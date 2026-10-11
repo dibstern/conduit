@@ -100,6 +100,12 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 				...(project.setupScript !== undefined && {
 					setupScript: project.setupScript,
 				}),
+				...(project.sessionMode !== undefined && {
+					sessionMode: project.sessionMode,
+				}),
+				...(project.groupingMode !== undefined && {
+					groupingMode: project.groupingMode,
+				}),
 				...(sessionCount > 0 && { sessionCount }),
 			};
 		}),

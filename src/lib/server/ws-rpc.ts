@@ -68,6 +68,7 @@ export {
 	GetCommands,
 	type GetCommandsResponse,
 	GetContinuationHandoff,
+	GetDefaultGroupingMode,
 	GetFileContent,
 	type GetFileContentResponse,
 	GetFileList,
@@ -126,6 +127,8 @@ export {
 	ResolveClaudeSettings,
 	type ResolveClaudeSettingsResponse,
 	ResolveSession,
+	ResolveSessionMode,
+	type ResolveSessionModeResponse,
 	RespondPermission,
 	RestartWithConfig,
 	RewindSession,
@@ -137,10 +140,13 @@ export {
 	type SessionInfo,
 	SetAgent,
 	SetClaudeSettings,
+	SetDefaultGroupingMode,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
 	SetDefaultPermissionMode,
 	type SetDefaultPermissionModeResponse,
+	SetDefaultSessionMode,
+	type SetDefaultSessionModeResponse,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
 	type SetKeepAwakeResponse,
@@ -357,6 +363,8 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "SetDefaultGroupingMode"
+	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "ScanNow"

@@ -1,6 +1,7 @@
 import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
+import type { SessionMode } from "../../contracts/project-file.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import {
@@ -11,7 +12,10 @@ import {
 	type SaveProjectInput,
 	type SetKeepAwakeResponse,
 } from "../../contracts/ws-rpc.js";
-import type { SessionPermissionMode } from "../../shared-types.js";
+import type {
+	GroupingMode,
+	SessionPermissionMode,
+} from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
@@ -578,6 +582,23 @@ export async function setPinRpc(input: {
 export async function listBranchesRpc(projectSlug: string) {
 	return runTransportEffect(
 		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
+	);
+}
+
+export async function resolveSessionModeRpc(projectSlug: string) {
+	return runTransportEffect(
+		callDaemon((client) => client.ResolveSessionMode({ projectSlug })),
+	);
+}
+
+export async function setDefaultSessionModeRpc(input: {
+	readonly projectSlug: string;
+	readonly mode: SessionMode;
+}) {
+	return runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.SetDefaultSessionMode(input),
+		),
 	);
 }
 
@@ -1356,6 +1377,22 @@ export async function setDefaultPermissionModeRpc(
 	input: SetDefaultPermissionModeRpcInput,
 ): Promise<SetDefaultPermissionModeResponse> {
 	return await runTransportEffect(callSetDefaultPermissionMode(input));
+}
+
+export async function getDefaultGroupingModeRpc(): Promise<GroupingMode> {
+	const response = await runTransportEffect(
+		callControl("", (client) => client.GetDefaultGroupingMode({})),
+	);
+	return response.mode;
+}
+
+export async function setDefaultGroupingModeRpc(
+	mode: GroupingMode,
+): Promise<GroupingMode> {
+	const response = await runTransportEffect(
+		callControl("", (client) => client.SetDefaultGroupingMode({ mode })),
+	);
+	return response.mode;
 }
 
 export async function setHiddenEntriesRpc(

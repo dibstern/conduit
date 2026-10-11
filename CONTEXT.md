@@ -39,6 +39,26 @@ save. The daemon's project registry layer refreshes every stored folder before
 HTTP/RPC consumers start, so remote changes are reflected after restart. Identity
 discovery is best-effort and never rejects a project save or daemon startup.
 
+## Project Group
+
+A **Project Group** contains the projects sharing a grouping key under their
+effective grouping mode. The primary Project Folder alone determines the group;
+attaching another folder does not change it. The daemon stores an optional
+`groupingMode` override on each project. Unset overrides inherit the global
+`defaultGroupingMode` in persisted settings, which defaults to `repository`.
+
+`repository` keys on Repository Identity, `repository+subfolder` adds the primary
+folder's path relative to its repository root, and `off` gives the project its
+own group. A primary folder without an identity also stands alone. Repository
+groups use one repository display name; standalone projects use their title.
+Session rows add the project title only when the group has multiple projects,
+even when those titles are identical.
+
+The shared pure `computeProjectGroups` function derives group keys, labels and
+qualifier decisions for the daemon and frontend. It leaves ordering to the
+daemon. Project and global grouping edits publish a fresh project list so rows
+relabel on every client without a reload.
+
 ## Session Workspace
 
 **Session Workspace** is where a session runs: Local uses the project's folders;
@@ -159,9 +179,25 @@ so a restart never leaves it running forever.
 
 The **Project File** is `conduit.json` in the primary Project Folder, never in a
 session's worktree. Its implementation-free Effect Schema accepts optional
-`setupScript` and ignores unknown keys. It is read afresh for every new worktree
+`setupScript` and `sessionMode` and ignores unknown keys. It is read afresh for every new worktree
 session. Invalid JSON or schema data skips setup with a visible notice; a daemon
 setup override still takes precedence. An absent script means no setup.
+
+## Default Session Mode
+
+The **Default Session Mode** is `local` or `worktree`. The daemon project
+override wins, then the Project File, then the daemon's global default, which
+is Local when unset. Clearing a project override restores that inheritance.
+The daemon resolver reads the primary folder's Project File afresh for each
+draft project or provider change and returns the mode and its source. Invalid
+files are ignored with a visible warning, including when a project override
+wins.
+
+New worktree is selected only when the project has a Git folder and the provider
+supports creating worktrees. Otherwise the draft starts Local and the existing
+control explains why. Explicit draft choices survive late defaults and layout
+changes. Global edits apply to the next draft. Neither defaults nor workspace
+choices are stored in browser storage.
 
 ## Workspace Hint
 

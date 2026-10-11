@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
+	import type { SessionMode } from "../../../contracts/project-file.js";
+	import type { GroupingMode } from "../../../shared-types.js";
 	import {
 		ProjectSaveRejected,
 		type FindFoldersResponse,
@@ -33,6 +35,7 @@
 	import Dialog from "../ui/Dialog.svelte";
 	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Select from "../ui/Select.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -67,6 +70,8 @@
 	const optionId = (index: number) => `${listboxId}-${index}`;
 	let draft = $state<ProjectDraft>(createDraft());
 	let setupScript = $state("");
+	let sessionMode = $state<SessionMode | "">("");
+	let groupingMode = $state<GroupingMode | "">("");
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
@@ -108,7 +113,7 @@
 		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
-		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "")),
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "") || groupingMode !== (project.groupingMode ?? "")),
 	);
 
 	onMount(() => {
@@ -140,6 +145,8 @@
 		}
 		draft = original;
 		setupScript = project?.setupScript ?? "";
+		sessionMode = project?.sessionMode ?? "";
+		groupingMode = project?.groupingMode ?? "";
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -239,6 +246,8 @@
 				title: draft.name,
 				folders: draft.folders,
 				...(setupValue ? { setupScript: setupValue } : project?.setupScript ? { setupScript: "" } : {}),
+				...(sessionMode ? { sessionMode } : project?.sessionMode ? { sessionMode: null } : {}),
+				...(groupingMode ? { groupingMode } : project?.groupingMode ? { groupingMode: null } : {}),
 			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
@@ -401,8 +410,23 @@
 						{/each}
 					</section>
 				{/if}
+				<Field label="Default session mode" hint="Without a project override, conduit.json takes precedence over the global default.">
+					<Select bind:value={sessionMode} disabled={saving}>
+						<option value="">Use global default</option>
+						<option value="local">Local</option>
+						<option value="worktree">New worktree</option>
+					</Select>
+				</Field>
 				<Field label="Setup script" hint="It runs in each new worktree before the agent starts.">
 					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
+				</Field>
+				<Field label="Repository grouping" hint="How this project's sessions are labelled in the session list.">
+					<Select bind:value={groupingMode} disabled={saving}>
+						<option value="">Use global default</option>
+						<option value="repository">By repository</option>
+						<option value="repository+subfolder">By repository and subfolder</option>
+						<option value="off">Off</option>
+					</Select>
 				</Field>
 				{#if errors.length || saveError || issues.nameError}
 					<div role="alert" class="flex flex-col gap-[5px] break-words text-[11px] text-error">

@@ -37,9 +37,11 @@ import {
 } from "effect";
 import {
 	ProjectSaveRejected,
+	type ResolveSessionModeResponse,
 	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
+import { readProjectFile } from "../../../daemon/project-file.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
 import {
 	daemonSessionGitCache,
@@ -56,7 +58,9 @@ import {
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
+import { computeProjectGroups } from "../../../project-grouping.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
@@ -130,6 +134,12 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	...(project.setupScript !== undefined && {
 		setupScript: project.setupScript,
 	}),
+	...(project.sessionMode !== undefined && {
+		sessionMode: project.sessionMode,
+	}),
+	...(project.groupingMode !== undefined && {
+		groupingMode: project.groupingMode,
+	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
 	}),
@@ -201,6 +211,32 @@ export const getProject = (slug: string) =>
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.getProject"),
 	);
+
+/** Resolve each draft from the primary folder's current file and persisted defaults. */
+export const resolveSessionMode = (slug: string) =>
+	Effect.gen(function* () {
+		const project = yield* getProject(slug);
+		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
+		const file = yield* readProjectFile(project.folders[0]);
+		const warning = file._tag === "invalid" ? { warning: file.message } : {};
+		if (project.sessionMode !== undefined)
+			return {
+				mode: project.sessionMode,
+				source: "project",
+				...warning,
+			} satisfies ResolveSessionModeResponse;
+		if (file._tag === "parsed" && file.file.sessionMode !== undefined)
+			return {
+				mode: file.file.sessionMode,
+				source: "file",
+				...warning,
+			} satisfies ResolveSessionModeResponse;
+		return {
+			mode: loadRelaySettings(configDir).defaultSessionMode ?? "local",
+			source: "global",
+			...warning,
+		} satisfies ResolveSessionModeResponse;
+	}).pipe(Effect.withSpan("projectRegistry.resolveSessionMode"));
 
 /** Check if a slug is registered. */
 export const has = (slug: string) =>
@@ -280,7 +316,12 @@ export const projectInfos = Effect.gen(function* () {
 			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
 		}
 	}
-	return withCachedProjectGit(
+	const daemonState = yield* Effect.serviceOption(DaemonStateTag);
+	const defaultGroupingMode = Option.isSome(daemonState)
+		? (loadRelaySettings((yield* Ref.get(daemonState.value)).configDir)
+				.defaultGroupingMode ?? "repository")
+		: "repository";
+	const entries = withCachedProjectGit(
 		(yield* allProjects).map((project) => ({
 			slug: project.slug,
 			folders: project.folders,
@@ -288,12 +329,29 @@ export const projectInfos = Effect.gen(function* () {
 			...(project.setupScript !== undefined && {
 				setupScript: project.setupScript,
 			}),
+			...(project.sessionMode !== undefined && {
+				sessionMode: project.sessionMode,
+			}),
+			...(project.groupingMode !== undefined && {
+				groupingMode: project.groupingMode,
+			}),
+			effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
 			...(project.repositoryIdentities !== undefined && {
 				repositoryIdentities: project.repositoryIdentities,
 			}),
 			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
 		})),
 	);
+	const groups = computeProjectGroups(
+		entries.map((project) => ({
+			...project,
+			groupingMode: project.effectiveGroupingMode,
+		})),
+	);
+	return entries.map((project) => ({
+		...project,
+		group: groups[project.slug],
+	}));
 });
 
 export const broadcastProjectList = Effect.gen(function* () {
@@ -528,7 +586,12 @@ export const updateProject = (
 	updates: Partial<
 		Pick<
 			StoredProject,
-			"title" | "folders" | "repositoryIdentities" | "setupScript"
+			| "title"
+			| "folders"
+			| "repositoryIdentities"
+			| "setupScript"
+			| "sessionMode"
+			| "groupingMode"
 		>
 	>,
 ) =>
@@ -1038,12 +1101,22 @@ export const saveProject = (input: SaveProjectInput) =>
 						: input.setupScript.trim()
 							? input.setupScript
 							: undefined;
+				const sessionMode =
+					input.sessionMode === undefined
+						? existing?.sessionMode
+						: (input.sessionMode ?? undefined);
+				const groupingMode =
+					input.groupingMode === undefined
+						? existing?.groupingMode
+						: (input.groupingMode ?? undefined);
 				const project: StoredProject = existing
 					? {
 							...existing,
 							folders: canonicalFolders,
 							repositoryIdentities,
 							setupScript,
+							sessionMode,
+							groupingMode,
 							...(title !== undefined && { title }),
 						}
 					: {
@@ -1051,6 +1124,8 @@ export const saveProject = (input: SaveProjectInput) =>
 							folders: canonicalFolders,
 							repositoryIdentities,
 							setupScript,
+							sessionMode,
+							groupingMode,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
 						};
@@ -1060,6 +1135,8 @@ export const saveProject = (input: SaveProjectInput) =>
 						repositoryIdentities,
 						title: project.title,
 						setupScript,
+						sessionMode,
+						groupingMode,
 					});
 				} else {
 					yield* addWithoutRelay(project);

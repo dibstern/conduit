@@ -79,7 +79,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -115,12 +115,31 @@
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
 	let draftWorktreeBase = $state<string | null>(null);
-	const draftContext = $derived(`${getDraftProject() ?? ""}:${getEffectiveInstanceId()}:${sessionState.currentId ?? ""}`);
+	let draftModeChosen = $state(false);
+	let draftSessionMode = $state<Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined>();
+	let pendingDraftSessionMode: Promise<void> | undefined;
+	const draftRoute = $derived(getCurrentRoute());
+	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
+	const sessionModeContext = $derived(`${draftContext}:${getEffectiveInstanceId()}`);
 	$effect(() => {
 		draftContext;
 		draftWorktree = null;
 		draftNewWorktree = false;
 		draftWorktreeBase = null;
+		draftModeChosen = false;
+	});
+	$effect(() => {
+		sessionModeContext;
+		const route = untrack(getCurrentRoute);
+		const projectSlug = untrack(getDraftProject);
+		draftSessionMode = undefined;
+		pendingDraftSessionMode = undefined;
+		if (route.page !== "chat" || !route.draft || !projectSlug || untrack(() => sessionState.currentId)) return;
+		let current = true;
+		pendingDraftSessionMode = resolveSessionModeRpc(projectSlug)
+			.then((resolution) => { if (current) draftSessionMode = resolution; })
+			.catch(() => { if (current) showToast("Couldn't load default session mode", { variant: "error" }); });
+		return () => { current = false; };
 	});
 	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -762,6 +781,15 @@
 			if (creatingSession) return false;
 			creatingSession = true;
 			try {
+				// Sending before the default arrives must use the same workspace as
+				// the chip. An explicit choice already supplies that workspace.
+				const context = sessionModeContext;
+				const resolution = pendingDraftSessionMode;
+				if (!draftModeChosen) {
+					await resolution;
+					await tick();
+				}
+				if (context !== sessionModeContext || resolution !== pendingDraftSessionMode || sessionState.currentId) return false;
 				// The draft's model pick is client-local until the session exists.
 				const instanceId = getEffectiveInstanceId();
 				const model = getChosenModel(instanceId);
@@ -1199,7 +1227,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1597,7 +1625,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 	</div>
 </div>

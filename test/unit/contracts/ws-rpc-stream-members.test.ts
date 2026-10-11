@@ -185,6 +185,21 @@ describe("subscription RPC contracts", () => {
 			item: visibility,
 			sequence: 2,
 		});
+		for (const mode of ["local", "worktree"]) {
+			const item = { _tag: "defaultSessionMode", mode };
+			expect(decode({ _tag: "upsert", item, sequence: 3 })).toEqual({
+				_tag: "upsert",
+				item,
+				sequence: 3,
+			});
+		}
+		expect(() =>
+			decode({
+				_tag: "upsert",
+				item: { _tag: "defaultSessionMode", mode: "sometimes" },
+				sequence: 3,
+			}),
+		).toThrow();
 		expect(() =>
 			decode({
 				_tag: "upsert",

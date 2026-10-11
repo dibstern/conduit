@@ -6,7 +6,7 @@ import {
 	ProjectFileSchema,
 } from "../contracts/project-file.js";
 
-/** Read on every session creation, from the primary folder rather than a worktree. */
+/** Read for each draft resolve and session creation, from the primary folder. */
 export const readProjectFile = (
 	primaryFolder: string,
 ): Effect.Effect<ProjectFileResult> =>

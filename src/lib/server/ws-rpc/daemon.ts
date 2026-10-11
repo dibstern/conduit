@@ -18,6 +18,11 @@ export const daemonOnlyHandlers = {
 	GetInstances: (_request) => daemonRequired("GetInstances"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
+	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
+	SetDefaultGroupingMode: (_request) =>
+		daemonRequired("SetDefaultGroupingMode"),
+	GetDefaultGroupingMode: (_request) =>
+		daemonRequired("GetDefaultGroupingMode"),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetStatus"
@@ -31,4 +36,7 @@ export const daemonOnlyHandlers = {
 	| "GetInstances"
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
+	| "ResolveSessionMode"
+	| "SetDefaultGroupingMode"
+	| "GetDefaultGroupingMode"
 >;

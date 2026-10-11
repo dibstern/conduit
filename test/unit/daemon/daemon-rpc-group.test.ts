@@ -2,8 +2,10 @@ import { describe, it } from "@effect/vitest";
 import { Either, Schema } from "effect";
 import { expect } from "vitest";
 import {
+	ResolveSessionMode,
 	RestartWithConfig,
 	SaveProject,
+	SetDefaultSessionMode,
 	SetKeepAwakeCommand,
 	SetPin,
 	WsRpcGroup,
@@ -23,6 +25,8 @@ describe("shared daemon RPC contracts", () => {
 			"RestartWithConfig",
 			"GetInstances",
 			"GetInstanceStatus",
+			"ResolveSessionMode",
+			"SetDefaultSessionMode",
 		]) {
 			expect(WsRpcGroup.requests.has(name)).toBe(true);
 		}
@@ -93,5 +97,18 @@ describe("shared daemon RPC contracts", () => {
 				Schema.encodeSync(WsRpcRequest)(request),
 			),
 		).toEqual(request);
+	});
+
+	it("keeps session-mode resolution and global writes on the shared contract", () => {
+		for (const request of [
+			new ResolveSessionMode({ projectSlug: "project" }),
+			new SetDefaultSessionMode({ projectSlug: "project", mode: "worktree" }),
+		]) {
+			expect(
+				Schema.decodeUnknownSync(WsRpcRequest)(
+					Schema.encodeSync(WsRpcRequest)(request),
+				),
+			).toEqual(request);
+		}
 	});
 });
