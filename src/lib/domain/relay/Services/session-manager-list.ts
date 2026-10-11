@@ -140,7 +140,7 @@ export const makeSessionListOperations = ({
 	statusPollerOption,
 	backgroundOf,
 	snapshot,
-	projectDir,
+	projectFolders,
 }: {
 	api: OpenCodeAPI;
 	stateRef: Ref.Ref<SessionManagerState>;
@@ -150,7 +150,7 @@ export const makeSessionListOperations = ({
 		| ((sessionId: string) => SessionBackground | undefined)
 		| undefined;
 	snapshot: RelayStatusSnapshotService;
-	projectDir: string;
+	projectFolders: readonly [string, ...string[]];
 }) => {
 	const currentStatuses = (
 		explicit?: Record<string, SessionStatus> | undefined,
@@ -178,7 +178,7 @@ export const makeSessionListOperations = ({
 				Effect.provideService(RelayStatusSnapshotTag, snapshot),
 			);
 			return sessions.map((session) =>
-				withCachedSessionGit(session, projectDir),
+				withCachedSessionGit(session, projectFolders),
 			);
 		});
 	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =

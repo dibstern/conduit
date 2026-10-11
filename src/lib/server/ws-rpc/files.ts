@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
@@ -14,6 +14,7 @@ import {
 	getFileTreeEntries,
 } from "../../handlers/files.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
+import { labelProjectFolders } from "../../project-folders.js";
 import {
 	mapRpcFailure,
 	resolveSessionRequestDirectory,
@@ -72,25 +73,13 @@ export const filesHandlers = {
 			Effect.flatMap(({ workspaceRoot, effectiveFolders }) =>
 				Effect.gen(function* () {
 					const entries = yield* getFileTreeEntries(workspaceRoot);
-					const roots = effectiveFolders.map(({ root }) => ({
-						root,
-						label: basename(root) || root,
-					}));
+					const roots = labelProjectFolders(
+						effectiveFolders.map(({ root }) => root),
+					);
 					return {
 						projectSlug: request.projectSlug,
 						entries,
-						...(roots.length > 1
-							? {
-									roots: roots.map(({ root, label }) => ({
-										root,
-										label:
-											roots.filter((folder) => folder.label === label).length >
-											1
-												? root
-												: label,
-									})),
-								}
-							: {}),
+						...(roots.length > 1 ? { roots } : {}),
 					};
 				}),
 			),

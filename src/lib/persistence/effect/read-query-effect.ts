@@ -469,6 +469,13 @@ export interface ReadQueryEffect {
 		ReadQueryEffectError | SqlError
 	>;
 
+	/** Busy children launched by a task while their parent has no turn in
+	 * flight, with the task id and the session whose Claude runtime lists it. */
+	readonly getStrandedChildren: () => Effect.Effect<
+		readonly { id: string; task_id: string; owner_id: string }[],
+		ReadQueryEffectError | SqlError
+	>;
+
 	readonly listSessions: (opts?: {
 		roots?: boolean;
 		limit?: number;
@@ -1045,6 +1052,43 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				(cause) =>
 					new ReadQueryEffectError({
 						operation: "getSessionsForReconciliation",
+						cause,
+					}),
+			),
+		);
+
+	// The link is found through the parent's own messages, which are indexed;
+	// CROSS JOIN pins that order, as the planner otherwise scans every part. SDK subagents share their
+	// parent's runtime, so the owner climbs through them; forks own theirs.
+	const getStrandedChildren = () =>
+		sql<{ id: string; task_id: string; owner_id: string }>`
+			WITH RECURSIVE stranded AS (
+				SELECT c.id, c.parent_id AS owner_id,
+					json_extract(mp.metadata, '$.providerTaskId') AS task_id
+				FROM sessions c
+				CROSS JOIN sessions parent
+				CROSS JOIN messages m
+				CROSS JOIN message_parts mp
+				WHERE c.status IN ('busy', 'retry')
+					AND parent.id = c.parent_id AND parent.status = 'idle'
+					AND m.session_id = c.parent_id AND mp.message_id = m.id
+					AND json_valid(mp.metadata)
+					AND json_extract(mp.metadata, '$.childSessionId') = c.id
+					AND json_type(mp.metadata, '$.providerTaskId') = 'text'
+			),
+			owned AS (
+				SELECT id, task_id, owner_id FROM stranded
+				UNION
+				SELECT o.id, o.task_id, s.parent_id FROM owned o
+				JOIN sessions s ON s.id = o.owner_id
+				WHERE o.owner_id LIKE 'claude-subagent-%' AND s.parent_id IS NOT NULL
+			)
+			SELECT id, task_id, owner_id FROM owned
+			WHERE owner_id NOT LIKE 'claude-subagent-%'`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getStrandedChildren",
 						cause,
 					}),
 			),
@@ -2088,6 +2132,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listSessionInfos,
 		getSessionLineage,
 		getSessionsForReconciliation,
+		getStrandedChildren,
 		countPendingApprovalsBySession,
 		readPendingApprovals,
 		listPendingClaudeQuestionTools,

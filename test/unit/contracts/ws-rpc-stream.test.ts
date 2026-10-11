@@ -106,6 +106,7 @@ const makeLayer = (options: {
 					listSessions: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),
+					getStrandedChildren: () => Effect.succeed([]),
 					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 					countPendingApprovalsBySession: () => Effect.succeed([]),
 					readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),

@@ -49,6 +49,7 @@ import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
 	applyGetModelsResponse,
+	clearDraftSelection,
 	flushPendingPermissionMode,
 	followSessionModelSettings,
 } from "./discovery.svelte.js";
@@ -970,6 +971,7 @@ export function switchToSession(
 	}
 
 	clientSession.currentId = sessionId;
+	clearDraftSelection();
 	if (clientSession.announcedParent?.sessionId !== sessionId)
 		clientSession.announcedParent = null;
 	activateSessionChatState(sessionId);

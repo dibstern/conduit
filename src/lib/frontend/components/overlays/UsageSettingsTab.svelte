@@ -2,7 +2,7 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -29,7 +29,7 @@
 	const sessionId = $derived(getCurrentSessionId());
 	const session = $derived(sessionId ? sessionState.sessions.get(sessionId) : undefined);
 	const sessionAccountId = $derived(session?.resumes?.at(-1)?.instanceId ?? (sessionId ? discoveryState.sessionInstanceIds[sessionId] : undefined));
-	const forecastAccount = $derived(accounts.find((account) => account.accountId === sessionAccountId) ?? accounts.find((account) => account.accountId === project?.instanceId) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
+	const forecastAccount = $derived(accounts.find((account) => account.accountId === (sessionId ? sessionAccountId : getEffectiveInstanceId())) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
 		!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
 	let expandedAccounts = $state<string[]>([]);
 	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
@@ -132,7 +132,7 @@
 	}
 
 	const headline = $derived.by((): { text: string; limited: boolean; warning?: boolean; bold?: string } => {
-		const defaultAccount = accounts.find((account) => account.accountId === project?.instanceId) ?? single;
+		const defaultAccount = accounts.find((account) => account.accountId === (sessionId ? sessionAccountId : getEffectiveInstanceId())) ?? single;
 		const alert = usageAlert(accounts, usageState.limits.warnAt);
 		if (alert?.level === "limited") {
 			const limited = alert.account;

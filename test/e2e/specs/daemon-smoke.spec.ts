@@ -46,23 +46,4 @@ test.describe("Daemon Smoke", () => {
 			page.locator(isNarrow ? "#sidebar-panel-sessions" : "#input"),
 		).toBeVisible({ timeout: 5_000 });
 	});
-
-	test("instance badge is hidden with single instance", async ({
-		page,
-		daemonProjectUrl,
-	}) => {
-		// With only one instance ("Default"), the header intentionally hides
-		// the instance badge (Header.svelte: instances.length <= 1 → undefined).
-		// This is correct UX — no badge clutter for single-instance setups.
-		await page.goto(daemonProjectUrl);
-
-		// Wait for page to fully load
-		await page.locator(".connect-overlay").waitFor({
-			state: "hidden",
-			timeout: 15_000,
-		});
-
-		const badge = page.locator("[data-testid='instance-badge']");
-		await expect(badge).not.toBeVisible();
-	});
 });
