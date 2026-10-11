@@ -281,6 +281,8 @@ export interface SessionGit {
 	ahead?: number;
 	behind?: number;
 	merged?: boolean;
+	/** Full branch head incorporated into the default branch. */
+	mergedHead?: string;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
 }
 
@@ -292,6 +294,7 @@ export const SessionGitSchema = Schema.Struct({
 	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
 	behind: Schema.optionalWith(Schema.Number, { exact: true }),
 	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
 	operation: Schema.optionalWith(
 		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
 		{ exact: true },
