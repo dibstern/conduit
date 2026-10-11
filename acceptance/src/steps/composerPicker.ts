@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
@@ -96,7 +97,11 @@ export const composerPickerHandlers: StepHandler[] = [
 			if (match[1] === "Model") {
 				await expect(picker.getByTestId("model-picker-list")).toBeVisible();
 				await expect(picker.getByTestId("picker-back")).toBeVisible();
-				await expect(picker.getByTestId("model-picker-search")).toBeFocused();
+				// Phones focus Back, not search: search would raise the keyboard over the list.
+				const phone = world.page.viewportSize()?.width === PHONE_VIEWPORT.width;
+				await expect(
+					picker.getByTestId(phone ? "picker-back" : "model-picker-search"),
+				).toBeFocused();
 			} else {
 				await expect(picker.getByTestId("picker-back")).toHaveCount(0);
 				await expect(
@@ -485,9 +490,11 @@ export const composerPickerHandlers: StepHandler[] = [
 		name: "assert Default leaves picker effort unselected",
 		match: /^no effort segment in the picker is selected$/,
 		run: async ({ world }) => {
+			const options = effortOptions.get(world.page);
+			if (!options) throw new Error("Effort options were not initialised");
 			await expect(
 				world.page.locator('[data-testid^="picker-effort-option-"]'),
-			).toHaveCount(levels.length);
+			).toHaveCount(options.length);
 			await expect(
 				world.page.locator(
 					'[data-testid^="picker-effort-option-"][aria-checked="true"]',

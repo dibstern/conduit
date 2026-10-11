@@ -1,6 +1,8 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import EffortMeter from "../ui/EffortMeter.svelte";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
@@ -9,9 +11,10 @@
 	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
-	let { onOpen, variant = "icons" }: {
+	let { onOpen, variant = "icons", children }: {
 		onOpen?: (() => void) | undefined;
-		variant?: "icons" | "words" | "control" | undefined;
+		variant?: "icons" | "words" | "control" | "row" | undefined;
+		children?: Snippet<[row: Snippet]> | undefined;
 	} = $props();
 
 	let open = $state(false);
@@ -53,7 +56,27 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if variants.length > 0 && variant === "words"}
+{#snippet effortRow()}
+	{#if variants.length > 0}
+		<Button
+			variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+			class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+			ariaLabel={`Effort: ${levelName}. Open effort options`}
+			loading={effort.pending}
+			aria-haspopup="dialog"
+			data-testid="composer-more-effort"
+			onclick={() => openPicker("effort")}
+		>
+			<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Effort</span>
+			<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold"><EffortMeter levels={variants.length} {filled} />{currentVariant || "Default"}</span>
+			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+		</Button>
+	{/if}
+{/snippet}
+
+{#if variant === "row"}
+	{#if children}{@render children(effortRow)}{:else}{@render effortRow()}{/if}
+{:else if variants.length > 0 && variant === "words"}
 		<Button
 			variant="ghost"
 			size="content"

@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: font-bold": "conduit-test-bn6x.9: E1-E3 phone use the design's 26px ghost control with a 13px harness logo and normal-weight 11.5px short model label. The previous bold micro-label styling is intentionally removed.",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: text-ellipsis": "conduit-test-bn6x.8: the desktop model control keeps its full label and never shrinks; the checkout control absorbs truncation first. The phone retains its short model tag, so neither trigger needs ellipsis styling.",
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: text-warning": "conduit-test-bn6x.5 replaces the interim Instance drill-in with the approved Account/Instance cards. The old newly-added instance sparkle is removed; cards show account-coloured identity dots and quota or live status instead.",
 	"src/lib/frontend/components/input/InputArea.svelte :: gap-px,px-[5px],py-[2px]": "conduit-test-bn6x.7: the words row now has two groups separated by 14px, with 5px internal gaps. The rightmost context percentage uses 4px left padding without a padded control box, matching D1-D4.",
@@ -388,5 +389,6 @@
 		"reason": "conduit-test-i7fy.10: the task list moved verbatim into BackgroundTaskList, which the pull-down and the desktop task drawer both render."
 	},
 	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: grid-cols-[16px_minmax(0,1fr)_auto]": "conduit-test-i7fy.10: the row grid moved to BackgroundTaskList with a fourth 12px column for the drill-in arrow, reserved on shell rows too so ages stay aligned: grid-cols-[16px_minmax(0,1fr)_auto_12px].",
-	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: left-0,px-[14px],py-[16px],right-[66px]": "The phone usage strip became a solid bottom bar: inset-x-0 replaces left-0 and right-[66px] (the bar spans the width and pr-[66px] keeps chips clear of the new-session button); pt/pr/pl plus a safe-area padding-bottom replace px/py so the bar reaches the screen edge."
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: left-0,px-[14px],py-[16px],right-[66px]": "The phone usage strip became a solid bottom bar: inset-x-0 replaces left-0 and right-[66px] (the bar spans the width and pr-[66px] keeps chips clear of the new-session button); pt/pr/pl plus a safe-area padding-bottom replace px/py so the bar reaches the screen edge.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: gap-[3px],px-[5px],rounded-[10px]": "conduit-test-bn6x.9: the phone icons-line model trigger takes the design's phone line control metrics (26px tall, 11.5px, gap-[5px], px-[6px], rounded-[7px]) instead of the old 32px boxed trigger."
 }

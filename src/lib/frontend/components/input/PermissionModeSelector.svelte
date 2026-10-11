@@ -1,12 +1,12 @@
-<!-- Session approvals: tap to cycle on phones, hold for the ranked menu. -->
+<!-- Session approvals: controls and sheet rows open the ranked mode menu. -->
 
 <script lang="ts">
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
 	import {
 		approvals,
 		getRankedApprovalOptions,
@@ -15,7 +15,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { SessionPermissionMode } from "../../types.js";
 
-	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
+	let { variant = "icons" }: { variant?: "icons" | "words" | "row" | undefined } = $props();
 
 	const presentation: Record<
 		SessionPermissionMode,
@@ -67,8 +67,7 @@
 	const currentLabel = $derived(approvals.current?.label ?? "Ask");
 	const currentPresentation = $derived(presentation[currentMode]);
 	const availableModes = $derived(getRankedApprovalOptions());
-	const isElevated = $derived(approvals.current?.elevated === true);
-	const hot = $derived(currentMode !== discoveryState.defaultPermissionMode);
+	const hot = $derived(currentMode !== (phone ? "ask" : discoveryState.defaultPermissionMode));
 
 	$effect(() => {
 		const providerId = discoveryState.currentProviderId;
@@ -117,6 +116,7 @@
 	</svg>
 {/snippet}
 
+{#if variant !== "icons" || !phone || hot}
 <Menu
 	bind:open
 	ariaLabel="Approvals"
@@ -141,28 +141,32 @@
 				data-testid="composer-word-approvals"
 				title="Approvals ({currentLabel})"
 			><span class="border-b border-dotted border-border-chip">{currentPresentation.microLabel.toLowerCase()}</span></Button>
-		{:else if phone}
-			<!-- Keep Bits' trigger attributes; its activation handlers would open
-			     the menu before the tap/hold control can decide the action. -->
-			<MicroLabelButton
+		{:else if variant === "row"}
+			<Button
 				{...props}
-				onpointerdown={undefined}
-				onpointerup={undefined}
-				onkeydown={undefined}
-				variant="micro"
-				label={currentPresentation.microLabel}
-				accessibleName="Approvals {currentLabel}. Activate to cycle; hold or Shift+F10 opens options"
-				tone={currentPresentation.tone}
-				tinted={isElevated}
-				pending={approvals.pending}
-				pulseKey={currentMode}
-				onTap={approvals.cycle}
-				onHold={() => { open = true; }}
+				variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+				ariaLabel={`Approvals: ${currentLabel}. Open options`}
+				loading={approvals.pending}
+				data-testid="composer-more-mode"
+			>
+				<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Mode</span>
+				<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{@render shield(currentMode, 13, false)}{currentLabel}</span>
+				<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+			</Button>
+		{:else if phone}
+			<Button
+				{...props}
+				variant="ghost" size="content" tone="inherit" hoverFill="none"
+				class="h-[26px] shrink-0 rounded-[7px] bg-warning/14 px-[6px] text-warning"
+				ariaLabel={`Approvals: ${currentLabel}. Open options`}
+				loading={approvals.pending}
+				data-hot="true"
 				data-testid="permission-mode-badge"
 				title="Approvals ({currentLabel})"
 			>
-				{@render shield(currentMode, 15, false)}
-			</MicroLabelButton>
+				{@render shield(currentMode, 13, false)}
+			</Button>
 		{:else}
 			<Button
 				{...props}
@@ -207,3 +211,4 @@
 		{/each}
 	</MenuRadioGroup>
 </Menu>
+{/if}

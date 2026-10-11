@@ -468,20 +468,21 @@ Examples:
   | baseline                             | threshold |
   | composer-picker-context-static-phone | 98        |
 
-Scenario Outline: phone xhigh selection stays open and Default leaves no effort segment selected
+Scenario Outline: phone Default starts unselected and xhigh persists through the composer sheet
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   When I open the model picker
-  And I select effort xhigh in the picker
-  Then the picker effort xhigh is selected while the root remains open
-  And the effort meter shows XHIGH
-  When I set effort to default
-  Then the effort meter shows DEF
-  When I open the model picker
   Then no effort segment in the picker is selected
   And the model-picker region visually matches <baseline> at <threshold> percent
+  When I select effort xhigh in the picker
+  Then the picker effort xhigh is selected while the root remains open
+  When I close the model picker
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads xhigh
+  When I tap the phone composer Effort row
+  Then the picker effort xhigh is selected while the root remains open
 
 Examples:
   | baseline                             | threshold |

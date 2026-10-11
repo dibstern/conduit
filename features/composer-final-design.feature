@@ -1,23 +1,246 @@
 Feature: Icons composer matches the final desktop and phone designs
 
-Scenario Outline: phone idle composer is one row with the design's controls
+Scenario Outline: E1 phone closed composer is one row with the design's controls
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
+  And approvals are ask
+  And the composer checkout is conduit / account-chip as worktree
   Then the composer has 1 row
   And the composer placeholder reads Ask Claude…
   And the placeholder sits on the controls row
   And the composer has no standalone agent selector
-  And the model button is 32 pixels tall and reads S5
-  And the effort meter is visible
-  And send is a 32 pixel square in the off colours
+  And the model button is 26 pixels tall and reads S5
+  And the phone icons line matches E1 with the default shield hidden
+  And the phone composer amber dot is hidden
+  And send is a 30 pixel square in the off colours
   And the attach button has no border
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:
   | baseline                   | threshold |
   | composer-final-idle-phone  | 98        |
+
+Scenario Outline: the phone ⋯ sheet
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  And the composer checkout is conduit / account-chip as worktree
+  And the mock relay reports context 42 percent
+  When I set effort to high
+  And I open the phone composer sheet
+  Then the phone composer sheet matches E1
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I close the phone composer sheet
+  Then the phone icons line matches E1 with the default shield hidden
+
+Examples:
+  | baseline                    | threshold |
+  | composer-icons-e1-sheet     | 98        |
+
+Scenario Outline: every phone sheet picker row opens its target
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  When I tap the phone composer <row> row
+  Then the phone composer sheet gives way to the picker
+  And the icons control opens the picker at <section>
+  When I close the model picker
+  Then the shared composer picker is closed
+  And the phone composer more button is focused
+
+Examples:
+  | row     | section |
+  | Harness | Harness |
+  | Model   | Model   |
+  | Effort  | Effort  |
+
+Scenario: the phone model control opens Model directly
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  When I tap the icons model control
+  Then the icons control opens the picker at Model
+
+Scenario: the phone sheet Mode row opens the existing ranked mode menu
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  When I tap the phone composer Mode row
+  Then the phone composer sheet keeps the Mode menu above it
+  And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
+  When I set approvals to auto
+  Then the approvals menu is closed
+  And the phone composer Mode row reads Auto
+  When I close the phone composer sheet
+  Then the phone hot shield is visible for Auto
+
+Scenario: the phone sheet Checkout row opens checkout details
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I tap the phone composer Checkout row
+  Then the phone composer sheet keeps the Checkout menu above it
+  And the composer checkout menu shows conduit and account-chip in full
+
+Scenario Outline: E2 phone shows a hot shield and amber dot for a workspace hint
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  And approvals are auto
+  And the composer checkout is conduit / account-chip as worktree
+  And the checkout has uncommitted changes, 2 ahead, 0 behind
+  And the session has a workspace hint at /workspace/conduit-chip
+  When I set effort to high
+  Then the phone hot shield is visible for Auto
+  And the phone composer amber dot is visible
+  And the composer region visually matches <closed> at <threshold> percent
+  When I tap the approvals shield
+  Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
+  When I set approvals to auto
+  And I open the phone composer sheet
+  Then the phone composer warning row reports Claude is working in ../conduit-chip and offers Move and Dismiss
+  And the screen region visually matches <open> at <threshold> percent
+  When I choose <action> in the phone composer warning row
+  Then the checkout <action> RPC targets /workspace/conduit-chip
+  And the phone composer warning row is absent
+  And the phone composer amber dot is hidden
+
+Examples:
+  | action  | closed                  | open                       | threshold |
+  | Move    | composer-icons-e2-phone | composer-icons-e2-sheet     | 98        |
+  | Dismiss | composer-icons-e2-phone | composer-icons-e2-sheet     | 98        |
+
+Scenario: a phone workspace mismatch also keeps the amber dot and warning actions
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace mismatch at /workspace/conduit-chip
+  Then the phone composer amber dot is visible
+  When I open the phone composer sheet
+  Then the phone composer warning row reports ../conduit-chip and offers Move and Dismiss
+  When I choose Move in the phone composer warning row
+  Then the checkout Move RPC targets /workspace/conduit
+  And the phone composer warning row is absent
+  And the phone composer amber dot is hidden
+
+Scenario: dismissing a phone workspace mismatch acknowledges its warning locally
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace mismatch at /workspace/conduit-chip
+  When I open the phone composer sheet
+  And I choose Dismiss in the phone composer warning row
+  Then the phone composer warning row is absent
+  And the phone composer amber dot is hidden
+  And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
+  When I close the phone composer sheet
+  And I open the phone composer sheet
+  Then the phone composer warning row is absent
+  When I tap the phone composer Checkout row
+  Then the composer checkout menu reports /workspace/conduit-chip and offers Retry move
+
+Scenario: a phone hint and mismatch at the same path have separate Dismiss actions
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace hint at /workspace/conduit-chip
+  And the session has a workspace mismatch at /workspace/conduit-chip
+  When I open the phone composer sheet
+  And I choose Dismiss in the phone composer warning row
+  Then the phone composer warning row reports ../conduit-chip and offers Move and Dismiss
+  And the phone composer amber dot is visible
+  And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
+  When I choose Dismiss in the phone composer warning row
+  Then the checkout Dismiss RPC targets /workspace/conduit-chip
+  And the phone composer warning row is absent
+  And the phone composer amber dot is hidden
+  And the workspace mismatch stays recorded at /workspace/conduit-chip after 1 Dismiss RPC
+  When the session has a workspace mismatch at /workspace/conduit-chip
+  Then the phone composer warning row is absent
+  And the phone composer amber dot is hidden
+  And the workspace mismatch stays recorded at /workspace/conduit-chip after 1 Dismiss RPC
+
+Scenario: changed phone mismatch evidence restores a locally dismissed warning
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace mismatch at /workspace/conduit-chip
+  When I open the phone composer sheet
+  And I choose Dismiss in the phone composer warning row
+  Then the phone composer warning row is absent
+  And the phone composer amber dot is hidden
+  When the session has a workspace mismatch at /workspace/conduit-other
+  Then the phone composer warning row reports ../conduit-other and offers Move and Dismiss
+  And the phone composer amber dot is visible
+  And the workspace mismatch stays recorded at /workspace/conduit-other without a Dismiss RPC
+  When the session has a workspace mismatch at /workspace/conduit-chip
+  Then the phone composer warning row reports ../conduit-chip and offers Move and Dismiss
+  And the phone composer amber dot is visible
+  And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
+
+Scenario Outline: every phone mode other than Ask stays visible as a hot shield
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And approvals are <mode>
+  Then the phone hot shield is <visible> for <label>
+  When I tap the phone composer Mode row
+  Then the phone composer sheet keeps the Mode menu above it
+  And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
+
+Examples:
+  | mode        | visible | label       |
+  | dontAsk     | visible | Never ask   |
+  | plan        | visible | Plan        |
+  | ask         | hidden  | Ask         |
+  | acceptEdits | visible | Edits       |
+  | auto        | visible | Auto        |
+  | full        | visible | Full access |
+
+Scenario Outline: E3 phone draft keeps its context above the one-line composer
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And I start a new session
+  And the composer uses icons controls
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  When I set effort to high
+  Then the phone icons line matches E1 with the default shield hidden
+  And the composer region visually matches <closed> at <threshold> percent
+  And the phone icons draft has no checkout and keeps context above the composer
+  And the screen region visually matches <open> at <threshold> percent
+
+Examples:
+  | closed                  | open                    | threshold |
+  | composer-icons-e3-phone | composer-icons-e3-sheet | 98        |
 
 Scenario Outline: E1 desktop icons split the footer and drop labels in the narrow tier
   Given the conduit app is served with the connected mockup

@@ -1,7 +1,7 @@
 <!-- Harness tabs and model options: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
-	import { onDestroy, tick, untrack } from "svelte";
+	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
 	import HarnessLogo from "./HarnessLogo.svelte";
@@ -60,7 +60,10 @@
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
+	let { variant = "icons", phoneControls }: {
+		variant?: "icons" | "words" | undefined;
+		phoneControls?: Snippet<[rows: Snippet]> | undefined;
+	} = $props();
 
 	const pickerOpen = $derived(composerPickerState.request !== null);
 	let view = $state<"root" | "model" | "agent">("root");
@@ -370,8 +373,9 @@
 	}
 
 	function closePicker() {
+		const opener = phone ? composerPickerState.request?.opener : undefined;
 		composerPickerState.request = null;
-		(pickerTriggerEl ?? triggerEl)?.focus({ preventScroll: true });
+		(opener?.isConnected ? opener : pickerTriggerEl?.isConnected ? pickerTriggerEl : triggerEl)?.focus({ preventScroll: true });
 	}
 
 	function handleInstanceSelect(instance: InstanceOption, e?: MouseEvent) {
@@ -850,7 +854,7 @@
 
 <div
 	id="model-display"
-	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : phone ? '' : 'shrink-0 gap-[2px]'}"
+	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : phone ? 'gap-[8px]' : 'shrink-0 gap-[2px]'}"
 	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
 >
 	{#if variant === "words"}
@@ -980,20 +984,57 @@
 			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
-			class="model-btn min-w-0 h-[32px] text-text-secondary font-brand hover:bg-text/7 gap-[3px] px-[5px] rounded-[10px] {hasModel ? '' : 'opacity-50'}"
+			class="model-btn min-w-0 h-[26px] text-[11.5px] font-normal text-text-secondary font-brand hover:bg-text/7 gap-[5px] px-[6px] rounded-[7px] {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}
 			aria-controls={pickerOpen ? "model-picker" : undefined}
-			onclick={togglePicker}
+			onclick={(event) => togglePicker(event, "model")}
 		>
-			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={17} surface="box" />
-			<span class="model-label text-[10px] font-bold whitespace-nowrap">{shortModelLabel}</span>
+			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />
+			<span class="model-label text-[11.5px] font-normal whitespace-nowrap">{shortModelLabel}</span>
 		</Button>
 	{/if}
 
-	<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} />
+	{#if variant === "icons" && phone && phoneControls}
+		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row">
+			{#snippet children(effortRow)}
+				{#snippet rows()}
+					<Button
+						variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text hover:bg-text/7"
+						data-testid="composer-harness-trigger"
+						data-instance-id={selectedLogoInstanceId}
+						ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}. Open harness options`}
+						aria-haspopup="dialog"
+						onclick={(event) => togglePicker(event, "harness")}
+					>
+						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Harness</span>
+						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold"><HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" /><span class="min-w-0 truncate">{driverLabel(selectedDriver)}{wordAccountName !== driverLabel(selectedDriver) ? ` · ${wordAccountName}` : ""}{switchingTo ? "…" : ""}</span></span>
+						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+					</Button>
+					<Button
+						variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text hover:bg-text/7"
+						data-testid="composer-more-model"
+						ariaLabel={`Model: ${displayName}. Open model options`}
+						aria-haspopup="dialog"
+						onclick={(event) => togglePicker(event, "model")}
+					>
+						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Model</span>
+						<span data-part="value" class="flex min-w-0 flex-1 flex-wrap items-center gap-[7px] font-semibold"><span>{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] font-normal {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
+						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+					</Button>
+					{@render effortRow()}
+				{/snippet}
+				{@render phoneControls(rows)}
+			{/snippet}
+		</ModelVariant>
+	{:else}
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} />
+	{/if}
 	{#if variant === "words" && selectedDriver === "opencode"}
 		<span aria-hidden="true" class="text-border-chip">·</span>
 		<Button
@@ -1018,7 +1059,7 @@
 				onclose={closePicker}
 				placement="sheet"
 				labelledBy={titleId}
-				returnFocus={() => pickerTriggerEl ?? triggerEl ?? null}
+				returnFocus={() => composerPickerState.request?.opener ?? pickerTriggerEl ?? triggerEl ?? null}
 				initialFocus="dialog"
 			>
 				{@render pickerSurface(true)}

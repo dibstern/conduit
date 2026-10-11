@@ -9,13 +9,15 @@
 <script lang="ts">
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
-	import { tick, untrack } from "svelte";
+	import { tick, untrack, type Snippet } from "svelte";
 	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import Dialog from "../ui/Dialog.svelte";
+	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
@@ -71,6 +73,7 @@
 	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
+	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
@@ -88,6 +91,23 @@
 	const inputAreaId = $props.id();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
+	const composerMoreTitleId = `${inputAreaId}-more-title`;
+	let composerMoreOpen = $state(false);
+	let composerMoreEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	const phoneIcons = $derived(composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone");
+	$effect(() => {
+		const request = composerPickerState.request;
+		if (request && composerMoreOpen) {
+			request.opener = composerMoreEl ?? null;
+			composerMoreOpen = false;
+		}
+	});
+	$effect(() => {
+		sessionState.currentId;
+		sessionViewState.composerTier;
+		composerPreferences.controls;
+		composerMoreOpen = false;
+	});
 
 	let inputText = $state("");
 	let draftWorktree = $state<WorktreeInfo | null>(null);
@@ -1090,6 +1110,38 @@
 	</div>
 {/if}
 
+{#snippet phoneMore(rows: Snippet, attention = false, checkout?: Snippet, warning?: Snippet)}
+	<Button
+		bind:element={composerMoreEl}
+		variant="ghost" size="content" tone="inherit" hoverFill="none"
+		class="relative h-[26px] shrink-0 rounded-[7px] px-[6px] text-text-secondary hover:bg-text/7"
+		ariaLabel={attention ? "Composer options, workspace needs attention" : "Composer options"}
+		aria-haspopup="dialog"
+		aria-expanded={composerMoreOpen}
+		data-testid="composer-more"
+		onclick={() => { composerMoreOpen = true; }}
+	>
+		<Icon name="ellipsis" size={15} />
+		{#if attention}<span data-testid="composer-more-attention" class="absolute right-[3px] top-[3px] size-[6px] rounded-full bg-warning ring-[1.5px] ring-input-bg" aria-hidden="true"></span>{/if}
+	</Button>
+	{#if composerMoreOpen}
+		<Dialog open onclose={() => { composerMoreOpen = false; }} placement="sheet" labelledBy={composerMoreTitleId} returnFocus={() => composerMoreEl ?? null}>
+			<Surface
+				variant="plain" radius="none"
+				data-testid="composer-more-sheet"
+				class="max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border px-[16px] pt-[8px] pb-[max(20px,env(safe-area-inset-bottom))] font-brand"
+			>
+				<div class="mx-auto mb-[10px] h-[4px] w-[36px] rounded-[2px] bg-border-chip" aria-hidden="true"></div>
+				<h2 id={composerMoreTitleId} class="mb-[2px] text-[11.5px] font-semibold text-text">Composer</h2>
+				{@render rows()}
+				<PermissionModeSelector variant="row" />
+				{@render checkout?.()}
+				{@render warning?.()}
+			</Surface>
+		</Dialog>
+	{/if}
+{/snippet}
+
 <!-- While the textarea is focused the keyboard covers the home indicator, but iOS
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
      keyboard. Drop the inset then. -->
@@ -1168,7 +1220,8 @@
 			id="input-row"
 			class:goal={goal.border === "solid"}
 			class:paused={goal.border === "dashed"}
-			class="flex flex-col bg-input-bg border border-border rounded-3xl py-1.5 px-1.5 transition-[border-color,box-shadow] duration-200 max-md:rounded-[20px] focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
+			class:phone-icons={phoneIcons}
+			class="flex flex-col bg-input-bg border border-border {phoneIcons ? 'min-h-[42px] rounded-[14px] py-[5px] pl-[10px] pr-[6px]' : 'rounded-3xl py-1.5 px-1.5 max-md:rounded-[20px]'} transition-[border-color,box-shadow] duration-200 focus-within:border-text-dimmer focus-within:shadow-[0_0_0_1px_var(--color-border)]"
 		>
 			{#if working || goal.phase === "checking"}
 				<ComposerStatusHeader
@@ -1181,7 +1234,7 @@
 					class="-mx-1.5 -mt-1.5 mb-1.5"
 				/>
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone"} style={phoneIcons ? "column-gap: 8px; align-items: center" : undefined}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1197,7 +1250,7 @@
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height="max(32px, var(--composer-placeholder-height, 0px))">
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${phoneIcons ? 30 : 32}px, var(--composer-placeholder-height, 0px))`}>
 							<SkillHighlightBackdrop
 								text={plainText ? "" : inputText}
 								commandNames={commandNameSet}
@@ -1286,10 +1339,35 @@
 							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker />
+							<InstanceModelPicker>
+								{#snippet phoneControls(rows)}
+									<PermissionModeSelector />
+									{#if currentSession && composerDirectory}
+										{@const session = currentSession}
+										{#key session.id}
+											<GitIdentity
+												presentation="row"
+												directory={composerDirectory}
+												git={composerGit}
+												workspaceMismatch={session.workspaceMismatch}
+												workspaceHint={session.workspaceHint}
+												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+											>
+												{#snippet children(attention, checkout, warning)}
+													{@render phoneMore(rows, attention, checkout, warning)}
+												{/snippet}
+											</GitIdentity>
+										{/key}
+									{:else}
+										{@render phoneMore(rows)}
+									{/if}
+								{/snippet}
+							</InstanceModelPicker>
 
 							<!-- Approvals (permission mode) selector -->
-							<PermissionModeSelector />
+							{#if sessionViewState.composerTier !== "phone"}<PermissionModeSelector />{/if}
 						</div>
 					{/if}
 				{/snippet}
@@ -1383,12 +1461,12 @@
 						disabledStyle="undimmed"
 						{...(sendMode === "at-reset" ? { iconOnly: false as const, children: sendAtLabel } : { iconOnly: true as const })}
 						icon={sendMode === "at-reset" ? "clock" : isGoalCommand ? "target" : "arrow-up"}
-						iconSize={sendMode === "at-reset" ? 13 : 17}
+						iconSize={sendMode === "at-reset" || phoneIcons ? 13 : 17}
 						id="send"
 						data-goal={isGoalCommand ? "true" : "false"}
 						data-send-mode={sendMode}
 						type="button"
-						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : 'w-[32px] rounded-[10px] ' + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
+						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : (phoneIcons ? 'w-[30px] rounded-[9px] ' : 'w-[32px] rounded-[10px] ') + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : phoneIcons && sendMode !== 'at-reset' ? 'h-[30px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
 						disabled={!canSend}
 						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
@@ -1462,6 +1540,20 @@
 </div>
 
 <style>
+	.phone-icons :global(.composer-text-metrics) {
+		font-size: 12.5px;
+		line-height: 20px;
+		padding: 5px 0;
+	}
+	.phone-icons :global(#attach-btn) {
+		width: 15px;
+		height: 30px;
+	}
+	.phone-icons :global(#attach-btn svg) {
+		width: 15px;
+		height: 15px;
+	}
+
 	.composer-task-dot {
 		width: 5px;
 		height: 5px;

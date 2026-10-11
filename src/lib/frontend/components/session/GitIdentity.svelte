@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
@@ -11,7 +12,7 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, presentation, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss }: {
+	let { directory, git, presentation, workspaceMismatch, workspaceHint, loadWorktrees, onmove, ondismiss, children }: {
 		directory: string;
 		git: SessionGit | undefined;
 		presentation?: "word" | "control" | "row" | undefined;
@@ -20,16 +21,23 @@
 		loadWorktrees?: (() => Promise<{ readonly worktrees: readonly WorktreeInfo[]; readonly directory?: string | undefined }>) | undefined;
 		onmove?: ((path: string) => Promise<void>) | undefined;
 		ondismiss?: ((path: string) => Promise<void>) | undefined;
+		children?: Snippet<[attention: boolean, checkout: Snippet, warning: Snippet]> | undefined;
 	} = $props();
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
 	let currentDirectory = $state<string | undefined>();
 	let moving = $state(false);
 	let dismissing = $state(false);
+	let dismissedMismatch = $state<string | undefined>();
 	const word = $derived(presentation === "word");
 	const control = $derived(presentation === "control");
-	const inComposer = $derived(word || control);
+	const row = $derived(presentation === "row");
+	const inComposer = $derived(word || control || row);
 	const phone = $derived(sessionViewState.composerTier === "phone");
+	const mismatchKey = $derived(workspaceMismatch ? `${directory}\0${workspaceMismatch.actualPath}` : undefined);
+	$effect(() => {
+		if (dismissedMismatch !== mismatchKey) dismissedMismatch = undefined;
+	});
 
 	async function openWorktrees() {
 		showWorktrees = true;
@@ -62,7 +70,13 @@
 			moving = false;
 		}
 	}
-	async function dismiss(path: string) {
+	async function dismiss(path: string, source: "hint" | "mismatch" = "hint") {
+		// Only workspace hints have a dismiss RPC. Acknowledge a mismatch here
+		// until the workspace changes; its checkout details stay available.
+		if (source === "mismatch" && warningMismatch?.actualPath === path) {
+			dismissedMismatch = mismatchKey;
+			return;
+		}
 		dismissing = true;
 		try {
 			await ondismiss?.(path);
@@ -85,7 +99,20 @@
 	// Phones show one status word: an in-progress operation outranks merged.
 	const showMerged = $derived(git?.merged === true && !(phone && operation));
 	const upstreamMark = $derived([git?.ahead ? `↑${git.ahead}` : "", git?.behind ? `↓${git.behind}` : ""].filter(Boolean).join(" "));
-	const warningLabel = $derived(workspaceMismatch ? `Workspace mismatch: Claude is working in ${workspaceMismatch.actualPath}` : workspaceHint ? hintLabel : undefined);
+	const warningMismatch = $derived(workspaceMismatch && (!row || mismatchKey !== dismissedMismatch) ? workspaceMismatch : undefined);
+	const warningPath = $derived(warningMismatch?.actualPath ?? workspaceHint);
+	const warningDisplayPath = $derived.by(() => {
+		if (!warningPath) return "";
+		const path = warningPath.replaceAll("\\", "/");
+		if (!path.startsWith("/") && !/^[a-z]:\//i.test(path)) return warningPath;
+		const base = directory.replaceAll("\\", "/").split("/").filter(Boolean);
+		const target = path.split("/").filter(Boolean);
+		if (target[0]?.includes(":") && target[0] !== base[0]) return warningPath;
+		let common = 0;
+		while (common < base.length && base[common] === target[common]) common++;
+		return [...base.slice(common).map(() => ".."), ...target.slice(common)].join("/") || ".";
+	});
+	const warningLabel = $derived(warningMismatch ? `Workspace mismatch: Claude is working in ${warningMismatch.actualPath}` : workspaceHint ? hintLabel : undefined);
 	const projectFloor = $derived(Math.min(project.length, inComposer ? 4.5 : 5));
 	const branchFloor = $derived(Math.min(checkout?.length ?? 0, inComposer ? 6.5 : 5));
 	// Floor = labels + slash, icon, padding, divider and fixed marks. It wins over the nominal cap for long operation labels.
@@ -108,13 +135,7 @@
 	}
 </script>
 
-<Menu presentation={phone ? "sheet" : "popover"} side={inComposer ? "top" : undefined} align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid={presentation ? "composer-checkout-menu" : "session-bar-checkout"} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
-	{#snippet trigger({ props })}
-		<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
-		<!-- The wrapper and button share a font size so the ch floors agree. -->
-		<span class="git-pill {control ? 'git-control text-[11.5px]' : word ? 'git-word text-[11.5px]' : phone ? 'git-pill-phone text-[10px]' : 'text-[10px]'} inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size={inComposer ? "content" : "segment"} {...(inComposer ? { tone: "muted" as const, hoverFill: "none" as const } : {})} touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : word ? "max-w-full gap-[5px] font-normal font-brand" : "max-w-full"}
-			style={`min-width: ${minimumWidth}`}
-			title={label} ariaLabel={`Checkout: ${label}${warningLabel ? `, ${warningLabel}` : ""}`} data-testid={presentation ? "composer-checkout" : "session-bar-identity"}>
+{#snippet identity()}
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
@@ -124,7 +145,7 @@
 				{/if}
 				<!-- On the icon, not after the branch: the icon never truncates, and a trailing dot sat against the account pill's dot. -->
 				{#if git?.dirty}
-					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {inComposer ? 'ring-input-bg' : 'ring-bg-surface'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
+					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {inComposer && !row ? 'ring-input-bg' : 'ring-bg-surface'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
 				{/if}
 			</span>
 			<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
@@ -138,10 +159,31 @@
 			{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
 			{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{#if warningLabel}
-				<span data-part="warning" class="inline-flex shrink-0 text-warning" role="img" aria-label={warningLabel} title={warningLabel} data-testid={workspaceMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
+				<span data-part="warning" class="inline-flex shrink-0 text-warning" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
 			{/if}
 			{#if control}<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={10} /></span>{/if}
-		</Button></span>
+{/snippet}
+
+{#snippet checkoutMenu()}
+<Menu presentation={phone ? "sheet" : "popover"} side={inComposer ? "top" : undefined} align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid={presentation ? "composer-checkout-menu" : "session-bar-checkout"} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
+	{#snippet trigger({ props })}
+		{#if row}
+			<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+				title={label} ariaLabel={`Checkout: ${label}${warningLabel ? `, ${warningLabel}` : ""}`} data-testid="composer-checkout">
+				<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Checkout</span>
+				<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[5px] font-normal">{@render identity()}</span>
+				<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+			</Button>
+		{:else}
+			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
+			<!-- The wrapper and button share a font size so the ch floors agree. -->
+			<span class="git-pill {control ? 'git-control text-[11.5px]' : word ? 'git-word text-[11.5px]' : phone ? 'git-pill-phone text-[10px]' : 'text-[10px]'} inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size={inComposer ? "content" : "segment"} {...(inComposer ? { tone: "muted" as const, hoverFill: "none" as const } : {})} touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : word ? "max-w-full gap-[5px] font-normal font-brand" : "max-w-full"}
+				style={`min-width: ${minimumWidth}`}
+				title={label} ariaLabel={`Checkout: ${label}${warningLabel ? `, ${warningLabel}` : ""}`} data-testid={presentation ? "composer-checkout" : "session-bar-identity"}>
+				{@render identity()}
+			</Button></span>
+		{/if}
 	{/snippet}
 	<MenuGroup label="Checkout">
 		<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px] px-[8px] py-[6px] text-[10px]">
@@ -197,6 +239,25 @@
 		{/if}
 	{/if}
 </Menu>
+{/snippet}
+
+{#snippet warningRow()}
+	{#if warningPath}
+		<div data-testid="composer-checkout-warning" class="flex min-h-[50px] flex-wrap items-center gap-x-[10px] gap-y-[6px] py-[8px] text-[11.5px] text-warning">
+			<span class="flex min-w-0 items-center gap-[5px]"><span class="inline-flex shrink-0"><Icon name="circle-alert" size={12} /></span><span class="min-w-0 break-all">Claude is working in {warningDisplayPath}</span></span>
+			<span class="ml-auto flex shrink-0 gap-[6px]">
+				{#if onmove}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="rounded-[7px] border border-border px-[10px] py-[3px] text-[11.5px] font-normal text-text" disabled={moving || dismissing} data-testid="workspace-hint-move" onclick={() => warningPath && void move(warningMismatch ? directory : warningPath)}>Move</Button>{/if}
+				{#if ondismiss || warningMismatch}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="rounded-[7px] border border-border px-[10px] py-[3px] text-[11.5px] font-normal text-text" disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onclick={() => warningPath && void dismiss(warningPath, warningMismatch ? "mismatch" : "hint")}>Dismiss</Button>{/if}
+			</span>
+		</div>
+	{/if}
+{/snippet}
+
+{#if children}
+	{@render children(!!warningLabel, checkoutMenu, warningRow)}
+{:else}
+	{@render checkoutMenu()}
+{/if}
 
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */

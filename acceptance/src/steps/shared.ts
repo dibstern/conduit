@@ -126,6 +126,13 @@ export async function openModelPicker(page: Page): Promise<void> {
 	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
+export async function openComposerMoreSheet(page: Page): Promise<void> {
+	const sheet = page.getByTestId("composer-more-sheet");
+	if (!(await sheet.isVisible()))
+		await page.getByTestId("composer-more").click();
+	await expect(sheet).toBeVisible();
+}
+
 export function exampleValue(
 	example: Record<string, string>,
 	key: string,
