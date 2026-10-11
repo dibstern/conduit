@@ -10,14 +10,6 @@
 	import { getAgentsRpc, getModelsRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let { visible, state = $bindable() }: { visible: boolean; state: { modelsFetchPending: boolean } } = $props();
-	function getRpcProjectSlug(): string | null {
-		const slug = getCurrentSlug();
-		if (!slug) {
-			showToast("No active project connection", { variant: "warn" });
-			return null;
-		}
-		return slug;
-	}
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
 	const hiddenAgentSet = $derived(new Set(discoveryState.hiddenAgents));
 	const agentScopeId = $derived(discoveryState.agentProviderScope?.id ?? null);
@@ -58,8 +50,11 @@
 		hiddenModels?: string[];
 		hiddenAgents?: string[];
 	}): Promise<void> {
-		const projectSlug = getRpcProjectSlug();
-		if (!projectSlug) return;
+		const projectSlug = getCurrentSlug();
+		if (!projectSlug) {
+			showToast("No active project connection", { variant: "warn" });
+			return;
+		}
 		const undoHidden = chooseHiddenEntries(update);
 		try {
 			applyHiddenEntriesSet(await setHiddenEntriesRpc({ projectSlug, ...update }));
