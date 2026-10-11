@@ -35,15 +35,17 @@ Examples:
   | phone    | Run vitest in watch mode                          | +1           | session-background-tasks-nogoal-phone   | 98        |
   | desktop  | Run vitest in watch mode, Start the Vite dev server | no more pill | session-background-tasks-nogoal-desktop | 98        |
 
-Scenario Outline: The pull-down lists every task with its kind and age
+Scenario Outline: The pull-down lists every task with its kind, command or agent, and age
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the composer status clock is frozen
   And a session already exists on the Claude harness
   And goal details are available for a working goal
   And the session has 4 live background tasks
+  And the background task launcher details are available
   When I click the background tasks row
   Then the background tasks pull-down lists the 4 tasks with kinds and ages
+  And the background tasks pull-down shows each command or agent under its description
   And the background tasks pull-down offers a named stop control for each task
   And the layout region visually matches <baseline> at <threshold> percent
   When I press Escape in the background tasks pull-down
@@ -100,6 +102,7 @@ Scenario: Unsupported providers show live tasks without stop controls
   And the session has 2 live background tasks
   When I click the background tasks row
   Then the background tasks pull-down has no stop controls
+  And the background tasks pull-down shows only kinds for unjoinable tasks
 
 Scenario: The row and dots disappear when the last task ends
   Given the conduit app is served with the connected mockup

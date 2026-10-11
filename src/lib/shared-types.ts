@@ -233,6 +233,8 @@ export const BackgroundTaskSchema = Schema.Struct({
 	/** SDK task_type, e.g. local_bash, local_agent, monitor_mcp. */
 	type: Schema.String,
 	description: Schema.String,
+	/** The originating shell command, agent type or workflow name, when known. */
+	detail: Schema.optional(Schema.String),
 	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
 	firstSeenAt: Schema.Number,
 	/** An agent's Child Session. */

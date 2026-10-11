@@ -78,6 +78,7 @@ export function makeSessionBackgroundLiveness(
 					return (
 						before?.type === task.type &&
 						before.description === task.description &&
+						before.detail === task.detail &&
 						before.firstSeenAt === task.firstSeenAt &&
 						before.childSessionId === task.childSessionId &&
 						before.parentTaskId === task.parentTaskId &&
