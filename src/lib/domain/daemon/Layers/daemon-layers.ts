@@ -137,6 +137,7 @@ import {
 	VersionCheckerLive,
 	VersionCheckerTag,
 } from "./version-checker-layer.js";
+import { makeWorktreeLive } from "./worktree-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
 export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
@@ -802,7 +803,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			UsageLive().pipe(Layer.provideMerge(withOpenCodeInstances)),
+			Layer.merge(makeWorktreeLive(configDir), UsageLive()).pipe(
+				Layer.provideMerge(withOpenCodeInstances),
+			),
 		),
 	);
 

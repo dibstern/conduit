@@ -177,6 +177,7 @@ export interface CreateSessionRpcInput {
 	readonly instanceId?: string;
 	readonly providerId?: string;
 	readonly worktreePath?: string;
+	readonly newWorktree?: boolean;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -666,6 +667,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 			...(input.worktreePath != null
 				? { worktreePath: input.worktreePath }
 				: {}),
+			...(input.newWorktree ? { newWorktree: true } : {}),
 		}),
 	);
 

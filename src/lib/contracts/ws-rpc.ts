@@ -10,6 +10,7 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
+import { WorktreeCreationError } from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -549,6 +550,10 @@ export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
 		path: Schema.String,
 	}),
 	Schema.Struct({ kind: Schema.Literal("not-a-folder"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("conduit-worktree"),
+		path: Schema.String,
+	}),
 	Schema.Struct({ kind: Schema.Literal("create-exists"), path: Schema.String }),
 	Schema.Struct({
 		kind: Schema.Literal("mkdir-failed"),
@@ -1759,7 +1764,11 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 	"CreateSession",
 	{
-		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		failure: Schema.Union(
+			WsRpcError,
+			WorkspaceMoveError,
+			WorktreeCreationError,
+		),
 		success: CreateSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
@@ -1770,6 +1779,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			),
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
+			newWorktree: Schema.optional(Schema.Boolean),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.

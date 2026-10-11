@@ -539,12 +539,12 @@ describe("WsRpcServerLayer GetModels", () => {
 				expect(api.session.get).not.toHaveBeenCalled();
 				expect(result.variant).toEqual({
 					variant: "careful",
-					variants: [],
+					variants: ["fast", "careful"],
 				});
 				expect(result.permissionMode).toBe("ask");
 				expect(result.contextWindow).toEqual({
 					contextWindow: "200k",
-					options: [],
+					options: [{ value: "200k", label: "200K", isDefault: true }],
 				});
 				expect(result.modelExecution).toBeUndefined();
 			}).pipe(

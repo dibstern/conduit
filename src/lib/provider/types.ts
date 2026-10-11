@@ -167,6 +167,8 @@ export interface ModelInfo {
 	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
+	/** Full request ids for catalog entries grouped by routing scope. */
+	readonly routingOptions?: readonly ContextWindowOption[];
 	/**
 	 * Optional per-model context-window selector entries. When present and
 	 * non-empty, the UI renders a dropdown alongside the effort picker. The
