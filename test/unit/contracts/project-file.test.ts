@@ -2,7 +2,8 @@
  * Failure cases written before the reader and contracts:
  * - Missing files are absent; malformed JSON and wrong field types are invalid.
  * - A non-object JSON value must not silently become an empty project file.
- * - Unknown keys must not prevent ticket q5u6.7 from extending the same file.
+ * - Unknown keys are ignored while sessionMode accepts only Local/New worktree.
+ * - Project saves preserve sessionMode and distinguish omission from null clearing.
  * - Editing the primary-folder file must affect the next read, without a cache.
  * - Setup events and the project save/read contracts must retain typed state.
  */
@@ -32,13 +33,17 @@ afterEach(() => {
 });
 
 describe("checked-in project file", () => {
-	it("ignores unknown keys and retains an optional setup script", () => {
+	it("ignores unknown keys and retains optional setup and session-mode settings", () => {
 		expect(
 			Schema.decodeUnknownSync(ProjectFileSchema)({
 				setupScript: "pnpm install\necho ready",
 				sessionMode: "worktree",
+				unknown: true,
 			}),
-		).toEqual({ setupScript: "pnpm install\necho ready" });
+		).toEqual({
+			setupScript: "pnpm install\necho ready",
+			sessionMode: "worktree",
+		});
 		expect(Schema.decodeUnknownSync(ProjectFileSchema)({})).toEqual({});
 	});
 
@@ -51,6 +56,8 @@ describe("checked-in project file", () => {
 	it.each([
 		"{broken",
 		'{"setupScript":42}',
+		'{"sessionMode":"sometimes"}',
+		'{"sessionMode":null}',
 		"null",
 		"[]",
 		'"script"',
@@ -80,6 +87,30 @@ describe("checked-in project file", () => {
 });
 
 describe("project setup contracts", () => {
+	it.each([
+		"local",
+		"worktree",
+		null,
+	])("retains sessionMode %j in SaveProject, including an explicit clear", (sessionMode) => {
+		const decoded = Schema.decodeUnknownSync(SaveProject)({
+			_tag: "SaveProject",
+			folders: ["/workspace/app"],
+			sessionMode,
+		});
+		expect(decoded.sessionMode).toBe(sessionMode);
+	});
+
+	it("exposes the stored mode to project edit mode", () => {
+		expect(
+			Schema.decodeUnknownSync(ProjectInfoSchema)({
+				slug: "app",
+				title: "App",
+				folders: ["/workspace/app"],
+				sessionMode: "worktree",
+			}).sessionMode,
+		).toBe("worktree");
+	});
+
 	it.each([
 		"echo ready",
 		"",

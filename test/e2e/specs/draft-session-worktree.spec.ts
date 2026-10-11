@@ -113,10 +113,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId(`picker-instance-${provider}`).click();
-	await page.keyboard.press("Escape");
+	// The only harness is the draft's default, so the picker shows no harness segment.
 	await expect(picker).toHaveAttribute("data-instance-id", provider);
 	await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 	return rpc;
@@ -166,6 +163,12 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
+			await page.addInitScript(() => {
+				localStorage.setItem(
+					"conduit-composer-preferences",
+					JSON.stringify({ controls: "words" }),
+				);
+			});
 			const rpc = await openDraft(page, harness.relayBaseUrl);
 			await page.locator("#input").fill("Start in docs");
 			await press(page.getByTestId("draft-start-chip"));
@@ -174,7 +177,7 @@ for (const mode of [
 			).toHaveAttribute("aria-checked", "true");
 			await expect(
 				page.getByRole("menuitem", { name: /New worktree/ }),
-			).toHaveAttribute("aria-disabled", "true");
+			).toHaveAttribute("aria-disabled", "false");
 			await expect(
 				page.getByRole("menuitem", { name: /New branch/ }),
 			).toHaveAttribute("aria-disabled", "true");
@@ -227,7 +230,7 @@ for (const mode of [
 				sessionId: "draft-session",
 				text: "Start in docs",
 			});
-			await expect(page.getByTestId("session-bar-identity")).toContainText(
+			await expect(page.getByTestId("composer-checkout")).toContainText(
 				"feature/docs",
 			);
 		});

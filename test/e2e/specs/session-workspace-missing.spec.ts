@@ -22,6 +22,16 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
+// The words composer keeps the checkout in the footer on phones too.
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => {
+		localStorage.setItem(
+			"conduit-composer-preferences",
+			JSON.stringify({ controls: "words" }),
+		);
+	});
+});
+
 const projectSlug = "e2e-replay";
 const main = "/workspace/main";
 const worktree = "/workspace/worktrees/missing-session/0";
@@ -135,13 +145,11 @@ for (const viewport of [
 				folder === main ? "main" : "library",
 			);
 			const label = `worktree missing: ${names.join(", ")}`;
-			const identity = page.getByTestId("session-bar-identity");
+			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-missing");
 			await expect(notice).toBeVisible();
-			if (viewport.width === 390) {
-				await expect(notice).toHaveAttribute("aria-label", label);
-				await expect(identity).toHaveAccessibleName(new RegExp(label));
-			} else await expect(notice).toHaveText(label);
+			await expect(notice).toHaveAttribute("aria-label", label);
+			await expect(identity).toHaveAccessibleName(new RegExp(label));
 			await capture(page, testInfo, "multi-folder-missing");
 			await identity.click();
 			const menu = page.getByRole("menu", { name: "Checkout" });
@@ -214,18 +222,14 @@ for (const viewport of [
 				page,
 				harness.relayBaseUrl,
 			);
-			const identity = page.getByTestId("session-bar-identity");
+			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-missing");
 			await expect(notice).toBeVisible();
 			await expect(page.getByTestId("workspace-moved-back")).toHaveCount(0);
-			if (viewport.width === 390) {
-				await expect(notice).toHaveAttribute("role", "img");
-				await expect(notice).toHaveAttribute("aria-label", "worktree missing");
-				await expect(notice).toHaveText("");
-				await expect(identity).toHaveAccessibleName(/worktree missing/);
-			} else {
-				await expect(notice).toHaveText("worktree missing");
-			}
+			await expect(notice).toHaveAttribute("role", "img");
+			await expect(notice).toHaveAttribute("aria-label", "worktree missing");
+			await expect(notice).toHaveText("");
+			await expect(identity).toHaveAccessibleName(/worktree missing/);
 			await capture(page, testInfo, "workspace-missing");
 			await identity.click();
 			const menu = page.getByRole("menu", { name: "Checkout" });
@@ -289,7 +293,7 @@ test("a deleted branch offers only Continue in main folder", async ({
 		canRecreate: false,
 		reason: "branch-missing",
 	});
-	await page.getByTestId("session-bar-identity").click();
+	await page.getByTestId("composer-checkout").click();
 	const menu = page.getByRole("menu", { name: "Checkout" });
 	await expect(
 		menu.getByRole("menuitem", { name: "Recreate worktree" }),
@@ -328,7 +332,7 @@ for (const failure of [
 		rpc.setHandler(failure.tag, () => {
 			throw failure.error;
 		});
-		await page.getByTestId("session-bar-identity").click();
+		await page.getByTestId("composer-checkout").click();
 		await page.getByRole("menuitem", { name: failure.label }).click();
 		await expect(page.getByRole("alert")).toContainText(failure.toast);
 		await expect(page.getByTestId("workspace-missing")).toBeVisible();

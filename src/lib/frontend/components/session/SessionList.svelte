@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
+	import { getScopeGroupKey } from "../../../session-scope.js";
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
@@ -15,6 +16,7 @@
 	import {
 		getSessionGrouping,
 		getSessionScope,
+		getSessionScopeLabel,
 		getSessionStatusFilter,
 		setSessionScope,
 	} from "../../stores/session-scope.js";
@@ -23,6 +25,7 @@
 		routerState,
 	} from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
+	import { getProjectGroup } from "../../stores/project-state.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		deleteSessionRpc,
@@ -116,13 +119,23 @@
 	});
 
 	const scope = $derived(getSessionScope());
+	const scopeLabel = $derived(getSessionScopeLabel(scope));
+	const scopeGroupKey = $derived(getScopeGroupKey(scope));
+	// A group's membership can change without its URL changing. Re-read its
+	// pages and search when projects join, leave or change their grouping mode.
+	const scopeQueryKey = $derived(JSON.stringify([
+		scope,
+		scopeGroupKey === null ? null : projectState.projects
+			.filter((project) => getProjectGroup(project.slug)?.key === scopeGroupKey)
+			.map((project) => project.slug).sort(),
+	]));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
 		if (statusFilter !== null) {
 			const label = statusFilter === "needs-you" ? "needs you" : statusFilter;
-			return `Nothing ${label}${scope === null ? "" : ` in ${projectDisplayName(scope)}`}`;
+			return `Nothing ${label}${scope === null ? "" : ` in ${scopeLabel}`}`;
 		}
-		if (scope !== null) return `No sessions in ${projectDisplayName(scope)}`;
+		if (scope !== null) return `No sessions in ${scopeLabel}`;
 		return "No sessions yet";
 	});
 
@@ -181,10 +194,10 @@
 	// The server scopes its page, so a new scope needs a fresh first page, and a
 	// live search its matches re-fetched. The initial scope is already loaded by
 	// ChatLayout on connect, hence skipping the first run.
-	let loadedScope = untrack(() => scope);
+	let loadedScope = untrack(() => scopeQueryKey);
 	$effect(() => {
-		if (scope === loadedScope) return;
-		loadedScope = scope;
+		if (scopeQueryKey === loadedScope) return;
+		loadedScope = scopeQueryKey;
 		void refreshSessionList();
 		const query = untrack(() => localSearchValue);
 		if (query.trim()) requestRemoteSearch(query);

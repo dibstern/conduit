@@ -82,6 +82,7 @@ import {
 	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
+	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
@@ -481,6 +482,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			ResolveSessionMode: ({ projectSlug }) =>
+				run(resolveSessionMode(projectSlug)),
 			SaveProject: (request) =>
 				Effect.gen(function* () {
 					const { kind, project, warnings } = yield* handle.saveProject({
@@ -489,6 +492,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.title !== undefined && { title: request.title }),
 						...(request.setupScript !== undefined && {
 							setupScript: request.setupScript,
+						}),
+						...(request.sessionMode !== undefined && {
+							sessionMode: request.sessionMode,
 						}),
 						...(request.groupingMode !== undefined && {
 							groupingMode: request.groupingMode,

@@ -246,6 +246,35 @@ describe("relay-settings", () => {
 		});
 	});
 
+	// Failure cases: invalid hand edits must not leak an unknown mode; saving a
+	// session default must retain the other persisted defaults and survive reload.
+	describe("defaultSessionMode persistence", () => {
+		it("drops invalid modes while preserving other persisted fields", () => {
+			writeFileSync(
+				join(tempDir, "settings.jsonc"),
+				JSON.stringify({
+					defaultSessionMode: "sometimes",
+					defaultPermissionMode: "auto",
+				}),
+			);
+			expect(loadRelaySettings(tempDir)).toEqual({
+				defaultPermissionMode: "auto",
+			});
+		});
+
+		it.each([
+			"local",
+			"worktree",
+		] as const)("round-trips %s without replacing other persisted fields", (mode) => {
+			saveRelaySettings({ defaultModel: "openai/gpt-4o" }, tempDir);
+			saveRelaySettings({ defaultSessionMode: mode }, tempDir);
+			expect(loadRelaySettings(tempDir)).toEqual({
+				defaultModel: "openai/gpt-4o",
+				defaultSessionMode: mode,
+			});
+		});
+	});
+
 	describe("round-trip: save → load → parse", () => {
 		it("persisted default model survives restart", () => {
 			saveRelaySettings({ defaultModel: "anthropic/claude-opus-4-6" }, tempDir);

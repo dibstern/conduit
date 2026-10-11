@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type { ProcessHarness } from "../../helpers/process-harness.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -41,9 +42,9 @@ async function sendFromAddedProject(
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId(`picker-instance-${driver}`).click();
+	await openPickerRoot(page, picker);
+	if ((await picker.getAttribute("data-instance-id")) !== driver)
+		await page.getByTestId(`picker-harness-${driver}`).click();
 	await page.keyboard.press("Escape");
 	await expect(page.getByTestId("model-picker")).toBeHidden();
 	await expect(picker).toHaveAttribute("data-instance-id", driver);

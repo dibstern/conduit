@@ -87,6 +87,7 @@ describe("SubscribeProjectSettings", () => {
 						hiddenAgents: [],
 					},
 					{ _tag: "defaultPermissionMode", mode: "ask" },
+					{ _tag: "defaultSessionMode", mode: "local" },
 					{ _tag: "claudeSettings", overrides: {} },
 				]),
 			);
@@ -169,6 +170,33 @@ describe("SubscribeProjectSettings", () => {
 			expect(yield* Queue.take(q)).toMatchObject({
 				_tag: "upsert",
 				item: { _tag: "defaultPermissionMode", mode: "acceptEdits" },
+			});
+		}).pipe(Effect.provide(makeLayer())),
+	);
+});
+
+// Failure case: a session-mode write must notify an open draft on this relay,
+// and a later subscriber must read the persisted default rather than Local.
+describe("defaultSessionMode subscriptions", () => {
+	it.scoped("publishes writes and includes the mode in later snapshots", () =>
+		Effect.gen(function* () {
+			const { client, subscribe } = yield* open;
+			const { q } = yield* subscribe;
+			expect(
+				yield* client.SetDefaultSessionMode({
+					projectSlug: "project",
+					mode: "worktree",
+				}),
+			).toEqual({ mode: "worktree" });
+			expect(yield* Queue.take(q)).toMatchObject({
+				_tag: "upsert",
+				item: { _tag: "defaultSessionMode", mode: "worktree" },
+			});
+			const { snapshot } = yield* subscribe;
+			if (snapshot._tag !== "snapshot") throw new Error("expected snapshot");
+			expect(snapshot.rows).toContainEqual({
+				_tag: "defaultSessionMode",
+				mode: "worktree",
 			});
 		}).pipe(Effect.provide(makeLayer())),
 	);

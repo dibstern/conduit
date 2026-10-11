@@ -1,19 +1,21 @@
-<!-- Session approvals: tap to cycle on phones, hold for the ranked menu. -->
+<!-- Session approvals: controls and sheet rows open the ranked mode menu. -->
 
 <script lang="ts">
 	import Badge from "../ui/Badge.svelte";
+	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
 	import {
 		approvals,
 		getRankedApprovalOptions,
 	} from "../../stores/composer-settings.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { SessionPermissionMode } from "../../types.js";
 
-	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
+	let { variant = "icons" }: { variant?: "icons" | "words" | "row" | undefined } = $props();
 
 	const presentation: Record<
 		SessionPermissionMode,
@@ -57,8 +59,7 @@
 		},
 	};
 
-	let innerWidth = $state(window.innerWidth);
-	const phone = $derived(innerWidth < 768);
+	const phone = $derived(sessionViewState.composerTier === "phone");
 	let open = $state(false);
 	let autoNormalizationProvider: string | null = null;
 
@@ -66,7 +67,7 @@
 	const currentLabel = $derived(approvals.current?.label ?? "Ask");
 	const currentPresentation = $derived(presentation[currentMode]);
 	const availableModes = $derived(getRankedApprovalOptions());
-	const isElevated = $derived(approvals.current?.elevated === true);
+	const hot = $derived(currentMode !== (phone ? "ask" : discoveryState.defaultPermissionMode));
 
 	$effect(() => {
 		const providerId = discoveryState.currentProviderId;
@@ -85,8 +86,6 @@
 		}
 	});
 </script>
-
-<svelte:window bind:innerWidth />
 
 {#snippet shield(mode: SessionPermissionMode, size: number, detailed = true, knockout = "var(--color-bg-surface)")}
 	<svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -117,6 +116,7 @@
 	</svg>
 {/snippet}
 
+{#if variant !== "icons" || !phone || hot}
 <Menu
 	bind:open
 	ariaLabel="Approvals"
@@ -127,46 +127,63 @@
 	data-testid="permission-mode-dropdown"
 >
 	{#snippet trigger({ props })}
-		{#if phone || variant === "words"}
-			<!-- Keep Bits' trigger attributes; its activation handlers would open
-			     the menu before the tap/hold control can decide the action. -->
-			<MicroLabelButton
+		{#if variant === "words"}
+			<Button
 				{...props}
-				onpointerdown={undefined}
-				onpointerup={undefined}
-				onkeydown={undefined}
-				variant={variant === "words" ? "words" : "micro"}
-				label={variant === "words" ? currentPresentation.microLabel.toLowerCase() : currentPresentation.microLabel}
-				accessibleName="Approvals {currentLabel}. Activate to cycle; hold or Shift+F10 opens options"
-				tone={currentPresentation.tone}
-				tinted={variant === "icons" && isElevated}
-				pending={approvals.pending}
-				pulseKey={currentMode}
-				onTap={approvals.cycle}
-				onHold={() => { open = true; }}
-				data-testid={variant === "words" ? "composer-word-approvals" : "permission-mode-badge"}
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
+				class="shrink-0 text-[11.5px] font-normal font-brand"
+				style={`color: ${currentPresentation.tone}`}
+				ariaLabel={`Approvals: ${currentLabel}. Open options`}
+				loading={approvals.pending}
+				data-testid="composer-word-approvals"
 				title="Approvals ({currentLabel})"
-			>
-				{#if variant === "icons"}{@render shield(currentMode, 15, false)}{/if}
-			</MicroLabelButton>
-		{:else}
-			<MicroLabelButton
+			><span class="border-b border-dotted border-border-chip">{currentPresentation.microLabel.toLowerCase()}</span></Button>
+		{:else if variant === "row"}
+			<Button
 				{...props}
-				variant="chip"
-				onpointerdown={undefined}
-				onpointerup={undefined}
-				label={currentLabel}
-				accessibleName="Approvals {currentLabel}. Open options"
-				tone={currentPresentation.tone}
-				pending={approvals.pending}
-				pulseKey={currentMode}
-				onTap={() => { open = true; }}
-				onHold={() => { open = true; }}
+				variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+				ariaLabel={`Approvals: ${currentLabel}. Open options`}
+				loading={approvals.pending}
+				data-testid="composer-more-mode"
+			>
+				<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Mode</span>
+				<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{@render shield(currentMode, 13, false)}{currentLabel}</span>
+				<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+			</Button>
+		{:else if phone}
+			<Button
+				{...props}
+				variant="ghost" size="content" tone="inherit" hoverFill="none"
+				class="h-[26px] shrink-0 rounded-[7px] bg-warning/14 px-[6px] text-warning"
+				ariaLabel={`Approvals: ${currentLabel}. Open options`}
+				loading={approvals.pending}
+				data-hot="true"
 				data-testid="permission-mode-badge"
 				title="Approvals ({currentLabel})"
 			>
-				{@render shield(currentMode, 15, true, "var(--color-input-bg)")}
-			</MicroLabelButton>
+				{@render shield(currentMode, 13, false)}
+			</Button>
+		{:else}
+			<Button
+				{...props}
+				variant="ghost"
+				size="content"
+				tone="inherit"
+				hoverFill="none"
+				class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand whitespace-nowrap {hot ? 'text-warning bg-warning/14' : 'text-text-secondary hover:bg-text/7'}"
+				ariaLabel="Approvals {currentLabel}. Open options"
+				loading={approvals.pending}
+				data-hot={hot ? "true" : undefined}
+				data-testid="permission-mode-badge"
+				title="Approvals ({currentLabel})"
+			>
+				{@render shield(currentMode, 12, false)}
+				{#if sessionViewState.composerTier === "wide"}<span data-testid="composer-mode-label">{currentLabel}</span>{/if}
+			</Button>
 		{/if}
 	{/snippet}
 
@@ -194,3 +211,4 @@
 		{/each}
 	</MenuRadioGroup>
 </Menu>
+{/if}

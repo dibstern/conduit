@@ -1,6 +1,10 @@
 // Agents, models, providers, and commands.
 
-import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+import type { SessionMode } from "../../contracts/project-file.js";
+import type {
+	ProviderDriverKind,
+	ProviderSessionCapabilities,
+} from "../../contracts/provider-instance.js";
 
 import type {
 	GetAgentsResponse,
@@ -118,7 +122,7 @@ const providersFromGetModelsResponse = (
 
 export interface InstanceOption {
 	readonly id: string;
-	readonly driver: "claude" | "opencode";
+	readonly driver: ProviderDriverKind;
 	readonly label: string;
 	/** Non-default instance of a driver — disambiguated with an accent badge. */
 	readonly isCustom: boolean;
@@ -171,6 +175,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
+	defaultSessionMode: "local" as SessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -305,6 +310,9 @@ export const discoveryState = {
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
 	},
+	get defaultSessionMode(): SessionMode {
+		return serverDiscovery.defaultSessionMode;
+	},
 	get hiddenModels(): readonly string[] {
 		return choice.hiddenModels ?? serverDiscovery.hiddenModels;
 	},
@@ -420,12 +428,12 @@ export function getAvailableInstances(): InstanceOption[] {
 		}
 	}
 	for (const inst of instanceState.instances) {
-		const driver: "claude" | "opencode" =
-			inst.driver === "claude" ? "claude" : "opencode";
+		const driver = inst.driver ?? "opencode";
 		const existing = byId.get(inst.id);
 		if (existing) {
 			byId.set(inst.id, {
 				...existing,
+				driver,
 				status: inst.status,
 				capabilities:
 					inst.capabilities ?? instanceState.providerCapabilities[driver],
@@ -1112,6 +1120,10 @@ export function applyHiddenEntriesSet(
 export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	serverDiscovery.defaultPermissionMode = mode;
 	choice.defaultPermissionMode = null;
+}
+
+export function applyDefaultSessionMode(mode: SessionMode): void {
+	serverDiscovery.defaultSessionMode = mode;
 }
 
 /** Clear all discovery state (for project switch). */

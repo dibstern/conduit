@@ -265,6 +265,11 @@ for (const mode of [
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
+		// Phones keep the session checkout in the composer's ⋯ sheet.
+		const checkout = async (page: Page) => {
+			if (mode.hasTouch) await press(page.getByTestId("composer-more"));
+			return page.getByTestId("composer-checkout");
+		};
 
 		test("New worktree starts on a generated branch and renders the worktree pill", async ({
 			page,
@@ -310,7 +315,7 @@ for (const mode of [
 			expect(request.payload).not.toHaveProperty("worktreePath");
 			expect(request.payload).not.toHaveProperty("worktreeBase");
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
-			const pill = page.getByTestId("session-bar-identity");
+			const pill = await checkout(page);
 			await expect(pill).toContainText(branch);
 			await expect(pill.locator('[data-icon="worktree"]')).toBeVisible();
 		});
@@ -488,7 +493,7 @@ for (const mode of [
 				await expect(page.getByTestId("session-bar-title")).toHaveText(
 					"New workspace",
 				);
-				await press(page.getByTestId("session-bar-identity"));
+				await press(await checkout(page));
 				const rows = page.getByTestId("session-folder-git");
 				await expect(rows).toHaveCount(3);
 				for (const root of [main, api]) {
@@ -509,6 +514,11 @@ for (const mode of [
 				);
 				await page.keyboard.press("Escape");
 				if (mode.hasTouch) {
+					// The ⋯ sheet is modal, so the session bar is inert until it closes.
+					await page.keyboard.press("Escape");
+					await expect(
+						page.getByRole("dialog", { name: "Composer" }),
+					).toBeHidden();
 					await press(page.getByTestId("session-bar-island-overflow"));
 					await press(page.getByTestId("overflow-view-files"));
 				} else {
@@ -642,8 +652,15 @@ for (const mode of [
 				"limited-provider",
 			]) {
 				await press(picker);
-				await press(page.getByTestId("picker-row-harness"));
-				await press(page.getByTestId(`picker-instance-${provider}`));
+				const back = page.getByTestId("picker-back");
+				if (await back.isVisible()) await press(back);
+				await press(
+					page.getByTestId(
+						`picker-harness-${provider === "claude" ? "claude" : "opencode"}`,
+					),
+				);
+				if (provider !== "claude")
+					await press(page.getByTestId(`picker-account-${provider}`));
 				await page.keyboard.press("Escape");
 				await expect(picker).toHaveAttribute("data-instance-id", provider);
 				if (provider === "opencode") {

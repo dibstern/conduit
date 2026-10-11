@@ -111,7 +111,7 @@ async function openSession(
 		responses: new Map(),
 	});
 	await page.goto(`${baseUrl}/s/${sessionId}`);
-	await expect(page.getByTestId("session-bar-identity")).toContainText(branch);
+	await expect(page.locator("#input")).toBeVisible();
 	return rpc;
 }
 
@@ -193,9 +193,22 @@ for (const mode of [
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
+		// Phones keep the session checkout in the composer's ⋯ sheet.
+		const checkout = async (page: Page) => {
+			const target = page.getByTestId("composer-checkout");
+			if (mode.hasTouch && !(await target.isVisible()))
+				await press(page.getByTestId("composer-more"));
+			return target;
+		};
+		// The ⋯ sheet is modal, so the session bar is inert until it closes.
+		const backToList = async (page: Page) => {
+			await page.keyboard.press("Escape");
+			await expect(page.getByRole("dialog", { name: "Composer" })).toBeHidden();
+			await press(page.getByTestId("session-bar-back"));
+		};
 
 		async function openRename(page: Page) {
-			await press(page.getByTestId("session-bar-identity"));
+			await press(await checkout(page));
 			const menu = page.getByRole("menu", { name: "Checkout" });
 			await press(
 				menu.getByRole("menuitem", { name: "Rename branch", exact: true }),
@@ -234,10 +247,8 @@ for (const mode of [
 					branchName: newName,
 				});
 				await expect(dialog).not.toBeVisible();
-				await expect(page.getByTestId("session-bar-identity")).toContainText(
-					newName,
-				);
-				await press(page.getByTestId("session-bar-identity"));
+				await expect(await checkout(page)).toContainText(newName);
+				await press(await checkout(page));
 				const folderRows = page
 					.getByRole("menu", { name: "Checkout" })
 					.getByTestId("session-folder-git");
@@ -246,7 +257,7 @@ for (const mode of [
 					await expect(row).toContainText(newName);
 				await page.keyboard.press("Escape");
 				// Navigation reuses the pushed row; the mock never polls new git.
-				if (mode.hasTouch) await press(page.getByTestId("session-bar-back"));
+				if (mode.hasTouch) await backToList(page);
 				const row = page.locator(
 					`#session-list [data-session-id="${sessionId}"]`,
 				);
@@ -264,7 +275,7 @@ for (const mode of [
 				const rpc = await openSession(page, harness.relayBaseUrl, {
 					ownership,
 				});
-				await press(page.getByTestId("session-bar-identity"));
+				await press(await checkout(page));
 				const menu = page.getByRole("menu", { name: "Checkout" });
 				await expect(menu).toBeVisible();
 				await expect(
@@ -299,9 +310,7 @@ for (const mode of [
 				await expect(dialog).toBeVisible();
 				await expect(input).toHaveValue(failure.branchName);
 				await expect(input).toHaveAttribute("aria-invalid", "true");
-				await expect(page.getByTestId("session-bar-identity")).toContainText(
-					branch,
-				);
+				await expect(await checkout(page)).toContainText(branch);
 				const current = rpc.shellRows?.[0] as SessionInfo | undefined;
 				expect(current?.git?.folders?.map(({ branch: name }) => name)).toEqual([
 					branch,
@@ -319,7 +328,7 @@ for (const mode of [
 				await press(
 					dialog.getByRole("button", { name: "Cancel", exact: true }),
 				);
-				if (mode.hasTouch) await press(page.getByTestId("session-bar-back"));
+				if (mode.hasTouch) await backToList(page);
 				await expect(
 					page.locator(`#session-list [data-session-id="${sessionId}"]`),
 				).toContainText(branch);
@@ -340,9 +349,7 @@ for (const mode of [
 			expect(
 				rpc.getRequests().filter(({ tag }) => tag === "RenameSessionBranch"),
 			).toHaveLength(0);
-			await expect(page.getByTestId("session-bar-identity")).toContainText(
-				branch,
-			);
+			await expect(await checkout(page)).toContainText(branch);
 		});
 	});
 }

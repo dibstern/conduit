@@ -12,6 +12,7 @@ import type { ProjectSetting } from "../transport/ws-rpc.js";
 import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
+	applyDefaultSessionMode,
 	discoveryState,
 	handleDefaultModelInfo,
 	handleHarnessDefaults,
@@ -40,6 +41,9 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			break;
 		case "defaultPermissionMode":
 			applyDefaultPermissionMode(setting.mode);
+			break;
+		case "defaultSessionMode":
+			applyDefaultSessionMode(setting.mode);
 			break;
 		case "defaultGroupingMode":
 			projectState.defaultGroupingMode = setting.mode;

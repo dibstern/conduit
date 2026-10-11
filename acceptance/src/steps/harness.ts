@@ -1,11 +1,19 @@
 import { expect, type Page } from "@playwright/test";
+import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
-	exampleValue,
 	openModelPicker,
 	openSessionRoute,
 	requireRpcControl,
 } from "./shared.js";
+
+const heldAccountSwitches = new WeakMap<Page, () => void>();
+
+const harnessLogo = (page: Page, region: string, account: string) =>
+	page
+		.locator(region === "composer" ? "#input-area" : "#model-picker")
+		.locator(`[data-testid="harness-logo"][data-account="${account}"]`)
+		.first();
 
 /** Map a harness/instance display label (e.g. "OpenCode · Local") to the
  *  default instance id of its driver. */
@@ -17,12 +25,9 @@ function instanceIdForLabel(label: string): string {
 	return driverName;
 }
 
-async function selectRailInstance(page: Page, label: string): Promise<void> {
+async function selectHarnessTab(page: Page, label: string): Promise<void> {
 	await openModelPicker(page);
-	await page.getByTestId("picker-row-harness").click();
-	await page
-		.getByTestId(`picker-instance-${instanceIdForLabel(label)}`)
-		.click();
+	await page.getByTestId(`picker-harness-${label.toLowerCase()}`).click();
 	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
@@ -36,6 +41,135 @@ async function openPickerAgentView(page: Page): Promise<void> {
 }
 
 export const harnessHandlers: StepHandler[] = [
+	{
+		name: "start a new session",
+		match: /^I start a new session$/,
+		run: async ({ world }) => {
+			// Phones show the session list until a session or draft is open.
+			const newSession = world.page.locator("#new-session-btn:visible");
+			if (!(await newSession.isVisible())) {
+				await world.page.getByTestId("session-bar-back").click();
+			}
+			await newSession.click();
+			await world.page
+				.locator("#input-wrapper")
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
+		name: "set harness logo tier",
+		match: /^the harness logo is viewed in the (wide|narrow|phone) tier$/,
+		run: async ({ world, match }) => {
+			const tier = match[1];
+			await world.driver.setViewport(
+				world.page,
+				tier === "phone" ? PHONE_VIEWPORT : DESKTOP_VIEWPORT,
+			);
+			if (tier === "narrow") {
+				await world.page.locator("#input-wrapper").evaluate((element) => {
+					element.style.width = "520px";
+				});
+			}
+		},
+	},
+	{
+		name: "choose composer controls for harness logo",
+		match: /^the composer uses (icons|words) controls$/,
+		run: async ({ world, match }) => {
+			await world.page.evaluate(() =>
+				window.dispatchEvent(new CustomEvent("settings:open")),
+			);
+			await world.page.getByTestId("settings-tab-general").click();
+			await world.page
+				.getByTestId(`settings-composer-controls-${match[1]}`)
+				.click();
+			await world.page.getByTestId("settings-close-btn").click();
+			await expect(world.page.locator("#settings-panel")).toBeHidden();
+		},
+	},
+	{
+		name: "assert harness logo has no badge",
+		match: /^the (composer|picker) harness logo for (\S+) has no badge$/,
+		run: async ({ world, match }) => {
+			const logo = harnessLogo(world.page, match[1] ?? "", match[2] ?? "");
+			await expect(logo).toBeVisible();
+			await expect(logo.getByTestId("harness-logo-badge")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert harness logo badge letter",
+		match:
+			/^the (composer|picker) harness logo for (\S+) shows (\S) on its badge$/,
+		run: async ({ world, match }) => {
+			const badge = harnessLogo(
+				world.page,
+				match[1] ?? "",
+				match[2] ?? "",
+			).getByTestId("harness-logo-badge");
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveAttribute("data-account", match[2] ?? "");
+			await expect(badge).toHaveText(match[3] ?? "");
+			await expect(badge).toHaveAttribute("data-state", "idle");
+		},
+	},
+	{
+		name: "assert harness badge matches AccountDot",
+		match:
+			/^the (composer|picker) harness badge for (\S+) matches its AccountDot colour$/,
+		run: async ({ world, match }) => {
+			const account = match[2] ?? "";
+			const dot = world.page
+				.locator(`[data-testid="account-dot"][data-account="${account}"]`)
+				.first();
+			await expect(dot).toBeVisible();
+			const colour = await dot.evaluate(
+				(element) => getComputedStyle(element).backgroundColor,
+			);
+			await expect(
+				harnessLogo(world.page, match[1] ?? "", account).getByTestId(
+					"harness-logo-badge",
+				),
+			).toHaveCSS("background-color", colour);
+		},
+	},
+	{
+		name: "hold account switch reply",
+		match: /^the account switch reply is held$/,
+		run: ({ world }) => {
+			const reply = new Promise<{ ok: true }>((resolve) => {
+				heldAccountSwitches.set(world.page, () => resolve({ ok: true }));
+			});
+			requireRpcControl(world.page).setHandler("ContinueSession", () => reply);
+		},
+	},
+	{
+		name: "release account switch reply",
+		match: /^the account switch reply lands$/,
+		run: ({ world }) => {
+			const release = heldAccountSwitches.get(world.page);
+			if (!release) throw new Error("No account switch reply is held");
+			release();
+			heldAccountSwitches.delete(world.page);
+		},
+	},
+	{
+		name: "assert harness badge switch state",
+		match: /^the (composer|picker) harness badge for (\S+) is (spinning|idle)$/,
+		run: async ({ world, match }) => {
+			const badge = harnessLogo(
+				world.page,
+				match[1] ?? "",
+				match[2] ?? "",
+			).getByTestId("harness-logo-badge");
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveAttribute("data-state", match[3] ?? "");
+			if (match[3] === "spinning") {
+				await expect(badge).toHaveText("");
+				// Name, not duration: an earlier visual step freezes durations to 0s.
+				await expect(badge).not.toHaveCSS("animation-name", "none");
+			}
+		},
+	},
 	{
 		name: "session exists on harness",
 		match: /^a session already exists on the (Claude|OpenCode) harness$/,
@@ -82,17 +216,18 @@ export const harnessHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "select instance in rail",
-		match: /^I select the (.+) instance in the rail$/,
+		name: "select Harness tab",
+		match:
+			/^I select the (Claude|OpenCode|Codex|Gemini|Cursor) Harness tab in the picker$/,
 		run: async ({ world, match }) => {
-			await selectRailInstance(world.page, match[1] ?? "");
+			await selectHarnessTab(world.page, match[1] ?? "");
 		},
 	},
 	{
 		name: "select harness",
 		match: /^I select the (Claude|OpenCode) harness$/,
 		run: async ({ world, match }) => {
-			await selectRailInstance(world.page, match[1] ?? "");
+			await selectHarnessTab(world.page, match[1] ?? "");
 			// Close the picker so follow-up steps interact with the toolbar.
 			await world.page.keyboard.press("Escape");
 			await world.page
@@ -114,13 +249,13 @@ export const harnessHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert model trigger instance icon",
-		match: /^the model trigger shows the (Claude|OpenCode) instance icon$/,
+		name: "assert composer harness trigger instance icon",
+		match: /^the harness trigger shows the (Claude|OpenCode) instance icon$/,
 		run: async ({ world, match }) => {
 			await world.page.waitForFunction(
 				(expected) => {
 					const trigger = document.querySelector(
-						'[data-testid="model-picker-trigger"]',
+						'[data-testid="composer-harness-trigger"], [data-testid="model-picker-trigger"]',
 					);
 					const icon = trigger?.querySelector("[data-driver]");
 					return (
@@ -134,49 +269,71 @@ export const harnessHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert rail instance selected",
-		match: /^the (Claude|OpenCode) instance in the rail is selected$/,
+		name: "assert Harness tab selected and in view",
+		match:
+			/^the (Claude|OpenCode|Codex|Gemini|Cursor) Harness tab is selected and in view$/,
 		run: async ({ world, match }) => {
-			const id = instanceIdForLabel(match[1] ?? "");
-			await world.page.waitForFunction(
-				(instanceId) => {
-					const button = document.querySelector(
-						`[data-testid="picker-instance-${instanceId}"]`,
-					);
-					return button?.getAttribute("aria-pressed") === "true";
-				},
-				id,
-				{ timeout: 5_000 },
+			const tab = world.page.getByTestId(
+				`picker-harness-${(match[1] ?? "").toLowerCase()}`,
 			);
+			await expect(tab).toHaveAttribute("role", "radio");
+			await expect(tab).toHaveAttribute("aria-checked", "true");
+			await expect(tab).toBeVisible();
+			await expect
+				.poll(() =>
+					tab.evaluate((element) => {
+						const row = element.closest(
+							'[data-testid="picker-harness-options"]',
+						);
+						if (!row) return false;
+						const bounds = row.getBoundingClientRect();
+						const item = element.getBoundingClientRect();
+						return (
+							item.left >= bounds.left - 1 && item.right <= bounds.right + 1
+						);
+					}),
+				)
+				.toBe(true);
 		},
 	},
 	{
-		name: "assert other harness instances disabled",
-		match: /^instances of other harnesses in the rail are disabled$/,
-		run: async ({ world, example }) => {
-			const bound = instanceIdForLabel(exampleValue(example, "harness"));
-			const result = await world.page.evaluate((boundId) => {
-				const buttons = Array.from(
-					document.querySelectorAll('[data-testid^="picker-instance-"]'),
-				);
-				const others = buttons.filter(
-					(b) => b.getAttribute("data-driver") !== boundId,
-				);
-				return {
-					otherCount: others.length,
-					allDisabled: others.every(
-						(b) => b.getAttribute("aria-disabled") === "true",
-					),
-				};
-			}, bound);
-			if (result.otherCount === 0) {
-				throw new Error("No other-harness instances rendered in the rail");
+		name: "assert other Harness tabs locked with accessible reason",
+		match: /^the other Harness tabs are locked and announce (.+)$/,
+		run: async ({ world, match }) => {
+			const section = world.page.getByTestId("picker-harness-section");
+			await expect(section).toContainText("fixed for this session");
+			const selected = section.getByRole("radio", { checked: true });
+			await expect(selected).not.toHaveAttribute("aria-disabled", "true");
+			await expect(selected).toHaveCSS("opacity", "1");
+			const others = section.getByRole("radio", { checked: false });
+			const count = await others.count();
+			expect(count).toBeGreaterThan(0);
+			for (let index = 0; index < count; index++) {
+				const tab = others.nth(index);
+				await expect(tab).toHaveAttribute("aria-disabled", "true");
+				await expect(tab).toHaveAccessibleDescription(match[1] ?? "");
+				await expect(tab).toHaveCSS("opacity", "0.5");
 			}
-			if (!result.allDisabled) {
-				throw new Error(
-					"Expected all other-harness rail instances to be disabled",
-				);
-			}
+		},
+	},
+	{
+		name: "move between Harness tabs with arrow keys",
+		match: /^I move to the next Harness with the keyboard$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("picker-harness-options")
+				.getByRole("radio", { checked: true })
+				.focus();
+			await world.page.keyboard.press("ArrowRight");
+		},
+	},
+	{
+		name: "assert draft instance",
+		match: /^the draft is bound to the (\S+) instance$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("model-picker-trigger").first(),
+			).toHaveAttribute("data-instance-id", match[1] ?? "");
 		},
 	},
 	{

@@ -325,7 +325,6 @@ export const KeyboardSave: Story = {
 		await expect(args["saveProject"]).toHaveBeenCalledWith({
 			title: "conduit-docs",
 			folders: [docs, { path: notes, create: { gitInit: true } }],
-			groupingMode: null,
 		});
 	},
 };
@@ -367,6 +366,23 @@ const editedProject = {
 	slug: "conduit",
 	title: "Conduit",
 	folders: [app, docs] as const,
+};
+
+export const SessionModeSet: Story = {
+	args: {
+		project: {
+			...editedProject,
+			title: "Isolated workspace",
+			sessionMode: "worktree",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: "Default session mode" }),
+		).toHaveValue("worktree");
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+	},
 };
 
 const capabilityInstances = [
@@ -472,7 +488,6 @@ export const Edit: Story = {
 			slug: "conduit",
 			title: "Conduit",
 			folders: [docs, app],
-			groupingMode: null,
 		});
 	},
 };

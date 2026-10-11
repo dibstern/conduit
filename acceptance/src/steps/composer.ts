@@ -5,7 +5,7 @@ import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	exampleValue,
-	holdUntilVisible,
+	openComposerMoreSheet,
 	openSessionRoute,
 	relayControls,
 	requireRpcControl,
@@ -17,18 +17,19 @@ const composerMessages = new WeakMap<Page, string>();
 async function openApprovalsMenu(page: Page): Promise<void> {
 	const menu = page.getByTestId("permission-mode-dropdown");
 	if (await menu.isVisible()) return;
-	const button = page.getByTestId(
+	let button = page.getByTestId(
 		/^(permission-mode-badge|composer-word-approvals)$/,
 	);
-	await expect(button).not.toHaveAttribute("aria-busy", "true");
-	if (
-		(page.viewportSize()?.width ?? 1440) < 768 ||
-		(await button.getAttribute("data-testid")) === "composer-word-approvals"
-	) {
-		await button.press("Shift+F10");
-	} else {
-		await button.click();
+	if ((await page.getByTestId("composer-more").count()) > 0) {
+		const row = page.getByTestId("composer-more-mode");
+		if (await row.isVisible()) button = row;
+		else if (!(await button.isVisible())) {
+			await openComposerMoreSheet(page);
+			button = row;
+		}
 	}
+	await expect(button).not.toHaveAttribute("aria-busy", "true");
+	await button.click();
 	await expect(menu).toBeVisible();
 }
 
@@ -251,47 +252,28 @@ export const composerHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "hold approvals shield",
-		match: /^I hold the approvals (shield|word)$/,
-		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word"
-					? "composer-word-approvals"
-					: "permission-mode-badge",
-			);
-			await expect(button).not.toHaveAttribute("aria-busy", "true");
-			await holdUntilVisible(
-				button,
-				world.page.getByTestId("permission-mode-dropdown"),
-			);
+		name: "open approvals menu",
+		match: /^I open the approvals menu$/,
+		run: async ({ world }) => {
+			await openApprovalsMenu(world.page);
 		},
 	},
 	{
-		name: "assert approvals micro label and shield",
-		match:
-			/^the approvals (shield|word) shows (NEVER|PLAN|ASK|EDITS|AUTO|FULL|never|plan|ask|edits|auto|full)$/,
+		name: "assert approvals word label",
+		match: /^the approvals word shows (never|plan|ask|edits|auto|full)$/,
 		run: async ({ world, match }) => {
-			const word = match[1] === "word";
-			const button = world.page.getByTestId(
-				word ? "composer-word-approvals" : "permission-mode-badge",
-			);
-			await expect(button).toHaveText(match[2] ?? "");
-			await expect(button.locator("svg")).toHaveCount(word ? 0 : 1);
+			const button = world.page.getByTestId("composer-word-approvals");
+			await expect(button).toHaveText(match[1] ?? "");
+			await expect(button.locator("svg")).toHaveCount(0);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 		},
 	},
 	{
-		name: "assert approval tone and tint",
+		name: "assert approval word tone",
 		match:
-			/^the approvals (shield|word) uses the (never|plan|ask|edits|auto|full) tone(?: with tint (true|false))?$/,
+			/^the approvals word uses the (never|plan|ask|edits|auto|full) tone$/,
 		run: async ({ world, match }) => {
-			const button = world.page.getByTestId(
-				match[1] === "word"
-					? "composer-word-approvals"
-					: "permission-mode-badge",
-			);
-			if (match[3])
-				await expect(button).toHaveAttribute("data-tinted", match[3]);
+			const button = world.page.getByTestId("composer-word-approvals");
 			// The tone animates (transition-colors), so poll until it settles.
 			await expect
 				.poll(() =>
@@ -302,7 +284,7 @@ export const composerHandlers: StepHandler[] = [
 						const expected = getComputedStyle(probe).color;
 						probe.remove();
 						return getComputedStyle(element).color === expected;
-					}, match[2] ?? ""),
+					}, match[1] ?? ""),
 				)
 				.toBe(true);
 		},

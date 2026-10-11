@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { encodeGroupScope } from "../../../session-scope.js";
 import { projectState } from "../../stores/project.svelte.js";
+import { getProjectGroup } from "../../stores/project-state.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
@@ -368,6 +370,115 @@ export const ScopePickerOpen: Story = {
 			await menu.findByRole("menuitemradio", { name: /All projects/ }),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(menu.getByText("project:acme")).toBeVisible();
+	},
+};
+
+function seedRepositoryScope(projectOnly: boolean) {
+	projectState.defaultGroupingMode = "repository";
+	projectState.projects = [
+		{
+			slug: "conduit",
+			title: "Main checkout",
+			folders: ["/src/conduit"],
+			repositoryIdentities: {
+				"/src/conduit": {
+					key: "github.com/acme/conduit",
+					name: "Conduit",
+					root: "/src/conduit",
+				},
+			},
+		},
+		{
+			slug: "conduit-review",
+			title: "Review checkout",
+			folders: ["/src/conduit-review"],
+			repositoryIdentities: {
+				"/src/conduit-review": {
+					key: "github.com/acme/conduit",
+					name: "Conduit",
+					root: "/src/conduit-review",
+				},
+			},
+		},
+	];
+	seedSessions([
+		{
+			id: "scope-main",
+			title: "Implement repository scope",
+			attention: "working",
+		},
+	]);
+	seedDaemonSessions([
+		{
+			id: "scope-review",
+			title: "Review the scope menu",
+			attention: "idle",
+			projectSlug: "conduit-review",
+		},
+	]);
+	const group = getProjectGroup("conduit");
+	routerState.search = `?${new URLSearchParams({ p: projectOnly ? "conduit" : encodeGroupScope(group?.key ?? "") })}`;
+}
+
+export const RepositoryScope: Story = {
+	name: "Repository scope, both checkouts",
+	beforeEach: () => seedRepositoryScope(false),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
+			"Conduit",
+		);
+		await expect(canvas.getByText("Implement repository scope")).toBeVisible();
+		await expect(canvas.getByText("Review the scope menu")).toBeVisible();
+	},
+};
+
+export const ProjectWithinRepositoryScope: Story = {
+	name: "Project within repository scope",
+	beforeEach: () => seedRepositoryScope(true),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-scope-chip")).toHaveTextContent(
+			"Conduit · Main checkout",
+		);
+		await expect(canvas.getByText("Implement repository scope")).toBeVisible();
+		await expect(
+			canvas.queryByText("Review the scope menu"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const RepositoryScopePickerOpen: Story = {
+	name: "Repository scope menu",
+	tags: ["viewport-capture"],
+	beforeEach: () => seedRepositoryScope(false),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-scope-chip"));
+		const menu = within(canvasElement.ownerDocument.body);
+		await expect(
+			await menu.findByRole("menuitemradio", { name: "Conduit" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(menu.getByText("project:conduit-review")).toBeVisible();
+	},
+};
+
+export const ProjectWithinRepositoryScopePickerOpen: Story = {
+	name: "Project within repository scope menu",
+	tags: ["viewport-capture"],
+	beforeEach: () => seedRepositoryScope(true),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("session-scope-chip"));
+		const menu = within(canvasElement.ownerDocument.body);
+		await expect(
+			await menu.findByRole("menuitemradio", {
+				name: /Conduit · Main checkout/,
+			}),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			menu.getByRole("menuitemradio", { name: "Conduit" }),
+		).toHaveAttribute("aria-checked", "false");
 	},
 };
 

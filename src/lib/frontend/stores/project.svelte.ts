@@ -2,6 +2,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import { getScopeGroupKey } from "../../session-scope.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -15,8 +16,11 @@ import { applyInstanceListResponse } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
+	getCurrentSearchParams,
 	getCurrentSlug,
 	replaceRoute,
+	routerState,
+	SCOPE_PARAM,
 } from "./router.svelte.js";
 import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
 import { confirm } from "./ui.svelte.js";
@@ -38,7 +42,12 @@ export function applyProjectList(
 		!projects.some((p) => p.slug === attachedProjectState.slug)
 	) {
 		attachedProjectState.slug = null;
-		replaceRoute("/?");
+		// A repository scope survives removal of its attached checkout, including
+		// when the last member leaves and the group key becomes unknown.
+		const scope = getCurrentSearchParams().get(SCOPE_PARAM);
+		replaceRoute(
+			getScopeGroupKey(scope) === null ? "/?" : `/${routerState.search}`,
+		);
 	}
 }
 
@@ -87,6 +96,9 @@ const toProjectInfoList = (
 		folders: project.folders,
 		...(project.setupScript !== undefined
 			? { setupScript: project.setupScript }
+			: {}),
+		...(project.sessionMode !== undefined
+			? { sessionMode: project.sessionMode }
 			: {}),
 		...(project.groupingMode !== undefined
 			? { groupingMode: project.groupingMode }

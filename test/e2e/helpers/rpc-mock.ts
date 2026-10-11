@@ -691,6 +691,9 @@ async function handleMessage(
 			control.getResponseHandler(raw.tag) ??
 			handlers[raw.tag] ??
 			control.catalogHandler(raw.tag) ??
+			(raw.tag === "ResolveSessionMode"
+				? () => ({ mode: "local", source: "global" })
+				: undefined) ??
 			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 			(raw.tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
 			(raw.tag === "GetDefaultGroupingMode"

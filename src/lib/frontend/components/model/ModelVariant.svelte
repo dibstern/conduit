@@ -1,19 +1,24 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import EffortMeter from "../ui/EffortMeter.svelte";
+	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
 	import { effort } from "../../stores/composer-settings.svelte.js";
+	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
-	let { onOpen, variant = "icons" }: {
+	let { onOpen, variant = "icons", children }: {
 		onOpen?: (() => void) | undefined;
-		variant?: "icons" | "words" | undefined;
+		variant?: "icons" | "words" | "control" | "row" | undefined;
+		children?: Snippet<[row: Snippet]> | undefined;
 	} = $props();
 
 	let open = $state(false);
-	let innerWidth = $state(window.innerWidth);
-	const phone = $derived(innerWidth < 768);
+	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
 	const filled = $derived(currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
@@ -49,9 +54,69 @@
 	}
 </script>
 
-<svelte:window bind:innerWidth onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
-{#if variants.length > 0}
+{#snippet effortRow()}
+	{#if variants.length > 0}
+		<Button
+			variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
+			class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+			ariaLabel={`Effort: ${levelName}. Open effort options`}
+			loading={effort.pending}
+			aria-haspopup="dialog"
+			data-testid="composer-more-effort"
+			onclick={() => openPicker("effort")}
+		>
+			<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Effort</span>
+			<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold"><EffortMeter levels={variants.length} {filled} />{currentVariant || "Default"}</span>
+			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
+		</Button>
+	{/if}
+{/snippet}
+
+{#if variant === "row"}
+	{#if children}{@render children(effortRow)}{:else}{@render effortRow()}{/if}
+{:else if variants.length > 0 && variant === "words"}
+		<Button
+			variant="ghost"
+			size="content"
+			tone="muted"
+			hoverFill="none"
+			class="shrink-0 text-[11.5px] font-normal font-brand"
+			ariaLabel={`Effort: ${levelName}. Open effort options`}
+			loading={effort.pending}
+			aria-haspopup="dialog"
+			aria-expanded={composerPickerState.request !== null}
+			aria-controls={composerPickerState.request ? "model-picker" : undefined}
+			data-testid="composer-word-effort"
+			onclick={(event) => {
+				openPicker("effort");
+				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
+			}}
+		><span class="border-b border-dotted border-border-chip">{currentVariant ? microLabel.toLowerCase() : microLabel}</span></Button>
+{:else if variants.length > 0 && variant === "control"}
+	<Button
+		variant="ghost"
+		size="content"
+		tone="inherit"
+		hoverFill="none"
+		class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7"
+		ariaLabel={`Effort: ${levelName}. Open effort options`}
+		loading={effort.pending}
+		aria-haspopup="dialog"
+		aria-expanded={composerPickerState.request !== null}
+		aria-controls={composerPickerState.request ? "model-picker" : undefined}
+		data-testid="variant-badge"
+		title="Effort {levelName}. Ctrl+T to cycle"
+		onclick={(event) => {
+			openPicker("effort");
+			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
+		}}
+	>
+		<EffortMeter levels={variants.length} {filled} />
+		{#if sessionViewState.composerTier === "wide"}<span data-testid="composer-effort-label">{levelName}</span>{/if}
+	</Button>
+{:else if variants.length > 0}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
@@ -62,7 +127,7 @@
 		data-testid="variant-dropdown"
 	>
 		{#snippet trigger({ props })}
-			{#if phone || variant === "words"}
+			{#if phone}
 				<!-- Keep Bits' trigger attributes and ref; MicroLabelButton owns tap,
 				     hold and keyboard activation instead of Bits' eager menu handlers. -->
 				<MicroLabelButton
@@ -70,18 +135,18 @@
 					onpointerdown={undefined}
 					onpointerup={undefined}
 					onkeydown={undefined}
-					variant={variant === "words" ? "words" : "micro"}
-					label={variant === "words" && currentVariant ? microLabel.toLowerCase() : microLabel}
-					tone={variant === "words" ? "var(--color-text-muted)" : "var(--color-text-secondary)"}
+					variant="micro"
+					label={microLabel}
+					tone="var(--color-text-secondary)"
 					accessibleName="Effort {levelName}. Tap or Ctrl+T to cycle; hold or Shift+F10 for options"
 					pending={effort.pending}
 					pulseKey={currentVariant}
 					onTap={() => effort.cycle()}
 					onHold={openMenu}
-					data-testid={variant === "words" ? "composer-word-effort" : "variant-badge"}
+					data-testid="variant-badge"
 					title="Effort {levelName}. Ctrl+T to cycle"
 				>
-					{#if variant === "icons"}<EffortMeter levels={variants.length} {filled} />{/if}
+					<EffortMeter levels={variants.length} {filled} />
 				</MicroLabelButton>
 			{:else}
 				<MicroLabelButton

@@ -1,4 +1,4 @@
-Feature: Composer effort meter cycles levels and offers every level on hold
+Feature: Phone composer effort moves into the sheet and shared picker
 
 Background:
   Given the conduit app is served with the connected mockup
@@ -7,84 +7,97 @@ Background:
 
 Scenario Outline: bar count follows model options and Default leaves every bar empty
   Given the model offers effort levels <levels>
-  Then the effort meter shows DEF
+  When I open the phone composer sheet
+  Then the phone composer Effort row reads Default
   And the effort meter has <bars> bars with 0 filled
+  When I tap the phone composer Effort row
+  Then the picker lists every offered effort level
+  And no effort segment in the picker is selected
 
 Examples:
   | levels                        | bars |
   | low, medium, high, max         | 4    |
   | low, medium, high, xhigh, max  | 5    |
 
-Scenario Outline: tapping cycles through levels and skips Default on wrap
+Scenario Outline: Ctrl+T cycles through levels and skips Default on wrap while the sheet is closed
   Given the model offers effort levels low, medium, high, xhigh, max
   When I set effort to <current>
-  And I tap the effort meter
-  Then the effort meter shows <next>
+  Then the phone composer sheet is closed
+  When I cycle effort with Ctrl+T
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads <next>
   And the effort meter has 5 bars with <filled> filled
   And the effort menu is closed
 
 Examples:
   | current | next  | filled |
-  | default | LOW   | 1      |
-  | low     | MED   | 2      |
-  | medium  | HIGH  | 3      |
-  | high    | XHIGH | 4      |
-  | xhigh   | MAX   | 5      |
-  | max     | LOW   | 1      |
+  | low     | medium | 2      |
+  | medium  | high   | 3      |
+  | high    | xhigh  | 4      |
+  | xhigh   | max    | 5      |
+  | max     | low    | 1      |
 
-Scenario: Ctrl+T wraps from Max to Low without landing on Default
+Scenario: Ctrl+T selects Low from Default without opening the sheet
   Given the model offers effort levels low, medium, high, xhigh, max
-  When I set effort to max
-  And I cycle effort with Ctrl+T
-  Then the effort meter shows LOW
+  When I cycle effort with Ctrl+T
+  Then the phone composer sheet is closed
+  When I open the phone composer sheet
+  Then the phone composer Effort row reads low
   And the effort meter has 5 bars with 1 filled
   And the effort menu is closed
 
-Scenario: holding offers Default and every level with descriptions and selection closes
+Scenario: the phone sheet Effort row opens the picker and selection keeps its root open
   Given the model offers effort levels low, medium, high, xhigh, max
   When I set effort to high
-  And I hold the effort meter
-  Then the effort menu lists Default and every offered level
-  And the effort meter shows HIGH
-  And the effort option default describes Use the model default
-  And the effort option low describes Quick, light reasoning
-  And the effort option medium describes Balanced
-  And the effort option high describes Thinks harder, slower
-  And the effort option xhigh describes Deeper still, for hard problems
-  And the effort option max describes Most thorough, slowest
-  When I set effort to default
-  Then the effort meter shows DEF
-  And the effort meter has 5 bars with 0 filled
+  And I tap the phone composer Effort row
+  Then the picker lists every offered effort level
+  And the picker effort high is selected while the root remains open
+  When I select effort max in the picker
+  Then the picker effort max is selected while the root remains open
+  When I close the model picker
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads max
+  And the effort meter has 5 bars with 5 filled
   And the effort menu is closed
 
-Scenario: an unknown level uses its first five characters as the micro label
+Scenario: an unknown effort level keeps its full name in the sheet
   Given the model offers effort levels low, medium, thorough
   When I set effort to thorough
-  Then the effort meter shows THORO
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads thorough
   And the effort meter has 3 bars with 3 filled
-  When I hold the effort meter
-  Then the effort menu lists Default and every offered level
-  And the effort option thorough describes Custom reasoning effort
+  When I tap the phone composer Effort row
+  Then the picker lists every offered effort level
+  And the picker effort thorough is selected while the root remains open
 
 Scenario: a failed effort switch rolls back the label and meter and remains usable
   Given the model offers effort levels low, medium, high, xhigh, max
   When I set effort to high
   Given the provider rejects the next effort switch
-  When I tap the effort meter
+  When I tap the phone composer Effort row
+  And I select effort xhigh in the picker
   Then the failed effort switch to xhigh is reported
-  And the effort meter shows HIGH
+  And the picker effort high is selected while the root remains open
+  When I close the model picker
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads high
   And the effort meter has 5 bars with 3 filled
   And the effort menu is closed
-  When I tap the effort meter
-  Then the effort meter shows XHIGH
+  When I tap the phone composer Effort row
+  And I select effort xhigh in the picker
+  Then the picker effort xhigh is selected while the root remains open
+  When I close the model picker
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads xhigh
   And the effort meter has 5 bars with 4 filled
 
-Scenario Outline: the phone meter matches the approved chip and micro label
+Scenario Outline: the phone sheet effort row shows the bars and lowercase value
   Given the model offers effort levels low, medium, high, xhigh, max
   When I set effort to high
-  Then the effort meter shows HIGH
-  And the composer region visually matches <baseline> at <threshold> percent
+  And I open the phone composer sheet
+  Then the phone composer Effort row reads high
+  And the screen region visually matches <baseline> at <threshold> percent
 
 Examples:
   | baseline                  | threshold |
-  | composer-effort-high-phone | 98       |
+  | composer-effort-high-sheet | 98       |

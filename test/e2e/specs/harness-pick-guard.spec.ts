@@ -13,6 +13,7 @@ import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -217,7 +218,7 @@ async function pickModel(
 	picker: Locator,
 	model: { providerID: string; modelID: string },
 ): Promise<void> {
-	await picker.click();
+	await openPickerRoot(page, picker);
 	await page.getByTestId("picker-row-model").click();
 	await page
 		.getByTestId("model-picker-list")
@@ -230,9 +231,8 @@ async function pickModel(
 }
 
 async function pickOpenCodeModel(page: Page, picker: Locator): Promise<void> {
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-opencode").click();
 	await closePicker(page);
 	await pickModel(page, picker, otherOpenCodeModel);
 }
@@ -502,7 +502,7 @@ for (const driver of ["claude", "opencode"] as const) {
 				}
 				// Opening the root also waits for the offered efforts to load. Select
 				// only concrete options supplied by the current model's catalogue.
-				await picker.click();
+				await openPickerRoot(page, picker);
 				await expect(
 					page.getByTestId("picker-effort-option-high"),
 				).toBeVisible();

@@ -36,6 +36,7 @@ import {
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
+import { type SessionMode, SessionModeSchema } from "./project-file.js";
 import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
@@ -178,6 +179,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
+	sessionMode: Schema.optional(SessionModeSchema),
 	groupingMode: Schema.optional(GroupingModeSchema),
 	effectiveGroupingMode: Schema.optional(GroupingModeSchema),
 	group: Schema.optional(ProjectGroupSchema),
@@ -405,6 +407,20 @@ export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 	mode: SessionPermissionModeSchema,
 });
 
+export const SetDefaultSessionModeResponseSchema = Schema.Struct({
+	mode: SessionModeSchema,
+});
+export type SetDefaultSessionModeResponse =
+	typeof SetDefaultSessionModeResponseSchema.Type;
+
+export const ResolveSessionModeResponseSchema = Schema.Struct({
+	mode: SessionModeSchema,
+	source: Schema.Literal("project", "file", "global"),
+	warning: Schema.optional(Schema.String),
+});
+export type ResolveSessionModeResponse =
+	typeof ResolveSessionModeResponseSchema.Type;
+
 export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	hiddenModels: Schema.Array(Schema.String),
@@ -621,6 +637,7 @@ export interface SaveProjectInput {
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
 	readonly setupScript?: string | undefined;
+	readonly sessionMode?: SessionMode | null | undefined;
 	/** null clears an override; omission preserves it. */
 	readonly groupingMode?: GroupingMode | null | undefined;
 }
@@ -1016,6 +1033,7 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
 			setupScript: Schema.optional(Schema.String),
+			sessionMode: Schema.optional(Schema.NullOr(SessionModeSchema)),
 			groupingMode: Schema.optional(Schema.NullOr(GroupingModeSchema)),
 		},
 	},
@@ -1338,6 +1356,27 @@ export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPer
 	},
 ) {}
 
+export class SetDefaultSessionMode extends Schema.TaggedRequest<SetDefaultSessionMode>()(
+	"SetDefaultSessionMode",
+	{
+		failure: WsRpcError,
+		success: SetDefaultSessionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			mode: SessionModeSchema,
+		},
+	},
+) {}
+
+/** Resolve draft defaults without attaching or starting a project relay. */
+export class ResolveSessionMode extends Schema.TaggedRequest<ResolveSessionMode>()(
+	"ResolveSessionMode",
+	{
+		failure: WsRpcError,
+		success: ResolveSessionModeResponseSchema,
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
 export class SetDefaultGroupingMode extends Schema.TaggedRequest<SetDefaultGroupingMode>()(
 	"SetDefaultGroupingMode",
 	{
@@ -1887,6 +1926,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
+			// A project slug or encodeGroupScope's reserved /group/<key> value.
 			scope: Schema.optional(NonEmptyString),
 			exclude: Schema.optional(NonEmptyString),
 		},
@@ -2255,6 +2295,8 @@ export const WsRpcRequest = Schema.Union(
 	SetDefaultModel,
 	SetHarnessDefault,
 	SetDefaultPermissionMode,
+	SetDefaultSessionMode,
+	ResolveSessionMode,
 	SetDefaultGroupingMode,
 	GetDefaultGroupingMode,
 	SetHiddenEntries,
@@ -2543,6 +2585,9 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("defaultPermissionMode", {
 		mode: SessionPermissionModeSchema,
 	}),
+	Schema.TaggedStruct("defaultSessionMode", {
+		mode: SessionModeSchema,
+	}),
 	Schema.TaggedStruct("defaultGroupingMode", {
 		mode: GroupingModeSchema,
 	}),
@@ -2577,6 +2622,7 @@ export type GlobalProjectSetting = Extract<
 		readonly _tag:
 			| "defaultModel"
 			| "defaultPermissionMode"
+			| "defaultSessionMode"
 			| "defaultGroupingMode"
 			| "visibility"
 			| "claudeSettings";
@@ -2680,6 +2726,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetDefaultModel),
 	Rpc.fromTaggedRequest(SetHarnessDefault),
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
+	Rpc.fromTaggedRequest(SetDefaultSessionMode),
+	Rpc.fromTaggedRequest(ResolveSessionMode),
 	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
 	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),

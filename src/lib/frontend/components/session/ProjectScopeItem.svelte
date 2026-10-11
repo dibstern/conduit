@@ -10,8 +10,9 @@
 	import Icon from "../ui/Icon.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 
-	let { project, onremove, onedit }: {
+	let { project, label, onremove, onedit }: {
 		project: ProjectInfo;
+		label?: string;
 		onremove: (slug: string) => void;
 		onedit: (project: ProjectInfo) => void;
 	} = $props();
@@ -106,7 +107,7 @@
 	>
 		<!-- The token beside each name teaches the typed form by use. -->
 		<span class="flex min-w-0 items-center justify-between gap-3">
-			<span class="truncate">{project.title || project.slug}</span>
+			<span class="truncate">{label ?? (project.title || project.slug)}</span>
 			<span class="flex shrink-0 items-center gap-[6px]">
 			<span class="font-mono text-xs text-text-dimmer">project:{project.slug}</span>
 			<!-- Same reveal as the ✕ on desktop; touch has no hover, so phones and
