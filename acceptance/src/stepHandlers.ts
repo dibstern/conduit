@@ -23,6 +23,7 @@ import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
+import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
@@ -61,6 +62,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerPickerHandlers,
 	...composerWordsHandlers,
 	...composerContextWarningHandlers,
+	...settingsGeneralHandlers,
 	...composerHandlers,
 	...composerEffortHandlers,
 	...composerSetGoalHandlers,

@@ -35,6 +35,12 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"input-newsessioncontext--multi-folder-supported | input-newsessioncontext--multi-folder-unknown":
 		"unknown worktree support is offered like supported support, so the open start menu is identical",
 
+	// Verified legitimate (conduit-test-cju0.13). On desktop both open General.
+	"overlays-settingspanel--composer | overlays-settingspanel--default":
+		"Composer's play walks every composer preference and restores the defaults so module state cannot leak into later stories; its assertions live in play(), and phone still differs because Composer opens drilled in",
+	"overlays-settingspanel--composer-light | overlays-settingspanel--default-light":
+		"the light pair of Composer and Default, identical for the same reason",
+
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":

@@ -97,6 +97,14 @@ export const Composer: Story = {
 	globals: { theme: "dark" },
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body
+				.getAllByRole("heading", { level: 3 })
+				.map((heading) => heading.textContent),
+		).toEqual(["Notifications", "Appearance", "Composer", "Sessions"]);
+		await expect(
+			body.getByRole("button", { name: /^Advanced.*Debug off$/ }),
+		).toHaveAttribute("aria-expanded", "false");
 		// On phone an explicit section opens drilled in, so the list is not shown.
 		const tab = body.queryByTestId("settings-tab-general");
 		if (tab) await expect(tab).toHaveAttribute("aria-selected", "true");
@@ -136,6 +144,28 @@ export const ComposerLight: Story = {
 	...Composer,
 	tags: ["autodocs"],
 	globals: { theme: "light" },
+};
+
+export const Advanced: Story = {
+	args: { initialTab: "general" },
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		const disclosure = body.getByRole("button", {
+			name: /^Advanced.*Debug off$/,
+		});
+		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+		disclosure.scrollIntoView({ block: "nearest" });
+		await userEvent.click(disclosure);
+		const toggle = body.getByRole("switch", {
+			name: "Toggle connection debug panel",
+		});
+		await expect(toggle).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(toggle);
+		await expect(disclosure).toHaveTextContent("Debug on");
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		toggle.scrollIntoView({ block: "nearest" });
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
 };
 
 export const VisibilityEmpty: Story = {
