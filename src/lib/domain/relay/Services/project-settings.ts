@@ -12,6 +12,7 @@
 import {
 	Context,
 	Effect,
+	Either,
 	FiberHandle,
 	Layer,
 	PubSub,
@@ -20,15 +21,24 @@ import {
 } from "effect";
 import type {
 	GlobalProjectSetting,
+	GlobalSettingTag,
+	HarnessDefaultState,
 	ProjectSetting,
 	ProjectSettingsEnvelope,
 } from "../../../contracts/ws-rpc.js";
+import {
+	catalogFromProviderList,
+	type Harness,
+	harnessDefaultPick,
+	harnessForModelProvider,
+	resolveTurnSettings,
+} from "../../../provider/turn-settings.js";
 import {
 	loadRelaySettings,
 	parseDefaultModel,
 	type RelaySettings,
 } from "../../../relay/relay-settings.js";
-import { ConfigTag } from "./services.js";
+import { ConfigTag, OpenCodeModelServiceTag } from "./services.js";
 import {
 	type OverridesState,
 	OverridesStateTag,
@@ -42,7 +52,13 @@ type ProjectSettingChange = Extract<
 /** Facts the relay observes rather than reads from config. */
 type LiveProjectFact = Extract<
 	ProjectSetting,
-	{ readonly _tag: "clientCount" | "opencodeConnection" | "providerModels" }
+	{
+		readonly _tag:
+			| "clientCount"
+			| "opencodeConnection"
+			| "providerModels"
+			| "harnessDefaults";
+	}
 >;
 /** OpenCode connections are kept per instance. */
 type LiveProjectFacts = {
@@ -55,11 +71,16 @@ type LiveProjectFacts = {
 		LiveProjectFact,
 		{ _tag: "providerModels" }
 	>;
+	readonly harnessDefaults?: Extract<
+		LiveProjectFact,
+		{ _tag: "harnessDefaults" }
+	>;
 };
 const isLiveFact = (setting: ProjectSetting): setting is LiveProjectFact =>
 	setting._tag === "clientCount" ||
 	setting._tag === "opencodeConnection" ||
-	setting._tag === "providerModels";
+	setting._tag === "providerModels" ||
+	setting._tag === "harnessDefaults";
 
 export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
@@ -123,6 +144,77 @@ export const publishProjectSetting = (setting: ProjectSetting) =>
 		});
 	});
 
+const readHarnessDefaults = Effect.gen(function* () {
+	const config = yield* ConfigTag;
+	const settings = loadRelaySettings(config.configDir);
+	const facts = yield* Ref.get((yield* ProjectSettingsTag).live);
+	const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
+	const openCode =
+		modelService._tag === "Some"
+			? yield* modelService.value.cachedProviders()
+			: undefined;
+	const openCodeCatalog =
+		openCode?._tag === "Some"
+			? openCode.value.providers.flatMap((provider) =>
+					(provider.models ?? []).map((model) => ({
+						...model,
+						providerId: provider.id,
+					})),
+				)
+			: undefined;
+	const claudeCatalog = facts.providerModels
+		? catalogFromProviderList(facts.providerModels.providers)
+		: undefined;
+	const state = (harness: Harness): HarnessDefaultState => {
+		const candidate = harnessDefaultPick(
+			harness,
+			settings,
+			openCode?._tag === "Some" ? openCode.value.nativeDefaultModel : undefined,
+		);
+		if (!candidate) return { status: "missing" };
+		const pick = {
+			...candidate.model,
+			effort: candidate.effort,
+			contextWindow: candidate.contextWindow,
+		};
+		const catalog = harness === "claude" ? claudeCatalog : openCodeCatalog;
+		if (
+			catalog === undefined &&
+			harnessForModelProvider(pick.providerId) === harness
+		)
+			return { pick, status: "unverified" };
+		const resolved = resolveTurnSettings(candidate, catalog ?? []);
+		return Either.isLeft(resolved)
+			? { pick, status: "invalid", problem: resolved.left.message }
+			: {
+					pick: {
+						...resolved.right.model,
+						effort: resolved.right.effort,
+						contextWindow: resolved.right.contextWindow,
+					},
+					status: "ok",
+				};
+	};
+	return {
+		_tag: "harnessDefaults",
+		claude: state("claude"),
+		opencode: state("opencode"),
+	} as const;
+});
+
+/** Catalog-dependent state is always recomputed on the receiving relay. */
+export const refreshHarnessDefaults: Effect.Effect<void> = Effect.gen(
+	function* () {
+		const config = yield* Effect.serviceOption(ConfigTag);
+		const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
+		if (config._tag === "None" || projectSettings._tag === "None") return;
+		yield* Effect.flatMap(readHarnessDefaults, publishProjectSetting).pipe(
+			Effect.provideService(ConfigTag, config.value),
+			Effect.provideService(ProjectSettingsTag, projectSettings.value),
+		);
+	},
+);
+
 const globalSettingRows = (
 	settings: RelaySettings,
 	defaults: OverridesState,
@@ -175,21 +267,21 @@ export const refreshGlobalDefaults = Effect.gen(function* () {
 });
 
 /** Receiving a notification only reloads and publishes locally. */
-export const syncGlobalSetting = (tag: GlobalProjectSetting["_tag"]) =>
+export const syncGlobalSetting = (tag: GlobalSettingTag) =>
 	Effect.gen(function* () {
 		const { globalSync } = yield* ProjectSettingsTag;
 		yield* globalSync.withPermits(1)(
 			Effect.gen(function* () {
 				const rows = yield* refreshGlobalDefaults;
-				yield* publishProjectSetting(rows[tag]);
+				if (tag !== "harnessDefaults") yield* publishProjectSetting(rows[tag]);
+				if (tag === "harnessDefaults" || tag === "defaultModel")
+					yield* refreshHarnessDefaults;
 			}),
 		);
 	});
 
 /** The origin converges from disk too, before notifying the daemon. */
-export const publishGlobalProjectSetting = (
-	tag: GlobalProjectSetting["_tag"],
-) =>
+export const publishGlobalProjectSetting = (tag: GlobalSettingTag) =>
 	Effect.gen(function* () {
 		yield* syncGlobalSetting(tag);
 		yield* (yield* ConfigTag).publishGlobalSetting(tag);
@@ -198,11 +290,15 @@ export const publishGlobalProjectSetting = (
 const readProjectSettings = Effect.gen(function* () {
 	const config = yield* ConfigTag;
 	const defaults = yield* Ref.get(yield* OverridesStateTag);
+	const harnessDefaults = yield* readHarnessDefaults;
 	return [
 		...Object.values(
 			globalSettingRows(loadRelaySettings(config.configDir), defaults),
 		),
-		...Object.values(yield* Ref.get((yield* ProjectSettingsTag).live)),
+		...Object.values(yield* Ref.get((yield* ProjectSettingsTag).live)).filter(
+			(fact) => fact._tag !== "harnessDefaults",
+		),
+		harnessDefaults,
 	] satisfies readonly ProjectSetting[];
 });
 

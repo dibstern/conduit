@@ -474,6 +474,15 @@ test.describe("a model id both harnesses list", () => {
 			opencodeRecording: "chat-simple",
 			capabilityModels: [
 				{ id: shared, name: "Sonnet 3.7", providerId: "claude" },
+				{
+					id: "opus",
+					name: "Opus",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200k" },
+						{ value: "1m", label: "1M", isDefault: true },
+					],
+				},
 			],
 		},
 	});
@@ -521,6 +530,10 @@ test.describe("effort", () => {
 					name: "Opus",
 					providerId: "claude",
 					variants: { high: {}, max: {} },
+					contextWindowOptions: [
+						{ value: "200k", label: "200k" },
+						{ value: "1m", label: "1M", isDefault: true },
+					],
 				},
 				{
 					id: "sonnet",

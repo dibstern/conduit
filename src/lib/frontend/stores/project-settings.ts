@@ -14,6 +14,7 @@ import {
 	applyDefaultPermissionMode,
 	discoveryState,
 	handleDefaultModelInfo,
+	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
 	hydrateModelSettings,
@@ -29,6 +30,9 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 				hydrateModelSettings({
 					active: { model: setting.model, provider: setting.provider },
 				});
+			break;
+		case "harnessDefaults":
+			handleHarnessDefaults(setting);
 			break;
 		case "visibility":
 			handleVisibilityInfo(setting);

@@ -406,6 +406,20 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						variant: "",
 						variants: [],
 					}),
+				SetHarnessDefault: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						harness: request.harness,
+						state: {
+							status: "ok" as const,
+							pick: {
+								providerId: request.providerId,
+								modelId: request.modelId,
+								effort: request.effort ?? "",
+								contextWindow: request.contextWindow,
+							},
+						},
+					}),
 				SetDefaultPermissionMode: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
