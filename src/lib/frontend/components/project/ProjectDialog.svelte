@@ -31,8 +31,10 @@
 	import Checkbox from "../ui/Checkbox.svelte";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
 	import Dialog from "../ui/Dialog.svelte";
+	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
 	let {
@@ -64,6 +66,7 @@
 	const listboxId = `${uid}-matches`;
 	const optionId = (index: number) => `${listboxId}-${index}`;
 	let draft = $state<ProjectDraft>(createDraft());
+	let setupScript = $state("");
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
@@ -92,6 +95,7 @@
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
 	const expanded = $derived(choices.length > 0);
 	const original = $derived(createDraft(project));
+	const setupValue = $derived(setupScript.trim() ? setupScript : "");
 	const folderRoots = $derived(labelProjectFolders(draft.folders.map(folderPath)));
 	const unsupportedProviders = $derived((instances ?? getAvailableInstances().map(({ id, label, capabilities }) => ({
 		id, name: getInstanceById(id)?.name ?? label, capabilities,
@@ -104,7 +108,7 @@
 		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
-		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original)),
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "")),
 	);
 
 	onMount(() => {
@@ -135,6 +139,7 @@
 			return;
 		}
 		draft = original;
+		setupScript = project?.setupScript ?? "";
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -233,6 +238,7 @@
 				...(project ? { slug: project.slug } : {}),
 				title: draft.name,
 				folders: draft.folders,
+				...(setupValue ? { setupScript: setupValue } : project?.setupScript ? { setupScript: "" } : {}),
 			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
@@ -395,6 +401,9 @@
 						{/each}
 					</section>
 				{/if}
+				<Field label="Setup script" hint="It runs in each new worktree before the agent starts.">
+					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
+				</Field>
 				{#if errors.length || saveError || issues.nameError}
 					<div role="alert" class="flex flex-col gap-[5px] break-words text-[11px] text-error">
 						{#if issues.nameError}<p id={`${uid}-name-error`}>{issues.nameError}</p>{/if}

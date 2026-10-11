@@ -1,5 +1,5 @@
 <script module lang="ts">
-	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}` | "pin-set" | "pin-change" | "pin-remove" | "keep-awake-command";
+	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | "pin-set" | "pin-change" | "pin-remove" | "keep-awake-command";
 </script>
 
 <script lang="ts">

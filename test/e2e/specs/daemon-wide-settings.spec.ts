@@ -133,7 +133,7 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 	await page.getByTestId("add-instance-btn").click();
 	await page.getByTestId("instance-form-driver-opencode").click();
 	await page.getByTestId("instance-form-name").fill("Settings E2E");
-	await expect(page.getByTestId("instance-form-managed")).not.toBeChecked();
+	await page.getByTestId("instance-form-managed").click();
 	await page.getByTestId("instance-form-url").fill(harness.baseUrl);
 	await page.getByTestId("instance-form-save").click();
 	await expect(page.getByTestId("instance-form")).toBeHidden();
@@ -151,12 +151,6 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 	await expect(page.getByTestId("instance-form")).toBeHidden();
 	await expect(row).toContainText("Settings E2E edited");
 	await row.getByRole("button").click();
-	await row.getByTestId("rename-instance-btn").click();
-	await row
-		.getByRole("textbox", { name: "Instance name" })
-		.fill("Settings E2E renamed");
-	await row.getByRole("textbox", { name: "Instance name" }).press("Enter");
-	await expect(row).toContainText("Settings E2E renamed");
 	await row.getByTestId("remove-instance-btn").click();
 	await page.getByTestId("confirm-modal-action").click();
 	await expect(row).toHaveCount(0);
@@ -183,7 +177,6 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 		"DetectProxy",
 		"AddInstance",
 		"UpdateInstance",
-		"RenameInstance",
 		"RemoveInstance",
 		"ScanNow",
 		"SetLogLevel",

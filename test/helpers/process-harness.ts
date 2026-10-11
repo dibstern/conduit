@@ -562,6 +562,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			startupTimeoutMs?: number;
 			/** A process fixture may need longer to load the test SDK in a runner. */
 			runnerStartupTimeoutMs?: number;
+			/** Keep a hanging worktree setup case short without changing the user setting. */
+			setupTimeoutMs?: number;
 			skipBrowserProbe?: boolean;
 			cliArgs?: string[];
 			/** Use service arguments verbatim, without appended port/host/TLS flags. */
@@ -757,6 +759,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(options.setupTimeoutMs === undefined
+						? {}
+						: {
+								CONDUIT_WORKTREE_SETUP_TIMEOUT_MS: String(
+									options.setupTimeoutMs,
+								),
+							}),
 					...(options.runnerStartupTimeoutMs === undefined
 						? {}
 						: {

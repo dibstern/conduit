@@ -12,6 +12,14 @@ export class InstanceNotFound extends Data.TaggedError("InstanceNotFound")<{
 	readonly message?: string;
 }> {}
 
+export class InstanceRemovalRejected extends Data.TaggedError(
+	"InstanceRemovalRejected",
+)<{ readonly id: string; readonly message: string }> {}
+
+export class InstanceUpdateRejected extends Data.TaggedError(
+	"InstanceUpdateRejected",
+)<{ readonly id: string; readonly message: string }> {}
+
 export class InstanceAlreadyExists extends Data.TaggedError(
 	"InstanceAlreadyExists",
 )<{

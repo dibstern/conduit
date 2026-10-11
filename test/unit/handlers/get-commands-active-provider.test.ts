@@ -43,6 +43,7 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 				makeMockConfig({ projectDir: "/primary-folder" }),
 			),
 			Layer.succeed(SessionWorkspaceTag, {
+				renameBranch: () => Effect.die("unused"),
 				get: () => Effect.succeed("/session-worktree"),
 				move: () => Effect.succeed("/session-worktree"),
 				inherit: () => Effect.die("unused"),

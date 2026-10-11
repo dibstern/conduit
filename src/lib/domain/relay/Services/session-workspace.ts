@@ -1,5 +1,6 @@
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { Context, Effect } from "effect";
 import type {
 	SessionWorkspace as RecordedWorkspace,
@@ -7,7 +8,10 @@ import type {
 	WorkspaceMoveCause,
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
-import type { WorkspaceMissing } from "../../../contracts/worktree.js";
+import type {
+	WorkspaceMissing,
+	WorktreeBranchRenameError,
+} from "../../../contracts/worktree.js";
 import { labelProjectFolders } from "../../../project-folders.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionInfo } from "../../../shared-types.js";
@@ -18,6 +22,10 @@ import type {
 } from "./session-command.js";
 
 export interface SessionWorkspace {
+	readonly renameBranch: (
+		sessionId: string,
+		branchName: string,
+	) => Effect.Effect<void, WorktreeBranchRenameError | SessionCommandError>;
 	/** Serialize launch-folder reads with draft and fork workspace initialization. */
 	readonly withLaunch: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
@@ -160,36 +168,52 @@ export const withSessionWorktreeStatus = (
 		readonly extraFolders?: readonly string[];
 	},
 ) =>
-	inspectSessionWorktree(session, project).pipe(
-		Effect.map((workspaceMissing): SessionInfo => {
-			if (!workspaceMissing) return { ...session, workspaceMissing };
-			if (!workspaceMissing.folders)
-				return { ...session, workspaceMissing, git: undefined };
-			const roots = [
-				...new Set([
-					project.projectDir,
-					...(project.extraFolders ?? []),
-					...Object.keys(session.workspace?.worktrees ?? {}),
-				]),
-			];
-			const folders = labelProjectFolders(roots).flatMap(({ root, label }) => {
-				if (workspaceMissing.folders?.some(({ folder }) => folder === root))
-					return [{ root, label, missing: true }];
-				const status = session.git?.folders?.find(
-					(folder) => folder.root === root,
-				);
-				return status ? [status] : [];
-			});
-			const { folders: _folders, ...primary } = session.git ?? {};
-			const primaryMissing = workspaceMissing.folders.some(
-				({ path }) =>
-					path ===
-					effectiveWorkingDirectory(project.projectDir, session.workspace),
+	Effect.gen(function* () {
+		const workspaceMissing = yield* inspectSessionWorktree(session, project);
+		// List reads run this per row: only a projected Conduit launch can own
+		// branches, and forks inherit that workspace, so the event check is exact.
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const launched =
+			session.workspace?.origin === "conduit" &&
+			Object.keys(session.workspace.worktrees).length > 0;
+		const canRenameBranch =
+			launched && sql._tag === "Some"
+				? yield* sql.value<{ owned: number }>`
+		SELECT EXISTS(SELECT 1 FROM events WHERE session_id = ${session.id}
+			AND type = 'session.workspace_changed' AND json_extract(data, '$.cause') = 'launch'
+			AND json_extract(data, '$.origin') = 'conduit'
+			AND json_array_length(data, '$.ownership') > 0) AS owned`.pipe(
+						Effect.map((rows) => rows[0]?.owned === 1),
+						Effect.orElseSucceed(() => false),
+					)
+				: false;
+		const base = { ...session, workspaceMissing, canRenameBranch };
+		if (!workspaceMissing) return base satisfies SessionInfo;
+		if (!workspaceMissing.folders)
+			return { ...base, git: undefined } satisfies SessionInfo;
+		const roots = [
+			...new Set([
+				project.projectDir,
+				...(project.extraFolders ?? []),
+				...Object.keys(session.workspace?.worktrees ?? {}),
+			]),
+		];
+		const folders = labelProjectFolders(roots).flatMap(({ root, label }) => {
+			if (workspaceMissing.folders?.some(({ folder }) => folder === root))
+				return [{ root, label, missing: true }];
+			const status = session.git?.folders?.find(
+				(folder) => folder.root === root,
 			);
-			return {
-				...session,
-				workspaceMissing,
-				git: { ...(!primaryMissing ? primary : {}), folders },
-			};
-		}),
-	);
+			return status ? [status] : [];
+		});
+		const { folders: _folders, ...primary } = session.git ?? {};
+		const primaryMissing = workspaceMissing.folders.some(
+			({ path }) =>
+				path ===
+				effectiveWorkingDirectory(project.projectDir, session.workspace),
+		);
+		return {
+			...base,
+			git: { ...(!primaryMissing ? primary : {}), folders },
+		} satisfies SessionInfo;
+	});

@@ -70,6 +70,7 @@ import {
 	setPermissionMode,
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
+import { SessionSetupTag } from "./session-setup.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 import {
 	inspectSessionWorktree,
@@ -911,6 +912,8 @@ const startProcessing = (input: ProviderTurnServiceSendInput) =>
 
 export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
+		const setup = yield* Effect.serviceOption(SessionSetupTag);
+		if (setup._tag === "Some") yield* setup.value.wait(input.sessionId);
 		if (!input.steer) yield* startProcessing(input);
 		const config = yield* ConfigTag;
 		const engine = yield* OrchestrationEngineTag;

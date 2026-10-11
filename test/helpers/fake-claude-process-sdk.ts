@@ -1289,9 +1289,20 @@ function query(params: {
 						writeFileSync(trackedFile, `${request}\n`);
 				}
 			}
-			const chunks = prompt.includes("workspace-isolation-read")
-				? [existsSync(workspaceFile) ? "present" : "absent"]
-				: responseChunks(prompt);
+			const setupMarker = join(
+				params.options?.cwd ?? process.cwd(),
+				"setup-marker.txt",
+			);
+			const chunks =
+				request === "project-setup-read"
+					? [
+							existsSync(setupMarker)
+								? readFileSync(setupMarker, "utf8")
+								: "absent",
+						]
+					: prompt.includes("workspace-isolation-read")
+						? [existsSync(workspaceFile) ? "present" : "absent"]
+						: responseChunks(prompt);
 			const messageId = randomUUID();
 			yield stream(sessionId, {
 				type: "message_start",

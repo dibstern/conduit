@@ -28,6 +28,8 @@ import {
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import {
+	InstanceRemovalRejected,
+	InstanceUpdateRejected,
 	instanceAlreadyExists,
 	instanceLimitExceeded,
 	instanceNotFound,
@@ -65,6 +67,10 @@ import {
 	ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
+import {
+	commitDaemonRuntimeConfig,
+	DaemonConfigRefTag,
+} from "./daemon-config-ref.js";
 import {
 	type DaemonEventBusTag,
 	publishInstanceError,
@@ -426,6 +432,12 @@ export const addInstance = (input: AddInstanceInput) =>
  */
 export const removeInstance = (instanceId: string) =>
 	Effect.gen(function* () {
+		if (instanceId === defaultInstanceIdForDriver("claude")) {
+			return yield* new InstanceRemovalRejected({
+				id: instanceId,
+				message: "The default account can't be removed",
+			});
+		}
 		const ref = yield* InstanceManagerStateTag;
 		const fiberMap = yield* PollerFibersTag;
 		const processRecord = HashMap.get(
@@ -545,7 +557,10 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 				? { processIdentity: record.processIdentity }
 				: {}),
 			...(Option.isSome(externalUrl) ? { url: externalUrl.value } : {}),
-			...(inst.configDir !== undefined ? { configDir: inst.configDir } : {}),
+			...(inst.id !== defaultInstanceIdForDriver("claude") &&
+			inst.configDir !== undefined
+				? { configDir: inst.configDir }
+				: {}),
 		});
 	}
 	return configs;
@@ -1332,6 +1347,31 @@ export const updateInstance = (
 ) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
+		const isDefaultClaude = instanceId === defaultInstanceIdForDriver("claude");
+		if (
+			isDefaultClaude &&
+			updates.driver !== undefined &&
+			updates.driver !== "claude"
+		) {
+			return yield* new InstanceUpdateRejected({
+				id: instanceId,
+				message: "The default Claude account's type can't be changed",
+			});
+		}
+		if (isDefaultClaude && updates.configDir !== undefined) {
+			const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
+			if (Option.isNone(configRef)) {
+				return yield* new InstanceUpdateRejected({
+					id: instanceId,
+					message:
+						"Default Claude folder editing requires daemon configuration",
+				});
+			}
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				claudeConfigDir: updates.configDir?.trim() || undefined,
+			})).pipe(Effect.provideService(DaemonConfigRefTag, configRef.value));
+		}
 		if (updates.driver === "claude") {
 			const record = HashMap.get(
 				(yield* Ref.get(stateRef)).managedProcesses ?? HashMap.empty(),
@@ -1353,6 +1393,17 @@ export const updateInstance = (
 						? { env: publicManagedOpenCodeEnv(updates.env) }
 						: {}),
 				};
+				if (isDefaultClaude) {
+					const { configDir: _configDir, ...metadata } = updated;
+					const configDir =
+						updates.configDir === undefined
+							? inst.configDir
+							: updates.configDir.trim() || undefined;
+					return {
+						...metadata,
+						...(configDir !== undefined ? { configDir } : {}),
+					};
+				}
 				if (updates.driver !== "claude") return updated;
 				const {
 					url: _url,

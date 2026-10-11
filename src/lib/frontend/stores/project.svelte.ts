@@ -85,6 +85,9 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.setupScript !== undefined
+			? { setupScript: project.setupScript }
+			: {}),
 		...(project.repositoryIdentities != null
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),

@@ -29,6 +29,7 @@ import {
 	setModel,
 	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../domain/relay/Services/session-setup.js";
 import {
 	PollerPubSubTag,
 	PollerStateTag,
@@ -431,6 +432,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
 					yield* startSseConsumers(inputs, services, monitoring);
+					yield* (yield* SessionSetupTag).recover;
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(

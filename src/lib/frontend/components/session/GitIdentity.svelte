@@ -1,19 +1,22 @@
 <script lang="ts">
 	import { Schema } from "effect";
 	import { type WorkspaceMoveCause, WorkspaceMoveError } from "../../../contracts/session-workspace.js";
-	import { type WorkspaceMissing, WorktreeRecoveryError } from "../../../contracts/worktree.js";
+	import { type WorkspaceMissing, WorktreeBranchRenameError, WorktreeRecoveryError } from "../../../contracts/worktree.js";
 	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
 	import { labelProjectFolders } from "../../../project-folders.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Button from "../ui/Button.svelte";
+	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
+	import Modal from "../ui/Modal.svelte";
+	import TextInput from "../ui/TextInput.svelte";
 
-	let { directory, git: folderGit, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss }: {
+	let { directory, git: folderGit, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss, onrenamebranch }: {
 		directory: string;
 		git: SessionGit | undefined;
 		workspaceCause?: WorkspaceMoveCause | undefined;
@@ -25,6 +28,7 @@
 		onrecreate?: (() => Promise<void>) | undefined;
 		oncontinue?: (() => Promise<void>) | undefined;
 		ondismiss?: ((path: string) => Promise<void>) | undefined;
+		onrenamebranch?: ((branchName: string) => Promise<void>) | undefined;
 	} = $props();
 	const folders = $derived(folderGit?.folders ?? []);
 	const git = $derived(folderGit?.folders && !folderGit.branch && !folderGit.head && folderGit.dirty === undefined ? undefined : folderGit);
@@ -33,6 +37,35 @@
 	let currentDirectory = $state<string | undefined>();
 	let moving = $state(false);
 	let dismissing = $state(false);
+	let showBranchRename = $state(false);
+	let branchName = $state("");
+	let branchRenameError = $state<string | undefined>();
+	let renamingBranch = $state(false);
+	let identityElement = $state<HTMLButtonElement | HTMLAnchorElement>();
+	const componentId = $props.id();
+	const branchRenameFormId = `${componentId}-branch-rename`;
+
+	function openBranchRename() {
+		branchName = git?.branch ?? folders.find((folder) => !folder.shared && folder.branch)?.branch ?? "";
+		branchRenameError = undefined;
+		showBranchRename = true;
+	}
+
+	async function renameBranch() {
+		if (!onrenamebranch || renamingBranch || !branchName.trim()) return;
+		renamingBranch = true;
+		branchRenameError = undefined;
+		try {
+			await onrenamebranch(branchName);
+			showBranchRename = false;
+		} catch (error) {
+			branchRenameError = Schema.is(WorktreeBranchRenameError)(error)
+				? `${error.folder}: ${error.message}`
+				: "Could not rename branch";
+		} finally {
+			renamingBranch = false;
+		}
+	}
 
 	async function openWorktrees() {
 		showWorktrees = true;
@@ -127,11 +160,11 @@
 	}
 </script>
 
-<Menu presentation={sessionViewState.compact ? "sheet" : "popover"} align="end" ariaLabel="Checkout" class={sessionViewState.compact ? undefined : "w-[280px]"} data-testid="session-bar-checkout" onopenchange={(open) => { if (!open) showWorktrees = false; }}>
+<Menu presentation={sessionViewState.compact ? "sheet" : "popover"} align="end" ariaLabel="Checkout" class={sessionViewState.compact ? undefined : "w-[280px]"} data-testid="session-bar-checkout" onopenchange={(open) => { if (!open) showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
 	{#snippet trigger({ props })}
 		<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 		<!-- text-[10px] matches the pill so the ch-based floor measures the same font. -->
-		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
+		<span class="git-pill {sessionViewState.compact ? 'git-pill-phone' : ''} inline-grid text-[10px]" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} bind:element={identityElement} variant="ghost" size="segment" touchTarget align="start" class="max-w-full"
 			style={`min-width: ${minimumWidth}`}
 			title={label} ariaLabel={`Checkout: ${label}${sessionViewState.compact && workspaceHint ? `, ${hintLabel}` : ""}${sessionViewState.compact && movedBack ? `, ${movedBackLabel}` : ""}${sessionViewState.compact && workspaceMissing ? `, ${missingLabel}` : ""}`} data-testid="session-bar-identity">
 			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
@@ -229,6 +262,7 @@
 		{#if ondismiss}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onselect={() => workspaceHint && void dismiss(workspaceHint)}>Dismiss</MenuItem>{/if}
 	{/if}
 	<MenuSeparator />
+	{#if onrenamebranch}<MenuItem data-testid="session-branch-rename" onselect={openBranchRename}>Rename branch</MenuItem>{/if}
 	{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "")}>Copy branch name</MenuItem>{/if}
 	<MenuItem onselect={() => void copy(directory)}>Copy folder path</MenuItem>
 	{#if loadWorktrees && onmove}
@@ -255,6 +289,18 @@
 		{/if}
 	{/if}
 </Menu>
+
+<Modal open={showBranchRename} title="Rename branch" description="Rename the branch in every worktree created for this session." size="sm" placement={sessionViewState.compact ? "sheet" : "center"} dismissible={!renamingBranch} showClose={!renamingBranch} onclose={() => { if (!renamingBranch) showBranchRename = false; }} returnFocus={() => identityElement ?? null}>
+	<form id={branchRenameFormId} onsubmit={(event) => { event.preventDefault(); void renameBranch(); }} aria-busy={renamingBranch}>
+		<Field label="Branch name" error={branchRenameError}>
+			<TextInput bind:value={branchName} readonly={renamingBranch} autofocus={showBranchRename} autocomplete="off" autocapitalize="off" spellcheck={false} data-testid="session-branch-rename-input" oninput={() => { branchRenameError = undefined; }} />
+		</Field>
+	</form>
+	{#snippet footer()}
+		<Button variant="secondary" size="sm" disabled={renamingBranch} onclick={() => { showBranchRename = false; }} data-testid="session-branch-rename-cancel">Cancel</Button>
+		<Button variant="primary" size="sm" type="submit" form={branchRenameFormId} disabled={renamingBranch || !branchName.trim()} data-testid="session-branch-rename-submit">{renamingBranch ? "Renaming…" : "Rename"}</Button>
+	{/snippet}
+</Modal>
 
 {#if !sessionViewState.compact && workspaceMissing}
 	<span class="inline-flex min-w-0 items-center gap-[5px] px-[8px] text-[10px] text-warning" data-testid="workspace-missing">

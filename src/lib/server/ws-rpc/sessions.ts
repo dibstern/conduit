@@ -14,6 +14,7 @@ import {
 } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
@@ -37,6 +38,7 @@ import {
 	SessionManagerServiceTag,
 } from "../../domain/relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
@@ -110,6 +112,23 @@ export const sessionsHandlers = {
 				removeWorktrees: plan.removeWorktrees,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("InspectSessionWorktrees"))),
+	RenameSessionBranch: (request) =>
+		Effect.gen(function* () {
+			const workspace = yield* SessionWorkspaceTag;
+			yield* workspace.renameBranch(request.sessionId, request.branchName);
+			const git = yield* Effect.serviceOption(SessionGitServiceTag);
+			if (git._tag === "Some") yield* git.value.refresh();
+			return { ok: true as const };
+		}).pipe(
+			Effect.catchAll(
+				(
+					error,
+				): Effect.Effect<never, WorktreeBranchRenameError | WsRpcError> =>
+					error instanceof WorktreeBranchRenameError
+						? Effect.fail(error)
+						: mapRpcFailure("RenameSessionBranch")(error),
+			),
+		),
 	MoveSessionWorkspace: (request) =>
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
@@ -528,7 +547,7 @@ export const sessionsHandlers = {
 										: { [config.projectDir]: request.worktreeBase },
 								),
 							);
-							return yield* restore(
+							const session = yield* restore(
 								createSessionForClient({
 									...options,
 									sessionId,
@@ -554,6 +573,13 @@ export const sessionsHandlers = {
 										.pipe(Effect.zipRight(Effect.failCause(cause))),
 								),
 							);
+							const setup = yield* Effect.serviceOption(SessionSetupTag);
+							if (setup._tag === "Some")
+								yield* setup.value.start(
+									session.id,
+									created.worktrees[config.projectDir] ?? config.projectDir,
+								);
+							return session;
 						}),
 					),
 				);
@@ -732,6 +758,7 @@ export const sessionsHandlers = {
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
+	| "RenameSessionBranch"
 	| "ListWorktrees"
 	| "InspectSessionWorktrees"
 	| "ListBranches"

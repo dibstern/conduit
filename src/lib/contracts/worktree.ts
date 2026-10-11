@@ -1,5 +1,21 @@
 import { Schema } from "effect";
 
+export class WorktreeBranchRenameError extends Schema.TaggedError<WorktreeBranchRenameError>()(
+	"WorktreeBranchRenameError",
+	{
+		folder: Schema.String,
+		reason: Schema.Literal(
+			"not-owned",
+			"invalid-name",
+			"already-exists",
+			"worktree-missing",
+			"head-mismatch",
+			"git-failed",
+		),
+		message: Schema.String,
+	},
+) {}
+
 export class WorktreeCreationError extends Schema.TaggedError<WorktreeCreationError>()(
 	"WorktreeCreationError",
 	{

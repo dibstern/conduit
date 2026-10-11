@@ -152,7 +152,7 @@ const readProjectSessions = (
 					}),
 				),
 			),
-		);
+		).pipe(Effect.provide(sqliteLayer));
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */
