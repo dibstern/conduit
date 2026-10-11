@@ -51,6 +51,7 @@ import type {
 	ClaudeSessionOutput,
 	ClaudeSessionRunner,
 } from "../lib/provider/claude/claude-session-runner.js";
+import { defaultClaudeSubagentSdk } from "../lib/provider/claude/claude-subagent-materializer.js";
 import { fromSdkPermissionMode } from "../lib/provider/claude/permission-mode-map.js";
 import {
 	type ClaudeThreadReadResult,
@@ -465,7 +466,7 @@ const main = Effect.gen(function* () {
 												role === "candidate",
 											);
 										},
-										...(subagentSdk ? { subagentSdk } : {}),
+										subagentSdk: subagentSdk ?? defaultClaudeSubagentSdk,
 										...(testSubagentPollTimeoutMs !== undefined
 											? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
 											: {}),

@@ -12,6 +12,7 @@
 	import { tick, untrack } from "svelte";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { revealedPart } from "../../stores/reveal.svelte.js";
+	import type { BackgroundTask } from "../../../shared-types.js";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -22,6 +23,7 @@
 		fmtClock,
 		fmtDuration,
 		latestStamp,
+		liveLaunchedTasks,
 		stepCaption,
 		type SkillChapter,
 		skillChapters,
@@ -34,9 +36,16 @@
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
 	import { partStyle } from "./activity-style.js";
+	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 
-	let { turn, segment, final }: { turn: Turn; segment: Segment; final: boolean } = $props();
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>() }: {
+		turn: Turn;
+		segment: Segment;
+		final: boolean;
+		liveTasks?: readonly BackgroundTask[];
+		taskListedAt?: ReadonlyMap<string, number>;
+	} = $props();
 
 	let expanded = $state(false);
 	let skillsOpen = $state(false);
@@ -55,6 +64,7 @@
 		return workingTime(turn, now, until);
 	});
 	const bill = $derived(economics(turn, now));
+	const running = $derived(liveLaunchedTasks(turn, liveTasks, clock.now, taskListedAt));
 	const phrase = $derived(countsPhrase(stats));
 	const chapters = $derived(skillChapters(segment, turn, final, now));
 	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
@@ -169,9 +179,10 @@
 
 			<div class="flex items-center gap-3 px-3 pb-2">
 				<div class="flex-1 min-w-0">
-					<ActivityStrip {turn} {segment} {final} {now} active={hovered} emphasis={skillSteps} onhover={(i) => (hovered = i)} onjump={jumpTo} />
+					<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps} onhover={(i) => (hovered = i)} onjump={jumpTo} />
 				</div>
 				{#if final}
+					<RunningPill count={running.size} />
 					<TurnEconomics economics={bill} />
 				{/if}
 			</div>
@@ -203,7 +214,7 @@
 		{#if expanded}
 			<div class="px-1 pb-1 border-t border-border-subtle">
 				{#each segment.activity as part, i (part.uuid)}
-					<ActivityRow {part} duration={durations?.[i]} highlight={part.uuid === focusUuid} />
+					<ActivityRow {part} {liveTasks} {taskListedAt} duration={durations?.[i]} highlight={part.uuid === focusUuid} />
 				{/each}
 			</div>
 		{:else if final && turn.live && segment.reply.length === 0 && !segment.handBack}
@@ -213,7 +224,7 @@
 				{#each ticker as part, i (part.uuid)}
 					{@const idx = segment.activity.length - ticker.length + i}
 					<div style="opacity: {(0.35 + (0.65 * (i + 1)) / ticker.length).toFixed(2)}">
-						<ActivityRow {part} duration={durations?.[idx]} />
+						<ActivityRow {part} {liveTasks} {taskListedAt} duration={durations?.[idx]} />
 					</div>
 				{/each}
 			</div>

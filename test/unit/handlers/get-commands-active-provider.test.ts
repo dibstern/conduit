@@ -45,6 +45,7 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 			Layer.succeed(SessionWorkspaceTag, {
 				get: () => Effect.succeed("/session-worktree"),
 				move: () => Effect.succeed("/session-worktree"),
+				inherit: () => Effect.die("unused"),
 				resolve: () => Effect.die("unused"),
 				record: () => Effect.die("unused"),
 				claudeWorktreeState: () => Effect.die("unused"),

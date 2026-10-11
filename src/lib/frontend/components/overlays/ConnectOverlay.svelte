@@ -14,6 +14,7 @@
 	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
+	import { openSettings } from "../layout/chrome-actions.js";
 	import ConduitLogo from '../ui/ConduitLogo.svelte';
 	import Button from '../ui/Button.svelte';
 
@@ -120,10 +121,8 @@
 	const isHidden = $derived(connected && displayNone);
 
 	function handleStartInstance() {
-		const projectSlug = projectState.currentSlug;
-		if (cachedInstanceId && projectSlug) {
+		if (cachedInstanceId) {
 			void startInstanceRpc({
-				projectSlug,
 				instanceId: cachedInstanceId,
 			})
 				.then(applyInstanceListResponse)
@@ -132,7 +131,7 @@
 	}
 
 	function handleSwitchInstance() {
-		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
+		openSettings("server", "instances");
 	}
 </script>
 

@@ -26,7 +26,6 @@ describe("Config persistence performance", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 			instances,
 		};

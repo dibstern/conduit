@@ -120,7 +120,6 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{
@@ -144,6 +143,7 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				Effect.provideService(SessionWorkspaceTag, {
 					get: () => Effect.succeed("/workspace/project"),
 					move: () => Effect.succeed("/workspace/project"),
+					inherit: () => Effect.die("unused"),
 					resolve: () => Effect.die("unused"),
 					record: () => Effect.die("unused"),
 					claudeWorktreeState: () => Effect.die("unused"),

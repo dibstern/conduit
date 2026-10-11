@@ -11,6 +11,7 @@
 	import { getCachedInstances, instanceState } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
+	import { openSettings } from "../layout/chrome-actions.js";
 
 	const INSTANCE_WARNING: BannerConfig = {
 		id: "no-healthy-instances",
@@ -21,7 +22,7 @@
 		dismissible: false,
 		action: {
 			label: "Manage Instances",
-			run: () => window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } })),
+			run: () => openSettings("server", "instances"),
 		},
 	};
 

@@ -3,8 +3,9 @@ import {
 	HttpServerRequest,
 	HttpServerResponse,
 } from "@effect/platform";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Option, Ref } from "effect";
 import { AuthManager, type AuthResult } from "../../../auth.js";
+import { getClientIp } from "../../../server/http-utils.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 
 export class AuthManagerTag extends Context.Tag("AuthManager")<
@@ -87,14 +88,6 @@ export const parseCookies = (
 	return cookies;
 };
 
-const getClientIp = (req: HttpServerRequest.HttpServerRequest): string => {
-	const forwarded = req.headers["x-forwarded-for"];
-	if (typeof forwarded === "string" && forwarded.length > 0) {
-		return forwarded.split(",")[0]?.trim() || "unknown";
-	}
-	return "unknown";
-};
-
 const sessionCookie = (cookie: string) =>
 	`relay_session=${cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`;
 
@@ -120,7 +113,13 @@ export const withAuthGate = <E, R>(
 
 		const pinHeader = req.headers["x-relay-pin"];
 		if (typeof pinHeader === "string") {
-			const result = yield* auth.authenticate(pinHeader, getClientIp(req));
+			const result = yield* auth.authenticate(
+				pinHeader,
+				getClientIp(
+					Option.getOrUndefined(req.remoteAddress),
+					req.headers["x-forwarded-for"],
+				),
+			);
 			if (result.ok && result.cookie) {
 				const response = yield* app;
 				return HttpServerResponse.setHeader(
@@ -164,7 +163,10 @@ const authHandler = Effect.gen(function* () {
 		);
 	}
 
-	const clientIp = getClientIp(req);
+	const clientIp = getClientIp(
+		Option.getOrUndefined(req.remoteAddress),
+		req.headers["x-forwarded-for"],
+	);
 	const result = yield* auth.authenticate(pin, clientIp);
 
 	if (result.locked) {

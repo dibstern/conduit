@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Final design: harness, account and checkout in the composer</title>
+<style>
+:root, [data-theme="dark"] {
+	--page: #08090b; --bg: #0d0e11; --bg-alt: #1b1e24; --surface: #141619; --box: #16181d;
+	--text: #eceef2; --text-2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--accent: #fe3781; --border: #2d323b; --border-subtle: #20242b; --chip: #3a414c;
+	--a1: #b08cff; --a2: #2fd3c0; --a3: #5b9cff; --a4: #4cc38a; --a5: #ff7eb6;
+	--claude: #d97757; --warn: #e5a50a; --red: #ff5c5c; --green: #3fb950; --shadow: rgba(0,0,0,.5);
+}
+[data-theme="light"] {
+	--page: #e6e8ee; --bg: #f5f6f9; --bg-alt: #e8ebf1; --surface: #ffffff; --box: #ffffff;
+	--text: #14171c; --text-2: #4b525e; --muted: #626975; --dim: #7e8591;
+	--accent: #c9004f; --border: #ccd2dc; --border-subtle: #dde1e8; --chip: #ccd2dc;
+	--a1: #7c4dff; --a2: #0f9e8e; --a3: #2f6fd6; --a4: #1f9d5c; --a5: #d63d86;
+	--warn: #a86f00; --red: #d42f2f; --green: #1f8a3a; --shadow: rgba(20,23,28,.18);
+}
+:root { --mono: "JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+* { box-sizing: border-box; }
+html, body { overflow-x: hidden; }
+body { margin: 0; background: var(--page); color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+main { max-width: 1400px; margin: 0 auto; padding: 28px 20px 80px; }
+h1 { font-size: 20px; margin: 0 0 6px; padding-right: 70px; }
+h2 { font-size: 16px; margin: 44px 0 4px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
+h2 .n { color: var(--accent); }
+p, li { color: var(--text-2); max-width: 960px; }
+.lede { color: var(--muted); }
+b, strong { color: var(--text); }
+code { font-size: 12px; color: var(--text); background: var(--bg-alt); border-radius: 4px; padding: 0 4px; }
+.theme { position: fixed; top: 10px; right: 10px; z-index: 10; min-height: 44px; min-width: 44px; font: 12px var(--mono); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; cursor: pointer; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; }
+nav.toc a { font-size: 11.5px; color: var(--text-2); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+.decisions { display: grid; gap: 6px; margin: 16px 0 0; max-width: 1000px; }
+.decisions div { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.decisions div > span:first-child { color: var(--accent); font-weight: 700; }
+
+.card { background: color-mix(in srgb, var(--surface) 60%, var(--page)); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 14px; margin-top: 16px; min-width: 0; }
+.card h3 { margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.card h3 .n { color: var(--accent); }
+.card .why { margin: 4px 0 8px; font-size: 12px; }
+.card ul.rules { margin: 10px 0 0; padding-left: 18px; font-size: 11.5px; }
+.card ul.rules li { margin: 2px 0; color: var(--muted); }
+.card ul.rules li b { color: var(--text-2); }
+.lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 4px; }
+.pair { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.pair > div { min-width: 0; }
+@media (min-width: 1000px) { .pair { grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); align-items: start; } .pair.even { grid-template-columns: 1fr 1fr; } }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+
+/* Scale-to-fit: a frame keeps its real layout and shrinks as a whole. */
+.fit { width: 100%; overflow: hidden; }
+.fit > .frame { transform-origin: top left; }
+
+/* ─── Frames at app size (12px root) ─── */
+.frame { position: relative; background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; color: var(--text); font-size: 12px; line-height: 1.4; }
+.frame.d { width: 860px; }
+.frame.m { width: 600px; }
+.frame.dp { width: 860px; height: 620px; justify-content: space-between; }
+.frame.p { width: 393px; border-radius: 22px; }
+.frame.pp { width: 393px; height: 780px; border-radius: 22px; justify-content: space-between; }
+.frame.hd { width: 860px; }
+.frame.hp { width: 393px; border-radius: 22px; }
+svg.i { flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.tail { padding: 14px 20px 10px; display: grid; gap: 8px; }
+.frame.p .tail, .frame.pp .tail { padding: 12px 12px 8px; }
+.ub { justify-self: end; background: var(--bg-alt); border-radius: 10px; padding: 5px 10px; font-size: 11px; }
+.lines { display: grid; gap: 6px; }
+.lines i { display: block; height: 5px; border-radius: 3px; background: var(--border); }
+
+/* Composer: max 760px wide, as #input-wrapper is. */
+.cw { padding: 0 20px 12px; width: 100%; max-width: 800px; margin: 0 auto; }
+.frame.p .cw, .frame.pp .cw { padding: 0 10px 10px; }
+.box { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 5px 6px 5px 10px; background: var(--box); border: 1px solid var(--border); border-radius: 14px; color: var(--text-2); }
+.box .ph { flex: 1; min-width: 0; color: var(--dim); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box.two { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 8px 7px 12px; }
+.box.two .ph { padding: 2px 0 10px; }
+.foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.foot .fl, .foot .fr { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.foot .fr { flex-shrink: 1; }
+.send { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: color-mix(in srgb, var(--accent) 65%, white); }
+.ctl { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 6px; border-radius: 7px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; flex-shrink: 0; position: relative; }
+.ctl.lead { color: var(--text); background: var(--bg-alt); }
+.ctl.quiet { color: var(--muted); }
+.ctl.hot { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.ctl .d { color: var(--dim); }
+.ctl.shrink { flex-shrink: 1; min-width: 0; }
+.vr { width: 1px; height: 14px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
+.attn { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 999px; background: var(--warn); box-shadow: 0 0 0 1.5px var(--box); }
+
+/* Words row under the composer: 11.5px, like composer-words-row. */
+.words { display: flex; justify-content: space-between; align-items: center; gap: 14px; height: 24px; padding: 3px 6px 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.grp { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.grp.l { flex-shrink: 0; }
+.grp.r { justify-content: flex-end; flex-shrink: 1; }
+.w { text-decoration: underline dotted var(--dim); text-underline-offset: 3px; }
+.sep { color: var(--chip); }
+.pct { color: var(--muted); padding-left: 4px; }
+.gap { width: 6px; flex-shrink: 0; }
+
+/* Checkout cell: GitIdentity's trigger, moved into the composer. */
+.co { display: inline-flex; white-space: nowrap; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--muted); }
+.co .ico { position: relative; display: inline-flex; flex-shrink: 0; }
+.co .dirty { position: absolute; right: -2px; bottom: -1px; width: 6px; height: 6px; border-radius: 999px; background: var(--warn); box-shadow: 0 0 0 1.5px var(--ring, var(--bg)); }
+.box .co .dirty { --ring: var(--box); }
+.co .proj { flex-shrink: 100000000; min-width: 4.5ch; overflow: hidden; text-overflow: ellipsis; }
+.co .slash { color: var(--dim); flex-shrink: 0; }
+.co .br { min-width: 6.5ch; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.co .br.det { color: var(--muted); }
+.co .x { flex-shrink: 0; }
+.co .up { color: var(--muted); }
+.co .op { color: var(--warn); }
+.co .ok { color: var(--green); }
+.co .wn { color: var(--warn); display: inline-flex; }
+
+/* Logos and the account badge */
+.logo { width: var(--s); height: var(--s); position: relative; display: inline-flex; flex-shrink: 0; color: var(--claude); }
+.logo.oc { color: var(--text-2); }
+.logo svg { width: 100%; height: 100%; fill: currentColor; }
+.logo.oc svg, .logo.gen svg { fill: none; stroke: currentColor; stroke-width: 2; }
+.logo .badge { position: absolute; right: calc(var(--s) * -.42); bottom: calc(var(--s) * -.38); min-width: calc(var(--s) * .74); height: calc(var(--s) * .74); padding: 0 1px; border-radius: 999px; color: #111; text-align: center; font: 700 calc(var(--s) * .5)/calc(var(--s) * .74) var(--mono); box-shadow: 0 0 0 1.5px var(--ring, var(--bg)); }
+.logo .badge.spin { background: var(--bg-alt) !important; border: 1.5px solid var(--muted); border-top-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.box .logo { --ring: var(--box); }
+.pk .logo, .sheet .logo { --ring: var(--surface); }
+.logo:has(.badge) { margin-right: calc(var(--s) * .4); }
+.dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
+
+/* Picker panel (desktop drop-up, 404px like today) */
+.pk { position: absolute; width: 404px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 36px var(--shadow); padding: 9px 12px 4px; }
+.pk h4, .sheet h4 { margin: 0 0 2px; font-size: 11.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.pk h4 small, .sheet h4 small { margin-left: auto; font-weight: 400; color: var(--dim); font-size: 10.5px; }
+.row { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--border-subtle); font-size: 12.5px; }
+.sheet .row { min-height: 50px; }
+.row:last-child { border-bottom: 0; }
+.row .k { width: 64px; flex-shrink: 0; font-size: 11px; color: var(--muted); }
+.row .v { flex: 1; display: flex; align-items: center; gap: 7px; min-width: 0; font-weight: 600; white-space: nowrap; }
+.row .v small { font-weight: 400; color: var(--muted); font-size: 10.5px; }
+.row .end { color: var(--dim); font-size: 10.5px; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.row.warnrow { flex-wrap: wrap; gap: 6px 10px; padding: 8px 0; color: var(--warn); font-size: 11.5px; }
+.row.warnrow .btns { margin-left: auto; display: flex; gap: 6px; }
+.row.warnrow .btns span { border: 1px solid var(--border); border-radius: 7px; padding: 3px 10px; color: var(--text); }
+.pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.pill { height: 22px; padding: 0 7px; border-radius: 999px; font-size: 10.5px; color: var(--muted); background: var(--bg-alt); display: inline-flex; align-items: center; }
+.pill.on { background: var(--text); color: var(--bg); font-weight: 600; }
+.sub { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); margin: 9px 0 5px; display: flex; justify-content: space-between; }
+
+/* Harness: 2–3 = segmented, 4+ = scrolling row */
+.tabs { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 9px; }
+.tab { height: 32px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; min-width: 0; }
+.tab.on { background: var(--bg-alt); color: var(--text); font-weight: 600; }
+.tab.off { opacity: .5; }
+.hscroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; scroll-padding-inline: 0; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); padding-right: 28px; }
+.hscroll::-webkit-scrollbar { display: none; }
+.hscroll > * { scroll-snap-align: start; flex: none; }
+.hscroll .tab { width: 104px; border: 1px solid var(--border); }
+.hscroll .tab.on { border-color: var(--text-2); }
+.hscroll .ac { width: 108px; }
+
+/* Account / instance cards: 2–3 = grid, 4+ = scrolling row */
+.accts { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; margin-bottom: 2px; }
+.ac { border: 1px solid var(--border); border-radius: 9px; padding: 7px 9px; display: grid; gap: 6px; font-size: 11.5px; min-width: 0; }
+.ac .top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ac .top .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ac .top small { margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.ac.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.ac.lim { opacity: .6; }
+.ac.lim .cap { color: var(--red); font-size: 10px; }
+.ac .cap { font-size: 10px; color: var(--muted); }
+.meter { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.meter i { display: block; height: 100%; }
+.foot-note { margin: 6px -12px 0; border-top: 1px solid var(--border-subtle); padding: 7px 12px 4px; font-size: 10.5px; color: var(--muted); }
+.check { color: var(--accent); }
+
+/* Phone sheet */
+.scrim { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); border-radius: 18px 18px 0 0; padding: 8px 16px 20px; }
+.grab { width: 36px; height: 4px; border-radius: 2px; background: var(--chip); margin: 0 auto 10px; }
+
+/* Session header */
+.hbar { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; }
+.hbar .title { font-weight: 600; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.segs { display: inline-flex; height: 24px; border: 1px solid var(--border); border-radius: 8px; align-items: stretch; flex-shrink: 1; min-width: 0; }
+.seg { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; font-size: 10.5px; color: var(--text-2); border-left: 1px solid var(--border); white-space: nowrap; min-width: 0; }
+.seg:first-child { border-left: 0; }
+.seg.gone { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--red) 22%, transparent) 0 4px, transparent 4px 8px); text-decoration: line-through; text-decoration-color: var(--red); }
+.apill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-alt); font-size: 10px; flex-shrink: 0; }
+.apill.gone { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--red) 22%, transparent) 0 4px, transparent 4px 8px); text-decoration: line-through; text-decoration-color: var(--red); }
+.hstatus { width: 6px; height: 6px; border-radius: 999px; background: var(--green); flex-shrink: 0; }
+
+/* Spec tables */
+table.spec { border-collapse: collapse; width: 100%; max-width: 1000px; margin-top: 10px; font-size: 12px; }
+table.spec th, table.spec td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); color: var(--text-2); }
+table.spec th { color: var(--dim); font-weight: 500; font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; }
+table.spec td:first-child { color: var(--text); white-space: nowrap; }
+ol.impl { max-width: 1000px; font-size: 12.5px; padding-left: 22px; }
+ol.impl li { margin: 6px 0; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';fit()">◐ theme</button>
+
+<svg width="0" height="0" style="position:absolute">
+	<defs>
+		<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+		<symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+		<symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+		<symbol id="right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+		<symbol id="left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+		<symbol id="lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+		<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+		<symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+		<symbol id="folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+		<symbol id="tree" viewBox="0 0 24 24"><path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/></symbol>
+		<symbol id="branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6"/><path d="M18 9.2c0 4-6 3.5-11 7.5"/></symbol>
+		<symbol id="commit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M3 12h5.5M15.5 12H21"/></symbol>
+		<symbol id="alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
+		<symbol id="shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+		<symbol id="sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></symbol>
+		<symbol id="msgs" viewBox="0 0 24 24"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></symbol>
+		<symbol id="back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+		<symbol id="oc" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><rect x="8.5" y="7.5" width="7" height="9" fill="currentColor" stroke="none" opacity=".55"/></symbol>
+		<symbol id="hex" viewBox="0 0 24 24"><path d="M12 2.5 20.5 7.3v9.4L12 21.5 3.5 16.7V7.3z"/><path d="M8.5 12h7"/></symbol>
+		<symbol id="star4" viewBox="0 0 24 24"><path d="M12 2c.8 5.5 4.5 9.2 10 10-5.5.8-9.2 4.5-10 10-.8-5.5-4.5-9.2-10-10 5.5-.8 9.2-4.5 10-10z"/></symbol>
+		<symbol id="tri" viewBox="0 0 24 24"><path d="M12 3 21 20H3z"/></symbol>
+		<symbol id="claudeLogo" viewBox="0 0 24 24"><path d="M12 1.5l1.6 7.2 6.3-3.9-3.9 6.3 7.2 1.6-7.2 1.6 3.9 6.3-6.3-3.9L12 22.5l-1.6-7.2-6.3 3.9 3.9-6.3L.8 11.3l7.2-1.6L4.1 4.8l6.3 3.9z"/></symbol>
+	</defs>
+</svg>
+
+<main>
+<h1>Final design: harness, account and checkout in the composer</h1>
+<p class="lede">2026-10-11 · implementer spec. Combines <b>P2</b> (harness tabs, account cards), <b>W1</b> (words: what on the left, where on the right) and <b>I2</b> (icons: t3code two-row footer, ⋯ on phone). Frames are drawn at real app size (12px root, 760px max composer, 404px picker) and scaled to fit. Toggle light/dark top right.</p>
+
+<div class="decisions">
+	<div><span>1</span><span><b>The header loses its checkout cell and its account pill.</b> The checkout moves into the composer in every theme and width; the account becomes a badge on the harness logo.</span></div>
+	<div><span>2</span><span><b>The picker separates harness from account.</b> Harness is a segmented control (2–3) or a scrolling row (4+). The account, or OpenCode instance, is a card grid (2–3) or a scrolling row (4+). A section with one option is hidden.</span></div>
+	<div><span>3</span><span><b>Words theme:</b> model words on the left, then <code>project / branch</code> and context % on the right, on every width including phone.</span></div>
+	<div><span>4</span><span><b>Icons theme:</b> desktop gets a two-row box with a labelled footer; phone is one line with the logo and a ⋯ sheet.</span></div>
+	<div><span>5</span><span><b>One checkout cell everywhere.</b> GitIdentity's trigger (<code>icon project / branch</code>, dirty dot, ↑↓, rebase/merged, warning) is moved, not redrawn. It keeps its menu, including Move to worktree.</span></div>
+</div>
+
+<nav class="toc"><a href="#header">A · Header</a><a href="#badge">B · Badge & checkout cell</a><a href="#picker">C · Picker</a><a href="#words">D · Words composer</a><a href="#icons">E · Icons composer</a><a href="#impl">F · Implementer notes</a></nav>
+
+<h2 id="header"><span class="n">A</span> · Session header</h2>
+<p>The segmented chip keeps Skills, Side threads and Settle. The checkout segment and the account pill (or OpenCode instance badge) are removed. Struck-through hatching marks what goes.</p>
+<div id="header-cards"></div>
+
+<h2 id="badge"><span class="n">B</span> · Shared parts: account badge and checkout cell</h2>
+<p>Both appear in the words row, the icons footer, the ⋯ sheet and the picker. Build each once.</p>
+<div id="badge-cards"></div>
+
+<h2 id="picker"><span class="n">C</span> · Picker: every state</h2>
+<p>Desktop is the drop-up from the harness control; phone is the sheet. The content is identical apart from 50px rows on the phone. Model, Context, Effort and Agent rows are today's, unchanged.</p>
+<div id="picker-cards"></div>
+
+<h2 id="words"><span class="n">D</span> · Words composer: every state</h2>
+<p>Each word is a button that opens the picker at its own section. The checkout cell opens the checkout menu. Desktop width is measured on the composer, so opening the files pane can push it into the narrow tier.</p>
+<div id="words-cards"></div>
+
+<h2 id="icons"><span class="n">E</span> · Icons composer: every state</h2>
+<div id="icons-cards"></div>
+
+<h2 id="impl"><span class="n">F</span> · Implementer notes</h2>
+<div style="overflow-x:auto"><table class="spec">
+	<tr><th>Tier</th><th>Trigger</th><th>Words row</th><th>Icons composer</th></tr>
+	<tr><td>Wide</td><td>not compact, composer ≥ 600px</td><td>badge · account · model · window · effort · mode | checkout · %</td><td>two rows; footer has labels</td></tr>
+	<tr><td>Narrow</td><td>not compact, composer &lt; 600px</td><td>drops the account word (the badge stays)</td><td>two rows; harness, effort and mode lose their labels</td></tr>
+	<tr><td>Phone</td><td><code>sessionViewState.compact</code> (≤ 767px viewport)</td><td>badge · short model · effort · mode | checkout · %</td><td>one line: logo, ⋯, send</td></tr>
+</table></div>
+<ol class="impl">
+	<li><b>Header</b> (<code>SessionBar.svelte</code> <code>identityBlock</code>): remove <code>&lt;GitIdentity&gt;</code>, <code>&lt;SessionAccountPill&gt;</code> and <code>&lt;InstanceBadgeMenu&gt;</code> while a session is open. The composer is mounted for every open session, so there is no state where the header still needs them. <code>SessionAccountPill.svelte</code> then has no caller; delete it.</li>
+	<li><b>Checkout cell</b>: move <code>GitIdentity.svelte</code> under <code>input/</code> and add <code>presentation: "words" | "control" | "row"</code>. The trigger markup, truncation floors and menu stay as they are. Workspace hint and mismatch use the menu path the phone already has (warning icon in the cell, Move and Dismiss in the menu) at every width, which retires the desktop-only inline hint buttons. Test IDs: <code>composer-checkout</code> (trigger) and <code>composer-checkout-menu</code>, replacing <code>session-bar-identity</code> and <code>session-bar-checkout</code>.</li>
+	<li><b>Drafts are unchanged.</b> There is no checkout yet, so the composer renders no checkout cell and <code>NewSessionContext</code> stays where it is (above the composer on a phone, below it on desktop).</li>
+	<li><b>Account badge</b>: extend the <code>driverIcon</code> snippet in <code>InstanceModelPicker.svelte</code> to take the instance and draw the letter badge, replacing the <code>isCustom</code> accent badge. The colour comes from <code>AccountDot</code>'s hash, so export its class lookup rather than copying it. Show the badge only when the driver has 2 or more instances. <b>Gotcha:</b> a session that never switched runs on the daemon's default <code>claude</code> instance, which is missing from the configured list. Treat it as an account card named "Claude" (the same fallback <code>SessionAccountPill</code> uses).</li>
+	<li><b>Picker</b>: delete the <code>harness</code> view and the <code>picker-row-harness</code> drill-in. The root gets two sections above the existing rows.
+		<br>Harness: <code>SegmentedControl</code> for 2–3 drivers, a scroll-snap row of 104px tabs for 4+. Test IDs <code>picker-harness-{driver}</code>.
+		<br>Account or Instance: a card grid for 2–3, a scroll-snap row of 108px cards for 4+. Test IDs <code>picker-account-{instanceId}</code>.
+		<br>Both rows scroll the selected item into view when the picker opens, and fade the right edge while more is hidden.</li>
+	<li><b>Card behaviour.</b> In a draft, a tap selects at once; that is today's <code>handleInstanceSelect</code> plus the project binding. In an open Claude session, a tap on another account runs <code>AccountSwitch</code>'s flow: quotas are read fresh when the picker opens, then <code>previewContinuationRpc</code> → <code>HandoffDialog</code> → <code>switchSessionAccount</code>. Pull that flow out of <code>AccountSwitch</code>'s menu so the cards can call it. Limited accounts and the current one can't be picked; an account whose quota can't be read can. In an open OpenCode session, instance cards are locked, as instances are today.</li>
+	<li><b>Harness lock</b>: in an open session, the other harness tabs show a lock and are <code>aria-disabled</code>, with today's copy "Harness is fixed for this session".</li>
+	<li><b>Icons theme</b>: on desktop, split the trigger into a harness control (<code>composer-harness-trigger</code>, which opens the picker at the top) and the model control (<code>model-picker-trigger</code>, which opens it at Model). Effort opens it at Effort. Mode is today's <code>PermissionModeSelector</code>. On a phone, ⋯ is <code>composer-more</code> and opens <code>composer-more-sheet</code>. ⋯ carries the amber dot while the checkout has a workspace hint or mismatch. A mode other than the default stays visible beside ⋯ as a tinted shield.</li>
+	<li><b>Words theme</b>: add <code>composer-word-account</code> after the badge (wide tier only), then the checkout cell, then the existing <code>composer-word-context-usage</code> at the far right. On a phone the model shortens (Sonnet 5 → S5) and the window word drops; 1M still shows, because it isn't the default.</li>
+	<li><b>Verification</b>: the composer is covered by <code>features/*.feature</code>, so run <code>pnpm acceptance:visual</code>, then recapture and review the baselines. Add a scenario for each of: 4+ accounts scroll, 4+ harnesses scroll, phone words row shows the project, phone ⋯ sheet, and a header with no checkout. Remember that new feature files must be added to the list in <code>scripts/acceptance-visual.sh</code>.</li>
+</ol>
+</main>
+
+<script>
+const ic = (n, s = 12) => `<svg class="i" style="width:${s}px;height:${s}px"><use href="#${n}"/></svg>`;
+const ACC = {
+	personal: { c: "var(--a1)", L: "P" }, work: { c: "var(--a2)", L: "W" }, client: { c: "var(--a3)", L: "C" },
+	research: { c: "var(--a4)", L: "R" }, ops: { c: "var(--a5)", L: "O" },
+	default: { c: "var(--a3)", L: "D" }, bedrock: { c: "var(--a4)", L: "B" },
+};
+const logo = (s = 13, acct = "personal", kind = "claude") => {
+	const glyph = { claude: "claudeLogo", oc: "oc", codex: "hex", gemini: "star4", cursor: "tri" }[kind];
+	const cls = kind === "claude" ? "" : kind === "oc" ? "oc" : "oc gen";
+	const a = acct === "spin" ? `<span class="badge spin"></span>` : acct ? `<span class="badge" style="background:${ACC[acct].c}">${ACC[acct].L}</span>` : "";
+	return `<span class="logo ${cls}" style="--s:${s}px"><svg><use href="#${glyph}"/></svg>${a}</span>`;
+};
+const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
+const bars = (lit = 3) => `<svg class="i" viewBox="0 0 20 16" style="width:14px;height:11px;stroke:none">${[3, 6, 9, 12].map((h, i) => `<rect x="${i * 5}" y="${16 - h - 2}" width="3" height="${h + 2}" rx="1" fill="currentColor" opacity="${i < lit ? 1 : .3}"/>`).join("")}</svg>`;
+const W = (t) => `<span class="w">${t}</span>`;
+const S = `<span class="sep">·</span>`;
+const words = (list) => list.map(W).join(S);
+const chev = ic("chev", 10);
+const caretR = ic("right", 12);
+
+const fit = () => {
+	for (const box of document.querySelectorAll(".fit")) {
+		const frame = box.firstElementChild;
+		const scale = Math.min(1, box.clientWidth / frame.offsetWidth);
+		frame.style.transform = `scale(${scale})`;
+		box.style.height = `${frame.offsetHeight * scale}px`;
+	}
+};
+const frame = (kind, inner) => `<div class="fit"><div class="frame ${kind}">${inner}</div></div>`;
+const tail = (n = 2) => `<div class="tail"><div class="ub">Make the picker match the header</div><div class="lines">${["88%", "70%", "80%", "62%", "75%", "68%"].slice(0, n).map((w) => `<i style="width:${w}"></i>`).join("")}</div></div>`;
+const L = (label, html) => `<div><div class="lbl">${label}</div>${html}</div>`;
+
+/* Checkout cell: GitIdentity trigger. */
+const co = ({ project = "conduit", branch = "account-chip", kind = "worktree", dirty = false, up = "", op = "", merged = false, warn = false, menu = false } = {}) => {
+	const icon = kind === "folder" ? "folder" : kind === "commit" ? "commit" : kind === "worktree" ? "tree" : "branch";
+	const tail = kind === "folder" ? "" : `<span class="slash">/</span><span class="br ${kind === "commit" ? "det" : ""}">${branch}</span>`;
+	return `<span class="co"><span class="ico">${ic(icon, 12)}${dirty ? `<span class="dirty"></span>` : ""}</span><span class="proj">${project}</span>${tail}${up ? `<span class="x up">${up}</span>` : ""}${op ? `<span class="x op">${op}</span>` : ""}${merged ? `<span class="x ok">merged</span>` : ""}${warn ? `<span class="x wn">${ic("alert", 12)}</span>` : ""}${menu ? `<span class="x" style="color:var(--dim)">${chev}</span>` : ""}</span>`;
+};
+
+/* Composer shells */
+const oneLine = (ctl = "") => `<div class="box">${ic("plus", 15)}<span class="ph">Ask Claude…</span>${ctl}<span class="send">${ic("up", 13)}</span></div>`;
+const twoRow = (left, right) => `<div class="box two"><div class="ph">Ask Claude…</div><div class="foot"><span class="fl">${ic("plus", 15)}<span class="gap"></span>${left}</span><span class="fr">${right}<span class="send">${ic("up", 13)}</span></span></div></div>`;
+const below = (left, right = "") => `<div class="words"><span class="grp l">${left}</span><span class="grp r">${right}</span></div>`;
+const composer = (kind, inner, n = 2, extra = "") => frame(kind, `${tail(n)}<div class="cw">${inner}</div>${extra}`);
+
+function card(d) {
+	const right = (d.phone ?? []).map(([l, h]) => L(l, h)).join("");
+	const left = (d.desk ?? []).map(([l, h]) => L(l, h)).join("");
+	return `<article class="card" id="${d.n}"><h3><span class="n">${d.n}</span>${d.name}</h3>${d.why ? `<p class="why">${d.why}</p>` : ""}
+	<div class="pair ${d.even ? "even" : ""}"><div class="stack">${left}</div><div class="stack">${right}</div></div>
+	${d.rules ? `<ul class="rules">${d.rules.map((r) => `<li>${r}</li>`).join("")}</ul>` : ""}</article>`;
+}
+const mount = (id, list) => { document.getElementById(id).innerHTML = list.map(card).join(""); };
+
+/* ─── A · Header ─── */
+const hdDesk = (after) => frame("hd", `<div class="hbar">${ic("back", 15)}<span class="title">Make the picker match the header</span>
+	<span class="segs"><span class="seg">${ic("sparkle", 11)}3</span><span class="seg">${ic("msgs", 11)}2</span>${after ? "" : `<span class="seg gone">${co({ up: "↑2", dirty: true })}</span>`}<span class="seg">${ic("check", 11)}Settle</span></span>
+	${after ? "" : `<span class="apill gone">${dot("var(--a1)")}personal</span>`}<span class="hstatus"></span>${ic("more", 15)}</div>${tail(1)}`);
+const hdPhone = (after) => frame("hp", `<div class="hbar">${ic("back", 15)}<span class="title">Make the picker match…</span>${ic("more", 15)}</div>
+	<div class="hbar" style="height:38px;border-bottom:0"><span class="segs"><span class="seg">${ic("sparkle", 11)}3</span>${after ? "" : `<span class="seg gone">${co({ dirty: true })}</span>`}</span>${after ? "" : `<span class="apill gone">${dot("var(--a1)")}personal</span>`}</div>${tail(1)}`);
+mount("header-cards", [
+	{ n: "A1", name: "Header, before and after",
+		desk: [["Desktop · before", hdDesk(false)], ["Desktop · after", hdDesk(true)]],
+		phone: [["Phone · before", hdPhone(false)], ["Phone · after", hdPhone(true)]],
+		rules: ["<b>Removed in every state of an open session:</b> the checkout segment, the Claude account pill and the OpenCode instance badge.",
+			"<b>Unchanged:</b> Skills, Side threads, Settle (desktop), connection dot, ⋯. The chip simply has fewer segments; no re-layout."] },
+]);
+
+/* ─── B · Badge and checkout cell ─── */
+const swatch = (inner) => `<div style="display:flex;flex-wrap:wrap;gap:16px 26px;align-items:center;padding:14px;background:var(--bg);border:1px solid var(--border-subtle);border-radius:10px;font-size:11.5px;color:var(--muted)">${inner}</div>`;
+const cap = (h, t) => `<span style="display:inline-flex;flex-direction:column;gap:6px;align-items:flex-start">${h}<span style="font-size:10px;color:var(--dim)">${t}</span></span>`;
+mount("badge-cards", [
+	{ n: "B1", name: "Account badge on the harness logo", even: true,
+		desk: [["States", swatch([
+			cap(logo(16, ""), "one account: no badge"),
+			cap(logo(16, "personal"), "2+ accounts"),
+			cap(logo(16, "work"), "another account"),
+			cap(logo(16, "personal", "oc"), "OpenCode, 2+ instances"),
+			cap(logo(16, "spin"), "switching (handoff running)"),
+		].join(""))]],
+		phone: [["Sizes in use", swatch([cap(logo(12, "personal"), "12 · words row"), cap(logo(13, "personal"), "13 · controls"), cap(logo(16, "personal"), "16 · picker, sheet")].join(""))]],
+		rules: ["<b>Letter</b> is the first letter of the account name, uppercased. <b>Colour</b> is AccountDot's colour for that instance ID, so the badge, the account card and anything else always agree.",
+			"<b>Ring</b> is 1.5px of whatever surface it sits on (box, surface, page), so it reads on both themes.",
+			"<b>Limit is not shown on the badge.</b> AccountDot's rule holds: identity colours never mean status. The usage-limit strip and red card captions show limits."] },
+	{ n: "B2", name: "Checkout cell (GitIdentity's trigger, moved)", even: true,
+		desk: [["States", swatch([
+			cap(co(), "worktree"),
+			cap(co({ kind: "branch", branch: "main" }), "branch, main folder"),
+			cap(co({ dirty: true, up: "↑2" }), "uncommitted + ahead (↑↓ desktop only)"),
+			cap(co({ op: "rebasing" }), "operation in progress"),
+			cap(co({ merged: true }), "merged"),
+			cap(co({ kind: "commit", branch: "a1b2c3d" }), "detached"),
+			cap(co({ kind: "folder" }), "not a git repo"),
+			cap(co({ warn: true }), "workspace hint / mismatch"),
+		].join(""))]],
+		phone: [["Truncation (floors kept)", swatch([
+			cap(`<span style="display:inline-flex;width:180px">${co({ project: "conduit-worktrees", branch: "feature/session-account-chip" })}</span>`, "project shrinks first, to 4 letters + …"),
+			cap(`<span style="display:inline-flex;width:120px">${co({ project: "conduit-worktrees", branch: "feature/session-account-chip" })}</span>`, "then the branch, to 6 letters + …"),
+		].join(""))]],
+		rules: ["<b>Same markup and floors as today's header pill</b>: project <code>shrink-[100000000]</code> with a ~4ch floor, branch truncates after it.",
+			"<b>Tap opens today's checkout menu</b>: popover on desktop, sheet on phone. It holds the details list, copy actions, Move to worktree, and for hints and mismatches the warning text with Move/Dismiss.",
+			"<b>Word presentation</b> (words row) is text-muted with no box. <b>Control</b> (icons footer) is a 26px quiet ghost control with a chevron. <b>Row</b> (⋯ sheet) is a 50px row labelled Checkout."] },
+]);
+
+/* ─── C · Picker ─── */
+const HARN = {
+	claude: { name: "Claude", g: "claude" }, oc: { name: "OpenCode", g: "oc" },
+	codex: { name: "Codex", g: "codex" }, gemini: { name: "Gemini", g: "gemini" }, cursor: { name: "Cursor", g: "cursor" },
+};
+const harness = (ids, sel, locked = false) => {
+	const tab = (id) => `<span class="tab ${id === sel ? "on" : locked ? "off" : ""}">${logo(14, "", HARN[id].g)}${HARN[id].name}${locked && id !== sel ? ic("lock", 10) : ""}</span>`;
+	if (ids.length < 2) return "";
+	const body = ids.length >= 4 ? `<div class="hscroll">${ids.map(tab).join("")}</div>` : `<div class="tabs" style="--n:${ids.length}">${ids.map(tab).join("")}</div>`;
+	return `<div class="sub"><span>Harness</span>${locked ? `<span>${ic("lock", 9)} fixed for this session</span>` : ""}</div>${body}`;
+};
+const meter = (pct, c) => `<div class="meter"><i style="width:${pct}%;background:${c}"></i></div>`;
+// cards: [name, pct|null, {lim, cur, status}]
+const acctCard = ([name, pct, o = {}], sel) => {
+	const c = ACC[name]?.c ?? "var(--a1)";
+	if (o.status) return `<div class="ac ${name === sel ? "on" : ""}" style="--c:${c}"><div class="top">${dot(c)}<span class="nm">${name}</span></div><div class="cap">${dot(o.status === "running" ? "var(--green)" : "var(--dim)")} ${o.status}</div></div>`;
+	const right = o.lim ? "" : `<small>${pct == null ? "—" : `${pct}%`}</small>`;
+	return `<div class="ac ${name === sel ? "on" : ""} ${o.lim ? "lim" : ""}" style="--c:${c}"><div class="top">${dot(c)}<span class="nm">${name}</span>${right}</div>${o.lim ? `<div class="cap">limit · resets 4:10pm</div>` : pct == null ? `<div class="cap">usage unknown</div>` : meter(pct, c)}</div>`;
+};
+const accounts = (cards, sel, { label = "Account", caption = "5-hour use", note = "" } = {}) => {
+	if (cards.length < 2) return "";
+	const body = cards.length >= 4 ? `<div class="hscroll">${cards.map((c) => acctCard(c, sel)).join("")}</div>` : `<div class="accts" style="--n:${cards.length}">${cards.map((c) => acctCard(c, sel)).join("")}</div>`;
+	return `<div class="sub"><span>${label}</span><span>${caption}</span></div>${body}${note}`;
+};
+const rows = (model = "Sonnet 5") => `
+	<div class="row"><span class="k">Model</span><span class="v">${model}</span><span class="end">${caretR}</span></div>
+	<div class="row"><span class="k">Context</span><span class="pills"><span class="pill on">200K</span><span class="pill">1M</span></span><span class="end" style="margin-left:auto">42% used</span></div>
+	<div class="row"><span class="k">Effort</span><span class="pills"><span class="pill">low</span><span class="pill">med</span><span class="pill on">high</span><span class="pill">xhigh</span><span class="pill">max</span></span></div>
+	<div class="row"><span class="k">Agent</span><span class="v">Planner</span><span class="end">${caretR}</span></div>`;
+const handoffNote = `<div class="foot-note" style="margin:8px 0 0;padding:6px 0 0">You'll see what carries over before anything changes.</div>`;
+const panelBody = (title, h, a, model) => `<h4>Harness &amp; model<small>${title}</small></h4>${h}${a}<div style="height:4px"></div>${rows(model)}`;
+const iconsFoot = (acct = "personal") => twoRow(`<span class="ctl lead">${logo(13, acct)}Claude<span class="d">·</span>${acct}${chev}</span><span class="vr"></span><span class="ctl">Sonnet 5<span class="d">·</span>200K${chev}</span><span class="ctl">${bars()}High</span><span class="ctl">${ic("shield", 12)}Ask</span>`, `<span class="ctl quiet shrink">${co({ menu: true })}</span>`);
+const deskPicker = (body) => frame("dp", `${tail(6)}<div class="cw">${iconsFoot()}</div><div class="pk" style="left:62px;bottom:108px">${body}</div>`);
+const phonePicker = (body) => frame("pp", `${tail(4)}<div class="cw">${oneLine(`<span class="ctl">${logo(13, "personal")}S5</span><span class="ctl">${ic("more", 15)}</span>`)}</div><div class="scrim"></div><div class="sheet"><div class="grab"></div>${body}</div>`);
+const both = (title, h, a, model) => ({ desk: deskPicker(panelBody(title, h, a, model)), phone: phonePicker(panelBody(title, h, a, model)) });
+const pick = (n, name, why, body, rules) => ({ n, name, why, desk: [["Desktop", body.desk]], phone: [["Phone", body.phone]], rules });
+
+const two = [["personal", 62], ["work", 90]];
+const five = [["personal", 62], ["work", 90], ["client", 15], ["research", null], ["ops", 40]];
+mount("picker-cards", [
+	pick("C1", "Draft · Claude · two accounts", "The base state. Both sections are live; a tap selects at once.",
+		both("new session", harness(["claude", "oc"], "claude"), accounts(two, "personal")),
+		["<b>Harness</b>: <code>SegmentedControl</code>, equal widths. <b>Accounts</b>: equal-width grid, selected card outlined and tinted in its own colour.",
+			"<b>Picking a harness</b> swaps the second section to that harness's accounts/instances and preselects the project's binding."]),
+	pick("C2", "Open Claude session · three accounts, one at its limit", "Harness is locked; accounts can still change, through the existing handoff.",
+		both("this session", harness(["claude", "oc"], "claude", true), accounts([["personal", 62], ["work", null, { lim: true }], ["client", null]], "personal", { note: handoffNote })),
+		["<b>Locked tabs</b> dim to 50% with a lock icon; the section caption says why.",
+			"<b>Limited account</b>: dimmed, red caption with reset time, no meter, not tappable. <b>Unknown usage</b> (—) stays tappable.",
+			"<b>Tap another account</b> → picker closes → HandoffDialog (what carries over) → on confirm, the badge spins until the switch lands (B1)."]),
+	pick("C3", "Five accounts → scrolling row", "From four accounts the grid becomes a horizontal scroll-snap row of 108px cards.",
+		both("this session", harness(["claude", "oc"], "claude", true), accounts(five, "personal", { note: handoffNote })),
+		["<b>Peek + fade</b>: the last visible card is cut by the 28px right-edge fade, so it's clear there's more. The fade drops once scrolled to the end.",
+			"<b>On open</b> the selected card scrolls into view (<code>scrollIntoView({ inline: 'nearest' })</code>).",
+			"<b>Keyboard</b>: arrow keys move between cards (roving tabindex), the same as the segmented control."]),
+	pick("C4", "Five harnesses → scrolling row", "Harnesses follow the same rule: from four, the segmented control becomes a row of 104px tabs. (Codex, Gemini, Cursor are placeholders for future drivers.)",
+		both("new session", harness(["claude", "oc", "codex", "gemini", "cursor"], "claude"), accounts(two, "personal")),
+		["<b>Same mechanics as C3</b>: scroll-snap, right-edge fade, selected scrolled into view, arrow-key navigation.",
+			"<b>Locked</b> (open session): the selected tab stays bright and every other tab gets the lock, exactly as C2."]),
+	pick("C5", "OpenCode selected · two instances", "The second section is labelled Instance and shows live status instead of usage.",
+		both("new session", harness(["claude", "oc"], "oc"), accounts([["default", null, { status: "running" }], ["bedrock", null, { status: "stopped" }]], "bedrock", { label: "Instance", caption: "status" }), "Claude Sonnet 5 <small>via Bedrock</small>"),
+		["<b>Status</b> comes from <code>InstanceStatus</code> via <code>instanceStatusColor</code>. In an open OpenCode session the cards are locked like the harness."]),
+	pick("C6", "One account (or one instance)", "A section with only one option is hidden: nothing to choose.",
+		both("new session", harness(["claude", "oc"], "claude"), accounts([["personal", 62]], "personal")),
+		["<b>One harness configured too</b> → both sections hidden and the picker is just today's rows.",
+			"<b>The badge also disappears</b> everywhere when the driver has one account (B1)."]),
+]);
+
+/* ─── D · Words ─── */
+const wl = (acct, list) => `${logo(12, acct)}<span class="gap"></span>${words(list)}`;
+const wr = (o = {}, pct = "42%") => `${co(o)}${pct ? `<span class="pct">${pct}</span>` : ""}`;
+const wd = (n, name, why, desk, phone, rules) => ({ n, name, why, desk, phone, rules });
+mount("words-cards", [
+	wd("D1", "Default", "What on the left, where on the right, on every width.",
+		[["Desktop · wide (composer ≥ 600px)", composer("d", `${oneLine()}${below(wl("personal", ["personal", "Sonnet 5", "200K", "high", "ask"]), wr({ up: "↑2" }))}`)],
+			["Desktop · narrow (files pane open)", composer("m", `${oneLine()}${below(wl("personal", ["Sonnet 5", "200K", "high", "ask"]), wr())}`)]],
+		[["Phone · fixed: project now shows", composer("p", `${oneLine()}${below(wl("personal", ["S5", "high", "ask"]), wr())}`)]],
+		["<b>Phone fix</b>: the right side keeps <code>project / branch</code>. To make room the model shortens to S5 and the default window word drops. 1M still shows.",
+			"<b>Taps</b>: badge or account → picker at Account. Model or window → picker at Model. Effort → Effort. Mode → today's mode menu. Checkout → checkout menu.",
+			"<b>Context %</b> stays rightmost, shown only above 0%, and turns amber at the warning threshold, as today."]),
+	wd("D2", "Long names", "The left group never shrinks; the checkout absorbs it, project first.",
+		[["Desktop · narrow", composer("m", `${oneLine()}${below(wl("personal", ["Sonnet 5", "200K", "high", "ask"]), wr({ project: "conduit-worktrees", branch: "feature/session-account-chip-redesign" }))}`)]],
+		[["Phone", composer("p", `${oneLine()}${below(wl("personal", ["S5", "high", "ask"]), wr({ project: "conduit-worktrees", branch: "feature/session-account-chip-redesign" }))}`)]],
+		["<b>Order of loss</b>: the project shrinks to its 4-letter floor, then the branch to 6 letters. The full names are always in the checkout menu."]),
+	wd("D3", "Checkout needs attention", "Dirty, ahead, mid-rebase and workspace warnings all live in the cell.",
+		[["Desktop · uncommitted + ahead + rebasing", composer("d", `${oneLine()}${below(wl("personal", ["personal", "Sonnet 5", "200K", "high", "ask"]), wr({ dirty: true, up: "↑2↓1", op: "rebasing" }))}`)],
+			["Desktop · workspace hint", composer("d", `${oneLine()}${below(wl("personal", ["personal", "Sonnet 5", "200K", "high", "ask"]), wr({ warn: true }))}`)]],
+		[["Phone · workspace hint", composer("p", `${oneLine()}${below(wl("personal", ["S5", "high", "ask"]), wr({ warn: true, dirty: true }))}`)]],
+		["<b>↑↓ counts are desktop only</b>, as in today's pill. The amber warning icon shows at every width; Move/Dismiss are in the menu."]),
+	wd("D4", "Other sessions", "",
+		[["Desktop · one account (no badge, no account word)", composer("d", `${oneLine()}${below(`${logo(12, "")}<span class="gap"></span>${words(["Sonnet 5", "200K", "high", "ask"])}`, wr({ kind: "branch", branch: "main" }, ""))}`)],
+			["Desktop · OpenCode, two instances", composer("d", `${oneLine()}${below(`${logo(12, "bedrock", "oc")}<span class="gap"></span>${words(["bedrock", "Sonnet 5", "200K", "build"])}`, wr())}`)],
+			["Desktop · switching account (handoff running)", composer("d", `${oneLine()}${below(wl("spin", ["work…", "Sonnet 5", "200K", "high", "ask"]), wr())}`)]],
+		[["Phone · draft (unchanged)", frame("p", `${tail(2)}<div class="cw"><div style="display:flex;gap:6px;padding:0 2px 6px;font-size:11px;color:var(--text-2)"><span class="ctl lead">${ic("folder", 12)}conduit${chev}</span><span class="ctl lead">${ic("branch", 12)}main${chev}</span></div>${oneLine()}${below(wl("personal", ["S5", "high", "ask"]), "")}</div>`)]],
+		["<b>Draft</b>: no checkout exists yet, so the right side is empty and <code>NewSessionContext</code> stays as it is today."]),
+]);
+
+/* ─── E · Icons ─── */
+const phoneOne = (extra = "", acct = "personal") => oneLine(`<span class="ctl">${logo(13, acct)}S5</span>${extra}<span class="ctl">${ic("more", 15)}</span>`);
+const moreSheet = (warn = false) => frame("pp", `${tail(4)}<div class="cw">${phoneOne()}</div><div class="scrim"></div><div class="sheet"><div class="grab"></div><h4>Composer</h4>
+	<div class="row"><span class="k">Harness</span><span class="v">${logo(16, "personal")}<span style="margin-left:3px">Claude · personal</span></span><span class="end">${caretR}</span></div>
+	<div class="row"><span class="k">Model</span><span class="v">Sonnet 5 <small>200K · 42% used</small></span><span class="end">${caretR}</span></div>
+	<div class="row"><span class="k">Effort</span><span class="v">${bars()}high</span><span class="end">${caretR}</span></div>
+	<div class="row"><span class="k">Mode</span><span class="v">${ic("shield", 13)}Ask</span><span class="end">${caretR}</span></div>
+	<div class="row"><span class="k">Checkout</span><span class="v" style="font-weight:400">${co({ dirty: warn, warn })}</span><span class="end">${caretR}</span></div>
+	${warn ? `<div class="row warnrow"><span>${ic("alert", 12)} Claude is working in ../conduit-chip</span><span class="btns"><span>Move</span><span>Dismiss</span></span></div>` : ""}</div>`);
+mount("icons-cards", [
+	{ n: "E1", name: "Default", why: "Desktop: two rows, labelled footer, checkout on the right. Phone: one line, logo and ⋯.",
+		desk: [["Desktop · wide (composer ≥ 600px)", composer("d", iconsFoot())],
+			["Desktop · narrow (labels drop)", composer("m", twoRow(`<span class="ctl lead">${logo(13, "personal")}${chev}</span><span class="vr"></span><span class="ctl">Sonnet 5<span class="d">·</span>200K${chev}</span><span class="ctl">${bars()}</span><span class="ctl">${ic("shield", 12)}</span>`, `<span class="ctl quiet shrink">${co({ menu: true })}</span>`))]],
+		phone: [["Phone · closed", composer("p", phoneOne())], ["Phone · ⋯ open", moreSheet()]],
+		rules: ["<b>Harness control</b> (lead, filled) opens the picker at the top. <b>Model</b> opens it at Model. <b>Effort</b> opens it at Effort. <b>Mode</b> is today's selector.",
+			"<b>Checkout</b> is the quiet ghost control on the right, and the first thing to truncate; it opens the checkout menu.",
+			"<b>⋯ sheet</b>: Harness opens the picker sheet (section C). Checkout opens the checkout sheet. Rows are 50px."] },
+	{ n: "E2", name: "Attention and elevated mode", why: "On a phone, what ⋯ hides must still be visible when it matters.",
+		desk: [["Desktop · auto-accept mode + workspace hint", composer("d", twoRow(`<span class="ctl lead">${logo(13, "personal")}Claude<span class="d">·</span>personal${chev}</span><span class="vr"></span><span class="ctl">Sonnet 5<span class="d">·</span>200K${chev}</span><span class="ctl">${bars()}High</span><span class="ctl hot">${ic("shield", 12)}Auto</span>`, `<span class="ctl quiet shrink">${co({ dirty: true, up: "↑2", warn: true, menu: true })}</span>`))]],
+		phone: [["Phone · auto-accept + workspace hint", composer("p", phoneOne(`<span class="ctl hot">${ic("shield", 13)}</span>`).replace(`${ic("more", 15)}</span>`, `${ic("more", 15)}<span class="attn"></span></span>`))], ["Phone · ⋯ open with the hint", moreSheet(true)]],
+		rules: ["<b>Any non-default mode</b> keeps a tinted shield beside ⋯ on a phone (tap opens the mode menu). Ask, the default, hides.",
+			"<b>Amber dot on ⋯</b> while the checkout has a workspace hint or mismatch. The sheet then shows the warning row with Move/Dismiss under Checkout.",
+			"<b>Switching account</b>: the logo badge spins (B1) in every tier."] },
+	{ n: "E3", name: "Draft", why: "Unchanged apart from the footer split: no checkout cell, NewSessionContext stays.",
+		desk: [["Desktop · draft", frame("d", `${tail(1)}<div class="cw">${twoRow(`<span class="ctl lead">${logo(13, "personal")}Claude<span class="d">·</span>personal${chev}</span><span class="vr"></span><span class="ctl">Sonnet 5<span class="d">·</span>200K${chev}</span><span class="ctl">${bars()}High</span><span class="ctl">${ic("shield", 12)}Ask</span>`, "")}<div style="display:flex;gap:6px;padding:8px 2px 0;font-size:11px;color:var(--text-2)"><span class="ctl lead">${ic("folder", 12)}conduit${chev}</span><span class="ctl lead">${ic("branch", 12)}main${chev}</span></div></div>`)]],
+		phone: [["Phone · draft", frame("p", `${tail(2)}<div class="cw"><div style="display:flex;gap:6px;padding:0 2px 6px;font-size:11px;color:var(--text-2)"><span class="ctl lead">${ic("folder", 12)}conduit${chev}</span><span class="ctl lead">${ic("branch", 12)}main${chev}</span></div>${phoneOne()}</div>`)]] },
+]);
+
+addEventListener("resize", fit);
+fit();
+</script>
+</body>
+</html>

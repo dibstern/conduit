@@ -36,6 +36,8 @@ export function buildClaudeQueryOptions(
 		}),
 		includePartialMessages: true,
 		forwardSubagentText: true,
+		// Individual task stops are exposed by the session's task pull-down.
+		perTaskStopAffordance: true,
 		// A string is a custom prompt; the claude_code preset changes every query.
 		systemPrompt:
 			"To work in another worktree, use EnterWorktree instead of cd.",

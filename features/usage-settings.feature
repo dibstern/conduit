@@ -8,10 +8,10 @@ Background:
 Scenario Outline: one account has full window rows on desktop
   Given the viewport is a desktop
   And Usage settings have one Claude account in the <state> state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude is absent
   Then the Usage settings title reads Claude plan usage
-  And the settings tabs place Usage between Claude and Instances
+  And the settings sections place Usage and Server under This computer
   And the Usage settings subheader reads <subheader>
   And the Usage single-account windows show 5h <fiveHour> and Week <week>
   And the Usage single-account five_hour reset reads <fiveHourReset>
@@ -37,7 +37,7 @@ Scenario Outline: one account has a full-screen Usage screen on phones
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
   And Usage settings have one Claude account in the <state> state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude is absent
   Then the Usage settings title reads Usage
   And the phone Usage screen fills the viewport and has a scrolling body and a back button
@@ -64,7 +64,7 @@ Examples:
 Scenario Outline: several accounts share ordered cards on desktop
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the <state> state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings title reads Claude plan usage
   And the Usage settings subheader reads 3 accounts · updated 2m ago · Refresh all
   And the Usage settings headline reads <headline> in <colour>
@@ -99,7 +99,7 @@ Scenario Outline: several account cards and limit controls fit the phone screen
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
   And Usage settings have several Claude accounts in the <state> state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings title reads Usage
   And the phone Usage screen fills the viewport and has a scrolling body and a back button
   And the Usage settings subheader reads 3 accounts · updated 2m ago · Refresh all
@@ -134,7 +134,7 @@ Scenario Outline: one account shows only its reported model weeks without reset 
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the normal state
   And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage single-account windows show 5h 41% and Week 22%
   And the Usage single-account model rows show Fable <fable>% and Sonnet 6% without reset lines
   And the Usage account claude remains available
@@ -150,7 +150,7 @@ Examples:
 Scenario Outline: an account without model windows shows no extra rows
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the normal state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage single-account windows show 5h 41% and Week 22%
   And the Usage single-account has no model rows
   And the usage-settings region visually matches <baseline> at <threshold> percent
@@ -164,7 +164,7 @@ Scenario Outline: desktop cards show model weeks without changing account limits
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the normal state
   And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage account claude model line reads Fable week <fable>% · Sonnet week 6%
   And the Usage account work model line reads absent
   And the Usage account spare model line reads absent
@@ -189,7 +189,7 @@ Scenario Outline: phone cards and chips keep account limits separate from model 
   And I open "Usage footer session 1" from the phone session list
   And Usage settings have several Claude accounts in the normal state
   And the Usage account claude has model windows Fable <fable>% and Sonnet 6%
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage account claude model line reads Fable week <fable>% · Sonnet week 6%
   And the Usage account work model line reads absent
   And the Usage account spare model line reads absent
@@ -212,7 +212,7 @@ Scenario: a single account with no five-hour window still has its weekly usage
   Given the viewport is a desktop
   And Usage settings have one Claude account in the normal state
   And the Usage account claude has no five-hour window
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage single-account windows show 5h — and Week 22%
   And the Usage single-account five_hour reset reads no window open
   And the Usage single-account seven_day reset reads resets Thu 9 am
@@ -221,14 +221,14 @@ Scenario: a limit without a reset time does not invent a reset
   Given the viewport is a desktop
   And Usage settings have one Claude account in the limit state
   When the usage footer claude five_hour reading is 100% resetting at none
-  And I open settings to the Usage tab
+  And I open settings to the Usage section
   Then the Usage single-account five_hour reset reads limit reached
 
 Scenario: the reached five-hour limit binds even when the weekly window warns
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the limit state
   When the usage footer claude seven_day reading is 91% resetting at 2026-01-08T09:00:00Z
-  And I open settings to the Usage tab
+  And I open settings to the Usage section
   Then the Usage settings headline reads Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left. in red
   And the Usage account claude status reads limited · 3:13 in red
   And the Usage account claude windows show 5h 100% and Week 91%
@@ -240,25 +240,25 @@ Scenario: no eligible successor omits the switch recommendation
   And Usage settings have several Claude accounts in the limit state
   And the Usage account work is unavailable
   And the usage footer spare five_hour reading is 100% resetting at 2026-01-01T15:13:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings headline reads Personal is limited until 3:13 pm. in red
 
 Scenario: the recommendation follows the saved switch order and skips unavailable accounts
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the limit state
   And the Usage account work is unavailable
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings headline reads Personal is limited until 3:13 pm. Spare, next in the switch order, has 100% of its 5h window left. in red
 
 Scenario Outline: warning thresholds are saved, survive reload and change the desktop footer
   Given the viewport is a desktop
   And Usage settings have one Claude account in the warn5 state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I select the Usage warning choice <initial>
   And I select the Usage warning choice <choice>
   Then the SetUsageLimitsSetting RPC saves warnAt <choice>
   And the Usage warning choice <choice> is selected
-  When I reload the app and open the Usage tab
+  When I reload the app and open the Usage section
   Then the Usage warning choice <choice> is selected
   When I close settings
   Then the usage footer claude five_hour level is <level> with an <fill> bar
@@ -275,7 +275,7 @@ Scenario Outline: phone chips use the saved warning threshold
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
   And Usage settings have several Claude accounts in the warn5 state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I select the Usage warning choice <initial>
   And I select the Usage warning choice <choice>
   Then the SetUsageLimitsSetting RPC saves warnAt <choice>
@@ -293,11 +293,11 @@ Examples:
 Scenario Outline: desktop card dragging saves and replays the switch order
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the normal state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I drag the Usage account Spare above Personal
   Then the account order reads Spare, Personal, Work
   And the SetUsageLimitsSetting RPC saves auto-resume off, auto-switch off, order spare, claude, work
-  When I reload the app and open the Usage tab
+  When I reload the app and open the Usage section
   Then the account order reads Spare, Personal, Work
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
@@ -308,7 +308,7 @@ Examples:
 Scenario: the card handle supports ArrowUp and ArrowDown without pickup
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the normal state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I press ArrowUp on the Usage account Work handle
   Then the account order reads Work, Personal, Spare
   And the SetUsageLimitsSetting RPC saves auto-resume off, auto-switch off, order work, claude, spare
@@ -320,7 +320,7 @@ Scenario Outline: auto-resume is now saved from Usage
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the normal state
   And auto-resume limited sessions is off on the daemon
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the usage limit settings heading reads When the account reaches its limit
   And the Auto-resume limited sessions toggle is off and reads <description>
   When I turn on Auto-resume limited sessions
@@ -339,7 +339,7 @@ Scenario Outline: auto-switch retains its toggles and accessible reordering in U
   And the daemon's usage limits are auto-resume on, auto-switch off, order team, claude
   And the quota check reads claude limited until 2026-01-05T09:00:00Z, self 38% used, team unknown
   And the quota check is published as the live Usage reading
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Auto-switch account toggle is off and reads <description>
   And the account order reads team-max, work2claude, personal
   And the account work2claude shows limited · 9:00 quota
@@ -364,7 +364,7 @@ Scenario: Refresh requests quota and the subscription replaces the view
   Given the viewport is a desktop
   And Usage settings have one Claude account in the normal state
   And the next Usage refresh publishes the warn5 reading
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I press Refresh in Usage settings
   Then the QuotaForAccounts RPC refreshes the attached project
   And the Usage single-account windows show 5h 86% and Week 58%
@@ -377,14 +377,14 @@ Scenario: Refresh all names every account and the oldest reading sets the update
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the normal state
   And the next Usage refresh publishes the warnWk reading
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings subheader reads 3 accounts · updated 2m ago · Refresh all
   When I press Refresh all in Usage settings
   Then the QuotaForAccounts RPC refreshes the attached project
   And the Usage account claude status reads week 91% in amber
   And the Usage settings subheader reads 3 accounts · updated just now · Refresh all
 
-Scenario: the desktop footer opens the Usage tab directly
+Scenario: the desktop footer opens the Usage section directly
   Given the viewport is a desktop
   And Usage settings have one Claude account in the normal state
   When I click the desktop usage footer
@@ -402,7 +402,7 @@ Scenario: a phone usage chip opens Usage without stopping list scrolling
   Then the Usage settings title reads Usage
   And the phone Usage screen fills the viewport and has a scrolling body and a back button
   When I press the Usage back button
-  Then the settings tabs place Usage between Claude and Instances
+  Then the settings sections place Usage and Server under This computer
 
 Scenario: the phone single-account row opens Usage directly
   Given the viewport is a phone
@@ -420,7 +420,7 @@ Scenario Outline: a single-account forecast describes the selected window
   And the usage footer claude <kind> reading is <used>% resetting at <reset>
   And the Usage account claude <kind> forecast is <forecast> resetting at <reset>
   And the Usage account claude <otherKind> forecast is under at <otherValue>% resetting at <otherReset>
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude is framed
   And the Usage forecast claude selects <kind>
   And the Usage forecast claude sentence reads <sentence> in <level>
@@ -447,7 +447,7 @@ Scenario Outline: a weekly-only forecast opens on Week
   And Usage settings have one Claude account in the normal state
   And the Usage account claude has no five-hour window
   And the Usage account claude seven_day forecast is under at 48% resetting at 2026-01-08T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude selects seven_day
   And the Usage forecast claude sentence reads On pace to finish this week at ~48% (resets Thu 9 am). in neutral
   And the Usage forecast claude emphasizes ~48%
@@ -465,7 +465,7 @@ Scenario Outline: the first crossing opens and switching updates the whole forec
   And Usage settings have one Claude account in the normal state
   And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
   And the Usage account claude seven_day forecast is runs_out at <weekCrossing> resetting at 2026-01-08T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude selects <first>
   And the Usage forecast claude sentence reads <firstSentence> in amber
   And the Usage forecast claude other line reads <firstOther>
@@ -490,7 +490,7 @@ Scenario Outline: switching to an under-limit window removes the crossing dot
   And Usage settings have one Claude account in the normal state
   And the Usage account claude five_hour forecast is under at 55% resetting at 2026-01-01T18:45:00Z
   And the Usage account claude seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude selects seven_day
   And the Usage forecast claude chart has a present crossing dot and a rising projection
   When I select the Usage forecast claude five_hour window
@@ -509,7 +509,7 @@ Scenario Outline: a forecast formats the hours and minutes before reset
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the warn5 state
   And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T16:24:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude sentence reads At this pace the 5h limit runs out ≈ 3:04 pm, 1h 20m before it resets. in amber
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
@@ -523,7 +523,7 @@ Scenario Outline: early history keeps the bars without a forecast card
   And Usage settings have one Claude account in the normal state
   And the Usage account claude five_hour has <count> history readings without a forecast
   And the Usage account claude seven_day has <count> history readings without a forecast
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude is absent
   And the Usage single-account windows show 5h 41% and Week 22%
   And the usage-settings region visually matches <baseline> at <threshold> percent
@@ -539,7 +539,7 @@ Scenario Outline: a reached limit with early history still has a reset forecast
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the limit state
   And the Usage account claude five_hour has 1 history readings without a forecast
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude selects five_hour
   And the Usage forecast claude sentence reads Limit reached. The 5h window resets at 3:13 pm. in red
   And the Usage forecast claude other line reads absent
@@ -559,7 +559,7 @@ Scenario Outline: other account pace lines expand into unframed forecasts
   And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
   And the Usage account work seven_day forecast is under at 70% resetting at 2026-01-03T09:00:00Z
   And the Usage account spare seven_day forecast is under at 20% resetting at 2026-01-05T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude is unframed
   And the Usage account claude pace line reads absent
   And the Usage forecast work is absent
@@ -587,7 +587,7 @@ Scenario Outline: fleet headlines describe five-hour and weekly crossings
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the normal state
   And the Usage account claude <kind> forecast is runs_out at <crossing> resetting at <reset>
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings headline reads <headline> in amber
   And the Usage headline emphasizes <firstSentence>
   And the Usage forecast claude is unframed
@@ -608,7 +608,7 @@ Scenario Outline: weekly crossings outrank five-hour crossings and follow switch
   And the Usage account work five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
   And the Usage account work seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
   And the Usage account spare seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings headline reads Work runs out of its week ≈ Tue 5 am, 2 days before it resets. Personal has 78% of its week left, Spare 91%. in amber
   And the Usage account work pace line reads 5h runs out ≈ 3:04 pm · week runs out ≈ Tue 5 am
   And the Usage account spare pace line reads No 5h window open · week runs out ≈ Tue 5 am
@@ -624,7 +624,7 @@ Scenario Outline: a limited headline outranks forecast crossings
   And Usage settings have several Claude accounts in the limit state
   And the Usage account claude five_hour has 1 history readings without a forecast
   And the Usage account work seven_day forecast is runs_out at 2026-01-06T05:00:00Z resetting at 2026-01-08T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings headline reads Personal is limited until 3:13 pm. Work, next in the switch order, has 88% of its 5h window left. in red
   And the Usage forecast claude sentence reads Limit reached. The 5h window resets at 3:13 pm. in red
   And the usage-settings-headline region visually matches <baseline> at <threshold> percent
@@ -640,7 +640,7 @@ Scenario Outline: the open session account shows its forecast after a switch
   And the Usage account claude five_hour forecast is under at 74% resetting at 2026-01-01T17:30:00Z
   And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
   And the session resumes on work from claude by user and replies Continued on Work.
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast work is unframed
   And the Usage forecast claude is absent
   And the Usage account claude pace line reads 5h on pace for ~74%
@@ -658,7 +658,7 @@ Scenario Outline: a forecast with no eligible successor omits the recommendation
   And the Usage account work is unavailable
   And the Usage account spare is unavailable
   And the Usage account claude five_hour forecast is runs_out at 2026-01-01T15:04:00Z resetting at 2026-01-01T15:37:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage settings headline reads Personal runs out of its 5h window ≈ 3:04 pm. in amber
   And the Usage headline emphasizes Personal runs out of its 5h window ≈ 3:04 pm.
   And the usage-settings-headline region visually matches <baseline> at <threshold> percent
@@ -674,7 +674,7 @@ Scenario Outline: a secondary limited account keeps its reset forecast without a
   And the Usage account claude five_hour forecast is under at 74% resetting at 2026-01-01T17:30:00Z
   And the usage footer work five_hour reading is 100% resetting at 2026-01-01T15:13:00Z
   And the Usage account work five_hour has 1 history readings without a forecast
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast claude is unframed
   And the Usage forecast work is unframed
   And the Usage account work pace line reads absent
@@ -694,7 +694,7 @@ Scenario Outline: an unconfigured session account falls back to the fullest acco
   And the usage footer spare seven_day reading is 97% resetting at 2026-01-08T09:00:00Z
   And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
   And the Usage account spare seven_day forecast is under at 98% resetting at 2026-01-08T09:00:00Z
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   Then the Usage forecast <primary> is unframed
   And the Usage account <primary> pace line reads absent
   And the Usage forecast <secondary> is absent

@@ -62,7 +62,6 @@ export interface DaemonState {
 	keepAwake: boolean;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
-	dangerouslySkipPermissions: boolean;
 	projects: DaemonProject[];
 	instances: DaemonInstanceConfig[];
 
@@ -89,7 +88,6 @@ export function emptyDaemonState(): DaemonState {
 		tls: false,
 		debug: false,
 		keepAwake: false,
-		dangerouslySkipPermissions: false,
 		projects: [],
 		instances: [],
 

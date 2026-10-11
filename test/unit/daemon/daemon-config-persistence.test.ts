@@ -110,6 +110,7 @@ describe("daemon-config-persistence", () => {
 			expect(parsed.port).toBe(9999);
 			expect(parsed.pinHash).toBe("test-hash");
 			expect(parsed).not.toHaveProperty("dismissedPaths");
+			expect(parsed).not.toHaveProperty("dangerouslySkipPermissions");
 			expect(parsed.projects).toHaveLength(1);
 			expect(parsed.projects[0].slug).toBe("app");
 		}),
@@ -130,7 +131,7 @@ describe("daemon-config-persistence", () => {
 				keepAwake: true,
 				keepAwakeCommand: "systemd-inhibit",
 				keepAwakeArgs: ["--what=idle"],
-				dangerouslySkipPermissions: false,
+				dangerouslySkipPermissions: true,
 				projects: [{ path: "/proj", slug: "proj", addedAt: 2000 }],
 				instances: [{ id: "i1", name: "Dev", port: 4096, managed: true }],
 				dismissedPaths: ["/old-path", "/another"],
@@ -157,6 +158,7 @@ describe("daemon-config-persistence", () => {
 			expect(state.projects).toHaveLength(1);
 			expect(state.instances).toHaveLength(1);
 			expect(state).not.toHaveProperty("dismissedPaths");
+			expect(state).not.toHaveProperty("dangerouslySkipPermissions");
 		}),
 	);
 
@@ -173,7 +175,6 @@ describe("daemon-config-persistence", () => {
 					tls: false,
 					debug: false,
 					keepAwake: false,
-					dangerouslySkipPermissions: false,
 					projects: [
 						{ path: "/proj", slug: "proj", addedAt: 1, instanceId: "default" },
 					],

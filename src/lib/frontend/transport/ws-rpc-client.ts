@@ -66,6 +66,12 @@ export interface CancelSessionRpcInput {
 	readonly commandId: string;
 }
 
+export interface StopBackgroundTaskRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly taskId: string;
+}
+
 export interface GetModelsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
@@ -97,18 +103,18 @@ export interface RemoveProjectRpcInput {
 }
 
 export interface InstanceMutationRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly instanceId: string;
 }
 
 export interface RenameInstanceRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly instanceId: string;
 	readonly name: string;
 }
 
 export interface AddInstanceRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly name: string;
 	readonly driver?: string;
 	readonly managed?: boolean;
@@ -119,7 +125,7 @@ export interface AddInstanceRpcInput {
 }
 
 export interface UpdateInstanceRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly instanceId: string;
 	readonly name?: string;
 	readonly port?: number;
@@ -128,11 +134,7 @@ export interface UpdateInstanceRpcInput {
 }
 
 export interface ScanNowRpcInput {
-	readonly projectSlug: string;
-}
-
-export interface DetectProxyRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 }
 
 export interface PtyInputRpcInput {
@@ -145,6 +147,7 @@ export interface CreatePtyRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 }
 
 export interface ResizePtyRpcInput {
@@ -168,6 +171,7 @@ export interface CreateSessionRpcInput {
 	readonly instanceId?: string;
 	readonly providerId?: string;
 	readonly worktreePath?: string;
+	readonly newWorktree?: boolean;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -247,12 +251,14 @@ export interface GetFileTreeRpcInput {
 export interface GetFileListRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 	readonly path?: string;
 }
 
 export interface GetFileContentRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly root?: string;
 	readonly path: string;
 }
 
@@ -489,7 +495,7 @@ export interface SyncInputDraftRpcInput {
 }
 
 export interface SetLogLevelRpcInput {
-	readonly projectSlug: string;
+	readonly projectSlug?: string;
 	readonly level: RpcLogLevel;
 }
 
@@ -504,6 +510,11 @@ const callControl = <A, E>(
 		);
 		return yield* call(control);
 	});
+
+/** Use the runtime's shared control socket without binding a project. */
+const callDaemon = <A, E>(
+	call: (client: WsRpcClient) => Effect.Effect<A, E>,
+): Effect.Effect<A, E, WsRpcClients> => callControl("", call);
 
 export async function listWorktreesRpc(
 	projectSlug: string,
@@ -554,6 +565,16 @@ const callCancelSession = (input: CancelSessionRpcInput) =>
 		client.CancelSession(input).pipe(Effect.asVoid),
 	);
 
+export async function stopBackgroundTaskRpc(
+	input: StopBackgroundTaskRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.StopBackgroundTask(input).pipe(Effect.asVoid),
+		),
+	);
+}
+
 const callGetModels = (input: GetModelsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetModels(input));
 
@@ -573,28 +594,27 @@ const callRemoveProject = (input: RemoveProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RemoveProject(input));
 
 const callStartInstance = (input: InstanceMutationRpcInput) =>
-	callControl(input.projectSlug, (client) => client.StartInstance(input));
+	callDaemon((client) => client.StartInstance(input));
 
 const callStopInstance = (input: InstanceMutationRpcInput) =>
-	callControl(input.projectSlug, (client) => client.StopInstance(input));
+	callDaemon((client) => client.StopInstance(input));
 
 const callRemoveInstance = (input: InstanceMutationRpcInput) =>
-	callControl(input.projectSlug, (client) => client.RemoveInstance(input));
+	callDaemon((client) => client.RemoveInstance(input));
 
 const callRenameInstance = (input: RenameInstanceRpcInput) =>
-	callControl(input.projectSlug, (client) => client.RenameInstance(input));
+	callDaemon((client) => client.RenameInstance(input));
 
 const callAddInstance = (input: AddInstanceRpcInput) =>
-	callControl(input.projectSlug, (client) => client.AddInstance(input));
+	callDaemon((client) => client.AddInstance(input));
 
 const callUpdateInstance = (input: UpdateInstanceRpcInput) =>
-	callControl(input.projectSlug, (client) => client.UpdateInstance(input));
+	callDaemon((client) => client.UpdateInstance(input));
 
 const callScanNow = (input: ScanNowRpcInput) =>
-	callControl(input.projectSlug, (client) => client.ScanNow(input));
+	callDaemon((client) => client.ScanNow(input));
 
-const callDetectProxy = (input: DetectProxyRpcInput) =>
-	callControl(input.projectSlug, (client) => client.DetectProxy(input));
+const callDetectProxy = () => callDaemon((client) => client.DetectProxy({}));
 
 const callPtyInput = (input: PtyInputRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -638,6 +658,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 			...(input.worktreePath != null
 				? { worktreePath: input.worktreePath }
 				: {}),
+			...(input.newWorktree ? { newWorktree: true } : {}),
 		}),
 	);
 
@@ -940,9 +961,7 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 	);
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client.SetLogLevel(input).pipe(Effect.asVoid),
-	);
+	callDaemon((client) => client.SetLogLevel(input).pipe(Effect.asVoid));
 
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
@@ -1036,15 +1055,13 @@ export async function updateInstanceRpc(
 }
 
 export async function scanNowRpc(
-	input: ScanNowRpcInput,
+	input: ScanNowRpcInput = {},
 ): Promise<ScanNowResponse> {
 	return await runTransportEffect(callScanNow(input));
 }
 
-export async function detectProxyRpc(
-	input: DetectProxyRpcInput,
-): Promise<DetectProxyResponse> {
-	return await runTransportEffect(callDetectProxy(input));
+export async function detectProxyRpc(): Promise<DetectProxyResponse> {
+	return await runTransportEffect(callDetectProxy());
 }
 
 export async function ptyInputRpc(input: PtyInputRpcInput): Promise<void> {

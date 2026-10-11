@@ -2,7 +2,7 @@
 // and leaf drainable services (KeepAwake, VersionChecker, StorageMonitor, PortScanner).
 // Finalizers remove process listeners / drain services to prevent leaks in tests.
 
-import { NodeFileSystem } from "@effect/platform-node";
+import { NodeCommandExecutor, NodeFileSystem } from "@effect/platform-node";
 import {
 	Cause,
 	Context,
@@ -32,7 +32,10 @@ import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import { ServerBuildUpdateLive } from "../../../server/build-update.js";
-import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
+import {
+	BrowserRpcConnectionsLive,
+	makeRoutedWsRpcServerLayer,
+} from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -103,7 +106,7 @@ import {
 	DaemonWsRpcHandlersLive,
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
-import { KeepAwakeLive, KeepAwakeTag } from "./keep-awake-layer.js";
+import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
@@ -132,6 +135,7 @@ import {
 	VersionCheckerLive,
 	VersionCheckerTag,
 } from "./version-checker-layer.js";
+import { makeWorktreeLive } from "./worktree-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
 export class ShutdownSignalTag extends Context.Tag("ShutdownSignal")<
@@ -255,7 +259,22 @@ export const ProcessErrorHandlerLayer = Layer.scopedDiscard(
 export const makeKeepAwakeLive = (options?: {
 	command?: string;
 	args?: string[];
-}) => KeepAwakeLive(options);
+}) =>
+	Layer.unwrapEffect(
+		Effect.gen(function* () {
+			const state = yield* Ref.get(yield* DaemonStateTag);
+			const command = options?.command ?? state.keepAwakeCommand;
+			const args = options?.args ?? state.keepAwakeArgs;
+			return KeepAwakeLive({
+				enabled: state.keepAwake,
+				...(command !== undefined && { command }),
+				...(args !== undefined && { args }),
+			});
+		}),
+	).pipe(
+		Layer.provide(NodeCommandExecutor.layer),
+		Layer.provide(NodeFileSystem.layer),
+	);
 
 /**
  * VersionChecker layer — uses the pure Effect VersionCheckerLive layer.
@@ -647,6 +666,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			),
 		),
 		DaemonEventBusLive,
+		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),
@@ -709,6 +729,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				...current,
 				configDir,
 				socketPath,
+				keepAwake: options.initialConfig.keepAwake,
+				...(options.initialConfig.keepAwakeCommand !== undefined && {
+					keepAwakeCommand: options.initialConfig.keepAwakeCommand,
+				}),
+				...(options.initialConfig.keepAwakeArgs !== undefined && {
+					keepAwakeArgs: options.initialConfig.keepAwakeArgs,
+				}),
 			})),
 		),
 	);
@@ -760,7 +787,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			UsageLive().pipe(Layer.provideMerge(withOpenCodeInstances)),
+			Layer.merge(makeWorktreeLive(configDir), UsageLive()).pipe(
+				Layer.provideMerge(withOpenCodeInstances),
+			),
 		),
 	);
 
@@ -768,21 +797,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(registries),
 	);
 
-	const withDaemonHandle = DaemonHandleLive.pipe(
+	const withKeepAwake = makeKeepAwakeLive(options.keepAwake).pipe(
 		Layer.provideMerge(withRelayCache),
 	);
-
-	const keepAwakeLayer =
-		options.keepAwake !== undefined
-			? makeKeepAwakeLive(options.keepAwake)
-			: Layer.succeed(KeepAwakeTag, {
-					activate: () => Effect.void,
-					deactivate: () => Effect.void,
-					isActive: () => Effect.succeed(false),
-					isSupported: () => Effect.succeed(false),
-				});
-	const withDaemonControl = keepAwakeLayer.pipe(
-		Layer.provideMerge(withDaemonHandle),
+	const withDaemonControl = DaemonHandleLive.pipe(
+		Layer.provideMerge(withKeepAwake),
 	);
 
 	// Tier 3: Servers (imperative lifecycle)

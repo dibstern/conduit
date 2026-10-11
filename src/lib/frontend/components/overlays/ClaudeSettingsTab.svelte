@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type {
 		ClaudeSettingsOverrides,
 		JsonValue,
@@ -8,6 +9,7 @@
 		applyResolvedClaudeSettingsResponse,
 		beginClaudeSettingsResolution,
 		claudeSettingsState,
+		clearClaudeSettingEdits,
 		describeClaudeSettingProvenance,
 		failClaudeSettingsResolution,
 		getClaudeSettingValue,
@@ -43,10 +45,15 @@
 	import Button from "../ui/Button.svelte";
 	import Select from "../ui/Select.svelte";
 	import TextInput from "../ui/TextInput.svelte";
-	import Toggle from "../ui/Toggle.svelte";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
+	import SettingsRow from "../ui/SettingsRow.svelte";
 	import ClaudeSettingRow from "./ClaudeSettingRow.svelte";
 
 	const log = createFrontendLogger("claude-settings");
+	onMount(() => {
+		clearClaudeSettingEdits();
+		return clearClaudeSettingEdits;
+	});
 	let reloadInFlight = $state(false);
 	const sessionId = $derived(getCurrentSessionId());
 	const workspace = $derived(JSON.stringify(sessionId ? findSession(sessionId)?.workspace ?? null : null));
@@ -343,36 +350,12 @@
 	}
 </script>
 
-{#snippet autoCompactEnabledControl(label: string, description: string)}
-	<Toggle
-		{label}
-		{description}
-		checked={autoCompactEnabled === true}
-		disabled={autoCompactEnabledProvenance.locked}
-		onchange={() =>
-			void setOverride("autoCompactEnabled", autoCompactEnabled !== true)}
-		class="p-0"
-	/>
-{/snippet}
-
-{#snippet heading(forId: string | undefined, label: string, description: string)}
-	<div>
-		{#if forId}
-			<label for={forId} class="block font-semibold text-text mb-[2px]">{label}</label>
-		{:else}
-			<div class="font-semibold text-text mb-[2px]">{label}</div>
-		{/if}
-		<p>{description}</p>
-	</div>
-{/snippet}
-
-{#snippet defaultModelControl(label: string, description: string)}
-	{@render heading("claude-default-model", label, description)}
+{#snippet defaultModelControl()}
 	<Select
 		id="claude-default-model"
 		value={defaultModelValue}
 		onchange={updateDefaultModel}
-		class="w-full md:max-w-[320px]"
+		class="w-[220px] max-w-full"
 		data-testid="claude-setting-defaultModel-select"
 	>
 		{#if !discoveryState.defaultModelId}
@@ -393,6 +376,9 @@
 			</optgroup>
 		{/each}
 	</Select>
+{/snippet}
+
+{#snippet defaultModelNotes()}
 	{#if discoveryState.defaultVariant}
 		<p data-testid="claude-setting-defaultModel-thinking">
 			Thinking level: {discoveryState.defaultVariant}
@@ -403,19 +389,21 @@
 	</p>
 {/snippet}
 
-{#snippet defaultPermissionModeControl(label: string, description: string)}
-	{@render heading("claude-default-permission-mode", label, description)}
+{#snippet defaultPermissionModeControl()}
 	<Select
 		id="claude-default-permission-mode"
 		value={discoveryState.defaultPermissionMode}
 		onchange={updateDefaultPermissionMode}
-		class="w-full md:max-w-[320px]"
+		class="w-[220px] max-w-full"
 		data-testid="claude-setting-defaultPermissionMode-select"
 	>
 		{#each DEFAULT_MODE_OPTIONS as { mode, label: modeLabel } (mode)}
 			<option value={mode}>{modeLabel}</option>
 		{/each}
 	</Select>
+{/snippet}
+
+{#snippet defaultPermissionModeNotes()}
 	<p class="text-text-dimmer">
 		New sessions start in this mode; the approvals pill still overrides it for the session you're in. Claude Code ignores a default mode set in a project's settings files, so Conduit applies this one itself.
 	</p>
@@ -426,68 +414,34 @@
 	{/if}
 {/snippet}
 
-{#snippet autoCompactWindowControl(label: string, description: string)}
-	{@render heading("claude-auto-compact-window", label, description)}
-	<div class="w-[120px]">
-		<TextInput
-			id="claude-auto-compact-window"
-			type="number"
-			value={typeof autoCompactWindow === "number" ? autoCompactWindow : ""}
-			disabled={autoCompactEnabled === false ||
-				autoCompactWindowProvenance.locked}
-			data-testid="claude-setting-autoCompactWindow-input"
-			onchange={updateAutoCompactWindow}
-		/>
-	</div>
-{/snippet}
-
-{#snippet alwaysThinkingEnabledControl(label: string, description: string)}
-	<Toggle
-		{label}
-		{description}
-		checked={alwaysThinkingEnabled !== false}
-		disabled={alwaysThinkingEnabledProvenance.locked}
-		onchange={() =>
-			void setOverride(
-				"alwaysThinkingEnabled",
-				alwaysThinkingEnabled === false,
-			)}
-		class="p-0"
+{#snippet autoCompactWindowControl()}
+	<TextInput
+		id="claude-auto-compact-window"
+		type="number"
+		value={typeof autoCompactWindow === "number" ? autoCompactWindow : ""}
+		disabled={autoCompactEnabled === false ||
+			autoCompactWindowProvenance.locked}
+		class="w-[120px]"
+		data-testid="claude-setting-autoCompactWindow-input"
+		onchange={updateAutoCompactWindow}
 	/>
 {/snippet}
 
-{#snippet disableAllHooksControl(label: string, description: string)}
-	<Toggle
-		{label}
-		{description}
-		checked={disableAllHooks !== true}
-		disabled={disableAllHooksProvenance.locked}
-		onchange={() =>
-			void setOverride("disableAllHooks", disableAllHooks !== true)}
-		class="p-0"
+{#snippet cleanupPeriodDaysControl()}
+	<TextInput
+		id="claude-cleanup-period-days"
+		type="number"
+		min="1"
+		value={typeof cleanupPeriodDays === "number" ? cleanupPeriodDays : 30}
+		disabled={cleanupPeriodDaysProvenance.locked}
+		class="w-[120px]"
+		data-testid="claude-setting-cleanupPeriodDays-input"
+		onchange={updateCleanupPeriodDays}
 	/>
+	<span>days</span>
 {/snippet}
 
-{#snippet cleanupPeriodDaysControl(label: string, description: string)}
-	{@render heading("claude-cleanup-period-days", label, description)}
-	<div class="flex items-center gap-[8px]">
-		<div class="w-[120px]">
-			<TextInput
-				id="claude-cleanup-period-days"
-				type="number"
-				min="1"
-				value={typeof cleanupPeriodDays === "number" ? cleanupPeriodDays : 30}
-				disabled={cleanupPeriodDaysProvenance.locked}
-				data-testid="claude-setting-cleanupPeriodDays-input"
-				onchange={updateCleanupPeriodDays}
-			/>
-		</div>
-		<span>days</span>
-	</div>
-{/snippet}
-
-{#snippet attributionControl(label: string, description: string)}
-	{@render heading(undefined, label, description)}
+{#snippet attributionEditor()}
 	<div class="flex flex-col gap-[4px]">
 		<label for="claude-attribution-commit" class="text-text">Commit attribution</label>
 		<TextInput
@@ -515,7 +469,7 @@
 	<p class="text-text-dimmer">
 		Leave a box empty to add no attribution at all. Reset restores the default.
 	</p>
-	<Toggle
+	<SettingsRow
 		label="Session link"
 		description="Append the claude.ai session link to commits and pull requests created from web sessions."
 		checked={attributionSessionUrl !== false}
@@ -529,86 +483,100 @@
 	/>
 {/snippet}
 
-<h3 class="pt-[2px] text-[12px] font-semibold text-text">Conduit defaults</h3>
-<p>Conduit applies these when it starts a session.</p>
-
-<ClaudeSettingRow
-	key="defaultModel"
-	label="Default model"
-	description="The model Conduit starts a new session with."
-	control={defaultModelControl}
-/>
-
-<ClaudeSettingRow
-	key="defaultPermissionMode"
-	label="Default approval mode"
-	description="How Conduit handles tool approvals in a session you haven't set a mode for."
-	control={defaultPermissionModeControl}
-/>
+<SettingsGroup
+	title="Conduit defaults"
+	caption="Conduit applies these when it starts a session."
+>
+	<ClaudeSettingRow
+		key="defaultModel"
+		label="Default model"
+		description="The model Conduit starts a new session with."
+		labelFor="claude-default-model"
+		control={defaultModelControl}
+		below={defaultModelNotes}
+	/>
+	<ClaudeSettingRow
+		key="defaultPermissionMode"
+		label="Default approval mode"
+		description="How Conduit handles tool approvals in a session you haven't set a mode for."
+		labelFor="claude-default-permission-mode"
+		control={defaultPermissionModeControl}
+		below={defaultPermissionModeNotes}
+	/>
+</SettingsGroup>
 
 <p class="text-text-dimmer">
 	Permission rules aren't editable here. Conduit runs its own approval prompts,
 	and a settings rule that auto-allows a tool would silently bypass them.
 </p>
 
-<h3 class="pt-[12px] text-[12px] font-semibold text-text">Claude settings</h3>
-<p>
-	Claude reads these when a session starts. A session that's already running keeps the settings it started with until you reload it.
-</p>
-
-<ClaudeSettingRow
-	key="autoCompactEnabled"
-	label="Auto-compact"
-	description="Compacts the conversation automatically when the context window fills up."
-	provenance={autoCompactEnabledProvenance}
-	onreset={() => resetOverride("autoCompactEnabled")}
-	control={autoCompactEnabledControl}
-/>
-
-<ClaudeSettingRow
-	key="autoCompactWindow"
-	label="Auto-compact threshold"
-	description="How much of the context window to leave before compacting."
-	provenance={autoCompactWindowProvenance}
-	onreset={() => resetOverride("autoCompactWindow")}
-	control={autoCompactWindowControl}
-/>
-
-<ClaudeSettingRow
-	key="alwaysThinkingEnabled"
-	label="Extended thinking"
-	description="Claude thinks before answering on models that support it. Turning this off disables thinking entirely."
-	provenance={alwaysThinkingEnabledProvenance}
-	onreset={() => resetOverride("alwaysThinkingEnabled")}
-	control={alwaysThinkingEnabledControl}
-/>
-
-<ClaudeSettingRow
-	key="disableAllHooks"
-	label="Hooks and status line"
-	description="Run your configured hooks and status line. Turning this off disables every hook, including any you rely on to block unsafe commands."
-	provenance={disableAllHooksProvenance}
-	onreset={() => resetOverride("disableAllHooks")}
-	control={disableAllHooksControl}
-/>
-
-<ClaudeSettingRow
-	key="cleanupPeriodDays"
-	label="Keep transcripts for"
-	description="How long Claude keeps chat transcripts on disk before deleting them."
-	provenance={cleanupPeriodDaysProvenance}
-	onreset={() => resetOverride("cleanupPeriodDays")}
-	control={cleanupPeriodDaysControl}
-/>
-
-<ClaudeSettingRow
-	key="attribution"
-	label="Attribution"
-	description="What Claude adds to commits and pull requests it creates."
-	provenance={attributionProvenance}
-	onreset={() => resetOverride("attribution")}
-	control={attributionControl}
-/>
+<SettingsGroup
+	title="Claude settings"
+	caption="Claude reads these when a session starts. A session that's already running keeps the settings it started with until you reload it."
+>
+	<ClaudeSettingRow
+		key="autoCompactEnabled"
+		label="Auto-compact"
+		description="Compacts the conversation automatically when the context window fills up."
+		provenance={autoCompactEnabledProvenance}
+		onreset={() => resetOverride("autoCompactEnabled")}
+		checked={autoCompactEnabled === true}
+		disabled={autoCompactEnabledProvenance.locked}
+		onchange={() =>
+			void setOverride("autoCompactEnabled", autoCompactEnabled !== true)}
+	/>
+	<ClaudeSettingRow
+		key="autoCompactWindow"
+		label="Auto-compact threshold"
+		description="How much of the context window to leave before compacting."
+		provenance={autoCompactWindowProvenance}
+		onreset={() => resetOverride("autoCompactWindow")}
+		labelFor="claude-auto-compact-window"
+		control={autoCompactWindowControl}
+	/>
+	<ClaudeSettingRow
+		key="alwaysThinkingEnabled"
+		label="Extended thinking"
+		description="Claude thinks before answering on models that support it. Turning this off disables thinking entirely."
+		provenance={alwaysThinkingEnabledProvenance}
+		onreset={() => resetOverride("alwaysThinkingEnabled")}
+		checked={alwaysThinkingEnabled !== false}
+		disabled={alwaysThinkingEnabledProvenance.locked}
+		onchange={() =>
+			void setOverride(
+				"alwaysThinkingEnabled",
+				alwaysThinkingEnabled === false,
+			)}
+	/>
+	<ClaudeSettingRow
+		key="disableAllHooks"
+		label="Hooks and status line"
+		description="Run your configured hooks and status line. Turning this off disables every hook, including any you rely on to block unsafe commands."
+		provenance={disableAllHooksProvenance}
+		onreset={() => resetOverride("disableAllHooks")}
+		checked={disableAllHooks !== true}
+		disabled={disableAllHooksProvenance.locked}
+		onchange={() =>
+			void setOverride("disableAllHooks", disableAllHooks !== true)}
+	/>
+	<ClaudeSettingRow
+		key="cleanupPeriodDays"
+		label="Keep transcripts for"
+		description="How long Claude keeps chat transcripts on disk before deleting them."
+		provenance={cleanupPeriodDaysProvenance}
+		onreset={() => resetOverride("cleanupPeriodDays")}
+		labelFor="claude-cleanup-period-days"
+		control={cleanupPeriodDaysControl}
+	/>
+	<ClaudeSettingRow
+		key="attribution"
+		label="Attribution"
+		description="What Claude adds to commits and pull requests it creates."
+		provenance={attributionProvenance}
+		onreset={() => resetOverride("attribution")}
+		below={attributionEditor}
+	/>
+</SettingsGroup>
 
 <div class="flex items-center gap-[10px] py-[8px]">
 	<p class="flex-1 text-text-dimmer">

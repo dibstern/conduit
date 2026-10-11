@@ -796,6 +796,7 @@ export const ClaudeSDKTaskStartedMessageSchema = Schema.Struct({
 	workflow_name: Schema.optional(Schema.String),
 	prompt: Schema.optional(Schema.String),
 	skip_transcript: Schema.optional(Schema.Boolean),
+	is_backgrounded: Schema.optional(Schema.Boolean),
 });
 
 export const ClaudeSDKTaskUpdatedMessageSchema = Schema.Struct({

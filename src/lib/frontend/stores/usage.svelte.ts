@@ -4,6 +4,11 @@ import type {
 } from "../../contracts/limit-recovery.js";
 import { DEFAULT_USAGE_LIMITS } from "../../contracts/limit-recovery.js";
 import type { Immutable, SessionInfo } from "../types.js";
+import {
+	type PlanUsageWindow,
+	planUsageWindows,
+	usageDisplay,
+} from "../utils/continuation.js";
 import { discoveryState, getEffectiveInstanceId } from "./discovery.svelte.js";
 import { getInstanceById, instanceState } from "./instance.svelte.js";
 
@@ -28,6 +33,55 @@ export function composerAccountId(
 		? (session.resumes?.at(-1)?.instanceId ??
 				discoveryState.sessionInstanceIds[session.id])
 		: getEffectiveInstanceId();
+}
+
+/** Include every Claude account so changing the switch order keeps them all. */
+export function orderedSettingsUsageAccounts(): UsageReading[] {
+	const order = usageState.limits.order;
+	const rank = (id: string) => {
+		const index = order.indexOf(id);
+		return index === -1 ? order.length : index;
+	};
+	return instanceState.instances
+		.filter((instance) => instance.driver === "claude")
+		.sort((a, b) => rank(a.id) - rank(b.id))
+		.map(
+			(instance) =>
+				usageState.readings.find(
+					(reading) => reading.accountId === instance.id,
+				) ?? {
+					accountId: instance.id,
+					harness: "claude",
+					status: "unknown",
+					windows: [],
+					readAt: 0,
+					stale: false,
+				},
+		);
+}
+
+/** The Usage rail dot and headline share the same ordered warning. */
+export function usageAlert(
+	accounts: readonly UsageReading[],
+	warnAt: UsageLimitsSetting["warnAt"],
+):
+	| { level: "limited"; account: UsageReading }
+	| { level: "runs_out"; account: UsageReading; window: PlanUsageWindow }
+	| null {
+	const limited = accounts.find(
+		(account) => usageDisplay(account, warnAt).level === "limited",
+	);
+	if (limited) return { level: "limited", account: limited };
+	for (const kind of ["seven_day", "five_hour"] as const) {
+		for (const account of accounts) {
+			const window = planUsageWindows(account).find(
+				(window) =>
+					window.kind === kind && window.forecast?.kind === "runs_out",
+			);
+			if (window) return { level: "runs_out", account, window };
+		}
+	}
+	return null;
 }
 
 /** The footer and Usage settings show the same accounts in switch order. */

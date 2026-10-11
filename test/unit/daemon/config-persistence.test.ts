@@ -34,7 +34,6 @@ function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: 3,
-		dangerouslySkipPermissions: false,
 		projects: [],
 		...overrides,
 	};
@@ -124,7 +123,10 @@ describe("loadDaemonConfig", () => {
 	it("returns parsed config from valid JSON file", () => {
 		const config = makeSampleConfig({ pid: 99999, port: 3000 });
 		mkdirSync(tempDir, { recursive: true });
-		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(config));
+		writeFileSync(
+			join(tempDir, "daemon.json"),
+			JSON.stringify({ ...config, dangerouslySkipPermissions: true }),
+		);
 
 		const loaded = loadDaemonConfig(tempDir);
 		expect(loaded).not.toBeNull();
@@ -132,6 +134,7 @@ describe("loadDaemonConfig", () => {
 		expect(loaded.pid).toBe(99999);
 		expect(loaded.port).toBe(3000);
 		expect(loaded.pinHash).toBeNull();
+		expect(loaded).not.toHaveProperty("dangerouslySkipPermissions");
 	});
 
 	it("returns null when file doesn't exist", () => {
@@ -196,7 +199,6 @@ describe("saveDaemonConfig", () => {
 			tls: true,
 			debug: true,
 			keepAwake: true,
-			dangerouslySkipPermissions: true,
 			projects: [
 				{
 					path: "/home/user/project",
@@ -409,7 +411,6 @@ describe("DaemonConfig with instances", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 			instances: [
 				{
@@ -441,7 +442,6 @@ describe("DaemonConfig with instances", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 		};
 		await saveDaemonConfig(config, tempDir);
@@ -459,7 +459,6 @@ describe("DaemonConfig with instances", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [
 				{
 					path: "/src/myapp",

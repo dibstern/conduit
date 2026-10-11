@@ -268,4 +268,54 @@ describe("Claude provider runtime boundary", () => {
 			}),
 		);
 	});
+
+	it("declares per-task stop and forwards it without interrupting or closing the query", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const started = yield* Deferred.make<void>();
+					const released = yield* Deferred.make<void>();
+					const query = makeBlockingQuery(started, released);
+					let options: SDKOptions | undefined;
+					const runtime = yield* makeClaudeProviderRuntime({
+						runnerFactory: makeClaudeSessionRunner,
+						workspaceRoot: "/tmp/ws",
+						queryFactory: (params) => {
+							options = params.options;
+							return query;
+						},
+					});
+					const instance = new ClaudeProviderInstance(runtime);
+					const turn = yield* Effect.fork(
+						instance
+							.sendTurnEffect(
+								makeBaseSendTurnInput({
+									sessionId: "task-stop",
+									model: { providerId: "claude", modelId: "sonnet" },
+								}),
+							)
+							.pipe(Effect.either),
+					);
+					yield* Deferred.await(started);
+					expect(options?.perTaskStopAffordance).toBe(true);
+					yield* instance.stopTaskEffect("task-stop", "shell");
+					expect(query.stopTask).toHaveBeenCalledWith("shell");
+					expect(query.interrupt).not.toHaveBeenCalled();
+					expect(query.close).not.toHaveBeenCalled();
+					vi.mocked(query.stopTask).mockRejectedValueOnce(
+						new Error("SDK unavailable"),
+					);
+					const failure = yield* Effect.either(
+						instance.stopTaskEffect("task-stop", "shell"),
+					);
+					expect(failure._tag).toBe("Left");
+					expect(query.close).not.toHaveBeenCalled();
+					// Composer Stop retains its existing teardown behavior.
+					yield* instance.interruptTurnEffect("task-stop");
+					expect(query.close).toHaveBeenCalledOnce();
+					yield* Fiber.join(turn);
+				}),
+			),
+		);
+	});
 });

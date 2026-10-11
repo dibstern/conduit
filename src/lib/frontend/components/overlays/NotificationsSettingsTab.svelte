@@ -1,16 +1,17 @@
 <script lang="ts">
-	import Toggle from "../ui/Toggle.svelte";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
+	import SettingsRow from "../ui/SettingsRow.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import { saveNotifSettings, type NotifSettings } from "../../utils/notif-settings.js";
+	import { getNotifSettings, saveNotifSettings } from "../../utils/notif-settings.js";
 	import { setPushActive } from "../../stores/ws-notifications.js";
 	const log = createFrontendLogger("push");
-	let { state = $bindable() }: { state: {
-		notifSettings: NotifSettings;
-		pushBlocked: boolean;
-		browserBlocked: boolean;
-		pushBusy: boolean;
-		pushError: string;
-	}} = $props();
+	let state = $state({
+		notifSettings: getNotifSettings(),
+		pushBlocked: typeof Notification !== "undefined" && Notification.permission === "denied",
+		browserBlocked: typeof Notification !== "undefined" && Notification.permission === "denied",
+		pushBusy: false,
+		pushError: "",
+	});
 	const pushUnavailable =
 		typeof Notification === "undefined" ||
 		!("serviceWorker" in navigator) ||
@@ -81,25 +82,27 @@
 	}
 </script>
 
-<Toggle
-	label="Push notifications"
-	description="Receive push notifications even when the tab is closed"
-	checked={state.notifSettings.push}
-	onchange={togglePush}
-	disabled={state.pushBusy || pushUnavailable}
-/>
-<Toggle
-	label="Browser alerts"
-	description="Show desktop notifications when tasks complete"
-	checked={state.notifSettings.browser}
-	onchange={toggleBrowser}
-/>
-<Toggle
-	label="Sound"
-	description="Play a sound when notifications are triggered"
-	checked={state.notifSettings.sound}
-	onchange={toggleSound}
-/>
+<SettingsGroup>
+	<SettingsRow
+		label="Push notifications"
+		description="Receive push notifications even when the tab is closed"
+		checked={state.notifSettings.push}
+		onchange={togglePush}
+		disabled={state.pushBusy || pushUnavailable}
+	/>
+	<SettingsRow
+		label="Browser alerts"
+		description="Show desktop notifications when tasks complete"
+		checked={state.notifSettings.browser}
+		onchange={toggleBrowser}
+	/>
+	<SettingsRow
+		label="Sound"
+		description="Play a sound when notifications are triggered"
+		checked={state.notifSettings.sound}
+		onchange={toggleSound}
+	/>
+</SettingsGroup>
 {#if pushUnavailable}
 	<p class="text-text-dimmer">Push notifications require HTTPS. Enable a certificate in the CLI settings.</p>
 {:else if state.pushError}

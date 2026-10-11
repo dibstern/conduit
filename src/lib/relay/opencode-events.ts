@@ -284,12 +284,10 @@ export function isSessionErrorEvent(
 // Verified against a live opencode 1.17.18 server (wire capture): the real
 // `permission.replied` event is { sessionID, requestID, reply }, where
 // `requestID` matches the asked event's `properties.id` and `reply` is one of
-// "once" | "always" | "reject". NOTE: the npm @opencode-ai/sdk@1.17.18
-// generated types disagree with the server binary here — they declare
-// { sessionID, permissionID, response } (those are the reply *request* body
-// field names, not the event). Follow the wire, not the SDK types. Older code
-// read `properties.id` / `properties.permissionID`, so the guard was always
-// false against a real server and pending permissions were never cleared.
+// "once" | "always" | "reject". The v2 SDK's EventPermissionReplied type
+// agrees. Older code read `properties.id` / `properties.permissionID`, so the
+// guard was always false against a real server and pending permissions were
+// never cleared.
 export interface PermissionRepliedEvent extends SSEEventBase {
 	type: "permission.replied";
 	properties: {
@@ -431,27 +429,11 @@ export interface FileWatcherUpdatedEvent extends SSEEventBase {
 	};
 }
 
-export type FileEvent = FileEditedEvent | FileWatcherUpdatedEvent;
-
-export function isFileEvent(event: unknown): event is FileEvent {
-	if (!hasProps(event)) return false;
-	if (event.type !== "file.edited" && event.type !== "file.watcher.updated") {
-		return false;
-	}
-	return typeof event.properties["file"] === "string";
-}
-
 export interface InstallationUpdateEvent extends SSEEventBase {
 	type: "installation.update-available";
 	properties: {
 		version?: string;
 	};
-}
-
-export function isInstallationUpdateEvent(
-	event: unknown,
-): event is InstallationUpdateEvent {
-	return hasProps(event) && event.type === "installation.update-available";
 }
 
 export interface TodoUpdatedEvent extends SSEEventBase {

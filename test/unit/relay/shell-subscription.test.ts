@@ -71,7 +71,6 @@ import {
 	SessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
 import {
-	MOCK_PROJECT_DIR,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -462,7 +461,7 @@ describe("subscribeShell", () => {
 				});
 				expect(sdkForkSession).toHaveBeenCalledWith(
 					"sdk-parent",
-					expect.objectContaining({ dir: MOCK_PROJECT_DIR }),
+					expect.not.objectContaining({ dir: expect.any(String) }),
 				);
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
@@ -626,9 +625,7 @@ describe("subscribeShell", () => {
 					_tag: "Left",
 					left: { message: expect.stringContaining("Claude transcript") },
 				});
-				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
-					dir: MOCK_PROJECT_DIR,
-				});
+				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {});
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	for (const messageId of ["fork-message", undefined]) {
@@ -1220,7 +1217,7 @@ describe("subscribeShell", () => {
 						if (delta._tag !== "upsert") throw new Error("expected upsert");
 						return delta.item.attention;
 					});
-				expect(yield* attentionAfter(["local_agent"])).toBe("working");
+				expect(yield* attentionAfter(["local_workflow"])).toBe("working");
 				expect(yield* attentionAfter(["local_bash"])).toBe("monitoring");
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);

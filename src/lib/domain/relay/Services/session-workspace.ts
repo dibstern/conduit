@@ -1,5 +1,6 @@
 import { Context, type Effect } from "effect";
 import type {
+	SessionWorkspace as RecordedWorkspace,
 	WorkspaceMoveCause,
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
@@ -9,7 +10,7 @@ import type {
 } from "./session-command.js";
 
 export interface SessionWorkspace {
-	/** Serialize launch-folder reads with draft workspace initialization. */
+	/** Serialize launch-folder reads with draft and fork workspace initialization. */
 	readonly withLaunch: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;
@@ -20,12 +21,20 @@ export interface SessionWorkspace {
 		sessionId: string,
 		path: string,
 		cause: WorkspaceMoveCause,
+		origin?: RecordedWorkspace["origin"],
 	) => Effect.Effect<string, WorkspaceMoveError | SessionCommandError>;
+	/** Copy a parent's recorded mapping and origin into a fork's launch event. */
+	readonly inherit: (
+		sessionId: string,
+		parentSessionId: string,
+		options?: Pick<ApplySessionCommandOptions, "project">,
+	) => Effect.Effect<string, SessionCommandError>;
 	/** Resolve and warm a target before acquiring a project commit permit. */
 	readonly resolve: (
 		sessionId: string,
 		path: string,
 		cause: WorkspaceMoveCause,
+		origin?: RecordedWorkspace["origin"],
 	) => Effect.Effect<
 		ResolvedWorkspaceTarget,
 		WorkspaceMoveError | SessionCommandError
@@ -56,6 +65,7 @@ export interface ResolvedWorkspaceTarget {
 	readonly projectFolder: string;
 	readonly reset: boolean;
 	readonly provider: string;
+	readonly origin?: RecordedWorkspace["origin"];
 }
 
 export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<

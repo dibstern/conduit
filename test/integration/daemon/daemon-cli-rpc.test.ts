@@ -325,9 +325,7 @@ describe("CLI and browser daemon RPC parity", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const client = yield* RpcClient.make(WsRpcGroup);
-						return yield* client.RestartWithConfig({
-							config: { keepAwake: true },
-						});
+						return yield* client.RestartWithConfig({});
 					}),
 				).pipe(Effect.provide(browserProtocol)),
 			);
@@ -335,7 +333,7 @@ describe("CLI and browser daemon RPC parity", () => {
 			await daemon.stopped;
 			expect(
 				JSON.parse(readFileSync(join(configDir, "daemon.json"), "utf-8")),
-			).toMatchObject({ keepAwake: true });
+			).toMatchObject({ keepAwake: false });
 		} finally {
 			await daemon?.stop();
 			for (const server of servers) {

@@ -66,7 +66,6 @@ export interface DaemonConfig {
 	keepAwakeCommand?: string;
 	/** Arguments for the keep-awake command override. */
 	keepAwakeArgs?: string[];
-	dangerouslySkipPermissions: boolean;
 	/**
 	 * Claude Code config directory (CLAUDE_CONFIG_DIR) for Claude SDK
 	 * subprocesses. Applied to process.env at daemon startup; restart to change.
@@ -188,7 +187,6 @@ export const DaemonConfigSchema = Schema.Struct({
 	usageLimits: Schema.optional(UsageLimitsSettingSchema),
 	keepAwakeCommand: Schema.optional(Schema.String),
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
-	dangerouslySkipPermissions: Schema.Boolean,
 	claudeConfigDir: Schema.optional(Schema.String),
 	newSessionProject: Schema.optional(Schema.String),
 	projects: Schema.Array(DaemonProjectSchema),
@@ -375,7 +373,6 @@ export function defaultDaemonConfig(): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
-		dangerouslySkipPermissions: false,
 		projects: [],
 	};
 }

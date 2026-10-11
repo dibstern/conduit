@@ -101,6 +101,7 @@ export {
 	SetSessionSettled,
 	SnoozeSession,
 	StartInstance,
+	StopBackgroundTask,
 	StopInstance,
 	SubmitInput,
 	type SubmitInputResponse,

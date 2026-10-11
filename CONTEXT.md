@@ -41,21 +41,38 @@ discovery is best-effort and never rejects a project save or daemon startup.
 
 ## Session Workspace
 
-**Session Workspace** is a session's recorded mapping from project folders to
-existing git worktrees, with the move's cause and the worktrees' origin. Only the
+**Session Workspace** is where a session runs: Local uses the project's folders;
+New worktree uses session-owned git worktrees on one generated branch. Its
+recorded mapping from Project Folders to worktrees includes the move's cause and
+origin, `existing` or `conduit`. Only the
 Session Workspace service writes it, as a `session.workspace_changed` canonical
-event through the session-command seam. An empty map projects to NULL, meaning
-the project's main folders. Existing sessions keep that default. Branch names
+event through the session-command seam. An empty map means the project's main
+folders; its projection keeps fallback and origin metadata when needed, otherwise
+it is NULL. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
-Moves require the session provider's `supportsWorktree` capability. OpenCode
-moves are refused before recording an event; Claude supports moves.
+Conduit's Worktree daemon service creates a checkout under
+`<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
+then the Session Workspace service records its launch move. It starts from the
+folder's committed HEAD on its current branch. Uncommitted changes stay in the
+original checkout. Creation or launch failure rolls back the checkout and its
+new branch. These worktrees cannot become projects or Project Folders.
 
-**Effective Working Directory** is the primary project folder's mapped worktree,
+Direct user moves require the session provider's `supportsWorktree` capability.
+OpenCode refuses those moves before recording an event; Claude supports moves.
+
+**Effective Working Directory** is the primary Project Folder's worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
-session's git pill, next provider launch, new terminals and file reads use it.
-The file tree and mention completion list that folder. Already-open terminals
-keep their start folder. Other launch folders are the
+session's git pill and next provider launch use it; new terminals default to it
+and the picker can start one in any Effective Folder.
+**Effective Folders** are each Project Folder's session worktree when mapped,
+otherwise the Project Folder itself. A worktree is session state, not a project.
+The file tree lists every Effective Folder, each Project Folder mapped through
+the workspace, as a labelled root, primary first. Single-folder projects keep
+their existing tree without an extra root row. File list and content requests
+can target a root; requests without one still use the Effective Working
+Directory. Mention completion continues to list that directory. Already-open
+terminals keep their start folder. Other launch folders are the
 remaining project folders mapped through the workspace. A user move updates the
 session immediately and takes effect on the next turn, leaving a running turn
 undisturbed.
@@ -79,6 +96,11 @@ Successful tool declarations also acknowledge a user move to the same path.
 metadata. A user move remains pending until a later startup cwd or successful
 worktree declaration acknowledges its effective working directory. Both states
 survive daemon restarts without additional session columns.
+
+At turn start, a missing recorded worktree with origin `existing` moves back to
+the main folder with cause `missing`, using the same pending Claude directive
+rules as a user move; a missing main folder still fails. Forks copy the parent's
+complete worktrees map and origin as a launch move before their first turn.
 
 ## Workspace Hint
 

@@ -166,7 +166,7 @@ Scenario Outline: warnings off and readings below the chosen threshold suppress 
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the warnWk state
   Then the usage warning strip is visible
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I select the Usage warning choice <warnAt>
   Then the Usage warning choice <warnAt> is selected
   When I close settings

@@ -9,6 +9,8 @@
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
+	import TaskDrawer from "../session/TaskDrawer.svelte";
+	import { taskDrawer } from "../session/background-tasks.svelte.js";
 	import { activeSessionView, matchSessionViewShortcut } from "./session-views.js";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
@@ -21,6 +23,7 @@
 	import ImageLightbox from "../overlays/ImageLightbox.svelte";
 	import QrModal from "../overlays/QrModal.svelte";
 	import SettingsPanel from "../overlays/SettingsPanel.svelte";
+	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
 	import DebugPanel from "../debug/DebugPanel.svelte";
 	import InfoPanels from "../overlays/InfoPanels.svelte";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
@@ -73,7 +76,8 @@
 
 	let qrVisible = $state(false);
 	let settingsVisible = $state(false);
-	let settingsInitialTab = $state<string | undefined>();
+	let settingsInitialTab = $state<SettingsSection | undefined>();
+	let settingsInitialAnchor = $state<SettingsOpenDetail["anchor"]>();
 	let debugPanelVisible = $state(false);
 
 	const TERMINAL_MIN_HEIGHT = 100;
@@ -453,9 +457,10 @@
 		const slug = attachedProjectState.slug;
 		const sessionId = getCurrentSessionId();
 		const session = sessionId ? findSession(sessionId) : undefined;
-		const primary = projectState.projects.find((project) => project.slug === slug)?.folders[0] ?? "";
+		const folders = projectState.projects.find((project) => project.slug === slug)?.folders ?? [];
+		const primary = folders[0] ?? "";
 		const directory = effectiveWorkingDirectory(primary, session?.workspace);
-		return JSON.stringify([slug, sessionId, directory]);
+		return JSON.stringify([slug, sessionId, directory, folders, session?.workspace]);
 	});
 	$effect(() => {
 		const scope = fileScope;
@@ -496,6 +501,16 @@
 			viewTodos(project, null);
 			viewInputDraft(project, null);
 		};
+	});
+	// The task drawer belongs to the session it was opened from.
+	$effect(() => {
+		void sessionState.currentId;
+		return () => {
+			taskDrawer.task = null;
+		};
+	});
+	$effect(() => {
+		if (sessionViewState.compact) taskDrawer.task = null;
 	});
 	// No null cleanup: moving within a family keeps its subscription.
 	$effect(() => {
@@ -653,10 +668,11 @@
 	// Settings panel event bridge (SessionBar dispatches "settings:open")
 
 	$effect(() => {
-		function onSettingsOpen(e: Event) {
-			const detail = (e as CustomEvent).detail;
+		function onSettingsOpen(e: WindowEventMap["settings:open"]) {
+			const detail = e.detail;
 			// A generic open leaves this undefined: phone then starts on the section list.
-			settingsInitialTab = detail?.tab;
+			settingsInitialTab = detail?.section;
+			settingsInitialAnchor = detail?.anchor;
 			settingsVisible = true;
 		}
 		window.addEventListener("settings:open", onSettingsOpen);
@@ -805,7 +821,7 @@
 							</div>
 						{/if}
 						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "padding-top: var(--phone-chrome-clearance);" : `height: ${terminalHeight}px;`}>
-							<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+							<TerminalPanel folders={fileTreeState.roots} onTabBarTouchStart={handleTabBarTouchStart} />
 						</div>
 					{/if}
 				</div>
@@ -851,6 +867,9 @@
 						{#if uiState.fileViewerOpen}<div class="absolute inset-0 flex min-h-0"><FileViewer pane {paneTitle} {paneActions} visible onClose={closeFileViewer} /></div>{/if}
 					</div>
 				{/if}
+				{#if !sessionViewState.compact && taskDrawer.task}
+					<TaskDrawer task={taskDrawer.task} />
+				{/if}
 			</div>
 			<ViewsRail />
 		</div>
@@ -872,7 +891,7 @@
 <NotificationStack />
 <DeepSearch />
 <QrModal visible={qrVisible} onClose={handleQrClose} />
-<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} onClose={() => (settingsVisible = false)} />
+<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} initialAnchor={settingsInitialAnchor} onClose={() => (settingsVisible = false)} />
 {#if featureFlags.debug}
 	<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
 {/if}

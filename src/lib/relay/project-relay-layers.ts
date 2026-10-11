@@ -23,6 +23,7 @@ import {
 	makeConfigWriterLive,
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import type { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -235,6 +236,9 @@ export function createProjectRelayLayers({
 		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		claudeQueryFactory: claudeSdk.query,
+		...(config.claudeSdk?.subagentSdk && {
+			claudeSubagentSdk: config.claudeSdk.subagentSdk,
+		}),
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
 		extraFolders: config.extraFolders ?? [],
@@ -525,7 +529,13 @@ export function createProjectRelayLayers({
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
 	const sseStreamLayer = SSEStreamLive.pipe(
-		Layer.provide(Layer.mergeAll(openCodeInstancesLayer, configLayer)),
+		Layer.provide(
+			Layer.mergeAll(
+				openCodeInstancesLayer,
+				configLayer,
+				persistenceEffectLayer,
+			),
+		),
 	);
 	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
@@ -589,6 +599,9 @@ export function createProjectRelayLayers({
 
 	const coreBridgeLayers = Layer.mergeAll(
 		daemonConfigLayer,
+		config.worktreeContext
+			? Layer.succeedContext(config.worktreeContext)
+			: makeWorktreeLive(config.configDir ?? getConfigDir()),
 		usageLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Effect.makeSemaphore(1)),
@@ -599,7 +612,7 @@ export function createProjectRelayLayers({
 		sseStreamLayer,
 		projectManagementServiceLayer,
 		daemonSessionQueryServiceLayer,
-		DirectoryListingServiceLive,
+		DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
 		pendingInteractionServiceLayer,

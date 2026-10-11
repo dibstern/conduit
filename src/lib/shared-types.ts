@@ -172,36 +172,6 @@ export interface ContextWindowOption {
 	isDefault?: boolean | undefined;
 }
 
-/** The catalog entry a model id names. Turns and settings keep whatever id the
- *  catalog advertised when they were written, and Claude's catalog moves its
- *  `[1m]` context-window marker on and off (`opus[1m]` became `opus`), so an
- *  exact miss falls back to the same model with or without it. The model's own
- *  provider is searched first: OpenCode and Claude can list the same id with
- *  different options. Mirrors the frontend's `modelMatchesId`. */
-export function findCatalogModel<
-	M extends {
-		id: string;
-		routingOptions?: readonly ContextWindowOption[] | undefined;
-	},
->(
-	providers: ReadonlyArray<{ id: string; models: ReadonlyArray<M> }>,
-	model: { providerID: string; modelID: string } | undefined,
-): M | undefined {
-	if (!model) return undefined;
-	const identity = (id: string) => id.replace(/\[1m\]$/i, "");
-	const exact = (entry: M) =>
-		entry.id === model.modelID ||
-		entry.routingOptions?.some((option) => option.value === model.modelID);
-	const own =
-		providers.find((provider) => provider.id === model.providerID)?.models ??
-		[];
-	return (
-		own.find(exact) ??
-		providers.flatMap((provider) => provider.models).find(exact) ??
-		own.find((entry) => identity(entry.id) === identity(model.modelID))
-	);
-}
-
 export interface ModelInfo {
 	id: string;
 	name: string;
@@ -264,6 +234,12 @@ export const BackgroundTaskSchema = Schema.Struct({
 	description: Schema.String,
 	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
 	firstSeenAt: Schema.Number,
+	/** An agent's Child Session. */
+	childSessionId: Schema.optional(Schema.String),
+	/** The task that started this one, for a task started inside an agent. */
+	parentTaskId: Schema.optional(Schema.String),
+	/** Ancestors beyond the live list, nearest first; supplied by task ownership. */
+	ancestorTaskIds: Schema.optional(Schema.Array(Schema.String)),
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
@@ -502,6 +478,10 @@ export interface HistoryMessage {
 	time?: { created?: number; completed?: number };
 	/** Cost in dollars — present on assistant messages from REST API. */
 	cost?: number;
+	/** Canonical turn cost from the persisted turn projection, when available. */
+	turnCost?: number;
+	/** Context occupancy reported separately from cumulative result usage. */
+	contextTokens?: number;
 	/** Token usage — present on assistant messages from REST API. */
 	tokens?: {
 		input?: number;
@@ -648,6 +628,7 @@ export type Approval = typeof ApprovalSchema.Type;
 const ResultSchema = Schema.Struct({
 	type: Schema.Literal("result"),
 	usage: UsageInfoSchema,
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	cost: Schema.Number,
 	duration: Schema.Number,
 	sessionId: Schema.String,

@@ -34,6 +34,10 @@ vi.mock(
 	emptyComponent,
 );
 vi.mock(
+	"../../../src/lib/frontend/components/session/TaskDrawer.svelte",
+	emptyComponent,
+);
+vi.mock(
 	"../../../src/lib/frontend/components/session/DeepSearch.svelte",
 	emptyComponent,
 );
@@ -287,6 +291,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 // Imports (after mocks)
 
 import ChatLayout from "../../../src/lib/frontend/components/layout/ChatLayout.svelte";
+import { taskDrawer } from "../../../src/lib/frontend/components/session/background-tasks.svelte.js";
 import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	attachedProjectState,
@@ -357,6 +362,23 @@ describe("ChatLayout RPC lifecycle", () => {
 		routerState.path = "/";
 		attachedProjectState.slug = null;
 		sessionViewState.compact = false;
+	});
+
+	it("does not reopen a hidden task drawer after switching back from a phone viewport", () => {
+		render(ChatLayout);
+		flushSync();
+		taskDrawer.task = {
+			id: "agent",
+			sessionId: "child",
+			description: "Review the router",
+		};
+		flushSync();
+		sessionViewState.compact = true;
+		flushSync();
+		expect(taskDrawer.task).toBeNull();
+		sessionViewState.compact = false;
+		flushSync();
+		expect(taskDrawer.task).toBeNull();
 	});
 
 	it("does not toast when optional discovery RPCs fail after shell synchronization", async () => {

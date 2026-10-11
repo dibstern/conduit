@@ -668,8 +668,12 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 		handleModelList({
 			providers: [
 				...response.providers,
+				// Keep the cached Claude provider unless the reply carries its own;
+				// a duplicate id crashes every keyed list of providers.
 				...serverDiscovery.providers.filter(
-					(provider) => provider.id === "claude",
+					(provider) =>
+						provider.id === "claude" &&
+						!response.providers.some((next) => next.id === "claude"),
 				),
 			],
 		});

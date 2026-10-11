@@ -1,9 +1,12 @@
 import { Effect } from "effect";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
-import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
 import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail } from "../../errors.js";
-import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+import {
+	mapRpcFailure,
+	resolveSessionRequestDirectory,
+	type WsRpcHandlerMap,
+} from "./shared.js";
 
 export const terminalsHandlers = {
 	ListPtys: (request) =>
@@ -18,10 +21,11 @@ export const terminalsHandlers = {
 	CreatePty: (request) =>
 		Effect.gen(function* () {
 			const terminal = yield* OpenCodeTerminalServiceTag;
-			const { workspaceRoot } = yield* resolveSessionRequestFolders(
-				request.sessionId,
+			const directory = yield* resolveSessionRequestDirectory(
+				request,
+				"terminal",
 			);
-			yield* terminal.create(request.originId, workspaceRoot);
+			yield* terminal.create(request.originId, directory);
 			return { ok: true as const };
 		}).pipe(
 			Effect.mapError(

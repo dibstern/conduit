@@ -771,27 +771,93 @@ body:has(dialog:modal) {
 	}
 }
 
+/* Holds at each end so the start and the end of the title are both readable,
+   and runs `alternate`, so it eases back rather than jumping. */
 @keyframes marquee-scroll {
-	0% {
+	0%,
+	12% {
 		transform: translateX(0);
 	}
-	/* The extra 3em is the blank gap before the loop restarts. Padding the
-	   title for it instead would widen a short title on hover and push the
-	   pin star after it sideways. */
+	88%,
 	100% {
-		transform: translateX(calc(-100% - 3em));
+		transform: translateX(var(--marquee-shift));
 	}
 }
 
-/* The .session-item-title clips overflow. On hover, the inner span scrolls left
-   in a continuous loop so long titles are fully readable. */
-/* Applied by SessionItem as `group-hover:session-title-marquee`. A descendant
-   selector keyed off `.session-item:hover` would be the component owning its
-   own recipe from outside itself; an @utility is the same animation as a
-   Tailwind utility the markup opts into, and `text-overflow: clip` is just
-   `group-hover:text-clip` at the call site. */
+/* Applied by SessionItem as `group-hover:session-title-marquee` on the span
+   inside the clipping .session-title-inner, and only when the title overflows.
+   SessionItem measures the overflow as --marquee-shift, so the text travels
+   exactly far enough for its last character to reach the clip edge, and sets
+   --marquee-dur from it so every title moves at the same speed. */
 @utility session-title-marquee {
-	animation: marquee-scroll var(--marquee-dur, 6s) linear 0.4s infinite;
+	animation: marquee-scroll var(--marquee-dur) ease-in-out 0.4s infinite
+		alternate;
+}
+
+/* One pass when a row's title changes, by auto-name or rename: the new title
+   fades in, then a bright band sweeps across it while session-row-sheen crosses
+   the row. The fill goes transparent through -webkit-text-fill-color, not
+   `color`, so `currentColor` in the gradient is still the title's own colour. */
+@utility session-title-gleam {
+	-webkit-text-fill-color: transparent;
+	background:
+		linear-gradient(
+			100deg,
+			currentColor 0 42%,
+			var(--color-brand-a) 46%,
+			#fff 50%,
+			var(--color-brand-b) 54%,
+			currentColor 58% 100%
+		)
+		100% 0 / 400% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	animation: session-title-gleam 1060ms both;
+}
+
+@keyframes session-title-gleam {
+	0% {
+		opacity: 0;
+		background-position: 100% 0;
+		animation-timing-function: ease-out;
+	}
+	19% {
+		opacity: 1;
+	}
+	25% {
+		background-position: 100% 0;
+		animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+	}
+	100% {
+		opacity: 1;
+		background-position: 0 0;
+	}
+}
+
+/* Timed to cross the row while the title's band crosses the title. */
+@utility session-row-sheen {
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 55%;
+	pointer-events: none;
+	background: linear-gradient(
+		100deg,
+		transparent,
+		rgb(from var(--color-brand-a) r g b / 0.1) 35%,
+		rgb(255 255 255 / 0.1) 50%,
+		rgb(from var(--color-brand-b) r g b / 0.1) 65%,
+		transparent
+	);
+	animation: session-row-sheen 800ms cubic-bezier(0.65, 0, 0.35, 1) 260ms both;
+}
+
+@keyframes session-row-sheen {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(200%);
+	}
 }
 
 @layer components {

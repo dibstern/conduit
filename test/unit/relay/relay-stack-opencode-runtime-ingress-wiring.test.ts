@@ -566,7 +566,6 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{

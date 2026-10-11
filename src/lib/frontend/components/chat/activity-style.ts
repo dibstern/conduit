@@ -78,11 +78,22 @@ export function partStyle(part: ActivityPart): PartStyle {
 	}
 }
 
-/** Failures always read as failures, whatever kind of work they were. */
-export function segmentClass(part: ActivityPart): string {
+/**
+ * Failures always read as failures, whatever kind of work they were. A step
+ * breathes while it runs, and while a background task it launched is live.
+ */
+export function segmentClass(
+	part: ActivityPart,
+	running: ReadonlySet<string>,
+): string {
 	if (part.type === "tool") {
 		if (part.status === "error" || part.isError) return "bg-error";
-		if (part.status === "running" || part.status === "pending") {
+		const taskId = part.metadata?.["providerTaskId"];
+		if (
+			typeof taskId === "string" && part.metadata?.["backgrounded"] === true
+				? running.has(taskId)
+				: part.status === "running" || part.status === "pending"
+		) {
 			return `${toolStyle(part).bg} animate-pulse`;
 		}
 	}

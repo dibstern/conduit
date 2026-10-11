@@ -862,8 +862,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert settings are open on the Usage tab",
-		match: /^settings are open on the Usage tab at the usage limit settings$/,
+		name: "assert settings are open on the Usage section",
+		match:
+			/^settings are open on the Usage section at the usage limit settings$/,
 		run: async ({ world }) => {
 			await expect(world.page.getByTestId("usage-settings")).toBeVisible();
 			await expect(world.page.locator("#usage-limit-settings")).toBeAttached();

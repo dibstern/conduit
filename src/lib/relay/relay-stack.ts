@@ -946,7 +946,13 @@ export async function createRelayStack(
 				const pinHeader = req.headers["x-relay-pin"];
 				const pinOk =
 					typeof pinHeader === "string" &&
-					auth.authenticate(pinHeader, getClientIp(req)).ok;
+					auth.authenticate(
+						pinHeader,
+						getClientIp(
+							req.socket.remoteAddress,
+							req.headers["x-forwarded-for"],
+						),
+					).ok;
 				if (!pinOk) {
 					socket.destroy();
 					return;

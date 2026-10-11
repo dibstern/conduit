@@ -329,7 +329,7 @@ test.describe("Status Color Mapping", () => {
 });
 
 test.describe("Instance Management Settings", () => {
-	test("gear icon opens settings with Instances tab", async ({
+	test("gear icon opens settings with Server section", async ({
 		page,
 		baseURL,
 	}) => {
@@ -337,17 +337,17 @@ test.describe("Instance Management Settings", () => {
 		await openSettingsPanel(page);
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
-		const instancesTab = settingsPanel.getByText("Instances");
-		await expect(instancesTab).toBeVisible();
+		const serverSection = settingsPanel.getByTestId("settings-tab-server");
+		await expect(serverSection).toBeVisible();
 	});
 
-	test("instances tab lists all instances with status and port", async ({
+	test("Server section lists all instances with status and port", async ({
 		page,
 		baseURL,
 	}) => {
 		await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		const instanceList = page.locator("#instance-settings-list");
 		await expect(instanceList).toContainText("Personal");
 		await expect(instanceList).toContainText("Work");
@@ -361,7 +361,7 @@ test.describe("Instance Management Settings", () => {
 	}) => {
 		await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await expect(page.getByText("Start")).toBeVisible();
 		await expect(page.getByText("Stop")).toBeVisible();
@@ -374,7 +374,7 @@ test.describe("Instance Management Settings", () => {
 	test("start button sends StartInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Start')");
 		const request = await control.rpc.waitForRequest(
@@ -388,7 +388,7 @@ test.describe("Instance Management Settings", () => {
 	test("stop button sends StopInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
 		await page.click("button:has-text('Stop')");
 		const request = await control.rpc.waitForRequest(
@@ -405,7 +405,7 @@ test.describe("Instance Management Settings", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
 		await page.click("button:has-text('Remove')");
 		const confirmModal = page.locator("#confirm-modal");
@@ -426,7 +426,7 @@ test.describe("Instance Management Settings", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Verify only 2 instances initially
 		const instanceList = page.locator("#instance-settings-list");
@@ -476,7 +476,7 @@ test.describe("Instance Management Settings", () => {
 	test("Scan Now button sends ScanNow RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		const scanBtn = page.locator("[data-testid='scan-now-btn']");
 		await expect(scanBtn).toBeVisible();
@@ -488,7 +488,7 @@ test.describe("Instance Management Settings", () => {
 	test("inline rename sends RenameInstance RPC", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Expand instance and click Rename
 		await page.locator("#instance-settings-list").getByText("Work").click();
@@ -690,11 +690,11 @@ test.describe("Settings: Instance Status Updates", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 
-		// Open settings and navigate to Instances tab
+		// Open settings and navigate to the Server section
 		await openSettingsPanel(page);
 		const settingsPanel = page.locator("#settings-panel");
 		await expect(settingsPanel).toBeVisible();
-		await settingsPanel.getByText("Instances").click();
+		await settingsPanel.getByTestId("settings-tab-server").click();
 
 		// "Work" instance should show red dot (unhealthy status from fixture)
 		const instanceList = page.locator("#instance-settings-list");
@@ -727,7 +727,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 	}) => {
 		await setupNoInstances(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Should show "No OpenCode instances detected" message
 		await expect(
@@ -746,7 +746,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 	}) => {
 		await setupNoInstances(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Click "Quick Start" to expand
 		await page.getByText("Quick Start — Direct API Key").click();
@@ -764,7 +764,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 	}) => {
 		const control = await setupNoInstances(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Getting Started panel should be visible
 		await expect(
@@ -803,7 +803,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 	}) => {
 		const control = await setupNoInstances(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Click "Scan Now" link at bottom of Getting Started
 		const scanLink = page.locator("[data-testid='scan-now-link']");
@@ -819,7 +819,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 
 		// Publish a list with a discovered (unmanaged) instance
 		control.rpc.setDaemonList("SubscribeInstances", {

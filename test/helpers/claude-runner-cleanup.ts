@@ -77,7 +77,7 @@ function requestShutdown(
 		socket.once("close", finish);
 		socket.once("connect", () =>
 			socket.write(
-				`${JSON.stringify({ type: "hello", protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir, materializeSubagents: false } })}\n`,
+				`${JSON.stringify({ type: "hello", protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir } })}\n`,
 			),
 		);
 		socket.on("data", (chunk: Buffer) => {

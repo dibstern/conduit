@@ -21,6 +21,8 @@ export function isKnownDriverKind(
 export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 	supportsMultiFolder: Schema.Boolean,
 	supportsWorktree: Schema.Boolean,
+	/** Individual background tasks can be stopped without interrupting a turn. */
+	supportsTaskStop: Schema.optional(Schema.Boolean),
 });
 export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
@@ -29,10 +31,18 @@ export type ProviderSessionCapabilities =
 export const PROVIDER_SESSION_CAPABILITIES = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
-	claude: { supportsMultiFolder: true, supportsWorktree: true },
+	claude: {
+		supportsMultiFolder: true,
+		supportsWorktree: true,
+		supportsTaskStop: true,
+	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// No captured session worktree/cwd-switch contract is wired for this adapter.
-	opencode: { supportsMultiFolder: true, supportsWorktree: false },
+	opencode: {
+		supportsMultiFolder: true,
+		supportsWorktree: false,
+		supportsTaskStop: false,
+	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
 	ProviderSessionCapabilities

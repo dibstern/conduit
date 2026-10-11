@@ -311,7 +311,6 @@ describe("ConfigPersistenceLive", () => {
 					keepAwake: true,
 					keepAwakeCommand: "caffeinate",
 					keepAwakeArgs: ["-dims"],
-					dangerouslySkipPermissions: false,
 					projects: [
 						{
 							path: "/tmp/alpha",
@@ -392,7 +391,6 @@ describe("ConfigPersistenceLive", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [],
 			} satisfies DaemonConfig;
@@ -438,7 +436,6 @@ describe("ConfigPersistenceLive", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [],
 			} satisfies DaemonConfig;

@@ -3,15 +3,15 @@
 	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { applyUsageLimitsSetting, usageState } from "../../stores/usage.svelte.js";
+	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { getUsageLimitsSettingRpc, quotaForAccountsRpc, setUsageLimitsSettingRpc } from "../../transport/ws-rpc-client.js";
-	import { planUsageWindows, usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
+	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Button from "../ui/Button.svelte";
 	import SortableList from "../ui/SortableList.svelte";
@@ -22,17 +22,7 @@
 
 	const phone = new MediaQuery("(max-width: 767px)");
 	const warnOptions = [70, 80, 90, "off"] as const;
-	// Every Claude account auto-switch can pick, so a drag never drops one from
-	// the order; accounts the order leaves out go last, as auto-switch tries them.
-	const accounts = $derived.by((): UsageReading[] => {
-		const order = usageState.limits.order;
-		const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
-		return instanceState.instances
-			.filter((instance) => instance.driver === "claude")
-			.sort((a, b) => rank(a.id) - rank(b.id))
-			.map((instance) => usageState.readings.find((reading) => reading.accountId === instance.id)
-				?? { accountId: instance.id, harness: "claude", status: "unknown", windows: [], readAt: 0, stale: false });
-	});
+	const accounts = $derived(orderedSettingsUsageAccounts());
 	const several = $derived(accounts.length > 1);
 	const single = $derived(accounts[0]);
 	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
@@ -143,8 +133,9 @@
 
 	const headline = $derived.by((): { text: string; limited: boolean; warning?: boolean; bold?: string } => {
 		const defaultAccount = accounts.find((account) => account.accountId === (sessionId ? sessionAccountId : getEffectiveInstanceId())) ?? single;
-		const limited = accounts.find((account) => usageDisplay(account, usageState.limits.warnAt).level === "limited");
-		if (limited) {
+		const alert = usageAlert(accounts, usageState.limits.warnAt);
+		if (alert?.level === "limited") {
+			const limited = alert.account;
 			const time = usageResetTime(limitWindow(limited)?.resetsAt);
 			let text = `${nameOf(limited)} is limited${time ? ` until ${time}` : ""}.`;
 			const next = nextAccount(limited);
@@ -152,15 +143,15 @@
 			if (next && fiveHour) text += ` ${nameOf(next)}, next in the switch order, has ${Math.round(100 - fiveHour.utilization)}% of its 5h window left.`;
 			return { text, limited: true };
 		}
-		for (const kind of ["seven_day", "five_hour"] as const) {
-			const account = accounts.find((candidate) => planUsageWindows(candidate).some((window) => window.kind === kind && window.forecast?.kind === "runs_out"));
-			const window = account && planUsageWindows(account).find((window) => window.kind === kind);
-			if (!account || window?.forecast?.kind !== "runs_out") continue;
-			const time = usageForecastTime(window.forecast.at, now);
+		if (alert?.level === "runs_out" && alert.window.forecast?.kind === "runs_out") {
+			const { account, window } = alert;
+			const forecast = alert.window.forecast;
+			const kind = window.kind;
+			const time = usageForecastTime(forecast.at, now);
 			let bold = `${nameOf(account)} runs out of its ${kind === "seven_day" ? "week" : "5h window"} ≈ ${time}`;
 			let rest = "";
 			if (kind === "seven_day") {
-				if (usageResetTime(window.resetsAt)) bold += `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - window.forecast.at)} before it resets`;
+				if (usageResetTime(window.resetsAt)) bold += `, ${usageForecastDuration(Date.parse(window.resetsAt ?? "") - forecast.at)} before it resets`;
 				const others = accounts.filter((other) => other !== account && hasPlanData(other)).flatMap((other) => {
 					const week = other.windows.find((window) => window.kind === "seven_day");
 					return week ? [{ name: nameOf(other), left: Math.round(100 - week.utilization) }] : [];

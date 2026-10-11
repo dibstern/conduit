@@ -17,99 +17,48 @@
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
 	import InstancesSettingsTab from "./InstancesSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
-	import { applyDetectProxyResponse, beginProxyDetection } from "../../stores/instance.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { getNotifSettings } from "../../utils/notif-settings.js";
-	import { clearClaudeSettingEdits } from "../../stores/claude-settings.svelte.js";
-	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { detectProxyRpc, getAutoSettleSettingRpc } from "../../transport/ws-rpc-client.js";
+	import type { SettingsSection } from "../layout/chrome-actions.js";
+	import { getCachedInstances, instanceStatusColor } from "../../stores/instance.svelte.js";
+	import { orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 
-	let { visible = false, initialTab, onClose }:
-		{ visible: boolean; initialTab?: string | undefined; onClose?: () => void } = $props();
-	let appearanceState = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false });
-	let notificationState = $state({
-		notifSettings: getNotifSettings(),
-		pushBlocked: typeof Notification !== "undefined" && Notification.permission === "denied",
-		browserBlocked: typeof Notification !== "undefined" && Notification.permission === "denied",
-		pushBusy: false,
-		pushError: "",
-	});
-	let visibilityState = $state({ modelsFetchPending: false });
-	let instanceState = $state({
-		expandedInstanceId: null as string | null,
-		renamingInstanceId: null as string | null,
-		renameValue: "",
-		expandedScenario: null as string | null,
-		copiedKey: null as string | null,
-		copyTimer: null as ReturnType<typeof setTimeout> | null,
-		instanceFormMode: null as "add" | "edit" | null,
-		editingInstanceId: null as string | null,
-		formDriver: "opencode" as "claude" | "opencode",
-		formName: "",
-		formConfigDir: "",
-		formManaged: false,
-		formPort: "",
-		formUrl: "",
-		formEnv: "",
-		formSaving: false,
-	});
+	let { visible = false, initialTab, initialAnchor, onClose }:
+		{ visible: boolean; initialTab?: SettingsSection | undefined; initialAnchor?: "instances" | undefined; onClose?: () => void } = $props();
 	const SETTINGS_TABS = [
-		{ value: "notifications", label: "Alerts", testId: "settings-tab-notifications" },
-		{ value: "appearance", label: "Theme", testId: "settings-tab-appearance" },
-		{ value: "composer", label: "Composer", testId: "settings-tab-composer" },
-		{ value: "visibility", label: "Agents & Models", testId: "settings-tab-visibility" },
+		{ value: "general", label: "General", testId: "settings-tab-general" },
+		{ value: "models", label: "Models & agents", testId: "settings-tab-models" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude" },
-		{ value: "usage", label: "Usage", testId: "settings-tab-usage" },
-		{ value: "instances", label: "Instances", testId: "settings-tab-instances" },
-		{ value: "debug", label: "Debug", testId: "settings-tab-debug" },
-	];
+		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer" },
+		{ value: "server", label: "Server", testId: "settings-tab-server" },
+	] as const;
 	const phone = new MediaQuery("(max-width: 767px)");
 	/** `null` only on phone, where it means the section list is the screen. */
-	let section = $state<string | null>("notifications");
+	let section = $state<SettingsSection | null>("general");
 	let backEl = $state<HTMLButtonElement | HTMLAnchorElement>();
-	const shown = $derived(section ?? "notifications");
+	let contentEl = $state<HTMLDivElement>();
+	const shown = $derived(section ?? "general");
 	const listHidden = $derived(phone.current && section !== null);
 	const sectionLabel = $derived(SETTINGS_TABS.find((tab) => tab.value === section)?.label ?? "Settings");
+	const alert = $derived(usageAlert(orderedSettingsUsageAccounts(), usageState.limits.warnAt));
+	const unhealthyInstance = $derived(getCachedInstances().find((instance) => instance.status === "unhealthy"));
 
 	$effect(() => {
-		if (visible) {
-			clearClaudeSettingEdits();
-			section = initialTab ?? (untrack(() => phone.current) ? null : "notifications");
-			Object.assign(instanceState, {
-				expandedInstanceId: null,
-				renamingInstanceId: null,
-				expandedScenario: null,
-				instanceFormMode: null,
-				editingInstanceId: null,
-				formDriver: "opencode",
-				formName: "",
-				formConfigDir: "",
-				formManaged: false,
-				formPort: "",
-				formUrl: "",
-				formEnv: "",
-				formSaving: false,
-			});
-			if (!untrack(() => notificationState.pushBusy)) {
-				notificationState.notifSettings = getNotifSettings();
-			}
-			const projectSlug = getCurrentSlug();
-			if (projectSlug) {
-				beginProxyDetection();
-				void detectProxyRpc({ projectSlug })
-					.then(applyDetectProxyResponse)
-					.catch(() => applyDetectProxyResponse({ projectSlug, found: false, port: 8317 }));
-			}
-		} else {
-			clearClaudeSettingEdits();
-		}
+		if (!visible) return;
+		section = initialTab ?? (untrack(() => phone.current) ? null : "general");
+		void scrollContent(initialAnchor);
 	});
 
-	async function openSection(next: string): Promise<void> {
-		section = next;
-		if (!phone.current) return;
+	async function scrollContent(anchor?: "instances"): Promise<void> {
 		await tick();
+		if (!contentEl) return;
+		contentEl.scrollTop = 0;
+		if (anchor) contentEl.querySelector<HTMLElement>(`#${anchor}-settings`)?.scrollIntoView({ block: "start" });
+	}
+
+	async function openSection(next: SettingsSection | ""): Promise<void> {
+		if (!next) return;
+		section = next;
+		await scrollContent();
+		if (!phone.current) return;
 		backEl?.focus();
 	}
 
@@ -120,20 +69,6 @@
 		document.querySelector<HTMLElement>(`[data-testid="settings-tab-${from}"]`)?.focus();
 	}
 
-	$effect(() => {
-		if (!visible || !getIsConnected()) return;
-		const route = getCurrentRoute();
-		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
-		let current = true;
-		void getAutoSettleSettingRpc()
-			.then((days) => {
-				if (current && !appearanceState.autoSettleSaving) appearanceState.autoSettleDays = days;
-			})
-			.catch(() => {
-				if (current) showToast("Couldn't load auto-settle setting", { variant: "error" });
-			});
-		return () => { current = false; };
-	});
 </script>
 
 <Dialog open={visible} onclose={() => onClose?.()} labelledBy="settings-panel-title" backdrop="subtle" placement={phone.current && section === "usage" ? "sheet" : "center"}>
@@ -196,6 +131,11 @@
 						onValueChange={openSection}
 					>
 						{#snippet optionContent(option)}
+							{#if option.value === "usage" && alert}
+								<span data-testid="settings-usage-dot" class="mr-[6px] inline-block h-[6px] w-[6px] shrink-0 rounded-full {alert.level === 'limited' ? 'bg-fill-red' : 'bg-fill-amber'}"></span>
+							{:else if option.value === "server" && unhealthyInstance}
+								<span data-testid="settings-server-dot" class="mr-[6px] inline-block h-[6px] w-[6px] shrink-0 rounded-full {instanceStatusColor(unhealthyInstance.status)}"></span>
+							{/if}
 							<span class="flex-1">{option.label}</span>
 							{#if phone.current}
 								<Icon name="chevron-right" size={14} class="text-text-dimmer" />
@@ -206,23 +146,20 @@
 			{/if}
 
 			{#if !phone.current || section !== null}
-				<div class="settings-content flex-1 min-w-0 overflow-y-auto px-[18px] py-[14px] flex flex-col gap-[7px] text-[11.5px] text-text-secondary">
-					{#if shown === "notifications"}
-						<NotificationsSettingsTab bind:state={notificationState} />
-					{:else if shown === "appearance"}
-						<AppearanceSettingsTab bind:state={appearanceState} />
-					{:else if shown === "composer"}
+				<div bind:this={contentEl} class="settings-content flex-1 min-w-0 overflow-y-auto px-[18px] py-[14px] flex flex-col gap-[7px] text-[11.5px] text-text-secondary">
+					{#if shown === "general"}
+						<NotificationsSettingsTab />
+						<AppearanceSettingsTab />
 						<ComposerSettingsTab />
-					{:else if shown === "visibility"}
-						<VisibilitySettingsTab {visible} bind:state={visibilityState} />
+						<DebugSettingsTab />
+					{:else if shown === "models"}
+						<VisibilitySettingsTab />
 					{:else if shown === "claude"}
 						<ClaudeSettingsTab />
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
-					{:else if shown === "instances"}
-						<InstancesSettingsTab bind:state={instanceState} />
-					{:else if shown === "debug"}
-						<DebugSettingsTab />
+					{:else if shown === "server"}
+						<InstancesSettingsTab />
 					{/if}
 				</div>
 			{/if}

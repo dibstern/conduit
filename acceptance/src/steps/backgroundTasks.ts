@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
+import { PROVIDER_SESSION_CAPABILITIES } from "../../../src/lib/contracts/provider-instance.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { mockInstances, requireRpcControl } from "./shared.js";
 
 // Oldest first, as the relay sends them. Ages are against the frozen clock.
 const TASKS = [
@@ -25,6 +26,7 @@ const TASKS = [
 		type: "local_agent",
 		description: "Explore route guard usage",
 		age: 40,
+		childSessionId: "claude-subagent-explore",
 		kind: "subagent",
 		ageText: "40s",
 	},
@@ -38,18 +40,63 @@ const TASKS = [
 	},
 ] as const;
 
+// An agent that started two shells of its own, beside a shell of the parent's.
+// The relay lists them in the order the SDK first reported them.
+const NESTED_TASKS = [
+	{
+		id: "a1",
+		type: "local_agent",
+		description: "Fix the flaky router test",
+		age: 5 * 60,
+		childSessionId: "claude-subagent-flaky-router",
+	},
+	{
+		id: "b1",
+		type: "local_bash",
+		description: "Start the Vite dev server",
+		age: 4 * 60,
+	},
+	{
+		id: "n1",
+		type: "local_bash",
+		description: "pnpm test --watch",
+		age: 3 * 60,
+		parentTaskId: "a1",
+	},
+	{
+		id: "n2",
+		type: "local_bash",
+		description: "tail -f router.log",
+		age: 90,
+		parentTaskId: "a1",
+	},
+];
+
+export type LiveTask = {
+	id: string;
+	type: string;
+	description: string;
+	age: number;
+	parentTaskId?: string;
+	childSessionId?: string;
+};
+
 const sessionIdOf = (url: string): string => {
 	const sessionId = new URL(url).pathname.split("/")[2];
 	if (!sessionId) throw new Error("Background tasks require an open session");
 	return sessionId;
 };
 
-async function setLiveTasks(
+export async function setLiveTasks(
 	page: import("@playwright/test").Page,
-	count: number,
+	tasks: readonly LiveTask[],
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
+	rpc.setDaemonList("SubscribeInstances", {
+		instances: mockInstances.get(page) ?? [],
+		providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+	});
 	const id = sessionIdOf(page.url());
 	// Merge into the existing row: a row replaces the session's goal state too.
 	const row = rpc.shellRows?.find(
@@ -64,15 +111,26 @@ async function setLiveTasks(
 			...(row as object | undefined),
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier tasks.
-			backgroundWork: count > 0 ? "working" : undefined,
+			backgroundWork: tasks.length > 0 ? "working" : undefined,
 			backgroundTasks:
-				count > 0
-					? TASKS.slice(0, count).map(({ id, type, description, age }) => ({
-							id,
-							type,
-							description,
-							firstSeenAt: now - age * 1000,
-						}))
+				tasks.length > 0
+					? tasks.map(
+							({
+								id,
+								type,
+								description,
+								age,
+								parentTaskId,
+								childSessionId,
+							}) => ({
+								id,
+								type,
+								description,
+								firstSeenAt: now - age * 1000,
+								...(parentTaskId ? { parentTaskId } : {}),
+								...(childSessionId ? { childSessionId } : {}),
+							}),
+						)
 					: undefined,
 		},
 	]);
@@ -83,7 +141,18 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "seed live background tasks",
 		match: /^the session has ([1-4]) live background tasks?$/,
 		run: async ({ world, match }) => {
-			await setLiveTasks(world.page, Number(match[1]));
+			await setLiveTasks(world.page, TASKS.slice(0, Number(match[1])));
+			await expect(
+				world.page.getByTestId("background-tasks-row"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "seed an agent with nested tasks",
+		match:
+			/^the session's live background tasks are an agent with 2 nested shells and a shell$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, NESTED_TASKS);
 			await expect(
 				world.page.getByTestId("background-tasks-row"),
 			).toBeVisible();
@@ -93,7 +162,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "end the last background task",
 		match: /^the session's last background task ends$/,
 		run: async ({ world }) => {
-			await setLiveTasks(world.page, 0);
+			await setLiveTasks(world.page, []);
 		},
 	},
 	{
@@ -181,6 +250,39 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert pull-down nesting",
+		match:
+			/^the background tasks pull-down lists the agent's 2 shells indented under it$/,
+		run: async ({ world }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toContainText("4 background tasks");
+			const items = panel.getByTestId("background-task");
+			await expect(items.getByTestId("background-task-description")).toHaveText(
+				[
+					"Fix the flaky router test",
+					"pnpm test --watch",
+					"tail -f router.log",
+					"Start the Vite dev server",
+				],
+			);
+			await expect(items.getByTestId("background-task-kind")).toHaveText([
+				"subagent",
+				"shell",
+				"shell",
+				"shell",
+			]);
+			const depths = await items.evaluateAll((nodes) =>
+				nodes.map((node) => node.getAttribute("data-depth")),
+			);
+			expect(depths).toEqual(["0", "1", "1", "0"]);
+			const [agent, nested] = await Promise.all([
+				items.nth(0).boundingBox(),
+				items.nth(1).boundingBox(),
+			]);
+			expect(agent && nested && nested.x > agent.x).toBe(true);
+		},
+	},
+	{
 		name: "dismiss pull-down with Escape",
 		match: /^I press Escape in the background tasks pull-down$/,
 		run: async ({ world }) => {
@@ -209,26 +311,86 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert task-specific stop controls",
+		match:
+			/^the background tasks pull-down offers a named stop control for each task$/,
+		run: async ({ world }) => {
+			for (const task of TASKS)
+				await expect(
+					world.page.getByRole("button", {
+						name: `Stop ${task.description}`,
+						exact: true,
+					}),
+				).toBeVisible();
+		},
+	},
+	{
+		name: "stop a named background task",
+		match: /^I stop the background task (.+)$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
+				ok: true,
+			});
+			await world.page
+				.getByRole("button", { name: `Stop ${match[1]}`, exact: true })
+				.click();
+		},
+	},
+	{
+		name: "SDK confirms vitest stopped",
+		match: /^the SDK reports the vitest task stopped$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, TASKS.slice(0, 1));
+		},
+	},
+	{
+		name: "hide stop controls for unsupported providers",
+		match: /^the background tasks pull-down has no stop controls$/,
+		run: async ({ world }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toBeVisible();
+			await expect(panel.getByRole("button", { name: /^Stop / })).toHaveCount(
+				0,
+			);
+		},
+	},
+	{
 		name: "press Stop all",
 		match: /^I press Stop all in the background tasks pull-down$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("CancelSession", { ok: true });
+			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
+				ok: true,
+			});
 			await world.page.getByTestId("background-tasks-stop-all").click();
 		},
 	},
 	{
-		name: "assert Stop all cancels the session",
+		name: "assert task stops leave the session and rows intact",
 		match:
-			/^the background tasks pull-down asks to cancel the current session$/,
-		run: async ({ world }) => {
+			/^the background tasks pull-down asks to stop (.+) without cancelling the session$/,
+		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
-			const request = await rpc.waitForRequest(
-				(candidate) => candidate.tag === "CancelSession",
-			);
-			expect(request.payload["sessionId"]).toBe(sessionIdOf(world.page.url()));
+			const ids = (match[1] ?? "").split(", ");
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter((request) => request.tag === "StopBackgroundTask")
+						.map((request) => request.payload["taskId"]),
+				)
+				.toEqual(ids);
+			for (const request of rpc
+				.getRequests()
+				.filter((request) => request.tag === "StopBackgroundTask"))
+				expect(request.payload["sessionId"]).toBe(
+					sessionIdOf(world.page.url()),
+				);
+			expect(
+				rpc.getRequests().some((request) => request.tag === "CancelSession"),
+			).toBe(false);
 			await expect(
 				world.page.getByTestId("background-tasks-panel"),
-			).toBeHidden();
+			).toBeVisible();
 		},
 	},
 ];

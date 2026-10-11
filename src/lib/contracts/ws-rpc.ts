@@ -10,6 +10,7 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
+import { WorktreeCreationError } from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -256,6 +257,8 @@ export const HistoryMessageSchema = Schema.Struct({
 		}),
 	),
 	cost: Schema.optional(Schema.Number),
+	turnCost: Schema.optionalWith(Schema.Number, { exact: true }),
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
@@ -546,6 +549,10 @@ export const FolderIssueSchema: Schema.Schema<FolderIssue> = Schema.Union(
 		path: Schema.String,
 	}),
 	Schema.Struct({ kind: Schema.Literal("not-a-folder"), path: Schema.String }),
+	Schema.Struct({
+		kind: Schema.Literal("conduit-worktree"),
+		path: Schema.String,
+	}),
 	Schema.Struct({ kind: Schema.Literal("create-exists"), path: Schema.String }),
 	Schema.Struct({
 		kind: Schema.Literal("mkdir-failed"),
@@ -638,6 +645,7 @@ export const GetStatusResponseSchema = Schema.Struct({
 		),
 	),
 	keepAwake: Schema.Boolean,
+	keepAwakeCommand: Schema.NullOr(Schema.String),
 	projects: Schema.Array(
 		Schema.Struct({
 			slug: Schema.String,
@@ -697,16 +705,28 @@ export const FindFoldersResponseSchema = Schema.Struct({
 export const GetFileTreeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	entries: Schema.Array(Schema.String),
+	/** Present only for projects with several folders, primary first. */
+	roots: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				/** Stable Project Folder identity, independent of its mapped worktree. */
+				root: NonEmptyString,
+				label: NonEmptyString,
+			}),
+		),
+	),
 });
 
 export const GetFileListResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	root: Schema.optional(NonEmptyString),
 	path: Schema.String,
 	entries: Schema.Array(FileEntrySchema),
 });
 
 export const GetFileContentResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	root: Schema.optional(NonEmptyString),
 	path: Schema.String,
 	content: Schema.String,
 	binary: Schema.optional(Schema.Boolean),
@@ -816,11 +836,22 @@ export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
 	payload: {},
 }) {}
 
+export class SetPinRejected extends Schema.TaggedError<SetPinRejected>()(
+	"SetPinRejected",
+	{
+		reason: Schema.Literal("wrong_pin", "locked_out"),
+		retryAfterSeconds: Schema.optional(Schema.Number),
+	},
+) {}
+
 export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
-	failure: WsRpcError,
+	failure: Schema.Union(WsRpcError, SetPinRejected),
 	success: OkResponseSchema,
 	payload: {
 		pin: Schema.NullOr(Schema.String.pipe(Schema.pattern(/^\d{4,8}$/))),
+		currentPin: Schema.optional(
+			Schema.String.pipe(Schema.pattern(/^\d{4,8}$/)),
+		),
 	},
 }) {}
 
@@ -864,11 +895,7 @@ export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()
 	{
 		failure: WsRpcError,
 		success: OkResponseSchema,
-		payload: {
-			config: Schema.optional(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-			),
-		},
+		payload: {},
 	},
 ) {}
 
@@ -1116,6 +1143,7 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
 		sessionId: Schema.optional(NonEmptyString),
+		root: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -1633,6 +1661,7 @@ export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
 			path: Schema.optional(Schema.String),
 		},
 	},
@@ -1646,6 +1675,7 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
 			path: NonEmptyString,
 		},
 	},
@@ -1718,7 +1748,11 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 	"CreateSession",
 	{
-		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		failure: Schema.Union(
+			WsRpcError,
+			WorkspaceMoveError,
+			WorktreeCreationError,
+		),
 		success: CreateSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
@@ -1729,6 +1763,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			),
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
+			newWorktree: Schema.optional(Schema.Boolean),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.
@@ -1982,6 +2017,19 @@ export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 	},
 ) {}
 
+export class StopBackgroundTask extends Schema.TaggedRequest<StopBackgroundTask>()(
+	"StopBackgroundTask",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			taskId: NonEmptyString,
+		},
+	},
+) {}
+
 export class SetLogLevel extends Schema.TaggedRequest<SetLogLevel>()(
 	"SetLogLevel",
 	{
@@ -2121,6 +2169,7 @@ export const WsRpcRequest = Schema.Union(
 	SendInputNow,
 	SyncInputDraft,
 	CancelSession,
+	StopBackgroundTask,
 	SetLogLevel,
 );
 
@@ -2526,6 +2575,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SendInputNow),
 	Rpc.fromTaggedRequest(SyncInputDraft),
 	Rpc.fromTaggedRequest(CancelSession),
+	Rpc.fromTaggedRequest(StopBackgroundTask),
 	Rpc.fromTaggedRequest(SetLogLevel),
 );
 

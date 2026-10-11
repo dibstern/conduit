@@ -498,9 +498,10 @@ function turnStart(turn: Turn): number | undefined {
 	return undefined;
 }
 
-/** Observed stamps keep settled turns independent of the render clock. */
+/** A stamped result closes the segment even if background tasks finish later. */
 export function latestStamp(segment: Segment): number | undefined {
 	let end = segment.end?.createdAt;
+	if (end !== undefined) return end;
 	for (const part of segment.activity) {
 		for (const stamp of [
 			part.createdAt,
@@ -516,7 +517,14 @@ export function latestStamp(segment: Segment): number | undefined {
 	return end;
 }
 
-/** Explicit waits keep time waiting for the user out of the prompt's clock. */
+function firstStamp(segment: Segment): number | undefined {
+	for (const part of [...segment.activity, ...segment.reply]) {
+		if (part.createdAt !== undefined) return part.createdAt;
+	}
+	return segment.handBack?.createdAt ?? segment.end?.createdAt;
+}
+
+/** Approval waits and gaps between segments stay out of the prompt's clock. */
 export function workingTime(
 	turn: Turn,
 	now: number,
@@ -535,9 +543,18 @@ export function workingTime(
 	if (end === undefined) return undefined;
 	if (until !== undefined) end = Math.min(end, until);
 	let duration = Math.max(0, end - start);
+	const waits: { from: number; to?: number }[] = [...(timing?.waits ?? [])];
+	for (const [index, segment] of turn.segments.entries()) {
+		const previous = turn.segments[index - 1];
+		if (previous === undefined) continue;
+		const from = latestStamp(previous);
+		const to = firstStamp(segment);
+		if (from !== undefined && to !== undefined && to > from)
+			waits.push({ from, to });
+	}
 	// Parallel prompts can overlap; time already subtracted is skipped.
 	let waitedUntil = start;
-	const waits = [...(timing?.waits ?? [])].sort((a, b) => a.from - b.from);
+	waits.sort((a, b) => a.from - b.from);
 	for (const wait of waits) {
 		const to = Math.min(wait.to ?? end, end);
 		duration -= Math.max(0, to - Math.max(wait.from, waitedUntil));
@@ -726,28 +743,36 @@ export interface TurnEconomics {
 /**
  * What the turn cost, and how full the context was when it finished. Context
  * used is the final call's fresh input plus everything read from and written to
- * cache; a provider that reports no window gets no context reading at all.
+ * cache; tokens sum the reported usage across segments. A provider that reports
+ * no window gets no context reading at all.
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
 	const result = lastResult(turn);
 	const duration = workingTime(turn, now);
 	const window = result?.context_window;
 	const used =
-		result &&
+		result?.contextTokens ??
+		(result &&
 		(result.inputTokens !== undefined || result.cacheRead !== undefined)
 			? (result.inputTokens ?? 0) +
 				(result.cacheRead ?? 0) +
 				(result.cacheWrite ?? 0)
-			: undefined;
+			: undefined);
+	let tokensIn: number | undefined;
+	let tokensOut: number | undefined;
+	for (const segment of turn.segments) {
+		const end = segment.end;
+		if (end?.type !== "result") continue;
+		if (end.inputTokens !== undefined)
+			tokensIn = (tokensIn ?? 0) + end.inputTokens;
+		if (end.outputTokens !== undefined)
+			tokensOut = (tokensOut ?? 0) + end.outputTokens;
+	}
 	return {
 		...(duration !== undefined ? { duration } : {}),
 		...(result?.cost !== undefined ? { cost: result.cost } : {}),
-		...(result?.inputTokens !== undefined
-			? { tokensIn: result.inputTokens }
-			: {}),
-		...(result?.outputTokens !== undefined
-			? { tokensOut: result.outputTokens }
-			: {}),
+		...(tokensIn !== undefined ? { tokensIn } : {}),
+		...(tokensOut !== undefined ? { tokensOut } : {}),
 		...(used !== undefined && window !== undefined && window > 0
 			? {
 					context: {
@@ -758,6 +783,176 @@ export function economics(turn: Turn, now: number): TurnEconomics {
 				}
 			: {}),
 	};
+}
+
+/** How long a task just off the live list waits for its outcome. */
+export const LAUNCH_SETTLE_MS = 3_000;
+
+export type LaunchOutcome = "completed" | "failed" | "stopped";
+
+export type LaunchState =
+	| { readonly kind: "foreground" }
+	| { readonly kind: "running" }
+	| { readonly kind: "finished"; readonly outcome: LaunchOutcome }
+	| { readonly kind: "gone" };
+
+/** What a step that launched a background task shows about that task. */
+export interface LaunchRow {
+	readonly state: LaunchState;
+	/** What a running task is doing now, e.g. "Running pnpm test". */
+	readonly step?: string;
+	/** How long it has run, or ran. Absent when the SDK gave no way to know. */
+	readonly time?: number;
+	readonly tokens?: number;
+	readonly toolCalls?: number;
+	/** Live tasks this task started (a shell inside an agent). */
+	readonly nested: number;
+}
+
+/**
+ * The launching row for a tool call that started an SDK task, or undefined for
+ * any other tool. `live` is the root session's live background tasks: the SDK
+ * keeps one list per Claude process, so a Child Session reads its root's.
+ * An outcome wins over the list, which is in no order with start and finish
+ * messages; without one, a backgrounded task off the list is no longer running.
+ * `listedAt` is when the task was last seen on the list: the SDK drops a task
+ * just before its outcome, which arrives on another feed, so a task that has
+ * just left the list still reads running for LAUNCH_SETTLE_MS.
+ */
+export function launchRow(
+	tool: ToolMessage,
+	live: readonly {
+		readonly id: string;
+		readonly parentTaskId?: string | undefined;
+	}[],
+	now: number,
+	listedAt?: number,
+): LaunchRow | undefined {
+	const meta = tool.metadata ?? {};
+	const taskId = meta["providerTaskId"];
+	if (typeof taskId !== "string") return undefined;
+	const num = (key: string) => {
+		const value = meta[key];
+		return typeof value === "number" ? value : undefined;
+	};
+	const outcome = meta["outcome"];
+	const state: LaunchState =
+		meta["backgrounded"] !== true
+			? { kind: "foreground" }
+			: outcome === "completed" || outcome === "failed" || outcome === "stopped"
+				? { kind: "finished", outcome }
+				: live.some((task) => task.id === taskId) ||
+						(listedAt !== undefined && now - listedAt < LAUNCH_SETTLE_MS)
+					? { kind: "running" }
+					: { kind: "gone" };
+	const startedAt = num("taskStartedAt");
+	const endTime = num("endTime");
+	const paused = num("pausedMs") ?? 0;
+	const time =
+		state.kind === "running"
+			? startedAt === undefined
+				? undefined
+				: Math.min(now, num("pausedAt") ?? now) - startedAt - paused
+			: (num("taskDurationMs") ??
+				(endTime === undefined || startedAt === undefined
+					? undefined
+					: endTime - startedAt - paused));
+	const currentStep = meta["currentStep"] ?? meta["activeToolName"];
+	const lastTool = meta["lastToolName"];
+	const step =
+		typeof currentStep === "string" && currentStep !== toolSubject(tool)
+			? currentStep
+			: typeof lastTool === "string"
+				? lastTool
+				: undefined;
+	const tokens = num("taskTotalTokens") ?? num("totalTokens");
+	const toolCalls = num("taskToolUses") ?? num("toolUses");
+	return {
+		state,
+		...(state.kind === "running" && step ? { step } : {}),
+		...(time !== undefined ? { time: Math.max(0, time) } : {}),
+		...(tokens ? { tokens } : {}),
+		...(toolCalls ? { toolCalls } : {}),
+		nested: live.filter((task) => task.parentTaskId === taskId).length,
+	};
+}
+
+/**
+ * The live tasks a turn launched, nested tasks included: what its "N running"
+ * pill counts and which launching steps keep breathing. A launched task counts
+ * while its row reads running; a nested task counts while it is on the list and
+ * its parent chain reaches a task this turn launched, whether or not that task
+ * still runs. Direct launches use the same observed settle window as their rows.
+ */
+export function liveLaunchedTasks(
+	turn: Turn,
+	live: readonly {
+		readonly id: string;
+		readonly parentTaskId?: string | undefined;
+		readonly ancestorTaskIds?: readonly string[] | undefined;
+	}[],
+	now: number,
+	listedAt?: ReadonlyMap<string, number>,
+): ReadonlySet<string> {
+	const launches = turn.segments.flatMap((segment) =>
+		segment.activity.flatMap((part) => {
+			if (part.type !== "tool") return [];
+			const taskId = part.metadata?.["providerTaskId"];
+			return typeof taskId === "string" ? [{ taskId, tool: part }] : [];
+		}),
+	);
+	const launched = new Set(launches.map(({ taskId }) => taskId));
+	const running = launches.flatMap(({ taskId, tool }) =>
+		launchRow(tool, live, now, listedAt?.get(taskId))?.state.kind === "running"
+			? [taskId]
+			: [],
+	);
+	const parents = new Map(live.map((task) => [task.id, task.parentTaskId]));
+	const nested = live.flatMap((task) => {
+		if (launched.has(task.id)) return [];
+		if (task.ancestorTaskIds?.some((parent) => launched.has(parent)))
+			return [task.id];
+		const seen = new Set([task.id]);
+		for (let parent = task.parentTaskId; parent && !seen.has(parent); ) {
+			if (launched.has(parent)) return [task.id];
+			seen.add(parent);
+			parent = parents.get(parent);
+		}
+		return [];
+	});
+	return new Set([...running, ...nested]);
+}
+
+export function launchStatus(state: LaunchState): string {
+	switch (state.kind) {
+		case "foreground":
+		case "running":
+			return "running";
+		case "finished":
+			return state.outcome === "completed" ? "done" : state.outcome;
+		case "gone":
+			return "no longer running";
+	}
+}
+
+/** "done · 18s"; a running task shows only its time, which ticks live. */
+export function launchMeta(row: LaunchRow): string {
+	return [
+		row.state.kind === "running" ? "" : launchStatus(row.state),
+		row.time === undefined ? "" : fmtDuration(row.time),
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
+/** "24k tokens · 6 tools": what the task used, the first thing to go when narrow. */
+export function launchUsage(row: LaunchRow): string {
+	return [
+		row.tokens === undefined ? "" : `${fmtTokens(row.tokens)} tokens`,
+		plural(row.toolCalls ?? 0, "tool"),
+	]
+		.filter(Boolean)
+		.join(" · ");
 }
 
 export function fmtTokens(n: number): string {

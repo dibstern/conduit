@@ -18,7 +18,7 @@
 	import { tick, onDestroy } from "svelte";
 	import type { AssistantMessage } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { isLoading } from "../../stores/chat.svelte.js";
+	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
 	import { followFork, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -34,7 +34,11 @@
 	hljs.registerAliases(["svelte", "vue"], { languageName: "xml" });
 	import { themeState } from "../../stores/theme.svelte.js";
 
-	let { message, forkMessageId }: { message: AssistantMessage; forkMessageId?: string | undefined } = $props();
+	let { message, forkMessageId, sessionId }: {
+		message: AssistantMessage;
+		forkMessageId?: string | undefined;
+		sessionId?: string | undefined;
+	} = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
 
 	type CopyState = "idle" | "primed" | "done";
@@ -163,7 +167,9 @@
 		// All mounted AssistantMessage instances will run postRender when replay ends.
 		// requestIdleCallback spreads the work across idle frames to avoid a single jank spike.
 		const _html = message.html;
-		const replaying = isLoading();
+		const replaying = sessionId === undefined
+			? isLoading()
+			: sessionMessages.get(sessionId)?.loadLifecycle === "loading";
 		// @perf-guard C1 — removing this guard causes 50-300ms of wasted hljs/mermaid CPU during session switch replay
 		if (!_html || replaying) return;
 
@@ -331,10 +337,11 @@
 		if (forkMessageId) {
 			const projectSlug = getCurrentSlug();
 			if (!projectSlug) return;
+			const sourceSessionId = sessionId ?? sessionState.currentId;
 			void forkSessionRpc({
 				projectSlug,
 				originId: getBrowserClientId(),
-				...(sessionState.currentId ? { sessionId: sessionState.currentId } : {}),
+				...(sourceSessionId ? { sessionId: sourceSessionId } : {}),
 				messageId: forkMessageId,
 			}).then(followFork)
 				.catch(() => showToast("Failed to fork session", { variant: "error" }));

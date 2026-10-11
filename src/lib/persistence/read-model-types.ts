@@ -93,6 +93,7 @@ export interface MessageRow {
 	tokens_out: number | null;
 	tokens_cache_read: number | null;
 	tokens_cache_write: number | null;
+	context_tokens?: number | null;
 	context_window: number | null;
 	is_streaming: number;
 	is_backfilled: number;
@@ -106,6 +107,8 @@ export interface MessageRow {
 	error?: string | null;
 	created_at: number;
 	updated_at: number;
+	/** Result boundary, independent of later message or tool revisions. */
+	completed_at?: number | null;
 }
 
 export interface MessagePartRow {
@@ -128,6 +131,7 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	turnCost?: number;
 	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {
 		requestedModel?: string;

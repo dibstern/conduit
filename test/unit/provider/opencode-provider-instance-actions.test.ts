@@ -7,7 +7,8 @@ import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-pro
 function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 	return {
 		session: {
-			get: vi.fn(async () => ({ permission: [] })),
+			get: vi.fn(async () => ({ permission: [], directory: "/workspace" })),
+			move: vi.fn(async () => {}),
 			update: vi.fn(async () => {}),
 			abort: vi.fn(async () => {}),
 			prompt: vi.fn(async () => {}),
@@ -273,7 +274,11 @@ describe("OpenCodeProviderInstance action methods", () => {
 				}),
 			);
 
-			expect(client.question.reply).toHaveBeenCalledWith("q1", [["yes"]]);
+			expect(client.question.reply).toHaveBeenCalledWith(
+				"q1",
+				[["yes"]],
+				"/workspace",
+			);
 		});
 
 		it("converts array answers to string arrays", async () => {
@@ -283,9 +288,11 @@ describe("OpenCodeProviderInstance action methods", () => {
 				}),
 			);
 
-			expect(client.question.reply).toHaveBeenCalledWith("q2", [
-				["a", "b", "c"],
-			]);
+			expect(client.question.reply).toHaveBeenCalledWith(
+				"q2",
+				[["a", "b", "c"]],
+				"/workspace",
+			);
 		});
 
 		it("handles multiple answer fields", async () => {
@@ -296,10 +303,11 @@ describe("OpenCodeProviderInstance action methods", () => {
 				}),
 			);
 
-			expect(client.question.reply).toHaveBeenCalledWith("q3", [
-				["value1"],
-				["x", "y"],
-			]);
+			expect(client.question.reply).toHaveBeenCalledWith(
+				"q3",
+				[["value1"], ["x", "y"]],
+				"/workspace",
+			);
 		});
 
 		it("propagates errors from client", async () => {
@@ -399,7 +407,11 @@ describe("OpenCodeProviderInstance action methods", () => {
 				instance.resolveQuestionEffect("bound-s", "q-1", { choice: "yes" }),
 			);
 
-			expect(namedClient.question.reply).toHaveBeenCalledWith("q-1", [["yes"]]);
+			expect(namedClient.question.reply).toHaveBeenCalledWith(
+				"q-1",
+				[["yes"]],
+				"/workspace",
+			);
 			expect(client.question.reply).not.toHaveBeenCalled();
 		});
 

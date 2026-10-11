@@ -65,6 +65,7 @@ import {
 import { setAttachedProject } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	connectionState,
+	markControlSocketOpen,
 	trackControlSocket,
 } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 
@@ -239,6 +240,7 @@ describe("RPC connection status recovery", () => {
 
 		await vi.waitFor(() => expect(connectionState.relayStatus).toBe("ready"));
 		instances[1]?.open();
+		markControlSocketOpen();
 		expect(connectionState.status).toBe("connected");
 		expect(connectionState.attempts).toBe(0);
 		expect(connectionState.relayStatus).toBeUndefined();
