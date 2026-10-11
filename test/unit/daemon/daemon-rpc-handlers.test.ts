@@ -14,10 +14,7 @@ import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/co
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
-import {
-	AuthManagerFromConfigLive,
-	AuthManagerTag,
-} from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
 	makeRoutedWsRpcServerLayer,
 	wsRpcHandlers,
@@ -163,11 +160,7 @@ describe("daemon control through the shared RPC group", () => {
 					{ statePin: hashPin("1234"), configPin: hashPin("1234") },
 					{ statePin: null, configPin: null },
 				]);
-			}).pipe(
-				Effect.provide(
-					AuthManagerFromConfigLive.pipe(Layer.provideMerge(layer)),
-				),
-			);
+			}).pipe(Effect.provide(layer));
 		},
 	);
 
@@ -294,16 +287,7 @@ describe("daemon control through the shared RPC group", () => {
 					const result =
 						command === "Shutdown"
 							? yield* client.Shutdown({})
-							: yield* client.RestartWithConfig({
-									config: {
-										port: 0,
-										tls: true,
-										pinHash: null,
-										keepAwake: true,
-										keepAwakeCommand: "awake",
-										keepAwakeArgs: ["--forever"],
-									},
-								});
+							: yield* client.RestartWithConfig({});
 					expect(result).toEqual({ ok: true });
 					expect(yield* Deferred.isDone(signal)).toBe(false);
 					const state = yield* Ref.get(yield* DaemonStateTag);
@@ -313,19 +297,15 @@ describe("daemon control through the shared RPC group", () => {
 					if (command === "RestartWithConfig") {
 						expect(state).toMatchObject({
 							port: 0,
-							tls: true,
+							tls: false,
 							pinHash: null,
-							keepAwake: true,
-							keepAwakeCommand: "awake",
-							keepAwakeArgs: ["--forever"],
+							keepAwake: false,
 						});
 						expect(config).toMatchObject({
 							port: 0,
-							tlsEnabled: true,
+							tlsEnabled: false,
 							pinHash: null,
-							keepAwake: true,
-							keepAwakeCommand: "awake",
-							keepAwakeArgs: ["--forever"],
+							keepAwake: false,
 						});
 						expect(saves).toHaveBeenCalledOnce();
 					}
