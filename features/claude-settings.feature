@@ -7,9 +7,9 @@ Scenario: opening the Claude tab shows the available settings
   When I open settings to the Claude tab
   Then the Claude settings are shown
 
-Scenario: the Claude tab shows the default model and thinking level
+Scenario: Agents & Models shows the Claude default model and effort
   Given the default model is Claude Sonnet 4 with a thinking level of high
-  When I open settings to the Claude tab
+  When I open settings to the Agents & Models tab
   Then the default model row shows Claude Sonnet 4
   And the default model row shows Thinking level: high
 
@@ -45,11 +45,11 @@ Scenario: changing the default approval mode elevates new sessions
   Then a SetDefaultPermissionMode RPC is sent with mode full
   And the default approval mode row shows the elevated-permissions warning
 
-Scenario: the default model is selectable from the Claude tab
+Scenario: the Claude default model is selectable from Agents & Models
   Given the default model is Claude Sonnet 4 with a thinking level of high
-  When I open settings to the Claude tab
+  When I open settings to the Agents & Models tab
   And I choose claude-opus-4-1 as the default model
-  Then a SetDefaultModel RPC is sent for claude-opus-4-1
+  Then a SetHarnessDefault RPC is sent for claude-opus-4-1
 
 Scenario: Auto is available as a default approval mode
   Given the default approval mode is Ask

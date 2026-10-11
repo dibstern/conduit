@@ -63,6 +63,7 @@ import type {
 	ModelInfo,
 	ProviderAgentInfo,
 } from "../../src/lib/provider/types.js";
+import type { RelaySettings } from "../../src/lib/relay/relay-settings.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
@@ -237,6 +238,7 @@ export class ProcessHarness {
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
 		private readonly logLevel?: "warn",
+		relaySettings?: RelaySettings,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -264,6 +266,11 @@ export class ProcessHarness {
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
+		if (relaySettings)
+			writeFileSync(
+				join(this.configDir, "settings.jsonc"),
+				JSON.stringify(relaySettings, null, 2),
+			);
 		// macOS resolves the login Keychain under HOME, so an isolated HOME hides
 		// the Claude login. Link only the Keychains dir for real-SDK runs.
 		if (realSdk && process.platform === "darwin") {
@@ -472,6 +479,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
 			capabilityAgents?: readonly ProviderAgentInfo[];
+			relaySettings?: RelaySettings;
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
 			/** Enable warning diagnostics for provider lifecycle regressions. */
@@ -525,6 +533,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.capabilityAgents,
 			options.continuationSweepIntervalMs,
 			options.logLevel,
+			options.relaySettings,
 		);
 	}
 

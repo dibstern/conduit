@@ -609,6 +609,11 @@ describe("WsRpcServerLayer GetModels", () => {
 				yield* client
 					.SubscribeProjectSettings({ projectSlug: "project-a" })
 					.pipe(
+						Stream.filter(
+							(envelope) =>
+								envelope._tag !== "upsert" ||
+								envelope.item._tag === "providerModels",
+						),
 						Stream.runForEach((envelope) => Queue.offer(updates, envelope)),
 						Effect.forkScoped,
 					);

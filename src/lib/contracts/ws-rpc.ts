@@ -364,6 +364,28 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const HarnessDefaultStateSchema = Schema.Struct({
+	pick: Schema.optional(
+		Schema.Struct({
+			providerId: Schema.String,
+			modelId: Schema.String,
+			effort: Schema.String,
+			contextWindow: Schema.String,
+		}),
+	),
+	status: Schema.Literal("ok", "missing", "invalid", "unverified"),
+	problem: Schema.optional(Schema.String),
+});
+export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
+
+export const SetHarnessDefaultResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	harness: Schema.Literal("claude", "opencode"),
+	state: HarnessDefaultStateSchema,
+});
+export type SetHarnessDefaultResponse =
+	typeof SetHarnessDefaultResponseSchema.Type;
+
 export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	mode: SessionPermissionModeSchema,
@@ -1266,6 +1288,24 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 	},
 ) {}
 
+export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()(
+	"SetHarnessDefault",
+	{
+		failure: WsRpcError,
+		success: SetHarnessDefaultResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			harness: Schema.Literal("claude", "opencode"),
+			providerId: NonEmptyString,
+			modelId: NonEmptyString,
+			/** Omitted: the effort last saved for this model, if still offered. */
+			effort: Schema.optional(Schema.String),
+			contextWindow: Schema.String,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
 	"SetDefaultPermissionMode",
 	{
@@ -2102,6 +2142,7 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetHarnessDefault,
 	SetDefaultPermissionMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
@@ -2402,6 +2443,10 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("providerModels", {
 		providers: Schema.Array(ProviderInfoSchema),
 	}),
+	Schema.TaggedStruct("harnessDefaults", {
+		claude: HarnessDefaultStateSchema,
+		opencode: HarnessDefaultStateSchema,
+	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */
@@ -2415,6 +2460,8 @@ export type GlobalProjectSetting = Extract<
 			| "claudeSettings";
 	}
 >;
+/** Global writes signal each relay to compute catalog-dependent facts locally. */
+export type GlobalSettingTag = GlobalProjectSetting["_tag"] | "harnessDefaults";
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
 
@@ -2508,6 +2555,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetHarnessDefault),
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),

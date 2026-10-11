@@ -14,6 +14,7 @@ import { switchContextWindowForSession } from "../../handlers/context-window.js"
 import {
 	getModelsResponse,
 	setDefaultModelForRelay,
+	setHarnessDefaultForRelay,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../handlers/model.js";
@@ -148,7 +149,26 @@ export const modelsHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SetDefaultModel failed: ${String(error)}`,
+						message: isPickRejection(error)
+							? error.message
+							: `SetDefaultModel failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	SetHarnessDefault: (request) =>
+		setHarnessDefaultForRelay(request).pipe(
+			Effect.map((state) => ({
+				projectSlug: request.projectSlug,
+				harness: request.harness,
+				state,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: isPickRejection(error)
+							? error.message
+							: `SetHarnessDefault failed: ${String(error)}`,
 					}),
 				),
 			),
@@ -201,6 +221,7 @@ export const modelsHandlers = {
 	| "SwitchContextWindow"
 	| "SwitchModel"
 	| "SetDefaultModel"
+	| "SetHarnessDefault"
 	| "SwitchVariant"
 	| "GetModels"
 >;

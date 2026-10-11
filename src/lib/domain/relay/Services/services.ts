@@ -194,8 +194,10 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 );
 
 export interface OpenCodeModelService {
-	/** Refreshes a running instance's catalog; returns cached/empty data while stopped. */
-	listProviders(): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
+	/** Uses cached/empty data while stopped unless an interactive caller opts in. */
+	listProviders(options?: {
+		readonly startIfStopped?: boolean;
+	}): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
 	/** The last catalog listProviders returned. Never contacts OpenCode. */
 	cachedProviders(): Effect.Effect<Option.Option<OpenCodeProviderList>>;
 	persistDefaultModel(
@@ -246,9 +248,11 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 				),
 			);
 		return {
-			listProviders: () =>
+			listProviders: ({ startIfStopped = false } = {}) =>
 				Effect.gen(function* () {
-					const running = yield* instances.ifRunning(instanceId);
+					const running = startIfStopped
+						? Option.some(client)
+						: yield* instances.ifRunning(instanceId);
 					if (Option.isSome(running)) return yield* refresh(running.value);
 					return catalog ?? { providers: [], defaults: {}, connected: [] };
 				}).pipe(Effect.scoped),

@@ -21,7 +21,9 @@ import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-i
 import {
 	type ProjectSettingsTag,
 	publishProjectSetting,
+	refreshHarnessDefaults,
 } from "../domain/relay/Services/project-settings.js";
+import { OpenCodeModelServiceTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getPermissionMode,
@@ -806,20 +808,26 @@ export const wireSSEConsumerEffect = (
 				onConnectionStatus: (status, managedStopped) => {
 					const revision = ++connectionRevision;
 					runFork(
-						publishProjectSetting({
-							_tag: "opencodeConnection",
-							instanceId: deps.providerInstanceId,
-							status,
-						}).pipe(
-							Effect.zipRight(
-								managedStopped
-									? (deps.opencodeRuntimeIngress?.onInstanceStopped?.(
-											deps.providerInstanceId,
-											() => revision === connectionRevision,
-										) ?? Effect.void)
-									: Effect.void,
-							),
-						),
+						Effect.gen(function* () {
+							yield* publishProjectSetting({
+								_tag: "opencodeConnection",
+								instanceId: deps.providerInstanceId,
+								status,
+							});
+							if (status === "connected") {
+								const models = yield* Effect.serviceOption(
+									OpenCodeModelServiceTag,
+								);
+								if (models._tag === "Some")
+									yield* models.value.listProviders().pipe(Effect.ignore);
+							}
+							yield* refreshHarnessDefaults;
+							if (managedStopped)
+								yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
+									deps.providerInstanceId,
+									() => revision === connectionRevision,
+								) ?? Effect.void;
+						}),
 					);
 				},
 				handleEvent: (event) => {

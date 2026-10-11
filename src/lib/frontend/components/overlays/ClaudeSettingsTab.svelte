@@ -18,14 +18,10 @@
 	} from "../../stores/claude-settings.svelte.js";
 	import { PERMISSION_MODES } from "../../permission-modes.js";
 	import {
-		applyDefaultModelSet,
 		applyDefaultPermissionMode,
-		chooseDefaultModel,
 		chooseDefaultPermissionMode,
 		discoveryState,
-		getAllModels,
 		getAvailableInstances,
-		getProviderGroups,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -36,7 +32,6 @@
 		getClaudeSettingsRpc,
 		resolveClaudeSettingsRpc,
 		setClaudeSettingsRpc,
-		setDefaultModelRpc,
 		setDefaultPermissionModeRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -118,24 +113,6 @@
 			"attribution",
 			claudeSettingsState.editedKeys.includes("attribution"),
 		),
-	);
-	/** Provider and model travel as one <option> value, split on the first
-	 *  slash — provider ids have none, model ids often do. */
-	const defaultModelValue = $derived(
-		discoveryState.defaultModelId
-			? `${discoveryState.defaultProviderId}/${discoveryState.defaultModelId}`
-			: "",
-	);
-	/** A default can be persisted for a provider that is not connected right
-	 *  now. Carry it as its own option so the select shows what is actually
-	 *  stored instead of silently snapping to the first model in the list. */
-	const defaultModelMissing = $derived(
-		Boolean(discoveryState.defaultModelId) &&
-			!getAllModels().some(
-				(model) =>
-					model.id === discoveryState.defaultModelId &&
-					model.provider === discoveryState.defaultProviderId,
-			),
 	);
 
 	const claudeInstanceId = $derived.by(() => {
@@ -279,25 +256,6 @@
 		({ sessionOnly }) => !sessionOnly,
 	);
 
-	function updateDefaultModel(event: Event): void {
-		const select = event.currentTarget;
-		if (!(select instanceof HTMLSelectElement)) return;
-		const separator = select.value.indexOf("/");
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug || separator < 0) return;
-		const provider = select.value.slice(0, separator);
-		const model = select.value.slice(separator + 1);
-		const undoDefaultModel = chooseDefaultModel({
-			modelId: model,
-			providerId: provider,
-		});
-		void setDefaultModelRpc({ projectSlug, model, provider })
-			.then(applyDefaultModelSet)
-			.catch(() => {
-				undoDefaultModel();
-				showToast("Failed to save default model", { variant: "warn" });
-			});
-	}
 
 	function updateDefaultPermissionMode(event: Event): void {
 		const select = event.currentTarget;
@@ -345,44 +303,6 @@
 	}
 </script>
 
-{#snippet defaultModelControl()}
-	<Select
-		id="claude-default-model"
-		value={defaultModelValue}
-		onchange={updateDefaultModel}
-		class="w-[220px] max-w-full"
-		data-testid="claude-setting-defaultModel-select"
-	>
-		{#if !discoveryState.defaultModelId}
-			<option value="" disabled>Not set</option>
-		{/if}
-		{#if defaultModelMissing}
-			<option value={defaultModelValue}>
-				{discoveryState.defaultModelId}
-			</option>
-		{/if}
-		{#each getProviderGroups() as group (group.provider.id)}
-			<optgroup label={group.provider.name || group.provider.id}>
-				{#each group.models as model (model.id)}
-					<option value="{group.provider.id}/{model.id}">
-						{model.name || model.id}
-					</option>
-				{/each}
-			</optgroup>
-		{/each}
-	</Select>
-{/snippet}
-
-{#snippet defaultModelNotes()}
-	{#if discoveryState.defaultVariant}
-		<p data-testid="claude-setting-defaultModel-thinking">
-			Thinking level: {discoveryState.defaultVariant}
-		</p>
-	{/if}
-	<p class="text-text-dimmer">
-		The thinking level follows the badge beside the model picker.
-	</p>
-{/snippet}
 
 {#snippet defaultPermissionModeControl()}
 	<Select
@@ -482,14 +402,6 @@
 	title="Conduit defaults"
 	caption="Conduit applies these when it starts a session."
 >
-	<ClaudeSettingRow
-		key="defaultModel"
-		label="Default model"
-		description="The model Conduit starts a new session with."
-		labelFor="claude-default-model"
-		control={defaultModelControl}
-		below={defaultModelNotes}
-	/>
 	<ClaudeSettingRow
 		key="defaultPermissionMode"
 		label="Default approval mode"

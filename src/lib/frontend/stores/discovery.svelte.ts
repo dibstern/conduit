@@ -6,7 +6,10 @@ import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
 	GetModelsResponse,
+	HarnessDefaultState,
+	ProjectSetting,
 	SetDefaultModelResponse,
+	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
 	SwitchContextWindowResponse,
 	SwitchModelResponse,
@@ -158,6 +161,10 @@ const serverDiscovery = $state({
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
+	harnessDefaults: {
+		claude: { status: "missing" },
+		opencode: { status: "missing" },
+	} as Record<"claude" | "opencode", HarnessDefaultState>,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -232,6 +239,11 @@ export const discoveryState = {
 	},
 	get defaultVariant(): string {
 		return serverDiscovery.defaultVariant;
+	},
+	get harnessDefaults(): Readonly<
+		Record<"claude" | "opencode", HarnessDefaultState>
+	> {
+		return serverDiscovery.harnessDefaults;
 	},
 	get availableVariants(): readonly string[] {
 		return serverDiscovery.availableVariants;
@@ -738,6 +750,21 @@ export function handleDefaultModelInfo(msg: {
 	choice.defaultProviderId = null;
 }
 
+export function handleHarnessDefaults(
+	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
+): void {
+	serverDiscovery.harnessDefaults = {
+		claude: setting.claude,
+		opencode: setting.opencode,
+	};
+}
+
+export function applyHarnessDefaultSet(
+	response: SetHarnessDefaultResponse,
+): void {
+	serverDiscovery.harnessDefaults[response.harness] = response.state;
+}
+
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
 	const model = getActiveModel();
@@ -1065,6 +1092,10 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
+	serverDiscovery.harnessDefaults = {
+		claude: { status: "missing" },
+		opencode: { status: "missing" },
+	};
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";
