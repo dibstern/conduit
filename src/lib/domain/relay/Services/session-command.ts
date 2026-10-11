@@ -46,6 +46,7 @@ import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-servi
 import { ConfigTag, LoggerTag } from "./services.js";
 import { markSeen } from "./session-attention.js";
 import { setPermissionMode } from "./session-overrides-state.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
@@ -462,6 +463,9 @@ export const forkOpenCodeSession = (
 				providerSessionId: session.id,
 			},
 		});
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		if (workspace._tag === "Some")
+			yield* workspace.value.inherit(session.id, parentSessionId);
 		const forkPointTimestamp =
 			readQueryOption._tag === "Some"
 				? (yield* readQueryOption.value.getSession(session.id))
@@ -480,7 +484,7 @@ export const forkOpenCodeSession = (
 	);
 
 /** Route forks by the persisted parent provider, before contacting a runtime. */
-export const forkSession = (
+const forkSessionInWorkspace = (
 	parentSessionId: string,
 	options?: { messageId?: string; side?: { title: string } },
 ) =>
@@ -581,6 +585,7 @@ export const forkSession = (
 			});
 		}
 		const state = stateOption.value;
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		if (config._tag === "None" || config.value.claudeSdk === undefined) {
 			return yield* new SessionCommandError({
 				operation: "session.forked.claude",
@@ -663,13 +668,14 @@ export const forkSession = (
 				provider,
 			) ??
 			config.value.shellEnv?.(config.value.projectDir)["CLAUDE_CONFIG_DIR"];
+		// The next launch workspace can differ from the native transcript's folder.
+		// Find the SDK id across the selected account's project directories.
 		const forked = parentThread
 			? yield* Effect.tryPromise({
 					try: () =>
 						forkClaudeTranscript(
 							{
 								parentSdkId: parentThread.resumeSessionId,
-								projectDir: config.value.projectDir,
 								...(claudeConfigDir !== undefined && {
 									configDir: claudeConfigDir,
 								}),
@@ -703,7 +709,7 @@ export const forkSession = (
 		// prepareTurn hands off this child's bounded history on its first send.
 		yield* commitAndSignal.write((project) =>
 			Effect.gen(function* () {
-				const stored = yield* eventStore.value.appendBatch([
+				const created = yield* eventStore.value.appendBatch([
 					canonicalEvent(
 						"session.created",
 						forked.sdkSessionId,
@@ -728,9 +734,16 @@ export const forkSession = (
 							metadata: { source: "relay" },
 						},
 					),
-					...(history?.events ?? []),
 				]);
-				yield* project(stored);
+				yield* project(created);
+				if (workspace._tag === "Some")
+					yield* workspace.value.inherit(forked.sdkSessionId, parentSessionId, {
+						project,
+					});
+				const stored = history?.events.length
+					? yield* eventStore.value.appendBatch(history.events)
+					: created;
+				if (history?.events.length) yield* project(stored);
 				if (parentThread)
 					yield* state.saveUpdates(forked.sdkSessionId, [
 						{
@@ -740,7 +753,7 @@ export const forkSession = (
 									? { configDir: claudeConfigDir }
 									: {}),
 								resumeSessionId: forked.sdkSessionId,
-								firstSequence: stored[0]?.sequence ?? 0,
+								firstSequence: created[0]?.sequence ?? 0,
 								deliveredThrough: stored.at(-1)?.sequence ?? 0,
 							}),
 						},
@@ -767,4 +780,17 @@ export const forkSession = (
 			forkMessageId: forkPointEvent,
 			forkPointTimestamp: forkPointMessage.created_at,
 		};
+	});
+
+/** A fork's first launch cannot read its row before workspace inheritance. */
+export const forkSession = (
+	parentSessionId: string,
+	options?: { messageId?: string; side?: { title: string } },
+) =>
+	Effect.gen(function* () {
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		const fork = forkSessionInWorkspace(parentSessionId, options);
+		return yield* workspace._tag === "Some"
+			? workspace.value.withLaunch(fork)
+			: fork;
 	});

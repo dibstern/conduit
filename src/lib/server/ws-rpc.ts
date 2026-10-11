@@ -366,6 +366,27 @@ export type DaemonRpcName =
 	| "SetLogLevel"
 	| "ResolveSession";
 
+export class RpcCaller extends Context.Tag("RpcCaller")<
+	RpcCaller,
+	{ readonly kind: "browser"; readonly ip: string } | { readonly kind: "cli" }
+>() {}
+
+/** Browser mutations revoke connections after their reply has been written. */
+export class RpcPinChangeResponse extends Context.Tag("RpcPinChangeResponse")<
+	RpcPinChangeResponse,
+	(invalidate: () => void) => void
+>() {}
+
+/** Connection invalidators share the daemon lifetime; Unix clients never register. */
+export class BrowserRpcConnectionsTag extends Context.Tag(
+	"BrowserRpcConnections",
+)<BrowserRpcConnectionsTag, Set<() => void>>() {}
+
+export const BrowserRpcConnectionsLive = Layer.sync(
+	BrowserRpcConnectionsTag,
+	() => new Set<() => void>(),
+);
+
 export type DaemonRpcHandlers = {
 	[K in DaemonRpcName]: (
 		payload: Parameters<(typeof unaryHandlers)[K]>[0],
@@ -373,7 +394,8 @@ export type DaemonRpcHandlers = {
 		Rpc.Success<
 			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
 		>,
-		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>
+		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>,
+		K extends "SetPin" ? RpcCaller : never
 	>;
 } & {
 	readonly SubscribeInstances: () => Stream.Stream<
@@ -396,9 +418,11 @@ export type DaemonRpcHandlers = {
 	readonly sessionCreated: (projectSlug: string) => Effect.Effect<void>;
 };
 
-export const makeRoutedWsRpcServerLayer = (
+export const makeRoutedWsRpcServerLayer = <
+	D extends DaemonRpcHandlers | undefined = undefined,
+>(
 	resolveContext: ResolveRpcContext,
-	daemonHandlers?: DaemonRpcHandlers,
+	daemonHandlers?: D,
 	defaultProjectSlug?: string,
 	attachProject?: AttachDaemonProject,
 ) => {
@@ -417,10 +441,11 @@ export const makeRoutedWsRpcServerLayer = (
 				return yield* Effect.provide(handler(payload), context);
 			});
 
+	const daemon: DaemonRpcHandlers | undefined = daemonHandlers;
 	const daemonUnaryHandlers =
-		daemonHandlers &&
+		daemon &&
 		Struct.omit(
-			daemonHandlers,
+			daemon,
 			"SubscribeInstances",
 			"SubscribeUsage",
 			"SubscribeProjects",
@@ -444,7 +469,12 @@ export const makeRoutedWsRpcServerLayer = (
 			payload: Parameters<(typeof unaryHandlers)[K]>[0],
 		) => Effect.Effect<
 			Effect.Effect.Success<ReturnType<(typeof unaryHandlers)[K]>>,
-			Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError
+			Effect.Effect.Error<ReturnType<(typeof unaryHandlers)[K]>> | WsRpcError,
+			K extends "SetPin"
+				? D extends DaemonRpcHandlers
+					? Effect.Effect.Context<ReturnType<D["SetPin"]>>
+					: never
+				: never
 		>;
 	};
 	if (attachProject) handlers.AttachProject = attachProject;

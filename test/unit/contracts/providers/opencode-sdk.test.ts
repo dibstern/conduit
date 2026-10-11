@@ -7,21 +7,17 @@ import {
 	OpenCodeCommandSchema,
 	OpenCodeEventSchema,
 	OpenCodeFileNodeSchema,
-	OpenCodeFileStatusEntrySchema,
 	OpenCodeMessageWithPartsSchema,
 	OpenCodePartSchema,
 	OpenCodePathSchema,
 	OpenCodePendingPermissionSchema,
 	OpenCodePendingQuestionSchema,
-	OpenCodePermissionReplyRequestSchema,
 	OpenCodeProjectSchema,
 	OpenCodeProviderListResponseSchema,
 	OpenCodeQuestionReplyRequestSchema,
 	OpenCodeSessionDetailSchema,
-	OpenCodeSessionPromptRequestSchema,
 	OpenCodeSessionSchema,
 	OpenCodeSessionStatusSchema,
-	OpenCodeSessionUpdateRequestSchema,
 	OpenCodeUndefinedResponseSchema,
 } from "../../../../src/lib/contracts/providers/opencode-sdk.js";
 
@@ -179,19 +175,6 @@ describe("OpenCode provider contract schemas", () => {
 			Either.isLeft(
 				Schema.decodeUnknownEither(OpenCodePathSchema)({
 					cwd: "/workspace/project",
-				}),
-			),
-		).toBe(true);
-	});
-
-	it("decodes SDK file status entries", () => {
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeFileStatusEntrySchema)({
-					path: "src/app.ts",
-					added: 2,
-					removed: 1,
-					status: "modified",
 				}),
 			),
 		).toBe(true);
@@ -514,37 +497,7 @@ describe("OpenCode provider contract schemas", () => {
 		).toBe(true);
 	});
 
-	it("validates OpenCode request bodies Conduit sends to SDK and gap endpoints", () => {
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionPromptRequestSchema)({
-					parts: [{ type: "text", text: "hello" }],
-					model: { providerID: "anthropic", modelID: "claude" },
-					agent: "build",
-				}),
-			),
-		).toBe(true);
-		expect(
-			Either.isLeft(
-				Schema.decodeUnknownEither(OpenCodeSessionPromptRequestSchema)({
-					parts: [{ type: "text" }],
-				}),
-			),
-		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodeSessionUpdateRequestSchema)({
-					title: "Renamed",
-				}),
-			),
-		).toBe(true);
-		expect(
-			Either.isRight(
-				Schema.decodeUnknownEither(OpenCodePermissionReplyRequestSchema)({
-					response: "once",
-				}),
-			),
-		).toBe(true);
+	it("validates the question reply body Conduit sends to the SDK", () => {
 		expect(
 			Either.isRight(
 				Schema.decodeUnknownEither(OpenCodeQuestionReplyRequestSchema)({

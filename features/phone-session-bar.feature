@@ -85,8 +85,8 @@ Scenario: Activating a view from the menu switches the view
 # needs the step before it to have actually happened.
 #
 # The bar is asserted expanded at the bottom before any scrolling, which is the
-# arrival rule: the controls are visible at least once, and only the first user
-# scroll hands over to the collapse rule. The jump-to-latest assertions are here
+# arrival rule: the controls are visible at least once, until a downward scroll
+# or a return to the bottom hands over to the collapse rule. The jump-to-latest assertions are here
 # to prove the scroll steps actually moved the transcript -- without them, a
 # scroll that silently did nothing also leaves the bar expanded, and the
 # scenario would pass for the wrong reason.
@@ -110,3 +110,19 @@ Scenario Outline: The bar collapses at the bottom and the chevron brings it back
 Examples:
   | baseline                | threshold |
   | session-bar-collapsed   | 98        |
+
+# The bar follows the reading direction anywhere in the transcript, not only at
+# the bottom. The jump-to-latest control stays visible throughout to prove the
+# downward scroll stopped short of the bottom, where reaching it would collapse
+# the bar on its own.
+Scenario: Scrolling down collapses the bar mid-transcript and scrolling up restores it
+  Given the viewport is a phone
+  And the conduit app is served with the long-transcript mockup
+  When I scroll the transcript up by 800 pixels
+  Then the jump-to-latest control is visible
+  And the session bar is expanded
+  When I scroll the transcript down by 200 pixels
+  Then the session bar is collapsed
+  And the jump-to-latest control is visible
+  When I scroll the transcript up by 200 pixels
+  Then the session bar is expanded

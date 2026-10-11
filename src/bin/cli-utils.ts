@@ -366,8 +366,6 @@ Options:
   --tailscale-serve     Serve HTTPS on your tailnet through Tailscale Serve;
                         persisted in daemon.json for future starts
   --no-tailscale-serve  Turn Tailscale Serve off and remove Conduit's handler
-  --dangerously-skip-permissions
-                        Skip permission prompts (requires --pin)
   -h, --help            Show this help
 `;
 

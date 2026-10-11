@@ -130,10 +130,8 @@
 	const isHidden = $derived(connected && displayNone);
 
 	function handleStartInstance() {
-		const projectSlug = projectState.currentSlug;
-		if (cachedInstanceId && projectSlug) {
+		if (cachedInstanceId) {
 			void startInstanceRpc({
-				projectSlug,
 				instanceId: cachedInstanceId,
 			})
 				.then(applyInstanceListResponse)

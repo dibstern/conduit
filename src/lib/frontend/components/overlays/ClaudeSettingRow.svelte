@@ -1,5 +1,13 @@
+<!--
+  ClaudeSettingRow — a SettingsRow plus the line saying where its value comes
+  from, with Reset when a Conduit override can be removed. `below` holds any
+  editor or note that belongs to the setting but is too wide for the row.
+  The provenance line sits outside the row so its Reset button is never
+  nested inside a switch row's button.
+-->
 <script lang="ts">
-	import type { Snippet } from "svelte";
+	import type { ComponentProps, Snippet } from "svelte";
+	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import type {
 		ClaudeSettingKey,
@@ -8,33 +16,30 @@
 
 	let {
 		key,
-		label,
-		description,
 		provenance,
 		onreset,
-		control,
-	}: {
+		below,
+		...row
+	}: ComponentProps<typeof SettingsRow> & {
 		key: ClaudeSettingKey | "defaultModel" | "defaultPermissionMode";
-		label: string;
-		description: string;
 		provenance?: ClaudeSettingProvenance;
 		onreset?: () => void;
-		control: Snippet<[string, string]>;
+		below?: Snippet;
 	} = $props();
 </script>
 
-<div
-	class="flex flex-col gap-[6px] py-[8px] border-b border-border-subtle"
-	data-testid="claude-setting-{key}"
->
-	{@render control(label, description)}
+<div class="flex flex-col gap-[6px] px-3 py-2" data-testid="claude-setting-{key}">
+	<SettingsRow {...row} class="p-0" />
+	{#if below}
+		<div class="flex flex-col gap-[6px]">{@render below()}</div>
+	{/if}
 	{#if provenance}
 		<div
-			class="flex items-center justify-between gap-3 text-text-dimmer"
+			class="flex items-center justify-between gap-3 text-[11px] text-text-muted"
 			data-testid="claude-setting-{key}-provenance"
 		>
 			<span>
-				{provenance.beforeSource ?? ""}{#if provenance.sourceLabel}<span title={provenance.sourcePath}>{provenance.sourceLabel}</span>{/if}{provenance.afterSource ?? (provenance.sourceLabel ? "" : provenance.text)}
+				{provenance.beforeSource ?? ""}{#if provenance.sourceLabel}<span class="text-text-secondary" title={provenance.sourcePath}>{provenance.sourceLabel}</span>{/if}{provenance.afterSource ?? (provenance.sourceLabel ? "" : provenance.text)}
 			</span>
 			{#if provenance.canReset}
 				<TextButton

@@ -433,7 +433,6 @@ describe("SessionTitleService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{

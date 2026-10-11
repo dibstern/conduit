@@ -335,6 +335,7 @@ export const validDaemonRpcRequest: fc.Arbitrary<WsRpcRequest> = fc
 		fc.record({
 			_tag: fc.constant("SetPin"),
 			pin: fc.stringMatching(/^\d{4,8}$/),
+			currentPin: fc.option(fc.stringMatching(/^\d{4,8}$/), { nil: undefined }),
 		}),
 		fc.record({ _tag: fc.constant("SetKeepAwake"), enabled: fc.boolean() }),
 		fc.record({

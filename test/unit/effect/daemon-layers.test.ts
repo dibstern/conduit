@@ -9,6 +9,7 @@ import {
 	ShutdownSignalTag,
 	SignalHandlerLayer,
 } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { KeepAwakeTag } from "../../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefLive } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
@@ -176,6 +177,14 @@ describe("DaemonHandleTag", () => {
 				invalidate: () => Effect.void,
 			});
 			const handleDeps = Layer.mergeAll(
+				Layer.succeed(KeepAwakeTag, {
+					activate: () => Effect.void,
+					deactivate: () => Effect.void,
+					setCommand: () => Effect.void,
+					getCommand: () => Effect.succeed(null),
+					isActive: () => Effect.succeed(false),
+					isSupported: () => Effect.succeed(false),
+				}),
 				makeDaemonStateLive({ configDir }),
 				DaemonConfigRefLive({
 					port: 49876,

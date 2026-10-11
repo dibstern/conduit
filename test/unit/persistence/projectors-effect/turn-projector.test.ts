@@ -364,6 +364,53 @@ describe("TurnProjector", () => {
 			expect(row?.started_at).toBeNull();
 			expect(row?.completed_at).toBe(now + 200);
 		});
+
+		// A result naming no reply this turn owns leaves only idle to close it;
+		// left open, the inbox reads the session as busy and queues every send.
+		it("settles a replied turn its result never named on idle, and a later reply reopens it", async () => {
+			const timeline: StoredEvent[] = [
+				makeStored("message.created", "s1", {
+					messageId: "u1",
+					role: "user",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload),
+				makeStored("message.created", "s1", {
+					messageId: "a1",
+					role: "assistant",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload),
+				makeStored("turn.completed", "s1", {
+					messageId: "unowned",
+				} satisfies TurnCompletedPayload),
+				makeStored("session.status", "s1", {
+					sessionId: "s1",
+					status: "idle",
+				} satisfies SessionStatusPayload),
+				makeStored("message.created", "s1", {
+					messageId: "a2",
+					role: "assistant",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload),
+			].map((event, index) => ({
+				...event,
+				sequence: index + 1,
+				streamVersion: index,
+				createdAt: now + index * 100,
+			}));
+			const states: string[] = [];
+			for (const event of timeline) {
+				await project(event);
+				states.push((await turnStates())["u1"] ?? "");
+			}
+
+			expect(states).toEqual([
+				"pending",
+				"running",
+				"running",
+				"completed",
+				"running",
+			]);
+		});
 	});
 
 	describe("turn.completed", () => {
@@ -392,6 +439,51 @@ describe("TurnProjector", () => {
 				tokens_in: 10,
 				tokens_out: 5,
 			});
+		});
+
+		// Claude starts a new assistant message when the SDK folds an input (a
+		// background task's notification) into the running turn, and its result
+		// names that newest reply. Left open, the turn reads as busy, so the inbox
+		// queues the next idle send instead of handing it off.
+		it("settles a turn whose result names its second assistant reply", async () => {
+			// The message projector runs first and writes these rows in production.
+			await harness.query(
+				"INSERT INTO messages (id, session_id, role, is_streaming, created_at, updated_at) VALUES ('a1', 's1', 'assistant', 0, ?, ?), ('a2', 's1', 'assistant', 0, ?, ?)",
+				[now, now, now, now],
+			);
+			const events = [
+				makeStored("message.created", "s1", {
+					messageId: "u1",
+					role: "user",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload),
+				makeStored("session.status", "s1", {
+					sessionId: "s1",
+					status: "busy",
+				} satisfies SessionStatusPayload),
+				makeStored("message.created", "s1", {
+					messageId: "a1",
+					role: "assistant",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload),
+				makeStored("message.created", "s1", {
+					messageId: "a2",
+					role: "assistant",
+					sessionId: "s1",
+				} satisfies MessageCreatedPayload),
+				makeStored("turn.completed", "s1", {
+					messageId: "a2",
+				} satisfies TurnCompletedPayload),
+			];
+			for (const [index, event] of events.entries())
+				await project({
+					...event,
+					sequence: index + 1,
+					streamVersion: index,
+					createdAt: now + index * 100,
+				});
+
+			expect(await turnStates()).toEqual({ u1: "completed" });
 		});
 
 		it("settles the turn with the latest cost, summed tokens, and completed_at", async () => {

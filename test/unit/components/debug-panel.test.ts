@@ -5,7 +5,6 @@ import DebugPanel from "../../../src/lib/frontend/components/debug/DebugPanel.sv
 import { wsDebugState } from "../../../src/lib/frontend/stores/ws-debug.svelte.js";
 
 interface SetLogLevelInput {
-	readonly projectSlug: string;
 	readonly level: "info" | "verbose" | "debug";
 }
 
@@ -14,10 +13,6 @@ const setLogLevelRpcSpy = vi.hoisted(() =>
 		throw new Error("RPC unavailable");
 	}),
 );
-
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "conduit",
-}));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	setLogLevelRpc: (input: SetLogLevelInput) => setLogLevelRpcSpy(input),
@@ -41,7 +36,6 @@ describe("DebugPanel", () => {
 		await fireEvent.click(getByText("verbose:off"));
 		await waitFor(() => {
 			expect(setLogLevelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "conduit",
 				level: "verbose",
 			});
 		});
