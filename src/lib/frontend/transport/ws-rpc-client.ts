@@ -15,6 +15,7 @@ import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
 export type { GoalDetails } from "../../contracts/ws-rpc.js";
+export { SetPinRejected } from "../../contracts/ws-rpc.js";
 // Keep the public URL helper available to existing callers.
 export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
@@ -524,6 +525,17 @@ export const restartServerRpc = () =>
 
 export const shutdownServerRpc = () =>
 	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
+export async function setPinRpc(input: {
+	readonly pin: string | null;
+	readonly currentPin?: string;
+}): Promise<{ readonly ok: true }> {
+	const result = await runTransportEffect(
+		Effect.either(callDaemon((client) => client.SetPin(input))),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
 
 export async function listWorktreesRpc(
 	projectSlug: string,
