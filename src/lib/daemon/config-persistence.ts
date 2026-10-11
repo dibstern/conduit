@@ -32,6 +32,8 @@ import {
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
+	type GroupingMode,
+	GroupingModeSchema,
 	type RepositoryIdentity,
 	RepositoryIdentitySchema,
 } from "../shared-types.js";
@@ -80,6 +82,7 @@ export interface DaemonConfig {
 		addedAt: number;
 		shellEnv?: ProjectShellEnvConfig;
 		setupScript?: string;
+		groupingMode?: GroupingMode;
 		/** Cached session count from last run — for instant CLI display. */
 		sessionCount?: number;
 	}>;
@@ -109,6 +112,7 @@ const ProjectSchema = Schema.Struct({
 	addedAt: Schema.Number,
 	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
 	setupScript: Schema.optional(Schema.String),
+	groupingMode: Schema.optional(GroupingModeSchema),
 	sessionCount: Schema.optional(Schema.Number),
 });
 

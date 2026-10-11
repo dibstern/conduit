@@ -68,6 +68,7 @@ export {
 	GetCommands,
 	type GetCommandsResponse,
 	GetContinuationHandoff,
+	GetDefaultGroupingMode,
 	GetFileContent,
 	type GetFileContentResponse,
 	GetFileList,
@@ -137,6 +138,7 @@ export {
 	type SessionInfo,
 	SetAgent,
 	SetClaudeSettings,
+	SetDefaultGroupingMode,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
 	SetDefaultPermissionMode,
@@ -357,6 +359,8 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "SetDefaultGroupingMode"
+	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "ScanNow"

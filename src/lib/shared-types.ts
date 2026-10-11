@@ -538,6 +538,20 @@ export const RepositoryIdentitySchema = Schema.Struct({
 });
 export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 
+export const GroupingModeSchema = Schema.Literal(
+	"repository",
+	"repository+subfolder",
+	"off",
+);
+export type GroupingMode = typeof GroupingModeSchema.Type;
+
+export const ProjectGroupSchema = Schema.Struct({
+	key: Schema.String,
+	label: Schema.String,
+	needsProjectQualifier: Schema.Boolean,
+});
+export type ProjectGroup = typeof ProjectGroupSchema.Type;
+
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
@@ -545,6 +559,10 @@ export interface ProjectInfo {
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;
+	/** Unset inherits the daemon's global default. */
+	groupingMode?: GroupingMode | undefined;
+	effectiveGroupingMode?: GroupingMode;
+	group?: ProjectGroup;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;

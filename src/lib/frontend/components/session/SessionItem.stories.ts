@@ -145,6 +145,41 @@ export const WithBranch: Story = {
 	},
 };
 
+export const RepositoryWithProjectQualifier: Story = {
+	name: "Repository with project qualifier",
+	args: {
+		session: {
+			...mockSessionProcessing,
+			id: "repository-main-checkout",
+			title: "Review API changes",
+		},
+		active: false,
+		projectLabel: "myapp · Main checkout",
+		branch: "main",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText("myapp · Main checkout · main"),
+		).toBeVisible();
+	},
+};
+
+export const RepositoryWithoutProjectQualifier: Story = {
+	name: "Repository without project qualifier",
+	args: {
+		session: {
+			...mockSessionIdle,
+			id: "repository-only-project",
+			title: "Plan release notes",
+		},
+		active: true,
+		projectLabel: "myapp",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(within(canvasElement).getByText("myapp")).toBeVisible();
+	},
+};
+
 // A pinned row appends the star glyph after its title.
 export const Pinned: Story = {
 	args: {

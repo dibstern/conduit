@@ -8,6 +8,8 @@ import type { ClaudeSettingsOverrides } from "../contracts/claude-settings.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
+	type GroupingMode,
+	GroupingModeSchema,
 	type SessionPermissionMode,
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
@@ -19,6 +21,7 @@ export interface RelaySettings {
 		opencode?: { providerId: string; modelId: string; contextWindow: string };
 	};
 	defaultPermissionMode?: SessionPermissionMode;
+	defaultGroupingMode?: GroupingMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
 	hiddenModels?: string[];
@@ -55,6 +58,11 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 		const dir = resolveDir(configDir);
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
 		const settings = JSON.parse(stripComments(raw)) as RelaySettings;
+		if (
+			settings.defaultGroupingMode !== undefined &&
+			!Schema.is(GroupingModeSchema)(settings.defaultGroupingMode)
+		)
+			delete settings.defaultGroupingMode;
 		// The file is hand-editable, so an unknown mode reaches getPermissionMode
 		// as a value no caller can interpret — the pill would fall back to "Ask"
 		// while the session ran under something else. Drop it and use the default.
@@ -93,6 +101,9 @@ export function saveRelaySettings(
 	}
 	if (settings.defaultPermissionMode !== undefined) {
 		merged.defaultPermissionMode = settings.defaultPermissionMode;
+	}
+	if (settings.defaultGroupingMode !== undefined) {
+		merged.defaultGroupingMode = settings.defaultGroupingMode;
 	}
 
 	// Merge defaultVariants map (shallow merge of entries)

@@ -120,6 +120,7 @@ export interface StoredProject {
 	readonly lastUsed?: number;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
 	readonly setupScript?: string | undefined;
+	readonly groupingMode?: import("./shared-types.js").GroupingMode | undefined;
 }
 
 export interface RecentProject {
