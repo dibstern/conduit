@@ -363,12 +363,21 @@ test("a model picked on another harness never reaches an OpenCode that lists no 
 	page,
 	harness,
 }, testInfo) => {
+	let createRequest: RpcFrame | undefined;
+	const createReplies: RpcFrame[] = [];
+	await editRpc(page, (frame, request) => {
+		if (frame.tag === "CreateSession") createRequest = frame;
+		if (request?.tag === "CreateSession") createReplies.push(frame);
+		return frame;
+	});
+	let setup: { browser: ProcessBrowser; projectSlug: string } | undefined;
 	// Hiding every OpenCode model leaves OpenCode running with an empty list,
 	// as one still loading its catalogue would be.
 	const picker = await openDraft(
 		page,
 		harness,
 		async (browser, projectSlug) => {
+			setup = { browser, projectSlug };
 			const { providers } = await Effect.runPromise(
 				browser.rpc.GetModels({ projectSlug }),
 			);
@@ -396,13 +405,59 @@ test("a model picked on another harness never reaches an OpenCode that lists no 
 	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
-	const evidence = await sendAndCapture(page, harness, picker, testInfo);
+	if (!setup) throw new Error("openDraft never ran its setup");
+	const sessionsBefore = await Effect.runPromise(
+		setup.browser.rpc.ListDaemonSessions({ projectSlug: setup.projectSlug }),
+	);
+	const requestsBefore = harness.opencodeRequestBodies().length;
+	const shown = {
+		harness: await picker.getAttribute("data-shown-harness"),
+		provider: await picker.getAttribute("data-shown-provider"),
+		model: await picker.getAttribute("data-shown-model"),
+		effort: await picker.getAttribute("data-shown-effort"),
+		contextWindow: await picker.getAttribute("data-shown-context-window"),
+	};
+	await new AppPage(page).sendMessage(prompt);
+	await expect.poll(() => createReplies.length).toBe(1);
+	const sessionsAfter = await Effect.runPromise(
+		setup.browser.rpc.ListDaemonSessions({ projectSlug: setup.projectSlug }),
+	);
+	const requests = harness.opencodeRequestBodies().slice(requestsBefore);
+	const evidence = {
+		shown,
+		createRequest,
+		createReply: createReplies[0],
+		sessionsBefore: sessionsBefore.sessions.map(({ id }) => id).sort(),
+		sessionsAfter: sessionsAfter.sessions.map(({ id }) => id).sort(),
+		upstreamCreates: requests.filter(
+			({ method, path }) => method === "POST" && path === "/session",
+		),
+		promptModels: requests
+			.filter(
+				({ method, path }) =>
+					method === "POST" && path.endsWith("/prompt_async"),
+			)
+			.map(({ body }) => jsonModel(body)),
+	};
+	writeFileSync(
+		testInfo.outputPath("draft-model-evidence.json"),
+		JSON.stringify(evidence, null, 2),
+	);
+	await page.screenshot({ path: testInfo.outputPath("draft-model.png") });
 	expect
 		.soft(
 			evidence.promptModels.filter(isClaudeModel),
 			"prompt_async never carries the other harness's pick",
 		)
 		.toEqual([]);
+	expect(JSON.stringify(evidence.createReply)).toContain("ModelNotInCatalog:");
+	expect(evidence.sessionsAfter).toEqual(evidence.sessionsBefore);
+	expect(evidence.upstreamCreates).toEqual([]);
+	expect(evidence.promptModels).toEqual([]);
+	await expect(page).toHaveURL(/\/new(?:[/?]|$)/);
+	await expect(
+		page.getByRole("textbox", { name: "Message", exact: true }),
+	).toHaveValue(prompt);
 });
 
 test("an OpenCode session shows OpenCode before conduit reports its harness", async ({
@@ -549,7 +604,12 @@ test.describe("effort", () => {
 	 *  is then made the default, so max is also the default effort. */
 	async function saveEfforts(browser: ProcessBrowser, projectSlug: string) {
 		const { sessionId } = await Effect.runPromise(
-			browser.rpc.CreateSession({ projectSlug, originId: "effort-setup" }),
+			browser.rpc.CreateSession({
+				projectSlug,
+				originId: "effort-setup",
+				instanceId: ProviderInstanceIdSchema.make("claude"),
+				model: { modelId: "sonnet", providerId: "claude", variant: "" },
+			}),
 		);
 		for (const [modelId, variant] of [
 			["sonnet", "low"],
@@ -650,7 +710,7 @@ test.describe("effort", () => {
 		expect(
 			await sendAndReadFirstTurn(page, harness, testInfo),
 			"the first turn runs the default model at the picked effort",
-		).toEqual([{ model: "opus", effort: "high" }]);
+		).toEqual([{ model: "opus[1m]", effort: "high" }]);
 	});
 
 	test("an effort picked while the picked model's efforts load is the effort the first turn runs", async ({
@@ -749,22 +809,22 @@ test.describe("effort", () => {
 		expect(
 			await sendAndReadFirstTurn(page, harness, testInfo, "first-draft"),
 			"the first draft runs at the picked effort",
-		).toEqual([{ model: "opus", effort: "high" }]);
+		).toEqual([{ model: "opus[1m]", effort: "high" }]);
 
 		// A fresh page load drops this tab's picks, so only saved efforts remain.
 		await new AppPage(page).goto(draftUrl);
 		expect(
 			await sendAndReadFirstTurn(page, harness, testInfo, "next-draft"),
 			"the next draft starts at the effort picked last",
-		).toEqual([{ model: "opus", effort: "high" }]);
+		).toEqual([{ model: "opus[1m]", effort: "high" }]);
 	});
 
 	test("an OpenCode session without a pick never sends the Claude default's effort", async ({
 		page,
 		harness,
 	}, testInfo) => {
-		// Opus, the Claude-harness default, saved max. OpenCode runs a model of
-		// its own here, so max is not its effort to run at.
+		// Opus, the Claude-harness default, saved max. Creation must send the
+		// displayed effort even while the draft store still inherits it.
 		const picker = await openDraft(page, harness, async (browser, slug) => {
 			await saveEfforts(browser, slug);
 		});
@@ -774,10 +834,14 @@ test.describe("effort", () => {
 		await page.keyboard.press("Escape");
 		await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
+		const shownEffort = await picker.getAttribute("data-shown-effort");
 		const evidence = await sendAndCapture(page, harness, picker, testInfo);
 		expect
-			.soft(evidence.promptVariants, "prompt_async carries no effort")
-			.toEqual([null]);
+			.soft(
+				evidence.promptVariants,
+				"prompt_async carries the displayed effort",
+			)
+			.toEqual([shownEffort || null]);
 
 		// A fresh load shows only what conduit reports for the session. The model
 		// list arrives in the same reply as the session's efforts.

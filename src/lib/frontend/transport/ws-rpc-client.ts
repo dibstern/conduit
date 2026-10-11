@@ -173,12 +173,12 @@ export interface CreateSessionRpcInput {
 	readonly providerId?: string;
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
-	/** The draft composer's model and effort, so the first turn runs what the
-	 *  user picked. */
+	/** The draft composer's displayed pick, including an untouched default. */
 	readonly model?: {
 		readonly modelId: string;
 		readonly providerId: string;
 		readonly variant?: string;
+		readonly contextWindow?: string;
 	};
 }
 

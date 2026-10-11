@@ -1,9 +1,11 @@
-import { Effect, Either, Ref } from "effect";
+import { Effect, Either } from "effect";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
+import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+	ProjectSettingsTag,
+	publishGlobalProjectSetting,
+	refreshGlobalDefaults,
+} from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -12,26 +14,16 @@ import {
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import {
-	selectSessionContextWindow,
-	selectSessionModel,
-	selectSessionVariant,
-} from "../domain/relay/Services/session-model-settings.js";
-import {
-	clearSession as clearEffectOverrideSession,
-	OverridesStateTag,
-} from "../domain/relay/Services/session-overrides-state.js";
+import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
+import { resolveSessionCreationInstance } from "../domain/relay/Services/session-pick.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import {
-	harnessForModelProvider,
+	PickRequired,
 	resolveTurnSettings,
 } from "../provider/turn-settings.js";
-import {
-	loadModelCatalog,
-	savedVariantFor,
-	switchVariantForSession,
-} from "./model.js";
+import { saveRelaySettings } from "../relay/relay-settings.js";
+import { RelaySettingsSaveError } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
 interface ViewSessionPayload {
@@ -42,6 +34,12 @@ interface NewSessionPayload {
 	readonly title?: string;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	readonly model?: {
+		readonly modelId: string;
+		readonly providerId: string;
+		readonly variant?: string;
+		readonly contextWindow?: string;
+	};
 }
 
 interface DeleteSessionPayload {
@@ -137,76 +135,39 @@ export const createSessionForClient = <E = never>({
 		readonly modelId: string;
 		readonly providerId: string;
 		readonly variant?: string | undefined;
+		readonly contextWindow?: string | undefined;
 	};
 	readonly initializeWorkspace?: (sessionId: string) => Effect.Effect<void, E>;
 }) =>
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
-		// Validate before creating either a durable row or an upstream session.
-		const picked = model
-			? yield* Effect.gen(function* () {
-					const config = yield* ConfigTag;
-					const defaults = yield* Ref.get(yield* OverridesStateTag);
-					const requestedProvider = providerId?.trim();
-					const instanceHarness =
-						instanceId === undefined
-							? undefined
-							: resolveProviderRoutingDriver(
-									loadDaemonConfig(config.configDir),
-									instanceId,
-								);
-					// Match the creator's existing explicit-instance / provider / default order.
-					const harness =
-						(instanceHarness === undefined
-							? undefined
-							: harnessForModelProvider(instanceHarness)) ??
-						(requestedProvider &&
-						requestedProvider !== "claude-sdk" &&
-						harnessForModelProvider(requestedProvider) === "opencode"
-							? "opencode"
-							: harnessForModelProvider(
-									defaults.defaultModel?.providerID ?? "claude",
-								));
-					const catalog = yield* loadModelCatalog(
-						harness,
-						instanceId ?? harness,
-					);
-					const resolved = resolveTurnSettings(
-						{ harness, model, effort: model.variant ?? "", contextWindow: "" },
-						catalog,
-					);
-					if (Either.isLeft(resolved)) return yield* resolved.left;
-					const inherited = resolveTurnSettings(
-						{
-							...resolved.right,
-							contextWindow:
-								resolved.right.contextWindow || defaults.defaultContextWindow,
-						},
-						catalog,
-					);
-					const settings = Either.isRight(inherited)
-						? inherited.right
-						: resolved.right;
-					return {
-						settings,
-						catalog,
-						contextWindowOverride:
-							resolved.right.contextWindow !== "" || Either.isLeft(inherited)
-								? settings.contextWindow
-								: undefined,
-					};
-				})
-			: undefined;
+		if (!model?.modelId.trim() || !model.providerId.trim())
+			return yield* new PickRequired();
+		const route = yield* resolveSessionCreationInstance({
+			...(instanceId === undefined ? {} : { instanceId }),
+			...(providerId === undefined ? {} : { providerId }),
+			...(sessionId === undefined ? {} : { sessionId }),
+		});
+		const catalog = yield* loadModelCatalog(route.harness, route.instanceId, {
+			startIfStopped: true,
+		});
+		const resolved = resolveTurnSettings(
+			{
+				harness: route.harness,
+				model,
+				effort: model.variant ?? "",
+				contextWindow: model.contextWindow ?? "",
+			},
+			catalog,
+		);
+		if (Either.isLeft(resolved)) return yield* resolved.left;
+		const create = sessionManagerService.createSession(title, {
+			instanceId: route.instanceId,
+			pick: resolved.right,
+			...(sessionId === undefined ? {} : { sessionId }),
+		});
 
-		const create =
-			instanceId != null || providerId != null || sessionId != null
-				? sessionManagerService.createSession(title, {
-						...(instanceId != null ? { instanceId } : {}),
-						...(providerId != null ? { providerId } : {}),
-						...(sessionId != null ? { sessionId } : {}),
-					})
-				: sessionManagerService.createSession(title);
 		return yield* Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
 				// Protect the id handoff for workspace initialization, then allow
@@ -215,38 +176,49 @@ export const createSessionForClient = <E = never>({
 				return yield* restore(
 					Effect.gen(function* () {
 						if (initializeWorkspace) yield* initializeWorkspace(session.id);
-						if (model && picked) {
-							const override = {
-								providerID: picked.settings.model.providerId,
-								modelID: picked.settings.model.modelId,
-							};
-							yield* selectSessionModel(session.id, override);
-							if (picked.contextWindowOverride !== undefined) {
-								yield* selectSessionContextWindow(
-									session.id,
-									picked.contextWindowOverride,
-								);
-							}
-							if (model.variant !== undefined) {
-								yield* switchVariantForSession(
-									{
-										clientId,
-										sessionId: session.id,
-										variant: picked.settings.effort,
-									},
-									picked.catalog,
-								);
-							} else {
-								const { variant: saved } = yield* savedVariantFor(
-									override,
-									picked.catalog,
-								);
-								yield* selectSessionVariant(session.id, saved);
-							}
-						}
 						yield* switchClientToSession(clientId, session.id, {
 							skipPollerSeed: true,
 						});
+						if (model.variant !== undefined) {
+							yield* Effect.gen(function* () {
+								const config = yield* ConfigTag;
+								const { model: pickModel, effort } = resolved.right;
+								yield* Effect.try({
+									try: () =>
+										saveRelaySettings(
+											{
+												defaultVariants: {
+													[`${pickModel.providerId}/${pickModel.modelId}`]:
+														effort,
+												},
+											},
+											config.configDir,
+										),
+									catch: (cause) => new RelaySettingsSaveError({ cause }),
+								});
+								const projectSettings =
+									yield* Effect.serviceOption(ProjectSettingsTag);
+								if (projectSettings._tag === "Some") {
+									yield* publishGlobalProjectSetting("defaultModel").pipe(
+										Effect.provideService(
+											ProjectSettingsTag,
+											projectSettings.value,
+										),
+									);
+								} else {
+									yield* refreshGlobalDefaults;
+								}
+							}).pipe(
+								Effect.catchAllCause((cause) =>
+									Effect.sync(() =>
+										log.warn(
+											`client=${clientId} session=${session.id} Failed to remember effort preference`,
+											cause,
+										),
+									),
+								),
+							);
+						}
 						log.info(`client=${clientId} Created: ${session.id}`);
 						return session;
 					}),
@@ -272,6 +244,7 @@ export const handleNewSession = (
 		...(payload.title != null ? { title: payload.title } : {}),
 		...(payload.instanceId != null ? { instanceId: payload.instanceId } : {}),
 		...(payload.providerId != null ? { providerId: payload.providerId } : {}),
+		...(payload.model === undefined ? {} : { model: payload.model }),
 	}).pipe(Effect.asVoid);
 
 export const handleSwitchSession = (

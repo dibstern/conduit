@@ -50,7 +50,6 @@ export interface ProviderTurnServiceSendInput {
 		readonly providerID: string;
 		readonly modelID: string;
 	};
-	readonly modelUserSelected: boolean;
 	readonly agent?: string;
 	readonly variant?: string;
 	readonly contextWindow?: string;
@@ -65,7 +64,6 @@ export interface ProviderTurnServicePrepareInput {
 	readonly commandId: string;
 	readonly sessionId: string;
 	readonly model?: ProviderTurnServiceSendInput["model"];
-	readonly modelUserSelected: boolean;
 }
 
 export interface ProviderTurnServiceInterruptInput {

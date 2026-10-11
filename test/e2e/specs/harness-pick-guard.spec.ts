@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import Database from "better-sqlite3";
 import { Effect, type Either } from "effect";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
@@ -82,6 +83,68 @@ type RpcFrame = {
 	readonly payload?: Readonly<Record<string, unknown>>;
 };
 
+async function writeGuardArtifact(
+	testInfo: TestInfo,
+	artifact: Readonly<Record<string, unknown>>,
+): Promise<void> {
+	const file = testInfo.outputPath("pick-guard.json");
+	writeFileSync(file, JSON.stringify(artifact, null, 2));
+	await testInfo.attach("pick-guard.json", {
+		path: file,
+		contentType: "application/json",
+	});
+}
+
+type StoredPickRow = {
+	provider: string;
+	model_id: string | null;
+	model_provider: string | null;
+	variant: string | null;
+	context_window: string | null;
+};
+type EventRow = { sequence: number; type: string; data: string };
+
+function readStoredState(
+	harness: ProcessHarness,
+	slug: string,
+	sessionId: string,
+) {
+	const db = new Database(harness.projectStorePath(slug), { readonly: true });
+	try {
+		const events = db
+			.prepare<[string], EventRow>(
+				`SELECT sequence, type, data FROM events WHERE session_id = ?
+				 AND type IN ('session.model_changed', 'session.variant_changed',
+				 'session.context_window_changed', 'turn.error') ORDER BY sequence`,
+			)
+			.all(sessionId);
+		return {
+			sessionCount:
+				db
+					.prepare<[], { count: number }>(
+						"SELECT count(*) AS count FROM sessions",
+					)
+					.get()?.count ?? 0,
+			pick: db
+				.prepare<[string], StoredPickRow>(
+					`SELECT provider, model_id, model_provider, variant, context_window
+					 FROM sessions WHERE id = ?`,
+				)
+				.get(sessionId),
+			pickEvents: events.filter((event) => event.type !== "turn.error"),
+			turnErrors: events.filter((event) => event.type === "turn.error"),
+			lastInput: db
+				.prepare<[string], EventRow>(
+					`SELECT sequence, type, data FROM events WHERE session_id = ?
+					 AND type = 'input.admitted' ORDER BY sequence DESC LIMIT 1`,
+				)
+				.get(sessionId),
+		};
+	} finally {
+		db.close();
+	}
+}
+
 // Same pass-through RPC interception as harness-draft-model, including the
 // request associated with each reply. It never changes product responses.
 async function editRpc(
@@ -113,6 +176,7 @@ async function openDraft(
 	harness: ProcessHarness,
 	driver: Driver,
 	prepare?: (browser: ProcessBrowser, slug: string) => Promise<void>,
+	expectedHarness: Driver | null = driver,
 ) {
 	const directory = mkdtempSync(join(harness.root, "pick-guard-project-"));
 	const browser = await harness.connect();
@@ -136,7 +200,8 @@ async function openDraft(
 	await expect(page).toHaveURL(/\/new\?/);
 	const picker = page.locator(pickerSelector);
 	await expect(picker).toHaveAttribute("data-shown-model", /.+/);
-	await expect(picker).toHaveAttribute("data-shown-harness", driver);
+	if (expectedHarness)
+		await expect(picker).toHaveAttribute("data-shown-harness", expectedHarness);
 	return { browser, slug, picker };
 }
 
@@ -349,6 +414,13 @@ async function openInheritedSession(
 		draft.browser.rpc.CreateSession({
 			projectSlug: draft.slug,
 			originId: `${caseId}-setup`,
+			instanceId: ProviderInstanceIdSchema.make("claude"),
+			model: {
+				providerId: "claude",
+				modelId: "sonnet",
+				variant: "",
+				contextWindow: "200k",
+			},
 		}),
 	);
 	await new AppPage(page).goto(
@@ -381,18 +453,6 @@ for (const driver of ["claude", "opencode"] as const) {
 				page,
 				harness,
 			}, testInfo) => {
-				if (dropsDraftContext) {
-					test.fail(
-						true,
-						"conduit-test-scw7: the draft's 1m context pick is dropped on the first turn",
-					);
-				}
-				if (omitsModel) {
-					test.fail(
-						true,
-						"conduit-test-fmg0.8: an inherited OpenCode model is displayed but omitted from prompt_async",
-					);
-				}
 				const { picker } = existing
 					? await openPickedSession(page, harness, driver, caseId)
 					: await openDraft(page, harness, driver);
@@ -471,7 +531,7 @@ test("zjdq: OpenCode draft with a Claude default", async ({
 		true,
 		"conduit-test-zjdq: the OpenCode draft displays the Claude default instead of its received model",
 	);
-	const { picker } = await openDraft(
+	const { browser, slug, picker } = await openDraft(
 		page,
 		harness,
 		"opencode",
@@ -484,33 +544,81 @@ test("zjdq: OpenCode draft with a Claude default", async ({
 				}),
 			);
 		},
+		// Record the wrong harness in the artifact before the parity assertion.
+		null,
 	);
-	await expect(picker).toHaveAttribute("data-shown-harness", "opencode");
 	await expect(picker).toHaveAttribute("data-shown-model", /.+/);
 	const shown = await readShown(picker);
-	const sent = await sendAndCapture(page, harness, "opencode", "zjdq-first");
-	await assertParity(
-		{
-			case: "zjdq",
-			bead: "conduit-test-zjdq",
-			harness: "opencode",
-			flow: "draft first send",
-			change: "Claude default set",
-		},
-		shown,
-		sent,
-		testInfo,
+	if (shown.harness === "opencode" && shown.provider !== "claude") {
+		const sent = await sendAndCapture(page, harness, "opencode", "zjdq-first");
+		await assertParity(
+			{
+				case: "zjdq",
+				bead: "conduit-test-zjdq",
+				harness: "opencode",
+				flow: "draft first send",
+				change: "Claude default set",
+			},
+			shown,
+			sent,
+			testInfo,
+		);
+		return;
+	}
+	const result = await Effect.runPromise(
+		Effect.either(
+			browser.rpc.CreateSession({
+				projectSlug: slug,
+				originId: "zjdq-shown-pick",
+				instanceId: ProviderInstanceIdSchema.make("opencode"),
+				model: {
+					providerId: shown.provider,
+					modelId: shown.model,
+					variant: shown.effort,
+					contextWindow: shown.contextWindow,
+				},
+			}),
+		),
 	);
+	const error = result._tag === "Left" ? result.left : undefined;
+	const mismatches: string[] = [];
+	if (shown.harness !== "opencode")
+		mismatches.push(
+			`harness: shown ${JSON.stringify(shown.harness)}, bound harness "opencode"`,
+		);
+	if (shown.provider === "claude")
+		mismatches.push(
+			`provider: shown ${JSON.stringify(shown.provider)}, bound harness "opencode"`,
+		);
+	await writeGuardArtifact(testInfo, {
+		case: "zjdq",
+		bead: "conduit-test-zjdq",
+		harness: "opencode",
+		flow: "draft CreateSession with the displayed pick",
+		change: "Claude default set",
+		shown,
+		sent: null,
+		expectedRejection: "ModelNotInCatalog",
+		rpcResult:
+			error instanceof WsRpcError
+				? { _tag: "Left", error: { _tag: error._tag, message: error.message } }
+				: result,
+		equal: mismatches.length === 0,
+		mismatches,
+	});
+	expect(error).toBeInstanceOf(WsRpcError);
+	if (error instanceof WsRpcError)
+		expect(error.message).toMatch(/^ModelNotInCatalog:/);
+	expect(
+		mismatches,
+		"zjdq: the displayed provider belongs to its harness",
+	).toEqual([]);
 });
 
 test("ob6u: another client changes an inherited session's default", async ({
 	page,
 	harness,
 }, testInfo) => {
-	test.fail(
-		true,
-		"conduit-test-ob6u: a default changed elsewhere runs instead of the session's shown model",
-	);
 	let changedElsewhere = false;
 	await editRpc(page, (frame) => {
 		const json = JSON.stringify(frame);
@@ -606,6 +714,560 @@ test("unse: restart with a different default keeps the inherited model", async (
 		testInfo,
 		before.model,
 	);
+});
+
+async function createStoredPickSession(
+	page: Page,
+	harness: ProcessHarness,
+	caseId: string,
+	contextWindow = "200k",
+) {
+	const draft = await openDraft(page, harness, "claude");
+	const { sessionId } = await Effect.runPromise(
+		draft.browser.rpc.CreateSession({
+			projectSlug: draft.slug,
+			originId: caseId,
+			instanceId: ProviderInstanceIdSchema.make("claude"),
+			model: {
+				providerId: "claude",
+				modelId: "sonnet",
+				variant: "high",
+				contextWindow,
+			},
+		}),
+	);
+	await new AppPage(page).goto(
+		`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(draft.slug)}`,
+	);
+	await expect(draft.picker).toHaveAttribute("data-shown-model", "sonnet");
+	return { ...draft, sessionId };
+}
+
+test("pick-required-create: no model rejects before session creation", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { browser, slug } = await openDraft(page, harness, "opencode");
+	const upstreamCreates = () =>
+		harness
+			.opencodeRequestBodies()
+			.filter(
+				(request) =>
+					request.method === "POST" && /^\/session\/?$/.test(request.path),
+			).length;
+	const before = {
+		sessions: readStoredState(harness, slug, "").sessionCount,
+		upstreamCreates: upstreamCreates(),
+	};
+	const requests = [
+		undefined,
+		{ modelId: "", providerId: "opencode" },
+		{ modelId: " \t ", providerId: "opencode" },
+		{ modelId: openCodeModel.modelID, providerId: "" },
+	] as const;
+	const errors: unknown[] = [];
+	for (const model of requests) {
+		try {
+			const result = await Effect.runPromise(
+				Effect.either(
+					browser.rpc
+						.CreateSession({
+							projectSlug: slug,
+							originId: "pick-required-create",
+							instanceId: ProviderInstanceIdSchema.make("opencode"),
+							...(model ? { model } : {}),
+						})
+						.pipe(Effect.timeout("10 seconds")),
+				),
+			);
+			errors.push(result._tag === "Left" ? result.left : undefined);
+		} catch (error) {
+			errors.push(error);
+		}
+	}
+	const after = {
+		sessions: readStoredState(harness, slug, "").sessionCount,
+		upstreamCreates: upstreamCreates(),
+	};
+	await writeGuardArtifact(testInfo, {
+		case: "pick-required-create",
+		bead: "conduit-test-fmg0.4",
+		before,
+		after,
+		expectedRejection: "PickRequired",
+		rpcResults: errors.map((error, index) => ({
+			model: requests[index] ?? null,
+			error:
+				error instanceof Error
+					? { name: error.name, message: error.message }
+					: error,
+		})),
+	});
+	for (const error of errors) {
+		expect(error).toBeInstanceOf(WsRpcError);
+		if (error instanceof WsRpcError)
+			expect(error.message).toMatch(/^PickRequired:/);
+	}
+	expect(after).toEqual(before);
+});
+
+test("legacy-pick-backfill: last turn restores once and survives a second restart", async ({
+	page,
+	harness,
+}, testInfo) => {
+	test.setTimeout(240_000);
+	const { browser, slug, sessionId } = await createStoredPickSession(
+		page,
+		harness,
+		"legacy-pick-backfill",
+	);
+	const sent = await sendAndCapture(
+		page,
+		harness,
+		"claude",
+		"legacy-pick-before",
+		true,
+	);
+	await Effect.runPromise(
+		browser.rpc.SetDefaultModel({
+			projectSlug: slug,
+			model: "opus",
+			provider: "claude",
+		}),
+	);
+	const before = readStoredState(harness, slug, sessionId);
+	await browser.close();
+	await harness.terminate();
+	const db = new Database(harness.projectStorePath(slug));
+	try {
+		expect(
+			db
+				.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
+			variant = NULL, context_window = NULL WHERE id = ?`)
+				.run(sessionId).changes,
+		).toBe(1);
+	} finally {
+		db.close();
+	}
+	const legacy = readStoredState(harness, slug, sessionId);
+	const restorations: ReturnType<typeof readStoredState>[] = [];
+	const reported: {
+		model: string;
+		provider: string;
+		effort: string;
+		contextWindow: string;
+	}[] = [];
+	try {
+		for (let restart = 0; restart < 2; restart++) {
+			await harness.restart({
+				startupTimeoutMs: 60_000,
+				runnerStartupTimeoutMs: 30_000,
+			});
+			const restoredBrowser = await harness.connect(
+				sessionId,
+				`legacy-read-${restart}`,
+				slug,
+			);
+			const models = await Effect.runPromise(
+				restoredBrowser.rpc.GetModels({ projectSlug: slug, sessionId }),
+			);
+			restorations.push(readStoredState(harness, slug, sessionId));
+			reported.push({
+				model: models.active?.model ?? "",
+				provider: models.active?.provider ?? "",
+				effort: models.variant?.variant ?? "",
+				contextWindow: models.contextWindow?.contextWindow ?? "",
+			});
+			await restoredBrowser.close();
+			if (restart === 0) await harness.terminate();
+		}
+	} finally {
+		await writeGuardArtifact(testInfo, {
+			case: "legacy-pick-backfill",
+			bead: "conduit-test-fmg0.4",
+			sent,
+			before,
+			legacy,
+			restorations,
+			reported,
+		});
+	}
+	const expected = {
+		provider: "claude",
+		model_id: "sonnet",
+		model_provider: "claude",
+		variant: "high",
+		context_window: "200k",
+	};
+	expect(sent).toMatchObject({
+		model: "sonnet",
+		effort: "high",
+		contextWindow: "200k",
+	});
+	expect(legacy.pick).toMatchObject({ model_id: null, variant: null });
+	expect(restorations[0]?.pick).toEqual(expected);
+	expect(restorations[0]?.pickEvents.length).toBeGreaterThan(
+		before.pickEvents.length,
+	);
+	expect(restorations[1]?.pick).toEqual(expected);
+	expect(restorations[1]?.pickEvents).toEqual(restorations[0]?.pickEvents);
+	expect(reported).toEqual([
+		{
+			model: "sonnet",
+			provider: "claude",
+			effort: "high",
+			contextWindow: "200k",
+		},
+		{
+			model: "sonnet",
+			provider: "claude",
+			effort: "high",
+			contextWindow: "200k",
+		},
+	]);
+});
+
+test("legacy-opencode-pick-backfill: message input receipt restores once across two restarts", async ({
+	page,
+	harness,
+}, testInfo) => {
+	test.setTimeout(240_000);
+	const caseId = "legacy-opencode-pick-backfill";
+	const { browser, slug, picker } = await openDraft(page, harness, "opencode");
+	const { sessionId } = await Effect.runPromise(
+		browser.rpc.CreateSession({
+			projectSlug: slug,
+			originId: caseId,
+			instanceId: ProviderInstanceIdSchema.make("opencode"),
+			model: {
+				providerId: openCodeModel.providerID,
+				modelId: openCodeModel.modelID,
+				variant: "high",
+				contextWindow: "",
+			},
+		}),
+	);
+	await new AppPage(page).goto(
+		`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(slug)}`,
+	);
+	await expect(picker).toHaveAttribute(
+		"data-shown-model",
+		openCodeModel.modelID,
+	);
+	const sent = await sendAndCapture(
+		page,
+		harness,
+		"opencode",
+		`${caseId}-before`,
+	);
+	const before = readStoredState(harness, slug, sessionId);
+	const receiptDb = new Database(harness.projectStorePath(slug), {
+		readonly: true,
+	});
+	let lastTurn:
+		| {
+				turnId: string;
+				userMessageId: string;
+				inputId: string | null;
+				receiptCommandId: string | null;
+				outboxRequestSequence: number | null;
+				commandPayload: string | null;
+		  }
+		| undefined;
+	try {
+		lastTurn = receiptDb
+			.prepare<[string], NonNullable<typeof lastTurn>>(
+				`SELECT t.id AS turnId, u.id AS userMessageId, u.input_id AS inputId,
+				 r.command_id AS receiptCommandId, o.request_sequence AS outboxRequestSequence,
+				 o.payload_json AS commandPayload
+				 FROM turns t JOIN messages u ON u.id = t.user_message_id
+				 LEFT JOIN command_receipts r ON r.command_id = u.input_id AND r.command_type = 'send_turn'
+				 LEFT JOIN provider_command_outbox o ON o.request_sequence = r.side_effect_sequence
+				 WHERE t.session_id = ? AND t.started_at IS NOT NULL
+				 ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1`,
+			)
+			.get(sessionId);
+	} finally {
+		receiptDb.close();
+	}
+	const dispatched = lastTurn?.commandPayload
+		? (JSON.parse(lastTurn.commandPayload) as {
+				model: { providerId: string; modelId: string };
+				variant: string;
+				contextWindow: string;
+			})
+		: undefined;
+	await Effect.runPromise(
+		browser.rpc.SetDefaultModel({
+			projectSlug: slug,
+			model: otherOpenCodeModel.modelID,
+			provider: otherOpenCodeModel.providerID,
+		}),
+	);
+	await browser.close();
+	await harness.terminate();
+	const db = new Database(harness.projectStorePath(slug));
+	try {
+		expect(
+			db
+				.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
+			variant = NULL, context_window = NULL WHERE id = ?`)
+				.run(sessionId).changes,
+		).toBe(1);
+	} finally {
+		db.close();
+	}
+	const legacy = readStoredState(harness, slug, sessionId);
+	const restorations: ReturnType<typeof readStoredState>[] = [];
+	const reported: {
+		model: string;
+		provider: string;
+		effort: string;
+		contextWindow: string;
+	}[] = [];
+	const expected = {
+		provider: "opencode",
+		model_id: openCodeModel.modelID,
+		model_provider: openCodeModel.providerID,
+		variant: "high",
+		context_window: "",
+	};
+	try {
+		for (let restart = 0; restart < 2; restart++) {
+			await harness.restart({
+				startupTimeoutMs: 60_000,
+				runnerStartupTimeoutMs: 30_000,
+			});
+			const restoredBrowser = await harness.connect(
+				sessionId,
+				`${caseId}-read-${restart}`,
+				slug,
+			);
+			const models = await Effect.runPromise(
+				restoredBrowser.rpc.GetModels({ projectSlug: slug, sessionId }),
+			);
+			restorations.push(readStoredState(harness, slug, sessionId));
+			reported.push({
+				model: models.active?.model ?? "",
+				provider: models.active?.provider ?? "",
+				effort: models.variant?.variant ?? "",
+				contextWindow: models.contextWindow?.contextWindow ?? "",
+			});
+			await restoredBrowser.close();
+			if (restart === 0) await harness.terminate();
+		}
+	} finally {
+		await writeGuardArtifact(testInfo, {
+			case: caseId,
+			bead: "conduit-test-fmg0.4",
+			harness: "opencode",
+			flow: "legacy session restarted twice after an explicit provider turn",
+			change: "stored pick cleared and harness default changed",
+			expected,
+			sent,
+			lastTurn,
+			dispatched,
+			before,
+			legacy,
+			restorations,
+			reported,
+		});
+	}
+	expect(sent).toMatchObject({
+		provider: openCodeModel.providerID,
+		model: openCodeModel.modelID,
+		effort: "high",
+	});
+	expect(lastTurn?.inputId).toBeTruthy();
+	expect(lastTurn?.turnId).not.toBe(lastTurn?.inputId);
+	expect(lastTurn?.receiptCommandId).toBe(lastTurn?.inputId);
+	expect(dispatched).toMatchObject({
+		model: {
+			providerId: openCodeModel.providerID,
+			modelId: openCodeModel.modelID,
+		},
+		variant: "high",
+		contextWindow: "",
+	});
+	expect(legacy.pick).toMatchObject({ model_id: null, variant: null });
+	expect(restorations[0]?.pick).toEqual(expected);
+	expect(restorations[0]?.pickEvents.length).toBe(before.pickEvents.length + 3);
+	expect(restorations[1]?.pick).toEqual(expected);
+	expect(restorations[1]?.pickEvents).toEqual(restorations[0]?.pickEvents);
+	expect(reported).toEqual([
+		{
+			model: openCodeModel.modelID,
+			provider: openCodeModel.providerID,
+			effort: "high",
+			contextWindow: "",
+		},
+		{
+			model: openCodeModel.modelID,
+			provider: openCodeModel.providerID,
+			effort: "high",
+			contextWindow: "",
+		},
+	]);
+});
+
+for (const rejection of ["uncatalogued", "missing"] as const) {
+	const caseId =
+		rejection === "uncatalogued"
+			? "reject-turn-no-model-event"
+			: "pick-required-turn";
+	test(`${caseId}: rejected turn writes no model change or provider prompt`, async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const { browser, slug, sessionId } = await createStoredPickSession(
+			page,
+			harness,
+			caseId,
+		);
+		await Effect.runPromise(
+			browser.rpc.GetModels({ projectSlug: slug, sessionId }),
+		);
+		const before = readStoredState(harness, slug, sessionId);
+		const receiptsBefore = enqueues(harness, true).length;
+		const db = new Database(harness.projectStorePath(slug));
+		try {
+			const changed =
+				rejection === "uncatalogued"
+					? db
+							.prepare("UPDATE sessions SET model_id = ? WHERE id = ?")
+							.run("not-in-catalog", sessionId)
+					: db
+							.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
+				variant = NULL, context_window = NULL WHERE id = ?`)
+							.run(sessionId);
+			expect(changed.changes).toBe(1);
+		} finally {
+			db.close();
+		}
+		const submit = await Effect.runPromise(
+			browser.rpc.input.submit({
+				projectSlug: slug,
+				sessionId,
+				inputId: caseId,
+				originId: "pick-guard",
+				delivery: "queue",
+				text: caseId,
+			}),
+		);
+		let after = readStoredState(harness, slug, sessionId);
+		try {
+			await expect
+				.poll(
+					() => {
+						after = readStoredState(harness, slug, sessionId);
+						return after.turnErrors.length;
+					},
+					{ timeout: 15_000 },
+				)
+				.toBe(before.turnErrors.length + 1);
+		} finally {
+			await writeGuardArtifact(testInfo, {
+				case: caseId,
+				bead: "conduit-test-fmg0.4",
+				expectedCode:
+					rejection === "uncatalogued" ? "PICK_REJECTED" : "PICK_REQUIRED",
+				submit,
+				before,
+				after,
+				receiptsBefore,
+				receiptsAfter: enqueues(harness, true).length,
+			});
+		}
+		const error = JSON.parse(after.turnErrors.at(-1)?.data ?? "{}") as {
+			code?: string;
+			error?: string;
+		};
+		expect(error.code).toBe(
+			rejection === "uncatalogued" ? "PICK_REJECTED" : "PICK_REQUIRED",
+		);
+		if (rejection === "uncatalogued")
+			expect(error.error).toMatch(/^ModelNotInCatalog:/);
+		else {
+			expect(error.error).toMatch(/pick/i);
+			expect(error.error).not.toMatch(/^PickRequired:/);
+		}
+		expect(after.pickEvents).toEqual(before.pickEvents);
+		expect(enqueues(harness, true).length).toBe(receiptsBefore);
+	});
+}
+
+test("server-side-thread-pick: a server-created session inherits its source pick", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { browser, slug, sessionId } = await createStoredPickSession(
+		page,
+		harness,
+		"server-side-thread-pick",
+		"1m",
+	);
+	// Enable the harness's native transcript recorder before the source turn.
+	writeFileSync(
+		join(harness.root, "claude", "conduit-test-record-forks"),
+		"record",
+	);
+	const sent = await sendAndCapture(
+		page,
+		harness,
+		"claude",
+		"side-source-first",
+		true,
+	);
+	await Effect.runPromise(
+		browser.rpc.SetDefaultModel({
+			projectSlug: slug,
+			model: "opus",
+			provider: "claude",
+		}),
+	);
+	const source = readStoredState(harness, slug, sessionId);
+	const side = await Effect.runPromise(
+		browser.rpc.StartSideThread({
+			projectSlug: slug,
+			parentSessionId: sessionId,
+			title: "Prove the source pick is inherited",
+		}),
+	);
+	const created = readStoredState(harness, slug, side.sessionId);
+	const models = await Effect.runPromise(
+		browser.rpc.GetModels({ projectSlug: slug, sessionId: side.sessionId }),
+	);
+	const reported = {
+		model: models.active?.model ?? "",
+		provider: models.active?.provider ?? "",
+		effort: models.variant?.variant ?? "",
+		contextWindow: models.contextWindow?.contextWindow ?? "",
+	};
+	await writeGuardArtifact(testInfo, {
+		case: "server-side-thread-pick",
+		bead: "conduit-test-fmg0.4",
+		sent,
+		source,
+		created,
+		reported,
+	});
+	expect(source.pick).toEqual({
+		provider: "claude",
+		model_id: "sonnet",
+		model_provider: "claude",
+		variant: "high",
+		context_window: "1m",
+	});
+	expect(created.pick).toEqual(source.pick);
+	expect(
+		created.pickEvents.some((event) => event.type === "session.model_changed"),
+	).toBe(true);
+	expect(reported).toEqual({
+		model: "sonnet",
+		provider: "claude",
+		effort: "high",
+		contextWindow: "1m",
+	});
 });
 
 async function assertPickRejected(

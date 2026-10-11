@@ -1826,14 +1826,13 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
-			// The draft composer's model, and its effort if one was picked.
-			// Recorded as the session's own choice so the first turn runs them
-			// instead of the relay default.
+			// The composer's displayed pick. The handler requires a real model.
 			model: Schema.optional(
 				Schema.Struct({
-					modelId: NonEmptyString,
-					providerId: NonEmptyString,
+					modelId: Schema.String,
+					providerId: Schema.String,
 					variant: Schema.optional(Schema.String),
+					contextWindow: Schema.optional(Schema.String),
 				}),
 			),
 		},

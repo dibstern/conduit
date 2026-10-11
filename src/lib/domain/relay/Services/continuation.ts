@@ -43,11 +43,7 @@ import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { applySessionCommand } from "./session-command.js";
 import {
 	getAgent,
-	getContextWindow,
-	getModel,
-	getVariant,
 	hasActiveProcessingTimeout,
-	isModelUserSelected,
 	type OverridesStateTag,
 } from "./session-overrides-state.js";
 
@@ -79,7 +75,7 @@ export const previewContinuation = (sessionId: string, instanceId: string) =>
 				: Schema.decodeUnknownSync(Schema.parseJson(LimitRecoverySchema))(
 						session.limit_recovery,
 					);
-		const contextWindow = yield* getContextWindow(sessionId);
+		const contextWindow = session.context_window ?? "";
 		const prepare = yield* makePrepareTurn({
 			configDir: resolveClaudeInstanceConfigDir(daemonConfig, instanceId),
 			agent: yield* getAgent(sessionId),
@@ -512,21 +508,24 @@ export const makeContinuation = Effect.gen(function* () {
 								]);
 							}
 							if (!continued.cutOffMessageId) return;
-							const model = yield* getModel(sessionId);
+							const row = yield* read.getSession(sessionId);
+							const model =
+								row?.model_id && row.model_provider
+									? { modelID: row.model_id, providerID: row.model_provider }
+									: undefined;
 							const agent = yield* getAgent(sessionId);
-							const variant = yield* getVariant(sessionId);
-							const contextWindow = yield* getContextWindow(sessionId);
+							const variant = row?.variant ?? "";
+							const contextWindow = row?.context_window ?? "";
 							yield* turns.sendTurn({
 								clientId: "continuation",
 								commandId: randomUUID(),
 								sessionId,
 								text: "",
 								continuation: { cutOffMessageId: continued.cutOffMessageId },
-								modelUserSelected: yield* isModelUserSelected(sessionId),
 								...(model ? { model } : {}),
 								...(agent ? { agent } : {}),
-								...(variant ? { variant } : {}),
-								...(contextWindow ? { contextWindow } : {}),
+								variant,
+								contextWindow,
 							});
 						}).pipe(Effect.scoped),
 					),

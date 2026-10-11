@@ -6,6 +6,7 @@ import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
@@ -67,6 +68,11 @@ describe("WsRpcServerLayer input.submit", () => {
 							orchestrationEngine: engine,
 							seedEvents: [
 								makeSessionCreatedEvent("session-1", { provider: "claude" }),
+								canonicalEvent("session.model_changed", "session-1", {
+									sessionId: "session-1",
+									providerId: "claude",
+									modelId: "sonnet",
+								}),
 							],
 							claudeEventPersistEffect: {
 								persistHandoffDelivered: () => Effect.void,
@@ -124,7 +130,14 @@ describe("WsRpcServerLayer input.submit", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
-							seedEvents: [makeSessionCreatedEvent("session-1")],
+							seedEvents: [
+								makeSessionCreatedEvent("session-1"),
+								canonicalEvent("session.model_changed", "session-1", {
+									sessionId: "session-1",
+									providerId: "openai",
+									modelId: "gpt-4",
+								}),
+							],
 							sessionManagerService: makeMockSessionManagerService({
 								recordMessageActivity,
 							}),
@@ -176,7 +189,14 @@ describe("WsRpcServerLayer input.submit", () => {
 							makeTestHandlerLayer({
 								config: makeMockConfig({ projectDir: tmpdir() }),
 								orchestrationEngine: engine,
-								seedEvents: [makeSessionCreatedEvent("session-1")],
+								seedEvents: [
+									makeSessionCreatedEvent("session-1"),
+									canonicalEvent("session.model_changed", "session-1", {
+										sessionId: "session-1",
+										providerId: "openai",
+										modelId: "gpt-4",
+									}),
+								],
 							}),
 							RateLimiterLive({ maxRequests: 1, windowMs: 60_000 }),
 						),

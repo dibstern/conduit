@@ -136,6 +136,19 @@
 		contextOptions.find((option) => option.value === contextWindow.current?.value) ??
 			contextOptions.find((option) => option.isDefault) ?? contextOptions[0] ?? null,
 	);
+
+	/** Use the same values as the trigger's data-shown-* attributes on creation. */
+	export function getDisplayedPick() {
+		return {
+			instanceId: selectedId,
+			model: {
+				modelId: activeModelId,
+				providerId: activeProviderId,
+				variant: effort.current ?? "",
+				contextWindow: selectedContext?.value ?? "",
+			},
+		};
+	}
 	const contextLabel = $derived(selectedContext?.label ?? modelContextLabel(activeModel));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));

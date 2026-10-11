@@ -1,3 +1,4 @@
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
@@ -10,9 +11,10 @@ import {
 	getDefaultContextWindow,
 	makeOverridesStateLive,
 	setDefaultModel,
-	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { switchContextWindowForSession } from "../../../src/lib/handlers/context-window.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -54,10 +56,11 @@ describe("switchContextWindowForSession with Effect override state", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* setModel("session-42", {
-					providerID: "claude",
-					modelID: "claude-sonnet-4-7",
-				});
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+					VALUES ('session-42', 'claude', 'Stored session', 'claude', 'claude-sonnet-4-7', '', '200k', 1, 1)`;
 
 				const result = yield* switchContextWindowForSession({
 					clientId: "client-1",
@@ -66,6 +69,14 @@ describe("switchContextWindowForSession with Effect override state", () => {
 				});
 
 				expect(yield* getContextWindow("session-42")).toBe("1m");
+				expect(
+					yield* (yield* ReadQueryEffectTag).getSession("session-42"),
+				).toMatchObject({
+					model_provider: "claude",
+					model_id: "claude-sonnet-4-7",
+					variant: "",
+					context_window: "1m",
+				});
 				expect(result).toEqual({
 					contextWindow: "1m",
 					options: contextWindowOptions,

@@ -154,7 +154,7 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 
 for (const delivery of ["queue", "steer"] as const) {
 	it(`the usage hold admits ${delivery} inputs and blocks Drain but not SendNow`, () => {
-		const request = { text: "wait", modelUserSelected: false };
+		const request = { text: "wait" };
 		const view: InboxView = {
 			provider: "claude",
 			queued: [],
@@ -269,7 +269,7 @@ const resetInboxFixture = Effect.gen(function* () {
 				sessionId: "s1",
 				inputId,
 				delivery: "queue",
-				request: { text: inputId, modelUserSelected: false },
+				request: { text: inputId },
 			}),
 		finish: (inputId: string) =>
 			commit([

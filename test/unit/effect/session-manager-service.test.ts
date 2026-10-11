@@ -95,6 +95,7 @@ import {
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
+import type { TurnSettings } from "../../../src/lib/provider/turn-settings.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
@@ -109,6 +110,20 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
+
+const openCodePick: TurnSettings = {
+	harness: "opencode",
+	model: { providerId: "openai", modelId: "gpt-5" },
+	effort: "",
+	contextWindow: "",
+};
+
+const claudePick: TurnSettings = {
+	harness: "claude",
+	model: { providerId: "claude", modelId: "claude-sonnet-4-7" },
+	effort: "",
+	contextWindow: "",
+};
 
 function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 	return {
@@ -474,6 +489,10 @@ describe("SessionManagerService", () => {
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: api }),
+					),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
@@ -487,6 +506,7 @@ describe("SessionManagerService", () => {
 
 				const session = yield* service.createSession("Created", {
 					providerId: "opencode",
+					pick: openCodePick,
 				});
 
 				expect(session.id).toBe("created-session");
@@ -534,7 +554,9 @@ describe("SessionManagerService", () => {
 				});
 				const service = yield* SessionManagerServiceTag;
 
-				const session = yield* service.createSession("Local Claude");
+				const session = yield* service.createSession("Local Claude", {
+					pick: claudePick,
+				});
 				const sessions = yield* service.listSessions();
 
 				expect(session.id).toMatch(/^ses_/);
@@ -580,6 +602,10 @@ describe("SessionManagerService", () => {
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: api }),
+					),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
@@ -594,6 +620,7 @@ describe("SessionManagerService", () => {
 
 				const session = yield* service.createSession("OpenCode Session", {
 					providerId: "opencode",
+					pick: openCodePick,
 				});
 				const sessions = yield* service.listSessions();
 				const persisted = yield* Effect.sync(() => {
@@ -675,6 +702,10 @@ describe("SessionManagerService", () => {
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: api }),
+					),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					DaemonEventBusLive,
@@ -686,6 +717,7 @@ describe("SessionManagerService", () => {
 				const result = yield* Effect.either(
 					service.createSession("No persistence", {
 						providerId: "opencode",
+						pick: openCodePick,
 					}),
 				);
 
@@ -937,6 +969,7 @@ describe("SessionManagerService", () => {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const session = yield* service.createSession("Native Claude", {
 					providerId: "claude",
+					pick: claudePick,
 				});
 				yield* persist.persistUserMessage(session.id, "First message");
 				const eventStore = yield* EventStoreEffectTag;
@@ -1020,11 +1053,11 @@ describe("SessionManagerService", () => {
 
 				const claudeSession = yield* service.createSession(
 					"Claude Instance Session",
-					{ instanceId: claudeInstanceId },
+					{ instanceId: claudeInstanceId, pick: claudePick },
 				);
 				const openCodeSession = yield* service.createSession(
 					"OpenCode Instance Session",
-					{ instanceId: openCodeInstanceId },
+					{ instanceId: openCodeInstanceId, pick: openCodePick },
 				);
 
 				const sql = yield* SqlClient.SqlClient;
@@ -1125,6 +1158,7 @@ describe("SessionManagerService", () => {
 				const service = yield* SessionManagerServiceTag;
 				const session = yield* service.createSession("Named", {
 					instanceId: ProviderInstanceIdSchema.make("work-oc"),
+					pick: openCodePick,
 				});
 				const bindings = yield* Effect.sync(() => {
 					const db = openFixtureDb(dbFile);
@@ -1190,6 +1224,10 @@ describe("SessionManagerService", () => {
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag, api),
+					Layer.succeed(
+						OpenCodeInstancesTag,
+						makeOpenCodeInstancesStub({ opencode: api }),
+					),
 					Layer.succeed(LoggerTag, makeMockLogger()),
 					makeSessionManagerStateLive(),
 					makeOverridesStateLive(),
@@ -1204,6 +1242,7 @@ describe("SessionManagerService", () => {
 				const result = yield* Effect.either(
 					service.createSession("OpenCode Session", {
 						providerId: "opencode",
+						pick: openCodePick,
 					}),
 				);
 				const sessions = yield* service.listSessions();
@@ -1221,7 +1260,7 @@ describe("SessionManagerService", () => {
 	);
 
 	it.scoped(
-		"live service creates a local Claude session before model discovery sets a default provider",
+		"rejects creation with PickRequired before model discovery provides a harness default",
 		() => {
 			const dbFile = join(
 				tmpdir(),
@@ -1250,12 +1289,20 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
-				const session = yield* service.createSession("Local before models");
+				const result = yield* Effect.either(
+					service.createSession("Local before models"),
+				);
 
-				expect(session.id).toMatch(/^ses_/);
-				expect(session.providerID).toBe("claude");
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						_tag: "PickRequired",
+						message: expect.stringMatching(/^PickRequired/),
+					}),
+				});
 				expect(api.session.create).not.toHaveBeenCalled();
-				expect(bindSession).toHaveBeenCalledWith(session.id, "claude");
+				expect(bindSession).not.toHaveBeenCalled();
+				expect(yield* service.listSessions()).toEqual([]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
@@ -2172,6 +2219,7 @@ describe("SessionManagerService", () => {
 
 				yield* service.createSession("Session 3", {
 					providerId: "opencode",
+					pick: openCodePick,
 				});
 				expect(snapshot.getSnapshot().sessionCount).toBe(3);
 

@@ -70,15 +70,28 @@ const establishClaudeSession = (sessionId: string) =>
 		const eventStore = yield* EventStoreEffectTag;
 		const runner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* runner.isRecovered())) yield* runner.recover();
-		const creation = yield* eventStore.append(
+		const creation = yield* eventStore.appendBatch([
 			canonicalEvent(
 				"session.created",
 				sessionId,
 				{ sessionId, title: "Claude Session", provider: "claude" },
 				{ provider: "claude" },
 			),
-		);
-		yield* runner.projectEvent(creation);
+			canonicalEvent("session.model_changed", sessionId, {
+				sessionId,
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+			}),
+			canonicalEvent("session.variant_changed", sessionId, {
+				sessionId,
+				variant: "",
+			}),
+			canonicalEvent("session.context_window_changed", sessionId, {
+				sessionId,
+				contextWindow: "",
+			}),
+		]);
+		for (const event of creation) yield* runner.projectEvent(event);
 	});
 
 // Mirror relay-stack production wiring: cev.3 makes ProviderRuntimeIngestion the

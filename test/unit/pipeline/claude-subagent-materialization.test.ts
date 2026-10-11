@@ -8,6 +8,7 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Fiber, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -203,6 +204,15 @@ describe("Claude subagent materialization pipeline", () => {
 						),
 					);
 
+					for (const event of sessionPickEvents(parentSessionId, {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
+						effort: "high",
+						contextWindow: "1m",
+					})) {
+						yield* appendProject(event);
+					}
+
 					const sdk: ClaudeSubagentSdk = {
 						listSubagents: vi.fn(async () => [sdkSubagentId]),
 						getSubagentMessages: vi.fn(async () => [
@@ -311,6 +321,8 @@ describe("Claude subagent materialization pipeline", () => {
 							sessionId: parentSessionId,
 							workspaceRoot: dir,
 							model: { providerId: "claude", modelId: "sonnet" },
+							variant: "high",
+							contextWindow: "1m",
 							nativeThread: {
 								resumeSessionId: parentClaudeSessionId,
 								projectId: "test-project",
@@ -344,7 +356,16 @@ describe("Claude subagent materialization pipeline", () => {
 					const childRows = yield* sql<{
 						parent_id: string | null;
 						provider_sid: string | null;
-					}>`SELECT parent_id, provider_sid FROM sessions WHERE id = ${childSessionId}`;
+						model_provider: string | null;
+						model_id: string | null;
+						variant: string | null;
+						context_window: string | null;
+					}>`SELECT parent_id, provider_sid, model_provider, model_id, variant, context_window
+						FROM sessions WHERE id = ${childSessionId}`;
+					const childPickEvents = yield* sql<{ type: string }>`
+						SELECT type FROM events WHERE session_id = ${childSessionId}
+						AND type IN ('session.model_changed', 'session.variant_changed', 'session.context_window_changed')
+						ORDER BY sequence`;
 					const roots = yield* sql<{ id: string }>`
 						SELECT id FROM sessions WHERE parent_id IS NULL ORDER BY updated_at DESC`;
 					const allSessions = yield* sql<{ id: string }>`
@@ -366,6 +387,7 @@ describe("Claude subagent materialization pipeline", () => {
 							).messages,
 						),
 						child: childRows[0],
+						childPickEvents: childPickEvents.map((event) => event.type),
 						rootIds: roots.map((row) => row.id),
 						allSessionIds: allSessions.map((row) => row.id),
 					};
@@ -385,7 +407,16 @@ describe("Claude subagent materialization pipeline", () => {
 			expect(result.child).toEqual({
 				parent_id: "parent-session",
 				provider_sid: "task-1",
+				model_provider: "claude",
+				model_id: "sonnet",
+				variant: "high",
+				context_window: "1m",
 			});
+			expect(result.childPickEvents).toEqual([
+				"session.model_changed",
+				"session.variant_changed",
+				"session.context_window_changed",
+			]);
 			expect(result.rootIds).toContain("parent-session");
 			expect(result.rootIds).not.toContain(result.childSessionId);
 			expect(result.allSessionIds).toContain(result.childSessionId);
@@ -439,7 +470,16 @@ describe("Claude subagent materialization pipeline", () => {
 							const childRows = yield* sql<{
 								parent_id: string | null;
 								provider_sid: string | null;
-							}>`SELECT parent_id, provider_sid FROM sessions WHERE id = ${childSessionId}`;
+								model_provider: string | null;
+								model_id: string | null;
+								variant: string | null;
+								context_window: string | null;
+							}>`SELECT parent_id, provider_sid, model_provider, model_id, variant, context_window
+								FROM sessions WHERE id = ${childSessionId}`;
+							const childPickEvents = yield* sql<{ type: string }>`
+								SELECT type FROM events WHERE session_id = ${childSessionId}
+								AND type IN ('session.model_changed', 'session.variant_changed', 'session.context_window_changed')
+								ORDER BY sequence`;
 							return {
 								parentChat: historyToChatMessages(
 									messageRowsToHistory(
@@ -454,6 +494,7 @@ describe("Claude subagent materialization pipeline", () => {
 									).messages,
 								),
 								child: childRows[0],
+								childPickEvents: childPickEvents.map((event) => event.type),
 							};
 						});
 					const hasProjectedChildTranscript = (state: {
@@ -506,6 +547,15 @@ describe("Claude subagent materialization pipeline", () => {
 							{ provider: "claude", createdAt: 1 },
 						),
 					);
+
+					for (const event of sessionPickEvents(parentSessionId, {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
+						effort: "high",
+						contextWindow: "1m",
+					})) {
+						yield* appendProject(event);
+					}
 
 					let getSubagentMessagesCalls = 0;
 					const transcript = [
@@ -663,6 +713,8 @@ describe("Claude subagent materialization pipeline", () => {
 								sessionId: parentSessionId,
 								workspaceRoot: dir,
 								model: { providerId: "claude", modelId: "sonnet" },
+								variant: "high",
+								contextWindow: "1m",
 								nativeThread: {
 									resumeSessionId: parentClaudeSessionId,
 									projectId: "test-project",
@@ -698,7 +750,16 @@ describe("Claude subagent materialization pipeline", () => {
 			expect(result.immediate.child).toEqual({
 				parent_id: "parent-live-session",
 				provider_sid: "task-live-1",
+				model_provider: "claude",
+				model_id: "sonnet",
+				variant: "high",
+				context_window: "1m",
 			});
+			expect(result.immediate.childPickEvents).toEqual([
+				"session.model_changed",
+				"session.variant_changed",
+				"session.context_window_changed",
+			]);
 			expect(immediateTaskMessage?.metadata?.["childSessionId"]).toBe(
 				result.childSessionId,
 			);

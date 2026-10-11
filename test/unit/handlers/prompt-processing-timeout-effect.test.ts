@@ -1,3 +1,4 @@
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
@@ -100,6 +101,10 @@ describe("prompt processing timeouts through Effect state", () => {
 		);
 
 		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+				VALUES ('session-1', 'opencode', 'Stored session', 'openai', 'gpt-4', '', '', 1, 1)`;
 			yield* handleMessage("client-1", {
 				text: "hello",
 				commandId: "cmd-timeout-send",

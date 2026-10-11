@@ -13,12 +13,10 @@ import {
 } from "effect";
 import {
 	isKnownDriverKind,
-	type ProviderDriverKind,
 	type ProviderInstanceId,
 } from "../../../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
-	resolveInstanceDriver,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail } from "../../../errors.js";
@@ -43,7 +41,12 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
-import { harnessForModelProvider } from "../../../provider/turn-settings.js";
+import {
+	isPickRejection,
+	ModelNotInCatalog,
+	type PickRejection,
+	type TurnSettings,
+} from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
@@ -62,6 +65,7 @@ import {
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "./services.js";
@@ -106,7 +110,16 @@ import {
 	snoozeSession,
 	unsnoozeSession,
 } from "./session-manager-triage.js";
-import { OverridesStateTag } from "./session-overrides-state.js";
+import {
+	OverridesStateTag,
+	setContextWindow,
+	setModel,
+	setVariant,
+} from "./session-overrides-state.js";
+import {
+	loadServerSessionPick,
+	resolveSessionCreationInstance,
+} from "./session-pick.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
 const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
@@ -154,6 +167,8 @@ export type ListSessionsOptions = {
 export interface CreateSessionOptions {
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	readonly pick?: TurnSettings;
+	readonly sourceSessionId?: string;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
 }
@@ -243,33 +258,16 @@ export const initialize = (title?: string) =>
 export const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
-const getLocalSessionProvider = () =>
-	Effect.gen(function* () {
-		const configuredProvider = yield* getConfiguredLocalSessionProvider();
-		return configuredProvider ?? "claude";
-	});
-
-const getConfiguredLocalSessionProvider = () =>
-	Effect.gen(function* () {
-		const overrides = yield* OverridesStateTag;
-		const state = yield* Ref.get(overrides);
-		return state.defaultModel?.providerID;
-	});
-
 const createLocalSession = (
-	title?: string,
-	selectedInstanceId?: ProviderInstanceId,
-	reservedSessionId?: string,
+	title: string | undefined,
+	selectedInstanceId: ProviderInstanceId,
+	reservedSessionId: string | undefined,
+	pick: TurnSettings,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 
-		const provider =
-			selectedInstanceId === undefined
-				? reservedSessionId === undefined
-					? yield* getLocalSessionProvider()
-					: "claude"
-				: selectedInstanceId;
+		const provider = selectedInstanceId;
 		const sessionId = reservedSessionId ?? createLocalSessionId();
 		const now = Date.now();
 		const sessionTitle = normalizeSessionTitle(title);
@@ -277,10 +275,13 @@ const createLocalSession = (
 		// The id is chosen here rather than upstream, so creation is one command:
 		// the seam appends session.created and the projector's upsert is what
 		// brings the sessions row into being.
-		yield* applySessionCommand({
-			type: "session.created",
-			data: { sessionId, title: sessionTitle, provider },
-		}).pipe(
+		yield* applySessionCommand(
+			{
+				type: "session.created",
+				data: { sessionId, title: sessionTitle, provider },
+			},
+			{ pick },
+		).pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({ operation: "createLocalSession", cause }),
@@ -601,10 +602,12 @@ export const deleteSession = (sessionId: string) =>
 	);
 
 export interface SessionManagerService {
-	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
+	initialize(
+		title?: string,
+	): Effect.Effect<string, SessionManagerError | PickRejection>;
 	getDefaultSessionId(
 		title?: string,
-	): Effect.Effect<string, SessionManagerError>;
+	): Effect.Effect<string, SessionManagerError | PickRejection>;
 	getLastKnownSessionCount(): Effect.Effect<number>;
 	listSessions(
 		options?: ListSessionsOptions,
@@ -613,7 +616,7 @@ export interface SessionManagerService {
 	createSession(
 		title?: string,
 		options?: CreateSessionOptions,
-	): Effect.Effect<SessionDetail, SessionManagerError>;
+	): Effect.Effect<SessionDetail, SessionManagerError | PickRejection>;
 	establishOpenCodeSession(
 		session: SessionDetail,
 		providerInstanceId: ProviderInstanceId,
@@ -679,15 +682,12 @@ export class SessionManagerServiceTag extends Context.Tag(
 )<SessionManagerServiceTag, SessionManagerService>() {}
 
 const makeServiceCreateSession = ({
-	api,
 	engine,
-	configDir,
 	instanceClients,
 	readQuery,
 	eventStore,
 	projectionRunner,
 	sql,
-	log,
 }: {
 	api: OpenCodeAPI;
 	engine: OrchestrationEngine;
@@ -704,198 +704,60 @@ const makeServiceCreateSession = ({
 		options?: CreateSessionOptions,
 	) =>
 		Effect.gen(function* () {
-			const bindSessionProvider = (
-				session: SessionDetail,
-				providerId: string,
-			) =>
-				Effect.sync(() => {
-					engine.bindSession(session.id, providerId);
+			const { instanceId, harness } =
+				yield* resolveSessionCreationInstance(options);
+			const source = options?.sourceSessionId
+				? yield* readQuery.getSession(options.sourceSessionId)
+				: undefined;
+			const pick =
+				options?.pick ??
+				(yield* loadServerSessionPick(harness, instanceId, source));
+			if (pick.harness !== harness)
+				return yield* new ModelNotInCatalog({ harness, ...pick.model });
+			if (harness === "opencode" && options?.sessionId)
+				return yield* new SessionManagerError({
+					operation: "createSession",
+					cause: "Reserved workspace sessions require Claude",
 				});
-			const resolveSelectedDriver = (
-				instanceId: ProviderInstanceId,
-			): Effect.Effect<ProviderDriverKind, SessionManagerError> =>
+			const session = yield* Effect.scoped(
 				Effect.gen(function* () {
-					const daemonConfig = loadDaemonConfig(configDir);
-					if (daemonConfig !== null) {
-						return resolveInstanceDriver(daemonConfig, instanceId);
-					}
-					if (isKnownDriverKind(instanceId)) {
-						return instanceId;
-					}
-					return yield* new SessionManagerError({
-						operation: "createSession.resolveInstanceDriver",
-						cause: `Cannot resolve provider instance without daemon config: ${instanceId}`,
-					});
-				});
-			const createViaOpenCode = (instanceId?: ProviderInstanceId) =>
-				Effect.either(
-					Effect.gen(function* () {
-						// A session bound to an OpenCode instance is created on
-						// THAT instance's server; no explicit instance uses the
-						// project-default client. An instance that is unknown or
-						// unreachable fails the create cleanly instead of silently
-						// landing on the default server.
-						const instanceApi =
-							instanceId !== undefined
-								? yield* instanceClients.use(instanceId).pipe(
-										Effect.mapError(
-											(cause) =>
-												new SessionManagerError({
-													operation: "createSession.resolveInstanceClient",
-													cause,
-												}),
-										),
-									)
-								: undefined;
-						return yield* createOpenCodeSession(
+					if (harness === "claude")
+						return yield* createLocalSession(
 							title,
-							instanceId ?? "opencode",
-						).pipe(
-							Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
-							Effect.provideService(ReadQueryEffectTag, readQuery),
-							Effect.provideService(EventStoreEffectTag, eventStore),
-							Effect.provideService(
-								ProjectionRunnerEffectTag,
-								projectionRunner,
-							),
-							Effect.provideService(SqlClient.SqlClient, sql),
-							Effect.mapError(
-								(cause) =>
-									new SessionManagerError({
-										operation: "createSession",
-										cause,
-									}),
-							),
+							instanceId,
+							options?.sessionId,
+							pick,
 						);
-					}).pipe(Effect.scoped),
-				);
-			const createViaLocal = (instanceId?: ProviderInstanceId) =>
-				Effect.either(
-					createLocalSession(title, instanceId, options?.sessionId).pipe(
-						Effect.provideService(ReadQueryEffectTag, readQuery),
-						Effect.provideService(EventStoreEffectTag, eventStore),
-						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
-						Effect.provideService(SqlClient.SqlClient, sql),
-					),
-				);
-
-			const selectedInstanceId = options?.instanceId;
-			if (selectedInstanceId !== undefined) {
-				const selectedDriver = yield* resolveSelectedDriver(selectedInstanceId);
-				if (selectedDriver === CLAUDE_PROVIDER_ID) {
-					const localResult = yield* createViaLocal(selectedInstanceId);
-					if (localResult._tag === "Right") {
-						yield* bindSessionProvider(localResult.right, selectedInstanceId);
-						return localResult.right;
-					}
-					return yield* new SessionManagerError({
-						operation: "createSession",
-						cause: localResult.left,
-					});
-				}
-				if (selectedDriver === "opencode") {
-					if (options?.sessionId)
-						return yield* new SessionManagerError({
-							operation: "createSession",
-							cause: "Reserved workspace sessions require Claude",
-						});
-					const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
-					if (openCodeResult._tag === "Right") {
-						yield* bindSessionProvider(
-							openCodeResult.right,
-							selectedInstanceId,
-						);
-						return openCodeResult.right;
-					}
-					return yield* new SessionManagerError({
-						operation: "createSession",
-						cause: openCodeResult.left,
-					});
-				}
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: `Unsupported provider driver for instance ${selectedInstanceId}: ${selectedDriver}`,
-				});
-			}
-
-			const requestedProvider = options?.providerId?.trim();
-			const requestedLocalProvider =
-				(requestedProvider !== undefined &&
-					harnessForModelProvider(requestedProvider) === "claude") ||
-				requestedProvider === CLAUDE_SDK_PROVIDER_ID;
-			if (requestedProvider && !requestedLocalProvider) {
-				if (options?.sessionId)
-					return yield* new SessionManagerError({
-						operation: "createSession",
-						cause: "Reserved workspace sessions require Claude",
-					});
-				const openCodeResult = yield* createViaOpenCode();
-				if (openCodeResult._tag === "Right") {
-					yield* bindSessionProvider(openCodeResult.right, "opencode");
-					return openCodeResult.right;
-				}
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: openCodeResult.left,
-				});
-			}
-
-			const configuredProvider = yield* getConfiguredLocalSessionProvider();
-			if (
-				options?.sessionId !== undefined ||
-				configuredProvider == null ||
-				harnessForModelProvider(configuredProvider) === "claude"
-			) {
-				const localResult = yield* createViaLocal();
-				if (localResult._tag === "Right") {
-					yield* bindSessionProvider(localResult.right, "claude");
-					return localResult.right;
-				}
-
-				if (options?.sessionId) return yield* localResult.left;
-				log.warn(
-					`Relay-owned Claude session create failed; falling back to OpenCode session create: ${localResult.left}`,
-				);
-				const openCodeResult = yield* createViaOpenCode();
-				if (openCodeResult._tag === "Right") {
-					yield* bindSessionProvider(openCodeResult.right, "opencode");
-					return openCodeResult.right;
-				}
-
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: {
-						local: localResult.left,
-						openCode: openCodeResult.left,
-					},
-				});
-			}
-
-			const openCodeResult = yield* createViaOpenCode();
-			if (openCodeResult._tag === "Right") {
-				yield* bindSessionProvider(openCodeResult.right, "opencode");
-				return openCodeResult.right;
-			}
-
-			log.warn(
-				`OpenCode session create failed; creating relay-owned session: ${openCodeResult.left}`,
+					const instanceApi = yield* instanceClients.use(instanceId);
+					return yield* createOpenCodeSession(title, instanceId, pick).pipe(
+						Effect.provideService(OpenCodeAPITag, instanceApi),
+					);
+				}),
+			).pipe(
+				Effect.provideService(ReadQueryEffectTag, readQuery),
+				Effect.provideService(EventStoreEffectTag, eventStore),
+				Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "createSession", cause }),
+				),
 			);
-			const localResult = yield* createViaLocal();
-			if (localResult._tag === "Right") {
-				if (localResult.right.providerID === CLAUDE_PROVIDER_ID) {
-					yield* bindSessionProvider(localResult.right, "claude");
-				}
-				return localResult.right;
-			}
-
-			return yield* new SessionManagerError({
-				operation: "createSession",
-				cause: {
-					openCode: openCodeResult.left,
-					local: localResult.left,
-				},
+			engine.bindSession(session.id, instanceId);
+			yield* setModel(session.id, {
+				providerID: pick.model.providerId,
+				modelID: pick.model.modelId,
 			});
-		});
+			yield* setVariant(session.id, pick.effort);
+			yield* setContextWindow(session.id, pick.contextWindow);
+			return session;
+		}).pipe(
+			Effect.mapError((cause) =>
+				isPickRejection(cause) || cause instanceof SessionManagerError
+					? cause
+					: new SessionManagerError({ operation: "createSession", cause }),
+			),
+		);
 	return serviceCreateSession;
 };
 
@@ -936,6 +798,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const overrides = yield* OverridesStateTag;
+		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		// Captured here, not read at call time: the auto-settle sweep calls in from
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
@@ -1085,14 +948,21 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const createSessionWithServices = (
 			title?: string,
 			options?: CreateSessionOptions,
-		) =>
-			serviceCreateSession(title, options).pipe(
+		) => {
+			const create = serviceCreateSession(title, options).pipe(
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
 				Effect.provideService(OpenCodeAPITag, api),
+				Effect.provideService(OrchestrationEngineTag, engine),
 				Effect.provideService(OverridesStateTag, overrides),
 				Effect.provideService(RelayStatusSnapshotTag, snapshot),
 			);
+			return modelService._tag === "Some"
+				? create.pipe(
+						Effect.provideService(OpenCodeModelServiceTag, modelService.value),
+					)
+				: create;
+		};
 
 		const withSessionCommandServices = <A, E>(
 			effect: Effect.Effect<

@@ -15,8 +15,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
+import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
@@ -190,7 +195,19 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 		// Providers
 		if (url.pathname === "/provider") {
-			res.end(JSON.stringify({ all: [], default: {}, connected: [] }));
+			res.end(
+				JSON.stringify({
+					all: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							models: { "gpt-4": { id: "gpt-4", name: "GPT-4" } },
+						},
+					],
+					default: { openai: "gpt-4" },
+					connected: ["openai"],
+				}),
+			);
 			return;
 		}
 
@@ -274,8 +291,31 @@ async function createTestHarness(): Promise<TestHarness> {
 	// Relay startup makes no OpenCode requests; the first use opens the stream.
 	await relay.effectRuntime.runtime.runPromise(
 		Effect.scoped(
-			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-				instances.use("opencode"),
+			Effect.gen(function* () {
+				yield* (yield* OpenCodeInstancesTag).use("opencode");
+				const manager = yield* SessionManagerServiceTag;
+				const commit = yield* makeCommitAndSignal;
+				for (const session of Object.values(mock.sessions)) {
+					yield* manager.establishOpenCodeSession(
+						session,
+						defaultInstanceIdForDriver("opencode"),
+					);
+					yield* commit(
+						sessionPickEvents(session.id, {
+							harness: "opencode",
+							model: { providerId: "openai", modelId: "gpt-4" },
+							effort: "",
+							contextWindow: "",
+						}),
+					);
+				}
+			}),
+		).pipe(
+			Effect.provide(
+				makePersistenceEffectLayer(
+					join(persistenceDir, "events.db"),
+					"test-project",
+				),
 			),
 		),
 	);

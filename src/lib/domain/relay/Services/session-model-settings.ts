@@ -14,14 +14,12 @@ import {
 	type ModelOverride,
 	setContextWindow,
 	setModel,
-	setModelDefault,
 	setVariant,
 } from "./session-overrides-state.js";
 
 // A session's model, effort and context window live in OverridesState for the
-// turn path, and on the session row for every tab (ni8.55). Each write goes
-// through here so the two cannot drift: memory first, then the canonical event
-// whose projection bumps the row version and reaches peers as a shell upsert.
+// picker, and on the session row for dispatch and every tab (ni8.55). The
+// canonical event bumps the row version and reaches peers as a shell upsert.
 // Child sessions are not shell rows; the same version bump reaches their
 // viewers as a family-feed upsert (ni8.28).
 
@@ -61,17 +59,11 @@ const commitModel = (sessionId: string, model: ModelOverride) =>
 
 /** A model the user picked for this session. */
 export const selectSessionModel = (sessionId: string, model: ModelOverride) =>
-	setModel(sessionId, model).pipe(
-		Effect.andThen(commitModel(sessionId, model)),
+	commitModel(sessionId, model).pipe(
+		Effect.andThen(setModel(sessionId, model)),
 	);
 
-/** A model the relay chose for this session; the user did not pick it. */
-export const inferSessionModel = (sessionId: string, model: ModelOverride) =>
-	setModelDefault(sessionId, model).pipe(
-		Effect.andThen(commitModel(sessionId, model)),
-	);
-
-/** "" clears the session's effort back to the default. */
+/** "" explicitly chooses the model's default effort. */
 export const selectSessionVariant = (sessionId: string, variant: string) =>
 	setVariant(sessionId, variant).pipe(
 		Effect.andThen(
@@ -82,7 +74,7 @@ export const selectSessionVariant = (sessionId: string, variant: string) =>
 		),
 	);
 
-/** "" clears the session's context window back to the default. */
+/** "" explicitly chooses the model's default context window. */
 export const selectSessionContextWindow = (
 	sessionId: string,
 	contextWindow: string,
@@ -97,8 +89,8 @@ export const selectSessionContextWindow = (
 	);
 
 /**
- * Load the projected settings back into memory after a restart. Runs after the
- * turns-table restore, so a setting changed since the last turn wins.
+ * Load the projected settings back into memory after a restart. The session row
+ * is the durable pick, including choices changed after the last turn.
  */
 export const restoreSessionModelSettings = () =>
 	Effect.gen(function* () {

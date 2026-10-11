@@ -3,9 +3,9 @@ import { LoggerTag } from "../domain/relay/Services/services.js";
 import { selectSessionContextWindow } from "../domain/relay/Services/session-model-settings.js";
 import {
 	getDefaultModel,
-	getModel,
 	setDefaultContextWindow,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	findCatalogModel,
 	harnessForModelProvider,
@@ -27,8 +27,13 @@ export const switchContextWindowForSession = (
 		const log = yield* LoggerTag;
 
 		const sessionId = input.sessionId;
+		const row = sessionId
+			? yield* (yield* ReadQueryEffectTag).getSession(sessionId)
+			: undefined;
 		const activeModel = sessionId
-			? ((yield* getModel(sessionId)) ?? (yield* getDefaultModel()))
+			? row?.model_id && row.model_provider
+				? { modelID: row.model_id, providerID: row.model_provider }
+				: undefined
 			: yield* getDefaultModel();
 		const harness = harnessForModelProvider(activeModel?.providerID ?? "");
 		const catalog = yield* loadModelCatalog(harness);

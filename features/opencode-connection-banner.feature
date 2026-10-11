@@ -113,7 +113,8 @@ Scenario: Rejected discovery on a persisted Claude instance does not show an Ope
   Then the OpenCode connection banner is not visible
 
 Scenario: The first send shows why the selected OpenCode instance cannot create a session
-  Given creating a session on instance work-oc fails with CreateSession failed: OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused
+  Given the composer picker has the OpenCode catalog
+  And creating a session on instance work-oc fails with CreateSession failed: OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused
   When I type diagnose this outage into the composer
   And I send the composer message
   Then an error toast contains OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused

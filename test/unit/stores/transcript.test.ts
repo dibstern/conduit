@@ -148,7 +148,7 @@ describe("transcript detail reducer", () => {
 				inputId,
 				state: "queued" as const,
 				admittedAt,
-				request: { text: inputId, modelUserSelected: false },
+				request: { text: inputId },
 			},
 		});
 		const first = applyTranscriptEnvelope(entry(), {

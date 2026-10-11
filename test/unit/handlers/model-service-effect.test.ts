@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, layer } from "@effect/vitest";
 import {
 	Deferred,
@@ -48,6 +49,7 @@ import {
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -110,6 +112,12 @@ describe("model handlers with Effect-native model service", () => {
 			);
 
 			return Effect.gen(function* () {
+				const projections = yield* ProjectionRunnerEffectTag;
+				yield* projections.recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Stored session', 'openai', 'gpt-4', '', '', 1, 1)`;
 				yield* setModel("session-1", {
 					providerID: "openai",
 					modelID: "gpt-4",
@@ -584,7 +592,7 @@ describe("model handlers with Effect-native model service", () => {
 		)))));
 	});
 
-	it.effect("honours the running project's native default instead of the first catalog model without starting OpenCode", () => {
+	it.effect("honours the running project's native default for drafts without assigning it to sessions", () => {
 		let running = false;
 		const nativeConfig = { model: "fake/model-b" };
 		const api = makeHandlerOpenCodeAPI({
@@ -638,7 +646,7 @@ describe("model handlers with Effect-native model service", () => {
 			expect(yield* getDefaultModel()).toEqual({ providerID: "fake", modelID: "model-b" });
 			yield* refreshGlobalDefaults;
 			expect(yield* getDefaultModel()).toEqual({ providerID: "fake", modelID: "model-b" });
-			expect((yield* getModelsResponse({ instanceId: "opencode", sessionId: "opencode-session" })).active).toEqual({ provider: "fake", model: "model-b" });
+			expect((yield* getModelsResponse({ instanceId: "opencode", sessionId: "opencode-session" })).active).toBeUndefined();
 			for (const sessionId of ["claude-session", "named-claude-session"]) {
 				expect((yield* getModelsResponse({ sessionId })).active).toBeUndefined();
 			}

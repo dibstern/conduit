@@ -5,6 +5,7 @@ Background:
   Given the conduit app is served with the connected mockup
 
 Scenario Outline: selecting a rail instance sets the harness for a new session
+  Given the composer picker has the OpenCode catalog
   When I open the model picker
   And I select the <instance> instance in the rail
   And I close the model picker

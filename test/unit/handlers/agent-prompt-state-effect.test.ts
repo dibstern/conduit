@@ -4,6 +4,7 @@ import { expect, vi } from "vitest";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { setDefaultAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
@@ -60,7 +61,14 @@ describe("agent selection state", () => {
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
-						seedEvents: [makeSessionCreatedEvent("session-1")],
+						seedEvents: [
+							makeSessionCreatedEvent("session-1"),
+							canonicalEvent("session.model_changed", "session-1", {
+								sessionId: "session-1",
+								providerId: "openai",
+								modelId: "gpt-4",
+							}),
+						],
 					}),
 				),
 			),
@@ -108,7 +116,14 @@ describe("agent selection state", () => {
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
-						seedEvents: [makeSessionCreatedEvent("session-1")],
+						seedEvents: [
+							makeSessionCreatedEvent("session-1"),
+							canonicalEvent("session.model_changed", "session-1", {
+								sessionId: "session-1",
+								providerId: "openai",
+								modelId: "gpt-4",
+							}),
+						],
 					}),
 				),
 			),

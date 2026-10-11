@@ -4,6 +4,7 @@ Background:
   Given the conduit app is served with the connected mockup
 
 Scenario: Sent message stays visible after the browser selects the first-send session
+  Given the composer picker has the OpenCode catalog
   When I type keep this message visible into the composer
   And I send the composer message
   And the mock relay replays the sent message for the selected session

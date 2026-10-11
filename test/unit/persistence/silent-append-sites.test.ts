@@ -33,6 +33,7 @@ import {
 import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import {
 	makePollerPubSubLive,
 	makePollerStateLive,
@@ -43,9 +44,11 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeMockConfig,
@@ -194,14 +197,24 @@ it("local session creation advances its row version and announces its session", 
 					const manager = yield* SessionManagerServiceTag;
 					let sessionId = "";
 					const announced = yield* announcedDuring(
-						manager.createSession("Local session").pipe(
-							Effect.tap((session) =>
-								Effect.sync(() => {
-									expect(session.providerID).toBe("claude");
-									sessionId = session.id;
-								}),
+						manager
+							.createSession("Local session", {
+								providerId: "claude",
+								pick: {
+									harness: "claude",
+									model: { providerId: "claude", modelId: "sonnet" },
+									effort: "high",
+									contextWindow: "200k",
+								},
+							})
+							.pipe(
+								Effect.tap((session) =>
+									Effect.sync(() => {
+										expect(session.providerID).toBe("claude");
+										sessionId = session.id;
+									}),
+								),
 							),
-						),
 					);
 					expect(yield* versionOf(sessionId)).toBeGreaterThan(0);
 					expect(announced).toContain(sessionId);
@@ -231,7 +244,15 @@ it("session-manager rename advances its row version and announces its session", 
 				Effect.gen(function* () {
 					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const manager = yield* SessionManagerServiceTag;
-					const session = yield* manager.createSession("Before rename");
+					const session = yield* manager.createSession("Before rename", {
+						providerId: "claude",
+						pick: {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "high",
+							contextWindow: "200k",
+						},
+					});
 					expect(session.providerID).toBe("claude");
 					const before = yield* versionOf(session.id);
 					if (before === undefined)
@@ -382,6 +403,12 @@ it("ensureClaudeSubagentSession announces the subagent session it creates", asyn
 							},
 							{ provider: "claude" },
 						),
+						...sessionPickEvents("agent-parent", {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "high",
+							contextWindow: "1m",
+						}),
 					]);
 
 					const persist = yield* ClaudeEventPersistEffectTag;
@@ -396,6 +423,27 @@ it("ensureClaudeSubagentSession announces the subagent session it creates", asyn
 
 					expect(yield* versionOf("agent-child")).toBeGreaterThan(0);
 					expect(announced).toContain("agent-child");
+					expect(
+						yield* (yield* ReadQueryEffectTag).getSession("agent-child"),
+					).toMatchObject({
+						model_provider: "claude",
+						model_id: "sonnet",
+						variant: "high",
+						context_window: "1m",
+					});
+					const events = yield* (yield* EventStoreEffectTag).readAllBySession(
+						"agent-child",
+					);
+					expect(
+						events
+							.filter((event) => event.type.startsWith("session."))
+							.map((event) => event.type),
+					).toEqual([
+						"session.created",
+						"session.model_changed",
+						"session.variant_changed",
+						"session.context_window_changed",
+					]);
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(
@@ -436,6 +484,12 @@ it("Claude transcript persistence announces the child session it writes messages
 							},
 							{ provider: "claude" },
 						),
+						...sessionPickEvents("batch-parent", {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "high",
+							contextWindow: "1m",
+						}),
 					]);
 
 					const persist = yield* ClaudeEventPersistEffectTag;
@@ -464,6 +518,14 @@ it("Claude transcript persistence announces the child session it writes messages
 
 					expect(yield* versionOf("batch-child")).toBeGreaterThan(before ?? 0);
 					expect(announced).toContain("batch-child");
+					expect(
+						yield* (yield* ReadQueryEffectTag).getSession("batch-child"),
+					).toMatchObject({
+						model_provider: "claude",
+						model_id: "sonnet",
+						variant: "high",
+						context_window: "1m",
+					});
 				}).pipe(
 					Effect.provide(
 						Layer.mergeAll(

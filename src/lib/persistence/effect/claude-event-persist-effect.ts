@@ -1,6 +1,15 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Schema } from "effect";
+import { Context, Data, Effect, Either, Schema } from "effect";
+import {
+	resolveServerSessionPick,
+	sessionPickEvents,
+	storedSessionPick,
+} from "../../domain/relay/Services/session-pick.js";
+import {
+	isPickRejection,
+	type PickRejection,
+} from "../../provider/turn-settings.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -69,7 +78,7 @@ export interface ClaudeEventPersistEffect {
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
 		readonly title: string;
-	}) => Effect.Effect<void, ClaudeEventPersistFailure>;
+	}) => Effect.Effect<void, ClaudeEventPersistFailure | PickRejection>;
 }
 
 export class ClaudeEventPersistEffectTag extends Context.Tag(
@@ -374,18 +383,18 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							provider: string;
 							parent_id: string | null;
 							provider_sid: string | null;
+							model_id: string | null;
 						}>`
-							SELECT provider, parent_id, provider_sid
+							SELECT provider, parent_id, provider_sid, model_id
 							FROM sessions
 							WHERE id = ${input.childSessionId}
 							LIMIT 1`;
 						const existingChild = existingChildRows[0];
-						if (!existingChild) {
-							yield* seedClaudeSubagentSession(input);
-						} else if (
-							existingChild.provider !== "claude" ||
-							existingChild.parent_id !== input.parentSessionId ||
-							existingChild.provider_sid !== input.providerSessionId
+						if (
+							existingChild &&
+							(existingChild.provider !== "claude" ||
+								existingChild.parent_id !== input.parentSessionId ||
+								existingChild.provider_sid !== input.providerSessionId)
 						) {
 							return yield* Effect.fail(
 								new ClaudeSessionLifecycleError({
@@ -396,6 +405,23 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								}),
 							);
 						}
+						let pickEvents: CanonicalEvent[] = [];
+						if (!existingChild?.model_id?.trim()) {
+							const [parent] = yield* sql<{
+								model_id: string | null;
+								model_provider: string | null;
+								variant: string | null;
+								context_window: string | null;
+							}>`SELECT model_id, model_provider, variant, context_window
+								FROM sessions WHERE id = ${input.parentSessionId}`;
+							const pick = resolveServerSessionPick(
+								"claude",
+								storedSessionPick(parent, "claude"),
+							);
+							if (Either.isLeft(pick)) return yield* pick.left;
+							pickEvents = sessionPickEvents(input.childSessionId, pick.right);
+						}
+						if (!existingChild) yield* seedClaudeSubagentSession(input);
 
 						const event = canonicalEvent(
 							"session.created",
@@ -439,18 +465,26 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 					RETURNING sequence, stream_version`;
 
 						const row = rows[0];
-						if (!row) return;
-
-						const stored: StoredEvent = {
-							...event,
-							projectId: eventStore.projectId,
-							sequence: row.sequence,
-							streamVersion: row.stream_version,
-						};
-						yield* project([stored]);
+						if (row) {
+							const stored: StoredEvent = {
+								...event,
+								projectId: eventStore.projectId,
+								sequence: row.sequence,
+								streamVersion: row.stream_version,
+							};
+							yield* project([stored]);
+						}
+						if (pickEvents.length > 0)
+							yield* project(yield* appendEvents(pickEvents));
 					}),
 				)
-				.pipe(Effect.mapError(mapPersistError("ensureClaudeSubagentSession")));
+				.pipe(
+					Effect.mapError((cause) =>
+						isPickRejection(cause)
+							? cause
+							: mapPersistError("ensureClaudeSubagentSession")(cause),
+					),
+				);
 
 	return {
 		persistHandoffDelivered,

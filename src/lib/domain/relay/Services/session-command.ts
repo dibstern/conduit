@@ -41,11 +41,13 @@ import {
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
+import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { markSeen } from "./session-attention.js";
 import { setPermissionMode } from "./session-overrides-state.js";
+import { loadServerSessionPick, sessionPickEvents } from "./session-pick.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 
 const CLAUDE_PROVIDER_ID = "claude";
@@ -109,6 +111,7 @@ export interface SessionUpstreamAdapter {
 }
 
 export interface ApplySessionCommandOptions {
+	readonly pick?: TurnSettings;
 	/** Join a caller's canonical commit, without publishing before that commit. */
 	readonly project?: CommitAndSignalProject;
 	/**
@@ -234,6 +237,9 @@ export const applySessionCommand = (
 					createdAt: Date.now(),
 					metadata: { source: "relay" },
 				}),
+				...(command.type === "session.created" && options.pick
+					? sessionPickEvents(sessionId, options.pick)
+					: []),
 			];
 			yield* (
 				options.project
@@ -297,9 +303,12 @@ export const normalizeSessionTitle = (title?: string): string => {
 export const createOpenCodeSession = (
 	title: string | undefined,
 	provider: string,
+	pick?: TurnSettings,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
+		const settings =
+			pick ?? (yield* loadServerSessionPick("opencode", provider));
 
 		// No retry: create is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
@@ -314,15 +323,18 @@ export const createOpenCodeSession = (
 			),
 		);
 
-		yield* applySessionCommand({
-			type: "session.created",
-			data: {
-				sessionId: session.id,
-				title: normalizeSessionTitle(session.title),
-				provider,
-				providerSessionId: session.id,
+		yield* applySessionCommand(
+			{
+				type: "session.created",
+				data: {
+					sessionId: session.id,
+					title: normalizeSessionTitle(session.title),
+					provider,
+					providerSessionId: session.id,
+				},
 			},
-		});
+			{ pick: settings },
+		);
 
 		return session;
 	}).pipe(
@@ -351,6 +363,15 @@ export const forkOpenCodeSession = (
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const parent =
+			readQueryOption._tag === "Some"
+				? yield* readQueryOption.value.getSession(parentSessionId)
+				: undefined;
+		const pick = yield* loadServerSessionPick(
+			"opencode",
+			parent?.provider ?? "opencode",
+			parent,
+		);
 		// An explicit fork must not succeed upstream before its ordering key is
 		// known. Otherwise a provider read failure creates a new legacy fallback.
 		const parentHistory =
@@ -423,12 +444,6 @@ export const forkOpenCodeSession = (
 		// A fork inherits its parent's provider. Forking is an OpenCode
 		// operation, so an unreadable parent can only mean the read model is not
 		// wired here at all — in which case nothing is projected anyway.
-		const parent =
-			readQueryOption._tag === "Some"
-				? yield* readQueryOption.value
-						.getSession(parentSessionId)
-						.pipe(Effect.orElseSucceed(() => undefined))
-				: undefined;
 		// The fork's newest message is its copy of the boundary. Its id, not the
 		// parent's, orders the fork's own transcript at that boundary.
 		const forkTip = yield* Effect.tryPromise(() =>
@@ -451,18 +466,21 @@ export const forkOpenCodeSession = (
 			forkPointEvent = parentMessages.at(-1)?.id;
 		}
 
-		yield* applySessionCommand({
-			type: "session.created",
-			data: {
-				sessionId: session.id,
-				title,
-				provider: parent?.provider ?? "opencode",
-				parentId: parentSessionId,
-				...(side ? { sideThread: true, permissionMode: "ask" as const } : {}),
-				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
-				providerSessionId: session.id,
+		yield* applySessionCommand(
+			{
+				type: "session.created",
+				data: {
+					sessionId: session.id,
+					title,
+					provider: parent?.provider ?? "opencode",
+					parentId: parentSessionId,
+					...(side ? { sideThread: true, permissionMode: "ask" as const } : {}),
+					...(forkPointEvent === undefined ? {} : { forkPointEvent }),
+					providerSessionId: session.id,
+				},
 			},
-		});
+			{ pick },
+		);
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		if (workspace._tag === "Some")
 			yield* workspace.value.inherit(session.id, parentSessionId);
@@ -660,6 +678,7 @@ const forkSessionInWorkspace = (
 		// Prefer the thread that began closest to the point when an older
 		// account has since returned and received a catch-up covering that range.
 		const provider = selected?.instanceId ?? parent.provider;
+		const pick = yield* loadServerSessionPick("claude", provider, parent);
 		const parentThread = selected?.thread;
 		const claudeConfigDir =
 			parentThread?.configDir ??
@@ -734,6 +753,7 @@ const forkSessionInWorkspace = (
 							metadata: { source: "relay" },
 						},
 					),
+					...sessionPickEvents(forked.sdkSessionId, pick),
 				]);
 				yield* project(created);
 				if (workspace._tag === "Some")

@@ -27,7 +27,13 @@ export interface TurnPick {
 /** Catalog identity and offered choices; empty choices use model defaults. */
 export interface TurnSettings extends TurnPick {}
 
-/** Read-time seeding only. A foreign stored pick stays visible for rejection. */
+export class PickRequired extends Data.TaggedError("PickRequired") {
+	override get message(): string {
+		return "PickRequired: a session model pick is required";
+	}
+}
+
+/** Creation and legacy backfill defaults. Stored session picks stay unchanged. */
 export function harnessDefaultPick(
 	harness: Harness,
 	settings: RelaySettings,
@@ -96,12 +102,14 @@ export class ContextWindowNotOffered extends Data.TaggedError(
 }
 
 export type PickRejection =
+	| PickRequired
 	| ModelNotInCatalog
 	| EffortNotOffered
 	| ContextWindowNotOffered;
 
 export function isPickRejection(error: unknown): error is PickRejection {
 	return (
+		error instanceof PickRequired ||
 		error instanceof ModelNotInCatalog ||
 		error instanceof EffortNotOffered ||
 		error instanceof ContextWindowNotOffered

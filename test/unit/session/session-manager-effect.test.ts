@@ -489,16 +489,31 @@ describe("SessionManager Effect", () => {
 
 				const session = yield* service.createSession("New", {
 					providerId: "opencode",
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "high",
+						contextWindow: "",
+					},
 				});
 
 				// conduit-test-48mo.1: create used to INSERT the sessions row directly
 				// and append nothing, so a read model rebuilt from the event store lost
 				// every OpenCode-backed session.
 				const events = yield* store.readBySession(session.id);
-				expect(events.map((e) => e.type)).toEqual(["session.created"]);
-				expect((yield* readQuery.getSession(session.id))?.provider).toBe(
-					"opencode",
-				);
+				expect(events.map((e) => e.type)).toEqual([
+					"session.created",
+					"session.model_changed",
+					"session.variant_changed",
+					"session.context_window_changed",
+				]);
+				expect(yield* readQuery.getSession(session.id)).toMatchObject({
+					provider: "opencode",
+					model_id: "gpt-4",
+					model_provider: "openai",
+					variant: "high",
+					context_window: "",
+				});
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(

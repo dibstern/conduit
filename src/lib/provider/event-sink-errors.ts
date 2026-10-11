@@ -11,6 +11,7 @@ import type { PersistenceError } from "../persistence/errors.js";
 import type { ClaudeSDKDecodeError } from "./claude/claude-sdk-validation.js";
 import type { MissingPendingInteractions } from "./errors.js";
 import type { ProviderSideEffectInteractionUnsupported } from "./orchestration-side-effect-reactor.js";
+import type { PickRejection } from "./turn-settings.js";
 
 /** An ingestion implementation failed with an error outside its declared store errors. */
 export class EventSinkIngestionError extends Data.TaggedError(
@@ -66,7 +67,8 @@ export type ClaudeAdapterError =
 	| EventSinkError
 	| ClaudeBoundaryError
 	| ClaudeRuntimeError
-	| ClaudeSDKDecodeError;
+	| ClaudeSDKDecodeError
+	| PickRejection;
 
 export type EventSinkPersistenceError =
 	| PersistenceError

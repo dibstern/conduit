@@ -29,6 +29,7 @@
 	import NewSessionContext from "./NewSessionContext.svelte";
 	import UsageLimitStrip from "./UsageLimitStrip.svelte";
 	import UsageWarningStrip from "./UsageWarningStrip.svelte";
+	// biome-ignore lint/style/useImportType: InstanceModelPicker is used as a value for bind:this
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
 	import SkillHighlightBackdrop from "./SkillHighlightBackdrop.svelte";
@@ -46,7 +47,6 @@
 		discoveryState,
 		extractCommandQuery,
 		filterCommands,
-		getChosenModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getModelDisplayName,
@@ -84,6 +84,7 @@
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
 	const inputAreaId = $props.id();
+	let modelPicker: InstanceModelPicker | undefined = $state();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 
@@ -754,14 +755,15 @@
 			if (creatingSession) return false;
 			creatingSession = true;
 			try {
-				// The draft's model pick is client-local until the session exists.
-				const instanceId = getEffectiveInstanceId();
-				const model = getChosenModel(instanceId);
+				const displayed = modelPicker?.getDisplayedPick();
+				if (!displayed) {
+					showToast("The model picker is not ready.", { variant: "error" });
+					return false;
+				}
 				const created = await createSessionRpc({
 					projectSlug,
 					originId: getBrowserClientId(),
-					instanceId,
-					...(model ? { model } : {}),
+					...displayed,
 					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
 					...(draftNewWorktree ? { newWorktree: true } : {}),
 				});
@@ -1306,7 +1308,7 @@
 							class="flex items-center gap-1 min-w-0"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker />
+							<InstanceModelPicker bind:this={modelPicker} />
 
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
@@ -1425,7 +1427,7 @@
 				data-testid="composer-words-row"
 				class="flex h-[24px] items-center gap-px px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
-				<InstanceModelPicker variant="words" />
+				<InstanceModelPicker variant="words" bind:this={modelPicker} />
 				<span aria-hidden="true" class="text-border-chip">·</span>
 				<PermissionModeSelector variant="words" />
 				<span class="flex-1"></span>
