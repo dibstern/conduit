@@ -3,12 +3,13 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
-import type {
-	GetSessionSkillsResponse,
-	GetSkillContentResponse,
-	GoalDetails,
-	SaveProjectInput,
-	SetKeepAwakeResponse,
+import {
+	type GetSessionSkillsResponse,
+	type GetSkillContentResponse,
+	type GoalDetails,
+	RpcLogLevelSchema,
+	type SaveProjectInput,
+	type SetKeepAwakeResponse,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
@@ -508,9 +509,15 @@ export interface SyncInputDraftRpcInput {
 	readonly originId?: string;
 }
 
+export const LOG_LEVELS = RpcLogLevelSchema.literals;
+
 export interface SetLogLevelRpcInput {
 	readonly projectSlug?: string;
 	readonly level: RpcLogLevel;
+}
+
+export interface SetTailscaleServeRpcInput {
+	readonly enabled: boolean;
 }
 
 const callControl = <A, E>(
@@ -1053,6 +1060,9 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client.SetLogLevel(input).pipe(Effect.asVoid));
+
+const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
+	callDaemon((client) => client.SetTailscaleServe(input).pipe(Effect.asVoid));
 
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
@@ -1610,4 +1620,10 @@ export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetLogLevel(input));
+}
+
+export async function setTailscaleServeRpc(
+	input: SetTailscaleServeRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetTailscaleServe(input));
 }
