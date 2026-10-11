@@ -1,4 +1,9 @@
 {
+	"src/lib/frontend/components/ui/AccountDot.svelte :: bg-fill-blue,bg-fill-green,bg-fill-indigo,bg-project-1,bg-project-3,bg-project-4": {
+		"movedTo": "src/lib/frontend/utils/account-color.ts",
+		"requires": "accountColorClass(instanceId)",
+		"reason": "conduit-test-bn6x.1 extracts the unchanged account colour palette and hash to a shared TypeScript utility. AccountDot still applies its returned class."
+	},
 	"src/lib/frontend/components/overlays/UsageLimitsSettings.svelte :: font-mono,min-w-0,text-[10.5px],text-text-secondary,truncate": {
 		"movedTo": "src/lib/frontend/components/overlays/UsageSettingsTab.svelte",
 		"reason": "conduit-test-hwxv.4 moves the account order and quota display from the Instances limit section into Usage account cards. The account names and quota values retain these tokens in UsageSettingsTab."
