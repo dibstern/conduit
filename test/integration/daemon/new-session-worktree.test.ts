@@ -2,7 +2,7 @@
  * Failure modes exercised through the daemon before implementing the launch:
  * - Git creates a checkout/branch then fails: no session event or owned files remain.
  * - Model initialization is interrupted after creation: session and checkout roll back.
- * - A provider or multi-folder project bypasses the disabled chip: reject before creation.
+ * - An unsupported provider or project without Git bypasses the disabled chip.
  * - Owned paths, including symlink aliases and missing children, become project folders.
  * - The first turn or a freshly started runner after restart uses the main checkout.
  * - Worktree edits leak into a parallel Local session or another worktree session.
@@ -493,7 +493,7 @@ process.exit(result.status ?? 1);
 		};
 	}, 300_000);
 
-	it("rejects unsupported providers and multi-folder launches before creating anything", async () => {
+	it("rejects unsupported providers and projects without Git before creating anything", async () => {
 		const { fixture, socket, sessions } = await start("unsupported-launches");
 		const before = (await sessions()).sessions.map(({ id }) => id);
 		await expect(
@@ -533,7 +533,7 @@ process.exit(result.status ?? 1);
 			socket,
 			new SaveProject({
 				slug: "process-test",
-				folders: [fixture.projectDir, secondary],
+				folders: [secondary],
 			}),
 		);
 		await expect(
@@ -563,7 +563,7 @@ process.exit(result.status ?? 1);
 		evidence["refused"] = [
 			"opencode",
 			"conflicting-draft-choices",
-			"multi-folder",
+			"no-git-folders",
 		];
 	}, 300_000);
 
