@@ -94,13 +94,10 @@
 			if (!untrack(() => notificationState.pushBusy)) {
 				notificationState.notifSettings = getNotifSettings();
 			}
-			const projectSlug = getCurrentSlug();
-			if (projectSlug) {
-				beginProxyDetection();
-				void detectProxyRpc({ projectSlug })
-					.then(applyDetectProxyResponse)
-					.catch(() => applyDetectProxyResponse({ projectSlug, found: false, port: 8317 }));
-			}
+			beginProxyDetection();
+			void detectProxyRpc()
+				.then(applyDetectProxyResponse)
+				.catch(() => applyDetectProxyResponse({ found: false, port: 8317 }));
 		} else {
 			clearClaudeSettingEdits();
 		}
