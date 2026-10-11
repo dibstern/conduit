@@ -25,7 +25,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [{ path: "/app", slug: "app", addedAt: 1 }],
 			dismissedPaths: ["/removed"],
 		});
@@ -44,7 +43,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
@@ -61,7 +59,6 @@ describe("DaemonConfigSchema", () => {
 			keepAwake: true,
 			keepAwakeCommand: "systemd-inhibit",
 			keepAwakeArgs: ["--what=idle"],
-			dangerouslySkipPermissions: false,
 			projects: [
 				{
 					path: "/src/app",
@@ -95,7 +92,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: "not an array",
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
@@ -116,7 +112,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
@@ -131,7 +126,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
@@ -149,7 +143,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [{ path: "/src/app", addedAt: 1000 }],
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
@@ -164,7 +157,6 @@ describe("DaemonConfigSchema", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [],
 			instances: [{ id: "x", name: "X", port: 4096 }],
 		};
@@ -210,7 +202,6 @@ describe("ServerConfigLive", () => {
 			tls: true,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [{ path: "/app", slug: "app", addedAt: 1000 }],
 			instances: [{ id: "i1", name: "Instance", port: 4096, managed: true }],
 		};

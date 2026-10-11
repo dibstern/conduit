@@ -78,7 +78,6 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		...(runtime.keepAwakeArgs !== undefined && {
 			keepAwakeArgs: runtime.keepAwakeArgs,
 		}),
-		dangerouslySkipPermissions: false,
 		...(runtime.claudeConfigDir !== undefined && {
 			claudeConfigDir: runtime.claudeConfigDir,
 		}),
@@ -190,12 +189,9 @@ export const makeConfigWriterLive = (configDir: string) =>
 					return saveDaemonConfig(
 						{
 							...config,
-							// These legacy settings have no runtime Ref; retain their
-							// saved values when writing the live runtime snapshot.
+							// This legacy setting has no runtime Ref; retain its
+							// saved value when writing the live runtime snapshot.
 							debug: persisted?.debug ?? config.debug,
-							dangerouslySkipPermissions:
-								persisted?.dangerouslySkipPermissions ??
-								config.dangerouslySkipPermissions,
 							instances: mergePersistedInstanceConfigs(
 								config.instances ?? [],
 								persisted?.instances ?? [],

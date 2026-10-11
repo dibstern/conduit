@@ -170,7 +170,6 @@ describe("daemon main runtime config status", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [
 					{
 						path: projectPath,

@@ -607,7 +607,7 @@ describe("model handlers with Effect-native model service", () => {
 		const config = makeMockConfig({ configDir });
 		writeFileSync(join(configDir, "daemon.json"), JSON.stringify({
 			pid: 1234, port: 0, pinHash: null, tls: false, debug: false,
-			keepAwake: false, dangerouslySkipPermissions: false, projects: [],
+			keepAwake: false, projects: [],
 			instances: [{ id: "work-claude", name: "Work Claude", port: 0, managed: false, driver: "claude" }],
 		}));
 		const deps = Layer.mergeAll(

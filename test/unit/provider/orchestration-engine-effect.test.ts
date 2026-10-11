@@ -214,7 +214,6 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					tls: false,
 					debug: false,
 					keepAwake: false,
-					dangerouslySkipPermissions: false,
 					projects: [],
 					instances: [
 						{
@@ -261,7 +260,6 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					tls: false,
 					debug: false,
 					keepAwake: false,
-					dangerouslySkipPermissions: false,
 					projects: [],
 					instances: [
 						{
@@ -308,7 +306,6 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					tls: false,
 					debug: false,
 					keepAwake: false,
-					dangerouslySkipPermissions: false,
 					projects: [],
 				};
 				const registry = new ProviderRegistry();
