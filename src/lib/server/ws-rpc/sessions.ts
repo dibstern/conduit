@@ -37,6 +37,7 @@ import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspa
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
+	listLocalBranches,
 	listProjectWorktrees,
 	realWorkspacePath,
 } from "../../git/worktrees.js";
@@ -65,6 +66,10 @@ import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
+	ListBranches: (_request) =>
+		Effect.flatMap(ConfigTag, (config) =>
+			listLocalBranches(config.projectDir),
+		).pipe(Effect.catchAll(mapRpcFailure("ListBranches"))),
 	ListWorktrees: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -448,6 +453,10 @@ export const sessionsHandlers = {
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
+			if (request.worktreeBase !== undefined && !request.newWorktree)
+				return yield* new WsRpcError({
+					message: "worktreeBase requires newWorktree: true.",
+				});
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
 			const options = {
@@ -498,6 +507,9 @@ export const sessionsHandlers = {
 											sessionId,
 										}),
 									),
+									request.worktreeBase === undefined
+										? undefined
+										: { [config.projectDir]: request.worktreeBase },
 								),
 							);
 							return yield* restore(
@@ -692,6 +704,7 @@ export const sessionsHandlers = {
 	| "ReloadProviderSession"
 	| "RenameSession"
 	| "ListWorktrees"
+	| "ListBranches"
 	| "MoveSessionWorkspace"
 	| "RecreateSessionWorktree"
 	| "ContinueSessionInMainFolder"

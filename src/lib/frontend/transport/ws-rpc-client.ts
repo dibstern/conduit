@@ -52,6 +52,7 @@ import type {
 	ScanNowResponse,
 	SetDefaultModelResponse,
 	SetDefaultPermissionModeResponse,
+	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
 	SubmitInputResponse,
 	SwitchContextWindowResponse,
@@ -173,6 +174,7 @@ export interface CreateSessionRpcInput {
 	readonly providerId?: string;
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
+	readonly worktreeBase?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -310,6 +312,16 @@ export interface SetDefaultModelRpcInput {
 	readonly projectSlug: string;
 	readonly model: string;
 	readonly provider: string;
+	readonly originId?: string;
+}
+
+export interface SetHarnessDefaultRpcInput {
+	readonly projectSlug: string;
+	readonly harness: "claude" | "opencode";
+	readonly providerId: string;
+	readonly modelId: string;
+	readonly effort?: string;
+	readonly contextWindow: string;
 	readonly originId?: string;
 }
 
@@ -537,6 +549,12 @@ export async function setPinRpc(input: {
 	return result.right;
 }
 
+export async function listBranchesRpc(projectSlug: string) {
+	return runTransportEffect(
+		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
+	);
+}
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,
@@ -708,6 +726,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { worktreePath: input.worktreePath }
 				: {}),
 			...(input.newWorktree ? { newWorktree: true } : {}),
+			...(input.worktreeBase != null
+				? { worktreeBase: input.worktreeBase }
+				: {}),
 		}),
 	);
 
@@ -854,6 +875,9 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 			...(input.originId ? { originId: input.originId } : {}),
 		}),
 	);
+
+const callSetHarnessDefault = (input: SetHarnessDefaultRpcInput) =>
+	callControl(input.projectSlug, (client) => client.SetHarnessDefault(input));
 
 const callSetDefaultPermissionMode = (
 	input: SetDefaultPermissionModeRpcInput,
@@ -1266,6 +1290,12 @@ export async function setDefaultModelRpc(
 	input: SetDefaultModelRpcInput,
 ): Promise<SetDefaultModelResponse> {
 	return await runTransportEffect(callSetDefaultModel(input));
+}
+
+export async function setHarnessDefaultRpc(
+	input: SetHarnessDefaultRpcInput,
+): Promise<SetHarnessDefaultResponse> {
+	return await runTransportEffect(callSetHarnessDefault(input));
 }
 
 export async function setDefaultPermissionModeRpc(

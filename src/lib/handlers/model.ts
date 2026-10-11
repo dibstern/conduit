@@ -16,6 +16,7 @@ import {
 	ProjectSettingsTag,
 	publishGlobalProjectSetting,
 	publishProjectSetting,
+	refreshHarnessDefaults,
 } from "../domain/relay/Services/project-settings.js";
 import {
 	ConfigTag,
@@ -110,10 +111,57 @@ const cloneContextWindowOptions = (
 				},
 	);
 
+const claudeProviderFromCatalog = (
+	models: readonly ModelInfo[],
+): ProviderInfo => ({
+	id: "claude",
+	name: "Anthropic - claude",
+	configured: true,
+	models: models
+		.map((model) => {
+			const { efforts } = offeredOptions(model);
+			return {
+				id: model.id,
+				name: model.name,
+				provider: "claude",
+				...(efforts.length > 0 ? { variants: [...efforts] } : {}),
+				...(model.limit ? { limit: { ...model.limit } } : {}),
+				...(model.contextWindowOptions?.length
+					? {
+							contextWindowOptions:
+								cloneContextWindowOptions(model.contextWindowOptions) ?? [],
+						}
+					: {}),
+				...(model.routingOptions?.length
+					? {
+							routingOptions:
+								cloneContextWindowOptions(model.routingOptions) ?? [],
+						}
+					: {}),
+			};
+		})
+		.sort((a, b) =>
+			a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+		),
+});
+
+const publishClaudeModels = (models: readonly ModelInfo[]) =>
+	Effect.gen(function* () {
+		const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
+		if (projectSettings._tag === "None") return;
+		const provider = claudeProviderFromCatalog(models);
+		yield* publishProjectSetting({
+			_tag: "providerModels",
+			providers: models.length > 0 ? [provider] : [],
+		}).pipe(Effect.provideService(ProjectSettingsTag, projectSettings.value));
+		yield* refreshHarnessDefaults;
+	});
+
 /** Catalog discovery for interactive picks; turn dispatch uses cached catalogs. */
 export const loadModelCatalog = (
 	harness: Harness,
 	instanceId: string = harness,
+	options?: { readonly startIfStopped?: boolean },
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -132,13 +180,15 @@ export const loadModelCatalog = (
 				);
 				return [] as ModelInfo[];
 			}
-			return capsResult.right.models;
+			const models = capsResult.right.models;
+			yield* publishClaudeModels(models);
+			return models;
 		}
 
 		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		if (modelService._tag === "None") return [] as ModelInfo[];
 		const provListResult = yield* Effect.either(
-			modelService.value.listProviders(),
+			modelService.value.listProviders(options),
 		);
 		if (provListResult._tag === "Left") {
 			log.warn(
@@ -146,6 +196,7 @@ export const loadModelCatalog = (
 			);
 			return [] as ModelInfo[];
 		}
+		yield* refreshHarnessDefaults;
 		return provListResult.right.providers.flatMap((provider) =>
 			(provider.models ?? []).map((model) => ({
 				...model,
@@ -309,41 +360,8 @@ export const getModelsResponse = (
 			yield* engine
 				.dispatchEffect({ type: "discover", providerId: "claude" })
 				.pipe(
-					Effect.map(
-						(capabilities): ProviderInfo => ({
-							id: "claude",
-							name: "Anthropic - claude",
-							configured: true,
-							models: capabilities.models
-								.map((m) => ({
-									id: m.id,
-									name: m.name,
-									provider: "claude",
-									...(m.limit ? { limit: { ...m.limit } } : {}),
-									...(offeredOptions(m).efforts.length > 0
-										? { variants: [...offeredOptions(m).efforts] }
-										: {}),
-									...(m.contextWindowOptions &&
-									m.contextWindowOptions.length > 0
-										? {
-												contextWindowOptions:
-													cloneContextWindowOptions(m.contextWindowOptions) ??
-													[],
-											}
-										: {}),
-								}))
-								.sort((a, b) =>
-									a.name.localeCompare(b.name, undefined, {
-										sensitivity: "base",
-									}),
-								),
-						}),
-					),
-					Effect.tap((provider) =>
-						publishProjectSetting({
-							_tag: "providerModels",
-							providers: provider.models.length > 0 ? [provider] : [],
-						}),
+					Effect.flatMap((capabilities) =>
+						publishClaudeModels(capabilities.models),
 					),
 					Effect.catchAll((error) =>
 						Effect.sync(() =>
@@ -368,6 +386,7 @@ export const getModelsResponse = (
 				modelService.listProviders(),
 			);
 			if (openCodeProviderResult._tag === "Right") {
+				yield* refreshHarnessDefaults;
 				const nativeDefaultModel = parseDefaultModel(
 					openCodeProviderResult.right.nativeDefaultModel,
 				);
@@ -704,11 +723,30 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		const config = yield* ConfigTag;
 
 		const { provider, model } = input;
+		const harness = harnessForModelProvider(provider);
+		const catalog = yield* loadModelCatalog(harness, harness, {
+			startIfStopped: true,
+		});
+		const resolved = resolveTurnSettings(
+			{
+				harness,
+				model: { providerId: provider, modelId: model },
+				effort: "",
+				contextWindow: "",
+			},
+			catalog,
+		);
+		if (Either.isLeft(resolved)) return yield* resolved.left;
 
 		const modelSpec = `${provider}/${model}`;
 		const override = { providerID: provider, modelID: model };
 		yield* saveRelaySettingsEffect(
-			{ defaultModel: modelSpec },
+			{
+				defaultModel: modelSpec,
+				harnessDefaults: {
+					[harness]: { ...resolved.right.model, contextWindow: "" },
+				},
+			},
 			config.configDir,
 		);
 		yield* publishGlobalProjectSetting("defaultModel");
@@ -726,7 +764,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		}
 
 		const { variant: validVariant, variants: availableVariants } =
-			yield* savedVariantFor(override);
+			yield* savedVariantFor(override, catalog);
 		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
 		return {
@@ -735,6 +773,46 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			variant: validVariant,
 			variants: availableVariants,
 		};
+	});
+
+export const setHarnessDefaultForRelay = (input: {
+	readonly harness: Harness;
+	readonly providerId: string;
+	readonly modelId: string;
+	readonly effort?: string | undefined;
+	readonly contextWindow: string;
+}) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const catalog = yield* loadModelCatalog(input.harness, input.harness, {
+			startIfStopped: true,
+		});
+		const requestedEffort =
+			input.effort ??
+			(yield* savedVariantFor(
+				{ providerID: input.providerId, modelID: input.modelId },
+				catalog,
+			)).variant;
+		const resolved = resolveTurnSettings(
+			{
+				harness: input.harness,
+				model: { providerId: input.providerId, modelId: input.modelId },
+				effort: requestedEffort,
+				contextWindow: input.contextWindow,
+			},
+			catalog,
+		);
+		if (Either.isLeft(resolved)) return yield* resolved.left;
+		const { model, effort, contextWindow } = resolved.right;
+		yield* saveRelaySettingsEffect(
+			{
+				harnessDefaults: { [input.harness]: { ...model, contextWindow } },
+				defaultVariants: { [`${model.providerId}/${model.modelId}`]: effort },
+			},
+			config.configDir,
+		);
+		yield* publishGlobalProjectSetting("harnessDefaults");
+		return { pick: { ...model, effort, contextWindow }, status: "ok" } as const;
 	});
 
 export interface SwitchVariantInput {

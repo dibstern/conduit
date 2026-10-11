@@ -17,39 +17,67 @@ export const realWorkspacePath = (path: string) =>
 		catch: () => new WorkspaceMoveError({ path, reason: "missing" }),
 	});
 
+const git = (directory: string, ...args: string[]) =>
+	Effect.tryPromise({
+		try: () => {
+			const env: NodeJS.ProcessEnv = {
+				...process.env,
+				GIT_OPTIONAL_LOCKS: "0",
+			};
+			for (const key of [
+				"GIT_DIR",
+				"GIT_INDEX_FILE",
+				"GIT_WORK_TREE",
+				"GIT_COMMON_DIR",
+			])
+				delete env[key];
+			return execFileAsync("git", args, {
+				cwd: directory,
+				env,
+				timeout: 2_000,
+			});
+		},
+		catch: () =>
+			new WorkspaceMoveError({ path: directory, reason: "not-a-worktree" }),
+	});
+
+/** The primary folder's local branch names, without tags or remote refs. */
+export const listLocalBranches = (directory: string) =>
+	Effect.gen(function* () {
+		const current = (yield* git(
+			directory,
+			"branch",
+			"--show-current",
+		)).stdout.trim();
+		const listed = yield* git(
+			directory,
+			"for-each-ref",
+			"--sort=refname",
+			"--format=%(refname:lstrip=2)",
+			"refs/heads/",
+		);
+		return {
+			...(current ? { current } : {}),
+			branches: listed.stdout.trim().split("\n").filter(Boolean),
+		};
+	}).pipe(Effect.orElseSucceed(() => ({ branches: [] })));
+
 /** Read the owning repository, including when directory is a linked worktree. */
 export const readWorktrees = (directory: string) =>
 	Effect.gen(function* () {
-		const git = (...args: string[]) =>
-			Effect.tryPromise({
-				try: () => {
-					const env: NodeJS.ProcessEnv = {
-						...process.env,
-						GIT_OPTIONAL_LOCKS: "0",
-					};
-					for (const key of [
-						"GIT_DIR",
-						"GIT_INDEX_FILE",
-						"GIT_WORK_TREE",
-						"GIT_COMMON_DIR",
-					])
-						delete env[key];
-					return execFileAsync("git", args, {
-						cwd: directory,
-						env,
-						timeout: 2_000,
-					});
-				},
-				catch: () =>
-					new WorkspaceMoveError({ path: directory, reason: "not-a-worktree" }),
-			});
-		const common = yield* git("rev-parse", "--git-common-dir");
+		const common = yield* git(directory, "rev-parse", "--git-common-dir");
 		const commonDir = yield* realWorkspacePath(
 			resolve(directory, common.stdout.trim()),
 		);
 		// -z avoids quoting or splitting paths containing spaces, newlines or quotes.
-		const listed = yield* git("worktree", "list", "--porcelain", "-z");
-		const root = yield* git("rev-parse", "--show-toplevel");
+		const listed = yield* git(
+			directory,
+			"worktree",
+			"list",
+			"--porcelain",
+			"-z",
+		);
+		const root = yield* git(directory, "rev-parse", "--show-toplevel");
 		const worktrees: WorktreeInfo[] = [];
 		const entries = listed.stdout.split("\0\0").filter(Boolean);
 		for (const [index, entry] of entries.entries()) {

@@ -55,13 +55,18 @@ Worktree sessions use their own branch's merged signal to settle through the sid
 
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
-then the Session Workspace service records its launch move. It starts from the
-folder's committed HEAD on its current branch. Uncommitted changes stay in the
-original checkout. Creation or launch failure rolls back the checkout and its
-new branch. These worktrees cannot become projects or Project Folders.
+then the Session Workspace service records its launch move. By default it starts
+from the folder's committed HEAD on its current branch. A new worktree draft can
+choose a local base branch for the primary Project Folder; other git folders
+still start from their own current HEAD. Tags, remote refs and revision
+expressions cannot be bases. Invalid bases fail before any checkout, branch or
+session is created, and a base requires New worktree mode. Uncommitted changes
+stay in the original checkout. Creation or launch failure rolls back the checkout
+and its new branch. These worktrees cannot become projects or Project Folders.
 
 A multi-folder worktree session creates a worktree in every git folder on one
-branch name. Non-git folders and folders attached later are used in place and
+branch name. Folders of one repository share a checkout and must resolve to the
+same starting commit. Non-git folders and folders attached later are used in place and
 reported as shared; detaching a folder keeps its worktree on disk.
 
 Direct user moves require the session provider's `supportsWorktree` capability.

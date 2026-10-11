@@ -80,6 +80,7 @@ describe("Multi-folder worktree sessions through the built daemon", () => {
 	const names = new Map<string, string>();
 	const paths = new Map<string, string>();
 	const branches = new Map<string, string>();
+	const headLabels = new Map<string, string>();
 
 	function seedRepository(fixture: ProcessHarness, directory: string) {
 		const label = basename(directory);
@@ -105,6 +106,7 @@ describe("Multi-folder worktree sessions through the built daemon", () => {
 		git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
 		git(fixture.root, "clone", remote, directory);
 		initialHeads.set(directory, git(directory, "rev-parse", "HEAD"));
+		headLabels.set(git(directory, "rev-parse", "HEAD"), `initial:${label}`);
 	}
 
 	async function start(name: string, failSecondGit = false) {
@@ -112,6 +114,7 @@ describe("Multi-folder worktree sessions through the built daemon", () => {
 		scenario = name;
 		evidence = {};
 		initialHeads.clear();
+		headLabels.clear();
 		names.clear();
 		paths.clear();
 		branches.clear();
@@ -171,7 +174,11 @@ process.exit(result.status ?? 1);
 					new ListDaemonSessions({ scope: "process-test" }),
 				)
 			).sessions;
-		const create = async (title: string, newWorktree = true) => {
+		const create = async (
+			title: string,
+			newWorktree = true,
+			worktreeBase?: string,
+		) => {
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
@@ -180,6 +187,7 @@ process.exit(result.status ?? 1);
 					providerId: "claude",
 					title,
 					...(newWorktree ? { newWorktree: true } : {}),
+					...(worktreeBase === undefined ? {} : { worktreeBase }),
 				}),
 			);
 			names.set(sessionId, title);
@@ -277,7 +285,7 @@ process.exit(result.status ?? 1);
 				});
 			evidence["worktrees"] = [...initialHeads]
 				.sort(([a], [b]) => a.localeCompare(b))
-				.flatMap(([folder, initial]) =>
+				.flatMap(([folder]) =>
 					git(folder, "worktree", "list", "--porcelain")
 						.split("\n\n")
 						.filter(Boolean)
@@ -290,9 +298,8 @@ process.exit(result.status ?? 1);
 								effectiveDirectory: path,
 								branch: git(path, "branch", "--show-current"),
 								head:
-									git(path, "rev-parse", "HEAD") === initial
-										? `initial:${basename(folder)}`
-										: "unexpected-head",
+									headLabels.get(git(path, "rev-parse", "HEAD")) ??
+									"unexpected-head",
 								shared: sessions.some(
 									({ workspace }) =>
 										workspace?.origin === "conduit" &&
@@ -393,6 +400,53 @@ process.exit(result.status ?? 1);
 			}
 		}
 	});
+
+	it("applies the chosen base to the primary folder while other repositories use their own HEAD", async () => {
+		const { fixture, secondary, create } = await start("primary-base");
+		const baseHead = git(fixture.projectDir, "rev-parse", "HEAD");
+		git(fixture.projectDir, "branch", "feature/base");
+		writeFileSync(
+			join(fixture.projectDir, "tracked.txt"),
+			"primary advances\n",
+		);
+		git(
+			fixture.projectDir,
+			"-c",
+			"user.name=Multi-folder test",
+			"-c",
+			"user.email=folders@example.test",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"commit",
+			"-am",
+			"Advance primary",
+		);
+		headLabels.set(
+			git(fixture.projectDir, "rev-parse", "HEAD"),
+			`current:${basename(fixture.projectDir)}`,
+		);
+		const secondaryHead = git(secondary, "rev-parse", "HEAD");
+		const session = await create("selected-base", true, "feature/base");
+		expect(
+			git(
+				session.workspace?.worktrees[fixture.projectDir] ?? "",
+				"rev-parse",
+				"HEAD",
+			),
+		).toBe(baseHead);
+		expect(
+			git(session.workspace?.worktrees[secondary] ?? "", "rev-parse", "HEAD"),
+		).toBe(secondaryHead);
+		expect(git(fixture.projectDir, "rev-parse", "HEAD")).not.toBe(baseHead);
+		evidence["baseSelections"] = [
+			{
+				folder: fixture.projectDir,
+				base: "feature/base",
+				head: headLabels.get(baseHead),
+			},
+			{ folder: secondary, base: "main", head: headLabels.get(secondaryHead) },
+		];
+	}, 300_000);
 
 	it("rolls back both creations and every owned branch when Git fails in the second repository", async () => {
 		const { fixture, secondary, sessions, create } = await start(

@@ -14,6 +14,10 @@ import {
 
 export interface RelaySettings {
 	defaultModel?: string;
+	harnessDefaults?: {
+		claude?: { providerId: string; modelId: string; contextWindow: string };
+		opencode?: { providerId: string; modelId: string; contextWindow: string };
+	};
 	defaultPermissionMode?: SessionPermissionMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
@@ -80,6 +84,12 @@ export function saveRelaySettings(
 
 	if (settings.defaultModel !== undefined) {
 		merged.defaultModel = settings.defaultModel;
+	}
+	if (settings.harnessDefaults) {
+		merged.harnessDefaults = {
+			...existing.harnessDefaults,
+			...settings.harnessDefaults,
+		};
 	}
 	if (settings.defaultPermissionMode !== undefined) {
 		merged.defaultPermissionMode = settings.defaultPermissionMode;
