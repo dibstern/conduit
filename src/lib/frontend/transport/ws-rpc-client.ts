@@ -51,6 +51,7 @@ import type {
 	ScanNowResponse,
 	SetDefaultModelResponse,
 	SetDefaultPermissionModeResponse,
+	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
 	SubmitInputResponse,
 	SwitchContextWindowResponse,
@@ -310,6 +311,16 @@ export interface SetDefaultModelRpcInput {
 	readonly projectSlug: string;
 	readonly model: string;
 	readonly provider: string;
+	readonly originId?: string;
+}
+
+export interface SetHarnessDefaultRpcInput {
+	readonly projectSlug: string;
+	readonly harness: "claude" | "opencode";
+	readonly providerId: string;
+	readonly modelId: string;
+	readonly effort?: string;
+	readonly contextWindow: string;
 	readonly originId?: string;
 }
 
@@ -853,6 +864,9 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 		}),
 	);
 
+const callSetHarnessDefault = (input: SetHarnessDefaultRpcInput) =>
+	callControl(input.projectSlug, (client) => client.SetHarnessDefault(input));
+
 const callSetDefaultPermissionMode = (
 	input: SetDefaultPermissionModeRpcInput,
 ) =>
@@ -1264,6 +1278,12 @@ export async function setDefaultModelRpc(
 	input: SetDefaultModelRpcInput,
 ): Promise<SetDefaultModelResponse> {
 	return await runTransportEffect(callSetDefaultModel(input));
+}
+
+export async function setHarnessDefaultRpc(
+	input: SetHarnessDefaultRpcInput,
+): Promise<SetHarnessDefaultResponse> {
+	return await runTransportEffect(callSetHarnessDefault(input));
 }
 
 export async function setDefaultPermissionModeRpc(
