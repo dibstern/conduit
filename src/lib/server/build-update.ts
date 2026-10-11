@@ -15,13 +15,14 @@ let restartAvailable = false;
 
 export const getRestartAvailable = (): boolean => restartAvailable;
 
+export const isServerSupervised = (): boolean =>
+	process.env["CONDUIT_SERVICE"] === "1" ||
+	process.env["XPC_SERVICE_NAME"] === "dev.conduit.server";
+
 // Only the daemon starts this layer; SubscribeServerStatus reads its snapshot.
 export const ServerBuildUpdateLive = Layer.scopedDiscard(
 	Effect.gen(function* () {
-		const supervised =
-			process.env["CONDUIT_SERVICE"] === "1" ||
-			process.env["XPC_SERVICE_NAME"] === "dev.conduit.server";
-		if (!supervised || SERVER_BUILD_ID === "dev") return;
+		if (!isServerSupervised() || SERVER_BUILD_ID === "dev") return;
 		const bus = yield* DaemonEventBusTag;
 
 		const markerPath =

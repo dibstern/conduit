@@ -161,6 +161,8 @@ export class ProcessHarness {
 	private logs = "";
 	private port = 0;
 	private disposed = false;
+	private supervisorStopped = false;
+	private respawning: Promise<void> | undefined;
 	private environment: NodeJS.ProcessEnv = {};
 	private defaultOpenCode: Server | undefined;
 	private defaultOpenCodeUrl = "http://127.0.0.1:0";
@@ -237,6 +239,7 @@ export class ProcessHarness {
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
 		private readonly logLevel?: "warn",
+		private readonly respawnOnExit = false,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -476,6 +479,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			continuationSweepIntervalMs?: number;
 			/** Enable warning diagnostics for provider lifecycle regressions. */
 			logLevel?: "warn";
+			/** Stand in for a login service: respawn exited daemons on the same port. */
+			respawnOnExit?: boolean;
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
@@ -525,6 +530,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.capabilityAgents,
 			options.continuationSweepIntervalMs,
 			options.logLevel,
+			options.respawnOnExit,
 		);
 	}
 
@@ -922,6 +928,16 @@ Object.assign(ClaudeDriver, { create: deps => {
 			child.once("exit", (exitCode, signal) => {
 				if (generation) Object.assign(generation, { exitCode, signal });
 				done();
+				if (generation && this.respawnOnExit && !this.supervisorStopped) {
+					this.child = undefined;
+					this.respawning = this.restart({
+						...options,
+						keepPort: true,
+						skipBrowserProbe: true,
+					}).catch((cause: unknown) => {
+						this.ownershipErrors.push(cause);
+					});
+				}
 			});
 			child.once("error", () => done());
 		});
@@ -1351,6 +1367,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	async shutdown(): Promise<void> {
+		this.supervisorStopped = true;
+		await this.respawning;
 		const child = this.child;
 		if (!child) return;
 		let rpcFailure: unknown;
@@ -1421,6 +1439,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	private async stop(signal: NodeJS.Signals, timeoutMs = 6000): Promise<void> {
+		this.supervisorStopped = true;
+		await this.respawning;
 		const child = this.child;
 		if (!child) return;
 		// Close clients before graceful disposal: RPC scopes can otherwise hold
@@ -1620,6 +1640,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	async dispose(): Promise<void> {
+		this.supervisorStopped = true;
+		await this.respawning;
 		if (this.disposed) {
 			this.assertNoRunners();
 			return;

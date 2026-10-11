@@ -15,10 +15,13 @@ import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daem
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { getLogLevel } from "../../../src/lib/logger.js";
+import { isServerSupervised } from "../../../src/lib/server/build-update.js";
 import {
 	makeRoutedWsRpcServerLayer,
 	wsRpcHandlers,
 } from "../../../src/lib/server/ws-rpc.js";
+import { getVersion } from "../../../src/lib/version.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 
 const makeClient = Effect.gen(function* () {
@@ -65,6 +68,9 @@ describe("daemon control through the shared RPC group", () => {
 				const client = yield* makeClient;
 				const result = yield* client.GetStatus({});
 				expect(result).toMatchObject({
+					version: getVersion(),
+					logLevel: getLogLevel(),
+					supervised: isServerSupervised(),
 					port: 0,
 					host: "0.0.0.0",
 					projectCount: 2,

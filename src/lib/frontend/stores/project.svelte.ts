@@ -23,7 +23,7 @@ import {
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
-import { applyServerStatus, serverStatusFeed } from "./server-status.js";
+import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { confirm } from "./ui.svelte.js";
 import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";

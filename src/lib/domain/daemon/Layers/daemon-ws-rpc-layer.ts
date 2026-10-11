@@ -22,8 +22,10 @@ import {
 } from "../../../daemon/config-persistence.js";
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
+import { getLogLevel } from "../../../logger.js";
 import {
 	getRestartAvailable,
+	isServerSupervised,
 	SERVER_BUILD_ID,
 } from "../../../server/build-update.js";
 import {
@@ -34,6 +36,7 @@ import {
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
+import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
@@ -281,7 +284,17 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const { ok: _ok, ...status } = yield* handle.getStatus();
-						return status;
+						return {
+							...status,
+							// Each browser follows one status feed, even with no project.
+							// Counting feeds excludes CLI IPC and the second browser socket.
+							clientCount: Array.from(listSubscribers).filter(
+								({ list }) => list === "serverStatus",
+							).length,
+							version: getVersion(),
+							logLevel: getLogLevel(),
+							supervised: isServerSupervised(),
+						};
 					}),
 				),
 			SetPin: (request) =>

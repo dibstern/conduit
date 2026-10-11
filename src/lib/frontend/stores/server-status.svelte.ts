@@ -3,23 +3,26 @@
 // The feed re-sends the whole status on every change, so each part acts only
 // when its own value moves; that keeps a dismissed banner dismissed.
 
-import { Cause, Effect, Stream } from "effect";
+import { Cause, Stream } from "effect";
 import { BUILD_ID } from "../../build-id.js";
-import type { ServerStatus } from "../../contracts/ws-rpc.js";
+import type {
+	GetStatusResponse,
+	ServerStatus,
+} from "../../contracts/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
-import { runTransportEffect } from "../transport/runtime.js";
-import {
-	WsRpcClients,
-	type WsRpcSubscriptions,
-} from "../transport/shared-client.js";
+import type { WsRpcSubscriptions } from "../transport/shared-client.js";
 import type { WsRpcError } from "../transport/ws-rpc.js";
+import {
+	getServerStatusRpc,
+	restartServerRpc,
+	shutdownServerRpc,
+} from "../transport/ws-rpc-client.js";
 import {
 	claimBuildReload,
 	refreshAppShell,
 	releaseBuildReload,
 } from "../utils/build-id.js";
 import { inputSyncState, persistInputDraft } from "./chat.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
 import { refreshListedSessions } from "./session-list.svelte.js";
 import { removeBanner, showBanner, showToast } from "./ui.svelte.js";
 
@@ -32,12 +35,86 @@ let last: ServerStatus | null = null;
 let buildReloadPending = false;
 let buildMismatchWarning = false;
 let serverUpdateAvailable = false;
-let serverRestartInFlight = false;
-let serverRestartAccepted = false;
+export const serverStatus = $state<{
+	status: GetStatusResponse | null;
+	loading: boolean;
+	error: string | null;
+	restartInFlight: boolean;
+	restartAccepted: boolean;
+	shutdownInFlight: boolean;
+}>({
+	status: null,
+	loading: false,
+	error: null,
+	restartInFlight: false,
+	restartAccepted: false,
+	shutdownInFlight: false,
+});
+
+let statusRequest = 0;
+
+export async function loadServerStatus(): Promise<void> {
+	const { status, loading } = serverStatus;
+	if (status === null && !loading) await refreshServerStatus();
+}
+
+/** Only the latest read can replace the snapshot after a mutation or reconnect. */
+export async function refreshServerStatus(): Promise<void> {
+	const request = ++statusRequest;
+	serverStatus.loading = true;
+	serverStatus.error = null;
+	try {
+		const status = await getServerStatusRpc();
+		if (request !== statusRequest) return;
+		serverStatus.status = status;
+		serverStatus.loading = false;
+	} catch (error: unknown) {
+		if (request !== statusRequest) return;
+		serverStatus.loading = false;
+		serverStatus.error =
+			error instanceof Error ? error.message : "Could not load server status.";
+	}
+}
+
+export async function restartServer(): Promise<void> {
+	if (
+		serverStatus.restartInFlight ||
+		serverStatus.restartAccepted ||
+		serverStatus.shutdownInFlight
+	)
+		return;
+	serverStatus.restartInFlight = true;
+	try {
+		await restartServerRpc();
+		serverStatus.restartAccepted = true;
+		removeBanner(SERVER_UPDATE_BANNER_ID);
+		showToast("Restarting conduit…");
+	} catch (error: unknown) {
+		const reason =
+			error instanceof Error ? error.message : "the daemon rejected it.";
+		showToast(`Failed to restart conduit: ${reason}`, { variant: "error" });
+		if (serverUpdateAvailable) showServerUpdateBanner();
+	} finally {
+		serverStatus.restartInFlight = false;
+	}
+}
+
+export async function shutdownServer(): Promise<void> {
+	serverStatus.shutdownInFlight = true;
+	try {
+		await shutdownServerRpc();
+	} finally {
+		serverStatus.shutdownInFlight = false;
+	}
+}
 
 export function applyServerStatus(status: ServerStatus): void {
 	const previous = last;
 	last = status;
+	if (previous === null) {
+		serverStatus.restartAccepted = false;
+		if (serverStatus.status !== null) void refreshServerStatus();
+	}
 	if (
 		previous === null ||
 		previous.protocolVersion !== status.protocolVersion ||
@@ -47,7 +124,6 @@ export function applyServerStatus(status: ServerStatus): void {
 		handleBuildId(status.buildId);
 	}
 	if (previous?.restartAvailable !== status.restartAvailable) {
-		if (!status.restartAvailable) serverRestartAccepted = false;
 		handleServerUpdate(status.restartAvailable);
 	}
 	if (
@@ -115,38 +191,7 @@ function showServerUpdateBanner(): void {
 		dismissible: true,
 		action: {
 			label: "Restart",
-			run: async () => {
-				if (
-					!serverUpdateAvailable ||
-					serverRestartInFlight ||
-					serverRestartAccepted
-				)
-					return;
-				serverRestartInFlight = true;
-				try {
-					await runTransportEffect(
-						Effect.gen(function* () {
-							const clients = yield* WsRpcClients;
-							const { control } = yield* clients.forProject(
-								getCurrentSlug() ?? "",
-							);
-							return yield* control.RestartWithConfig({});
-						}),
-					);
-					serverRestartAccepted = true;
-					removeBanner(SERVER_UPDATE_BANNER_ID);
-					showToast("Restarting conduit…");
-				} catch (error: unknown) {
-					const reason =
-						error instanceof Error ? error.message : "the daemon rejected it.";
-					showToast(`Failed to restart conduit: ${reason}`, {
-						variant: "error",
-					});
-					if (serverUpdateAvailable) showServerUpdateBanner();
-				} finally {
-					serverRestartInFlight = false;
-				}
-			},
+			run: restartServer,
 		},
 	});
 }
@@ -155,7 +200,7 @@ function handleServerUpdate(restartAvailable: boolean): void {
 	serverUpdateAvailable = restartAvailable;
 	if (restartAvailable) {
 		removeBanner(BUILD_MISMATCH_BANNER_ID);
-		if (!serverRestartInFlight && !serverRestartAccepted)
+		if (!serverStatus.restartInFlight && !serverStatus.restartAccepted)
 			showServerUpdateBanner();
 	} else {
 		removeBanner(SERVER_UPDATE_BANNER_ID);

@@ -61,7 +61,7 @@ import {
 	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
-import { restoreServerUpdateBanner } from "./server-status.js";
+import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";

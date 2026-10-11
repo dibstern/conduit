@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
+import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	instanceSlug,
@@ -224,14 +225,14 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open settings to server instances",
+		name: "open settings to Server",
 		match: /^I open settings to the Server section$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await page.evaluate(() =>
 				window.dispatchEvent(
 					new CustomEvent("settings:open", {
-						detail: { section: "server", anchor: "instances" },
+						detail: { section: "server" },
 					}),
 				),
 			);
@@ -241,6 +242,81 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await page
 				.locator("#instances-settings")
 				.waitFor({ state: "visible", timeout: 5_000 });
+			await expect(page.getByTestId("server-status-version")).toBeVisible();
+		},
+	},
+	{
+		name: "seed daemon supervision",
+		match: /^the daemon is (supervised|unsupervised)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setResponse("GetStatus", {
+				...MOCK_SERVER_STATUS,
+				supervised: match[1] === "supervised",
+			});
+		},
+	},
+	{
+		name: "assert Server status",
+		match:
+			/^the Server card shows uptime, version, port and connected browsers$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("server-status-uptime")).toHaveText(
+				"up 3d 4h",
+			);
+			await expect(world.page.getByTestId("server-status-version")).toHaveText(
+				"0.42.1",
+			);
+			await expect(world.page.getByTestId("server-status-port")).toHaveText(
+				"port 2633",
+			);
+			await expect(world.page.getByTestId("server-status-browsers")).toHaveText(
+				"2 browsers connected",
+			);
+		},
+	},
+	{
+		name: "assert Restart visibility",
+		match: /^Server Restart is (visible|hidden)$/,
+		run: async ({ world, match }) => {
+			const restart = world.page.getByTestId("server-restart-btn");
+			if (match[1] === "visible") await expect(restart).toBeVisible();
+			else await expect(restart).toHaveCount(0);
+		},
+	},
+	{
+		name: "open Server shutdown confirmation",
+		match: /^I open the Server Shut down confirmation$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("server-shutdown-btn").click();
+			await expect(
+				world.page.getByTestId("server-shutdown-cancel"),
+			).toBeFocused();
+		},
+	},
+	{
+		name: "assert shutdown warning",
+		match: /^the Server Shut down warning says (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("server-shutdown-confirmation"),
+			).toContainText(match[1] ?? "");
+		},
+	},
+	{
+		name: "cancel Server shutdown confirmation",
+		match: /^I cancel the Server Shut down confirmation$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("server-shutdown-cancel").click();
+			await expect(
+				world.page.getByTestId("server-shutdown-confirmation"),
+			).toBeHidden();
+		},
+	},
+	{
+		name: "assert the instance editor closes for another Server form",
+		match: /^the Server instance editor is closed$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("instance-form")).toBeHidden();
 		},
 	},
 	{
