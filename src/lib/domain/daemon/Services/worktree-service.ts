@@ -1,4 +1,4 @@
-import { Context, type Effect } from "effect";
+import { Context, type Effect, type Stream } from "effect";
 import type {
 	WorkspaceMissing,
 	WorktreeCreationError,
@@ -23,7 +23,24 @@ export interface CreatedWorktrees {
 	}[];
 }
 
+export interface WorktreeSetupResult {
+	readonly _tag: "finished";
+	readonly status: "succeeded" | "failed" | "timed_out";
+	readonly exitCode?: number;
+	readonly message?: string;
+}
+
+export type WorktreeSetupUpdate =
+	| { readonly _tag: "output"; readonly output: string }
+	| WorktreeSetupResult;
+
 export interface WorktreeService {
+	/** Own the setup process group until completion or stream interruption. */
+	readonly runSetup: (
+		effectiveWorkingDirectory: string,
+		script: string,
+		env: Readonly<Record<string, string | undefined>>,
+	) => Stream.Stream<WorktreeSetupUpdate>;
 	/** Read Git's registration, including prunable entries, without changing any refs. */
 	readonly inspectMissing: (
 		folder: WorktreeFolder,

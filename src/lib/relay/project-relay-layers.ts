@@ -91,6 +91,10 @@ import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
+import {
+	SessionSetupLive,
+	type SessionSetupTag,
+} from "../domain/relay/Services/session-setup.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
@@ -175,6 +179,7 @@ const relayOpenCodeInstances = (
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
+	| SessionSetupTag
 	| OverridesStateTag
 	| DaemonConfigRefTag
 	| ConfigPersistenceTag
@@ -669,7 +674,11 @@ export function createProjectRelayLayers({
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(
-			Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
+			SessionSetupLive.pipe(
+				Layer.provideMerge(
+					Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
+				),
+			),
 			makeWsTransportLive({ noServer: true }),
 		),
 	);

@@ -116,6 +116,31 @@ complete worktrees map and origin as a launch move before their first turn.
 Conduit-created worktrees never fall back automatically: a missing checkout is
 reported on read and requires explicit recreation or a user move to the main folder.
 
+## Setup Script
+
+A **Setup Script** prepares a New worktree session before its first agent turn.
+The daemon project setting takes precedence over the Project File. Empty or
+whitespace-only settings clear the override. Local sessions never run setup.
+Creation returns as soon as the session and worktrees exist; its first turn waits
+for setup to finish. The script runs in the Effective Working Directory through
+the user's shell with the project's shell environment. Output is merged, streamed
+and capped at 64 KiB with a truncation note. A ten-minute timeout kills its process
+group. A daemon-lifetime pipe also stops the group if the daemon dies. Failure
+and timeout leave the session usable.
+
+`session.setup_started`, `session.setup_output` and `session.setup_finished` are
+canonical session commands. They project one notice in the durable transcript.
+Interrupted setup becomes a failed notice on shutdown or the next relay startup,
+so a restart never leaves it running forever.
+
+## Project File
+
+The **Project File** is `conduit.json` in the primary Project Folder, never in a
+session's worktree. Its implementation-free Effect Schema accepts optional
+`setupScript` and ignores unknown keys. It is read afresh for every new worktree
+session. Invalid JSON or schema data skips setup with a visible notice; a daemon
+setup override still takes precedence. An absent script means no setup.
+
 ## Workspace Hint
 
 **Workspace Hint** is a suggested effective working directory when the latest

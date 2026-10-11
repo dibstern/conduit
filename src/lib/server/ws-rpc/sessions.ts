@@ -33,6 +33,7 @@ import {
 	SessionManagerServiceTag,
 } from "../../domain/relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { formatErrorDetail } from "../../errors.js";
@@ -512,7 +513,7 @@ export const sessionsHandlers = {
 										: { [config.projectDir]: request.worktreeBase },
 								),
 							);
-							return yield* restore(
+							const session = yield* restore(
 								createSessionForClient({
 									...options,
 									sessionId,
@@ -531,6 +532,13 @@ export const sessionsHandlers = {
 										.pipe(Effect.zipRight(Effect.failCause(cause))),
 								),
 							);
+							const setup = yield* Effect.serviceOption(SessionSetupTag);
+							if (setup._tag === "Some")
+								yield* setup.value.start(
+									session.id,
+									created.worktrees[config.projectDir] ?? config.projectDir,
+								);
+							return session;
 						}),
 					),
 				);

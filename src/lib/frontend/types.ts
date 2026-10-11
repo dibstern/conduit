@@ -5,6 +5,7 @@
 // frontend code can import everything from "./types.js".
 // Types also used locally in this file are imported separately.
 
+import type { ProjectSetupState } from "../contracts/project-setup.js";
 import type {
 	AskUserQuestion,
 	FileEntry,
@@ -197,6 +198,9 @@ export interface SystemMessage {
 	retry?: true;
 	preTokens?: number;
 	createdAt?: number;
+	/** Canonical worktree setup state and its merged process output. */
+	setup?: ProjectSetupState;
+	setupOutput?: string;
 }
 
 // Session Types (frontend-only)
