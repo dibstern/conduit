@@ -10,6 +10,7 @@ import type {
 	ProviderSessionCapabilities,
 } from "./contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "./contracts/session-workspace.js";
+import { WorkspaceMissingSchema } from "./contracts/worktree.js";
 
 export type {
 	SessionWorkspace,
@@ -251,6 +252,8 @@ export interface SessionGit {
 	ahead?: number;
 	behind?: number;
 	merged?: boolean;
+	/** Full branch head incorporated into the default branch. */
+	mergedHead?: string;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
 	/** Git and shared Effective Folders in Project Folder order. */
 	folders?: readonly SessionFolderGit[];
@@ -264,6 +267,7 @@ const GitStatusSchema = Schema.Struct({
 	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
 	behind: Schema.optionalWith(Schema.Number, { exact: true }),
 	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
 	operation: Schema.optionalWith(
 		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
 		{ exact: true },
@@ -339,6 +343,7 @@ export const SessionInfoSchema = Schema.Struct({
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
+	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),

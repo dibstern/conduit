@@ -51,6 +51,8 @@ folders; its projection keeps fallback and origin metadata when needed, otherwis
 it is NULL. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
+Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
+
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
 then the Session Workspace service records its launch move. It starts from the
@@ -106,6 +108,8 @@ At turn start, a missing recorded worktree with origin `existing` moves back to
 the main folder with cause `missing`, using the same pending Claude directive
 rules as a user move; a missing main folder still fails. Forks copy the parent's
 complete worktrees map and origin as a launch move before their first turn.
+Conduit-created worktrees never fall back automatically: a missing checkout is
+reported on read and requires explicit recreation or a user move to the main folder.
 
 ## Workspace Hint
 

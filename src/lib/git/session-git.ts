@@ -142,11 +142,13 @@ export async function readSessionGit(
 			return { ...result, merged: false };
 		}
 		if (!head) return { ...result, merged: false };
+		const tip = await git(directory, "rev-parse", `refs/heads/${branch}`);
+		if (!tip) return { ...result, merged: false };
 		const ancestor = await git(
 			directory,
 			"merge-base",
 			"--is-ancestor",
-			`refs/heads/${branch}`,
+			tip,
 			defaultBranch,
 		);
 		if (ancestor === undefined) return { ...result, merged: false };
@@ -154,15 +156,38 @@ export async function readSessionGit(
 			directory,
 			"reflog",
 			"show",
-			"--format=%H",
+			"--format=%H %gD",
+			"--date=unix",
 			`refs/heads/${branch}`,
 		);
-		const creationPoint = reflog?.split("\n").at(-1);
-		const tip = await git(directory, "rev-parse", `refs/heads/${branch}`);
+		const creation = reflog
+			?.split("\n")
+			.at(-1)
+			?.match(/^([a-f0-9]+) .+@\{(\d+)\}$/);
+		const creationPoint = creation?.[1];
 		// Squash merges are intentionally missed: a false negative cannot hide live work.
+		let merged = Boolean(creationPoint && creationPoint !== tip);
+		if (!merged && creation?.[2]) {
+			// An existing branch can start at its final feature commit. Its default
+			// ref at creation must exclude the tip; a fresh branch on default is
+			// not merged work. Date lookup also resolves a clone's first fetch's old SHA.
+			const createdAt = new Date(Number(creation[2]) * 1_000).toISOString();
+			const previousDefault = await git(
+				directory,
+				"rev-parse",
+				"--verify",
+				"-q",
+				`${defaultBranch}@{${createdAt}}`,
+			);
+			const base = previousDefault
+				? await git(directory, "merge-base", tip, previousDefault)
+				: undefined;
+			merged = base !== undefined && base !== tip;
+		}
 		return {
 			...result,
-			merged: Boolean(creationPoint && tip && creationPoint !== tip),
+			merged,
+			...(merged ? { mergedHead: tip } : {}),
 		};
 	} catch {
 		return undefined;

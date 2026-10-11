@@ -412,6 +412,7 @@ describe("OpenCode provider contract schemas", () => {
 			"session.updated",
 			"todo.updated",
 			"pty.created",
+			"pty.updated",
 			"pty.exited",
 			"pty.deleted",
 			"file.edited",

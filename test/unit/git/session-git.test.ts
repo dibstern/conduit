@@ -41,6 +41,7 @@ const commit = (directory: string, name: string) => {
 };
 
 afterEach(() => {
+	vi.unstubAllEnvs();
 	for (const directory of roots.splice(0))
 		rmSync(directory, { recursive: true, force: true });
 });
@@ -166,6 +167,64 @@ describe("readSessionGit", () => {
 			branch: "feature",
 			merged: true,
 		});
+	});
+	it.each([
+		["--no-ff", false],
+		["--ff-only", false],
+		["--no-ff", true],
+		["--ff-only", true],
+	])("recognises a clone's first fetched %s merge (precommitted branch: %s)", async (strategy, precommitted) => {
+		// Cloning does not seed the remote default ref's reflog. A first fetch
+		// must still detect the merge, including an unchanged local feature ref.
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+		const seed = repo();
+		commit(seed, "initial");
+		git(seed, "branch", "-m", "trunk");
+		const remote = root();
+		git(remote, "init", "--bare", "-q");
+		git(seed, "push", "-q", remote, "trunk");
+		git(remote, "symbolic-ref", "HEAD", "refs/heads/trunk");
+		if (precommitted) {
+			git(seed, "checkout", "-qb", "feature");
+			commit(seed, "feature-file");
+			git(seed, "push", "-q", remote, "feature");
+			git(seed, "checkout", "-q", "trunk");
+		}
+		const directory = root();
+		git(directory, "clone", "-q", remote, ".");
+		git(directory, "config", "user.name", "Test User");
+		git(directory, "config", "user.email", "test@example.com");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
+		git(
+			directory,
+			"checkout",
+			"-qb",
+			"feature",
+			precommitted ? "origin/feature" : "HEAD",
+		);
+		if (!precommitted) commit(directory, "feature-file");
+		const tip = git(directory, "rev-parse", "HEAD");
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
+		git(seed, "fetch", "-q", directory, "feature");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
+		git(seed, "merge", strategy, "-qm", "Merge feature", "FETCH_HEAD");
+		git(seed, "push", "-q", remote, "trunk");
+		git(directory, "fetch", "-q", "origin");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
+		commit(seed, "later-default-work");
+		git(seed, "push", "-q", remote, "trunk");
+		git(directory, "fetch", "-q", "origin");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:04:00Z");
+		git(directory, "checkout", "-qb", "fresh", "origin/trunk");
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
 	});
 	it("omits merged when no default ref exists", async () => {
 		const directory = repo();

@@ -3,8 +3,7 @@
 
 import type { PtyEvent } from "../contracts/ws-rpc.js";
 import type { Logger } from "../logger.js";
-import type { PtyInfo } from "../shared-types.js";
-import { trackedPtyInfo } from "./pty-manager.js";
+import { type PtySessionState, trackedPtyInfo } from "./pty-manager.js";
 
 export interface PtyUpstreamDeps {
 	ptyManager: {
@@ -13,7 +12,11 @@ export interface PtyUpstreamDeps {
 		appendScrollback(ptyId: string, text: string): void;
 		markExited(ptyId: string, exitCode: number): void;
 		hasSession(ptyId: string): boolean;
-		getSession(ptyId: string): { readonly info?: PtyInfo } | undefined;
+		getSession(
+			ptyId: string,
+		):
+			| Pick<PtySessionState, "source" | "upstream" | "info" | "exited">
+			| undefined;
 		publish(event: PtyEvent): void;
 	};
 	client: {
@@ -23,8 +26,9 @@ export interface PtyUpstreamDeps {
 	projectDir: string;
 	log: Logger;
 	WebSocketClass: typeof import("ws").WebSocket;
-	/** Runs once the upstream socket has closed, however it closed. */
 	onClose?: () => void;
+	/** Interrupt a pending socket acquisition when the relay's scope closes. */
+	signal?: AbortSignal;
 }
 
 type RawData = import("ws").RawData;
@@ -50,6 +54,7 @@ export async function connectPtyUpstream(
 		projectDir,
 		log,
 		WebSocketClass,
+		signal,
 		onClose,
 	} = deps;
 
@@ -61,6 +66,10 @@ export async function connectPtyUpstream(
 	const headers = client.getAuthHeaders();
 
 	return new Promise<void>((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(new Error(`PTY ${ptyId} attachment interrupted`));
+			return;
+		}
 		const upstream = new WebSocketClass(wsUrl, {
 			headers,
 			// Disable per-message compression for PTY connections.
@@ -80,16 +89,45 @@ export async function connectPtyUpstream(
 		// replay data in the same TCP segment as the upgrade response
 		// (Node.js ws processes both synchronously).
 		ptyManager.registerSession(ptyId, upstream);
+		const current = () => {
+			const session = ptyManager.getSession(ptyId);
+			return session?.source === "opencode" && session.upstream === upstream;
+		};
+		if (!current()) {
+			// Registration refused a late provider attachment to a local terminal.
+			upstream.on("error", () => {});
+			upstream.terminate();
+			onClose?.();
+			resolve();
+			return;
+		}
 		let connected = false;
+		const disconnect = () => {
+			const session = ptyManager.getSession(ptyId);
+			// Discovery owns the row. A failed socket must retain its scrollback.
+			if (current() && session) session.upstream = undefined;
+			upstream.terminate();
+		};
 
 		const connectTimeout = setTimeout(() => {
-			// Remove the session on timeout — it was never successfully opened
-			ptyManager.closeSession(ptyId);
+			cleanup();
+			disconnect();
 			reject(new Error(`Timed out connecting to PTY ${ptyId}`));
 		}, 10_000);
+		const abort = () => {
+			cleanup();
+			disconnect();
+			reject(new Error(`PTY ${ptyId} attachment interrupted`));
+		};
+		const cleanup = () => {
+			clearTimeout(connectTimeout);
+			signal?.removeEventListener("abort", abort);
+		};
+		signal?.addEventListener("abort", abort, { once: true });
 
 		// Install message handler BEFORE "open" fires.
 		upstream.on("message", (data: RawData) => {
+			if (!current()) return;
 			// OpenCode sends cursor metadata as binary: 0x00 + JSON {"cursor":N}.
 			// Always convert to Buffer first and check byte 0.
 			let buf: Buffer;
@@ -112,12 +150,13 @@ export async function connectPtyUpstream(
 		});
 
 		upstream.on("close", () => {
-			ptyManager.markExited(ptyId, 0);
-			// Only announce the exit if the session is still tracked: a closed
-			// PTY was already announced removed, and a failed connect was never
-			// stored.
+			cleanup();
+			if (!connected)
+				reject(new Error(`PTY ${ptyId} closed before connecting`));
+			// An obsolete socket must not mark a removed or replaced session exited.
 			const session = ptyManager.getSession(ptyId);
-			if (session) {
+			if (current() && session && !session.exited) {
+				ptyManager.markExited(ptyId, 0);
 				ptyManager.publish({
 					_tag: "upsert",
 					item: trackedPtyInfo(
@@ -133,9 +172,8 @@ export async function connectPtyUpstream(
 
 		upstream.on("error", (err: Error) => {
 			if (!connected) {
-				clearTimeout(connectTimeout);
-				// Remove the failed session
-				ptyManager.closeSession(ptyId);
+				cleanup();
+				disconnect();
 				reject(err);
 			}
 			log.warn(`Upstream error ${ptyId}: ${err.message}`);
@@ -143,7 +181,7 @@ export async function connectPtyUpstream(
 
 		upstream.on("open", () => {
 			connected = true;
-			clearTimeout(connectTimeout);
+			cleanup();
 			resolve();
 		});
 	});

@@ -22,6 +22,19 @@
  * - Generated branch namespaces conflict in another repository: choose one name free in all.
  * - Non-git folders are skipped; zero git folders cannot create a worktree session.
  * - Folders sharing a repository must map into one owned checkout on the new branch.
+ * - A missing checkout is recreated from its existing, possibly renamed branch,
+ *   preserving branch commits and the source checkout's edits.
+ * - The recovery branch is deleted or its worktree registration was pruned:
+ *   refuse recovery without guessing a branch or creating a replacement ref.
+ * - A recovery target is occupied by a directory, file or symlink: preserve it.
+ * - The recovery branch is checked out in another live worktree: refuse instead
+ *   of forcing two live checkouts onto the same branch.
+ * - Git fails before or after adding the recovered checkout: preserve the branch
+ *   and main checkout, and leave no partially populated directory.
+ * - Two recreations race for one target: only one owns it, the loser preserves it.
+ * - A recorded path points outside the owned location: refuse recovery.
+ * - The main checkout's project subfolder disappears while its isolated copy
+ *   remains: keep that checkout usable and recover through the main Git root.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -586,6 +599,204 @@ finish();
 				"utf8",
 			),
 		).toBe("app committed\n");
+	});
+
+	const recreateEffect = (
+		directory?: string,
+		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+	) =>
+		Effect.flatMap(WorktreeServiceTag, (service) =>
+			service.recreate(folder, directory),
+		).pipe(Effect.provide(makeWorktreeLive(configDir, options)));
+	const recoveryError = async (
+		directory?: string,
+		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+	) => {
+		const result = await Effect.runPromise(
+			Effect.either(recreateEffect(directory, options)),
+		);
+		if (Either.isRight(result)) throw new Error("Expected recreation to fail");
+		return result.left;
+	};
+	const inspectMissing = (directory?: string) =>
+		Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.inspectMissing(folder, directory),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+
+	it("recreates a missing checkout from the registered renamed branch without changing its ref", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		git("-C", path, "branch", "-m", "renamed-session");
+		writeFileSync(join(path, "tracked.txt"), "branch commit\n");
+		git("-C", path, "commit", "-qam", "Session commit");
+		const head = git("rev-parse", "renamed-session");
+		writeFileSync(join(repository, "tracked.txt"), "main edit\n");
+		const main = git("status", "--porcelain");
+		rmSync(path, { recursive: true });
+		expect(await inspectMissing()).toEqual({
+			path,
+			branch: "renamed-session",
+			canRecreate: true,
+		});
+		expect(await Effect.runPromise(recreateEffect())).toBe(path);
+		expect(await inspectMissing()).toBeUndefined();
+		expect(git("-C", path, "branch", "--show-current")).toBe("renamed-session");
+		expect(git("-C", path, "rev-parse", "HEAD")).toBe(head);
+		expect(readFileSync(join(path, "tracked.txt"), "utf8")).toBe(
+			"branch commit\n",
+		);
+		expect(git("status", "--porcelain")).toBe(main);
+	});
+
+	it("refuses a deleted branch and reports why recreation is unavailable", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		git("update-ref", "-d", `refs/heads/${created.branchName}`);
+		const before = repositoryState();
+		expect(await inspectMissing()).toEqual({
+			path,
+			branch: created.branchName,
+			canRecreate: false,
+			reason: "branch-missing",
+		});
+		expect((await recoveryError()).reason).toBe("branch-missing");
+		assertUnchanged(before);
+	});
+
+	it("does not guess a branch after the missing worktree registration was pruned", async () => {
+		const created = await Effect.runPromise(createEffect());
+		rmSync(created.worktrees[repository] ?? "", { recursive: true });
+		git("worktree", "prune");
+		const before = repositoryState();
+		expect((await inspectMissing())?.reason).toBe("branch-unknown");
+		expect((await recoveryError()).reason).toBe("branch-unknown");
+		assertUnchanged(before);
+	});
+
+	it("refuses a recovery branch checked out in another live worktree", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		const other = join(fixture, "other-checkout");
+		git("worktree", "add", "--force", other, created.branchName);
+		const before = repositoryState();
+		expect(await inspectMissing()).toEqual({
+			path,
+			branch: created.branchName,
+			canRecreate: false,
+			reason: "branch-in-use",
+		});
+		expect((await recoveryError()).reason).toBe("branch-in-use");
+		assertUnchanged(before);
+		expect(git("-C", other, "branch", "--show-current")).toBe(
+			created.branchName,
+		);
+	});
+
+	it.each([
+		"directory",
+		"file",
+		"symlink",
+	])("preserves an occupied recovery target: %s", async (kind) => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		if (kind === "directory") {
+			mkdirSync(path);
+			writeFileSync(join(path, "keep.txt"), "keep\n");
+		} else if (kind === "file") writeFileSync(path, "keep\n");
+		else symlinkSync(repository, path);
+		const before = repositoryState();
+		expect((await inspectMissing())?.canRecreate).toBe(true);
+		expect((await recoveryError()).reason).toBe("target-exists");
+		expect(repositoryState()).toEqual(before);
+		expect(existsSync(path)).toBe(true);
+		if (kind !== "symlink")
+			expect(
+				readFileSync(
+					kind === "directory" ? join(path, "keep.txt") : path,
+					"utf8",
+				),
+			).toBe("keep\n");
+		expect(readFileSync(join(repository, "tracked.txt"), "utf8")).toBe(
+			"committed\n",
+		);
+	});
+
+	it.each([
+		false,
+		true,
+	])("preserves the branch when Git recreation fails, after add=%s", async (afterAdd) => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		const head = git("rev-parse", created.branchName);
+		rmSync(path, { recursive: true });
+		const executable = gitWrapper(
+			`if (args.includes("worktree") && args.includes("add")) { ${afterAdd ? runRealGit : ""} console.error("forced recreation failure"); process.exit(42); }\n${runRealGit}\nprocess.exit(result.status ?? 1);`,
+		);
+		const error = await recoveryError(undefined, { gitExecutable: executable });
+		expect(error.reason).toBe("git-failed");
+		expect(error.message).toContain("forced recreation failure");
+		expect(git("rev-parse", created.branchName)).toBe(head);
+		expect(git("status", "--porcelain")).toBe("");
+		expect(existsSync(path)).toBe(false);
+		expect((await inspectMissing())?.canRecreate).toBe(true);
+	});
+
+	it("preserves the winning checkout when two recreations race", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		const results = await Promise.all([
+			Effect.runPromise(Effect.either(recreateEffect())),
+			Effect.runPromise(Effect.either(recreateEffect())),
+		]);
+		expect(results.filter(Either.isRight)).toHaveLength(1);
+		expect(
+			results.filter(Either.isLeft).map(({ left }) => left.reason),
+		).toEqual(["target-exists"]);
+		expect(git("-C", path, "branch", "--show-current")).toBe(
+			created.branchName,
+		);
+	});
+
+	it("recreates a repository subdirectory at its original mapping", async () => {
+		folder = { ...folder, path: join(repository, "app") };
+		const created = await Effect.runPromise(createEffect());
+		const directory = created.worktrees[folder.path] ?? "";
+		rmSync(ownedWorktreePath(configDir, folder), { recursive: true });
+		expect(await Effect.runPromise(recreateEffect(directory))).toBe(directory);
+		expect(readFileSync(join(directory, "app.txt"), "utf8")).toBe(
+			"app committed\n",
+		);
+	});
+
+	it("keeps and recreates the isolated subfolder when its main copy is missing", async () => {
+		folder = { ...folder, path: join(repository, "app") };
+		const created = await Effect.runPromise(createEffect());
+		const directory = created.worktrees[folder.path] ?? "";
+		rmSync(folder.path, { recursive: true });
+		expect(await inspectMissing(directory)).toBeUndefined();
+		const main = git("status", "--porcelain");
+		rmSync(ownedWorktreePath(configDir, folder), { recursive: true });
+		expect((await inspectMissing(directory))?.canRecreate).toBe(true);
+		expect(await Effect.runPromise(recreateEffect(directory))).toBe(directory);
+		expect(readFileSync(join(directory, "app.txt"), "utf8")).toBe(
+			"app committed\n",
+		);
+		expect(git("status", "--porcelain")).toBe(main);
+		expect(existsSync(folder.path)).toBe(false);
+	});
+
+	it("refuses a path outside the owned location", async () => {
+		const before = repositoryState();
+		expect((await recoveryError(join(fixture, "unowned"))).reason).toBe(
+			"not-owned",
+		);
+		assertUnchanged(before);
 	});
 
 	it("rejects an empty folder list before doing any work", async () => {

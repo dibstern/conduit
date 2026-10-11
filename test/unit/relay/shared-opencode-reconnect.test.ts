@@ -1,4 +1,13 @@
-import { Deferred, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Scope,
+	Stream,
+} from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenCodeConnectionStatus } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -221,6 +230,45 @@ describe("Shared OpenCode stream reconnect", () => {
 				Effect.scoped(instances.use(instanceId)),
 			),
 		);
+
+	it.each([
+		"stopped",
+		"unhealthy",
+	] as const)("a non-starting lease does nothing for a %s managed instance", async (status) => {
+		endpoints.set("opencode", {
+			url: "http://opencode.test",
+			status,
+			managed: true,
+		});
+		const instances = await runtime.runPromise(OpenCodeInstancesTag);
+		const client = await runtime.runPromise(
+			Effect.scoped(instances.useIfRunning("opencode")),
+		);
+		expect(Option.isNone(client)).toBe(true);
+		expect(endpoints.get("opencode")?.status).toBe(status);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it("a non-starting lease prevents idle stop until its scope closes", async () => {
+		vi.useFakeTimers();
+		const scope = await Effect.runPromise(Scope.make());
+		try {
+			const instances = await runtime.runPromise(OpenCodeInstancesTag);
+			const client = await runtime.runPromise(
+				instances.useIfRunning("opencode").pipe(Scope.extend(scope)),
+			);
+			expect(Option.isSome(client)).toBe(true);
+			await vi.advanceTimersByTimeAsync(120_001);
+			expect(stopProcess).not.toHaveBeenCalled();
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+			await vi.advanceTimersByTimeAsync(120_001);
+			expect(stopProcess).toHaveBeenCalledWith("opencode");
+		} finally {
+			await Effect.runPromise(Scope.close(scope, Exit.void));
+			await runtime.dispose();
+			vi.useRealTimers();
+		}
+	});
 
 	it.each([
 		false,

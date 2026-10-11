@@ -84,6 +84,13 @@ export const SingleFolder: Story = {
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
 			"New worktree Not supported by Folder provider",
 		);
+		const existing = canvas.getByRole("menuitem", {
+			name: /Existing worktree/,
+		});
+		await expect(existing).toHaveAttribute("aria-disabled", "true");
+		await expect(existing).toHaveTextContent(
+			"Not supported by Folder provider",
+		);
 	},
 };
 
@@ -243,19 +250,5 @@ export const ExistingWorktreeSelected: Story = {
 		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
 			"existing worktree",
 		);
-	},
-};
-
-export const ExistingWorktreeUnsupported: Story = {
-	beforeEach: () => seed(false, 1, false),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement.ownerDocument.body);
-		await userEvent.click(canvas.getByTestId("draft-start-chip"));
-		await expect(
-			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
-		).toHaveAttribute("aria-disabled", "true");
-		await expect(
-			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
-		).toHaveTextContent("Not supported by Folder provider");
 	},
 };

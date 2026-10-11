@@ -200,8 +200,8 @@ Scenario Outline: phone cards and chips keep account limits separate from model 
   And the usage-settings region visually matches <baseline> at <threshold> percent
   When I close settings
   And I tap back to the session list
-  Then the phone usage chip claude shows 5h 41% at level ok
-  And the phone usage chips are claude in that order
+  Then the phone usage rows are claude in that order
+  And the usage footer claude five_hour meter is normal at 41 percent
 
 Examples:
   | fable | baseline                                    | threshold |
@@ -270,7 +270,7 @@ Examples:
   | 70      | 90     | normal  | normal |
   | 90      | off    | normal  | amber  |
 
-Scenario Outline: phone chips use the saved warning threshold
+Scenario Outline: the phone usage dock uses the saved warning threshold
   Given the viewport is a phone
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
@@ -281,14 +281,15 @@ Scenario Outline: phone chips use the saved warning threshold
   Then the SetUsageLimitsSetting RPC saves warnAt <choice>
   When I close settings
   And I tap back to the session list
-  Then the phone usage chip claude shows 5h 86% at level <level>
+  Then the usage footer claude shows five_hour 86% and seven_day 58%
+  And the usage footer claude five_hour window is at level <level>
 
 Examples:
-  | initial | choice | level |
-  | 90      | 70     | warn  |
-  | 90      | 80     | warn  |
-  | 70      | 90     | ok    |
-  | 90      | off    | ok    |
+  | initial | choice | level   |
+  | 90      | 70     | warning |
+  | 90      | 80     | warning |
+  | 70      | 90     | normal  |
+  | 90      | off    | normal  |
 
 Scenario Outline: desktop card dragging saves and replays the switch order
   Given the viewport is a desktop
@@ -297,13 +298,38 @@ Scenario Outline: desktop card dragging saves and replays the switch order
   And I drag the Usage account Spare above Personal
   Then the account order reads Spare, Personal, Work
   And the SetUsageLimitsSetting RPC saves auto-resume off, auto-switch off, order spare, claude, work
+  When I drag the Usage account Work above Personal
+  Then the account order reads Spare, Work, Personal
+  And the SetUsageLimitsSetting RPC saves auto-resume off, auto-switch off, order spare, work, claude
   When I reload the app and open the Usage section
-  Then the account order reads Spare, Personal, Work
+  Then the account order reads Spare, Work, Personal
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
   | baseline                          | threshold |
   | usage-settings-reordered-desktop | 98        |
+
+Scenario: desktop cards drag down and up again
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  When I open settings to the Usage section
+  And I drag the Usage account Personal below Work
+  Then the account order reads Work, Personal, Spare
+  When I drag the Usage account Personal below Spare
+  Then the account order reads Work, Spare, Personal
+  When I drag the Usage account Personal above Work
+  Then the account order reads Personal, Work, Spare
+
+Scenario: phone cards touch-drag repeatedly
+  Given the viewport is a phone
+  And Usage settings have several Claude accounts in the normal state
+  When I open settings to the Usage section
+  And I touch-drag the Usage account Spare above Personal
+  Then the account order reads Spare, Personal, Work
+  When I touch-drag the Usage account Work above Personal
+  Then the account order reads Spare, Work, Personal
+  When I touch-drag the Usage account Spare below Personal
+  Then the account order reads Work, Personal, Spare
 
 Scenario: the card handle supports ArrowUp and ArrowDown without pickup
   Given the viewport is a desktop
@@ -391,14 +417,14 @@ Scenario: the desktop footer opens the Usage section directly
   Then the Usage settings title reads Claude plan usage
   And the Usage settings subheader reads Claude Max · updated 2m ago · Refresh
 
-Scenario: a phone usage chip opens Usage without stopping list scrolling
+Scenario: the phone usage sheet opens Usage
   Given the viewport is a phone
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
   And Usage settings have several Claude accounts in the normal state
   When I tap back to the session list
-  Then the phone usage footer allows list scrolling around its chips
-  When I tap the phone usage chip claude
+  And I open the phone usage sheet
+  And I tap Settings in the usage sheet
   Then the Usage settings title reads Usage
   And the phone Usage screen fills the viewport and has a scrolling body and a back button
   When I press the Usage back button
