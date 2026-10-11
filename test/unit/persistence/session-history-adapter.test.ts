@@ -339,6 +339,7 @@ describe("messageRowsToHistory", () => {
 			pageSize: 50,
 		}).messages;
 		const kept = {
+			providerTaskId: "task-1",
 			childSessionId: "claude-subagent-abc",
 			status: "completed",
 		};

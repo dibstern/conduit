@@ -106,20 +106,42 @@ const TOOL_STATUSES = new Map<string, ToolStatus>([
 	["error", "error"],
 ]);
 
-/** The tool metadata the browser reads: a subagent's session and a settled
- *  status. Everything else stays on the server — an OpenCode edit's metadata
- *  alone holds the whole file twice over. */
-const BROWSER_METADATA_KEYS = ["status", "childSessionId", "sessionId"];
+/** The tool metadata the browser reads: a subagent's session, a settled
+ *  status, and a launching row's task, outcome, step, times and usage.
+ *  Everything else stays on the server — an OpenCode edit's metadata alone
+ *  holds the whole file twice over. */
+const BROWSER_METADATA_KEYS = new Set([
+	"status",
+	"childSessionId",
+	"sessionId",
+	"providerTaskId",
+	"backgrounded",
+	"outcome",
+	"currentStep",
+	"activeToolName",
+	"lastToolName",
+	"taskStartedAt",
+	"endTime",
+	"pausedAt",
+	"pausedMs",
+	"taskDurationMs",
+	"taskTotalTokens",
+	"totalTokens",
+	"taskToolUses",
+	"toolUses",
+]);
 
 function browserMetadata(
 	metadata: object | undefined,
-): Record<string, string> | undefined {
+): Record<string, string | number | boolean> | undefined {
 	if (metadata === undefined) return undefined;
 	const kept = Object.fromEntries(
 		Object.entries(metadata).filter(
-			(entry): entry is [string, string] =>
-				BROWSER_METADATA_KEYS.includes(entry[0]) &&
-				typeof entry[1] === "string",
+			(entry): entry is [string, string | number | boolean] =>
+				BROWSER_METADATA_KEYS.has(entry[0]) &&
+				(typeof entry[1] === "string" ||
+					typeof entry[1] === "number" ||
+					typeof entry[1] === "boolean"),
 		),
 	);
 	return Object.keys(kept).length > 0 ? kept : undefined;
