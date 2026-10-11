@@ -55,7 +55,7 @@ export type ClaudeTraceName =
 	| "pong-thinking-text-turn"
 	| "second-input-held-to-turn-end"
 	| "queued-input-promoted-to-steer"
-	| "side-thread-plan-turn"
+	| "side-thread-ask-turn"
 	| "skill-loads-turn"
 	| "steer-during-tool-folds"
 	| "steer-misses-boundary"

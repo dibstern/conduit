@@ -60,7 +60,7 @@ test.describe("Claude Side Thread started mid-turn", () => {
 			turns: [
 				"pong-thinking-text-turn",
 				"extra-folder-read-turn",
-				"side-thread-plan-turn",
+				"side-thread-ask-turn",
 			],
 			holdTurnBeforeToolResult: 2,
 		},

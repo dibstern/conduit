@@ -1,12 +1,12 @@
 /**
  * Re-capture a real Claude Side Thread's first turn: a whole-session fork that
- * then answers in plan mode, with an existing login.
+ * then answers in Ask mode, with an existing login.
  * pnpm build
  * RUN_EXPENSIVE_E2E=1 npx --no-install vitest run --config vitest.e2e.config.ts \
  *   test/e2e/provider/claude-side-thread-trace-capture.test.ts
- * Copies the Side Thread's trace to side-thread-plan-turn.jsonl only after the
- * answer recalls the parent's word and the SDK reports plan mode. Hook output
- * and home paths are redacted; review the trace before committing it.
+ * Copies the Side Thread's trace to side-thread-ask-turn.jsonl only after the
+ * answer recalls the parent's word and the SDK reports Ask ("default") mode.
+ * Hook output and home paths are redacted; review the trace before committing.
  */
 import {
 	existsSync,
@@ -34,11 +34,11 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	"Claude Side Thread trace capture (real SDK)",
 	() => {
 		it(
-			"captures a forked Side Thread's first turn in plan mode",
+			"captures a forked Side Thread's first turn in Ask mode",
 			async () => {
 				const fixturePath = join(
 					import.meta.dirname,
-					"../../fixtures/claude-sdk-traces/side-thread-plan-turn.jsonl",
+					"../../fixtures/claude-sdk-traces/side-thread-ask-turn.jsonl",
 				);
 				const captureDir = mkdtempSync(
 					join(tmpdir(), "conduit-side-thread-capture-"),
