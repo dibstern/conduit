@@ -46,6 +46,21 @@ Scenario: editing a named instance updates it in the settings list
   Then the Instances list shows Prod OC
   And the Instances list does not show Staging OC
 
+Scenario: the OpenCode empty state includes setup guides even with a Claude account
+  Given no OpenCode servers are configured and CCS is detected
+  When I open settings to the Server section
+  Then the OpenCode empty state offers the serve command and Scan link
+  And the OpenCode setup guides are collapsed with the CCS tick
+
+Scenario: the Add form switches between managed and external OpenCode servers
+  When I open settings to the Server section
+  And I start adding an OpenCode instance
+  Then the OpenCode editor offers name and port with environment variables collapsed
+  When I expand the instance environment variables
+  Then the instance environment field is visible
+  When I turn off Conduit starts it
+  Then the OpenCode editor offers name and URL
+
 Scenario: removing a named instance drops it from the settings list
   Given a named OpenCode instance Staging OC is already configured
   When I open settings to the Server section
@@ -54,12 +69,12 @@ Scenario: removing a named instance drops it from the settings list
 
 Scenario Outline: the instance editor matches the approved layout
   When I open settings to the Server section
-  And I start adding a Claude instance
+  And I start adding a <driver> instance
   Then the instances-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | baseline                         | threshold |
-  | provider-instances-settings-dark | 98        |
+  | driver | baseline                         | threshold |
+  | Claude | provider-instances-settings-dark | 98        |
 
 Scenario: Usage owns the limit settings beside the Claude and Server sections
   When I open settings to the Server section
