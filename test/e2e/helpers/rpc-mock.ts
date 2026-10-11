@@ -707,9 +707,11 @@ async function handleMessage(
 							})
 						: raw.tag === "ViewSession"
 							? () => ({ ok: true })
-							: raw.tag === "input.submit"
-								? ({ sessionId }) => ({ ok: true, sessionId })
-								: undefined);
+							: raw.tag === "InspectSessionWorktrees"
+								? () => ({ worktrees: [], removeWorktrees: false })
+								: raw.tag === "input.submit"
+									? ({ sessionId }) => ({ ok: true, sessionId })
+									: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
