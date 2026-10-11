@@ -450,6 +450,7 @@ export const ProjectWithinRepositoryScope: Story = {
 
 export const RepositoryScopePickerOpen: Story = {
 	name: "Repository scope menu",
+	tags: ["viewport-capture"],
 	beforeEach: () => seedRepositoryScope(false),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -464,6 +465,7 @@ export const RepositoryScopePickerOpen: Story = {
 
 export const ProjectWithinRepositoryScopePickerOpen: Story = {
 	name: "Project within repository scope menu",
+	tags: ["viewport-capture"],
 	beforeEach: () => seedRepositoryScope(true),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
