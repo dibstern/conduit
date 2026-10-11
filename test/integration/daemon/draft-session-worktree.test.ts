@@ -63,7 +63,10 @@ function sessionQueries(harness: ProcessHarness, sessionId: string) {
 				: [],
 		),
 	);
-	return harness.claudeOptions().filter(({ pid }) => pids.has(pid));
+	// The replay SDK also logs each prompt to this file; count query launches only.
+	return harness
+		.claudeOptions()
+		.filter(({ pid, prompt }) => pids.has(pid) && prompt === undefined);
 }
 
 async function holdWorkspaceValidation(

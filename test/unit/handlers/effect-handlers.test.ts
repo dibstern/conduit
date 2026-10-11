@@ -32,6 +32,7 @@ import {
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ProjectSettingsLive,
+	publishProjectSetting,
 	subscribeProjectSettings,
 } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import {
@@ -731,7 +732,7 @@ describe("switchModelForSession", () => {
 		const client = makeHandlerOpenCodeAPI({
 			provider: {
 				list: vi.fn(async () => makeProviderListResult({
-					providers: [],
+					providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 				})),
 			},
 		});
@@ -1132,7 +1133,7 @@ describe("switchContextWindowForSession", () => {
 	);
 
 	it.effect(
-		"ignores unsupported context window and resends current state",
+		"rejects unsupported context window and keeps current state",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-42"),
@@ -1164,15 +1165,20 @@ describe("switchContextWindowForSession", () => {
 					modelID: "claude-haiku-4-7",
 				});
 				yield* setContextWindow("session-42", "200k");
-				const result = yield* switchContextWindowForSession({
+				const result = yield* Effect.either(switchContextWindowForSession({
 					clientId: "client-1",
 					sessionId: "session-42",
 					contextWindow: "1m",
-				});
+				}));
 				expect(yield* getContextWindow("session-42")).toBe("200k");
 				expect(result).toMatchObject({
-					contextWindow: "200k",
-					options: [],
+					_tag: "Left",
+					left: {
+						_tag: "ContextWindowNotOffered",
+						modelId: "claude-haiku-4-7",
+						contextWindow: "1m",
+						offered: [],
+					},
 				});
 			}).pipe(Effect.provide(layer));
 		},
@@ -3091,6 +3097,20 @@ describe("handleMessage", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* publishProjectSetting({
+				_tag: "providerModels",
+				providers: [{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [{
+						id: "sonnet",
+						name: "Sonnet",
+						provider: "claude",
+						contextWindowOptions: [{ value: "1m", label: "1M" }],
+					}],
+				}],
+			});
 			yield* setModel("session-1", {
 				providerID: "claude",
 				modelID: "sonnet",
@@ -3184,6 +3204,15 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* publishProjectSetting({
+					_tag: "providerModels",
+					providers: [{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+					}],
+				});
 				yield* setModel("session-1", {
 					providerID: "claude",
 					modelID: "sonnet",
@@ -3279,6 +3308,15 @@ describe("handleMessage", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* publishProjectSetting({
+					_tag: "providerModels",
+					providers: [{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+					}],
+				});
 				yield* setModel("session-1", {
 					providerID: "claude",
 					modelID: "sonnet",

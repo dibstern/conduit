@@ -73,6 +73,19 @@ export type ProcessMark =
 	  }
 	| { kind: "stop-held"; queryId: string }
 	| {
+			kind: "task-stop";
+			phase: "requested" | "confirmed" | "failed" | "already-finished";
+			taskId: string;
+			queryId: string;
+			at: string;
+	  }
+	| {
+			kind: "task-stop-turn";
+			phase: "streaming" | "result" | "after-result";
+			queryId: string;
+			at: string;
+	  }
+	| {
 			kind: "handoff-first-turn-died";
 			prompt: string;
 			queryId: string;
@@ -116,6 +129,7 @@ export type ProcessMark =
 	| {
 			kind: "enqueue";
 			prompt: string;
+			request: string;
 			at: string;
 			queryId: string;
 			promptIndex: number;
@@ -157,6 +171,7 @@ export type ProcessMark =
 				| "initialization-ready"
 				| "initialization-failed"
 				| "query-closed"
+				| "query-interrupted"
 				| "system-init";
 			queryId: string;
 			at: string;
@@ -267,15 +282,50 @@ function mark(message: ProcessMark): void {
 	else send();
 }
 
-function stream(sessionId: string, event: Record<string, unknown>): SDKMessage {
+function stream(
+	sessionId: string,
+	event: Record<string, unknown>,
+	parentToolUseId: string | null = null,
+): SDKMessage {
 	return {
 		type: "stream_event",
 		session_id: sessionId,
 		uuid: randomUUID(),
-		parent_tool_use_id: null,
+		parent_tool_use_id: parentToolUseId,
 		event,
 	} as unknown as SDKMessage;
 }
+
+export const taskStopFixture = [
+	{
+		task_id: "task-stop-shell",
+		tool_use_id: "task-stop-shell-tool",
+		task_type: "local_bash",
+		description: "Watch the build output",
+		parentToolUseId: null,
+	},
+	{
+		task_id: "task-stop-agent",
+		tool_use_id: "task-stop-agent-tool",
+		task_type: "local_agent",
+		description: "Review the background changes",
+		parentToolUseId: null,
+	},
+	{
+		task_id: "task-stop-nested",
+		tool_use_id: "task-stop-nested-tool",
+		task_type: "local_bash",
+		description: "Watch the agent's test output",
+		parentToolUseId: "task-stop-agent-tool",
+	},
+	{
+		task_id: "task-stop-unrelated",
+		tool_use_id: "task-stop-unrelated-tool",
+		task_type: "local_bash",
+		description: "Watch the unrelated deployment",
+		parentToolUseId: null,
+	},
+] as const;
 
 function mergeSettings(
 	base: Record<string, unknown>,
@@ -463,12 +513,57 @@ function query(params: {
 	// status it reports on a permission-mode change. Only a held turn polls,
 	// so they are collected only while one is held.
 	const outOfBand: SDKMessage[] = [];
+	let taskStopLive: (typeof taskStopFixture)[number][] = [];
+	const pendingTaskStops = new Set<string>();
 	let turnHeld = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
 	let rejectInitialization: (error: Error) => void = () => {};
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+	// A successful control reply does not remove a task. The SDK confirms it
+	// later, independently of the active turn, when the browser test releases it.
+	const releaseTaskStops = () => {
+		if (!proof) return;
+		for (const taskId of pendingTaskStops) {
+			if (
+				!existsSync(join(dirname(proof), "task-stop-confirm-all")) &&
+				!existsSync(join(dirname(proof), `task-stop-confirm-${taskId}`))
+			)
+				continue;
+			pendingTaskStops.delete(taskId);
+			const task = taskStopLive.find((entry) => entry.task_id === taskId);
+			if (!task) continue;
+			taskStopLive = taskStopLive.filter((entry) => entry !== task);
+			outOfBand.push(
+				{
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: taskStopLive,
+				},
+				{
+					type: "system",
+					subtype: "task_notification",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					task_id: taskId,
+					tool_use_id: task.tool_use_id,
+					status: "stopped",
+					output_file: join(dirname(proof), `${taskId}.output`),
+					summary: `${task.description} stopped`,
+				},
+			);
+			mark({
+				kind: "task-stop",
+				phase: "confirmed",
+				taskId,
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
+		}
+	};
 	const consumeMarker = (name: string): boolean => {
 		if (!proof) return false;
 		try {
@@ -657,6 +752,7 @@ function query(params: {
 			mark({
 				kind: "enqueue",
 				prompt,
+				request,
 				at,
 				queryId,
 				promptIndex: ++promptIndex,
@@ -930,6 +1026,145 @@ function query(params: {
 				} as unknown as SDKMessage;
 				continue;
 			}
+			if (request.startsWith("task-stop-foreground")) {
+				if (!proof) throw new Error("Missing task-stop proof gates");
+				taskStopLive = [...taskStopFixture];
+				for (const task of taskStopLive) {
+					const toolMessageId = randomUUID();
+					yield stream(
+						sessionId,
+						{
+							type: "message_start",
+							message: { id: toolMessageId, role: "assistant", content: [] },
+						},
+						task.parentToolUseId,
+					);
+					yield stream(
+						sessionId,
+						{
+							type: "content_block_start",
+							index: 0,
+							content_block: {
+								type: "tool_use",
+								id: task.tool_use_id,
+								name: task.task_type === "local_agent" ? "Agent" : "Bash",
+								input: {},
+							},
+						},
+						task.parentToolUseId,
+					);
+					yield stream(
+						sessionId,
+						{
+							type: "content_block_delta",
+							index: 0,
+							delta: {
+								type: "input_json_delta",
+								partial_json: JSON.stringify({
+									description: task.description,
+									...(task.task_type === "local_agent"
+										? {
+												prompt: "Review the changes",
+												subagent_type: "general-purpose",
+											}
+										: { command: "sleep 600", run_in_background: true }),
+								}),
+							},
+						},
+						task.parentToolUseId,
+					);
+					yield stream(
+						sessionId,
+						{ type: "content_block_stop", index: 0 },
+						task.parentToolUseId,
+					);
+					yield stream(
+						sessionId,
+						{ type: "message_stop" },
+						task.parentToolUseId,
+					);
+					// Child stream blocks are transient; the SDK's completed block
+					// snapshot registers the child tool's issuer before task_started.
+					if (task.parentToolUseId)
+						yield {
+							type: "assistant",
+							uuid: randomUUID(),
+							session_id: sessionId,
+							parent_tool_use_id: task.parentToolUseId,
+							message: {
+								id: toolMessageId,
+								type: "message",
+								role: "assistant",
+								model: liveModel ?? "claude-sonnet-4",
+								content: [
+									{
+										type: "tool_use",
+										id: task.tool_use_id,
+										name: "Bash",
+										input: {
+											command: "sleep 600",
+											description: task.description,
+											run_in_background: true,
+										},
+									},
+								],
+								stop_reason: null,
+								stop_sequence: null,
+								stop_details: null,
+								container: null,
+								context_management: null,
+								diagnostics: null,
+								usage: {
+									input_tokens: 1,
+									output_tokens: 1,
+									cache_creation: null,
+									cache_creation_input_tokens: null,
+									cache_read_input_tokens: null,
+									fallback_credit: null,
+									inference_geo: null,
+									iterations: null,
+									output_tokens_details: null,
+									server_tool_use: null,
+									service_tier: null,
+									speed: null,
+								},
+							},
+						};
+					yield {
+						type: "system",
+						subtype: "task_started",
+						session_id: sessionId,
+						uuid: randomUUID(),
+						task_id: task.task_id,
+						tool_use_id: task.tool_use_id,
+						task_type: task.task_type,
+						description: task.description,
+						is_backgrounded: true,
+						...(task.task_type === "local_agent"
+							? { subagent_type: "general-purpose", spawn_depth: 1 }
+							: {}),
+					};
+				}
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: taskStopLive,
+				};
+			}
+			const workspaceFile = join(
+				params.options?.cwd ?? process.cwd(),
+				"session-only.txt",
+			);
+			if (prompt.includes("workspace-isolation-write"))
+				writeFileSync(
+					workspaceFile,
+					prompt.slice(prompt.indexOf("workspace-isolation-write")),
+				);
+			const chunks = prompt.includes("workspace-isolation-read")
+				? [existsSync(workspaceFile) ? "present" : "absent"]
+				: responseChunks(prompt);
 			const messageId = randomUUID();
 			yield stream(sessionId, {
 				type: "message_start",
@@ -940,7 +1175,7 @@ function query(params: {
 				index: 0,
 				content_block: { type: "text", text: "" },
 			});
-			for (const [index, text] of responseChunks(prompt).entries()) {
+			for (const [index, text] of chunks.entries()) {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
 					turnHeld = true;
@@ -965,6 +1200,29 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 				yield event;
+				if (
+					request.startsWith("task-stop-foreground") &&
+					index === 1 &&
+					proof
+				) {
+					mark({
+						kind: "task-stop-turn",
+						phase: "streaming",
+						queryId,
+						at: process.hrtime.bigint().toString(),
+					});
+					turnHeld = true;
+					while (
+						!existsSync(join(dirname(proof), "task-stop-release-result")) &&
+						!closed
+					) {
+						releaseTaskStops();
+						yield* outOfBand.splice(0);
+						await new Promise<void>((done) => setTimeout(done, 20));
+					}
+					turnHeld = false;
+					if (closed) return;
+				}
 			}
 			// A turn that keeps streaming until it is stopped, for load tests.
 			if (request.startsWith("load-stream-"))
@@ -1336,7 +1594,7 @@ function query(params: {
 					message: {
 						id: messageId,
 						role: "assistant",
-						content: [{ type: "text", text: responseChunks(prompt).join("") }],
+						content: [{ type: "text", text: chunks.join("") }],
 					},
 					parent_tool_use_id: null,
 					parent_agent_id: null,
@@ -1352,7 +1610,7 @@ function query(params: {
 				message: {
 					id: messageId,
 					role: "assistant",
-					content: [{ type: "text", text: responseChunks(prompt).join("") }],
+					content: [{ type: "text", text: chunks.join("") }],
 				},
 			} as unknown as SDKMessage;
 			if (request === "terminal-replay-interrupt") {
@@ -1360,6 +1618,13 @@ function query(params: {
 				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
 				return;
 			}
+			if (request.startsWith("task-stop-foreground"))
+				mark({
+					kind: "task-stop-turn",
+					phase: "result",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
 			yield {
 				type: "result",
 				subtype: "success",
@@ -1369,7 +1634,7 @@ function query(params: {
 				duration_ms: 0,
 				duration_api_ms: 0,
 				num_turns: 1,
-				result: responseChunks(prompt).join(""),
+				result: chunks.join(""),
 				stop_reason: "end_turn",
 				total_cost_usd: 0,
 				usage: {
@@ -1381,6 +1646,23 @@ function query(params: {
 				modelUsage: {},
 				permission_denials: [],
 			} as unknown as SDKMessage;
+			if (request === "task-stop-foreground-idle" && proof) {
+				mark({
+					kind: "task-stop-turn",
+					phase: "after-result",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				while (
+					!existsSync(join(dirname(proof), "task-stop-release-input")) &&
+					!closed
+				) {
+					releaseTaskStops();
+					yield* outOfBand.splice(0);
+					await new Promise<void>((done) => setTimeout(done, 20));
+				}
+				if (closed) return;
+			}
 			if (request === "restart-background-work") {
 				yield {
 					type: "system",
@@ -1704,6 +1986,11 @@ function query(params: {
 			});
 		},
 		interrupt: async () => {
+			mark({
+				kind: "query-interrupted",
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
 			const configDir =
 				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 				process.env["CLAUDE_CONFIG_DIR"];
@@ -1719,6 +2006,39 @@ function query(params: {
 				)
 					await new Promise<void>((done) => setTimeout(done, 20));
 			}
+		},
+		stopTask: async (taskId: string) => {
+			mark({
+				kind: "task-stop",
+				phase: "requested",
+				taskId,
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
+			if (!taskStopLive.some((task) => task.task_id === taskId)) {
+				mark({
+					kind: "task-stop",
+					phase: "already-finished",
+					taskId,
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				return;
+			}
+			if (
+				proof &&
+				existsSync(join(dirname(proof), `task-stop-fail-${taskId}`))
+			) {
+				mark({
+					kind: "task-stop",
+					phase: "failed",
+					taskId,
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				throw new Error("Synthetic task stop failure");
+			}
+			pendingTaskStops.add(taskId);
 		},
 		setModel: async (model?: string) => {
 			liveModel = model;

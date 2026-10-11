@@ -9,6 +9,7 @@
 <script lang="ts">
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
+	import { WorktreeCreationError } from "../../../contracts/worktree.js";
 	import { tick, untrack } from "svelte";
 	import { formatErrorDetail } from "../../../errors-utils.js";
 	import Button from "../ui/Button.svelte";
@@ -89,10 +90,12 @@
 
 	let inputText = $state("");
 	let draftWorktree = $state<WorktreeInfo | null>(null);
+	let draftNewWorktree = $state(false);
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${getEffectiveInstanceId()}:${sessionState.currentId ?? ""}`);
 	$effect(() => {
 		draftContext;
 		draftWorktree = null;
+		draftNewWorktree = false;
 	});
 	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
@@ -763,13 +766,16 @@
 					instanceId,
 					...(model ? { model } : {}),
 					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
+					...(draftNewWorktree ? { newWorktree: true } : {}),
 				});
 				sid = created.sessionId;
 				storeNewSessionDraft("");
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
 			} catch (error) {
-				if (Schema.is(WorkspaceMoveError)(error)) {
+				if (Schema.is(WorktreeCreationError)(error)) {
+					showToast({ title: "Could not start session", variant: "error", body: error.message });
+				} else if (Schema.is(WorkspaceMoveError)(error)) {
 					const body = {
 						missing: "That worktree no longer exists.",
 						"not-a-worktree": "That folder is not a git worktree.",
@@ -1121,7 +1127,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1440,7 +1446,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} /></div>
 		{/if}
 	</div>
 </div>

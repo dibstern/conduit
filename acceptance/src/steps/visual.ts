@@ -39,7 +39,7 @@ export const visualHandlers: StepHandler[] = [
 				REGION_SELECTORS[regionId] ?? `#${regionId}`,
 				baseline,
 				threshold,
-				currentVisualMode(),
+				currentVisualMode(baseline),
 			);
 			if (result.actualPath) world.artifacts.push(result.actualPath);
 			if (result.diffPath) world.artifacts.push(result.diffPath);

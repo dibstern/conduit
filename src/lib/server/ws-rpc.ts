@@ -151,6 +151,7 @@ export {
 	Shutdown,
 	SnoozeSession,
 	StartInstance,
+	StopBackgroundTask,
 	StopInstance,
 	SubmitInput,
 	SubscribePtys,

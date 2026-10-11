@@ -67,6 +67,12 @@ export interface CancelSessionRpcInput {
 	readonly commandId: string;
 }
 
+export interface StopBackgroundTaskRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly taskId: string;
+}
+
 export interface GetModelsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
@@ -172,6 +178,7 @@ export interface CreateSessionRpcInput {
 	readonly instanceId?: string;
 	readonly providerId?: string;
 	readonly worktreePath?: string;
+	readonly newWorktree?: boolean;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -566,6 +573,16 @@ const callCancelSession = (input: CancelSessionRpcInput) =>
 		client.CancelSession(input).pipe(Effect.asVoid),
 	);
 
+export async function stopBackgroundTaskRpc(
+	input: StopBackgroundTaskRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.StopBackgroundTask(input).pipe(Effect.asVoid),
+		),
+	);
+}
+
 const callGetModels = (input: GetModelsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetModels(input));
 
@@ -652,6 +669,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 			...(input.worktreePath != null
 				? { worktreePath: input.worktreePath }
 				: {}),
+			...(input.newWorktree ? { newWorktree: true } : {}),
 		}),
 	);
 

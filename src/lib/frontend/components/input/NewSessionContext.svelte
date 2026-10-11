@@ -21,8 +21,9 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), loadWorktrees = listWorktreesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), loadWorktrees = listWorktreesRpc }: {
 		worktree?: WorktreeInfo | null;
+		newWorktree?: boolean;
 		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
 	} = $props();
 	let showWorktrees = $state(false);
@@ -36,13 +37,15 @@
 	const instance = $derived(getAvailableInstances().find((provider) => provider.id === getEffectiveInstanceId()));
 	const providerName = $derived(getInstanceById(instance?.id ?? "")?.name ?? instance?.label ?? "This provider");
 	const supportsWorktree = $derived(instance?.capabilities?.supportsWorktree !== false);
-	const checkout = $derived(worktree ? worktree.branch ?? "Detached HEAD" : branch ?? "Current folder");
+	const canCreateWorktree = $derived(Boolean(slug && project?.folders.length === 1 && branch && instance?.driver === "claude" && supportsWorktree));
+	const checkout = $derived(newWorktree ? "New worktree" : worktree ? worktree.branch ?? "Detached HEAD" : branch ?? "Current folder");
 	const worktreeContext = $derived(`${slug ?? ""}:${instance?.id ?? ""}:${supportsWorktree}`);
 	$effect(() => {
 		worktreeContext;
 		showWorktrees = false;
 		worktrees = undefined;
 		if (!supportsWorktree) worktree = null;
+		if (!canCreateWorktree) newWorktree = false;
 	});
 	const uid = $props.id();
 	const explanationId = `${uid}-provider-explanation`;
@@ -56,6 +59,7 @@
 
 	function chooseProject(next: string) {
 		worktree = null;
+		newWorktree = false;
 		const params = getCurrentSearchParams();
 		params.set(DRAFT_PROJECT_PARAM, next);
 		replaceRoute(`/new?${params}`);
@@ -112,13 +116,13 @@
 	<Menu ariaLabel="Where the session starts" {presentation} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : undefined}>
-				<Icon name={worktree ? "worktree" : branch ? "git-branch" : "folder"} size={12} />
+				<Icon name={worktree || newWorktree ? "worktree" : branch ? "git-branch" : "folder"} size={12} />
 				<span class="truncate">{checkout}</span>
 				<Icon name="chevron-down" size={12} />
 			</Button>
 		{/snippet}
 		<MenuGroup label="Workspace">
-			<MenuRadioGroup value={worktree ? "" : "current"} onvaluechange={() => { worktree = null; }}>
+			<MenuRadioGroup value={worktree || newWorktree ? "" : "current"} onvaluechange={() => { worktree = null; newWorktree = false; }}>
 				<MenuRadioItem value="current" class={rowClass}>Current checkout</MenuRadioItem>
 			</MenuRadioGroup>
 			<MenuItem disabled={!slug || !supportsWorktree} closeOnSelect={false} onselect={() => void openWorktrees()} class={rowClass}>Existing worktree {#if !supportsWorktree}<span class="ml-auto text-text-dimmer">Not supported by {providerName}</span>{/if}</MenuItem>
@@ -129,7 +133,7 @@
 					{:else if worktrees.length === 0}
 						<MenuItem disabled class={rowClass}>No worktrees available</MenuItem>
 					{:else}
-						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
+						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { newWorktree = false; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
 							{#each worktrees as entry (entry.path)}
 								<MenuRadioItem value={entry.path} class={rowClass}>
 									<span class="flex min-w-0 flex-1 flex-col">
@@ -142,7 +146,7 @@
 					{/if}
 				</MenuGroup>
 			{/if}
-			<MenuItem disabled class={rowClass}>New worktree <span class="ml-auto text-text-dimmer">{instance?.capabilities?.supportsWorktree === false ? `Not supported by ${providerName}` : "soon"}</span></MenuItem>
+			<MenuItem disabled={!canCreateWorktree} onselect={() => { worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{instance?.capabilities?.supportsWorktree === false ? `Not supported by ${providerName}` : "soon"}</span>{/if}</MenuItem>
 		</MenuGroup>
 		{#if branch}
 			<MenuSeparator />
@@ -155,7 +159,7 @@
 		{/if}
 	</Menu>
 
-	{#if worktree || branch}<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{worktree ? "existing worktree" : "current checkout"}</span>{/if}
+	{#if worktree || newWorktree || branch}<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{newWorktree ? "from committed HEAD" : worktree ? "existing worktree" : "current checkout"}</span>{/if}
 </div>
 
 {#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
