@@ -75,7 +75,7 @@ describe("shared daemon RPC contracts", () => {
 		);
 	});
 
-	it("preserves restart overrides across schema encoding and decoding", () => {
+	it("drops restart overrides across schema encoding and decoding", () => {
 		const request = Schema.decodeUnknownSync(WsRpcRequest)({
 			_tag: "RestartWithConfig",
 			config: { tls: true, port: 0, keepAwakeArgs: ["-di"] },
@@ -83,7 +83,6 @@ describe("shared daemon RPC contracts", () => {
 		expect(request).toBeInstanceOf(RestartWithConfig);
 		expect(Schema.encodeSync(WsRpcRequest)(request)).toEqual({
 			_tag: "RestartWithConfig",
-			config: { tls: true, port: 0, keepAwakeArgs: ["-di"] },
 		});
 	});
 

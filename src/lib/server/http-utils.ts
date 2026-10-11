@@ -1,6 +1,7 @@
 // Pure helper functions used by both RelayServer (server.ts) and Daemon (daemon.ts).
 
 import type { IncomingMessage } from "node:http";
+import { isIP } from "node:net";
 
 /** Read the full body of an incoming HTTP request as a UTF-8 string. */
 export function readBody(req: IncomingMessage): Promise<string> {
@@ -12,12 +13,23 @@ export function readBody(req: IncomingMessage): Promise<string> {
 	});
 }
 
-/** Extract client IP from X-Forwarded-For header or socket address. */
-export function getClientIp(req: IncomingMessage): string {
-	const forwarded = req.headers["x-forwarded-for"];
-	if (typeof forwarded === "string")
-		return (forwarded.split(",")[0] ?? "").trim();
-	return req.socket.remoteAddress ?? "unknown";
+/** Only trust a loopback proxy's last non-empty XFF entry. */
+export function getClientIp(
+	peer: string | undefined,
+	forwarded: string | readonly string[] | undefined,
+): string {
+	const address = peer ?? "unknown";
+	const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+	const loopback =
+		address === "::1" || (isIP(ipv4) === 4 && ipv4.startsWith("127."));
+	if (loopback && typeof forwarded === "string") {
+		const entries = forwarded.split(",");
+		for (let index = entries.length - 1; index >= 0; index--) {
+			const entry = entries[index]?.trim();
+			if (entry) return entry;
+		}
+	}
+	return address;
 }
 
 /** Parse a Cookie header string into key-value pairs. */

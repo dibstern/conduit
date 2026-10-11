@@ -32,7 +32,10 @@ import { resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import { ServerBuildUpdateLive } from "../../../server/build-update.js";
-import { makeRoutedWsRpcServerLayer } from "../../../server/ws-rpc.js";
+import {
+	BrowserRpcConnectionsLive,
+	makeRoutedWsRpcServerLayer,
+} from "../../../server/ws-rpc.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -663,6 +666,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			),
 		),
 		DaemonEventBusLive,
+		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
 		DaemonConfigRefLive(options.initialConfig),

@@ -79,14 +79,14 @@ describe("Daemon RPC request properties", () => {
 		);
 	});
 
-	it("preserves restart configuration overrides", () => {
+	it("drops legacy restart configuration overrides", () => {
 		const result = decode({
 			_tag: "RestartWithConfig",
 			config: { tls: true, port: 2634 },
 		});
 		expect(Either.isRight(result)).toBe(true);
 		if (Either.isRight(result) && result.right._tag === "RestartWithConfig") {
-			expect(result.right.config).toEqual({ tls: true, port: 2634 });
+			expect(Object.hasOwn(result.right, "config")).toBe(false);
 		}
 	});
 

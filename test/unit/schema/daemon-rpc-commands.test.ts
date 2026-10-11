@@ -82,14 +82,14 @@ describe("Daemon RPC command schema validation", () => {
 		expect(Either.isRight(result)).toBe(true);
 	});
 
-	it("decodes restart_with_config command with config overrides", () => {
+	it("drops legacy restart configuration overrides", () => {
 		const result = Schema.decodeUnknownEither(WsRpcRequest)({
 			_tag: "RestartWithConfig",
 			config: { tls: true, port: 2634 },
 		});
 		expect(Either.isRight(result)).toBe(true);
 		if (Either.isRight(result) && result.right._tag === "RestartWithConfig") {
-			expect(result.right.config).toEqual({ tls: true, port: 2634 });
+			expect(Object.hasOwn(result.right, "config")).toBe(false);
 		}
 	});
 
