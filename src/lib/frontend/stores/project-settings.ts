@@ -20,6 +20,7 @@ import {
 	handleVisibilityInfo,
 	hydrateModelSettings,
 } from "./discovery.svelte.js";
+import { projectState } from "./project-state.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
@@ -43,6 +44,10 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			break;
 		case "defaultSessionMode":
 			applyDefaultSessionMode(setting.mode);
+			break;
+		case "defaultGroupingMode":
+			projectState.defaultGroupingMode = setting.mode;
+			projectState.defaultGroupingRevision++;
 			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);

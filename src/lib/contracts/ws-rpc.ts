@@ -3,6 +3,9 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	type GroupingMode,
+	GroupingModeSchema,
+	ProjectGroupSchema,
 	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
@@ -10,7 +13,11 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError, WorktreeRecoveryError } from "./worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -173,6 +180,9 @@ export const ProjectInfoSchema = Schema.Struct({
 	folders: Schema.NonEmptyArray(Schema.String),
 	setupScript: Schema.optional(Schema.String),
 	sessionMode: Schema.optional(SessionModeSchema),
+	groupingMode: Schema.optional(GroupingModeSchema),
+	effectiveGroupingMode: Schema.optional(GroupingModeSchema),
+	group: Schema.optional(ProjectGroupSchema),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -628,6 +638,8 @@ export interface SaveProjectInput {
 	readonly folders: readonly ProjectFolderInput[];
 	readonly setupScript?: string | undefined;
 	readonly sessionMode?: SessionMode | null | undefined;
+	/** null clears an override; omission preserves it. */
+	readonly groupingMode?: GroupingMode | null | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -1022,6 +1034,7 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			folders: Schema.Array(ProjectFolderInputSchema),
 			setupScript: Schema.optional(Schema.String),
 			sessionMode: Schema.optional(Schema.NullOr(SessionModeSchema)),
+			groupingMode: Schema.optional(Schema.NullOr(GroupingModeSchema)),
 		},
 	},
 ) {}
@@ -1364,6 +1377,23 @@ export class ResolveSessionMode extends Schema.TaggedRequest<ResolveSessionMode>
 		payload: { projectSlug: NonEmptyString },
 	},
 ) {}
+export class SetDefaultGroupingMode extends Schema.TaggedRequest<SetDefaultGroupingMode>()(
+	"SetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: { mode: GroupingModeSchema },
+	},
+) {}
+
+export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroupingMode>()(
+	"GetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: {},
+	},
+) {}
 
 export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 	"SetHiddenEntries",
@@ -1477,6 +1507,19 @@ export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSession
 			removeWorktrees: Schema.Boolean,
 		}),
 		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranch>()(
+	"RenameSessionBranch",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
+		success: Schema.Struct({ ok: Schema.Literal(true) }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			branchName: Schema.String,
+		},
 	},
 ) {}
 
@@ -2254,6 +2297,8 @@ export const WsRpcRequest = Schema.Union(
 	SetDefaultPermissionMode,
 	SetDefaultSessionMode,
 	ResolveSessionMode,
+	SetDefaultGroupingMode,
+	GetDefaultGroupingMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
@@ -2263,6 +2308,7 @@ export const WsRpcRequest = Schema.Union(
 	ListBranches,
 	ListWorktrees,
 	InspectSessionWorktrees,
+	RenameSessionBranch,
 	MoveSessionWorkspace,
 	RecreateSessionWorktree,
 	ContinueSessionInMainFolder,
@@ -2542,6 +2588,9 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("defaultSessionMode", {
 		mode: SessionModeSchema,
 	}),
+	Schema.TaggedStruct("defaultGroupingMode", {
+		mode: GroupingModeSchema,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -2574,6 +2623,7 @@ export type GlobalProjectSetting = Extract<
 			| "defaultModel"
 			| "defaultPermissionMode"
 			| "defaultSessionMode"
+			| "defaultGroupingMode"
 			| "visibility"
 			| "claudeSettings";
 	}
@@ -2678,6 +2728,8 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
 	Rpc.fromTaggedRequest(SetDefaultSessionMode),
 	Rpc.fromTaggedRequest(ResolveSessionMode),
+	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
+	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
 	Rpc.fromTaggedRequest(SetClaudeSettings),
@@ -2687,6 +2739,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(InspectSessionWorktrees),
+	Rpc.fromTaggedRequest(RenameSessionBranch),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(RecreateSessionWorktree),
 	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),

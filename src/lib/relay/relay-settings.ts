@@ -12,6 +12,8 @@ import {
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
+	type GroupingMode,
+	GroupingModeSchema,
 	type SessionPermissionMode,
 	SessionPermissionModeSchema,
 } from "../shared-types.js";
@@ -24,6 +26,7 @@ export interface RelaySettings {
 	};
 	defaultPermissionMode?: SessionPermissionMode;
 	defaultSessionMode?: SessionMode;
+	defaultGroupingMode?: GroupingMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
 	hiddenModels?: string[];
@@ -46,6 +49,7 @@ function stripComments(text: string): string {
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const isSessionMode = Schema.is(SessionModeSchema);
+const isGroupingMode = Schema.is(GroupingModeSchema);
 
 /**
  * Load relay settings from the config directory.
@@ -57,7 +61,12 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 		const raw = readFileSync(join(dir, SETTINGS_FILE), "utf-8");
 		const settings = JSON.parse(stripComments(raw)) as RelaySettings;
 		// The file is hand-editable. Drop unknown modes so consumers use their defaults.
-		const { defaultPermissionMode, defaultSessionMode, ...rest } = settings;
+		const {
+			defaultPermissionMode,
+			defaultSessionMode,
+			defaultGroupingMode,
+			...rest
+		} = settings;
 		return {
 			...rest,
 			...(defaultPermissionMode !== undefined &&
@@ -66,6 +75,8 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 				}),
 			...(defaultSessionMode !== undefined &&
 				isSessionMode(defaultSessionMode) && { defaultSessionMode }),
+			...(defaultGroupingMode !== undefined &&
+				isGroupingMode(defaultGroupingMode) && { defaultGroupingMode }),
 		};
 	} catch {
 		return {};
@@ -102,6 +113,9 @@ export function saveRelaySettings(
 	}
 	if (settings.defaultSessionMode !== undefined) {
 		merged.defaultSessionMode = settings.defaultSessionMode;
+	}
+	if (settings.defaultGroupingMode !== undefined) {
+		merged.defaultGroupingMode = settings.defaultGroupingMode;
 	}
 
 	// Merge defaultVariants map (shallow merge of entries)

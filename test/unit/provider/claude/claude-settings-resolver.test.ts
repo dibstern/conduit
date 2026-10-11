@@ -141,6 +141,7 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				runner,
 			).pipe(
 				Effect.provideService(SessionWorkspaceTag, {
+					renameBranch: () => Effect.die("unused"),
 					get: () => Effect.succeed("/workspace/project"),
 					move: () => Effect.succeed("/workspace/project"),
 					inherit: () => Effect.die("unused"),

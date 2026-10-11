@@ -513,6 +513,7 @@ describe("listDaemonSessions", () => {
 						attention: "idle",
 						limitRecovery: null,
 						resumes: [],
+						canRenameBranch: false,
 					},
 					{
 						id: "b-mid",
@@ -525,6 +526,7 @@ describe("listDaemonSessions", () => {
 						attention: "idle",
 						limitRecovery: null,
 						resumes: [],
+						canRenameBranch: false,
 					},
 				]);
 				expect(result.availability).toEqual(

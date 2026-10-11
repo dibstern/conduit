@@ -58,6 +58,7 @@ import {
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
+import { computeProjectGroups } from "../../../project-grouping.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
@@ -135,6 +136,9 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	}),
 	...(project.sessionMode !== undefined && {
 		sessionMode: project.sessionMode,
+	}),
+	...(project.groupingMode !== undefined && {
+		groupingMode: project.groupingMode,
 	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
@@ -312,7 +316,12 @@ export const projectInfos = Effect.gen(function* () {
 			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
 		}
 	}
-	return withCachedProjectGit(
+	const daemonState = yield* Effect.serviceOption(DaemonStateTag);
+	const defaultGroupingMode = Option.isSome(daemonState)
+		? (loadRelaySettings((yield* Ref.get(daemonState.value)).configDir)
+				.defaultGroupingMode ?? "repository")
+		: "repository";
+	const entries = withCachedProjectGit(
 		(yield* allProjects).map((project) => ({
 			slug: project.slug,
 			folders: project.folders,
@@ -323,12 +332,26 @@ export const projectInfos = Effect.gen(function* () {
 			...(project.sessionMode !== undefined && {
 				sessionMode: project.sessionMode,
 			}),
+			...(project.groupingMode !== undefined && {
+				groupingMode: project.groupingMode,
+			}),
+			effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
 			...(project.repositoryIdentities !== undefined && {
 				repositoryIdentities: project.repositoryIdentities,
 			}),
 			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
 		})),
 	);
+	const groups = computeProjectGroups(
+		entries.map((project) => ({
+			...project,
+			groupingMode: project.effectiveGroupingMode,
+		})),
+	);
+	return entries.map((project) => ({
+		...project,
+		group: groups[project.slug],
+	}));
 });
 
 export const broadcastProjectList = Effect.gen(function* () {
@@ -568,6 +591,7 @@ export const updateProject = (
 			| "repositoryIdentities"
 			| "setupScript"
 			| "sessionMode"
+			| "groupingMode"
 		>
 	>,
 ) =>
@@ -1081,6 +1105,10 @@ export const saveProject = (input: SaveProjectInput) =>
 					input.sessionMode === undefined
 						? existing?.sessionMode
 						: (input.sessionMode ?? undefined);
+				const groupingMode =
+					input.groupingMode === undefined
+						? existing?.groupingMode
+						: (input.groupingMode ?? undefined);
 				const project: StoredProject = existing
 					? {
 							...existing,
@@ -1088,6 +1116,7 @@ export const saveProject = (input: SaveProjectInput) =>
 							repositoryIdentities,
 							setupScript,
 							sessionMode,
+							groupingMode,
 							...(title !== undefined && { title }),
 						}
 					: {
@@ -1096,6 +1125,7 @@ export const saveProject = (input: SaveProjectInput) =>
 							repositoryIdentities,
 							setupScript,
 							sessionMode,
+							groupingMode,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
 						};
@@ -1106,6 +1136,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						title: project.title,
 						setupScript,
 						sessionMode,
+						groupingMode,
 					});
 				} else {
 					yield* addWithoutRelay(project);

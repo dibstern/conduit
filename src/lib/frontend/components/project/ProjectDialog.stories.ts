@@ -162,7 +162,7 @@ export const PathMatchesOpen: Story = {
 		await expect(input).toHaveAttribute("aria-expanded", "true");
 		await expect(input).toHaveFocus();
 		await expect(listbox.id).toBe(input.getAttribute("aria-controls"));
-		const options = canvas.getAllByRole("option");
+		const options = within(listbox).getAllByRole("option");
 		await expect(options[0]).toHaveAttribute("aria-selected", "true");
 		await userEvent.keyboard("{ArrowDown}");
 		await expect(options[1]).toHaveAttribute("aria-selected", "true");
@@ -508,5 +508,52 @@ export const WithSetupScript: Story = {
 		await expect(
 			canvas.getByText("It runs in each new worktree before the agent starts."),
 		).toBeVisible();
+	},
+};
+
+export const RepositoryGroupingOverride: Story = {
+	args: {
+		project: {
+			...editedProject,
+			groupingMode: "repository+subfolder",
+		},
+		projects: [editedProject],
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		const grouping = canvas.getByRole("combobox", {
+			name: "Repository grouping",
+		});
+		await expect(grouping).toHaveValue("repository+subfolder");
+		await expect(within(grouping).getAllByRole("option")).toHaveLength(4);
+		await expect(
+			within(grouping).getByRole("option", { name: "Use global default" }),
+		).toHaveValue("");
+		await expect(
+			within(grouping).getByRole("option", {
+				name: /^By repository$/,
+			}),
+		).toHaveValue("repository");
+		await expect(
+			within(grouping).getByRole("option", {
+				name: "By repository and subfolder",
+			}),
+		).toHaveValue("repository+subfolder");
+		await expect(
+			within(grouping).getByRole("option", { name: "Off" }),
+		).toHaveValue("off");
+		const save = canvas.getByRole("button", { name: "Save" });
+		await expect(save).toBeDisabled();
+		await userEvent.selectOptions(grouping, "off");
+		await expect(save).toBeEnabled();
+		await userEvent.click(save);
+		await expect(args["saveProject"]).toHaveBeenCalledWith({
+			slug: "conduit",
+			title: "Conduit",
+			folders: [app, docs],
+			groupingMode: "off",
+		});
+		await userEvent.selectOptions(grouping, "repository+subfolder");
+		await expect(grouping).toHaveValue("repository+subfolder");
 	},
 };

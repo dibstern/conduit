@@ -39,6 +39,26 @@ save. The daemon's project registry layer refreshes every stored folder before
 HTTP/RPC consumers start, so remote changes are reflected after restart. Identity
 discovery is best-effort and never rejects a project save or daemon startup.
 
+## Project Group
+
+A **Project Group** contains the projects sharing a grouping key under their
+effective grouping mode. The primary Project Folder alone determines the group;
+attaching another folder does not change it. The daemon stores an optional
+`groupingMode` override on each project. Unset overrides inherit the global
+`defaultGroupingMode` in persisted settings, which defaults to `repository`.
+
+`repository` keys on Repository Identity, `repository+subfolder` adds the primary
+folder's path relative to its repository root, and `off` gives the project its
+own group. A primary folder without an identity also stands alone. Repository
+groups use one repository display name; standalone projects use their title.
+Session rows add the project title only when the group has multiple projects,
+even when those titles are identical.
+
+The shared pure `computeProjectGroups` function derives group keys, labels and
+qualifier decisions for the daemon and frontend. It leaves ordering to the
+daemon. Project and global grouping edits publish a fresh project list so rows
+relabel on every client without a reload.
+
 ## Session Workspace
 
 **Session Workspace** is where a session runs: Local uses the project's folders;
@@ -51,7 +71,13 @@ folders; its projection keeps fallback and origin metadata when needed, otherwis
 it is NULL. Existing sessions keep that default. Current branch names
 are read from git, never stored in the workspace. Conduit launch events retain
 the originally created checkout, branch and committed base as deletion
-provenance; forks inherit the workspace without that ownership.
+provenance; forks inherit the workspace without that ownership. A branch rename
+validates every launch-owned checkout, renames their branches together and rolls
+back Git failures. It records updated branch ownership as a
+`session.workspace_changed` event with cause `branch-rename`, leaving workspace
+paths, move cause and pending moves unchanged. Deletion follows that latest
+owned branch name. The git pill offers Rename branch only with launch ownership
+and refreshes git status immediately after a rename.
 
 Deleting a session inspects its launch-created checkouts, including ones left
 behind after a move or folder detach. Uncommitted changes, unpushed commits,

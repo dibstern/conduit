@@ -12,7 +12,10 @@ import {
 	type SaveProjectInput,
 	type SetKeepAwakeResponse,
 } from "../../contracts/ws-rpc.js";
-import type { SessionPermissionMode } from "../../shared-types.js";
+import type {
+	GroupingMode,
+	SessionPermissionMode,
+} from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
@@ -633,6 +636,21 @@ export async function moveSessionWorkspaceRpc(input: {
 		Effect.either(
 			callControl(input.projectSlug, (client) =>
 				client.MoveSessionWorkspace(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function renameSessionBranchRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly branchName: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.RenameSessionBranch(input),
 			),
 		),
 	);
@@ -1359,6 +1377,22 @@ export async function setDefaultPermissionModeRpc(
 	input: SetDefaultPermissionModeRpcInput,
 ): Promise<SetDefaultPermissionModeResponse> {
 	return await runTransportEffect(callSetDefaultPermissionMode(input));
+}
+
+export async function getDefaultGroupingModeRpc(): Promise<GroupingMode> {
+	const response = await runTransportEffect(
+		callControl("", (client) => client.GetDefaultGroupingMode({})),
+	);
+	return response.mode;
+}
+
+export async function setDefaultGroupingModeRpc(
+	mode: GroupingMode,
+): Promise<GroupingMode> {
+	const response = await runTransportEffect(
+		callControl("", (client) => client.SetDefaultGroupingMode({ mode })),
+	);
+	return response.mode;
 }
 
 export async function setHiddenEntriesRpc(

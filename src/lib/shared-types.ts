@@ -283,6 +283,8 @@ export const SessionFolderGitSchema = Schema.Struct({
 	label: Schema.String,
 	/** Derived from conduit workspace origin and an absent worktree mapping. */
 	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** An unavailable recorded checkout has no healthy Git status fields. */
+	missing: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	...GitStatusSchema.fields,
 });
 export type SessionFolderGit = typeof SessionFolderGitSchema.Type;
@@ -348,6 +350,8 @@ export const SessionInfoSchema = Schema.Struct({
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
 	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
+	/** Explicit Conduit launch ownership permits renaming its branches. */
+	canRenameBranch: Schema.optional(Schema.Boolean),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),
@@ -539,6 +543,20 @@ export const RepositoryIdentitySchema = Schema.Struct({
 });
 export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 
+export const GroupingModeSchema = Schema.Literal(
+	"repository",
+	"repository+subfolder",
+	"off",
+);
+export type GroupingMode = typeof GroupingModeSchema.Type;
+
+export const ProjectGroupSchema = Schema.Struct({
+	key: Schema.String,
+	label: Schema.String,
+	needsProjectQualifier: Schema.Boolean,
+});
+export type ProjectGroup = typeof ProjectGroupSchema.Type;
+
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
@@ -547,6 +565,10 @@ export interface ProjectInfo {
 	folders: readonly [string, ...string[]];
 	setupScript?: string | undefined;
 	sessionMode?: SessionMode | undefined;
+	/** Unset inherits the daemon's global default. */
+	groupingMode?: GroupingMode | undefined;
+	effectiveGroupingMode?: GroupingMode;
+	group?: ProjectGroup;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;

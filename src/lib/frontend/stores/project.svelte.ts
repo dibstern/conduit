@@ -91,6 +91,13 @@ const toProjectInfoList = (
 		...(project.sessionMode !== undefined
 			? { sessionMode: project.sessionMode }
 			: {}),
+		...(project.groupingMode !== undefined
+			? { groupingMode: project.groupingMode }
+			: {}),
+		...(project.effectiveGroupingMode !== undefined
+			? { effectiveGroupingMode: project.effectiveGroupingMode }
+			: {}),
+		...(project.group !== undefined ? { group: project.group } : {}),
 		...(project.repositoryIdentities != null
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),
