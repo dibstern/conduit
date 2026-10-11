@@ -252,7 +252,7 @@ export interface SessionGit {
 	behind?: number;
 	merged?: boolean;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
-	/** Git Effective Folders in Project Folder order; non-git folders are omitted. */
+	/** Git and shared Effective Folders in Project Folder order. */
 	folders?: readonly SessionFolderGit[];
 }
 
@@ -273,6 +273,8 @@ const GitStatusSchema = Schema.Struct({
 export const SessionFolderGitSchema = Schema.Struct({
 	root: Schema.String,
 	label: Schema.String,
+	/** Derived from conduit workspace origin and an absent worktree mapping. */
+	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	...GitStatusSchema.fields,
 });
 export type SessionFolderGit = typeof SessionFolderGitSchema.Type;

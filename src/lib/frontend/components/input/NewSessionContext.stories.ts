@@ -165,6 +165,42 @@ export const NewWorktreeSelected: Story = {
 	args: { newWorktree: true },
 };
 
+export const MultiFolderNewWorktree: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 2, true, "claude");
+		projectState.projects = [
+			{
+				slug: "workspace",
+				title: "Workspace",
+				folders: ["/src/notes", "/src/app", "/src/api"],
+				git: {
+					folders: [
+						{ root: "/src/app", label: "app", branch: "main" },
+						{ root: "/src/api", label: "api", branch: "main" },
+					],
+				},
+			},
+		];
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^Current folder$/,
+		);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		const choice = canvas.getByRole("menuitem", { name: /^New worktree$/ });
+		await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(choice);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^New worktree$/,
+		);
+		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
+			"from committed HEAD",
+		);
+	},
+};
+
 const existingWorktrees = [
 	{ path: "/src/app", branch: "main", main: true },
 	{ path: "/src/app-draft", branch: "feature/draft", main: false },

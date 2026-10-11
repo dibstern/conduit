@@ -222,9 +222,18 @@ const cachedFolderGit = (
 ): SessionGit | undefined => {
 	const roots = labelProjectFolders(folders);
 	const statuses = effectiveSessionFolders(folders, workspace).flatMap(
-		({ root, directory }, index) => {
+		({ root, directory, shared }, index) => {
 			const git = cache.peek(directory);
-			return git ? [{ ...git, root, label: roots[index]?.label ?? root }] : [];
+			return git || shared
+				? [
+						{
+							...git,
+							root,
+							label: roots[index]?.label ?? root,
+							...(shared ? { shared } : {}),
+						},
+					]
+				: [];
 		},
 	);
 	const primary = cache.peek(effectiveWorkingDirectory(folders[0], workspace));

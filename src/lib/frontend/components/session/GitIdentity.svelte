@@ -146,17 +146,19 @@
 		</Button></span>
 	{/snippet}
 	<MenuGroup label="Checkout">
-		{#if folders.length > 1 || (!git && folders.length > 0)}
+		{#if folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0)}
 			{#each folders as folder (folder.root)}
 				<section class="px-[8px] py-[6px] text-[10px]" aria-label={folder.label} data-testid="session-folder-git" data-folder-root={folder.root}>
-					<p class="mb-[6px] break-all font-medium text-text" title={folder.root}>{folder.label}</p>
-					<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px]">
-						<dt class="text-text-muted">Branch</dt><dd class="min-w-0 break-all text-right text-text">{folder.branch || `Detached at ${folder.head ?? "unknown"}`}</dd>
-						{#if folder.ahead !== undefined || folder.behind !== undefined}
-							<dt class="text-text-muted">Upstream</dt><dd class="text-right tabular-nums text-text">↑{folder.ahead ?? 0} ↓{folder.behind ?? 0}</dd>
-						{/if}
-						<dt class="text-text-muted">Changes</dt><dd class="text-right {folder.dirty ? 'text-warning' : 'text-text'}">{folder.dirty ? "uncommitted" : "clean"}</dd>
-					</dl>
+					<p class="mb-[6px] break-all font-medium text-text" title={folder.root}>{folder.label}{#if folder.shared}<span class="ml-2 font-normal text-text-muted">shared</span>{/if}</p>
+					{#if folder.branch || folder.head || folder.dirty !== undefined}
+						<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px]">
+							<dt class="text-text-muted">Branch</dt><dd class="min-w-0 break-all text-right text-text">{folder.branch || `Detached at ${folder.head ?? "unknown"}`}</dd>
+							{#if folder.ahead !== undefined || folder.behind !== undefined}
+								<dt class="text-text-muted">Upstream</dt><dd class="text-right tabular-nums text-text">↑{folder.ahead ?? 0} ↓{folder.behind ?? 0}</dd>
+							{/if}
+							<dt class="text-text-muted">Changes</dt><dd class="text-right {folder.dirty ? 'text-warning' : 'text-text'}">{folder.dirty ? "uncommitted" : "clean"}</dd>
+						</dl>
+					{/if}
 				</section>
 			{/each}
 		{:else}

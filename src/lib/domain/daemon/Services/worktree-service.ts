@@ -20,6 +20,7 @@ export interface CreatedWorktrees {
 }
 
 export interface WorktreeService {
+	/** One branch in every git folder; non-git folders stay in place. Failure rolls back all ownership. */
 	readonly create: (
 		folders: readonly WorktreeFolder[],
 		baseBranches?: Readonly<Record<string, string>>,

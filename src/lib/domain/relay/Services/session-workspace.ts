@@ -22,6 +22,7 @@ export interface SessionWorkspace {
 		path: string,
 		cause: WorkspaceMoveCause,
 		origin?: RecordedWorkspace["origin"],
+		projectFolder?: string,
 	) => Effect.Effect<string, WorkspaceMoveError | SessionCommandError>;
 	/** Copy a parent's recorded mapping and origin into a fork's launch event. */
 	readonly inherit: (
@@ -29,12 +30,13 @@ export interface SessionWorkspace {
 		parentSessionId: string,
 		options?: Pick<ApplySessionCommandOptions, "project">,
 	) => Effect.Effect<string, SessionCommandError>;
-	/** Resolve and warm a target before acquiring a project commit permit. */
+	/** Resolve and warm a target; projectFolder disambiguates folders sharing a checkout. */
 	readonly resolve: (
 		sessionId: string,
 		path: string,
 		cause: WorkspaceMoveCause,
 		origin?: RecordedWorkspace["origin"],
+		projectFolder?: string,
 	) => Effect.Effect<
 		ResolvedWorkspaceTarget,
 		WorkspaceMoveError | SessionCommandError

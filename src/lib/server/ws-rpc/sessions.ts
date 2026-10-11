@@ -423,20 +423,16 @@ export const sessionsHandlers = {
 								),
 							);
 							return yield* restore(
-								Effect.gen(function* () {
-									const launchPath = created.worktrees[config.projectDir];
-									if (launchPath === undefined)
-										return yield* new WsRpcError({
-											message: "Worktree creation returned no primary folder.",
-										});
-									return yield* createSessionForClient({
-										...options,
-										sessionId,
-										initializeWorkspace: (id: string) =>
-											workspace
-												.move(id, launchPath, "launch", "conduit")
-												.pipe(Effect.asVoid),
-									});
+								createSessionForClient({
+									...options,
+									sessionId,
+									initializeWorkspace: (id: string) =>
+										Effect.forEach(
+											Object.entries(created.worktrees),
+											([folder, path]) =>
+												workspace.move(id, path, "launch", "conduit", folder),
+											{ discard: true },
+										),
 								}),
 							).pipe(
 								Effect.catchAllCause((cause) =>

@@ -184,6 +184,68 @@ export const NonGitPrimary: Story = {
 	},
 };
 
+export const SharedFolderDetailsOpen: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/conduit/worktrees/workspace/session/app",
+		git: {
+			branch: "conduit/session-cross-repo",
+			worktree: "app",
+			folders: [
+				{
+					root: "/src/app",
+					label: "app",
+					branch: "conduit/session-cross-repo",
+					worktree: "app",
+					dirty: false,
+				},
+				{
+					root: "/src/api",
+					label: "api",
+					branch: "conduit/session-cross-repo",
+					worktree: "api",
+					dirty: true,
+				},
+				{ root: "/src/notes", label: "notes", shared: true },
+				{
+					root: "/src/library",
+					label: "library",
+					branch: "main",
+					dirty: false,
+					shared: true,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
+			"session-folder-git",
+		);
+		const notes = within(canvasElement.ownerDocument.body).getByRole("region", {
+			name: "notes",
+		});
+		const library = within(canvasElement.ownerDocument.body).getByRole(
+			"region",
+			{ name: "library" },
+		);
+		await expect(rows).toHaveLength(4);
+		await expect(rows[0]).toHaveTextContent("conduit/session-cross-repo");
+		await expect(rows[1]).toHaveTextContent("conduit/session-cross-repo");
+		await expect(
+			within(notes).getByText("shared", { exact: true }),
+		).toBeVisible();
+		await expect(notes).not.toHaveTextContent(/Detached|Branch|Changes|clean/);
+		await expect(
+			within(library).getByText("shared", { exact: true }),
+		).toBeVisible();
+		await expect(library).toHaveTextContent("main");
+		await expect(library).toHaveTextContent("clean");
+	},
+};
+
 export const WorktreeMenu: Story = {
 	tags: ["viewport-capture"],
 	args: {

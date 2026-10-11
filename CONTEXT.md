@@ -58,11 +58,16 @@ folder's committed HEAD on its current branch. Uncommitted changes stay in the
 original checkout. Creation or launch failure rolls back the checkout and its
 new branch. These worktrees cannot become projects or Project Folders.
 
+A multi-folder worktree session creates a worktree in every git folder on one
+branch name. Non-git folders and folders attached later are used in place and
+reported as shared; detaching a folder keeps its worktree on disk.
+
 Direct user moves require the session provider's `supportsWorktree` capability.
 OpenCode refuses those moves before recording an event; Claude supports moves.
 
 **Effective Working Directory** is the primary Project Folder's worktree,
-otherwise the only mapped worktree, otherwise the primary project folder. The
+otherwise the primary folder for a conduit-created workspace. An existing move
+can use its only mapped worktree instead. The
 session's git pill and next provider launch use it; new terminals default to it
 and the picker can start one in any Effective Folder.
 **Effective Folders** are each Project Folder's session worktree when mapped,

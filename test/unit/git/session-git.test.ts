@@ -225,12 +225,69 @@ describe("createSessionGitCache", () => {
 // Failure modes: a secondary folder is omitted or uses the main checkout;
 // primary fields are replaced by a secondary status; labels collide; non-git
 // primary folders hide git extras; stale session git survives a failed read.
+// Conduit workspaces must report unmapped folders as shared, including non-git
+// folders, without giving those folders invented git status or storing flags.
 describe("cached folder git", () => {
 	const session: SessionInfo = {
 		id: "session",
 		title: "Folders",
 		status: "idle",
 	};
+
+	it("derives shared non-git and later-attached git folders from a conduit workspace", async () => {
+		const cache = createSessionGitCache(async (directory) =>
+			directory === "/scratch"
+				? undefined
+				: {
+						branch: directory.startsWith("/worktree/")
+							? "feature/together"
+							: "main",
+						dirty: false,
+					},
+		);
+		await Promise.all(
+			["/worktree/app", "/worktree/api", "/scratch", "/late"].map(
+				cache.refresh,
+			),
+		);
+		const workspace = {
+			cause: "launch" as const,
+			origin: "conduit" as const,
+			worktrees: { "/app": "/worktree/app", "/api": "/worktree/api" },
+		};
+		const result = withCachedSessionGit(
+			{ ...session, workspace },
+			["/app", "/api", "/scratch", "/late"],
+			cache,
+		);
+		expect(result.git?.folders).toEqual([
+			{ root: "/app", label: "app", branch: "feature/together", dirty: false },
+			{ root: "/api", label: "api", branch: "feature/together", dirty: false },
+			{ root: "/scratch", label: "scratch", shared: true },
+			{
+				root: "/late",
+				label: "late",
+				branch: "main",
+				dirty: false,
+				shared: true,
+			},
+		]);
+		expect(Schema.decodeUnknownSync(SessionInfoSchema)(result).git).toEqual(
+			result.git,
+		);
+		expect(result.workspace).toEqual(workspace);
+		expect(
+			withCachedSessionGit(
+				{ ...session, workspace: { ...workspace, origin: "existing" } },
+				["/app", "/api", "/scratch", "/late"],
+				cache,
+			).git?.folders,
+		).toEqual([
+			{ root: "/app", label: "app", branch: "feature/together", dirty: false },
+			{ root: "/api", label: "api", branch: "feature/together", dirty: false },
+			{ root: "/late", label: "late", branch: "main", dirty: false },
+		]);
+	});
 
 	it("keeps primary fields and labels each effective folder, skipping non-git", async () => {
 		const cache = createSessionGitCache(async (directory) => {

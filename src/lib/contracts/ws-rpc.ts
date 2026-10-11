@@ -712,6 +712,7 @@ export const GetFileTreeResponseSchema = Schema.Struct({
 				/** Stable Project Folder identity, independent of its mapped worktree. */
 				root: NonEmptyString,
 				label: NonEmptyString,
+				shared: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),
