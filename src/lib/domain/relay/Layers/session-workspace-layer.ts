@@ -289,6 +289,11 @@ export const SessionWorkspaceLive = Layer.effect(
 								path,
 								worktrees,
 								origin: target.origin ?? "existing",
+								...(cause === "launch" &&
+								target.origin === "conduit" &&
+								target.ownership
+									? { ownership: target.ownership }
+									: {}),
 							},
 						},
 						{ project, upstreamAdapter: null },
@@ -361,9 +366,15 @@ export const SessionWorkspaceLive = Layer.effect(
 			resolve,
 			record,
 			inherit,
-			move: (sessionId, path, cause, origin, projectFolder) =>
+			move: (sessionId, path, cause, origin, projectFolder, ownership) =>
 				resolve(sessionId, path, cause, origin, projectFolder).pipe(
-					Effect.flatMap((target) => record(sessionId, target, cause)),
+					Effect.flatMap((target) =>
+						record(
+							sessionId,
+							{ ...target, ...(ownership ? { ownership } : {}) },
+							cause,
+						),
+					),
 				),
 			claudeWorktreeState: (sessionId) =>
 				readClaudeWorktreeState(sql, sessionId, config.projectDir).pipe(

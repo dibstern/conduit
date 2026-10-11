@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { Context, Effect } from "effect";
 import type {
 	SessionWorkspace as RecordedWorkspace,
+	SessionWorktreeOwnership,
 	WorkspaceMoveCause,
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
@@ -29,6 +30,7 @@ export interface SessionWorkspace {
 		cause: WorkspaceMoveCause,
 		origin?: RecordedWorkspace["origin"],
 		projectFolder?: string,
+		ownership?: readonly SessionWorktreeOwnership[],
 	) => Effect.Effect<string, WorkspaceMoveError | SessionCommandError>;
 	/** Copy a parent's recorded mapping and origin into a fork's launch event. */
 	readonly inherit: (
@@ -74,6 +76,7 @@ export interface ResolvedWorkspaceTarget {
 	readonly reset: boolean;
 	readonly provider: string;
 	readonly origin?: RecordedWorkspace["origin"];
+	readonly ownership?: readonly SessionWorktreeOwnership[];
 }
 
 export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<

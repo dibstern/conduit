@@ -16,6 +16,10 @@ export default defineConfig({
 		// playwright-harness.config.ts: isolated daemon processes with recorded providers.
 		"harness-*.spec.ts",
 		"settings-server-status.spec.ts",
+		"settings-server-logs.spec.ts",
+		"settings-pin.spec.ts",
+		"settings-power.spec.ts",
+		"settings-access.spec.ts",
 		// playwright-live.config.ts: an ephemeral OpenCode instance.
 		"live-smoke.spec.ts",
 		// playwright-multi-instance.config.ts: Vite preview with a mocked WebSocket.

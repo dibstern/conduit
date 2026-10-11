@@ -10,6 +10,10 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
+import {
+	TailscaleCliTag,
+	TailscaleServeError,
+} from "../../../src/lib/domain/daemon/Layers/tailscale-serve-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
@@ -204,6 +208,300 @@ describe("daemon control through the shared RPC group", () => {
 			yield* client.SetKeepAwakeCommand({ command: "awake" });
 			expect((yield* Ref.get(config)).keepAwakeArgs).toEqual([]);
 		}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
+	);
+
+	// Failure modes: unavailable CLI, conflicting Serve handler, failed enable or
+	// disable, stale URL after disabling, and HTTP/HTTPS proxy mismatch.
+	for (const tlsEnabled of [false, true]) {
+		it.scoped(
+			`applies and persists Tailscale Serve with TLS ${tlsEnabled}`,
+			() => {
+				const calls: string[][] = [];
+				let proxy: string | undefined;
+				const snapshots: boolean[] = [];
+				const tailscaleCli = Layer.succeed(TailscaleCliTag, {
+					exec: (args) =>
+						Effect.sync(() => {
+							calls.push(args);
+							if (args[0] === "status")
+								return JSON.stringify({
+									BackendState: "Running",
+									Self: { DNSName: "computer.tailnet.ts.net." },
+									CertDomains: ["computer.tailnet.ts.net"],
+								});
+							if (args[1] === "status")
+								return JSON.stringify({
+									Web: {
+										"computer.tailnet.ts.net:2633": {
+											Handlers: proxy ? { "/": { Proxy: proxy } } : {},
+										},
+									},
+								});
+							proxy = args.at(-1) === "off" ? undefined : args.at(-1);
+							return "";
+						}),
+				});
+				const persistence = Layer.effect(
+					ConfigPersistenceTag,
+					Effect.gen(function* () {
+						const config = yield* DaemonConfigRefTag;
+						return {
+							requestSave: Ref.get(config).pipe(
+								Effect.tap((current) =>
+									Effect.sync(() =>
+										snapshots.push(current.tailscaleServeEnabled === true),
+									),
+								),
+								Effect.asVoid,
+							),
+							flush: Effect.void,
+						};
+					}),
+				);
+				return Effect.gen(function* () {
+					const client = yield* makeClient;
+					const config = yield* DaemonConfigRefTag;
+					expect(yield* client.GetStatus({})).toMatchObject({
+						tailscaleServeEnabled: false,
+						tailscaleServeAvailable: true,
+					});
+					expect(yield* client.SetTailscaleServe({ enabled: true })).toEqual({
+						ok: true,
+					});
+					expect(calls).toContainEqual([
+						"serve",
+						"--bg",
+						"--https=2633",
+						"--set-path=/",
+						`${tlsEnabled ? "https+insecure" : "http"}://127.0.0.1:2633`,
+					]);
+					expect(yield* client.GetStatus({})).toMatchObject({
+						tailscaleServeEnabled: true,
+						tailscaleServe: { url: "https://computer.tailnet.ts.net:2633" },
+					});
+					expect(yield* client.SetTailscaleServe({ enabled: false })).toEqual({
+						ok: true,
+					});
+					expect(calls).toContainEqual([
+						"serve",
+						"--https=2633",
+						"--set-path=/",
+						"off",
+					]);
+					const disabled = yield* client.GetStatus({});
+					expect(disabled.tailscaleServeEnabled).toBe(false);
+					expect(disabled.tailscaleServe).toBeUndefined();
+					expect((yield* Ref.get(config)).tlsEnabled).toBe(tlsEnabled);
+					expect(snapshots).toEqual([true, false]);
+				}).pipe(
+					Effect.provide(
+						makeDaemonRpcTestLayer([], undefined, {
+							config: { port: 2633, tlsEnabled },
+							tailscaleCli,
+							persistence,
+						}),
+					),
+				);
+			},
+		);
+	}
+
+	for (const enabled of [true, false]) {
+		it.scoped(
+			`keeps the previous Tailscale state when setting ${enabled} fails`,
+			() => {
+				const requestSave = vi.fn(() => {});
+				const previous = {
+					tailscaleServeEnabled: !enabled,
+					...(!enabled && {
+						tailscaleServe: { url: "https://computer.tailnet.ts.net:2633" },
+					}),
+				};
+				const tailscaleCli = Layer.succeed(TailscaleCliTag, {
+					exec: (args) =>
+						args[0] === "status"
+							? Effect.succeed(
+									JSON.stringify({
+										BackendState: "Running",
+										Self: { DNSName: "computer.tailnet.ts.net" },
+										CertDomains: ["computer.tailnet.ts.net"],
+									}),
+								)
+							: args[1] === "status"
+								? Effect.succeed(
+										JSON.stringify({
+											Web: {
+												"computer.tailnet.ts.net:2633": {
+													Handlers: enabled
+														? {}
+														: { "/": { Proxy: "http://127.0.0.1:2633" } },
+												},
+											},
+										}),
+									)
+								: Effect.fail(
+										new TailscaleServeError({ message: "Permission denied" }),
+									),
+				});
+				return Effect.gen(function* () {
+					const client = yield* makeClient;
+					const config = yield* DaemonConfigRefTag;
+					const before = yield* Ref.get(config);
+					const result = yield* Effect.either(
+						client.SetTailscaleServe({ enabled }),
+					);
+					expect(Either.isLeft(result)).toBe(true);
+					if (Either.isLeft(result))
+						expect(result.left).toBeInstanceOf(WsRpcError);
+					expect(yield* Ref.get(config)).toEqual(before);
+					expect(yield* client.GetStatus({})).toMatchObject(previous);
+					expect(requestSave).not.toHaveBeenCalled();
+				}).pipe(
+					Effect.provide(
+						makeDaemonRpcTestLayer([], undefined, {
+							config: { port: 2633, ...previous },
+							tailscaleCli,
+							persistence: Layer.succeed(ConfigPersistenceTag, {
+								requestSave: Effect.sync(requestSave),
+								flush: Effect.void,
+							}),
+						}),
+					),
+				);
+			},
+		);
+	}
+
+	it.scoped(
+		"reports unavailable Tailscale and rejects enabling without persisting",
+		() => {
+			const requestSave = vi.fn(() => {});
+			return Effect.gen(function* () {
+				const client = yield* makeClient;
+				expect((yield* client.GetStatus({})).tailscaleServeAvailable).toBe(
+					false,
+				);
+				const result = yield* Effect.either(
+					client.SetTailscaleServe({ enabled: true }),
+				);
+				expect(Either.isLeft(result)).toBe(true);
+				expect((yield* client.GetStatus({})).tailscaleServeEnabled).toBe(false);
+				expect(requestSave).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.provide(
+					makeDaemonRpcTestLayer([], undefined, {
+						tailscaleCli: Layer.succeed(TailscaleCliTag, {
+							exec: () =>
+								Effect.fail(
+									new TailscaleServeError({
+										message: "Tailscale CLI not found",
+									}),
+								),
+						}),
+						persistence: Layer.succeed(ConfigPersistenceTag, {
+							requestSave: Effect.sync(requestSave),
+							flush: Effect.void,
+						}),
+					}),
+				),
+			);
+		},
+	);
+
+	it.scoped("rejects a conflicting Serve root and leaves it untouched", () => {
+		const calls: string[][] = [];
+		return Effect.gen(function* () {
+			const client = yield* makeClient;
+			const result = yield* Effect.either(
+				client.SetTailscaleServe({ enabled: true }),
+			);
+			expect(Either.isLeft(result)).toBe(true);
+			expect(calls).toEqual([
+				["status", "--json"],
+				["serve", "status", "--json"],
+			]);
+			expect(
+				(yield* Ref.get(yield* DaemonConfigRefTag)).tailscaleServeEnabled,
+			).toBe(false);
+		}).pipe(
+			Effect.provide(
+				makeDaemonRpcTestLayer([], undefined, {
+					config: { port: 2633 },
+					tailscaleCli: Layer.succeed(TailscaleCliTag, {
+						exec: (args) =>
+							Effect.sync(() => {
+								calls.push(args);
+								return JSON.stringify(
+									args[0] === "status"
+										? {
+												BackendState: "Running",
+												Self: { DNSName: "computer.tailnet.ts.net" },
+												CertDomains: ["computer.tailnet.ts.net"],
+											}
+										: {
+												Web: {
+													"computer.tailnet.ts.net:2633": {
+														Handlers: {
+															"/": { Proxy: "http://127.0.0.1:9000" },
+														},
+													},
+												},
+											},
+								);
+							}),
+					}),
+				}),
+			),
+		);
+	});
+
+	it.scoped(
+		"reconciles its HTTPS proxy after a restart changes the local listener to HTTP",
+		() => {
+			const calls: string[][] = [];
+			return Effect.gen(function* () {
+				const client = yield* makeClient;
+				yield* client.SetTailscaleServe({ enabled: true });
+				expect(calls).toContainEqual([
+					"serve",
+					"--bg",
+					"--https=2633",
+					"--set-path=/",
+					"http://127.0.0.1:2633",
+				]);
+			}).pipe(
+				Effect.provide(
+					makeDaemonRpcTestLayer([], undefined, {
+						config: { port: 2633, tailscaleServeEnabled: true },
+						tailscaleCli: Layer.succeed(TailscaleCliTag, {
+							exec: (args) =>
+								Effect.sync(() => {
+									calls.push(args);
+									return JSON.stringify(
+										args[0] === "status"
+											? {
+													BackendState: "Running",
+													Self: { DNSName: "computer.tailnet.ts.net" },
+													CertDomains: ["computer.tailnet.ts.net"],
+												}
+											: {
+													Web: {
+														"computer.tailnet.ts.net:2633": {
+															Handlers: {
+																"/": {
+																	Proxy: "https+insecure://127.0.0.1:2633",
+																},
+															},
+														},
+													},
+												},
+									);
+								}),
+						}),
+					}),
+				),
+			);
+		},
 	);
 
 	it.scoped(

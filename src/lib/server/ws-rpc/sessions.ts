@@ -39,6 +39,7 @@ import {
 import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
+import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	listLocalBranches,
@@ -98,6 +99,17 @@ export const sessionsHandlers = {
 				]),
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("ListWorktrees"))),
+	InspectSessionWorktrees: (request) =>
+		Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			if (!(yield* read.getSession(request.sessionId)))
+				return yield* new WsRpcError({ message: "Session not found." });
+			const plan = yield* prepareSessionWorktreeDeletion(request.sessionId);
+			return {
+				worktrees: plan.worktrees,
+				removeWorktrees: plan.removeWorktrees,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("InspectSessionWorktrees"))),
 	MoveSessionWorkspace: (request) =>
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
@@ -526,8 +538,15 @@ export const sessionsHandlers = {
 									initializeWorkspace: (id: string) =>
 										Effect.forEach(
 											Object.entries(created.worktrees),
-											([folder, path]) =>
-												workspace.move(id, path, "launch", "conduit", folder),
+											([folder, path], index) =>
+												workspace.move(
+													id,
+													path,
+													"launch",
+													"conduit",
+													folder,
+													index === 0 ? created.ownership : undefined,
+												),
 											{ discard: true },
 										),
 								}),
@@ -597,8 +616,14 @@ export const sessionsHandlers = {
 		deleteSessionForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
+			...(request.removeWorktrees === undefined
+				? {}
+				: { removeWorktrees: request.removeWorktrees }),
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.map((worktreeWarnings) => ({
+				ok: true as const,
+				...(worktreeWarnings.length > 0 ? { worktreeWarnings } : {}),
+			})),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -711,6 +736,7 @@ export const sessionsHandlers = {
 	| "ReloadProviderSession"
 	| "RenameSession"
 	| "ListWorktrees"
+	| "InspectSessionWorktrees"
 	| "ListBranches"
 	| "MoveSessionWorkspace"
 	| "RecreateSessionWorktree"

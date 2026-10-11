@@ -3,11 +3,13 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
-import type {
-	GetSessionSkillsResponse,
-	GetSkillContentResponse,
-	GoalDetails,
-	SaveProjectInput,
+import {
+	type GetSessionSkillsResponse,
+	type GetSkillContentResponse,
+	type GoalDetails,
+	RpcLogLevelSchema,
+	type SaveProjectInput,
+	type SetKeepAwakeResponse,
 } from "../../contracts/ws-rpc.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
@@ -15,6 +17,7 @@ import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
 export type { GoalDetails } from "../../contracts/ws-rpc.js";
+export { SetPinRejected } from "../../contracts/ws-rpc.js";
 // Keep the public URL helper available to existing callers.
 export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
@@ -204,6 +207,7 @@ export interface DeleteSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
+	readonly removeWorktrees?: boolean;
 }
 
 export interface ForkSessionRpcInput {
@@ -506,9 +510,15 @@ export interface SyncInputDraftRpcInput {
 	readonly originId?: string;
 }
 
+export const LOG_LEVELS = RpcLogLevelSchema.literals;
+
 export interface SetLogLevelRpcInput {
 	readonly projectSlug?: string;
 	readonly level: RpcLogLevel;
+}
+
+export interface SetTailscaleServeRpcInput {
+	readonly enabled: boolean;
 }
 
 const callControl = <A, E>(
@@ -537,6 +547,34 @@ export const restartServerRpc = () =>
 export const shutdownServerRpc = () =>
 	runTransportEffect(callDaemon((client) => client.Shutdown({})));
 
+export async function setKeepAwakeRpc(input: {
+	readonly enabled: boolean;
+}): Promise<SetKeepAwakeResponse> {
+	return await runTransportEffect(
+		callDaemon((client) => client.SetKeepAwake(input)),
+	);
+}
+
+export async function setKeepAwakeCommandRpc(input: {
+	readonly command: string;
+	readonly args?: readonly string[];
+}): Promise<{ readonly ok: true }> {
+	return await runTransportEffect(
+		callDaemon((client) => client.SetKeepAwakeCommand(input)),
+	);
+}
+
+export async function setPinRpc(input: {
+	readonly pin: string | null;
+	readonly currentPin?: string;
+}): Promise<{ readonly ok: true }> {
+	const result = await runTransportEffect(
+		Effect.either(callDaemon((client) => client.SetPin(input))),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
+
 export async function listBranchesRpc(projectSlug: string) {
 	return runTransportEffect(
 		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
@@ -553,6 +591,17 @@ export async function listWorktreesRpc(
 				projectSlug,
 				...(sessionId ? { sessionId } : {}),
 			}),
+		),
+	);
+}
+
+export async function inspectSessionWorktreesRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}) {
+	return runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.InspectSessionWorktrees(input),
 		),
 	);
 }
@@ -731,13 +780,14 @@ const callAttachProject = (input: AttachProjectRpcInput) =>
 
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
-		client
-			.DeleteSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId != null ? { originId: input.originId } : {}),
-			})
-			.pipe(Effect.asVoid),
+		client.DeleteSession({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			...(input.originId != null ? { originId: input.originId } : {}),
+			...(input.removeWorktrees === undefined
+				? {}
+				: { removeWorktrees: input.removeWorktrees }),
+		}),
 	);
 
 const callForkSession = (input: ForkSessionRpcInput) =>
@@ -1024,6 +1074,9 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client.SetLogLevel(input).pipe(Effect.asVoid));
 
+const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
+	callDaemon((client) => client.SetTailscaleServe(input).pipe(Effect.asVoid));
+
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
 ): Promise<void> {
@@ -1169,10 +1222,8 @@ export function attachProjectRpc(
 	return runTransportEffect(callAttachProject(input));
 }
 
-export async function deleteSessionRpc(
-	input: DeleteSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callDeleteSession(input));
+export async function deleteSessionRpc(input: DeleteSessionRpcInput) {
+	return runTransportEffect(callDeleteSession(input));
 }
 
 export async function forkSessionRpc(
@@ -1580,4 +1631,10 @@ export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetLogLevel(input));
+}
+
+export async function setTailscaleServeRpc(
+	input: SetTailscaleServeRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetTailscaleServe(input));
 }

@@ -91,6 +91,7 @@ export {
 	GetToolContent,
 	type GetToolContentResponse,
 	type GoalDetails,
+	InspectSessionWorktrees,
 	type InstanceListResponse,
 	ListBranches,
 	ListDaemonSessions,

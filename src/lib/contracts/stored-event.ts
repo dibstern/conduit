@@ -7,6 +7,8 @@ import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
+	type SessionWorktreeOwnership,
+	SessionWorktreeOwnershipSchema,
 } from "./session-workspace.js";
 
 export const EventId = Schema.String.pipe(Schema.brand("EventId"));
@@ -381,6 +383,8 @@ export interface SessionWorkspaceChangedPayload extends SessionWorkspace {
 	readonly sessionId: string;
 	/** Effective cwd after applying the mapping, including a reset to main. */
 	readonly path?: string;
+	/** Only a new Conduit launch owns these checkouts; forks never copy this metadata. */
+	readonly ownership?: readonly SessionWorktreeOwnership[];
 }
 
 export interface SessionWorkspaceHintChangedPayload {
@@ -1015,6 +1019,7 @@ const SessionRenamedPayloadSchema = Schema.Struct({
 export const SessionWorkspaceChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	path: Schema.optional(Schema.String),
+	ownership: Schema.optional(Schema.Array(SessionWorktreeOwnershipSchema)),
 	...SessionWorkspaceSchema.fields,
 });
 
