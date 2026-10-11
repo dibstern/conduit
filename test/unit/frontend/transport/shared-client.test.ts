@@ -20,6 +20,7 @@ import {
 	ManagedRuntime,
 	RuntimeFlags,
 	RuntimeFlagsPatch,
+	Schedule,
 	Scope,
 	Supervisor,
 } from "effect";
@@ -425,6 +426,7 @@ describe("shared two-socket RPC client in memory", () => {
 
 const fakeSockets: Array<FakeWebSocket> = [];
 let onFrame: () => void = () => {};
+let dial: (ws: FakeWebSocket) => void = (ws) => ws.open();
 
 /**
  * The smallest WebSocket `Socket.fromWebSocket` will drive: it reads
@@ -438,10 +440,12 @@ class FakeWebSocket {
 
 	constructor(readonly url: string) {
 		fakeSockets.push(this);
-		queueMicrotask(() => {
-			this.readyState = 1;
-			this.emit("open", {});
-		});
+		queueMicrotask(() => dial(this));
+	}
+
+	open(): void {
+		this.readyState = 1;
+		this.emit("open", {});
 	}
 
 	addEventListener(type: string, handler: (event: unknown) => void): void {
@@ -493,6 +497,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 	beforeEach(() => {
 		fakeSockets.length = 0;
 		onFrame = () => {};
+		dial = (ws) => ws.open();
 	});
 
 	it.effect("carries a request placed after forProject has returned", () =>
@@ -533,5 +538,72 @@ describe("shared two-socket RPC client over WebSockets", () => {
 				),
 			).toHaveLength(1);
 		}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
+	);
+
+	// Live clock: the protocol's redial waits on a real schedule.
+	it.live(
+		"carries the first request placed once a redialled control socket reports connected",
+		() =>
+			Effect.gen(function* () {
+				const until = (done: () => boolean) =>
+					Effect.sync(done).pipe(
+						Effect.repeat({
+							until: (finished) => finished,
+							schedule: Schedule.spaced("1 millis"),
+						}),
+						Effect.timeoutFail({
+							duration: "3 seconds",
+							onTimeout: () => new Error("condition never held"),
+						}),
+					);
+				const clients = yield* WsRpcClients;
+				const { control } = yield* clients.forProject("alpha");
+				yield* until(() => connectionState.status === "connected");
+
+				// The app reads as soon as it sees `connected` (ChatLayout loads the
+				// file tree), so place the request at the first moment that holds:
+				// right after the redialled socket opens, or on a later poll.
+				const outcome = yield* Deferred.make<string>();
+				let placed = false;
+				const placeIfConnected = () => {
+					if (placed || connectionState.status !== "connected") return placed;
+					placed = true;
+					Effect.runFork(
+						control
+							.SetLogLevel({ projectSlug: "alpha", level: "debug" })
+							.pipe(
+								Effect.catchAll((error) =>
+									Deferred.succeed(outcome, String(error)),
+								),
+							),
+					);
+					return placed;
+				};
+				onFrame = () => {
+					if (
+						fakeSockets.some((ws) =>
+							ws.sent.some((frame) => frame.includes("SetLogLevel")),
+						)
+					)
+						Deferred.unsafeDone(outcome, Effect.succeed("sent"));
+				};
+				dial = (ws) => {
+					ws.open();
+					placeIfConnected();
+				};
+
+				// The daemon restarts: both sockets drop and redial.
+				for (const ws of fakeSockets) ws.close(1006);
+				yield* until(placeIfConnected);
+
+				expect(
+					yield* Deferred.await(outcome).pipe(
+						Effect.timeoutFail({
+							duration: "3 seconds",
+							onTimeout: () => new Error("the request neither sent nor failed"),
+						}),
+					),
+				).toBe("sent");
+			}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
 	);
 });
