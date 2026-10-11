@@ -48,8 +48,20 @@ origin, `existing` or `conduit`. Only the
 Session Workspace service writes it, as a `session.workspace_changed` canonical
 event through the session-command seam. An empty map means the project's main
 folders; its projection keeps fallback and origin metadata when needed, otherwise
-it is NULL. Existing sessions keep that default. Branch names
-are read from git, never stored in the workspace.
+it is NULL. Existing sessions keep that default. Current branch names
+are read from git, never stored in the workspace. Conduit launch events retain
+the originally created checkout, branch and committed base as deletion
+provenance; forks inherit the workspace without that ownership.
+
+Deleting a session inspects its launch-created checkouts, including ones left
+behind after a move or folder detach. Uncommitted changes, unpushed commits,
+unmerged commits or an unknown default branch default the prompt to Keep.
+Checkouts used by another live session are always kept. Cleanup follows the
+canonical `session.deleted` event and is best-effort; it rechecks use and
+dirtiness, never force-removes a dirty checkout, and removes a Conduit-created
+branch only after successful checkout removal and a merged check. Detached
+checkouts are kept unless their commits are known to be merged into the default
+branch.
 
 Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
 
@@ -70,7 +82,11 @@ same starting commit. Non-git folders and folders attached later are used in pla
 reported as shared; detaching a folder keeps its worktree on disk.
 
 Direct user moves require the session provider's `supportsWorktree` capability.
-OpenCode refuses those moves before recording an event; Claude supports moves.
+Claude supports moves. OpenCode keeps that capability disabled: its native
+`moveSession` rejects a destination belonging to another repository. The narrower
+`supportsNewWorktree` capability permits Conduit-owned launches, recreation and
+recovery to the primary folder. OpenCode reserves the launch id through its v2
+session API and aligns its native directory before the next turn.
 
 **Effective Working Directory** is the primary Project Folder's worktree,
 otherwise the primary folder for a conduit-created workspace. An existing move

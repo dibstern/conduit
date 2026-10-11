@@ -291,7 +291,8 @@ export const normalizeSessionTitle = (title?: string): string => {
  * Create a session on an OpenCode server and record it locally.
  *
  * The one mutation that cannot be expressed as a command on its own: OpenCode
- * chooses the session id, and a command needs that id before it can be built.
+ * chooses the session id unless a worktree launch reserves it, and a command
+ * needs that id before it can be built.
  * So the direct `api.session.create` call lives here, next to the sync adapter,
  * and applying `session.created` is folded into the same function rather than
  * left to the caller.
@@ -303,13 +304,17 @@ export const normalizeSessionTitle = (title?: string): string => {
 export const createOpenCodeSession = (
 	title: string | undefined,
 	provider: string,
+	reservedSessionId?: string,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 
 		// No retry: create is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
-			api.session.create(title ? { title } : undefined),
+			api.session.create({
+				...(title ? { title } : {}),
+				...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
+			}),
 		).pipe(
 			Effect.mapError(
 				(cause) =>

@@ -8,6 +8,8 @@ export default defineConfig({
 		"settings-server-status.spec.ts",
 		"settings-server-logs.spec.ts",
 		"settings-pin.spec.ts",
+		"settings-power.spec.ts",
+		"settings-access.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],

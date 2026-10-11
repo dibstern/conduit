@@ -1,4 +1,5 @@
 import { Context, type Effect, type Stream } from "effect";
+import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import type {
 	WorkspaceMissing,
 	WorktreeCreationError,
@@ -14,13 +15,8 @@ export interface WorktreeFolder {
 export interface CreatedWorktrees {
 	readonly branchName: string;
 	readonly worktrees: Readonly<Record<string, string>>;
-	/** Checkout roots and original refs owned by this creation, used only for launch rollback. */
-	readonly ownership: readonly {
-		readonly folder: string;
-		readonly path: string;
-		readonly branchName: string;
-		readonly head: string;
-	}[];
+	/** Checkout roots and original refs, retained by the canonical launch event. */
+	readonly ownership: readonly SessionWorktreeOwnership[];
 }
 
 export interface WorktreeSetupResult {
@@ -41,6 +37,25 @@ export interface WorktreeService {
 		script: string,
 		env: Readonly<Record<string, string | undefined>>,
 	) => Stream.Stream<WorktreeSetupUpdate>;
+	/** Read-only proof for historical launch events that predate ownership metadata. */
+	readonly legacyOwnership: (
+		folder: WorktreeFolder,
+		directory: string,
+	) => Effect.Effect<
+		SessionWorktreeOwnership | undefined,
+		WorktreeRecoveryError
+	>;
+	/** Read local Git state for the exact launch-owned checkout; no fetch or prune. */
+	readonly inspectRemoval: (
+		folder: WorktreeFolder,
+		owned: SessionWorktreeOwnership,
+	) => Effect.Effect<readonly string[], WorktreeRecoveryError>;
+	/** Recheck dirtiness and remove without force; guarded branch deletion follows removal. */
+	readonly remove: <R = never>(
+		folder: WorktreeFolder,
+		owned: SessionWorktreeOwnership,
+		inUse?: Effect.Effect<boolean, WorktreeRecoveryError, R>,
+	) => Effect.Effect<void, WorktreeRecoveryError, R>;
 	/** Read Git's registration, including prunable entries, without changing any refs. */
 	readonly inspectMissing: (
 		folder: WorktreeFolder,

@@ -38,6 +38,9 @@ function resetState() {
 			sessionCount: 0,
 			pinEnabled: false,
 			tlsEnabled: false,
+			tailscaleServeEnabled: true,
+			tailscaleServeAvailable: true,
+			tailscaleServe: { url: "https://conduit.example.ts.net" },
 			keepAwake: false,
 			keepAwakeCommand: "caffeinate -di",
 			logLevel: "info",
@@ -459,6 +462,10 @@ export const Usage: Story = {
 
 export const Server: Story = {
 	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwake: true };
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await expect(
@@ -466,11 +473,26 @@ export const Server: Story = {
 		).toHaveValue("info");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
+			canvas.getByTestId("server-access-settings"),
+		).toHaveTextContent("https://conduit.example.ts.net");
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle Tailscale Serve" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			within(canvas.getByTestId("server-startup-settings")).getByRole("button"),
+		).toHaveAttribute("aria-expanded", "false");
+		await expect(
 			canvas.getByTestId("server-security-settings"),
 		).toHaveTextContent(
 			"Off · anyone who can reach this address can open conduit",
 		);
 		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeChecked();
+		await expect(
+			canvas.getByTestId("server-power-command-value"),
+		).toHaveTextContent("caffeinate -di");
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
@@ -490,6 +512,76 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+		canvas
+			.getByTestId("server-startup-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ServerStartupExpanded: Story = {
+	args: { initialTab: "server" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const startup = canvas.getByTestId("server-startup-settings");
+		const disclosure = within(startup).getByRole("button");
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		disclosure.blur();
+		await expect(canvas.getByTestId("server-startup-port")).toHaveTextContent(
+			"2633",
+		);
+		await expect(canvas.getByTestId("server-startup-host")).toHaveTextContent(
+			"0.0.0.0",
+		);
+		await expect(canvas.getByTestId("server-startup-https")).toHaveTextContent(
+			"Off",
+		);
+		await expect(canvas.getByTestId("server-startup-login")).toHaveTextContent(
+			"Installed",
+		);
+		await expect(within(startup).queryByRole("switch")).not.toBeInTheDocument();
+		startup.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerCommandEdit: Story = {
+	...Server,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-power-edit"));
+		await expect(canvas.getByTestId("server-power-command")).toHaveFocus();
+		await expect(canvas.getByTestId("server-power-command")).toHaveValue(
+			"caffeinate",
+		);
+		await expect(canvas.getByTestId("server-power-args")).toHaveValue("-di");
+		await expect(canvas.getByTestId("server-power-save")).toBeVisible();
+		await expect(canvas.getByTestId("server-power-cancel")).toBeVisible();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const PowerNotAvailable: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, keepAwakeCommand: null };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("switch", { name: "Toggle keep computer awake" }),
+		).toBeDisabled();
+		await expect(canvas.getByTestId("server-power-settings")).toHaveTextContent(
+			"Not available on this computer",
+		);
+		await expect(
+			canvas.queryByTestId("server-power-edit"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("server-power-settings")
+			.scrollIntoView({ block: "end" });
 	},
 };
 

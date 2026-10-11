@@ -1,5 +1,5 @@
 <script module lang="ts">
-	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}` | "pin-set" | "pin-change" | "pin-remove";
+	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}` | "pin-set" | "pin-change" | "pin-remove" | "keep-awake-command";
 </script>
 
 <script lang="ts">
@@ -11,6 +11,7 @@
 	import ServerPowerSettings from "./ServerPowerSettings.svelte";
 	import ServerAccessSettings from "./ServerAccessSettings.svelte";
 	import ServerLogsSettings from "./ServerLogsSettings.svelte";
+	import ServerStartupSettings from "./ServerStartupSettings.svelte";
 
 	let { onClose, onOpenUsage }: { onClose?: (() => void) | undefined; onOpenUsage: () => void } = $props();
 	let openForm = $state<ServerForm | null>(null);
@@ -34,7 +35,8 @@
 	<ServerStatusSettings {openForm} onToggleForm={toggleForm} {onClose} />
 	<InstancesSettingsTab {openForm} onToggleForm={toggleForm} {onOpenUsage} />
 	<ServerSecuritySettings {openForm} onToggleForm={toggleForm} />
-	<ServerPowerSettings />
+	<ServerPowerSettings {openForm} onToggleForm={toggleForm} />
 	<ServerAccessSettings />
 	<ServerLogsSettings />
+	<ServerStartupSettings />
 </div>
