@@ -10,6 +10,8 @@ const FILES_PANE_STORAGE_KEY = "files-pane-by-session";
 const FILES_PANE_MEMORY_LIMIT = 100;
 export const FILES_PANE_MIN_WIDTH = 280;
 
+export type ComposerTier = "wide" | "narrow" | "phone";
+
 type FilesPaneMemory = { filesOpen: boolean; width: number | null };
 let filesPaneMemory: Map<string, FilesPaneMemory> | undefined;
 let activeSessionId: string | null = null;
@@ -87,7 +89,21 @@ export const sessionViewState = $state({
 		typeof matchMedia === "function"
 			? matchMedia(COMPACT_QUERY).matches
 			: false,
+
+	/** Measured only by the composer's input wrapper. */
+	composerWidth: 0,
+	get composerTier(): ComposerTier {
+		return composerTier;
+	},
 });
+
+const composerTier = $derived<ComposerTier>(
+	sessionViewState.compact
+		? "phone"
+		: sessionViewState.composerWidth >= 600
+			? "wide"
+			: "narrow",
+);
 
 /**
  * The collapse rule, derived rather than stored so the bar and the transcript

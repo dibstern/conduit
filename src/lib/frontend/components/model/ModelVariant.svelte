@@ -5,6 +5,7 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
 	import { effort } from "../../stores/composer-settings.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 
 	let { onOpen, variant = "icons" }: {
 		onOpen?: (() => void) | undefined;
@@ -12,8 +13,7 @@
 	} = $props();
 
 	let open = $state(false);
-	let innerWidth = $state(window.innerWidth);
-	const phone = $derived(innerWidth < 768);
+	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
 	const filled = $derived(currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
@@ -49,7 +49,7 @@
 	}
 </script>
 
-<svelte:window bind:innerWidth onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#if variants.length > 0}
 	<Menu

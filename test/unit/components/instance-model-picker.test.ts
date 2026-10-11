@@ -10,6 +10,7 @@ import {
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
 
 const getAgentsRpcSpy = vi.hoisted(() =>
@@ -95,6 +96,8 @@ const CLAUDE_PROVIDER: ProviderInfo = {
 
 describe("InstanceModelPicker", () => {
 	beforeEach(() => {
+		Element.prototype.scrollIntoView = vi.fn();
+		sessionViewState.compact = false;
 		getAgentsRpcSpy.mockClear();
 		switchModelRpcSpy.mockClear();
 		setDefaultModelRpcSpy.mockClear();
@@ -117,6 +120,7 @@ describe("InstanceModelPicker", () => {
 	afterEach(() => {
 		cleanup();
 		sessionState.currentId = null;
+		sessionViewState.compact = false;
 	});
 
 	// The drift indicator moved to InputArea (it is a status line, not a
@@ -187,7 +191,7 @@ describe("InstanceModelPicker", () => {
 		[390, "Opus"],
 		[1024, "Opus"],
 	])("labels a restored 1M-window model by its catalog entry at width %i", async (width, expected) => {
-		window.innerWidth = width;
+		sessionViewState.compact = width <= 767;
 		handleModelList({
 			providers: [
 				{
@@ -206,7 +210,6 @@ describe("InstanceModelPicker", () => {
 			.querySelector(".model-label")
 			?.textContent?.trim();
 		expect(label).toBe(expected);
-		window.innerWidth = 1024;
 	});
 
 	it("refreshes active-provider agents after switching model", async () => {

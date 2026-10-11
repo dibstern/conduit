@@ -1,6 +1,7 @@
 <!-- Harness/model drill-down: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
+	import { onDestroy, tick, untrack } from "svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
@@ -34,6 +35,8 @@
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
+	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { bindProjectInstance, getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
@@ -49,16 +52,15 @@
 
 	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
 
-	let pickerOpen = $state(false);
+	const pickerOpen = $derived(composerPickerState.request !== null);
 	let view = $state<"root" | "harness" | "model" | "agent">("root");
-	let innerWidth = $state(window.innerWidth);
-	const phone = $derived(innerWidth < 768);
+	const phone = $derived(sessionViewState.composerTier === "phone");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
 	let variantRef: ModelVariant | undefined = $state();
 	let searchEl: HTMLInputElement | undefined = $state();
 	let triggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
-	let pickerTriggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
+	let pickerTriggerEl: HTMLElement | undefined = $state();
 	let harnessRowEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let backEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	const draftChosen = $derived(discoveryState.hasModelChoice);
@@ -305,17 +307,20 @@
 		return isActiveModel(model) ? `${base} model-item-active` : base;
 	}
 
-	function togglePicker(e: MouseEvent) {
+	function togglePicker(e: MouseEvent, section: PickerSection = "harness") {
 		e.stopPropagation();
 		pickerTriggerEl = e.currentTarget as HTMLButtonElement;
-		variantRef?.close();
-		searchQuery = "";
-		view = "root";
-		pickerOpen = !pickerOpen;
+		if (pickerOpen) closePicker();
+		else {
+			openPicker(section);
+			// Touch browsers can keep the textarea focused when a button is tapped.
+			const request = composerPickerState.request;
+			if (request) request.opener = pickerTriggerEl;
+		}
 	}
 
 	function closePicker() {
-		pickerOpen = false;
+		composerPickerState.request = null;
 		(pickerTriggerEl ?? triggerEl)?.focus({ preventScroll: true });
 	}
 
@@ -372,15 +377,43 @@
 	}
 
 	$effect(() => {
-		if (!pickerOpen) return;
-		// Phones skip the search box: focusing it would raise the keyboard over the list.
-		if (view === "model" && !phone) searchEl?.focus({ preventScroll: true });
-		else if (view !== "root") backEl?.focus({ preventScroll: true });
-		else harnessRowEl?.focus({ preventScroll: true });
+		const request = composerPickerState.request;
+		if (!request) return;
+		untrack(() => {
+			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
+			variantRef?.close();
+			searchQuery = "";
+			view = request.section === "model" || request.section === "agent"
+				? request.section
+				: "root";
+		});
 	});
-</script>
 
-<svelte:window bind:innerWidth />
+	$effect(() => {
+		if (!pickerOpen) return;
+		const section = composerPickerState.request?.section;
+		const root = view === "root";
+		// Phones skip the search box: focusing it would raise the keyboard over the list.
+		const target = view === "model" && !phone ? searchEl : backEl;
+		const fallback = harnessRowEl;
+		let cancelled = false;
+		void tick().then(() => {
+			if (cancelled) return;
+			if (!root) {
+				target?.focus({ preventScroll: true });
+				return;
+			}
+			const row = document.getElementById("model-picker")?.querySelector<HTMLElement>(
+				`[data-testid="picker-row-${section === "account" ? "harness" : section}"]`,
+			) ?? fallback;
+			row?.scrollIntoView({ block: "nearest" });
+			row?.focus({ preventScroll: true });
+		});
+		return () => { cancelled = true; };
+	});
+
+	onDestroy(() => { composerPickerState.request = null; });
+</script>
 
 {#snippet driverIcon(driver: "claude" | "opencode", size: number, badge: boolean)}
 	<span
@@ -465,7 +498,7 @@
 					<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 				</Button>
 				{#if contextLabel}
-					<div data-testid="picker-row-context" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
+					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Context</span>
 						{#if contextOptions.length > 1}
 							<SegmentedControl
@@ -483,7 +516,7 @@
 					</div>
 				{/if}
 				{#if effortSegments.length > 0}
-					<div data-testid="picker-row-effort" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
+					<div data-testid="picker-row-effort" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
 						<SegmentedControl
 							bind:value={() => effort.current ?? "", (value) => effort.select(value)}
@@ -738,7 +771,7 @@
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
 				aria-controls={pickerOpen ? "model-picker" : undefined}
-				onclick={togglePicker}
+				onclick={(e) => togglePicker(e, "context")}
 			>
 				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
 			</Button>

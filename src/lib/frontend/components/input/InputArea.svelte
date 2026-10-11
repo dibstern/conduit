@@ -524,7 +524,7 @@
 	function isMobile(): boolean {
 		return (
 			/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-			(navigator.maxTouchPoints > 0 && window.innerWidth < 768)
+			(navigator.maxTouchPoints > 0 && sessionViewState.compact)
 		);
 	}
 
@@ -1113,7 +1113,7 @@
 	{@attach publishComposerClearance}
 	class="shrink-0 px-4 py-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] has-[textarea:focus]:pb-[12px] max-md:px-3 max-md:py-1.5 max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
-	<div id="input-wrapper" class="max-w-[760px] mx-auto relative">
+	<div id="input-wrapper" bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 

@@ -11,6 +11,7 @@
 		getRankedApprovalOptions,
 	} from "../../stores/composer-settings.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { SessionPermissionMode } from "../../types.js";
 
 	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
@@ -57,8 +58,7 @@
 		},
 	};
 
-	let innerWidth = $state(window.innerWidth);
-	const phone = $derived(innerWidth < 768);
+	const phone = $derived(sessionViewState.composerTier === "phone");
 	let open = $state(false);
 	let autoNormalizationProvider: string | null = null;
 
@@ -85,8 +85,6 @@
 		}
 	});
 </script>
-
-<svelte:window bind:innerWidth />
 
 {#snippet shield(mode: SessionPermissionMode, size: number, detailed = true, knockout = "var(--color-bg-surface)")}
 	<svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false">

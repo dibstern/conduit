@@ -43,6 +43,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 
 describe("InstanceModelPicker context window", () => {
 	beforeEach(() => {
+		Element.prototype.scrollIntoView = vi.fn();
 		switchContextWindowRpcSpy.mockClear();
 		clearDiscoveryState();
 		handleContextWindowInfo({
