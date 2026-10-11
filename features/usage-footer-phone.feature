@@ -1,4 +1,4 @@
-Feature: Phone session list shows compact live plan usage
+Feature: Phone session list docks the live plan usage meter
 
 Background:
   Given the conduit app is served with the connected mockup
@@ -7,14 +7,14 @@ Background:
   And the session list has 24 rows for usage footer clearance
   And I open "Usage footer session 1" from the phone session list
 
-Scenario Outline: normal accounts collapse to the current account and a count
+Scenario Outline: normal accounts dock the current account's row and fold the rest
   Given the usage footer has several accounts with an unknown Claude reading
   When I tap back to the session list
   Then the session list is open
-  And the phone usage chips are claude in that order
-  And the phone usage chip claude is the highlighted current account
-  And the phone usage chip claude shows 5h 41% at level ok
-  And the phone usage footer counts 5 remaining accounts
+  And the phone usage rows are claude in that order
+  And the phone usage row claude is the highlighted current account
+  And the usage footer claude shows five_hour 41% and seven_day 22%
+  And the phone usage footer folds 5 more accounts
   And the phone usage footer clears the new-session button and the last row text
   And the sidebar region visually matches <baseline> at <threshold> percent
 
@@ -22,33 +22,35 @@ Examples:
   | baseline                     | threshold |
   | usage-footer-multiple-phone  | 98        |
 
-Scenario Outline: warning accounts get chips with the binding window
+Scenario Outline: a warning account docks its own row with both windows
   Given the usage footer has several accounts with an unknown Claude reading
   When the usage footer work five_hour reading is 86% resetting at none
   And the usage footer work seven_day reading is <week>% resetting at none
   And I tap back to the session list
   Then the session list is open
-  And the phone usage chips are claude, work in that order
-  And the phone usage chip claude is the highlighted current account
-  And the phone usage chip work shows <window> <value> at level warn
-  And the phone usage footer counts 4 remaining accounts
+  And the phone usage rows are claude, work in that order
+  And the phone usage row claude is the highlighted current account
+  And the usage footer work shows five_hour 86% and seven_day <week>%
+  And the usage footer work <window> meter is warning at <used> percent
+  And the phone usage footer folds 4 more accounts
   And the phone usage footer clears the new-session button and the last row text
   And the sidebar region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | week | window | value | baseline                         | threshold |
-  | 48   | 5h     | 86%   | usage-footer-warning-phone       | 98        |
-  | 91   | wk     | 91%   | usage-footer-week-warning-phone  | 98        |
+  | week | window    | used | baseline                         | threshold |
+  | 48   | five_hour | 86   | usage-footer-warning-phone       | 98        |
+  | 91   | seven_day | 91   | usage-footer-week-warning-phone  | 98        |
 
 Scenario Outline: a limited default shows its compact reset time
   Given the usage footer has several accounts with an unknown Claude reading
   When the usage footer claude five_hour reading is 100% resetting at 2026-01-01T03:13:00Z
   And I tap back to the session list
   Then the session list is open
-  And the phone usage chips are claude in that order
-  And the phone usage chip claude is the highlighted current account
-  And the phone usage chip claude shows 5h 3:13 at level limited
-  And the phone usage footer counts 5 remaining accounts
+  And the phone usage rows are claude in that order
+  And the phone usage row claude is the highlighted current account
+  And the usage footer claude shows five_hour 3:13 and seven_day 22%
+  And the usage footer claude five_hour meter is danger at 100 percent
+  And the phone usage footer folds 5 more accounts
   And the phone usage footer clears the new-session button and the last row text
   And the sidebar region visually matches <baseline> at <threshold> percent
 
@@ -56,7 +58,24 @@ Examples:
   | baseline                     | threshold |
   | usage-footer-at-limit-phone  | 98        |
 
-Scenario Outline: one account uses inline windows without chips
+Scenario Outline: tapping the dock opens every account's meter in a sheet
+  Given the usage footer has several accounts with an unknown Claude reading
+  When the usage footer work five_hour reading is 86% resetting at none
+  And I tap back to the session list
+  And I open the phone usage sheet
+  Then the usage sheet groups read CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
+  And the usage sheet row claude is the highlighted current account
+  And the usage sheet work shows five_hour 86% and seven_day 48%
+  And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I tap Settings in the usage sheet
+  Then the usage sheet is closed and Usage settings are open
+
+Examples:
+  | baseline                  | threshold |
+  | usage-footer-sheet-phone  | 98        |
+
+Scenario Outline: one account uses inline windows without the sheet
   Given the usage footer has one Claude account in the <state> state
   When I tap back to the session list
   Then the session list is open
@@ -84,35 +103,26 @@ Examples:
   | baseline                    | threshold |
   | usage-footer-no-data-phone  | 98        |
 
-Scenario: the default uses the fuller window even when both windows warn
-  Given the usage footer has several accounts with an unknown Claude reading
-  When the usage footer claude five_hour reading is 92% resetting at none
-  And the usage footer claude seven_day reading is 91% resetting at none
-  And I tap back to the session list
-  Then the session list is open
-  And the phone usage chip claude shows 5h 92% at level warn
-  And the phone usage footer counts 5 remaining accounts
-
-Scenario: the first chip follows the new session draft's pick and can show a dash
+Scenario: the docked row follows the new session draft's pick and can show dashes
   Given the usage footer has several accounts with an unknown Claude reading
   When I pick unreadable for a new session draft
   And I tap back to the session list
   Then the session list is open
-  And the phone usage chips are unreadable in that order
-  And the phone usage chip unreadable is the highlighted current account
-  And the phone usage chip unreadable shows none — at level unknown
-  And the phone usage footer counts 5 remaining accounts
+  And the phone usage rows are unreadable in that order
+  And the phone usage row unreadable is the highlighted current account
+  And the usage footer unreadable shows five_hour — and seven_day —
+  And the phone usage footer folds 5 more accounts
   And the phone usage footer clears the new-session button and the last row text
 
-Scenario: live readings include warning accounts from other harnesses in account order
+Scenario: live readings dock warning accounts from other harnesses in account order
   Given the usage footer has several accounts with an unknown Claude reading
   When I tap back to the session list
   Then the session list is open
   When the usage footer chatgpt seven_day reading is 91% resetting at none
   And the usage footer spare five_hour reading is 86% resetting at none
   And the usage footer work five_hour reading is 86% resetting at none
-  Then the phone usage chips are claude, work, spare, chatgpt in that order
-  And the phone usage chip chatgpt shows wk 91% at level warn
-  And the phone usage footer counts 2 remaining accounts
+  Then the phone usage rows are claude, work, spare, chatgpt in that order
+  And the usage footer chatgpt seven_day meter is warning at 91 percent
+  And the phone usage footer folds 2 more accounts
   And the phone usage footer clears the new-session button and the last row text
   And the SubscribeUsage RPC has no project payload

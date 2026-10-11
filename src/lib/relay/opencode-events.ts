@@ -385,6 +385,11 @@ export interface PtyExitedEvent extends SSEEventBase {
 	};
 }
 
+export interface PtyUpdatedEvent extends SSEEventBase {
+	type: "pty.updated";
+	properties: PtyCreatedEvent["properties"];
+}
+
 export interface PtyDeletedEvent extends SSEEventBase {
 	type: "pty.deleted";
 	properties: {
@@ -392,12 +397,17 @@ export interface PtyDeletedEvent extends SSEEventBase {
 	};
 }
 
-export type PtyEvent = PtyCreatedEvent | PtyExitedEvent | PtyDeletedEvent;
+export type PtyEvent =
+	| PtyCreatedEvent
+	| PtyUpdatedEvent
+	| PtyExitedEvent
+	| PtyDeletedEvent;
 
 export function isPtyEvent(event: unknown): event is PtyEvent {
 	if (!hasProps(event)) return false;
 	return (
 		event.type === "pty.created" ||
+		event.type === "pty.updated" ||
 		event.type === "pty.exited" ||
 		event.type === "pty.deleted"
 	);
