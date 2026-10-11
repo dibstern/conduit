@@ -137,7 +137,14 @@ describe("SubscribeProjectSettings", () => {
 					provider: "openai",
 				});
 
-				expect(yield* Queue.take(q)).toMatchObject({
+				const update = yield* Queue.take(q).pipe(
+					Effect.repeat({
+						until: (envelope) =>
+							envelope._tag === "upsert" &&
+							envelope.item._tag === "defaultModel",
+					}),
+				);
+				expect(update).toMatchObject({
 					_tag: "upsert",
 					item: {
 						_tag: "defaultModel",

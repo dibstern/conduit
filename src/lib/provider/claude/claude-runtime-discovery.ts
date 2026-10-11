@@ -8,7 +8,10 @@ import {
 	ClaudeRuntimeError,
 } from "../event-sink-errors.js";
 import type { CommandInfo, ModelInfo, ProviderCapabilities } from "../types.js";
-import { expectedClaudeReportedModelId } from "./claude-api-model-id.js";
+import {
+	contextWindowOptionsForModel,
+	expectedClaudeReportedModelId,
+} from "./claude-api-model-id.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import type { ClaudeCapabilitiesService } from "./claude-capabilities-service.js";
 import type { ClaudeSessionContext } from "./types.js";
@@ -30,12 +33,14 @@ const FALLBACK_MODELS: ReadonlyArray<ModelInfo> = [
 		id: "opus",
 		name: "Claude Opus (latest)",
 		providerId: "claude",
+		contextWindowOptions: contextWindowOptionsForModel("opus") ?? [],
 		limit: { context: 200_000, output: 32_000 },
 	},
 	{
 		id: "sonnet",
 		name: "Claude Sonnet (latest)",
 		providerId: "claude",
+		contextWindowOptions: contextWindowOptionsForModel("sonnet") ?? [],
 		limit: { context: 200_000, output: 64_000 },
 	},
 	{

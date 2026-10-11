@@ -14,7 +14,11 @@ const sections = [
 		"Models & agents",
 		"p:has-text('Hidden models stay out of the model picker')",
 	],
-	["claude", "Claude", "[data-testid=claude-setting-defaultModel-select]"],
+	[
+		"claude",
+		"Claude",
+		"[data-testid=claude-setting-defaultPermissionMode-select]",
+	],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
 ] as const;
@@ -310,16 +314,24 @@ for (const [viewportName, viewport] of [
 				),
 			);
 			await expect(page.locator("#instances-settings")).toBeInViewport();
-			const anchorOffset = await page
+			// The anchor scrolls to the top unless the section is too short to
+			// scroll that far, in which case it scrolls to the end.
+			const { anchorOffset, atScrollEnd } = await page
 				.locator("#instances-settings")
-				.evaluate(
-					(element) =>
-						element.getBoundingClientRect().top -
-						(element.closest(".settings-content")?.getBoundingClientRect()
-							.top ?? 0),
-				);
+				.evaluate((element) => {
+					const scroller = element.closest(".settings-content");
+					if (!scroller) throw new Error("no .settings-content");
+					return {
+						anchorOffset:
+							element.getBoundingClientRect().top -
+							scroller.getBoundingClientRect().top,
+						atScrollEnd:
+							scroller.scrollTop + scroller.clientHeight >=
+							scroller.scrollHeight - 1,
+					};
+				});
 			expect(anchorOffset).toBeGreaterThanOrEqual(0);
-			expect(anchorOffset).toBeLessThanOrEqual(15);
+			if (!atScrollEnd) expect(anchorOffset).toBeLessThanOrEqual(15);
 			await page.getByTestId("settings-close-btn").click();
 			await expect(panel).toBeHidden();
 		});

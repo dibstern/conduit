@@ -280,7 +280,7 @@ describe("model handlers with Effect-native model service", () => {
 				expect(refresh).toHaveLength(1);
 				yield* Deferred.succeed(pending, { ...capabilities, models: [{ id: "opus", name: "Opus", providerId: "claude" }] });
 				yield* Effect.forEach(refresh, Fiber.join);
-				expect(Array.from(yield* Queue.takeAll(updates))).toMatchObject([
+				expect(Array.from(yield* Queue.takeAll(updates)).filter(({ item }) => item._tag === "providerModels")).toMatchObject([
 					{ item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "opus" }] }] } },
 				]);
 			}).pipe(Effect.provide(deps), Effect.scoped);

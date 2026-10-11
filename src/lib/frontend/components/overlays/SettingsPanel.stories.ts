@@ -8,6 +8,7 @@ import {
 import {
 	clearDiscoveryState,
 	handleAgentList,
+	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
 } from "../../stores/discovery.svelte.js";
@@ -218,65 +219,106 @@ export const VisibilityEmpty: Story = {
 	args: { initialTab: "models" },
 };
 
+function populateVisibility() {
+	handleModelList({
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{
+						id: "opus",
+						name: "Opus",
+						provider: "claude",
+						variants: ["high", "max"],
+						contextWindowOptions: [
+							{ value: "200k", label: "200k" },
+							{ value: "1m", label: "1M" },
+						],
+					},
+				],
+			},
+			{
+				id: "anthropic",
+				name: "Anthropic",
+				configured: true,
+				models: [
+					{
+						id: "claude-sonnet-4",
+						name: "Claude Sonnet 4",
+						provider: "anthropic",
+					},
+					{
+						id: "claude-haiku-3-5",
+						name: "Claude Haiku 3.5",
+						provider: "anthropic",
+					},
+				],
+			},
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [
+					{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
+					{ id: "gpt-5", name: "GPT-5", provider: "openai" },
+				],
+			},
+		],
+	});
+	handleHarnessDefaults({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "opus",
+				effort: "max",
+				contextWindow: "1m",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	handleVisibilityInfo({
+		hiddenModels: ["anthropic/claude-haiku-3-5"],
+		hiddenAgents: ["anthropic/review"],
+	});
+	handleAgentList({
+		providerScope: { id: "anthropic", name: "Anthropic" },
+		agents: [
+			{
+				id: "code",
+				name: "Code",
+				description: "Write and edit code",
+			},
+			{
+				id: "review",
+				name: "Review",
+				description: "Review changes without editing",
+			},
+		],
+	});
+}
+
 export const Models: Story = {
 	args: { initialTab: "models" },
-	beforeEach: () => {
-		handleModelList({
-			providers: [
-				{
-					id: "anthropic",
-					name: "Anthropic",
-					configured: true,
-					models: [
-						{
-							id: "claude-sonnet-4",
-							name: "Claude Sonnet 4",
-							provider: "anthropic",
-						},
-						{
-							id: "claude-haiku-3-5",
-							name: "Claude Haiku 3.5",
-							provider: "anthropic",
-						},
-					],
-				},
-				{
-					id: "openai",
-					name: "OpenAI",
-					configured: true,
-					models: [
-						{ id: "gpt-4.1", name: "GPT-4.1", provider: "openai" },
-						{ id: "gpt-5", name: "GPT-5", provider: "openai" },
-					],
-				},
-			],
-		});
-		handleVisibilityInfo({
-			hiddenModels: ["anthropic/claude-haiku-3-5"],
-			hiddenAgents: ["anthropic/review"],
-		});
-		handleAgentList({
-			providerScope: { id: "anthropic", name: "Anthropic" },
-			agents: [
-				{
-					id: "code",
-					name: "Code",
-					description: "Write and edit code",
-				},
-				{
-					id: "review",
-					name: "Review",
-					description: "Review changes without editing",
-				},
-			],
-		});
-	},
+	beforeEach: populateVisibility,
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(body.getByTestId("settings-models-summary")).toHaveTextContent(
-			"3 of 4 shown",
+			"4 of 5 shown",
 		);
 		for (const testId of [
+			"settings-models-group-claude",
 			"settings-models-group-anthropic",
 			"settings-models-group-openai",
 			"settings-agents-group",
@@ -287,6 +329,36 @@ export const Models: Story = {
 				}),
 			).toBeVisible();
 		await expect(body.queryAllByRole("switch")).toHaveLength(0);
+	},
+};
+
+export const ModelsInvalidDefault: Story = {
+	args: { initialTab: "models" },
+	beforeEach: () => {
+		populateVisibility();
+		handleHarnessDefaults({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "invalid",
+				pick: {
+					providerId: "claude",
+					modelId: "retired-sonnet",
+					effort: "",
+					contextWindow: "",
+				},
+				problem:
+					"ModelNotInCatalog: model claude/retired-sonnet is not in the claude catalog",
+			},
+			opencode: {
+				status: "ok",
+				pick: {
+					providerId: "anthropic",
+					modelId: "claude-sonnet-4",
+					effort: "",
+					contextWindow: "",
+				},
+			},
+		});
 	},
 };
 
