@@ -22,6 +22,7 @@ import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
+import { sessionRowsHandlers } from "./steps/sessionRows.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
@@ -37,6 +38,7 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
+	...sessionRowsHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,
 	...taskDrillInHandlers,

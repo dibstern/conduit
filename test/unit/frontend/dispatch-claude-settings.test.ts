@@ -226,6 +226,7 @@ describe("project-settings dispatch", () => {
 	});
 
 	it("applies a defaultModel fact without changing the session variant", () => {
+		sessionState.currentId = "current-session";
 		handleVariantInfo({
 			variant: "low",
 			variants: ["low", "high"],

@@ -22,8 +22,10 @@ import {
 } from "../../../daemon/config-persistence.js";
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
+import { getLogLevel } from "../../../logger.js";
 import {
 	getRestartAvailable,
+	isServerSupervised,
 	SERVER_BUILD_ID,
 } from "../../../server/build-update.js";
 import {
@@ -34,6 +36,7 @@ import {
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
+import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
@@ -75,7 +78,6 @@ import {
 	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
-	setProjectInstance,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
@@ -281,7 +283,17 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const { ok: _ok, ...status } = yield* handle.getStatus();
-						return status;
+						return {
+							...status,
+							// Each browser follows one status feed, even with no project.
+							// Counting feeds excludes CLI IPC and the second browser socket.
+							clientCount: Array.from(listSubscribers).filter(
+								({ list }) => list === "serverStatus",
+							).length,
+							version: getVersion(),
+							logLevel: getLogLevel(),
+							supervised: isServerSupervised(),
+						};
 					}),
 				),
 			SetPin: (request) =>
@@ -451,9 +463,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
-						...(request.instanceId !== undefined && {
-							instanceId: request.instanceId,
-						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -496,17 +505,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 									configDir,
 								),
 							).pipe(Effect.ignore);
-						return {
-							projectSlug: request.projectSlug,
-							...(request.projectSlug ? { current: request.projectSlug } : {}),
-							projects: yield* projectList,
-						};
-					}),
-				),
-			SetProjectInstance: (request) =>
-				run(
-					Effect.gen(function* () {
-						yield* setProjectInstance(request.slug, request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),

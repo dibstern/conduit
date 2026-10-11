@@ -41,6 +41,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 			api.pty.delete = vi.fn(async () => undefined);
 			api.pty.resize = vi.fn(async () => undefined);
 			const wsHandler = makeMockWebSocketHandler();
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
 			const connectPtyUpstream = vi.fn(() => Effect.void);
 
 			return Effect.gen(function* () {
@@ -69,7 +70,12 @@ describe("WsRpcServerLayer terminal controls", () => {
 				Effect.provide(
 					WsRpcServerLayer.pipe(
 						Layer.provideMerge(
-							makeTestHandlerLayer({ api, wsHandler, connectPtyUpstream }),
+							makeTestHandlerLayer({
+								api,
+								wsHandler,
+								ptyManager,
+								connectPtyUpstream,
+							}),
 						),
 					),
 				),

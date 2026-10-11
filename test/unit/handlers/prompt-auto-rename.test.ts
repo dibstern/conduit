@@ -80,6 +80,7 @@ const makeReadQuery = (
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 	getSessionsForReconciliation: () => Effect.succeed([]),
+	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
 	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),

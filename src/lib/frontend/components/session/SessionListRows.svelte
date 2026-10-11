@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { SessionInfo } from "../../types.js";
+	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+	import { projectState } from "../../stores/project.svelte.js";
 	import type { SessionProjection } from "../../stores/session.svelte.js";
 	import { isSessionSnoozed, isSessionWoken, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
@@ -71,6 +73,7 @@
 	{#snippet sessionRow(s: SessionInfo)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
+		{@const primary = projectState.projects.find((project) => project.slug === (s.projectSlug ?? getCurrentSlug()))?.folders[0]}
 		<SessionItem
 			session={s}
 			pinned={s.pinnedAt != null}
@@ -82,7 +85,7 @@
 			href={getSessionHref(s.id)}
 			projectLabel={getProjectLabel(s)}
 			projectAccent={getProjectAccent(s)}
-			branch={s.git?.branch}
+			branch={primary && effectiveWorkingDirectory(primary, s.workspace) !== primary ? s.git?.branch : undefined}
 			active={s.id === sessionState.currentId}
 			renaming={s.id === renamingSessionId}
 			{selectMode}

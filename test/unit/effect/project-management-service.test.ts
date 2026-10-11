@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterEach, expect, vi } from "vitest";
@@ -76,7 +76,10 @@ describe("ProjectManagementServiceLive", () => {
 				const projects = yield* service.list();
 				expect(
 					projects.find((project) => project.slug === "cached")?.git,
-				).toEqual(git);
+				).toEqual({
+					...git,
+					folders: [{ ...git, root: directory, label: basename(directory) }],
+				});
 				expect(
 					projects.find((project) => project.slug === "uncached"),
 				).not.toHaveProperty("git");
@@ -100,7 +103,6 @@ describe("ProjectManagementServiceLive", () => {
 					slug: "proj-1",
 					title: "Project 1",
 					folders: ["/work/proj-1"] as const,
-					instanceId: "inst-1",
 				},
 			],
 		});
@@ -114,7 +116,6 @@ describe("ProjectManagementServiceLive", () => {
 				{
 					slug: "proj-1",
 					title: "Project 1",
-					instanceId: "inst-1",
 					missing: true,
 					folders: ["/work/proj-1"],
 				},
@@ -232,67 +233,4 @@ describe("ProjectManagementServiceLive", () => {
 			]);
 		}).pipe(Effect.provide(layer));
 	});
-
-	it.effect(
-		"reports unsupported project instance binding as a typed error",
-		() => {
-			const layer = makeLayer();
-
-			return Effect.gen(function* () {
-				const service = yield* ProjectManagementServiceTag;
-				const result = yield* Effect.either(
-					service.setProjectInstance("proj-1", "inst-1"),
-				);
-
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left).toBeInstanceOf(ProjectManagementNotSupported);
-					expect(result.left).toMatchObject({
-						operation: "setInstance",
-						message: "Project instance binding not available",
-					});
-				}
-			}).pipe(Effect.provide(layer));
-		},
-	);
-
-	it.effect(
-		"sets project instance and returns the updated project list",
-		() => {
-			const projects = [
-				{
-					slug: "proj-1",
-					title: "Project 1",
-					folders: ["/work/proj-1"] as const,
-					instanceId: "old",
-				},
-			];
-			const settingsService = makeSettingsService();
-			const setProjectInstance = vi.fn((slug: string, instanceId: string) => {
-				const project = projects.find((candidate) => candidate.slug === slug);
-				if (project) project.instanceId = instanceId;
-			});
-			const config = makeMockConfig({
-				getProjects: () => projects,
-				setProjectInstance,
-			});
-			const layer = makeLayer(config, settingsService);
-
-			return Effect.gen(function* () {
-				const service = yield* ProjectManagementServiceTag;
-				const updated = yield* service.setProjectInstance("proj-1", "inst-2");
-
-				expect(setProjectInstance).toHaveBeenCalledWith("proj-1", "inst-2");
-				expect(updated).toEqual([
-					{
-						slug: "proj-1",
-						title: "Project 1",
-						instanceId: "inst-2",
-						missing: true,
-						folders: ["/work/proj-1"],
-					},
-				]);
-			}).pipe(Effect.provide(layer));
-		},
-	);
 });

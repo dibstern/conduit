@@ -17,7 +17,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		checks: [],
 		tokensSinceStart: null,
 	})),
-	setProjectInstanceRpc: vi.fn(async () => undefined),
 	startInstanceRpc: vi.fn(async () => undefined),
 }));
 

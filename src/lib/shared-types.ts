@@ -251,10 +251,14 @@ export interface SessionGit {
 	ahead?: number;
 	behind?: number;
 	merged?: boolean;
+	/** Full branch head incorporated into the default branch. */
+	mergedHead?: string;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
+	/** Git Effective Folders in Project Folder order; non-git folders are omitted. */
+	folders?: readonly SessionFolderGit[];
 }
 
-export const SessionGitSchema = Schema.Struct({
+const GitStatusSchema = Schema.Struct({
 	branch: Schema.optionalWith(Schema.String, { exact: true }),
 	head: Schema.optionalWith(Schema.String, { exact: true }),
 	worktree: Schema.optionalWith(Schema.String, { exact: true }),
@@ -262,10 +266,25 @@ export const SessionGitSchema = Schema.Struct({
 	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
 	behind: Schema.optionalWith(Schema.Number, { exact: true }),
 	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
 	operation: Schema.optionalWith(
 		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
 		{ exact: true },
 	),
+});
+
+export const SessionFolderGitSchema = Schema.Struct({
+	root: Schema.String,
+	label: Schema.String,
+	...GitStatusSchema.fields,
+});
+export type SessionFolderGit = typeof SessionFolderGitSchema.Type;
+
+export const SessionGitSchema = Schema.Struct({
+	...GitStatusSchema.fields,
+	folders: Schema.optionalWith(Schema.Array(SessionFolderGitSchema), {
+		exact: true,
+	}),
 });
 
 /** One wire shape for projected sessions and daemon-wide lists. */

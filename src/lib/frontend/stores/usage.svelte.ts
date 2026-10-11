@@ -3,13 +3,13 @@ import type {
 	UsageReading,
 } from "../../contracts/limit-recovery.js";
 import { DEFAULT_USAGE_LIMITS } from "../../contracts/limit-recovery.js";
-import type { Immutable, ProjectInfo, SessionInfo } from "../types.js";
+import type { Immutable, SessionInfo } from "../types.js";
 import {
 	type PlanUsageWindow,
 	planUsageWindows,
 	usageDisplay,
 } from "../utils/continuation.js";
-import { discoveryState } from "./discovery.svelte.js";
+import { discoveryState, getEffectiveInstanceId } from "./discovery.svelte.js";
 import { getInstanceById, instanceState } from "./instance.svelte.js";
 
 export const usageState = $state<{
@@ -25,15 +25,14 @@ export function applyUsageLimitsSetting(setting: UsageLimitsSetting): void {
 	usageState.limits = setting;
 }
 
-/** A resumed session uses its latest account; a draft uses its project's. */
+/** A resumed session uses its latest account; a draft uses its effective instance. */
 export function composerAccountId(
 	session: Immutable<SessionInfo> | undefined,
-	project: Immutable<ProjectInfo> | undefined,
 ): string | undefined {
 	return session
 		? (session.resumes?.at(-1)?.instanceId ??
 				discoveryState.sessionInstanceIds[session.id])
-		: project?.instanceId;
+		: getEffectiveInstanceId();
 }
 
 /** Include every Claude account so changing the switch order keeps them all. */

@@ -28,7 +28,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			title: "App",
 			folders: [main, docs],
 			git: { branch: "main" },
-			instanceId: provider,
 		},
 		{
 			slug: "other",
@@ -111,6 +110,14 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	rpc.setDaemonList("SubscribeInstances", instances);
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
+	const picker = page.locator(
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+	);
+	await picker.click();
+	await page.getByTestId("picker-row-harness").click();
+	await page.getByTestId(`picker-instance-${provider}`).click();
+	await page.keyboard.press("Escape");
+	await expect(picker).toHaveAttribute("data-instance-id", provider);
 	await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 	return rpc;
 }
@@ -210,6 +217,7 @@ for (const mode of [
 			);
 			expect(create.payload).toMatchObject({
 				projectSlug: "e2e-replay",
+				instanceId: "claude",
 				worktreePath: docsLinked,
 			});
 			const send = await rpc.waitForRequest(
@@ -244,6 +252,7 @@ for (const mode of [
 			const create = await rpc.waitForRequest(
 				({ tag }) => tag === "CreateSession",
 			);
+			expect(create.payload).toMatchObject({ instanceId: "claude" });
 			expect(create.payload).not.toHaveProperty("worktreePath");
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 		});

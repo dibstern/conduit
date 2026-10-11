@@ -71,7 +71,6 @@
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
-	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import SessionAccountPill from "./SessionAccountPill.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
@@ -451,13 +450,8 @@
 				</Tooltip>
 			{/if}
 		</div>
-		<!-- Until an open session's provider is known, show neither: the project badge would flash before a Claude session's pill. -->
-		{#if !session}
-			<InstanceBadgeMenu />
-		{:else if discoveryState.sessionProviderIds[session.id] === "claude"}
+		{#if session && discoveryState.sessionProviderIds[session.id] === "claude"}
 			<SessionAccountPill {session} />
-		{:else if discoveryState.sessionProviderIds[session.id] !== undefined}
-			<InstanceBadgeMenu />
 		{/if}
 	</div>
 {/snippet}

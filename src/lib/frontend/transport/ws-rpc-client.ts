@@ -102,12 +102,6 @@ export interface RemoveProjectRpcInput {
 	readonly slug: string;
 }
 
-export interface SetProjectInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-	readonly instanceId: string;
-}
-
 export interface InstanceMutationRpcInput {
 	readonly projectSlug?: string;
 	readonly instanceId: string;
@@ -522,6 +516,15 @@ const callDaemon = <A, E>(
 	call: (client: WsRpcClient) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E, WsRpcClients> => callControl("", call);
 
+export const getServerStatusRpc = () =>
+	runTransportEffect(callDaemon((client) => client.GetStatus({})));
+
+export const restartServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.RestartWithConfig({})));
+
+export const shutdownServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,
@@ -598,9 +601,6 @@ const callSaveProject = (input: SaveProjectRpcInput) =>
 
 const callRemoveProject = (input: RemoveProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RemoveProject(input));
-
-const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
-	callControl(input.projectSlug, (client) => client.SetProjectInstance(input));
 
 const callStartInstance = (input: InstanceMutationRpcInput) =>
 	callDaemon((client) => client.StartInstance(input));
@@ -1025,12 +1025,6 @@ export async function removeProjectRpc(
 	input: RemoveProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
 	return await runTransportEffect(callRemoveProject(input));
-}
-
-export async function setProjectInstanceRpc(
-	input: SetProjectInstanceRpcInput,
-): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callSetProjectInstance(input));
 }
 
 export async function startInstanceRpc(

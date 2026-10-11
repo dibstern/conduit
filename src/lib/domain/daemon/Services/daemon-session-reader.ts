@@ -15,7 +15,10 @@ import {
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
 import type {
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
@@ -73,8 +76,8 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
-		if (gitCache.isStale(projectDirectory))
-			void gitCache.refresh(projectDirectory);
+		for (const folder of project.folders)
+			if (gitCache.isStale(folder)) void gitCache.refresh(folder);
 
 		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
@@ -113,9 +116,12 @@ const readProjectSessions = (
 			});
 		}).pipe(Effect.provide(readQueryLayer));
 		const directories = new Set(
-			sessions.map((session) =>
-				effectiveWorkingDirectory(projectDirectory, session.workspace),
-			),
+			sessions.flatMap((session) => [
+				effectiveWorkingDirectory(project.folders[0], session.workspace),
+				...effectiveSessionFolders(project.folders, session.workspace).map(
+					({ directory }) => directory,
+				),
+			]),
 		);
 		yield* Effect.tryPromise({
 			try: () =>
@@ -130,7 +136,7 @@ const readProjectSessions = (
 			(session): ProjectSessionCandidate => ({
 				sortKey: { updatedAt: session.updatedAt, id: session.id },
 				session: {
-					...withCachedSessionGit(session, projectDirectory, gitCache),
+					...withCachedSessionGit(session, project.folders, gitCache),
 					projectSlug,
 				},
 			}),
@@ -239,9 +245,11 @@ export const hasColdAutoSettleCandidate = (
 			readonly: true,
 			disableWAL: true,
 		}).pipe(Layer.provide(Reactivity.layer));
-		const facts = yield* readPersistedAutoSettleFacts(now).pipe(
-			Effect.provide(sqliteLayer),
-		);
+		const facts = yield* readPersistedAutoSettleFacts(
+			now,
+			undefined,
+			project.folders[0],
+		).pipe(Effect.provide(sqliteLayer));
 		return [...facts.values()].some((item) =>
 			shouldSettleIdleSession(item, now, idleWindowMs),
 		);

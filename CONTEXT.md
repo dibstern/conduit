@@ -51,6 +51,8 @@ folders; its projection keeps fallback and origin metadata when needed, otherwis
 it is NULL. Existing sessions keep that default. Branch names
 are read from git, never stored in the workspace.
 
+Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
+
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
 then the Session Workspace service records its launch move. It starts from the
@@ -66,7 +68,7 @@ otherwise the only mapped worktree, otherwise the primary project folder. The
 session's git pill and next provider launch use it; new terminals default to it
 and the picker can start one in any Effective Folder.
 **Effective Folders** are each Project Folder's session worktree when mapped,
-otherwise the Project Folder itself. A worktree is session state, not a project.
+otherwise the Project Folder itself. A worktree is session state, not a project. Git status is reported per git Effective Folder.
 The file tree lists every Effective Folder, each Project Folder mapped through
 the workspace, as a labelled root, primary first. Single-folder projects keep
 their existing tree without an extra root row. File list and content requests
