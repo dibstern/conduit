@@ -1,4 +1,9 @@
 {
+	"src/lib/frontend/components/overlays/UsageLimitsSettings.svelte :: font-mono,min-w-0,text-[10.5px],text-text-secondary,truncate": {
+		"movedTo": "src/lib/frontend/components/overlays/UsageSettingsTab.svelte",
+		"reason": "conduit-test-hwxv.4 moves the account order and quota display from the Instances limit section into Usage account cards. The account names and quota values retain these tokens in UsageSettingsTab."
+	},
+	"src/lib/frontend/components/overlays/UsageLimitsSettings.svelte :: flex-1,gap-[7px],md:text-[13px],text-[14px]": "conduit-test-hwxv.4 follows card 04: the limit section uses a 12.5px heading and 4px gap. Account names no longer fill the old quota row; the Usage card header aligns its status with ml-auto.",
 	"src/lib/frontend/components/session/GitIdentity.svelte :: leading-none,max-w-full,pl-[4px],px-[4px],shrink,shrink-[10000],text-sm": "conduit-test-fnrs implements approved session-header variant B: the plain text identity becomes a 22px segmented git control with literal 10px type, 5px gaps, 240px/150px caps, a project floor of four letters plus the ellipsis, and worktree metadata in the Checkout menu. The old separator padding, worktree shrink weight, and inherited text geometry are intentionally removed.",
 	"src/lib/frontend/components/input/ContextBar.svelte :: bg-border,context-mini-bar,context-mini-fill,context-mini-label,contextFillColor,contextLabelColor,duration-300,ease-out,flex,flex-1,font-mono,font-semibold,gap-2,h-1,h-full,items-center,min-w-6,pb-1.5,px-2,rounded-[2px],text-xs,whitespace-nowrap": "conduit-test-dfvd.9 intentionally removes the mini context meter and its fill/label expressions. InputArea now shows a configurable warning bar above the composer, with amber usage text in the Words row and model picker. Meter geometry, animation and fixed color thresholds are removed.",
 	"src/lib/frontend/components/input/ContextBar.svelte :: transition-[width,background-color]": "The deleted mini meter no longer animates its fill width or color. The replacement context warning is a discrete threshold bar.",
@@ -371,5 +376,6 @@
 	"src/lib/frontend/components/chat/ActivityRow.svelte :: part.isError": {
 		"renamedTo": "tool.isError",
 		"reason": "Not a class: the expanded result renders inside ToolFullDetail's snippet, whose argument is the full-detail tool."
-	}
+	},
+	"src/lib/frontend/components/layout/UsageFooterMeter.svelte :: left-0,px-[14px],py-[16px],right-[66px]": "The phone usage strip became a solid bottom bar: inset-x-0 replaces left-0 and right-[66px] (the bar spans the width and pr-[66px] keeps chips clear of the new-session button); pt/pr/pl plus a safe-area padding-bottom replace px/py so the bar reaches the screen edge."
 }

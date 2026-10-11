@@ -80,7 +80,7 @@ describe("OpenCode Instances shared start", () => {
 						if (starts <= failures) return yield* Effect.fail("spawn crashed");
 						endpoint = { ...endpoint, status: "healthy" };
 					}),
-				stop: () => Effect.void,
+				stop: () => Effect.succeed(false),
 				adopted: Effect.succeed([]),
 			},
 		});

@@ -1,4 +1,5 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
+import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import {
 	type Alert,
@@ -38,6 +39,7 @@ type RpcHandler = (
 /** Daemon-global feeds whose latest value the mock replays to each subscriber. */
 type DaemonListTag =
 	| "SubscribeInstances"
+	| "SubscribeUsage"
 	| "SubscribeProjects"
 	| "SubscribeServerStatus";
 
@@ -342,8 +344,16 @@ export class RpcMockControl {
 		if (this.streams.has(tag)) this.sendChunk(tag, [value]);
 	}
 
+	setUsageReadings(readings: readonly UsageReading[]): void {
+		this.setDaemonList("SubscribeUsage", { readings });
+	}
+
 	initialDaemonList(tag: DaemonListTag): readonly unknown[] {
-		return this.daemonLists.has(tag) ? [this.daemonLists.get(tag)] : [];
+		return this.daemonLists.has(tag)
+			? [this.daemonLists.get(tag)]
+			: tag === "SubscribeUsage"
+				? [{ readings: [] }]
+				: [];
 	}
 
 	/** GetProjects answers from the mocked list, as the daemon does. */
@@ -617,6 +627,7 @@ async function handleMessage(
 		control.record(raw.tag, raw.payload ?? {});
 		const daemonList =
 			raw.tag === "SubscribeInstances" ||
+			raw.tag === "SubscribeUsage" ||
 			raw.tag === "SubscribeProjects" ||
 			raw.tag === "SubscribeServerStatus"
 				? control.initialDaemonList(raw.tag)
@@ -658,20 +669,24 @@ async function handleMessage(
 			handlers[raw.tag] ??
 			control.catalogHandler(raw.tag) ??
 			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
-			(raw.tag === "ResolveSession"
-				? () => ({ projectSlug: control.projectSlug })
-				: raw.tag === "AttachProject"
-					? ({ projectSlug }) => ({
-							projectSlug:
-								typeof projectSlug === "string"
-									? projectSlug
-									: control.projectSlug,
-						})
-					: raw.tag === "ViewSession"
-						? () => ({ ok: true })
-						: raw.tag === "input.submit"
-							? ({ sessionId }) => ({ ok: true, sessionId })
-							: undefined);
+			(raw.tag === "GetUsageLimitsSetting"
+				? () => ({
+						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
+					})
+				: raw.tag === "ResolveSession"
+					? () => ({ projectSlug: control.projectSlug })
+					: raw.tag === "AttachProject"
+						? ({ projectSlug }) => ({
+								projectSlug:
+									typeof projectSlug === "string"
+										? projectSlug
+										: control.projectSlug,
+							})
+						: raw.tag === "ViewSession"
+							? () => ({ ok: true })
+							: raw.tag === "input.submit"
+								? ({ sessionId }) => ({ ok: true, sessionId })
+								: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);

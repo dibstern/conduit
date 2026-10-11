@@ -28,9 +28,9 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getProviderGroupsForInstance,
+		getSessionInstanceId,
 		formatModelName,
 		type InstanceOption,
-		instanceIdForProviderId,
 		isProviderConfigured,
 		selectInstance,
 	} from "../../stores/discovery.svelte.js";
@@ -63,7 +63,7 @@
 	let pickerTriggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let harnessRowEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let backEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
-	let draftChosen = $state(false);
+	const draftChosen = $derived(discoveryState.hasModelChoice);
 
 	// Prefix for the per-provider heading ids that each group's
 	// `aria-labelledby` points at. One base id per component instance, suffixed
@@ -77,11 +77,9 @@
 	const instances = $derived(getAvailableInstances());
 
 	/** Instance bound to the active session — non-null means locked mode. */
-	const boundInstanceId = $derived.by(() => {
-		if (!sessionState.currentId) return null;
-		const providerId = discoveryState.currentProviderId;
-		return providerId ? instanceIdForProviderId(providerId) : null;
-	});
+	const boundInstanceId = $derived(
+		sessionState.currentId ? getSessionInstanceId(sessionState.currentId) : null,
+	);
 	const locked = $derived(boundInstanceId !== null);
 	const selectedId = $derived(boundInstanceId ?? getEffectiveInstanceId());
 	const selectedInstance = $derived(
@@ -116,13 +114,22 @@
 			? discoveryState.currentModelId
 			: discoveryState.defaultModelId,
 	);
-	const activeModel = $derived(getActiveModel(activeModelId));
+	const activeModel = $derived(
+		getActiveModel(
+			activeModelId,
+			sessionState.currentId || draftChosen
+				? discoveryState.currentProviderId
+				: discoveryState.defaultProviderId,
+		),
+	);
 	const hasModel = $derived(!!activeModelId);
 	// A draft model change has no server context-info refresh. Prefer its catalog
 	// so the new harness cannot inherit the previous model's window choices.
 	const contextOptions = $derived(
-		activeModel?.contextWindowOptions ??
-			(!sessionState.currentId && draftChosen && activeModel?.limit?.context ? [] : contextWindow.options),
+		selectedDriver === "claude"
+			? (activeModel?.contextWindowOptions ?? [])
+			: activeModel?.contextWindowOptions ??
+				(!sessionState.currentId && draftChosen && activeModel?.limit?.context ? [] : contextWindow.options),
 	);
 	const selectedContext = $derived(
 		contextOptions.find((option) => option.value === contextWindow.current?.value) ??
@@ -143,9 +150,6 @@
 		testId: `picker-effort-option-${variant}`,
 		disabled: effort.pending,
 	})));
-	$effect(() => {
-		if (sessionState.currentId) draftChosen = false;
-	});
 	$effect(() => {
 		// Refetch once each turn ends.
 		const endedGeneration = currentChat().endedGeneration;
@@ -323,7 +327,6 @@
 		view = "root";
 		if (instance.id === selectedId) return;
 		selectInstance(instance.id);
-		draftChosen = true;
 		searchQuery = "";
 		// The agent list follows the selected harness — re-fetch instance-scoped.
 		const projectSlug = getCurrentSlug();
@@ -341,7 +344,6 @@
 			modelId: targetId,
 			providerId: model.provider,
 		});
-		draftChosen = !sessionState.currentId;
 		view = "root";
 	}
 

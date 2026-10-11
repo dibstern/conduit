@@ -1,28 +1,13 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
+import type { UsageRead, UsageReader } from "../usage-reader.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
-import {
-	decodeClaudeUsage,
-	type QuotaCheckResult,
-} from "./claude-usage-schema.js";
+import { decodeClaudeUsage } from "./claude-usage-schema.js";
 import {
 	closeClaudeEmptyQuery,
 	makeClaudeEmptyQuery,
 } from "./claude-warmed-query.js";
 import type { Options, SDKUserMessage } from "./types.js";
-
-export interface ClaudeQuotaAccount {
-	readonly id: string;
-	readonly configDir?: string;
-	readonly env?: Readonly<Record<string, string>>;
-}
-
-/** This is the one provider boundary used by the daemon's quota decisions. */
-export interface ClaudeUsageProbe {
-	readonly probe: (
-		account: ClaudeQuotaAccount,
-	) => Effect.Effect<QuotaCheckResult>;
-}
 
 interface UsageQuery {
 	initializationResult(): Promise<unknown>;
@@ -32,7 +17,7 @@ interface UsageQuery {
 	close(): void;
 }
 
-export interface ClaudeUsageProbeOptions {
+export interface ClaudeUsageReaderOptions {
 	readonly queryFactory?: (params: {
 		prompt: AsyncIterable<SDKUserMessage>;
 		options?: Options;
@@ -42,7 +27,7 @@ export interface ClaudeUsageProbeOptions {
 	readonly shellEnv?: Readonly<Record<string, string | undefined>>;
 }
 
-function probeFailure(error: unknown, stderr: string): QuotaCheckResult {
+function usageFailure(error: unknown, stderr: string): UsageRead {
 	const cause =
 		error !== null && typeof error === "object" && "cause" in error
 			? error.cause
@@ -52,14 +37,18 @@ function probeFailure(error: unknown, stderr: string): QuotaCheckResult {
 	return /not logged in|not authenticated|login required|please log in|please run \/login|authentication failed|authentication_error|invalid_api_key|invalid (?:oauth |authentication )?(?:token|credentials)|unauthorized/i.test(
 		message,
 	)
-		? { _tag: "Unavailable", reason: "Claude account authentication failed" }
-		: { _tag: "Unknown" };
+		? {
+				status: "unavailable",
+				windows: [],
+				reason: "Claude account authentication failed",
+			}
+		: { status: "unknown", windows: [] };
 }
 
-export const makeClaudeUsageProbe = (
-	options: ClaudeUsageProbeOptions = {},
-): ClaudeUsageProbe => ({
-	probe: (account) =>
+export const makeClaudeUsageReader = (
+	options: ClaudeUsageReaderOptions = {},
+): UsageReader => ({
+	read: (account) =>
 		Effect.suspend(() => {
 			let stderr = "";
 			return Effect.acquireUseRelease(
@@ -99,7 +88,7 @@ export const makeClaudeUsageProbe = (
 					}),
 				closeClaudeEmptyQuery,
 			).pipe(
-				Effect.catchAll((error) => Effect.succeed(probeFailure(error, stderr))),
+				Effect.catchAll((error) => Effect.succeed(usageFailure(error, stderr))),
 			);
 		}),
 });

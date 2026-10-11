@@ -8,7 +8,7 @@
   single Close. A modal on desktop, a bottom sheet with condensed rows on phones.
 -->
 <script lang="ts">
-	import type { HandoffSummary, QuotaCheckResult } from "../../../contracts/limit-recovery.js";
+	import type { HandoffSummary, UsageReading } from "../../../contracts/limit-recovery.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { handoffMessagesLine, quotaReading } from "../../utils/continuation.js";
@@ -35,8 +35,8 @@
 		confirm?:
 			| {
 					from: string;
-					fromQuota: QuotaCheckResult | undefined;
-					quota: QuotaCheckResult | undefined;
+					fromQuota: UsageReading | undefined;
+					quota: UsageReading | undefined;
 					/** Whether a cut-off request goes out with the handoff. */
 					cutOff: boolean;
 					busy: boolean;

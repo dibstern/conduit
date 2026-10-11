@@ -45,6 +45,7 @@ import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
+import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { announceBackgroundWork } from "./session-attention.js";
 
@@ -113,6 +114,7 @@ export interface ProviderRuntimeIngestionLiveOptions {
 		EventStoreError
 	>;
 	readonly relayPublisher?: ProviderRuntimeRelayPublisher;
+	readonly usage?: Pick<UsageService, "turnEnded">;
 	readonly compactions?: Pick<
 		ReturnType<typeof makeSessionCompactions>,
 		"observe"
@@ -244,6 +246,7 @@ export const makeProviderRuntimeIngestionLive = (
 
 							let appended = true;
 							const acceptedLimits: string[] = [];
+							const completedAccounts = new Set<string>();
 							let skippedLimits = 0;
 							const beforeCommit = Effect.gen(function* () {
 								yield* ingestOptions.beforeCommit ?? Effect.void;
@@ -251,10 +254,37 @@ export const makeProviderRuntimeIngestionLive = (
 									yield* createClaudeRunnerPermissionReplies(sql);
 									yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
 								}
+								if (options.usage)
+									for (const event of events) {
+										if (
+											event.providerId !== "claude" ||
+											(event.type !== "turn.completed" &&
+												event.type !== "turn.error" &&
+												event.type !== "turn.interrupted")
+										)
+											continue;
+										// After an auto-switch this reads the new account; the old one's
+										// limit is already known and the 5-minute sampler catches up.
+										const [session] = yield* sql<{ provider: string }>`
+											SELECT provider FROM sessions WHERE id = ${event.sessionId}
+										`.pipe(
+											Effect.catchAll((error) =>
+												Effect.logWarning(
+													"Could not refresh usage after turn",
+													error,
+												).pipe(Effect.as([])),
+											),
+										);
+										if (session?.provider)
+											completedAccounts.add(session.provider);
+									}
 							});
 							const afterCommit = Effect.gen(function* () {
 								if (appended) {
 									yield* Ref.set(mapperStateRef, nextState);
+									if (options.usage)
+										for (const accountId of completedAccounts)
+											yield* options.usage.turnEnded(accountId);
 									for (const sessionId of acceptedLimits)
 										yield* continuation.queueLimitPolicy(sessionId);
 									yield* ingestOptions.afterCommit ?? Effect.void;

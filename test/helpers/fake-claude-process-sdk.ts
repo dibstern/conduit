@@ -1515,6 +1515,15 @@ function query(params: {
 						await new Promise<void>((done) => setTimeout(done, 20));
 					throw new Error("Usage control query closed");
 				}
+				const responseFile = configDir
+					? join(configDir, "conduit-test-usage-response.json")
+					: undefined;
+				const configured =
+					responseFile && existsSync(responseFile)
+						? (JSON.parse(
+								readFileSync(responseFile, "utf8"),
+							) as Partial<SDKControlGetUsageResponse>)
+						: {};
 				return {
 					session: {
 						total_cost_usd: 0,
@@ -1540,6 +1549,7 @@ function query(params: {
 									},
 								},
 					behaviors: null,
+					...configured,
 				};
 			},
 		close: () => {

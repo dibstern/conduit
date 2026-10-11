@@ -14,7 +14,7 @@
   back. The caller renders each row's content through the `row` snippet.
 -->
 <script lang="ts" generics="T">
-	import { type Snippet, tick } from "svelte";
+	import { flushSync, type Snippet, tick } from "svelte";
 	import { flip } from "svelte/animate";
 	import { MediaQuery } from "svelte/reactivity";
 
@@ -24,6 +24,8 @@
 		label,
 		onreorder,
 		row,
+		details,
+		variant = "rows",
 		ariaLabel,
 		disabled = false,
 		class: className = "",
@@ -37,6 +39,9 @@
 		onreorder: (next: T[]) => void;
 		/** The row's content, after the handle. */
 		row: Snippet<[item: T, index: number]>;
+		/** Cards keep the handle beside their heading, with details underneath. */
+		details?: Snippet<[item: T, index: number]>;
+		variant?: "rows" | "cards";
 		/** Names the list for assistive tech. */
 		ariaLabel: string;
 		disabled?: boolean | undefined;
@@ -111,6 +116,18 @@
 	function onkeydown(event: KeyboardEvent, item: T) {
 		if (disabled) return;
 		const k = key(item);
+		const step = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+		if (variant === "cards" && !lifted && step !== 0) {
+			event.preventDefault();
+			const from = position(items, k);
+			const to = from + step;
+			if (to < 0 || to >= items.length) return;
+			lift(item, "keyboard");
+			move(from, to);
+			drop();
+			void focusHandle(to);
+			return;
+		}
 		if (event.key === " " || event.key === "Enter") {
 			event.preventDefault();
 			if (lifted?.key === k) drop();
@@ -126,7 +143,6 @@
 			void focusHandle(index);
 			return;
 		}
-		const step = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
 		if (step === 0) return;
 		event.preventDefault();
 		const from = position(draft, k);
@@ -154,22 +170,28 @@
 
 	function onpointermove(event: PointerEvent) {
 		if (!drag || event.pointerId !== drag.pointerId || !draft || !lifted || !listEl) return;
-		offset = event.clientY - drag.originY;
-		const rows = [...listEl.children] as HTMLElement[];
-		const index = position(draft, lifted.key);
-		const self = rows[index];
-		if (!self) return;
-		// Layout offsets ignore transforms, so a row mid-animation still measures where it will land.
-		const centre = self.offsetTop + self.offsetHeight / 2 + offset;
-		const below = rows[index + 1];
-		const above = rows[index - 1];
-		if (below && centre > below.offsetTop + below.offsetHeight / 2) {
-			drag.originY += below.offsetTop + below.offsetHeight - self.offsetTop - self.offsetHeight;
-			move(index, index + 1);
-		} else if (above && centre < above.offsetTop + above.offsetHeight / 2) {
-			drag.originY += above.offsetTop - self.offsetTop;
-			move(index, index - 1);
-		} else return;
+		// One event can pass several rows (a fast flick, or tall cards), so keep
+		// stepping until the lifted row's centre sits between its neighbours.
+		for (let step = 0; step < draft.length; step++) {
+			offset = event.clientY - drag.originY;
+			const rows = [...listEl.children] as HTMLElement[];
+			const index = position(draft, lifted.key);
+			const self = rows[index];
+			if (!self) return;
+			// Layout offsets ignore transforms, so a row mid-animation still measures where it will land.
+			const centre = self.offsetTop + self.offsetHeight / 2 + offset;
+			const below = rows[index + 1];
+			const above = rows[index - 1];
+			if (below && centre > below.offsetTop + below.offsetHeight / 2) {
+				drag.originY += below.offsetTop + below.offsetHeight - self.offsetTop - self.offsetHeight;
+				move(index, index + 1);
+			} else if (above && centre < above.offsetTop + above.offsetHeight / 2) {
+				drag.originY += above.offsetTop - self.offsetTop;
+				move(index, index - 1);
+			} else return;
+			// Render the move so the next pass measures the new layout.
+			flushSync();
+		}
 		offset = event.clientY - drag.originY;
 	}
 
@@ -180,16 +202,17 @@
 	}
 </script>
 
-<ul bind:this={listEl} aria-label={ariaLabel} class="relative flex flex-col gap-[6px] {className}" {onfocusout}>
+<ul bind:this={listEl} aria-label={ariaLabel} class="relative flex flex-col {variant === 'cards' ? 'gap-[8px]' : 'gap-[6px]'} {className}" {onfocusout}>
 	{#each shown as item, index (key(item))}
 		{@const isLifted = lifted?.key === key(item)}
 		<li
 			animate:flip={{ duration: reducedMotion.current || (isLifted && lifted?.by === "pointer") ? 0 : 150 }}
 			data-testid="sortable-row"
 			data-lifted={isLifted || undefined}
-			class="flex min-h-[30px] items-center gap-[8px] rounded-[7px] border bg-bg p-[6px] text-[11.5px] text-text-secondary {isLifted ? 'relative border-border shadow-modal' : 'border-border-subtle'}"
+			class="min-h-[30px] border bg-bg text-[11.5px] text-text-secondary {variant === 'cards' ? 'rounded-[12px] px-[11px] py-[9px]' : 'rounded-[7px] p-[6px]'} {isLifted ? 'relative z-10 border-border shadow-modal' : variant === 'cards' ? 'border-border' : 'border-border-subtle'}"
 			style:transform={isLifted && lifted?.by === "pointer" ? `translateY(${offset}px)` : undefined}
 		>
+			<div class="flex min-w-0 items-center {variant === 'cards' ? 'gap-[7px]' : 'gap-[8px]'}">
 			<button
 				type="button"
 				data-sortable-handle
@@ -204,8 +227,10 @@
 				{onpointermove}
 				onpointerup={(event) => onpointerend(event, true)}
 				onpointercancel={(event) => onpointerend(event, false)}
-			><span aria-hidden="true">⋮⋮</span></button>
+				><span aria-hidden="true">{variant === "cards" ? "⠿" : "⋮⋮"}</span></button>
 			{@render row(item, index)}
+			</div>
+			{#if details}{@render details(item, index)}{/if}
 		</li>
 	{/each}
 </ul>

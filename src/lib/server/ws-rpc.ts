@@ -10,6 +10,7 @@ import {
 	Struct,
 	type Take,
 } from "effect";
+import type { UsageReading } from "../contracts/limit-recovery.js";
 import {
 	type OpenCodeInstance,
 	type ProjectInfo,
@@ -308,6 +309,10 @@ export const wsRpcHandlers = WsRpcGroup.of({
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeInstances requires daemon mode" }),
 		),
+	SubscribeUsage: () =>
+		Stream.fail(
+			new WsRpcError({ message: "SubscribeUsage requires daemon mode" }),
+		),
 	SubscribeProjects: () =>
 		Stream.fail(
 			new WsRpcError({ message: "SubscribeProjects requires daemon mode" }),
@@ -382,6 +387,10 @@ export type DaemonRpcHandlers = {
 		{ readonly instances: readonly OpenCodeInstance[] },
 		WsRpcError
 	>;
+	readonly SubscribeUsage: () => Stream.Stream<
+		{ readonly readings: readonly UsageReading[] },
+		WsRpcError
+	>;
 	readonly SubscribeProjects: () => Stream.Stream<
 		{
 			readonly projects: readonly ProjectInfo[];
@@ -420,6 +429,7 @@ export const makeRoutedWsRpcServerLayer = (
 		Struct.omit(
 			daemonHandlers,
 			"SubscribeInstances",
+			"SubscribeUsage",
 			"SubscribeProjects",
 			"SubscribeServerStatus",
 			"sessionCreated",
@@ -570,6 +580,10 @@ export const makeRoutedWsRpcServerLayer = (
 			daemonHandlers
 				? Rpc.fork(daemonHandlers.SubscribeInstances())
 				: wsRpcHandlers.SubscribeInstances(),
+		SubscribeUsage: () =>
+			daemonHandlers
+				? Rpc.fork(daemonHandlers.SubscribeUsage())
+				: wsRpcHandlers.SubscribeUsage(),
 		SubscribeProjects: () =>
 			daemonHandlers
 				? Rpc.fork(daemonHandlers.SubscribeProjects())

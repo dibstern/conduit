@@ -26,6 +26,7 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 
 export const conduitCommands = [
 	{
@@ -94,6 +95,12 @@ const providersFromGetModelsResponse = (
 				? {
 						contextWindowOptions:
 							cloneContextWindowOptions(model.contextWindowOptions) ?? [],
+					}
+				: {}),
+			...(model.routingOptions
+				? {
+						routingOptions:
+							cloneContextWindowOptions(model.routingOptions) ?? [],
 					}
 				: {}),
 		})),
@@ -249,6 +256,9 @@ export const discoveryState = {
 	},
 
 	// Server-owned, with this tab's unconfirmed click read first.
+	get hasModelChoice(): boolean {
+		return choice.modelId !== null || choice.variant !== null;
+	},
 	get currentModelId(): string {
 		return choice.modelId ?? serverDiscovery.currentModelId;
 	},
@@ -315,8 +325,11 @@ export function getAllModels(): readonly Immutable<ModelInfo>[] {
  *  match when the active id is any of their routing option values. */
 export function getActiveModel(
 	currentId = discoveryState.currentModelId,
+	providerId = discoveryState.currentProviderId,
 ): Immutable<ModelInfo> | undefined {
-	return getAllModels().find((m) => modelMatchesId(m, currentId));
+	return discoveryState.providers
+		.find((provider) => provider.id === providerId)
+		?.models.find((model) => modelMatchesId(model, currentId));
 }
 
 /** Whether `modelId` names this catalog entry. A trailing `[1m]` is Claude's
@@ -429,10 +442,15 @@ export function getAvailableInstances(): InstanceOption[] {
 export function getProviderGroupsForInstance(
 	instanceId: string,
 ): readonly Immutable<ProviderGroup>[] {
-	return getVisibleProviderGroups().filter(
-		(g) =>
-			(g.provider.instanceId ?? instanceIdForProviderId(g.provider.id)) ===
-			instanceId,
+	const claude =
+		instanceId === "claude" ||
+		instanceState.instances.some(
+			(instance) => instance.id === instanceId && instance.driver === "claude",
+		);
+	return getVisibleProviderGroups().filter((g) =>
+		g.provider.id === "claude"
+			? claude
+			: (g.provider.instanceId ?? "opencode") === instanceId,
 	);
 }
 
@@ -451,6 +469,22 @@ export function getEffectiveInstanceId(): string {
 	);
 	if (isAvailable(derived)) return derived;
 	return available[0]?.id ?? derived;
+}
+
+/** The instance a session's picker is locked to. Only built-in instances'
+ *  catalogues are fetched, so a custom instance shows its driver's. Until
+ *  GetAgents reports the binding, the session's own model names its harness,
+ *  since a model runs only on its own. One left on the default has none, so
+ *  assume the composer's aim, which is where a new session runs. */
+export function getSessionInstanceId(sessionId: string): string {
+	const bound = getAvailableInstances().find(
+		(instance) => instance.id === serverDiscovery.sessionInstanceIds[sessionId],
+	);
+	if (bound) return bound.driver;
+	const provider = findSession(sessionId)?.model?.provider;
+	return provider
+		? instanceIdForProviderId(provider)
+		: getEffectiveInstanceId();
 }
 
 /** Select a harness instance (pre-creation only). Persists the draft and, if
@@ -613,17 +647,51 @@ export function applyGetAgentsResponse(
 export function handleModelList({
 	providers,
 }: {
-	readonly providers: readonly ProviderInfo[];
+	readonly providers: GetModelsResponse["providers"];
 }): void {
-	serverDiscovery.providers = [...providers];
+	serverDiscovery.providers = providersFromGetModelsResponse(providers);
+	if (serverDiscovery.providers.some((provider) => provider.id === "claude")) {
+		for (const provider of serverDiscovery.providers)
+			if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
+	}
 }
 
 export function applyGetModelsResponse(response: GetModelsResponse): void {
-	handleModelList({
-		providers: providersFromGetModelsResponse(response.providers),
-	});
+	// Scoped reads describe one instance, not the project's catalog.
+	if (response.instanceId === undefined)
+		handleModelList({
+			providers: [
+				...response.providers,
+				...serverDiscovery.providers.filter(
+					(provider) => provider.id === "claude",
+				),
+			],
+		});
+	hydrateModelSettings(response);
+	serverDiscovery.modelExecution = response.modelExecution
+		? { ...response.modelExecution }
+		: null;
+	if (response.permissionMode) {
+		handlePermissionModeInfo({ mode: response.permissionMode });
+	}
+	if (response.hiddenModels) {
+		serverDiscovery.hiddenModels = [...response.hiddenModels];
+	}
+}
+
+/** Default hydration cannot acknowledge a model or effort picked for a draft. */
+export function hydrateModelSettings(
+	response: Pick<GetModelsResponse, "active" | "variant" | "contextWindow">,
+): void {
+	if (!sessionState.currentId && discoveryState.hasModelChoice) return;
 	if (response.active) {
 		handleModelInfo(response.active);
+	} else {
+		// The harness picks its own model, so drop the last session's.
+		serverDiscovery.currentModelId = "";
+		serverDiscovery.currentProviderId = "";
+		choice.modelId = null;
+		choice.providerId = null;
 	}
 	if (response.variant) {
 		handleVariantInfo({
@@ -640,15 +708,6 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 			contextWindow: response.contextWindow.contextWindow,
 			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
 		});
-	}
-	serverDiscovery.modelExecution = response.modelExecution
-		? { ...response.modelExecution }
-		: null;
-	if (response.permissionMode) {
-		handlePermissionModeInfo({ mode: response.permissionMode });
-	}
-	if (response.hiddenModels) {
-		serverDiscovery.hiddenModels = [...response.hiddenModels];
 	}
 }
 
@@ -699,7 +758,10 @@ export function handleDefaultModelInfo(msg: {
 
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
-	return discoveryState.availableVariants;
+	const model = getActiveModel();
+	return discoveryState.currentProviderId === "claude"
+		? (model?.variants ?? [])
+		: (model?.variants ?? discoveryState.availableVariants);
 }
 
 /** Get the available context-window options for the currently active model.
@@ -708,6 +770,7 @@ export function getActiveModelVariants(): readonly string[] {
  *  back to the last server-provided list otherwise. */
 export function getActiveContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
 	const modelOptions = getActiveModel()?.contextWindowOptions;
+	if (discoveryState.currentProviderId === "claude") return modelOptions ?? [];
 	if (modelOptions && modelOptions.length > 0) return modelOptions;
 	return discoveryState.availableContextWindowOptions;
 }
@@ -753,7 +816,7 @@ export function followSessionModelSettings(
 	) {
 		handleModelInfo(row.model);
 		// The row carries no catalog, so take the new model's own lists.
-		const catalogModel = getActiveModel(row.model.model);
+		const catalogModel = getActiveModel(row.model.model, row.model.provider);
 		serverDiscovery.availableVariants = [...(catalogModel?.variants ?? [])];
 		serverDiscovery.availableContextWindowOptions =
 			cloneContextWindowOptions(catalogModel?.contextWindowOptions) ?? [];
@@ -871,6 +934,25 @@ export function chooseModel(model: {
 	]);
 }
 
+/** Call right after a draft's model pick. Returns how to apply what that pick
+ *  reads back: the model's efforts and saved effort. Nothing changes once the
+ *  draft has moved on, to a session, another pick or another project. An
+ *  effort picked while the read was in flight stays picked; one picked before
+ *  belonged to the previous model. */
+export function followDraftModelPick(): (msg: {
+	readonly variant?: string;
+	readonly variants?: readonly string[];
+}) => void {
+	const modelClick = owner.modelId;
+	const effortClick = owner.variant;
+	return (msg) => {
+		if (sessionState.currentId || owner.modelId !== modelClick) return;
+		serverDiscovery.currentVariant = msg.variant ?? "";
+		serverDiscovery.availableVariants = [...(msg.variants ?? [])];
+		if (owner.variant === effortClick) choice.variant = null;
+	};
+}
+
 /** This tab's model and effort picks, if `instanceId` lists the model.
  *  Nothing without a pick: the server's default applies then. An effort pick
  *  commits the model it was picked for, which may be the one the server
@@ -883,7 +965,7 @@ export function getChosenModel(instanceId: string):
 			readonly variant?: string;
 	  }
 	| undefined {
-	if (choice.modelId == null && choice.variant == null) return undefined;
+	if (!discoveryState.hasModelChoice) return undefined;
 	const { currentModelId: modelId, currentProviderId: providerId } =
 		discoveryState;
 	const listed = getProviderGroupsForInstance(instanceId).some((group) =>

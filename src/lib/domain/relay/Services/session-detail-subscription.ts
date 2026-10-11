@@ -47,6 +47,7 @@ import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.
 import { stream } from "./read-model-subscription.js";
 import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
+import { providerSteers } from "./session-inbox.js";
 
 /**
  * A single detail row shared by the base and the deltas, as the seam requires.
@@ -169,6 +170,7 @@ export const subscribeSessionDetail = (options: {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+			const config = yield* Effect.serviceOption(ConfigTag);
 			const sessionRow = yield* Effect.either(
 				readQuery.getSession(options.sessionId),
 			);
@@ -176,7 +178,6 @@ export const subscribeSessionDetail = (options: {
 				sessionRow._tag === "Right" &&
 				sessionRow.right?.history_complete === 0
 			) {
-				const config = yield* Effect.serviceOption(ConfigTag);
 				if (
 					resolveProviderRoutingDriver(
 						loadDaemonConfig(
@@ -264,14 +265,15 @@ export const subscribeSessionDetail = (options: {
 															inbox: {
 																paused: inbox.paused,
 																// Only the reasons that do not depend on the draft.
-																steer:
-																	registry._tag === "Some" &&
-																	registry.value.getInstance(inbox.provider)
-																		?.steering === true
-																		? inbox.promptOpen
-																			? "prompt_open"
-																			: null
-																		: "no_steering",
+																steer: providerSteers(
+																	registry,
+																	config,
+																	inbox.provider,
+																)
+																	? inbox.promptOpen
+																		? "prompt_open"
+																		: null
+																	: "no_steering",
 															},
 														} satisfies SessionDetailItem,
 														version: Math.min(inbox.version, through),

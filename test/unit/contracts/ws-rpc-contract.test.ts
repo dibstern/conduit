@@ -3,6 +3,7 @@ import { describe, it } from "@effect/vitest";
 import { Array as Arr, Effect, Schema, type Scope, Stream } from "effect";
 import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
+import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import {
 	PartVersion,
 	ToolCallId,
@@ -36,6 +37,7 @@ import {
 	MarkSessionUnread,
 	ModelExecutionSchema,
 	PtyInput,
+	QuotaForAccountsResponseSchema,
 	RejectQuestion,
 	ReloadProviderSession,
 	RemoveInstance,
@@ -81,6 +83,39 @@ type WsRpcTestEnv =
 	| Scope.Scope
 	| Rpc.ToHandler<RpcGroup.Rpcs<typeof WsRpcGroup>>;
 
+const usageSnapshots: readonly (readonly UsageReading[])[] = [
+	[],
+	[
+		{
+			accountId: "personal",
+			harness: "claude",
+			status: "available",
+			windows: [
+				{ kind: "five_hour", utilization: 41 },
+				{ kind: "seven_day", utilization: 22 },
+			],
+			readAt: 1,
+			stale: false,
+		},
+		{
+			accountId: "chatgpt",
+			harness: "codex",
+			status: "unknown",
+			windows: [],
+			readAt: 2,
+			stale: false,
+		},
+		{
+			accountId: "cursor",
+			harness: "cursor",
+			status: "available",
+			windows: [{ kind: "month", utilization: 38 }],
+			readAt: 3,
+			stale: true,
+		},
+	],
+];
+
 const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	Effect.scoped(effect).pipe(
 		Effect.provide(
@@ -98,6 +133,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeAlerts: () => Stream.empty,
 				SubscribeInputDraft: () => Stream.empty,
 				SubscribeInstances: () => Stream.empty,
+				SubscribeUsage: () =>
+					Stream.fromIterable(usageSnapshots).pipe(
+						Stream.map((readings) => ({ readings })),
+					),
 				SubscribeServerStatus: () => Stream.empty,
 				SubscribeProjects: () => Stream.empty,
 				AttachProject: () => Effect.succeed({ projectSlug: null }),
@@ -451,7 +490,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
 				GetUsageLimitsSetting: () =>
 					Effect.succeed({
-						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
+						usageLimits: {
+							autoResume: false,
+							autoSwitch: false,
+							warnAt: 80 as const,
+							order: [],
+						},
 					}),
 				SetUsageLimitsSetting: (request) =>
 					Effect.succeed({ usageLimits: request.usageLimits }),
@@ -468,7 +512,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						firstMessageIncluded: false,
 						tokens: 0,
 					}),
-				QuotaForAccounts: () => Effect.succeed({ accounts: [] }),
+				QuotaForAccounts: () => Effect.succeed([]),
 				GetContinuationHandoff: () => Effect.succeed({ handoff: null }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
@@ -559,6 +603,17 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 	);
 
 describe("browser WebSocket RPC contract", () => {
+	it.effect("streams complete daemon-wide usage snapshots", () =>
+		provideRpc(
+			Effect.gen(function* () {
+				const client = yield* RpcTest.makeClient(WsRpcGroup);
+				const snapshots = yield* Stream.runCollect(client.SubscribeUsage({}));
+				expect(Arr.fromIterable(snapshots)).toEqual(
+					usageSnapshots.map((readings) => ({ readings })),
+				);
+			}),
+		),
+	);
 	it("round-trips durable settled and pinned timestamps", () => {
 		const session = {
 			id: "s1",
@@ -820,6 +875,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("ClosePty")).toBe(true);
 		expect(WsRpcGroup.requests.has("PtyInput")).toBe(true);
 		expect(WsRpcGroup.requests.has("SubscribePtys")).toBe(true);
+		expect(WsRpcGroup.requests.has("SubscribeUsage")).toBe(true);
 		expect(WsRpcGroup.requests.has("SubscribeSessionFamily")).toBe(true);
 		expect(WsRpcGroup.requests.has("CreateSession")).toBe(true);
 		expect(WsRpcGroup.requests.has("ViewSession")).toBe(true);
@@ -1742,4 +1798,43 @@ describe("browser WebSocket RPC contract", () => {
 		expect(sendWithoutCommandId._tag).toBe("Left");
 		expect(cancelWithoutCommandId._tag).toBe("Left");
 	});
+});
+
+// The on-demand usage RPC returns readings directly, with ISO window resets.
+it("decodes QuotaForAccounts as a harness-tagged reading array", () => {
+	const readings = [
+		{
+			accountId: "claude-2",
+			harness: "claude",
+			status: "available",
+			planLabel: "Max",
+			windows: [
+				{ kind: "five_hour", utilization: 12 },
+				{
+					kind: "seven_day",
+					utilization: 37,
+					resetsAt: "2026-10-12T09:00:00.000Z",
+				},
+			],
+			readAt: 1791637200000,
+			stale: false,
+		},
+		{
+			accountId: "claude-3",
+			harness: "claude",
+			status: "unknown",
+			windows: [],
+			readAt: 1791637200000,
+			stale: false,
+			reason: "Usage read failed",
+		},
+	];
+	expect(
+		Schema.decodeUnknownSync(QuotaForAccountsResponseSchema)(readings),
+	).toEqual(readings);
+	expect(() =>
+		Schema.decodeUnknownSync(QuotaForAccountsResponseSchema)({
+			accounts: readings,
+		}),
+	).toThrow();
 });

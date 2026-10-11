@@ -84,6 +84,11 @@ export interface ClaudeReplayPlan {
 	 * outlasted its retries.
 	 */
 	readonly failTurns?: readonly number[];
+	/**
+	 * Open the session on this named Claude account (declared in daemon.json)
+	 * instead of the default `claude` instance.
+	 */
+	readonly instanceId?: string;
 	/** Trace directory override (unit tests only). */
 	readonly tracesDir?: string;
 	/** Claude model catalog to advertise instead of the bare trace model. */

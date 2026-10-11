@@ -46,12 +46,12 @@ const authHeaders = (
 export const InstanceHealthCheckLiveService: InstanceHealthCheckService = {
 	check: ({ instance, url }) =>
 		Effect.tryPromise({
-			try: async () => {
+			try: async (signal) => {
 				const headers = authHeaders(instance);
-				const res = await fetch(
-					healthUrl(url),
-					headers === undefined ? undefined : { headers },
-				);
+				const res = await fetch(healthUrl(url), {
+					signal,
+					...(headers === undefined ? {} : { headers }),
+				});
 				if (!res.ok) return false;
 				const body = (await res.json()) as { healthy?: boolean };
 				return body.healthy === true;

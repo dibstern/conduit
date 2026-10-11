@@ -12,24 +12,50 @@
 // the limited account is not excluded or the durable reason is lost.
 // A newer turn during failover selection or its gate probe is interrupted by
 // stale automation, or a newer reply still permits switching/scheduling.
+// Send-at-reset failures: a limited account dispatches an idle/steered input;
+// repeated submits replace an existing schedule; missing/expired resets hold;
+// a schedule without a cut-off never drains; stale quota re-arms after its reset;
+// queued turns overtake the scheduled resume or each other; Edit/Remove bypass
+// the hold, a busy session cannot schedule its queued input, a cancellation
+// reschedules itself, or releasing the hold overrides a later Stop.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect, Schedule } from "effect";
+import { it as effectIt } from "@effect/vitest";
+import {
+	Context,
+	Effect,
+	Layer,
+	Queue,
+	Schedule,
+	Stream,
+	TestClock,
+} from "effect";
 import { expect, it } from "vitest";
-import { QuotaCheckTag } from "../../../../src/lib/domain/daemon/Services/quota-check.js";
+import type { UsageReading } from "../../../../src/lib/contracts/limit-recovery.js";
+import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
-import { makeContinuation } from "../../../../src/lib/domain/relay/Services/continuation.js";
+import {
+	ContinuationTag,
+	makeContinuation,
+} from "../../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
+import { SessionEventBusLive } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
+import {
+	decideInbox,
+	type InboxView,
+	SessionInboxLive,
+	SessionInboxTag,
+} from "../../../../src/lib/domain/relay/Services/session-inbox.js";
 import {
 	makeOverridesStateLive,
 	startProcessingTimeout,
@@ -48,6 +74,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
+import { usageReading } from "../../../helpers/usage.js";
 
 const seed = (at = 10) =>
 	Effect.gen(function* () {
@@ -124,6 +151,379 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 		Effect.provide(AlertsLive),
 	);
 };
+
+for (const delivery of ["queue", "steer"] as const) {
+	it(`the usage hold admits ${delivery} inputs and blocks Drain but not SendNow`, () => {
+		const request = { text: "wait", modelUserSelected: false };
+		const view: InboxView = {
+			provider: "claude",
+			queued: [],
+			steering: false,
+			busy: false,
+			stoppedSinceHandoff: false,
+			limited: false,
+			usageResetsAt: 10,
+			scheduled: false,
+			known: false,
+			providerSteers: true,
+			promptOpen: false,
+			running: undefined,
+		};
+		const submitted = decideInbox("s1", view, {
+			_tag: "Submit",
+			inputId: "q1",
+			delivery,
+			request,
+		});
+		expect(submitted).toEqual({
+			_tag: "Accepted",
+			events: [
+				{
+					type: "input.admitted",
+					data: { sessionId: "s1", inputId: "q1", delivery, request },
+				},
+			],
+		});
+		const queued = { ...view, queued: [{ inputId: "q1", request }] };
+		expect(decideInbox("s1", queued, { _tag: "Drain" })).toEqual({
+			_tag: "Accepted",
+			events: [],
+		});
+		// Send now / Resume is the user's explicit call, so the hold yields to it.
+		expect(
+			decideInbox("s1", queued, { _tag: "SendNow", inputId: "q1" }),
+		).toMatchObject({ handoff: { inputId: "q1" } });
+		expect(
+			decideInbox("s1", queued, { _tag: "Cancel", inputId: "q1" }),
+		).toEqual({
+			_tag: "Accepted",
+			events: [
+				{ type: "input.cancelled", data: { sessionId: "s1", inputId: "q1" } },
+			],
+		});
+	});
+}
+
+const resetInboxFixture = Effect.gen(function* () {
+	const commit = yield* makeCommitAndSignal;
+	const store = yield* EventStoreEffectTag;
+	const read = yield* ReadQueryEffectTag;
+	const sql = yield* SqlClient.SqlClient;
+	const continuation = yield* makeContinuation;
+	const sent = yield* Queue.unbounded<string>();
+	const dispatches: string[] = [];
+	const turns: ProviderTurnServiceTag["Type"] = {
+		holdUserTurnsForAccountSwitch: () => Effect.void,
+		prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+		interruptTurn: () => Effect.void,
+		sendTurn: (input) =>
+			Effect.gen(function* () {
+				dispatches.push(input.continuation ? "resume" : input.text);
+				yield* commit([
+					...(input.events ?? []),
+					...(input.continuation
+						? []
+						: [
+								canonicalEvent("message.created", input.sessionId, {
+									sessionId: input.sessionId,
+									messageId: input.commandId,
+									inputId: input.commandId,
+									role: "user",
+								}),
+							]),
+					canonicalEvent("session.status", input.sessionId, {
+						sessionId: input.sessionId,
+						status: "busy",
+					}),
+				]);
+				yield* Queue.offer(sent, input.continuation ? "resume" : input.text);
+			}).pipe(Effect.orDie),
+	};
+	const inboxContext = yield* Layer.build(SessionInboxLive).pipe(
+		Effect.provideService(ContinuationTag, continuation),
+		Effect.provideService(ProviderTurnServiceTag, turns),
+	);
+	const inbox = Context.get(inboxContext, SessionInboxTag);
+	yield* commit([
+		canonicalEvent("session.created", "s1", {
+			sessionId: "s1",
+			title: "Send at reset",
+			provider: "claude",
+		}),
+	]);
+	return {
+		inbox,
+		continuation,
+		commit,
+		store,
+		read,
+		sql,
+		dispatches,
+		next: Queue.take(sent),
+		sweep: continuation
+			.sweepDueContinuations(10)
+			.pipe(Effect.provideService(ProviderTurnServiceTag, turns)),
+		submit: (inputId: string) =>
+			inbox.submit({
+				clientId: "c1",
+				sessionId: "s1",
+				inputId,
+				delivery: "queue",
+				request: { text: inputId, modelUserSelected: false },
+			}),
+		finish: (inputId: string) =>
+			commit([
+				canonicalEvent("message.created", "s1", {
+					sessionId: "s1",
+					messageId: `a-${inputId}`,
+					parentID: inputId,
+					role: "assistant",
+				}),
+				canonicalEvent("turn.completed", "s1", { messageId: `a-${inputId}` }),
+				canonicalEvent("session.status", "s1", {
+					sessionId: "s1",
+					status: "idle",
+				}),
+			]),
+	};
+});
+
+const withResetInbox = <A, E, R>(
+	reading: () => UsageReading,
+	use: (
+		fixture: Effect.Effect.Success<typeof resetInboxFixture>,
+	) => Effect.Effect<A, E, R>,
+) =>
+	Effect.flatMap(resetInboxFixture, use).pipe(
+		Effect.provideService(ConfigTag, config),
+		Effect.provideService(Usage, {
+			readings: Stream.empty,
+			latest: () => Effect.sync(reading),
+			refresh: () => Effect.sync(() => [reading()]),
+			turnEnded: () => Effect.void,
+			pickFailover: () => Effect.succeed(undefined),
+		}),
+		withSwitchServices,
+		Effect.provide(makeOverridesStateLive()),
+		Effect.provide(
+			Layer.merge(
+				makePersistenceEffectLayer(
+					":memory:",
+					"test-project",
+					undefined,
+					SessionEventBusLive,
+				),
+				SessionEventBusLive,
+			),
+		),
+	);
+
+for (const schedule of [
+	"none",
+	"existing",
+	"cut-off",
+	"cut-off-stale",
+	"busy",
+	"stopped",
+	"model-window",
+	"cancelled",
+	"later-stopped",
+] as const) {
+	effectIt.scoped(
+		`send at reset: ${schedule} schedules once and releases in turn order`,
+		() => {
+			let reading = usageReading("claude", {
+				status: "limited",
+				windows: [
+					{
+						kind: "five_hour",
+						utilization: 100,
+						resetsAt: new Date(10_000).toISOString(),
+					},
+				],
+			});
+			if (schedule === "model-window")
+				reading = {
+					...reading,
+					windows: [
+						...reading.windows,
+						{
+							kind: "seven_day_model",
+							model: "opus",
+							utilization: 100,
+							resetsAt: new Date(20_000).toISOString(),
+						},
+					],
+				};
+			return withResetInbox(
+				() => reading,
+				(fixture) =>
+					Effect.gen(function* () {
+						const cutOff =
+							schedule === "cut-off" || schedule === "cut-off-stale";
+						yield* TestClock.setTime(1_000);
+						if (cutOff)
+							yield* fixture.commit([
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "u1",
+									role: "user",
+								}),
+								canonicalEvent("session.usage_limited", "s1", {
+									instanceId: "claude",
+									rateLimitType: "five_hour",
+									cutOffMessageId: "u1",
+									resetsAt: 10,
+								}),
+							]);
+						if (schedule === "existing" || cutOff)
+							yield* fixture.commit([
+								canonicalEvent("session.resume_scheduled", "s1", {
+									instanceId: "claude",
+									at: 10,
+								}),
+							]);
+						if (schedule === "busy")
+							yield* fixture.commit([
+								canonicalEvent("session.status", "s1", {
+									sessionId: "s1",
+									status: "busy",
+								}),
+							]);
+						if (schedule === "stopped")
+							yield* fixture.commit([
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "u0",
+									role: "user",
+								}),
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "a0",
+									parentID: "u0",
+									role: "assistant",
+								}),
+								canonicalEvent("turn.interrupted", "s1", { messageId: "a0" }),
+							]);
+						yield* fixture.inbox.start;
+						expect(yield* fixture.submit("q1")).toEqual({ handedOff: false });
+						expect(yield* fixture.submit("q2")).toEqual({ handedOff: false });
+						expect(yield* fixture.submit("q1")).toEqual({ handedOff: false });
+						expect(fixture.dispatches).toEqual([]);
+						expect(
+							(yield* fixture.store.readAllBySession("s1")).filter(
+								(event) => event.type === "session.resume_scheduled",
+							),
+						).toHaveLength(1);
+						expect(
+							(yield* fixture.read.listSessionInfos())[0]?.limitRecovery
+								?.scheduledAt,
+						).toBe(10);
+						expect(
+							yield* fixture.sql<{
+								input_id: string;
+							}>`SELECT input_id FROM pending_inputs WHERE state = 'queued' ORDER BY admitted_at, rowid`,
+						).toEqual([{ input_id: "q1" }, { input_id: "q2" }]);
+						if (schedule === "cancelled") {
+							yield* fixture.continuation.cancelContinuation("s1");
+							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							expect(
+								(yield* fixture.store.readAllBySession("s1")).filter(
+									(event) => event.type === "session.resume_scheduled",
+								),
+							).toHaveLength(1);
+							expect(fixture.dispatches).toEqual([]);
+							return;
+						}
+						if (schedule === "later-stopped")
+							yield* fixture.commit([
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "u0",
+									role: "user",
+								}),
+								canonicalEvent("message.created", "s1", {
+									sessionId: "s1",
+									messageId: "a0",
+									parentID: "u0",
+									role: "assistant",
+								}),
+								canonicalEvent("turn.interrupted", "s1", { messageId: "a0" }),
+							]);
+						yield* TestClock.setTime(10_000);
+						if (schedule === "cut-off")
+							reading = usageReading("claude", { status: "available" });
+						if (schedule === "busy")
+							yield* fixture.commit([
+								canonicalEvent("session.status", "s1", {
+									sessionId: "s1",
+									status: "idle",
+								}),
+							]);
+						yield* fixture.sweep;
+						if (schedule === "later-stopped") {
+							yield* Effect.yieldNow().pipe(Effect.repeat(Schedule.recurs(10)));
+							expect(fixture.dispatches).toEqual([]);
+							return;
+						}
+						if (cutOff) {
+							expect(fixture.dispatches).toEqual(["resume"]);
+							expect(yield* fixture.next).toBe("resume");
+							yield* fixture.finish("u1");
+						} else
+							expect(
+								(yield* fixture.read.listSessionInfos())[0]?.limitRecovery,
+							).toBeNull();
+						expect(yield* fixture.next).toBe("q1");
+						expect(fixture.dispatches).toEqual(
+							cutOff ? ["resume", "q1"] : ["q1"],
+						);
+						yield* fixture.finish("q1");
+						expect(yield* fixture.next).toBe("q2");
+						expect(fixture.dispatches).toEqual(
+							cutOff ? ["resume", "q1", "q2"] : ["q1", "q2"],
+						);
+					}),
+			);
+		},
+	);
+}
+
+for (const reset of ["expired", "missing", "invalid"] as const) {
+	effectIt.scoped(`send at reset: a ${reset} reset holds nothing`, () =>
+		withResetInbox(
+			() =>
+				usageReading("claude", {
+					status: "limited",
+					windows: [
+						{
+							kind: "five_hour",
+							utilization: 100,
+							...(reset === "missing"
+								? {}
+								: {
+										resetsAt:
+											reset === "expired"
+												? new Date(1_000).toISOString()
+												: "bad-time",
+									}),
+						},
+					],
+				}),
+			(fixture) =>
+				Effect.gen(function* () {
+					yield* TestClock.setTime(1_000);
+					expect(yield* fixture.submit("q1")).toEqual({ handedOff: true });
+					expect(fixture.dispatches).toEqual(["q1"]);
+					expect(
+						(yield* fixture.store.readAllBySession("s1")).filter(
+							(event) => event.type === "session.resume_scheduled",
+						),
+					).toHaveLength(0);
+				}),
+		),
+	);
+}
 
 for (const scenario of [
 	"future",
@@ -204,8 +604,11 @@ for (const scenario of [
 				}
 				const before = yield* store.readAllBySession("s1");
 				yield* continuation.sweepDueContinuations(10).pipe(
-					Effect.provideService(QuotaCheckTag, {
-						check: () =>
+					Effect.provideService(Usage, {
+						readings: Stream.empty,
+						latest: () => Effect.succeed(undefined),
+						turnEnded: () => Effect.void,
+						refresh: () =>
 							Effect.gen(function* () {
 								probes++;
 								switch (scenario) {
@@ -234,10 +637,15 @@ for (const scenario of [
 										break;
 								}
 								return scenario === "unavailable"
-									? { _tag: "Unavailable" as const, reason: "Not logged in" }
+									? [
+											usageReading("claude", {
+												status: "unavailable",
+												reason: "Not logged in",
+											}),
+										]
 									: scenario === "available"
-										? { _tag: "Available" as const }
-										: { _tag: "Unknown" as const };
+										? [usageReading("claude", { status: "available" })]
+										: [usageReading("claude")];
 							}).pipe(Effect.orDie),
 						pickFailover: () => Effect.succeed(undefined),
 					}),
@@ -276,8 +684,11 @@ for (const scenario of [
 				}
 			}).pipe(
 				Effect.provideService(ConfigTag, config),
-				Effect.provideService(QuotaCheckTag, {
-					check: () => Effect.succeed({ _tag: "Unknown" }),
+				Effect.provideService(Usage, {
+					readings: Stream.empty,
+					latest: () => Effect.succeed(undefined),
+					turnEnded: () => Effect.void,
+					refresh: () => Effect.succeed([usageReading("claude")]),
 					pickFailover: () => Effect.succeed(undefined),
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
@@ -338,6 +749,7 @@ for (const scenario of [
 				usageLimits: {
 					autoSwitch: scenario !== "off",
 					autoResume: true,
+					warnAt: 80,
 					order: ["target"],
 				},
 			}),
@@ -447,7 +859,7 @@ for (const scenario of [
 					const before = (yield* store.readAllBySession("s1")).length;
 					yield* Effect.forkScoped(
 						continuation.runLimitPolicies.pipe(
-							Effect.provideService(QuotaCheckTag, {
+							Effect.provideService(Usage, {
 								pickFailover: (excluding) =>
 									Effect.gen(function* () {
 										picked.push(excluding);
@@ -460,8 +872,12 @@ for (const scenario of [
 											? "target"
 											: undefined;
 									}).pipe(Effect.orDie),
-								check: (instanceId) =>
+								readings: Stream.empty,
+								latest: () => Effect.succeed(undefined),
+								turnEnded: () => Effect.void,
+								refresh: (accountIds) =>
 									Effect.gen(function* () {
+										const instanceId = accountIds?.[0] ?? "claude";
 										probed.push(instanceId);
 										if (scenario === "defect")
 											return yield* Effect.die("Probe defect");
@@ -494,11 +910,13 @@ for (const scenario of [
 												}),
 											]);
 										return scenario === "unavailable"
-											? {
-													_tag: "Unavailable" as const,
-													reason: "Not logged in",
-												}
-											: { _tag: "Unknown" as const };
+											? [
+													usageReading(instanceId, {
+														status: "unavailable",
+														reason: "Not logged in",
+													}),
+												]
+											: [usageReading(instanceId)];
 									}).pipe(Effect.orDie),
 							}),
 						),
@@ -644,8 +1062,11 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 			).toBe(true);
 		}).pipe(
 			Effect.provideService(ConfigTag, config),
-			Effect.provideService(QuotaCheckTag, {
-				check: () => Effect.succeed({ _tag: "Unknown" }),
+			Effect.provideService(Usage, {
+				readings: Stream.empty,
+				latest: () => Effect.succeed(undefined),
+				turnEnded: () => Effect.void,
+				refresh: () => Effect.succeed([usageReading("claude")]),
 				pickFailover: () => Effect.succeed(undefined),
 			}),
 			Effect.provideService(ProviderTurnServiceTag, {
@@ -676,7 +1097,8 @@ for (const freshReset of [42, undefined]) {
 				let now = 10;
 				for (let rearms = 1; rearms <= 3; rearms++) {
 					yield* continuation.sweepDueContinuations(now);
-					const scheduledAt = freshReset ?? now + 300;
+					const scheduledAt =
+						freshReset === undefined ? now + 300 : freshReset * rearms;
 					expect(
 						(yield* read.listSessionInfos())[0]?.limitRecovery,
 					).toMatchObject({
@@ -709,15 +1131,32 @@ for (const freshReset of [42, undefined]) {
 				expect(probes).toBe(4);
 			}).pipe(
 				Effect.provideService(ConfigTag, config),
-				Effect.provideService(QuotaCheckTag, {
-					check: () =>
+				Effect.provideService(Usage, {
+					readings: Stream.empty,
+					latest: () => Effect.succeed(undefined),
+					turnEnded: () => Effect.void,
+					refresh: () =>
 						Effect.sync(() => {
 							probes++;
-							return {
-								_tag: "Limited" as const,
-								rateLimitType: "seven_day",
-								...(freshReset === undefined ? {} : { resetsAt: freshReset }),
-							};
+							return [
+								usageReading("claude", {
+									status: "limited",
+									windows: [
+										{
+											kind: "seven_day",
+											utilization: 100,
+											...(freshReset === undefined
+												? {}
+												: {
+														// Each fresh probe sees another future reset, not an expired one.
+														resetsAt: new Date(
+															freshReset * probes * 1000,
+														).toISOString(),
+													}),
+										},
+									],
+								}),
+							];
 						}),
 					pickFailover: () => Effect.succeed(undefined),
 				}),

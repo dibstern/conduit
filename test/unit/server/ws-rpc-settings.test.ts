@@ -74,6 +74,7 @@ describe("settings RPC config persistence", () => {
 			const usageLimits = {
 				autoResume: true,
 				autoSwitch: true,
+				warnAt: 90 as const,
 				order: ["second", "first"],
 			};
 			yield* settingsHandlers

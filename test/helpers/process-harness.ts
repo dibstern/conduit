@@ -233,6 +233,7 @@ export class ProcessHarness {
 		realOpenCode?: string,
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
+		private readonly logLevel?: "warn",
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -471,6 +472,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			capabilityAgents?: readonly ProviderAgentInfo[];
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
+			/** Enable warning diagnostics for provider lifecycle regressions. */
+			logLevel?: "warn";
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
@@ -519,6 +522,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.realOpenCode,
 			options.capabilityAgents,
 			options.continuationSweepIntervalMs,
+			options.logLevel,
 		);
 	}
 
@@ -893,7 +897,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 						? { SHELL: "/bin/zsh", ZDOTDIR: join(this.root, "home") }
 						: {}),
 					NODE_ENV: "test",
-					LOG_LEVEL: this.claudeReplay?.logLevel ?? "error",
+					LOG_LEVEL: this.logLevel ?? this.claudeReplay?.logLevel ?? "error",
 				}),
 				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},
@@ -1092,8 +1096,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		await this.openCodeTestCommand("emit-event", envelope, instanceId);
 	}
 
-	async closeOpenCodeStreams(): Promise<void> {
-		await this.openCodeTestCommand("close-streams", {});
+	async closeOpenCodeStreams(
+		options: { silenceReconnect?: boolean } = {},
+	): Promise<void> {
+		await this.openCodeTestCommand("close-streams", options);
 	}
 
 	/** Serve a status from /session/status and emit it as session.status. */
@@ -1108,6 +1114,34 @@ Object.assign(ClaudeDriver, { create: deps => {
 			{ directory, sessionID, status },
 			instanceId,
 		);
+	}
+
+	/** Sample /session/status reads on arrival but answer them only on release. */
+	async holdOpenCodeStatusReads(): Promise<void> {
+		await this.openCodeTestCommand("hold-status", {});
+	}
+
+	async releaseOpenCodeStatusReads(): Promise<void> {
+		await this.openCodeTestCommand("release-status", {});
+	}
+
+	/** Status reads held so far, with the statuses each one sampled. */
+	opencodeHeldStatusReads() {
+		const file = join(this.configDir, "fake-opencode-held-status.jsonl");
+		return existsSync(file)
+			? readFileSync(file, "utf8")
+					.trim()
+					.split("\n")
+					.filter(Boolean)
+					.map(
+						(line) =>
+							JSON.parse(line) as {
+								at: number;
+								directory?: string;
+								statuses: string;
+							},
+					)
+			: [];
 	}
 
 	/** Serve a pending prompt from /permission or /question and emit it as asked. */

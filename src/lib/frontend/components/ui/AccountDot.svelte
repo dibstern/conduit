@@ -18,7 +18,7 @@
 		"bg-project-4",
 	] as const;
 
-	const SIZE_CLASSES = { 6: "size-[6px]", 8: "size-[8px]" } as const;
+	const SIZE_CLASSES = { 6: "size-[6px]", 7: "size-[7px]", 8: "size-[8px]" } as const;
 
 	// FNV-1a: cheap, stable across sessions and browsers, and well spread for
 	// the short random IDs instances get.
@@ -34,10 +34,12 @@
 	let {
 		instanceId,
 		size = 8,
+		"data-testid": testId = "account-dot",
 		class: className = "",
 	}: {
 		instanceId: string;
 		size?: keyof typeof SIZE_CLASSES | undefined;
+		"data-testid"?: string;
 		/** Layout only (margin, alignment); the colour and shape are the dot's. */
 		class?: string | undefined;
 	} = $props();
@@ -45,7 +47,7 @@
 
 <span
 	aria-hidden="true"
-	data-testid="account-dot"
+	data-testid={testId}
 	data-account={instanceId}
 	class="inline-block shrink-0 rounded-full {SIZE_CLASSES[size]} {accountColorClass(instanceId)} {className}"
 ></span>

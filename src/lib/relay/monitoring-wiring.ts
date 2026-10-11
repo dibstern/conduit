@@ -10,6 +10,7 @@ import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
+import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	type AlertsTag,
 	publishAlert,
@@ -335,11 +336,13 @@ const executeMonitoringEffectsEffect = (
 					// the effects that follow it (other sessions' stops and dones).
 					yield* Effect.forkDaemon(
 						Effect.gen(function* () {
-							const messages = yield* Effect.tryPromise(() =>
-								deps.client.session.messages(sessionId),
-							).pipe(
+							const messages = yield* Effect.tryPromise({
+								try: () => deps.client.session.messages(sessionId),
+								catch: (error) => error,
+							}).pipe(
 								Effect.catchAll((err) =>
 									Effect.sync(() => {
+										if (isOpenCodeNotRunningError(err)) return;
 										deps.statusLog.warn(
 											`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
 										);
@@ -440,11 +443,12 @@ export function wireMonitoring(
 					if (!monitoringActive) return;
 					pollerManager.startPolling(sessionId, msgs);
 				})
-				.catch((err) =>
+				.catch((err) => {
+					if (isOpenCodeNotRunningError(err)) return;
 					statusLog.warn(
 						`Failed to seed poller for ${sessionId.slice(0, 12)}, will retry: ${err instanceof Error ? err.message : err}`,
-					),
-				);
+					);
+				});
 		},
 		stopPoller: (sessionId) => pollerManager.stopPolling(sessionId),
 		processAndApplyDone: (sessionId, isSubagent, busySince) => {

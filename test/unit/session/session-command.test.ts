@@ -354,7 +354,8 @@ describe("applySessionCommand", () => {
 				const reads = yield* makeReadQueryEffect;
 				expect(
 					(yield* reads.listSessionInfos()).find(({ id }) => id === forked.id),
-				).toMatchObject({ forkMessageId: "msg-7", forkPointTimestamp: 123 });
+				).toMatchObject({ forkMessageId: "msg-7" });
+				expect(forked).not.toHaveProperty("forkPointTimestamp");
 
 				// The fork keeps msg-7; OpenCode copies what precedes its messageID.
 				expect(api.session.fork).toHaveBeenCalledWith("ses-parent", {
@@ -394,6 +395,41 @@ describe("applySessionCommand", () => {
 			}),
 		),
 	);
+
+	for (const projection of ["lagging", "projected"] as const) {
+		it.effect(
+			`returns only the persisted fork boundary timestamp with a ${projection} copy`,
+			() =>
+				withHarness(({ api }) =>
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSession("ses-parent", "opencode");
+						if (projection === "projected") {
+							yield* seedSession("ses-fork", "opencode");
+							yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+								VALUES ('fork-reply', 'ses-fork', 'assistant', 999999, 999999)`;
+						}
+						api.session.messagesPage.mockResolvedValue([
+							partialFake<Message>({
+								id: "fork-reply",
+								time: { created: 123 },
+							}),
+						]);
+						const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
+						const reads = yield* makeReadQueryEffect;
+						const row = yield* reads.getSession(forked.id);
+						expect(row?.fork_point_timestamp).toBe(
+							projection === "projected" ? 999999 : null,
+						);
+						expect(forked.forkPointTimestamp).toBe(
+							row?.fork_point_timestamp ?? undefined,
+						);
+						if (projection === "lagging")
+							expect(forked).not.toHaveProperty("forkPointTimestamp");
+					}),
+				),
+		);
+	}
 	it.effect(
 		"does not create an explicit OpenCode fork when its boundary key cannot be read",
 		() =>

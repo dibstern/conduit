@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer } from "effect";
+import { Deferred, Effect, Layer, Ref } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import {
 	MessageVersion,
@@ -37,6 +37,7 @@ import {
 	hasActiveProcessingTimeout,
 	isModelUserSelected,
 	makeOverridesStateLive,
+	OverridesStateTag,
 	setPermissionMode,
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -545,6 +546,52 @@ describe("ProviderTurnService", () => {
 				expect(log.info).toHaveBeenCalledWith(
 					expect.stringContaining("model=default"),
 				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"infers a Claude model after an OpenCode native default has been hydrated",
+		() => {
+			const dispatchEffect = vi.fn((command) =>
+				command.type === "discover"
+					? Effect.succeed(
+							modelCapabilities([
+								{ id: "sonnet", name: "Sonnet", providerId: "claude" },
+							]),
+						)
+					: Effect.succeed(completedTurn()),
+			) as unknown as OrchestrationEngine["dispatchEffect"];
+			const engine = makeEngine({ providerId: "claude", dispatchEffect });
+			const configDir = mkdtempSync(join(tmpdir(), "native-default-claude-"));
+			tempConfigDirs.push(configDir);
+			const { layer } = serviceLayer({ engine, configDir });
+
+			return Effect.gen(function* () {
+				yield* Ref.update(yield* OverridesStateTag, (state) => ({
+					...state,
+					nativeDefaultModel: { providerID: "fake", modelID: "model-b" },
+				}));
+				yield* sendTurn({
+					model: yield* getModel("session-1"),
+					modelUserSelected: false,
+				});
+
+				expect(dispatchEffect).toHaveBeenCalledWith({
+					type: "discover",
+					providerId: "claude",
+				});
+				const sendCommand = vi
+					.mocked(dispatchEffect)
+					.mock.calls.map(([command]) => command)
+					.find((command) => command.type === "send_turn");
+				expect(sendCommand).toMatchObject({
+					input: { model: { providerId: "claude", modelId: "sonnet" } },
+				});
+				expect(yield* getModel("session-1")).toEqual({
+					providerID: "claude",
+					modelID: "sonnet",
+				});
 			}).pipe(Effect.provide(layer));
 		},
 	);

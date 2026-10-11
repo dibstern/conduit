@@ -75,7 +75,7 @@ export function followSessionResumes(
 				{
 					kind: "dismiss",
 					label: "Settings",
-					run: () => openSettings("instances"),
+					run: () => openSettings("usage"),
 				},
 			],
 		});

@@ -43,6 +43,13 @@ type SegmentedRecipe = {
 };
 
 export const SEGMENTED_VARIANTS = {
+	/** Compact settings values, with literal 44px phone options. */
+	compact: {
+		list: "inline-flex overflow-hidden rounded-[8px] border border-border text-[10.5px]",
+		item: "px-[7px] py-[2px] max-md:min-h-[44px] max-md:min-w-[36px] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
+		selected: "bg-border-chip text-text",
+		unselected: "text-text-muted hover:text-text",
+	},
 	/** P2 effort choices, with a neutral selected fill in both themes. */
 	picker: {
 		list: "flex flex-1 min-w-0 gap-[3px]",

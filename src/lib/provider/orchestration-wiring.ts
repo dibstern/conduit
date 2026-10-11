@@ -171,6 +171,8 @@ const createOrchestrationComponentsEffect = (
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
 			clientForSession,
+			instanceIdForSession: (sessionId) =>
+				sessionBindingReadModel.getProviderForSession(sessionId),
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 

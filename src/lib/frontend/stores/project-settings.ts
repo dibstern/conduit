@@ -12,9 +12,11 @@ import type { ProjectSetting } from "../transport/ws-rpc.js";
 import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
+	discoveryState,
 	handleDefaultModelInfo,
-	handleModelInfo,
+	handleModelList,
 	handleVisibilityInfo,
+	hydrateModelSettings,
 } from "./discovery.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
@@ -23,9 +25,10 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 	switch (setting._tag) {
 		case "defaultModel":
 			handleDefaultModelInfo(setting);
-			// A draft has no session model of its own, so it shows the default.
 			if (!sessionState.currentId && setting.model && setting.provider)
-				handleModelInfo({ model: setting.model, provider: setting.provider });
+				hydrateModelSettings({
+					active: { model: setting.model, provider: setting.provider },
+				});
 			break;
 		case "visibility":
 			handleVisibilityInfo(setting);
@@ -41,6 +44,16 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			break;
 		case "opencodeConnection":
 			uiState.opencodeConnections[setting.instanceId] = setting.status;
+			break;
+		case "providerModels":
+			handleModelList({
+				providers: [
+					...discoveryState.providers.filter(
+						(provider) => provider.id !== "claude",
+					),
+					...setting.providers,
+				],
+			});
 			break;
 	}
 };

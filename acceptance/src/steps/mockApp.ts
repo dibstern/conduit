@@ -145,6 +145,9 @@ export const mockAppHandlers: StepHandler[] = [
 			if (mockup !== "connected" && !modelExecutionMockup) {
 				throw new Error(`Unsupported conduit mockup: ${mockup ?? ""}`);
 			}
+			const providers = modelExecutionMockup
+				? modelExecutionProviders
+				: dualDriverProviders;
 
 			const relayControl = await mockRelayWebSocket(world.page, {
 				initMessages: modelExecutionMockup?.initMessages ?? unboundInitMessages,
@@ -330,9 +333,7 @@ export const mockAppHandlers: StepHandler[] = [
 					// session fetches models, and a late reply must not rebind it.
 					GetModels: async (payload) => ({
 						projectSlug: "myapp",
-						providers: modelExecutionMockup
-							? modelExecutionProviders
-							: dualDriverProviders,
+						providers: providers.filter((provider) => provider.id !== "claude"),
 						active: modelExecutionMockup
 							? { model: "opus[1m]", provider: "claude" }
 							: sessionInstance(payload) === "claude"
@@ -370,6 +371,10 @@ export const mockAppHandlers: StepHandler[] = [
 			});
 			rpcControls.set(world.page, rpcControl);
 			rpcControl.detailFeed = detailFeeds.get(world.page) ?? "synchronize";
+			rpcControl.setProjectSetting({
+				_tag: "providerModels",
+				providers: providers.filter((provider) => provider.id === "claude"),
+			});
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";

@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
@@ -15,6 +16,18 @@ export const composerEffortHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const options = (match[1] ?? "").split(", ");
 			effortOptions.set(world.page, options);
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "providerModels",
+				providers: dualDriverProviders
+					.filter((provider) => provider.id === "claude")
+					.map((provider) => ({
+						...provider,
+						models: provider.models.map((model) => ({
+							...model,
+							variants: options,
+						})),
+					})),
+			});
 			await refetchModelCatalog(world.page);
 			await expect(
 				world.page.getByTestId(/^(variant-badge|composer-word-effort)$/),

@@ -99,17 +99,27 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 	const appendInCurrentTransaction = (
 		event: CanonicalEvent,
-	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
+	): Effect.Effect<
+		{ readonly stored: StoredEvent; readonly duplicateAsk: boolean },
+		EventStoreError | SqlError
+	> =>
 		Effect.gen(function* () {
 			yield* validateCanonicalEvent(event);
 
 			const dataJson = JSON.stringify(event.data);
 			const metadataJson = JSON.stringify(event.metadata);
+			const requestId =
+				event.provider === "opencode" &&
+				(event.type === "permission.asked" || event.type === "question.asked")
+					? event.data.id
+					: undefined;
 			const isOpenCodeSessionSeed =
 				event.type === "session.created" &&
 				event.provider === "opencode" &&
 				event.eventId === `evt_opencode_session_created_${event.sessionId}`;
 
+			// Check request identity in the first write statement so independent
+			// SQLite connections cannot race a read snapshot into a write upgrade.
 			const rows = yield* sql<StoredEventRow>`
 				${sql.literal(isOpenCodeSessionSeed ? "INSERT OR IGNORE" : "INSERT")} INTO events (
 					project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
@@ -126,11 +136,18 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 					${event.createdAt}
 				FROM events
 				WHERE session_id = ${event.sessionId}
+				HAVING ${requestId ?? null} IS NULL OR NOT EXISTS (
+					SELECT 1 FROM events
+					WHERE session_id = ${event.sessionId}
+						AND provider = ${event.provider} AND type = ${event.type}
+						AND json_extract(data, '$.id') = ${requestId ?? null}
+				)
 				RETURNING
 					project_id, sequence, event_id, session_id, stream_version,
 					type, data, metadata, provider, created_at`;
 
 			let row = rows[0];
+			const duplicateAsk = !row && requestId !== undefined;
 			if (!row && isOpenCodeSessionSeed) {
 				// Retry projection with the durable seed after a failed projection.
 				const existingRows = yield* sql<StoredEventRow>`
@@ -138,6 +155,18 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 						type, data, metadata, provider, created_at
 					FROM events
 					WHERE event_id = ${event.eventId}`;
+				row = existingRows[0];
+			}
+			if (duplicateAsk) {
+				// Return the original event even when it predates request deduplication.
+				const existingRows = yield* sql<StoredEventRow>`
+					SELECT project_id, sequence, event_id, session_id, stream_version,
+						type, data, metadata, provider, created_at
+					FROM events
+					WHERE session_id = ${event.sessionId}
+						AND provider = ${event.provider} AND type = ${event.type}
+						AND json_extract(data, '$.id') = ${requestId}
+					ORDER BY sequence LIMIT 1`;
 				row = existingRows[0];
 			}
 			if (!row) {
@@ -148,7 +177,7 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			}
 
 			const stored = yield* decodeEventStoreRow(row);
-			return stored;
+			return { stored, duplicateAsk };
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof EventStoreError
@@ -160,7 +189,11 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 	const append = (
 		event: CanonicalEvent,
 	): Effect.Effect<StoredEvent, EventStoreError | SqlError> =>
-		sql.withTransaction(appendInCurrentTransaction(event));
+		sql.withTransaction(
+			appendInCurrentTransaction(event).pipe(
+				Effect.map(({ stored }) => stored),
+			),
+		);
 
 	const appendBatch = (
 		events: readonly CanonicalEvent[],
@@ -176,7 +209,10 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 							SELECT sequence FROM events WHERE event_id = ${event.eventId}`;
 						if (existing.length > 0) continue;
 					}
-					results.push(yield* appendInCurrentTransaction(event));
+					const { stored, duplicateAsk } =
+						yield* appendInCurrentTransaction(event);
+					// Recovery must not project an already stored ask again.
+					if (!duplicateAsk) results.push(stored);
 				}
 				return results;
 			}),

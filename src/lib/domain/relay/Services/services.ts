@@ -124,7 +124,7 @@ export type OpenCodeFileContent = Awaited<
 >;
 export type OpenCodeProviderList = Awaited<
 	ReturnType<OpenCodeAPI["provider"]["list"]>
->;
+> & { readonly nativeDefaultModel?: string };
 export type OpenCodeCommandList = Awaited<
 	ReturnType<OpenCodeAPI["app"]["commands"]>
 >;
@@ -222,12 +222,25 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 		const instanceId = defaultInstanceIdForDriver("opencode");
 		let catalog: OpenCodeProviderList | undefined;
 		const refresh = (opencode: OpenCodeAPI) =>
-			Effect.tryPromise(() => opencode.provider.list()).pipe(
-				Effect.tap((list) =>
-					Effect.sync(() => {
-						catalog = list;
-					}),
-				),
+			Effect.gen(function* () {
+				const list = yield* Effect.tryPromise(() => opencode.provider.list());
+				const nativeConfig = yield* Effect.either(
+					Effect.tryPromise(() => opencode.config.get()),
+				);
+				const nativeDefaultModel =
+					nativeConfig._tag === "Right"
+						? typeof nativeConfig.right["model"] === "string"
+							? nativeConfig.right["model"]
+							: undefined
+						: catalog?.nativeDefaultModel;
+				if (nativeConfig._tag === "Left")
+					log.warn("Failed to read OpenCode's native default model");
+				catalog = {
+					...list,
+					...(nativeDefaultModel === undefined ? {} : { nativeDefaultModel }),
+				};
+				return catalog;
+			}).pipe(
 				Effect.catchAll((error) =>
 					catalog ? Effect.succeed(catalog) : Effect.fail(error),
 				),

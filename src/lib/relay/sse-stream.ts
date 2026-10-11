@@ -42,7 +42,7 @@ export interface SSEStreamCallbacks {
 	error: (error: Error) => void;
 	heartbeat: () => void;
 	/** OpenCode instance lifecycle; only relay channels report it. */
-	status: (status: OpenCodeConnectionStatus) => void;
+	status: (status: OpenCodeConnectionStatus, managedStopped?: boolean) => void;
 }
 
 export interface SSEStreamEvents {
