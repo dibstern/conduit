@@ -100,27 +100,13 @@ export const DaemonHandleLive: Layer.Layer<
 		const onboardingPort = Effect.sync(() =>
 			getOnboardingPort(lifecycleContext.onboardingServer),
 		);
+		// A new project stays unbound unless the caller picks an instance: the
+		// binding chooses the harness for new sessions, so a default here would
+		// override the default model's harness. The relay picks an OpenCode
+		// instance on its own.
 		const saveProject = (input: SaveProjectInput) =>
 			Effect.gen(function* () {
-				const instances = Array.from(
-					yield* getEffectInstances.pipe(
-						Effect.provideService(InstanceManagerStateTag, instanceState),
-					),
-				);
-				const opencodeInstances = instances.filter(
-					(instance) => (instance.driver ?? "opencode") === "opencode",
-				);
-				const resolvedInstanceId =
-					input.instanceId ??
-					opencodeInstances.find((instance) => instance.status === "healthy")
-						?.id ??
-					opencodeInstances[0]?.id;
-				const result = yield* saveProjectToRegistry({
-					...input,
-					...(resolvedInstanceId !== undefined && {
-						instanceId: resolvedInstanceId,
-					}),
-				}).pipe(
+				const result = yield* saveProjectToRegistry(input).pipe(
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),

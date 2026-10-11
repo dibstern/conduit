@@ -52,9 +52,13 @@ vi.mock(
 	"../../../src/lib/frontend/components/model/ModelVariant.svelte",
 	closeableEmptyComponent,
 );
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "project-a",
-}));
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<object>()),
+		getCurrentSlug: () => "project-a",
+	}),
+);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getAgentsRpc: (input: unknown) => getAgentsRpcSpy(input),
 	reloadProviderSessionRpc: (input: {

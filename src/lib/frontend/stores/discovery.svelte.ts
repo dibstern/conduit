@@ -26,6 +26,7 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
+import { getDraftProject, projectState } from "./project-state.svelte.js";
 import { sessionState } from "./session.svelte.js";
 
 export const conduitCommands = [
@@ -128,16 +129,6 @@ export interface InstanceOption {
 
 const DRIVER_LABELS = { claude: "Claude", opencode: "OpenCode" } as const;
 
-const INSTANCE_DRAFT_KEY = "conduit-selected-instance";
-
-function loadInstanceDraft(): string | null {
-	try {
-		return localStorage.getItem(INSTANCE_DRAFT_KEY);
-	} catch {
-		return null;
-	}
-}
-
 /** Map a provider catalog id to the default instance id of its driver. */
 export function instanceIdForProviderId(
 	providerId: string,
@@ -207,9 +198,6 @@ const choice = $state({
 const clientDiscovery = $state({
 	/** Mode selected while no session was bound — flushed on session bind. */
 	pendingPermissionMode: null as SessionPermissionMode | null,
-	/** Pre-creation harness choice (client-persisted draft). Survives reload;
-	 *  never authoritative once a session is bound (harness is fixed then). */
-	selectedInstanceId: loadInstanceDraft() as string | null,
 });
 
 /** Read view over both halves. Server-owned fields have no setter: write them
@@ -298,12 +286,6 @@ export const discoveryState = {
 	},
 	set pendingPermissionMode(mode: SessionPermissionMode | null) {
 		clientDiscovery.pendingPermissionMode = mode;
-	},
-	get selectedInstanceId(): string | null {
-		return clientDiscovery.selectedInstanceId;
-	},
-	set selectedInstanceId(id: string | null) {
-		clientDiscovery.selectedInstanceId = id;
 	},
 };
 
@@ -454,16 +436,21 @@ export function getProviderGroupsForInstance(
 	);
 }
 
-/** The instance the composer is currently aimed at (pre-creation): the
- *  explicit draft when still available, else the instance derived from the
- *  current/default model's provider. Bound-session locking is layered on top
- *  by the picker (it needs session state). */
-export function getEffectiveInstanceId(): string {
+/** The instance a new session in `project` (default: the draft's) is created
+ *  on: the project's binding when still available, else the instance derived from the current/default
+ *  model's provider. The project binding is the only harness choice, so the
+ *  header badge and the composer picker cannot disagree. Bound-session
+ *  locking is layered on top by the picker (it needs session state). */
+export function getEffectiveInstanceId(
+	project: string | null = getDraftProject(),
+): string {
 	const available = getAvailableInstances();
 	const isAvailable = (id: string) =>
 		available.length === 0 || available.some((i) => i.id === id);
-	const selected = discoveryState.selectedInstanceId;
-	if (selected != null && isAvailable(selected)) return selected;
+	const bound = projectState.projects.find(
+		(p) => p.slug === project,
+	)?.instanceId;
+	if (bound != null && isAvailable(bound)) return bound;
 	const derived = instanceIdForProviderId(
 		discoveryState.currentProviderId || discoveryState.defaultProviderId,
 	);
@@ -471,16 +458,11 @@ export function getEffectiveInstanceId(): string {
 	return available[0]?.id ?? derived;
 }
 
-/** Select a harness instance (pre-creation only). Persists the draft and, if
- *  the active model falls outside the instance, re-aims the local model
- *  selection at the instance's default-or-first visible model. */
+/** Re-aim the local model selection after a harness pick (pre-creation
+ *  only): if the active model falls outside the instance, choose the
+ *  instance's default-or-first visible model. The pick itself is a project
+ *  rebind, which the caller makes. */
 export function selectInstance(instanceId: string): void {
-	clientDiscovery.selectedInstanceId = instanceId;
-	try {
-		localStorage.setItem(INSTANCE_DRAFT_KEY, instanceId);
-	} catch {
-		// localStorage unavailable (private browsing) — draft is best-effort.
-	}
 	const groups = getProviderGroupsForInstance(instanceId);
 	const models = groups.flatMap((g) => g.models);
 	// Match the provider too: both harnesses list ids like claude-sonnet-4-6,
@@ -1056,6 +1038,4 @@ export function clearDiscoveryState(): void {
 		choice[field] = null;
 		delete owner[field];
 	}
-	// selectedInstanceId is intentionally kept: it is a client-side draft
-	// preference (instances are daemon-global), not server discovery state.
 }

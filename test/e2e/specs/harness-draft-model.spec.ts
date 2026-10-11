@@ -130,15 +130,16 @@ test("a model picked in the draft composer is the model OpenCode runs", async ({
 		.toBe("opencode");
 });
 
-test("a draft harness restored from an earlier visit never sends OpenCode a Claude model", async ({
+test("a draft in a project bound to OpenCode never sends OpenCode a Claude model", async ({
 	page,
 	harness,
 }, testInfo) => {
-	// The harness pick persists across visits; the model pick does not.
-	await page.addInitScript(() =>
-		localStorage.setItem("conduit-selected-instance", "opencode"),
-	);
-	const picker = await openDraft(page, harness);
+	// The binding lives on the daemon; the relay default stays a Claude model.
+	const picker = await openDraft(page, harness, async (browser, slug) => {
+		await Effect.runPromise(
+			browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
+		);
+	});
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
 	const evidence = await sendAndCapture(page, harness, picker, testInfo);

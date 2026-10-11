@@ -18,12 +18,9 @@
 		instanceState,
 		instanceStatusColor,
 	} from "../../stores/instance.svelte.js";
-	import {
-		applyProjectList,
-		projectState,
-	} from "../../stores/project.svelte.js";
+	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { bindProjectInstance } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { setProjectInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
@@ -34,13 +31,11 @@
 
 	let { class: className = "" }: { class?: string } = $props();
 
+	// An unbound project shows the instance its new sessions land on.
 	const currentInstance = $derived.by(() => {
 		if (instanceState.instances.length <= 1) return undefined;
 		const slug = getCurrentSlug();
-		const project = slug
-			? projectState.projects.find((p) => p.slug === slug)
-			: undefined;
-		return project?.instanceId ? getInstanceById(project.instanceId) : undefined;
+		return slug ? getInstanceById(getEffectiveInstanceId(slug)) : undefined;
 	});
 
 	let open = $state(false);
@@ -49,10 +44,7 @@
 		// Picking an instance rebinds the *current project* to it rather than
 		// navigating anywhere; the project is the thing that has an instance.
 		const slug = getCurrentSlug();
-		if (!slug) return;
-		void setProjectInstanceRpc({ projectSlug: slug, slug, instanceId })
-			.then(applyProjectList)
-			.catch(() => undefined);
+		if (slug) bindProjectInstance(slug, instanceId);
 	}
 </script>
 
