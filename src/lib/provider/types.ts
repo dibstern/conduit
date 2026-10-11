@@ -167,6 +167,8 @@ export interface ModelInfo {
 	readonly resolvedModel?: string;
 	readonly limit?: { context?: number; output?: number };
 	readonly variants?: Record<string, Record<string, unknown>>;
+	/** Full request ids for catalog entries grouped by routing scope. */
+	readonly routingOptions?: readonly ContextWindowOption[];
 	/**
 	 * Optional per-model context-window selector entries. When present and
 	 * non-empty, the UI renders a dropdown alongside the effort picker. The
@@ -346,6 +348,12 @@ export interface ProviderInstance {
 	interruptTurnEffect(
 		sessionId: string,
 	): Effect.Effect<void, ProviderInstanceFailure>;
+
+	/** Stop a background task while leaving the query and its input queue live. */
+	readonly stopTaskEffect?: (
+		sessionId: string,
+		taskId: string,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending permission request (from EventSink.requestPermission) */
 	resolvePermissionEffect(

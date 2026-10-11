@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
+import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
 import {
 	composerPreferences,
 	setComposerPreferences,
@@ -13,6 +14,10 @@ import {
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
+import {
+	applyUsageLimitsSetting,
+	applyUsageReadings,
+} from "../../stores/usage.svelte.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
@@ -20,6 +25,8 @@ function resetState() {
 	routerState.path = "/";
 	clearDiscoveryState();
 	applyInstanceListResponse({ instances: [] });
+	applyUsageReadings([]);
+	applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
 	featureFlags.debug = false;
 	localStorage.setItem(
 		"notif-settings",
@@ -70,12 +77,12 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** A generic open: Alerts on desktop, the section list on phone. */
+/** A generic open: General on desktop, the section list on phone. */
 export const Default: Story = {};
 
-/** An explicit Alerts open: on phone it lands drilled in, past the list. */
+/** An explicit General open: on phone it lands drilled in, past the list. */
 export const NotificationsEnabled: Story = {
-	args: { initialTab: "notifications" },
+	args: { initialTab: "general" },
 	beforeEach: () => {
 		localStorage.setItem(
 			"notif-settings",
@@ -84,18 +91,14 @@ export const NotificationsEnabled: Story = {
 	},
 };
 
-export const Appearance: Story = {
-	args: { initialTab: "appearance" },
-};
-
 export const Composer: Story = {
 	tags: ["autodocs"],
-	args: { initialTab: "composer" },
+	args: { initialTab: "general" },
 	globals: { theme: "dark" },
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
 		// On phone an explicit section opens drilled in, so the list is not shown.
-		const tab = body.queryByTestId("settings-tab-composer");
+		const tab = body.queryByTestId("settings-tab-general");
 		if (tab) await expect(tab).toHaveAttribute("aria-selected", "true");
 		else await expect(body.getByTestId("settings-back-btn")).toBeVisible();
 		const icons = body.getByRole("radio", { name: "Icons" });
@@ -136,11 +139,11 @@ export const ComposerLight: Story = {
 };
 
 export const VisibilityEmpty: Story = {
-	args: { initialTab: "visibility" },
+	args: { initialTab: "models" },
 };
 
-export const VisibilityPopulated: Story = {
-	args: { initialTab: "visibility" },
+export const Models: Story = {
+	args: { initialTab: "models" },
 	beforeEach: () => {
 		handleModelList({
 			providers: [
@@ -185,8 +188,60 @@ export const VisibilityPopulated: Story = {
 	},
 };
 
-export const InstancesEmpty: Story = {
-	args: { initialTab: "instances" },
+export const Claude: Story = {
+	args: { initialTab: "claude" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const disclosure = canvas.getByRole("button", {
+			name: "Attribution Commit · PR · Session link",
+		});
+		await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+		await expect(
+			canvas.queryByTestId("claude-setting-attribution"),
+		).not.toBeInTheDocument();
+		canvas
+			.getByTestId("claude-attribution-group")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const ClaudeAttributionExpanded: Story = {
+	args: { initialTab: "claude" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const disclosure = canvas.getByRole("button", {
+			name: "Attribution Commit · PR · Session link",
+		});
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		// The synthetic click leaves keyboard focus; the frame should show the open group, not a ring.
+		disclosure.blur();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-commit-input"),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-pr-input"),
+		).toBeVisible();
+		await expect(
+			within(canvas.getByTestId("claude-setting-attribution")).getByRole(
+				"switch",
+			),
+		).toBeVisible();
+		await expect(
+			canvas.getByTestId("claude-setting-attribution-provenance"),
+		).toBeVisible();
+		canvas
+			.getByTestId("claude-attribution-group")
+			.scrollIntoView({ block: "end" });
+	},
+};
+
+export const Usage: Story = {
+	args: { initialTab: "usage" },
+};
+
+export const Server: Story = {
+	args: { initialTab: "server" },
 };
 
 /**
@@ -196,7 +251,7 @@ export const InstancesEmpty: Story = {
  * state rather than being a constant.
  */
 export const QuickStartExpanded: Story = {
-	args: { initialTab: "instances" },
+	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const row = canvas.getByRole("button", {
@@ -212,12 +267,12 @@ export const QuickStartExpanded: Story = {
 };
 
 export const InstancesPopulated: Story = {
-	args: { initialTab: "instances" },
+	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 };
 
 export const InstanceExpanded: Story = {
-	args: { initialTab: "instances" },
+	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -233,10 +288,6 @@ export const InstanceExpanded: Story = {
 	},
 };
 
-export const Debug: Story = {
-	args: { initialTab: "debug" },
-};
-
 export const Hover: Story = {
 	...Default,
 	parameters: { pseudo: { hover: true } },
@@ -249,7 +300,7 @@ export const Hover: Story = {
  * gate can only prove "nothing moved" against an image of the old markup.
  */
 export const InstanceForm: Story = {
-	args: { initialTab: "instances" },
+	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("add-instance-btn"));
@@ -264,7 +315,7 @@ export const InstanceForm: Story = {
 };
 
 /**
- * Hover on the instances tab. The existing Hover story sits on the Alerts tab,
+ * Hover on Server. The existing Hover story sits on General,
  * so every hover style in the instances list — Scan Now, Add, and the per-row
  * actions — was uncaptured. That matters more than usual here: the component swap
  * of this panel needs `!` overrides mostly to hold HOVER colours that differ
@@ -272,7 +323,7 @@ export const InstanceForm: Story = {
  * no gate can prove.
  */
 export const InstancesHover: Story = {
-	args: { initialTab: "instances" },
+	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	parameters: { pseudo: { hover: true } },
 };
@@ -306,7 +357,7 @@ export const InstancesHover: Story = {
  * watch the gate go red.
  */
 export const InstanceExpandedHover: Story = {
-	args: { initialTab: "instances" },
+	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

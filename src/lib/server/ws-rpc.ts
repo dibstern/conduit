@@ -144,13 +144,13 @@ export {
 	type SetKeepAwakeResponse,
 	SetLogLevel,
 	SetPin,
-	SetProjectInstance,
 	SetSessionAutoSettle,
 	SetSessionPinned,
 	SetSessionSettled,
 	Shutdown,
 	SnoozeSession,
 	StartInstance,
+	StopBackgroundTask,
 	StopInstance,
 	SubmitInput,
 	SubscribePtys,
@@ -347,7 +347,6 @@ export type DaemonRpcName =
 	| "GetProjects"
 	| "SaveProject"
 	| "RemoveProject"
-	| "SetProjectInstance"
 	| "StartInstance"
 	| "StopInstance"
 	| "RemoveInstance"

@@ -7,7 +7,10 @@ import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
 import type { SessionGit, SessionInfo } from "../../../shared-types.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
@@ -59,8 +62,17 @@ export const SessionGitLive = Layer.effect(
 								const request = queued;
 								queued = undefined;
 								const sessions = yield* read.listSessionInfos();
+								const projectFolders = [
+									config.projectDir,
+									...(config.extraFolders ?? []),
+								];
 								const directories = new Map<string, boolean>(
-									request.all ? [[config.projectDir, request.forceAll]] : [],
+									request.all
+										? projectFolders.map((directory) => [
+												directory,
+												request.forceAll,
+											])
+										: [],
 								);
 								const isolated = new Map<string, SessionInfo>();
 								for (const session of sessions) {
@@ -73,18 +85,25 @@ export const SessionGitLive = Layer.effect(
 										)
 									)
 										continue;
-									const directory = effectiveWorkingDirectory(
+									const workspaceDirectory = effectiveWorkingDirectory(
 										config.projectDir,
 										session.workspace,
 									);
 									if (session.workspace?.origin === "conduit")
-										isolated.set(directory, session);
-									directories.set(
-										directory,
-										Boolean(directories.get(directory)) ||
-											request.forceAll ||
-											request.forceSessionIds.has(session.id),
-									);
+										isolated.set(workspaceDirectory, session);
+									for (const directory of [
+										workspaceDirectory,
+										...effectiveSessionFolders(
+											projectFolders,
+											session.workspace,
+										).map(({ directory }) => directory),
+									])
+										directories.set(
+											directory,
+											Boolean(directories.get(directory)) ||
+												request.forceAll ||
+												request.forceSessionIds.has(session.id),
+										);
 								}
 								const next = new Map(published);
 								for (const [directory, force] of directories) {
@@ -137,7 +156,11 @@ export const SessionGitLive = Layer.effect(
 															config.projectDir,
 															workspace,
 														),
-													)
+													) ||
+													effectiveSessionFolders(
+														projectFolders,
+														workspace,
+													).some(({ directory }) => changed.has(directory))
 												)
 													ids.push(row.id);
 											}

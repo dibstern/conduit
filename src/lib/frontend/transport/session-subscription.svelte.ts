@@ -22,6 +22,7 @@ import {
 	forgetSession,
 	leaveDeletedSession,
 	sessionState,
+	settleReadMarks,
 } from "../stores/session.svelte.js";
 import type { SessionInfo } from "../types.js";
 import type { WsRpcSubscriptions } from "./shared-client.js";
@@ -155,6 +156,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		}
 	}
 	applied = next;
+	settleReadMarks(next.rows);
 }
 
 /** Forget the project we were watching. */

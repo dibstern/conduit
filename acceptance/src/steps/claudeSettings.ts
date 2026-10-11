@@ -11,11 +11,50 @@ const claudeSettingsSessionId = "sess-claude-settings";
 
 export const claudeSettingsHandlers: StepHandler[] = [
 	{
+		name: "assert claude attribution is collapsed with its fixed summary",
+		match:
+			/^the Claude Attribution group is collapsed with summary "Commit · PR · Session link"$/,
+		run: async ({ world }) => {
+			const disclosure = world.page
+				.getByTestId("claude-attribution-group")
+				.getByRole("button", {
+					name: "Attribution Commit · PR · Session link",
+					exact: true,
+				});
+			await disclosure.waitFor({ state: "visible", timeout: 5_000 });
+			if ((await disclosure.getAttribute("aria-expanded")) !== "false") {
+				throw new Error("Claude Attribution was not collapsed by default");
+			}
+			await world.page
+				.getByTestId("claude-setting-attribution")
+				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "expand claude attribution group",
+		match: /^I expand the Claude Attribution group$/,
+		run: async ({ world }) => {
+			const group = world.page.getByTestId("claude-attribution-group");
+			await group
+				.getByRole("button", {
+					name: "Attribution Commit · PR · Session link",
+					exact: true,
+				})
+				.click();
+			await group
+				.locator('button[aria-expanded="true"]')
+				.waitFor({ state: "visible", timeout: 5_000 });
+			await group
+				.getByTestId("claude-setting-attribution-commit-input")
+				.waitFor({ state: "visible", timeout: 5_000 });
+		},
+	},
+	{
 		name: "scroll claude settings to the attribution row",
 		match: /^I scroll the Claude settings to the Attribution row$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByTestId("claude-setting-attribution")
+				.getByTestId("claude-attribution-group")
 				.scrollIntoViewIfNeeded();
 		},
 	},
@@ -61,19 +100,18 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open settings to claude tab",
-		match: /^I open settings to the Claude tab$/,
+		name: "open settings to claude section",
+		match: /^I open settings to the Claude section$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await page.evaluate(() =>
 				window.dispatchEvent(
-					new CustomEvent("settings:open", { detail: { tab: "claude" } }),
+					new CustomEvent("settings:open", { detail: { section: "claude" } }),
 				),
 			);
 			await page
 				.locator("#settings-panel")
 				.waitFor({ state: "visible", timeout: 5_000 });
-			await page.getByTestId("settings-tab-claude").click();
 			await page
 				.getByTestId("claude-setting-autoCompactEnabled")
 				.waitFor({ state: "visible", timeout: 5_000 });

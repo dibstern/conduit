@@ -12,7 +12,7 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { directory, git, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss }: {
+	let { directory, git: folderGit, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss }: {
 		directory: string;
 		git: SessionGit | undefined;
 		workspaceCause?: WorkspaceMoveCause | undefined;
@@ -25,6 +25,8 @@
 		oncontinue?: (() => Promise<void>) | undefined;
 		ondismiss?: ((path: string) => Promise<void>) | undefined;
 	} = $props();
+	const folders = $derived(folderGit?.folders ?? []);
+	const git = $derived(folderGit?.folders && !folderGit.branch && !folderGit.head && folderGit.dirty === undefined ? undefined : folderGit);
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
 	let currentDirectory = $state<string | undefined>();
@@ -163,6 +165,20 @@
 		</Button></span>
 	{/snippet}
 	<MenuGroup label="Checkout">
+		{#if folders.length > 1 || (!git && folders.length > 0)}
+			{#each folders as folder (folder.root)}
+				<section class="px-[8px] py-[6px] text-[10px]" aria-label={folder.label} data-testid="session-folder-git" data-folder-root={folder.root}>
+					<p class="mb-[6px] break-all font-medium text-text" title={folder.root}>{folder.label}</p>
+					<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px]">
+						<dt class="text-text-muted">Branch</dt><dd class="min-w-0 break-all text-right text-text">{folder.branch || `Detached at ${folder.head ?? "unknown"}`}</dd>
+						{#if folder.ahead !== undefined || folder.behind !== undefined}
+							<dt class="text-text-muted">Upstream</dt><dd class="text-right tabular-nums text-text">↑{folder.ahead ?? 0} ↓{folder.behind ?? 0}</dd>
+						{/if}
+						<dt class="text-text-muted">Changes</dt><dd class="text-right {folder.dirty ? 'text-warning' : 'text-text'}">{folder.dirty ? "uncommitted" : "clean"}</dd>
+					</dl>
+				</section>
+			{/each}
+		{:else}
 		<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px] px-[8px] py-[6px] text-[10px]">
 			<dt class="text-text-muted">Project</dt><dd class="min-w-0 break-all text-right text-text">{project}</dd>
 			{#if git}
@@ -177,6 +193,7 @@
 				<dt class="text-text-muted">Changes</dt><dd class="text-right {git.dirty ? 'text-warning' : 'text-text'}">{git.dirty ? "uncommitted" : "clean"}</dd>
 			{/if}
 		</dl>
+		{/if}
 	</MenuGroup>
 	{#if workspaceMissing}
 		<MenuSeparator />

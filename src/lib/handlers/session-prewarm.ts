@@ -20,6 +20,7 @@ import { ProviderStateEffectTag } from "../persistence/effect/provider-state-eff
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { makePrepareTurn } from "../provider/claude/prepare-turn.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { harnessForModelProvider } from "../provider/turn-settings.js";
 
 /** Resolve the same launch inputs as a send without admitting a turn. */
 export const preWarmSession = (sessionId: string) =>
@@ -38,11 +39,7 @@ export const preWarmSession = (sessionId: string) =>
 		if (!instance?.preWarmSessionEffect) return;
 
 		const model = yield* getModel(sessionId);
-		if (
-			model &&
-			resolveProviderRoutingDriver(daemonConfig, model.providerID) !== "claude"
-		)
-			return;
+		if (model && harnessForModelProvider(model.providerID) !== "claude") return;
 		const providerState = yield* ProviderStateEffectTag;
 		const agentService = yield* AgentServiceTag;
 		const agent = yield* agentService.getActiveAgent(sessionId);

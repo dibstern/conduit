@@ -86,6 +86,8 @@ describe("SessionStatusPoller Effect", () => {
 							{ id: "hung", status: "busy", updated_at: longAgo },
 						]),
 					getSessionsAwaitingUser: () => Effect.succeed(new Set(["asking"])),
+					getStrandedChildren: () => Effect.succeed([]),
+					liveListOf: () => undefined,
 					injectCorrectiveEvent: (sessionId, status) =>
 						Effect.sync(() => {
 							injected.push({ sessionId, status });
@@ -95,6 +97,42 @@ describe("SessionStatusPoller Effect", () => {
 
 			expect(injected).toEqual([{ sessionId: "hung", status: "idle" }]);
 		}).pipe(Effect.provide(makeTestLayer())),
+	);
+
+	it.effect(
+		"settles a stranded child once its task has been off a stable live list for 60s",
+		() =>
+			Effect.gen(function* () {
+				const injected: string[] = [];
+				const now = Date.now();
+				const lists = new Map([
+					["stable", { taskIds: new Set(["kept"]), since: now - 61_000 }],
+					["fresh", { taskIds: new Set<string>(), since: now - 30_000 }],
+				]);
+
+				yield* poll({
+					getRawStatuses: () => Effect.succeed({}),
+					reconciliation: {
+						getProjectedSessions: () => Effect.succeed([]),
+						getSessionsAwaitingUser: () => Effect.succeed(new Set(["asking"])),
+						getStrandedChildren: () =>
+							Effect.succeed([
+								{ id: "gone", task_id: "t-gone", owner_id: "stable" },
+								{ id: "kept", task_id: "kept", owner_id: "stable" },
+								{ id: "asking", task_id: "t-ask", owner_id: "stable" },
+								{ id: "recent", task_id: "t-recent", owner_id: "fresh" },
+								{ id: "unheard", task_id: "t-unheard", owner_id: "silent" },
+							]),
+						liveListOf: (sessionId) => lists.get(sessionId),
+						injectCorrectiveEvent: (sessionId, status) =>
+							Effect.sync(() => {
+								injected.push(`${sessionId}:${status}`);
+							}),
+					},
+				});
+
+				expect(injected).toEqual(["gone:idle"]);
+			}).pipe(Effect.provide(makeTestLayer())),
 	);
 
 	it.effect("isProcessing returns false for unknown session", () =>

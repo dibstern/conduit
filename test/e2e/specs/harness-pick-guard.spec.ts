@@ -1,7 +1,9 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { Effect } from "effect";
+import { Effect, type Either } from "effect";
+import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import type {
@@ -112,13 +114,10 @@ async function openDraft(
 	driver: Driver,
 	prepare?: (browser: ProcessBrowser, slug: string) => Promise<void>,
 ) {
-	await page.addInitScript((instance) => {
-		localStorage.setItem("conduit-selected-instance", instance);
-	}, driver);
 	const directory = mkdtempSync(join(harness.root, "pick-guard-project-"));
 	const browser = await harness.connect();
 	const { savedSlug: slug } = await Effect.runPromise(
-		browser.rpc.SaveProject({ folders: [directory], instanceId: driver }),
+		browser.rpc.SaveProject({ folders: [directory] }),
 	);
 	if (!slug) throw new Error("SaveProject did not return a slug");
 	await Effect.runPromise(
@@ -607,4 +606,206 @@ test("unse: restart with a different default keeps the inherited model", async (
 		testInfo,
 		before.model,
 	);
+});
+
+async function assertPickRejected(
+	guard: GuardCase,
+	result: Either.Either<unknown, unknown>,
+	tag: "EffortNotOffered" | "ContextWindowNotOffered",
+	testInfo: TestInfo,
+	evidence: {
+		shown: Pick;
+		after: Pick;
+		request: Readonly<Record<string, unknown>>;
+		sessionsBefore: readonly string[];
+		sessionsAfter: readonly string[];
+	},
+): Promise<void> {
+	const error = result._tag === "Left" ? result.left : undefined;
+	const mismatches: string[] = [];
+	if (!(error instanceof WsRpcError))
+		mismatches.push(`RPC did not reject with WsRpcError: ${result._tag}`);
+	else if (!error.message.includes(tag))
+		mismatches.push(`RPC error omitted ${tag}: ${error.message}`);
+	for (const key of [
+		"harness",
+		"provider",
+		"model",
+		"effort",
+		"contextWindow",
+	] as const) {
+		if (evidence.shown[key] !== evidence.after[key])
+			mismatches.push(
+				`${key}: before ${JSON.stringify(evidence.shown[key])}, after ${JSON.stringify(evidence.after[key])}`,
+			);
+	}
+	if (
+		JSON.stringify(evidence.sessionsBefore) !==
+		JSON.stringify(evidence.sessionsAfter)
+	)
+		mismatches.push("Rejected RPC changed the session list");
+	const artifact = {
+		...guard,
+		...evidence,
+		sent: null,
+		expectedRejection: tag,
+		rpcResult:
+			result._tag === "Left" && error instanceof WsRpcError
+				? { _tag: "Left", error: { _tag: error._tag, message: error.message } }
+				: result,
+		equal: mismatches.length === 0,
+		mismatches,
+	};
+	const file = testInfo.outputPath("pick-guard.json");
+	writeFileSync(file, JSON.stringify(artifact, null, 2));
+	await testInfo.attach("pick-guard.json", {
+		path: file,
+		contentType: "application/json",
+	});
+	expect(
+		mismatches,
+		`${guard.case}: rejected pick leaves settings intact`,
+	).toEqual([]);
+}
+
+test.describe("server pick rejections", () => {
+	test.use({
+		harnessOptions: {
+			opencodeRecording: "chat-simple",
+			capabilityModels: [
+				...claudeModels,
+				{ id: "haiku", name: "Haiku", providerId: "claude" },
+			],
+		},
+	});
+
+	for (const driver of ["claude", "opencode"] as const) {
+		for (const rejection of [
+			"effort",
+			"context",
+			"no-efforts",
+			"create",
+		] as const) {
+			const caseId = `${driver === "claude" ? "c" : "o"}-reject-${rejection}`;
+			test(`${caseId}: ${driver}, ${rejection} RPC rejection`, async ({
+				page,
+				harness,
+			}, testInfo) => {
+				const { browser, slug, picker } = await openDraft(
+					page,
+					harness,
+					driver,
+				);
+				const model =
+					rejection === "no-efforts"
+						? {
+								providerID: driver,
+								modelID: driver === "claude" ? "haiku" : "minimax-m2.5-free",
+							}
+						: driver === "claude"
+							? { providerID: "claude", modelID: "sonnet" }
+							: openCodeModel;
+				let sessionId = "";
+				if (rejection !== "create") {
+					({ sessionId } = await Effect.runPromise(
+						browser.rpc.CreateSession({
+							projectSlug: slug,
+							originId: `${caseId}-setup`,
+							instanceId: ProviderInstanceIdSchema.make(driver),
+							model: {
+								providerId: model.providerID,
+								modelId: model.modelID,
+								variant: rejection === "no-efforts" ? "" : "high",
+							},
+						}),
+					));
+					await new AppPage(page).goto(
+						`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(slug)}`,
+					);
+					await expect(picker).toHaveAttribute(
+						"data-shown-model",
+						model.modelID,
+					);
+					await expect(picker).toHaveAttribute(
+						"data-shown-effort",
+						rejection === "no-efforts" ? "" : "high",
+					);
+				}
+				const shown = await readShown(picker);
+				const sessionsBefore = (
+					await Effect.runPromise(
+						browser.rpc.ListDaemonSessions({ projectSlug: slug }),
+					)
+				).sessions
+					.map((session) => session.id)
+					.sort();
+				const createRequest = {
+					projectSlug: slug,
+					originId: caseId,
+					instanceId: ProviderInstanceIdSchema.make(driver),
+					model: {
+						providerId: model.providerID,
+						modelId: model.modelID,
+						variant: "not-offered",
+					},
+				};
+				const contextRequest = {
+					projectSlug: slug,
+					sessionId,
+					contextWindow: "2m",
+				};
+				const variantRequest = {
+					projectSlug: slug,
+					sessionId,
+					variant: rejection === "no-efforts" ? "high" : "not-offered",
+				};
+				const call: Effect.Effect<unknown, unknown> =
+					rejection === "create"
+						? browser.rpc.CreateSession(createRequest)
+						: rejection === "context"
+							? browser.rpc.SwitchContextWindow(contextRequest)
+							: browser.rpc.SwitchVariant(variantRequest);
+				const result = await Effect.runPromise(Effect.either(call));
+				// Rehydrate server settings so a stale composer cannot hide mutation.
+				await page.reload();
+				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+				const after = await readShown(picker);
+				const sessionsAfter = (
+					await Effect.runPromise(
+						browser.rpc.ListDaemonSessions({ projectSlug: slug }),
+					)
+				).sessions
+					.map((session) => session.id)
+					.sort();
+				await assertPickRejected(
+					{
+						case: caseId,
+						harness: driver,
+						flow:
+							rejection === "create"
+								? "draft CreateSession RPC"
+								: "existing session settings RPC",
+						change: rejection,
+					},
+					result,
+					rejection === "context"
+						? "ContextWindowNotOffered"
+						: "EffortNotOffered",
+					testInfo,
+					{
+						shown,
+						after,
+						request:
+							rejection === "create"
+								? { method: "CreateSession", ...createRequest }
+								: rejection === "context"
+									? { method: "SwitchContextWindow", ...contextRequest }
+									: { method: "SwitchVariant", ...variantRequest },
+						sessionsBefore,
+						sessionsAfter,
+					},
+				);
+			});
+		}
+	}
 });

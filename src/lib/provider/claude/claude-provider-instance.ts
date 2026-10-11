@@ -60,6 +60,13 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		return this.runtime.interruptTurnEffect(sessionId);
 	}
 
+	stopTaskEffect(
+		sessionId: string,
+		taskId: string,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.runtime.stopTaskEffect(sessionId, taskId);
+	}
+
 	resolvePermissionEffect(
 		sessionId: string,
 		requestId: string,

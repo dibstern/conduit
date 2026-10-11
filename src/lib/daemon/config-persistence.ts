@@ -78,7 +78,6 @@ export interface DaemonConfig {
 		slug: string;
 		title?: string;
 		addedAt: number;
-		instanceId?: string;
 		shellEnv?: ProjectShellEnvConfig;
 		/** Cached session count from last run — for instant CLI display. */
 		sessionCount?: number;
@@ -107,7 +106,6 @@ const ProjectSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
-	instanceId: Schema.optional(Schema.String),
 	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
 	sessionCount: Schema.optional(Schema.Number),
 });
@@ -126,7 +124,7 @@ export type PersistedProject = Omit<
 	folders?: readonly string[];
 };
 
-const DaemonProjectSchema = Schema.transform(
+export const DaemonProjectSchema = Schema.transform(
 	PersistedProjectSchema,
 	Schema.typeSchema(ProjectSchema),
 	{
@@ -450,7 +448,7 @@ export function getConfigDir(): string {
  * Pre-driver-model installs stored the sole OpenCode server as instance id
  * `"default"`; the driver+instance model canonicalizes the default OpenCode
  * instance as `defaultInstanceIdForDriver("opencode") === "opencode"`. A
- * lingering `"default"` id desyncs the config (and every project binding) from
+ * lingering `"default"` id desyncs the config from
  * the composer rail, which keys OpenCode providers to `"opencode"` — leaving
  * the OpenCode harness unpickable and duplicated. Rewriting the id to the
  * canonical value on load makes the existing code correct end-to-end. URL
@@ -463,13 +461,8 @@ export function getConfigDir(): string {
  */
 export function migrateLegacyInstanceIds(config: DaemonConfig): DaemonConfig {
 	if (config.instances === undefined) return config;
-	const migrated = migrateLegacyDefaultOpencodeInstanceId(
-		config.instances,
-		config.projects,
-	);
-	return migrated === null
-		? config
-		: { ...config, instances: migrated.instances, projects: migrated.projects };
+	const migrated = migrateLegacyDefaultOpencodeInstanceId(config.instances);
+	return migrated === null ? config : { ...config, instances: migrated };
 }
 
 /** Read and parse daemon.json. Returns null if missing or corrupt. */

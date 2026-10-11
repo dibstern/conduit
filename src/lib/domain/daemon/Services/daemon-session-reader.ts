@@ -15,7 +15,10 @@ import {
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
 import type {
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
@@ -74,8 +77,8 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
-		if (gitCache.isStale(projectDirectory))
-			void gitCache.refresh(projectDirectory);
+		for (const folder of project.folders)
+			if (gitCache.isStale(folder)) void gitCache.refresh(folder);
 
 		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
@@ -114,9 +117,12 @@ const readProjectSessions = (
 			});
 		}).pipe(Effect.provide(readQueryLayer));
 		const directories = new Set(
-			sessions.map((session) =>
-				effectiveWorkingDirectory(projectDirectory, session.workspace),
-			),
+			sessions.flatMap((session) => [
+				effectiveWorkingDirectory(project.folders[0], session.workspace),
+				...effectiveSessionFolders(project.folders, session.workspace).map(
+					({ directory }) => directory,
+				),
+			]),
 		);
 		yield* Effect.tryPromise({
 			try: () =>
@@ -129,7 +135,7 @@ const readProjectSessions = (
 		});
 		return yield* Effect.forEach(sessions, (session) =>
 			withSessionWorktreeStatus(
-				withCachedSessionGit(session, projectDirectory, gitCache),
+				withCachedSessionGit(session, project.folders, gitCache),
 				{
 					projectDir: projectDirectory,
 					slug: projectSlug,

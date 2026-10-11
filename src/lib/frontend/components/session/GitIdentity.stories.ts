@@ -101,6 +101,89 @@ export const DetailsOpen: Story = {
 	},
 };
 
+export const FolderDetailsOpen: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		git: {
+			branch: "feature/web",
+			dirty: false,
+			folders: [
+				{
+					root: "/src/conduit",
+					label: "conduit",
+					branch: "feature/web",
+					dirty: false,
+					ahead: 0,
+					behind: 0,
+				},
+				{
+					root: "/src/api",
+					label: "api",
+					branch: "feature/api",
+					dirty: true,
+					ahead: 2,
+					behind: 1,
+				},
+				{
+					root: "/src/library",
+					label: "library",
+					head: "a1b2c3d",
+					dirty: false,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
+			"session-folder-git",
+		);
+		await expect(rows).toHaveLength(3);
+		await expect(rows[0]).toHaveTextContent("feature/web");
+		await expect(rows[0]).toHaveTextContent("clean");
+		await expect(rows[1]).toHaveTextContent("feature/api");
+		await expect(rows[1]).toHaveTextContent("uncommitted");
+		await expect(rows[1]).toHaveTextContent("↑2 ↓1");
+		await expect(rows[2]).toHaveTextContent("Detached at a1b2c3d");
+	},
+};
+
+export const NonGitPrimary: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/notes",
+		git: {
+			folders: [
+				{
+					root: "/src/api",
+					label: "api",
+					branch: "feature/api",
+					dirty: true,
+					ahead: 2,
+					behind: 1,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const identity = within(canvasElement).getByTestId("session-bar-identity");
+		await expect(
+			identity.querySelector('[data-icon="folder"]'),
+		).toBeInTheDocument();
+		await userEvent.click(identity);
+		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
+			"session-folder-git",
+		);
+		await expect(rows).toHaveLength(1);
+		await expect(rows[0]).toHaveTextContent("api");
+		await expect(rows[0]).toHaveTextContent("feature/api");
+		await expect(rows[0]).toHaveTextContent("uncommitted");
+		await expect(rows[0]).toHaveTextContent("↑2 ↓1");
+	},
+};
+
 export const WorktreeMenu: Story = {
 	tags: ["viewport-capture"],
 	args: {

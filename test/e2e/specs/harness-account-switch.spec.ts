@@ -187,7 +187,6 @@ for (const stale of [false, true]) {
 			const { savedSlug: projectSlug } = await Effect.runPromise(
 				browser.rpc.SaveProject({
 					folders: [mkdtempSync(join(harness.root, "return-project-"))],
-					instanceId: account1.id,
 				}),
 			);
 			if (!projectSlug) throw new Error("No return project slug");
@@ -415,7 +414,6 @@ for (const dismiss of [false, true]) {
 			const { savedSlug: slug } = await Effect.runPromise(
 				browser.rpc.SaveProject({
 					folders: [directory],
-					instanceId: account.id,
 				}),
 			);
 			if (!slug) throw new Error("No project slug");
@@ -688,7 +686,7 @@ for (const decision of [
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "retry-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+			browser.rpc.SaveProject({ folders: [directory] }),
 		);
 		if (!projectSlug) throw new Error("No retry project slug");
 		// Session creation resolves the account from daemon.json, which reaches
@@ -1073,7 +1071,6 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		const { savedSlug: projectSlug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [mkdtempSync(join(harness.root, "auto-switch-project-"))],
-				instanceId: source.id,
 			}),
 		);
 		if (!projectSlug) throw new Error("No auto-switch project slug");
@@ -1140,7 +1137,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		const openUsageLimitSettings = async () => {
 			await page.evaluate(() =>
 				window.dispatchEvent(
-					new CustomEvent("settings:open", { detail: { tab: "usage" } }),
+					new CustomEvent("settings:open", { detail: { section: "usage" } }),
 				),
 			);
 			const section = page.locator("#usage-settings");
@@ -1448,7 +1445,7 @@ for (const scenario of [
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "reset-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+			browser.rpc.SaveProject({ folders: [directory] }),
 		);
 		if (!projectSlug) throw new Error("No reset project slug");
 		// See the Try again setup: wait for daemon.json without sending RPCs.
@@ -1819,7 +1816,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "auto-resume-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({ folders: [directory], instanceId }),
+			browser.rpc.SaveProject({ folders: [directory] }),
 		);
 		if (!projectSlug) throw new Error("No auto-resume project slug");
 		const usageLimits = { ...defaults, autoResume: scenario !== "off" };
@@ -2042,7 +2039,6 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		const { savedSlug: slug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [directory],
-				instanceId: account.id,
 			}),
 		);
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
@@ -2223,7 +2219,6 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		const { savedSlug: slug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [directory],
-				instanceId: addedInstanceId,
 			}),
 		);
 		if (!slug) throw new Error("SaveProject did not return the project's slug");
@@ -2471,7 +2466,6 @@ for (const behavior of [
 		const { savedSlug: projectSlug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
-				instanceId: source.id,
 			}),
 		);
 		if (!projectSlug) throw new Error("No switch project slug");
@@ -3115,8 +3109,8 @@ for (const behavior of [
 	});
 }
 
-// Story 16. Failures: the pill shows the project's account instead of the
-// session's, a pick rebinds the project, or the session stays on account 1.
+// Story 16. Failures: the pill shows the wrong account or the session stays
+// on account 1 after switching.
 test("story 16: the session-bar account pill switches the session, not the project", async ({
 	page,
 	harness,
@@ -3142,14 +3136,13 @@ test("story 16: the session-bar account pill switches the session, not the proje
 	const { savedSlug: projectSlug } = await Effect.runPromise(
 		browser.rpc.SaveProject({
 			folders: [mkdtempSync(join(harness.root, "pill-project-"))],
-			instanceId: source.id,
 		}),
 	);
 	if (!projectSlug) throw new Error("No pill project slug");
-	const boundInstance = async () =>
+	const registeredProject = async () =>
 		(await Effect.runPromise(browser.rpc.GetProjects({}))).projects.find(
 			(project) => project.slug === projectSlug,
-		)?.instanceId;
+		);
 	// Project RPCs reset config persistence's debounce. Wait on disk once,
 	// without retrying CreateSession or issuing another project RPC.
 	await expect
@@ -3211,8 +3204,6 @@ test("story 16: the session-bar account pill switches the session, not the proje
 		const pill = bar.getByTestId("session-account-pill");
 		await expect(pill).toHaveText("Account 1");
 		await expect(pill).toHaveAttribute("data-account", source.id);
-		// The project's rebind control is not offered on a Claude session.
-		await expect(bar.getByTestId("instance-badge")).toHaveCount(0);
 		await page.screenshot({ path: join(artifacts, "01-pill.png") });
 
 		await pill.click();
@@ -3247,12 +3238,12 @@ test("story 16: the session-bar account pill switches the session, not the proje
 			instanceId: target.id,
 			from: source.id,
 		});
-		expect(await boundInstance()).toBe(source.id);
+		expect(await registeredProject()).not.toHaveProperty("instanceId");
 		await expect(pill).toHaveText("Account 2");
 		await expect(pill).toHaveAttribute("data-account", target.id);
 		await page.screenshot({ path: join(artifacts, "04-switched.png") });
 
-		// The next turn runs on account 2 with the handoff; the project stays on 1.
+		// The next turn runs on account 2 with the handoff.
 		await send("Next message on the new account.", "pill-next");
 		await expect
 			.poll(
@@ -3267,9 +3258,9 @@ test("story 16: the session-bar account pill switches the session, not the proje
 				.claudeOptions()
 				.find((call) => call.configDir === target.configDir)?.prompt,
 		).toContain(handoffMarker);
-		expect(await boundInstance()).toBe(source.id);
+		expect(await registeredProject()).not.toHaveProperty("instanceId");
 		evidence["resumes"] = latest()?.resumes;
-		evidence["boundInstance"] = await boundInstance();
+		evidence["project"] = await registeredProject();
 	} finally {
 		evidence["observed"] = observed;
 		evidence["sdkCalls"] = harness.claudeOptions();

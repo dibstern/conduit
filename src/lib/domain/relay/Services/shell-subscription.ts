@@ -106,7 +106,10 @@ export const subscribeShell = (
 											item: {
 												...(config
 													? yield* withSessionWorktreeStatus(
-															withCachedSessionGit(row.item, config.projectDir),
+															withCachedSessionGit(row.item, [
+																config.projectDir,
+																...(config.extraFolders ?? []),
+															]),
 															config,
 														)
 													: row.item),

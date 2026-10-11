@@ -20,7 +20,7 @@
 -->
 
 <script lang="ts">
-	import { followSessionBusy, isProcessing } from "../../stores/chat.svelte.js";
+	import { isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
@@ -34,11 +34,11 @@
 		isBarCollapsed,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
-	import { findSession, getAttentionSessions, isSessionBusy, sessionAttention, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, getAttentionSessions, sessionAttention, sessionState } from "../../stores/session.svelte.js";
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
-	import { cancelSessionRpc, getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import { stopBackgroundTaskRpc, getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
@@ -65,13 +65,12 @@
 	import SideThreadsPanel, { waitingMarker } from "../session/SideThreadsPanel.svelte";
 	import { appBanners } from "../overlays/Banners.svelte";
 	import BannersRow from "../overlays/BannersRow.svelte";
-	import { tasksPanel } from "../session/background-tasks.svelte.js";
+	import { taskStopIds, tasksPanel } from "../session/background-tasks.svelte.js";
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
-	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import SessionAccountPill from "./SessionAccountPill.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
@@ -118,17 +117,20 @@
 		if (backgroundTasks.length === 0) tasksPanel.open = false;
 	});
 
-	function stopAllBackgroundTasks() {
+	async function stopBackgroundTasks(taskId?: string) {
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
-		tasksPanel.open = false;
 		if (!sessionId || !projectSlug) return;
-		void cancelSessionRpc({ projectSlug, sessionId, commandId: crypto.randomUUID() }).then(() => {
-			// See InputArea's handleStop: an interrupt may end a turn the row never reported.
-			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-		}).catch(() => {
-			showToast("Failed to stop session", { variant: "error" });
-		});
+		const ids = taskStopIds(backgroundTasks, taskId);
+		let failed = false;
+		for (const id of ids) {
+			try {
+				await stopBackgroundTaskRpc({ projectSlug, sessionId, taskId: id });
+			} catch {
+				failed = true;
+			}
+		}
+		if (failed) showToast(taskId ? "Failed to stop background task" : "Failed to stop background tasks", { variant: "error" });
 	}
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
@@ -234,6 +236,10 @@
 		sessionInstance?.capabilities?.supportsWorktree
 			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsWorktree,
 	);
+	const supportsTaskStop = $derived((
+		sessionInstance?.capabilities?.supportsTaskStop
+			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsTaskStop
+	) === true);
 	async function loadWorktrees() {
 		return project && session ? await listWorktreesRpc(project.slug, session.id) : { worktrees: [] };
 	}
@@ -450,13 +456,8 @@
 				</Tooltip>
 			{/if}
 		</div>
-		<!-- Until an open session's provider is known, show neither: the project badge would flash before a Claude session's pill. -->
-		{#if !session}
-			<InstanceBadgeMenu />
-		{:else if discoveryState.sessionProviderIds[session.id] === "claude"}
+		{#if session && discoveryState.sessionProviderIds[session.id] === "claude"}
 			<SessionAccountPill {session} />
-		{:else if discoveryState.sessionProviderIds[session.id] !== undefined}
-			<InstanceBadgeMenu />
 		{/if}
 	</div>
 {/snippet}
@@ -734,7 +735,7 @@
 	{/if}
 
 	{#if tasksPanel.open && backgroundTasks.length > 0}
-		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstopall={stopAllBackgroundTasks} />
+		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(); } : undefined} />
 	{/if}
 
 	{#if sideThreadsPanel.open}

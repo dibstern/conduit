@@ -66,6 +66,12 @@ export interface CancelSessionRpcInput {
 	readonly commandId: string;
 }
 
+export interface StopBackgroundTaskRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly taskId: string;
+}
+
 export interface GetModelsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
@@ -94,12 +100,6 @@ export interface SaveProjectRpcInput extends SaveProjectInput {
 export interface RemoveProjectRpcInput {
 	readonly projectSlug: string;
 	readonly slug: string;
-}
-
-export interface SetProjectInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-	readonly instanceId: string;
 }
 
 export interface InstanceMutationRpcInput {
@@ -593,6 +593,16 @@ const callCancelSession = (input: CancelSessionRpcInput) =>
 		client.CancelSession(input).pipe(Effect.asVoid),
 	);
 
+export async function stopBackgroundTaskRpc(
+	input: StopBackgroundTaskRpcInput,
+): Promise<void> {
+	await runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.StopBackgroundTask(input).pipe(Effect.asVoid),
+		),
+	);
+}
+
 const callGetModels = (input: GetModelsRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetModels(input));
 
@@ -610,9 +620,6 @@ const callSaveProject = (input: SaveProjectRpcInput) =>
 
 const callRemoveProject = (input: RemoveProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RemoveProject(input));
-
-const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
-	callControl(input.projectSlug, (client) => client.SetProjectInstance(input));
 
 const callStartInstance = (input: InstanceMutationRpcInput) =>
 	callDaemon((client) => client.StartInstance(input));
@@ -1037,12 +1044,6 @@ export async function removeProjectRpc(
 	input: RemoveProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
 	return await runTransportEffect(callRemoveProject(input));
-}
-
-export async function setProjectInstanceRpc(
-	input: SetProjectInstanceRpcInput,
-): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callSetProjectInstance(input));
 }
 
 export async function startInstanceRpc(

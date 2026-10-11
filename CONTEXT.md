@@ -66,7 +66,7 @@ otherwise the only mapped worktree, otherwise the primary project folder. The
 session's git pill and next provider launch use it; new terminals default to it
 and the picker can start one in any Effective Folder.
 **Effective Folders** are each Project Folder's session worktree when mapped,
-otherwise the Project Folder itself. A worktree is session state, not a project.
+otherwise the Project Folder itself. A worktree is session state, not a project. Git status is reported per git Effective Folder.
 The file tree lists every Effective Folder, each Project Folder mapped through
 the workspace, as a labelled root, primary first. Single-folder projects keep
 their existing tree without an extra root row. File list and content requests
