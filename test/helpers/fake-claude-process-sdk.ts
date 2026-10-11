@@ -940,6 +940,96 @@ function query(params: {
 						{ once: true },
 					);
 				});
+			const workspaceHintPrefix = "workspace-hint-tools ";
+			const workspaceHintRequest = request
+				.split("\n")
+				.find((line) => line.startsWith(workspaceHintPrefix));
+			if (workspaceHintRequest) {
+				const turn = JSON.parse(
+					workspaceHintRequest.slice(workspaceHintPrefix.length),
+				) as {
+					writes: readonly string[];
+					reads?: readonly string[];
+					declareWorkspace?: string;
+					holdBeforeResult?: boolean;
+					failAfterTools?: boolean;
+				};
+				const tools: readonly {
+					name: string;
+					input: Record<string, unknown>;
+					workspacePath?: string;
+				}[] = [
+					...(turn.declareWorkspace
+						? [
+								{
+									name: "EnterWorktree",
+									input: { path: turn.declareWorkspace },
+									workspacePath: turn.declareWorkspace,
+								},
+							]
+						: []),
+					...turn.writes.map((path) => ({
+						name: "Write",
+						input: { file_path: path, content: "workspace hint fixture\n" },
+					})),
+					...(turn.reads ?? []).map((path) => ({
+						name: "Read",
+						input: { file_path: path },
+					})),
+				];
+				for (const [offset, tool] of tools.entries()) {
+					const toolUseID = randomUUID();
+					const index = offset + 1;
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block: {
+							type: "tool_use",
+							id: toolUseID,
+							name: tool.name,
+							input: {},
+						},
+					});
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index,
+						delta: {
+							type: "input_json_delta",
+							partial_json: JSON.stringify(tool.input),
+						},
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+					yield {
+						type: "user",
+						uuid: randomUUID(),
+						session_id: sessionId,
+						parent_tool_use_id: null,
+						...(tool.workspacePath === undefined
+							? {}
+							: { tool_use_result: { worktreePath: tool.workspacePath } }),
+						message: {
+							role: "user",
+							content: [
+								{
+									type: "tool_result",
+									tool_use_id: toolUseID,
+									content: "workspace hint fixture complete",
+								},
+							],
+						},
+					} as unknown as SDKMessage;
+				}
+				if (turn.holdBeforeResult) {
+					if (!optionsFile)
+						throw new Error("Missing workspace hint fixture gate");
+					const release = join(dirname(optionsFile), "workspace-hint-release");
+					while (!existsSync(release) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed) return;
+				}
+				if (turn.failAfterTools)
+					throw new Error("Harness failure after workspace writes");
+			}
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");

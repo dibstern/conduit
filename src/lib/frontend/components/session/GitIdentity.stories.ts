@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import AgentWorktreeLifecycle from "./__fixtures__/AgentWorktreeLifecycle.svelte";
 import GitIdentity from "./GitIdentity.svelte";
@@ -131,6 +131,86 @@ export const WorktreeMenu: Story = {
 		await expect(
 			within(document.body).getByRole("menuitem", { name: /feature\/two/ }),
 		).toBeVisible();
+	},
+};
+
+export const WorkspaceMismatch: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-two",
+		git: { branch: "feature/two", worktree: "conduit-two" },
+		workspaceMismatch: {
+			actualPath: "/src/conduit/.claude/worktrees/contract",
+		},
+		onmove: fn(async (_path: string) => {}),
+	},
+	play: async ({ canvasElement, args }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("workspace-mismatch")).toHaveTextContent(
+			args["workspaceMismatch"]?.actualPath ?? "",
+		);
+		await userEvent.click(body.getByRole("menuitem", { name: "Retry move" }));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-two");
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-identity"),
+		);
+		await expect(body.getByTestId("workspace-mismatch")).toBeVisible();
+	},
+};
+
+export const WorkspaceHint: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit",
+		git: { branch: "main" },
+		workspaceHint: "/src/conduit-hint",
+		onmove: fn(async (_path: string) => {}),
+		ondismiss: fn(async (_path: string) => {}),
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-hint")).toHaveTextContent(
+			"working in conduit-hint?",
+		);
+		await userEvent.click(canvas.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
+		await userEvent.click(canvas.getByTestId("workspace-hint-dismiss"));
+		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
+	},
+};
+
+export const WorkspaceHintPhone: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const hint = canvas.getByTestId("workspace-hint");
+		await expect(hint).toHaveAttribute(
+			"aria-label",
+			"working in conduit-hint?",
+		);
+		await expect(hint).toHaveTextContent(/^$/);
+		await expect(
+			canvas.queryByTestId("workspace-hint-move"),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("workspace-hint-dismiss"),
+		).not.toBeInTheDocument();
+		const identity = canvas.getByTestId("session-bar-identity");
+		await userEvent.click(identity);
+		await expect(body.getByTestId("workspace-hint-dismiss")).toBeVisible();
+		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
+		await userEvent.click(identity);
+		await userEvent.click(body.getByTestId("workspace-hint-dismiss"));
+		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
 	},
 };
 

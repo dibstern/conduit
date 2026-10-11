@@ -352,7 +352,13 @@ export function buildUserMessage(input: SendTurnInput): SDKUserMessage {
 			});
 		}
 	}
-	content.push({ type: "text" as const, text: input.prompt });
+	content.push({
+		type: "text" as const,
+		text:
+			input.workspaceMoveDirective === undefined
+				? input.prompt
+				: `${input.workspaceMoveDirective}\n${input.prompt}`,
+	});
 	// The input id is the SDK message uuid, so lifecycle frames and results
 	// name the input they belong to.
 	return {

@@ -19,12 +19,14 @@ import {
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
+import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import {
 	ReadQueryEffectTag,
 	sessionGoalState,
 } from "../../../persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
@@ -509,6 +511,31 @@ const prepareEngineTurnInput = (
 			(resolvedInput.modelUserSelected ||
 				(isClaudeDriver(driver) &&
 					resolvedInput.model.providerID === CLAUDE_PROVIDER_ID));
+		let workspaceMoveSequence: number | undefined;
+		let workspaceMoveDirective: string | undefined;
+		if (isClaudeDriver(driver) && !resolvedInput.steer) {
+			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+			if (workspace._tag === "Some") {
+				const state = yield* workspace.value.claudeWorktreeState(
+					resolvedInput.sessionId,
+				);
+				if (state.directivePending) {
+					const config = yield* ConfigTag;
+					const checkouts = yield* Effect.forEach(
+						[config.projectDir, ...(config.extraFolders ?? [])],
+						(folder) =>
+							realWorkspacePath(folder).pipe(
+								Effect.orElseSucceed(() => folder),
+							),
+					);
+					const directive = checkouts.includes(state.requestedPath)
+						? '[Conduit workspace move] Call ExitWorktree with action "keep" before continuing.'
+						: `[Conduit workspace move] Call EnterWorktree with path ${JSON.stringify(state.requestedPath)} before continuing.`;
+					workspaceMoveSequence = state.userMoveSequence;
+					workspaceMoveDirective = directive;
+				}
+			}
+		}
 		// An effort belongs to its model. One inherited with the other harness's
 		// default model would run on a model that may not offer it.
 		const sendVariant =
@@ -519,6 +546,9 @@ const prepareEngineTurnInput = (
 			sessionId: resolvedInput.sessionId,
 			inputId,
 			prompt: resolvedInput.text,
+			...(workspaceMoveDirective === undefined
+				? {}
+				: { workspaceMoveDirective }),
 			...(resolvedInput.continuation
 				? { continuation: resolvedInput.continuation }
 				: {}),
@@ -557,7 +587,7 @@ const prepareEngineTurnInput = (
 				: {}),
 		};
 
-		return sendTurnInput;
+		return { sendTurnInput, workspaceMoveSequence };
 	});
 
 const dispatchEngineTurn = (
@@ -565,6 +595,7 @@ const dispatchEngineTurn = (
 	providerId: string,
 	driver: ProviderDriverKind,
 	sendTurnInput: SendTurnInput,
+	workspaceMoveSequence: number | undefined,
 ) =>
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
@@ -616,6 +647,29 @@ const dispatchEngineTurn = (
 				},
 			},
 		};
+		const events = (resolvedInput.events ?? []).map((event) =>
+			event.type === "input.sent" && workspaceMoveSequence !== undefined
+				? { ...event, data: { ...event.data, workspaceMoveSequence } }
+				: event,
+		);
+		// Continuations have no inbox admission, but handing their directive to
+		// Claude still consumes exactly this move, atomically with the outbox.
+		if (
+			workspaceMoveSequence !== undefined &&
+			!events.some((event) => event.type === "input.sent")
+		)
+			events.push(
+				canonicalEvent(
+					"input.sent",
+					resolvedInput.sessionId,
+					{
+						sessionId: resolvedInput.sessionId,
+						inputId: sendTurnInput.inputId,
+						workspaceMoveSequence,
+					},
+					{ provider: "claude" },
+				),
+			);
 		const dispatchProgram = Effect.try({
 			try: () =>
 				orchestrationEngine.dispatchEffect({
@@ -623,7 +677,7 @@ const dispatchEngineTurn = (
 					commandId: resolvedInput.commandId,
 					providerId,
 					input: watchedInput,
-					...(resolvedInput.events ? { events: resolvedInput.events } : {}),
+					...(events.length > 0 ? { events } : {}),
 					onAccepted: Deferred.succeed(accepted, undefined),
 				}),
 			catch: (cause) => cause,
@@ -668,7 +722,7 @@ const sendViaEngine = (
 	Effect.gen(function* () {
 		const resolvedInput = yield* resolveClaudeModel(input, providerId, driver);
 		if (!resolvedInput) return;
-		const sendTurnInput = yield* prepareEngineTurnInput(
+		const prepared = yield* prepareEngineTurnInput(
 			resolvedInput,
 			providerId,
 			driver,
@@ -680,8 +734,14 @@ const sendViaEngine = (
 				(cause) => handleDispatchFailure(resolvedInput, cause, driver),
 			),
 		);
-		if (!sendTurnInput) return;
-		yield* dispatchEngineTurn(resolvedInput, providerId, driver, sendTurnInput);
+		if (!prepared) return;
+		yield* dispatchEngineTurn(
+			resolvedInput,
+			providerId,
+			driver,
+			prepared.sendTurnInput,
+			prepared.workspaceMoveSequence,
+		);
 	});
 
 /** The handoff is where a turn starts working: arm its timeout. The browser's

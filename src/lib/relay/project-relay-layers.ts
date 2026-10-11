@@ -91,6 +91,8 @@ import type { SessionManagerServiceTag } from "../domain/relay/Services/session-
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
+import { SessionWorkspaceHintStateLive } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceLive,
@@ -331,7 +333,7 @@ export function createProjectRelayLayers({
 		config.slug,
 		undefined,
 		SessionEventBusLive,
-	);
+	).pipe(Layer.provideMerge(SessionWorkspaceHintStateLive));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
@@ -407,11 +409,13 @@ export function createProjectRelayLayers({
 						return (project: CommitAndSignalProject) =>
 							Effect.gen(function* () {
 								// A user can move while resolution is in flight. Recheck intent under
-								// the commit permit; this state check does only database reads.
+								// the commit permit before recording the declaration.
+								const state = yield* workspace.claudeWorktreeState(
+									event.sessionId,
+								);
 								if (
-									source === "start" &&
-									(yield* workspace.claudeWorktreeState(event.sessionId))
-										.pendingUserMove
+									state.pendingUserMove &&
+									target.path !== state.requestedPath
 								)
 									return;
 								yield* workspace.record(event.sessionId, target, "agent", {
@@ -491,6 +495,9 @@ export function createProjectRelayLayers({
 	// ingestion pipeline — no duplicate event append. Likewise the shared
 	// persistenceEffectLayer reference gives orchestration (session bindings,
 	// durable command receipts) the relay's one SqlClient connection.
+	const instanceManagementLayer = hasInstanceManagement
+		? InstanceManagementServiceFromConfigLive.pipe(Layer.provide(configLayer))
+		: Layer.empty;
 	const providerOrchestrationDeps = Layer.mergeAll(
 		openCodeApiLayer,
 		persistenceEffectLayer,
@@ -499,6 +506,7 @@ export function createProjectRelayLayers({
 		SessionEventBusLive,
 		providerRuntimeIngestionLayer,
 		openCodeInstancesLayer,
+		instanceManagementLayer,
 	);
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
@@ -615,14 +623,7 @@ export function createProjectRelayLayers({
 	);
 
 	// Optional bridge layers (only included when deps are present)
-	const bridgeLayers = hasInstanceManagement
-		? Layer.merge(
-				coreBridgeLayers,
-				InstanceManagementServiceFromConfigLive.pipe(
-					Layer.provide(configLayer),
-				),
-			)
-		: coreBridgeLayers;
+	const bridgeLayers = Layer.merge(coreBridgeLayers, instanceManagementLayer);
 	// Compose: self-constructing state layers + imperative bridge layers.
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionLifecycleWiringLive) are added after monitoring state exists
@@ -682,7 +683,10 @@ export function createProjectRelayLayers({
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
 	const fullLayer = Layer.provideMerge(
 		RpcSubscriptionScopeLive,
-		Layer.provideMerge(Layer.merge(wiringLayers, inboxLayer), fullBaseLayers),
+		Layer.provideMerge(
+			Layer.mergeAll(wiringLayers, inboxLayer, SessionWorkspaceHintReactorLive),
+			fullBaseLayers,
+		),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

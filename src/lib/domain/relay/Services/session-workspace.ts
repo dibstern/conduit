@@ -40,7 +40,12 @@ export interface SessionWorkspace {
 	/** A user move is pending until a matching startup or agent declaration acknowledges it. */
 	readonly claudeWorktreeState: (sessionId: string) => Effect.Effect<
 		{
+			readonly enteredWorktree: boolean;
 			readonly pendingUserMove: boolean;
+			readonly directivePending: boolean;
+			readonly userMoveSequence: number | undefined;
+			readonly requestedPath: string;
+			readonly workspaceMismatch: { readonly actualPath: string } | undefined;
 		},
 		SessionCommandError
 	>;

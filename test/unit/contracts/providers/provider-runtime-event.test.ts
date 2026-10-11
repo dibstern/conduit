@@ -114,6 +114,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.permission_mode_changed",
 			"session.model_changed",
 			"session.workspace_changed",
+			"session.workspace_hint_changed", // Relay-owned write-path inference.
 			"session.workspace_started", // Mapped from the provider's workspace.changed startup report.
 			"session.variant_changed",
 			"session.context_window_changed",

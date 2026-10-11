@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, type Scope } from "effect";
+import { Context, Effect, Layer, Option, type Scope } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -15,6 +15,7 @@ import {
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
+import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
@@ -155,6 +156,9 @@ const createOrchestrationComponentsEffect = (
 		// binds session→providerId), so a session-keyed resolver over the
 		// binding read model is correct for sendTurn/interrupt/permission/question.
 		const instances = yield* OpenCodeInstancesTag;
+		const instanceManagement = Option.getOrUndefined(
+			yield* Effect.serviceOption(InstanceManagementServiceTag),
+		);
 		const clientForSession = (sessionId: string) =>
 			sessionBindingReadModel
 				.getProviderForSession(sessionId)
@@ -174,6 +178,25 @@ const createOrchestrationComponentsEffect = (
 			clientForSession,
 			instanceIdForSession: (sessionId) =>
 				sessionBindingReadModel.getProviderForSession(sessionId),
+			hasWorktreeToolForSession: (sessionId) =>
+				sessionBindingReadModel.getProviderForSession(sessionId).pipe(
+					Effect.flatMap((instanceId) =>
+						instanceManagement
+							? instanceManagement.list().pipe(
+									Effect.map((configured) =>
+										configured.some(
+											(instance) =>
+												instance.id ===
+													(instanceId ??
+														defaultInstanceIdForDriver("opencode")) &&
+												instance.managed,
+										),
+									),
+									Effect.orElseSucceed(() => false),
+								)
+							: Effect.succeed(false),
+					),
+				),
 		})) as OpenCodeProviderInstance;
 		registry.registerInstance(openCodeInstance);
 

@@ -487,11 +487,13 @@ describe("Claude turn economics through SQLite persistence", () => {
 		await runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				// Remove only the new column/ledger entry to recreate the pre-migration schema.
+				// Recreate the ledger prefix before completion boundaries were added.
 				yield* sql`ALTER TABLE messages DROP COLUMN completed_at`;
-				yield* sql`DELETE FROM effect_sql_migrations WHERE name = 'messages_completed_at'`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 47`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[47, "messages_completed_at"],
+					[48, "sessions_claude_worktree_state"],
+					[49, "sessions_workspace_hint"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),

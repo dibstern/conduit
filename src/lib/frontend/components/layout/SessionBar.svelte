@@ -57,7 +57,7 @@
 	import SessionVerbItems from "../session/SessionVerbItems.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
-	import { listWorktreesRpc, moveSessionWorkspaceRpc } from "../../transport/ws-rpc-client.js";
+	import { dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc } from "../../transport/ws-rpc-client.js";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -240,6 +240,9 @@
 	async function moveWorkspace(path: string) {
 		if (project && session) await moveSessionWorkspaceRpc({ projectSlug: project.slug, sessionId: session.id, path });
 	}
+	async function dismissWorkspaceHint(path: string) {
+		if (project && session) await dismissWorkspaceHintRpc({ projectSlug: project.slug, sessionId: session.id, path });
+	}
 
 	const attentionCount = $derived(
 		getAttentionSessions(sessionState.currentId, getDescendantSessionIds).size,
@@ -420,7 +423,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} />{/if}
+			{#if directory}<GitIdentity {directory} {git} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
 			{#if !sessionViewState.compact && settleVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button

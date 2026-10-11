@@ -70,6 +70,10 @@ export const PROJECT_PROVENANCE_MIGRATION = "0044_project_provenance.sql";
 export const MESSAGES_CONTEXT_TOKENS_MIGRATION =
 	"0045_messages_context_tokens.sql";
 export const MESSAGES_COMPLETED_AT_MIGRATION = "0046_messages_completed_at.sql";
+export const SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION =
+	"0047_sessions_claude_worktree_state.sql";
+export const SESSIONS_WORKSPACE_HINT_MIGRATION =
+	"0048_sessions_workspace_hint.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

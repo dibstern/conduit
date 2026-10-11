@@ -43,6 +43,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "session.usage_limited",
   "session.variant_changed",
   "session.workspace_changed",
+  "session.workspace_hint_changed",
   "session.workspace_started",
   "text.delta",
   "thinking.delta",

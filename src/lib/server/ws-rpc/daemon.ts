@@ -15,6 +15,7 @@ export const daemonOnlyHandlers = {
 	RestartWithConfig: (_request) => daemonRequired("RestartWithConfig"),
 	GetInstances: (_request) => daemonRequired("GetInstances"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
+	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetStatus"
@@ -26,4 +27,5 @@ export const daemonOnlyHandlers = {
 	| "RestartWithConfig"
 	| "GetInstances"
 	| "GetInstanceStatus"
+	| "OpenCodeUseWorktree"
 >;

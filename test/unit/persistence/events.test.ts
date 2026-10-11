@@ -18,8 +18,8 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
-	it("exports all 54 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(54);
+	it("exports all 55 canonical event types", () => {
+		expect(CANONICAL_EVENT_TYPES).toHaveLength(55);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("message.snapshot");
 		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
@@ -37,6 +37,7 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("turn.model_resolved");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.created");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.renamed");
+		expect(CANONICAL_EVENT_TYPES).toContain("session.workspace_hint_changed");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.read");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.unread");
 		expect(CANONICAL_EVENT_TYPES).toContain("session.settled");
@@ -58,6 +59,24 @@ describe("Canonical Event Types", () => {
 		expect(CANONICAL_EVENT_TYPES).toContain("permission.resolved");
 		expect(CANONICAL_EVENT_TYPES).toContain("question.asked");
 		expect(CANONICAL_EVENT_TYPES).toContain("question.resolved");
+	});
+
+	it.each([
+		"/repo/worktree",
+		null,
+	])("does not lose a workspace hint path=%s in canonical round-trip", (path) => {
+		const event = canonicalEvent("session.workspace_hint_changed", "s1", {
+			path,
+		});
+		expect(() => validateEventPayload(event)).not.toThrow();
+		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
+		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
+			event,
+		);
+		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
+		expect(() => validateEventPayload({ ...event, data: {} })).toThrow(
+			"missing required fields: path",
+		);
 	});
 
 	it.each([
