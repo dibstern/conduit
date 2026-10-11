@@ -244,6 +244,10 @@
 		renderedTitle = displayTitle;
 	});
 	const gleaming = $derived(gleamingTitle === displayTitle);
+	// How far a clipped title has to travel for its end to show, measured when
+	// the pointer enters because that is when the hover marquee starts.
+	let titleEl = $state<HTMLElement>();
+	let marqueeShift = $state(0);
 	const actions = $derived(getSessionActionState(session, now));
 	const swipeStage = $derived.by(() => {
 		const stage = getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0);
@@ -591,6 +595,7 @@
 	onclick={handleClick}
 	onclickcapture={suppressGestureClick}
 	onpointerdown={startPointer}
+	onpointerenter={() => { marqueeShift = titleEl ? titleEl.scrollWidth - titleEl.clientWidth : 0; }}
 	oncontextmenu={(event) => {
 		if (selectMode || !oncontextmenuProp) return;
 		event.preventDefault();
@@ -664,13 +669,22 @@
 			/>
 		{:else}
 			<!-- Keyed so a second rename mid-gleam restarts it on a fresh element.
-			     The hover marquee waits for the gleam: both are `animation`, so
-			     hovering would cut the gleam short and replay it on leave. -->
+			     The outer span clips; the inner one is what the hover marquee
+			     moves, so the clip stays put and reveals the title's end. The
+			     marquee waits for the gleam: both are `animation`, so hovering
+			     would cut the gleam short and replay it on leave. -->
 			{#key displayTitle}
+				{@const marquee = !gleaming && marqueeShift > 0}
 				<span
-					class="session-title-inner inline-block overflow-hidden text-ellipsis whitespace-nowrap min-w-0 {gleaming ? 'session-title-gleam motion-reduce:animate-none' : 'group-hover:session-title-marquee group-hover:text-clip'}"
+					bind:this={titleEl}
+					class="session-title-inner inline-block overflow-hidden text-ellipsis whitespace-nowrap min-w-0 {gleaming ? 'session-title-gleam motion-reduce:animate-none' : ''} {marquee ? 'group-hover:text-clip' : ''}"
 					onanimationend={() => { gleamingTitle = undefined; }}
-					>{displayTitle}</span
+					><span
+						class={marquee ? "group-hover:inline-block group-hover:session-title-marquee" : undefined}
+						style:--marquee-shift={marquee ? `${-marqueeShift}px` : undefined}
+						style:--marquee-dur={marquee ? `${Math.max(2, marqueeShift / 38)}s` : undefined}
+						>{displayTitle}</span
+					></span
 				>
 			{/key}
 			{#if sessionAttention(session) === "done-unread"}
