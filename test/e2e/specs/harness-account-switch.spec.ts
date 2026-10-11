@@ -451,7 +451,8 @@ for (const dismiss of [false, true]) {
 					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 				);
 				await picker.click();
-				await page.getByTestId("picker-row-harness").click();
+				await page.getByTestId("picker-harness-claude").click();
+				await page.getByTestId("picker-row-instance").click();
 				await page.getByTestId(`picker-instance-${account.id}`).click();
 				await page.keyboard.press("Escape");
 				const cutOffText =
@@ -2053,7 +2054,8 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 		);
 		await picker.click();
-		await page.getByTestId("picker-row-harness").click();
+		await page.getByTestId("picker-harness-claude").click();
+		await page.getByTestId("picker-row-instance").click();
 		for (const { id } of accounts)
 			await expect(page.getByTestId(`picker-instance-${id}`)).toBeVisible();
 		await capture("01-accounts");
@@ -2234,7 +2236,8 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 		);
 		await picker.click();
-		await page.getByTestId("picker-row-harness").click();
+		await page.getByTestId("picker-harness-claude").click();
+		await page.getByTestId("picker-row-instance").click();
 		await page.getByTestId(`picker-instance-${addedInstanceId}`).click();
 		await page.keyboard.press("Escape");
 

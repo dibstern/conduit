@@ -124,8 +124,7 @@ async function sendAndCapture(
 /** Pick the OpenCode harness, then `picked`, in the draft composer. */
 async function pickOpenCodeModel(page: Page, picker: Locator) {
 	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await page.getByTestId("picker-harness-opencode").click();
 	await page.getByTestId("picker-row-model").click();
 	await page
 		.getByTestId("model-picker-list")
@@ -379,8 +378,7 @@ test("a model picked on another harness never reaches an OpenCode that lists no 
 		.locator('[data-provider-id="claude"]')
 		.first()
 		.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await page.getByTestId("picker-harness-opencode").click();
 	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
@@ -477,8 +475,7 @@ test.describe("a model id both harnesses list", () => {
 		await list
 			.locator(`[data-model-id="${shared}"][data-provider-id="claude"]`)
 			.click();
-		await page.getByTestId("picker-row-harness").click();
-		await page.getByTestId("picker-instance-opencode").click();
+		await page.getByTestId("picker-harness-opencode").click();
 		await page.getByTestId("picker-row-model").click();
 		const shownRow = list.locator('[aria-current="true"]');
 		await expect(shownRow).toHaveCount(1);

@@ -146,7 +146,8 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 				throw new WsRpcError({ message: match[2] ?? "" });
 			});
 			await openModelPicker(world.page);
-			await world.page.getByTestId("picker-row-harness").click();
+			await world.page.getByTestId("picker-harness-opencode").click();
+			await world.page.getByTestId("picker-row-instance").click();
 			await world.page.getByTestId(`picker-instance-${instanceId}`).click();
 			await world.page
 				.getByTestId("picker-row-model")

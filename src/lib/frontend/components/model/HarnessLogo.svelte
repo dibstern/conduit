@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
@@ -9,10 +10,10 @@
 	import { accountColorClass } from "../../utils/account-color.js";
 
 	let { driver, instanceId, size, surface }: {
-		driver: "claude" | "opencode";
+		driver: ProviderDriverKind;
 		instanceId: string;
 		// 15 and 17 retire with bn6x.8/.9.
-		size: 12 | 13 | 15 | 16 | 17;
+		size: 12 | 13 | 14 | 15 | 16 | 17;
 		surface: "box" | "surface" | "page";
 	} = $props();
 
@@ -27,7 +28,7 @@
 	);
 	const letter = $derived(accounts.nameOf(
 		instanceId,
-		driver === "claude" ? "Claude" : instances.find((instance) => instance.id === instanceId)?.label ?? "OpenCode",
+		driver === "claude" ? "Claude" : instances.find((instance) => instance.id === instanceId)?.label ?? driver,
 	).charAt(0).toUpperCase());
 	const spinning = $derived(
 		driver === "claude" && accounts.switchingTo !== null &&
@@ -46,7 +47,11 @@
 	class:badged
 	style="--s:{size}px"
 >
-	<Icon name={driver} {size} />
+	{#if driver === "claude" || driver === "opencode"}
+		<Icon name={driver} {size} />
+	{:else}
+		<Icon name="bot" {size} class="text-text-secondary" />
+	{/if}
 	{#if badged}
 		<span
 			data-testid="harness-logo-badge"

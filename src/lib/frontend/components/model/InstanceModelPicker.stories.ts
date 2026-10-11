@@ -97,7 +97,6 @@ async function openPicker(canvasElement: HTMLElement) {
 	await expect(
 		within(picker).getByRole("heading", { name: "Harness & model" }),
 	).toBeVisible();
-	await expect(within(picker).getByTestId("picker-row-harness")).toBeVisible();
 	await expect(within(picker).getByTestId("picker-row-model")).toBeVisible();
 	// userEvent.click leaves the pointer on the trigger. Its background has a
 	// 150ms transition, so a hovered trigger is a flaky thing to bake into a
@@ -132,15 +131,14 @@ async function rootControls(canvasElement: HTMLElement) {
 		"true",
 	);
 	await expect(
-		sheet
+		within(sheet.getByRole("radiogroup", { name: "Effort" }))
 			.getAllByRole("radio")
-			.slice(2)
 			.map((radio) => radio.textContent),
 	).toEqual(["low", "med", "high", "xhigh", "max"]);
-	await userEvent.click(sheet.getByTestId("picker-row-harness"));
-	await expect(sheet.getByTestId("picker-back")).toHaveFocus();
-	await userEvent.click(sheet.getByTestId("picker-back"));
-	await expect(sheet.getByTestId("picker-row-harness")).toHaveFocus();
+	const rootFocusTestId = sheet.queryByTestId("picker-harness-claude")
+		? "picker-harness-claude"
+		: "picker-row-model";
+	await expect(sheet.getByTestId(rootFocusTestId)).toHaveFocus();
 	await drillModel(picker);
 	await expect(picker.querySelectorAll(".model-item-context")).toHaveLength(2);
 	await expect(picker.querySelector(".model-item-context")).toHaveTextContent(
@@ -148,7 +146,7 @@ async function rootControls(canvasElement: HTMLElement) {
 	);
 	await userEvent.click(sheet.getByTestId("picker-back"));
 	await expect(sheet.getByTestId("picker-row-model")).toBeVisible();
-	await expect(sheet.getByTestId("picker-row-harness")).toHaveFocus();
+	await expect(sheet.getByTestId(rootFocusTestId)).toHaveFocus();
 	await userEvent.click(sheet.getByTestId("picker-context-option-1m"));
 	await expect(sheet.getByTestId("picker-context-option-1m")).toHaveAttribute(
 		"aria-checked",
@@ -355,9 +353,8 @@ export const UnlockedHarnesses: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const picker = await openPicker(canvasElement);
-		await userEvent.click(within(picker).getByTestId("picker-row-harness"));
 		await expect(
-			within(picker).getByTestId("picker-instance-opencode"),
+			within(picker).getByTestId("picker-harness-opencode"),
 		).not.toHaveAttribute("aria-disabled", "true");
 	},
 };
@@ -452,7 +449,7 @@ export const RoutingOptions: Story = {
 
 /**
  * Locked mode: a session is already bound to an instance, so every other harness
- * entry is soft-disabled and says why inline (phones cannot hover).
+ * tab is disabled and announces why.
  */
 export const Locked: Story = {
 	tags: ["viewport-capture"],
@@ -474,13 +471,14 @@ export const Locked: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const picker = await openPicker(canvasElement);
-		await userEvent.click(within(picker).getByTestId("picker-row-harness"));
-		const other = within(picker).getByTestId("picker-instance-opencode");
+		const other = within(picker).getByTestId("picker-harness-opencode");
 		await expect(other).toHaveAttribute("aria-disabled", "true");
-		await expect(other).toHaveTextContent(/Harness is fixed for this session/);
+		await expect(other).toHaveAccessibleDescription(
+			"Harness is fixed for this session",
+		);
 		await userEvent.click(other);
 		await expect(
-			within(picker).getByRole("heading", { name: "Harness" }),
+			within(picker).getByRole("heading", { name: "Harness & model" }),
 		).toBeVisible();
 	},
 };

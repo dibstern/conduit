@@ -1,12 +1,14 @@
-<!-- Harness/model drill-down: a phone sheet or a desktop drop-up. -->
+<!-- Harness tabs and model options: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
 	import HarnessLogo from "./HarnessLogo.svelte";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import OptionRow from "../ui/OptionRow.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
@@ -39,7 +41,7 @@
 	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId } from "../../stores/usage.svelte.js";
-	import { bindProjectInstance, getDraftProject } from "../../stores/project.svelte.js";
+	import { bindProjectInstance, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -55,7 +57,7 @@
 	let { variant = "icons" }: { variant?: "icons" | "words" | undefined } = $props();
 
 	const pickerOpen = $derived(composerPickerState.request !== null);
-	let view = $state<"root" | "harness" | "model" | "agent">("root");
+	let view = $state<"root" | "instance" | "model" | "agent">("root");
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
@@ -63,7 +65,6 @@
 	let searchEl: HTMLInputElement | undefined = $state();
 	let triggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let pickerTriggerEl: HTMLElement | undefined = $state();
-	let harnessRowEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let backEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	const draftChosen = $derived(discoveryState.hasModelChoice);
 
@@ -73,7 +74,7 @@
 	const groupHeadingId = $props.id();
 	const titleId = `${groupHeadingId}-title`;
 	const title = $derived(
-		view === "root" ? "Harness & model" : view === "harness" ? "Harness" : view === "agent" ? "Agent" : "Model",
+		view === "root" ? "Harness & model" : view === "instance" ? "Instance" : view === "agent" ? "Agent" : "Model",
 	);
 
 	const instances = $derived(getAvailableInstances());
@@ -92,6 +93,8 @@
 	);
 	const selectedDriver = $derived(
 		selectedInstance?.driver ??
+			// getSessionInstanceId resolves a session to its driver, not an instance id.
+			boundInstanceId ??
 			(selectedId === "claude" ? ("claude" as const) : ("opencode" as const)),
 	);
 	const selectedLogoInstanceId = $derived(
@@ -99,6 +102,14 @@
 			? composerAccountId(findSession(sessionState.currentId), undefined) ?? selectedId
 			: selectedId,
 	);
+	const harnesses = $derived(
+		[...new Set(instances.map((instance) => instance.driver))].map((driver) => ({
+			value: driver,
+			label: driverLabel(driver),
+			locked: locked && driver !== selectedDriver,
+		})),
+	);
+	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
 
 	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
 	const filteredGroups = $derived.by(() => {
@@ -228,10 +239,16 @@
 		}
 	}
 
-	function driverLabel(id: string): string {
+	function driverLabel(id: ProviderDriverKind): string {
 		if (id === "claude") return "Claude";
 		if (id === "opencode") return "OpenCode";
-		return id;
+		return id.charAt(0).toUpperCase() + id.slice(1);
+	}
+
+	function instanceForDriver(driver: ProviderDriverKind): InstanceOption | undefined {
+		const binding = projectState.projects.find((project) => project.slug === getDraftProject())?.instanceId;
+		return instances.find((instance) => instance.driver === driver && instance.id === binding)
+			?? instances.find((instance) => instance.driver === driver);
 	}
 
 	/** Strip date suffixes like -20250514 from model names. */
@@ -283,7 +300,7 @@
 
 	function instanceDescription(instance: InstanceOption): string {
 		if (isInstanceDisabled(instance)) return "Harness is fixed for this session";
-		const driver = instance.driver === "claude" ? "Claude Agent SDK" : "OpenCode server";
+		const driver = instance.driver === "claude" ? "Claude Agent SDK" : instance.driver === "opencode" ? "OpenCode server" : driverLabel(instance.driver);
 		return instance.status && instance.status !== "healthy"
 			? `${driver} · ${instance.status}`
 			: driver;
@@ -331,8 +348,8 @@
 		(pickerTriggerEl ?? triggerEl)?.focus({ preventScroll: true });
 	}
 
-	function handleInstanceSelect(instance: InstanceOption, e: MouseEvent) {
-		e.stopPropagation();
+	function handleInstanceSelect(instance: InstanceOption, e?: MouseEvent) {
+		e?.stopPropagation();
 		if (isInstanceDisabled(instance)) return;
 		view = "root";
 		if (instance.id === selectedId) return;
@@ -342,6 +359,12 @@
 		const draftProject = getDraftProject();
 		if (draftProject) bindProjectInstance(draftProject, instance.id);
 		searchQuery = "";
+	}
+
+	function handleHarnessSelect(driver: ProviderDriverKind) {
+		if (locked) return;
+		const instance = instanceForDriver(driver);
+		if (instance) handleInstanceSelect(instance);
 	}
 
 	function handleModelClick(model: Immutable<ModelInfo>, e: MouseEvent, modelId?: string) {
@@ -402,7 +425,6 @@
 		const root = view === "root";
 		// Phones skip the search box: focusing it would raise the keyboard over the list.
 		const target = view === "model" && !phone ? searchEl : backEl;
-		const fallback = harnessRowEl;
 		let cancelled = false;
 		void tick().then(() => {
 			if (cancelled) return;
@@ -410,10 +432,12 @@
 				target?.focus({ preventScroll: true });
 				return;
 			}
-			const row = document.getElementById("model-picker")?.querySelector<HTMLElement>(
-				`[data-testid="picker-row-${section === "account" ? "harness" : section}"]`,
-			) ?? fallback;
-			row?.scrollIntoView({ block: "nearest" });
+			const panel = document.getElementById("model-picker");
+			const selectedTab = panel?.querySelector<HTMLElement>('[data-testid="picker-harness-options"] [aria-checked="true"]');
+			const row = (section === "harness" ? selectedTab : panel?.querySelector<HTMLElement>(
+				`[data-testid="picker-row-${section === "account" ? "instance" : section}"]`,
+			)) ?? selectedTab ?? panel?.querySelector<HTMLElement>('[data-testid="picker-row-model"]');
+			row?.scrollIntoView({ block: "nearest", inline: "nearest" });
 			row?.focus({ preventScroll: true });
 		});
 		return () => { cancelled = true; };
@@ -424,21 +448,22 @@
 
 {#snippet pickerSurface(sheet: boolean)}
 	<Surface
-		variant={sheet ? "plain" : "raised"}
+		variant={sheet ? "plain" : "card"}
 		radius="none"
 		elevation={sheet ? "modal" : "menu-lg"}
 		id="model-picker"
 		data-testid="model-picker"
+		data-phone={sheet ? "true" : undefined}
 		role={sheet ? undefined : "dialog"}
 		aria-labelledby={sheet ? undefined : titleId}
-		class="model-dropdown flex flex-col overflow-hidden px-3.5 pt-2 font-brand {sheet
-			? 'w-full max-h-[85dvh] rounded-t-[22px] border-t border-border pb-[max(30px,env(safe-area-inset-bottom))]'
-			: 'absolute bottom-[calc(100%+8px)] right-0 w-[300px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[14px] pb-3.5 z-[var(--z-popover)]'}"
+		class="model-dropdown flex flex-col overflow-hidden font-brand {sheet
+			? 'w-full max-h-[85dvh] rounded-t-[22px] border-t border-border px-[16px] pt-2 pb-[max(30px,env(safe-area-inset-bottom))]'
+			: 'absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[12px] px-[12px] pt-[9px] pb-[4px] z-[var(--z-popover)]'}"
 	>
 		{#if sheet}
 			<div class="mx-auto mb-2.5 h-1 w-9 shrink-0 rounded-full bg-border-chip" aria-hidden="true"></div>
 		{/if}
-		<div class="mb-2 flex min-h-7 shrink-0 items-center gap-2">
+		<div class="mb-[2px] flex shrink-0 items-center gap-[6px]">
 			{#if view !== "root"}
 				<Button
 					bind:element={backEl}
@@ -453,28 +478,67 @@
 					onclick={() => { view = "root"; searchQuery = ""; }}
 				/>
 			{/if}
-			<h2 id={titleId} class="text-sm font-semibold text-text">{title}</h2>
+			<h2 id={titleId} class="text-[11.5px] font-semibold text-text">{title}</h2>
+			{#if view === "root"}
+				<span data-testid="picker-subtitle" class="ml-auto text-[10.5px] text-text-dimmer">{locked ? "this session" : "new session"}</span>
+			{/if}
 		</div>
 		<div class="min-h-0 overflow-y-auto">
 			{#if view === "root"}
-				<Button
-					bind:element={harnessRowEl}
-					variant="ghost"
-					size="content"
-					tone="default"
-					hoverFill="base"
-					layout="flow"
-					data-testid="picker-row-harness"
-					class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
-					onclick={() => { view = "harness"; }}
-				>
-					<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Harness</span>
-					<span class="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold">
-						<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />
-						<span class="truncate">{selectedLabel}</span>
-					</span>
-					<Icon name="chevron-right" size={14} class="text-text-dimmer" />
-				</Button>
+				{#if harnesses.length > 1}
+					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[4px]">
+						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
+							<span>Harness</span>
+							{#if locked}
+								<span data-testid="picker-harness-caption" class="inline-flex items-center gap-[4px]">
+									<Icon name="lock" size={9} /> fixed for this session
+								</span>
+							{/if}
+						</div>
+						<OptionRow
+							options={harnesses}
+							value={selectedDriver}
+							onChange={handleHarnessSelect}
+							label="Harness"
+							lockedReason="Harness is fixed for this session"
+							itemWidth={104}
+							testId="picker-harness-options"
+							itemTestId={(driver) => `picker-harness-${driver}`}
+							class={harnesses.length < 4 ? "gap-[2px] rounded-[9px] border border-border p-[2px]" : ""}
+							itemClass="flex h-[32px] min-w-0 items-center justify-center gap-[6px] rounded-[7px] text-[12px] text-text-muted whitespace-nowrap data-[state=checked]:bg-bg-alt data-[state=checked]:text-text data-[state=checked]:font-semibold aria-disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+						>
+							{#snippet item(option)}
+								<HarnessLogo
+									driver={option.value}
+									instanceId={option.value === selectedDriver ? selectedLogoInstanceId : instanceForDriver(option.value)?.id ?? option.value}
+									size={14}
+									surface="surface"
+								/>
+								{option.label}
+								{#if option.locked}<Icon name="lock" size={10} />{/if}
+							{/snippet}
+						</OptionRow>
+					</section>
+				{/if}
+				{#if driverInstances.length > 1}
+					<Button
+						variant="ghost"
+						size="content"
+						tone="default"
+						hoverFill="base"
+						layout="flow"
+						data-testid="picker-row-instance"
+						class="flex min-h-[46px] w-full items-center gap-2.5 rounded-none border-b border-border-subtle px-1 py-2.5 text-left last:border-b-0"
+						onclick={() => { view = "instance"; }}
+					>
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Instance</span>
+						<span class="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold">
+							<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />
+							<span class="truncate">{selectedLabel}</span>
+						</span>
+						<Icon name="chevron-right" size={14} class="text-text-dimmer" />
+					</Button>
+				{/if}
 				<Button
 					variant="ghost"
 					size="content"
@@ -566,8 +630,8 @@
 						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
 					</Button>
 				{/each}
-			{:else if view === "harness"}
-				{#each instances as instance (instance.id)}
+			{:else if view === "instance"}
+				{#each driverInstances as instance (instance.id)}
 					{@const disabled = isInstanceDisabled(instance)}
 					{@const selected = instance.id === selectedId}
 					<Button
@@ -814,7 +878,7 @@
 				placement="sheet"
 				labelledBy={titleId}
 				returnFocus={() => pickerTriggerEl ?? triggerEl ?? null}
-				initialFocus="first"
+				initialFocus="dialog"
 			>
 				{@render pickerSurface(true)}
 			</Dialog>
@@ -823,3 +887,18 @@
 		{/if}
 	{/if}
 </div>
+
+<style>
+	:global(.model-dropdown [data-testid="picker-harness-options"][data-layout="scroll"] > [data-radio-group-item]) {
+		border: 1px solid var(--color-border);
+	}
+	:global(.model-dropdown [data-testid="picker-harness-options"][data-layout="scroll"] > [data-state="checked"]) {
+		border-color: var(--color-text-secondary);
+	}
+	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-row-"]),
+	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-instance-"]),
+	:global(.model-dropdown[data-phone="true"] [data-testid^="picker-agent-"]),
+	:global(.model-dropdown[data-phone="true"] .model-item) {
+		min-height: 50px;
+	}
+</style>

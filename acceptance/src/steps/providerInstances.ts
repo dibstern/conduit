@@ -376,8 +376,15 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const name = (match[1] ?? "").trim();
 			await openModelPicker(world.page);
-			await world.page.getByTestId("picker-row-harness").click();
-			// Harness buttons keep the instance's slug id across picker views.
+			const instance = mockInstances
+				.get(world.page)
+				?.find((candidate) => candidate["id"] === instanceSlug(name));
+			if (!instance) throw new Error(`Mock instance "${name}" is missing`);
+			await world.page
+				.getByTestId(`picker-harness-${instance["driver"]}`)
+				.click();
+			await world.page.getByTestId("picker-row-instance").click();
+			// Instance choices keep their slug ids in the retained instance view.
 			const railButton = world.page.getByTestId(
 				`picker-instance-${instanceSlug(name)}`,
 			);

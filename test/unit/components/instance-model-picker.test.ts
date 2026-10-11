@@ -346,21 +346,15 @@ describe("InstanceModelPicker", () => {
 
 		const { container, getByTitle, getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
-		await fireEvent.click(getByTestId("picker-row-harness"));
 
-		const claudeRail = container.querySelector<HTMLButtonElement>(
-			'[data-testid="picker-instance-claude"]',
-		);
-		const opencodeRail = container.querySelector<HTMLButtonElement>(
-			'[data-testid="picker-instance-opencode"]',
-		);
-		expect(claudeRail?.getAttribute("aria-pressed")).toBe("true");
-		expect(opencodeRail?.getAttribute("aria-disabled")).toBe("true");
+		const claudeRail = getByTestId("picker-harness-claude");
+		const opencodeRail = getByTestId("picker-harness-opencode");
+		expect(claudeRail.getAttribute("aria-checked")).toBe("true");
+		expect(opencodeRail.getAttribute("aria-disabled")).toBe("true");
 
 		// A disabled instance cannot change the bound harness or model scope.
-		await fireEvent.click(opencodeRail as HTMLButtonElement);
-		expect(claudeRail?.getAttribute("aria-pressed")).toBe("true");
-		await fireEvent.click(getByTestId("picker-back"));
+		await fireEvent.click(opencodeRail);
+		expect(claudeRail.getAttribute("aria-checked")).toBe("true");
 		await fireEvent.click(getByTestId("picker-row-model"));
 		expect(
 			container.querySelector('[data-model-id="claude-sonnet-4"]'),

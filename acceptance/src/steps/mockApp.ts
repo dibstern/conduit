@@ -22,9 +22,12 @@ import {
 	instanceSlug,
 	mockInstances,
 	mockSessionSkills,
+	openSessionRoute,
 	rejectedEffortSwitches,
 	relayControls,
+	requireRpcControl,
 	rpcControls,
+	serveModelCatalog,
 } from "./shared.js";
 
 const mockClaudeSettings = new WeakMap<Page, ClaudeSettingsOverrides>();
@@ -107,6 +110,84 @@ const skillNavigationMockup = {
 
 export const mockAppHandlers: StepHandler[] = [
 	{
+		name: "configure picker Harness choices through mock subscriptions",
+		match: /^the configured Harness choices are (.+)$/,
+		run: async ({ world, match }) => {
+			const available = {
+				Claude: "claude",
+				OpenCode: "opencode",
+				Codex: "codex",
+				Gemini: "gemini",
+				Cursor: "cursor",
+			} as const;
+			const configured = (match[1] ?? "").split(", ").map((label) => {
+				const entry = Object.entries(available).find(
+					([name]) => name === label,
+				);
+				if (!entry) throw new Error(`Unknown mock Harness: ${label}`);
+				return entry;
+			});
+			const instances = configured.map(([name, driver]) => ({
+				id: driver,
+				name,
+				driver,
+				port: driver === "opencode" ? 4096 : 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+			}));
+			mockInstances.set(world.page, instances);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances,
+			});
+			const drivers = configured.map(([, driver]) => driver);
+			const claude = drivers.includes("claude");
+			await serveModelCatalog(world.page, {
+				providers: dualDriverProviders.filter((provider) =>
+					drivers.includes(provider.id === "claude" ? "claude" : "opencode"),
+				),
+				active: claude
+					? { model: "claude-sonnet-4-5", provider: "claude" }
+					: { model: "claude-sonnet-4", provider: "anthropic" },
+			});
+		},
+	},
+	{
+		name: "open a session on a named future-driver instance",
+		match: /^a session is bound to the Codex instance (\S+)$/,
+		run: async ({ world, match }) => {
+			const instanceId = match[1] ?? "";
+			const instances = (mockInstances.get(world.page) ?? []).map((instance) =>
+				instance["driver"] === "codex"
+					? { ...instance, id: instanceId, name: "Codex work" }
+					: instance,
+			);
+			mockInstances.set(world.page, instances);
+			const rpc = requireRpcControl(world.page);
+			rpc.setDaemonList("SubscribeInstances", { instances });
+			rpc.setResponse("GetAgents", {
+				projectSlug: "myapp",
+				instanceId,
+				providerScope: { id: "codex", name: "Codex" },
+				agents: [],
+			});
+			const sessionId = "sess-bound-codex";
+			rpc.upsertShellRow({
+				id: sessionId,
+				title: "Codex session",
+				status: "idle",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, sessionId);
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag === "GetAgents" &&
+					request.payload["sessionId"] === sessionId,
+			);
+		},
+	},
+	{
 		name: "hold the session's provider lookup",
 		match: /^the session's provider lookup is held$/,
 		run: ({ world }) => {
@@ -160,6 +241,7 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
+			let projectInstanceId: string | undefined;
 			const sessionInstance = (payload: Record<string, unknown>) =>
 				payload["sessionId"] === "sess-first-send"
 					? createdSessionInstance
@@ -172,9 +254,33 @@ export const mockAppHandlers: StepHandler[] = [
 					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					// A real daemon always lists its projects; a draft prefills from them.
 					GetProjects: async () => ({
-						projects: [{ slug: "myapp", title: "myapp", folders: ["/myapp"] }],
+						projects: [
+							{
+								slug: "myapp",
+								title: "myapp",
+								folders: ["/myapp"],
+								...(projectInstanceId ? { instanceId: projectInstanceId } : {}),
+							},
+						],
 						current: "myapp",
 					}),
+					SetProjectInstance: async (payload) => {
+						if (typeof payload["instanceId"] !== "string") {
+							throw new Error("SetProjectInstance requires an instanceId");
+						}
+						projectInstanceId = payload["instanceId"];
+						return {
+							projectSlug: "myapp",
+							projects: [
+								{
+									slug: "myapp",
+									title: "myapp",
+									folders: ["/myapp"],
+									instanceId: projectInstanceId,
+								},
+							],
+						};
+					},
 					ViewSession: async () => ({ ok: true }),
 					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
 						projectSlug: String(projectSlug ?? "myapp"),

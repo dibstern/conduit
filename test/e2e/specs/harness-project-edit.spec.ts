@@ -236,8 +236,8 @@ for (const provider of providers) {
 				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 			);
 			await picker.click();
-			await page.getByTestId("picker-row-harness").click();
-			await page.getByTestId(`picker-instance-${provider.driver}`).click();
+			if ((await picker.getAttribute("data-instance-id")) !== provider.driver)
+				await page.getByTestId(`picker-harness-${provider.driver}`).click();
 			await page.keyboard.press("Escape");
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			await expect(picker).toHaveAttribute("data-instance-id", provider.driver);
