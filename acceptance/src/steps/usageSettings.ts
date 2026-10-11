@@ -146,6 +146,17 @@ async function assertWindows(
 	}
 }
 
+/** Measure cards only after the previous drop's reorder animation ends. */
+async function settleCards(page: Page): Promise<void> {
+	await expect
+		.poll(() =>
+			page
+				.getByRole("list", { name: "Auto-switch account order" })
+				.evaluate((list) => list.getAnimations({ subtree: true }).length),
+		)
+		.toBe(0);
+}
+
 async function tapUsage(page: Page, testId: string): Promise<void> {
 	const target = page.getByTestId(testId);
 	await expect(target).toBeVisible();
@@ -1131,16 +1142,17 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "drag a whole Usage card through its native pointer handle",
-		match: /^I drag the Usage account (.+) above (.+)$/,
+		match: /^I drag the Usage account (.+) (above|below) (.+)$/,
 		run: async ({ world, match }) => {
 			const list = world.page.getByRole("list", {
 				name: "Auto-switch account order",
 			});
 			const handle = list.getByRole("button", { name: `Reorder ${match[1]}` });
 			const first = list.getByTestId("sortable-row").filter({
-				hasText: match[2] ?? "",
+				hasText: match[3] ?? "",
 			});
 			await handle.scrollIntoViewIfNeeded();
+			await settleCards(world.page);
 			const [from, to] = await Promise.all([
 				handle.boundingBox(),
 				first.boundingBox(),
@@ -1151,10 +1163,60 @@ export const usageSettingsHandlers: StepHandler[] = [
 				from.y + from.height / 2,
 			);
 			await world.page.mouse.down();
-			await world.page.mouse.move(from.x + from.width / 2, to.y + 2, {
-				steps: 12,
-			});
+			// A hand drifts off the narrow handle on the way, toward the card's middle.
+			await world.page.mouse.move(
+				to.x + to.width / 2,
+				match[2] === "above" ? to.y + 2 : to.y + to.height - 2,
+				{ steps: 12 },
+			);
 			await world.page.mouse.up();
+		},
+	},
+	{
+		name: "touch-drag a whole Usage card through its handle",
+		match: /^I touch-drag the Usage account (.+) (above|below) (.+)$/,
+		run: async ({ world, match }) => {
+			const list = world.page.getByRole("list", {
+				name: "Auto-switch account order",
+			});
+			const handle = list.getByRole("button", { name: `Reorder ${match[1]}` });
+			const target = list.getByTestId("sortable-row").filter({
+				hasText: match[3] ?? "",
+			});
+			await handle.scrollIntoViewIfNeeded();
+			await settleCards(world.page);
+			const [from, to] = await Promise.all([
+				handle.boundingBox(),
+				target.boundingBox(),
+			]);
+			if (!from || !to) throw new Error("Missing Usage card drag geometry");
+			const startX = from.x + from.width / 2;
+			const startY = from.y + from.height / 2;
+			const endX = to.x + to.width / 2;
+			const endY = match[2] === "above" ? to.y + 2 : to.y + to.height - 2;
+			const touch = await world.page.context().newCDPSession(world.page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [{ x: startX, y: startY }],
+				});
+				for (let step = 1; step <= 12; step++)
+					await touch.send("Input.dispatchTouchEvent", {
+						type: "touchMove",
+						touchPoints: [
+							{
+								x: startX + ((endX - startX) * step) / 12,
+								y: startY + ((endY - startY) * step) / 12,
+							},
+						],
+					});
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+			} finally {
+				await touch.detach();
+			}
 		},
 	},
 	{

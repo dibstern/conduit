@@ -163,7 +163,10 @@
 	function onpointerdown(event: PointerEvent, item: T) {
 		if (disabled || lifted || event.button !== 0) return;
 		event.preventDefault();
-		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		// Capture on the list, not the handle: a swap moves the row's nodes, and
+		// moving a node releases its capture, so the drop would never arrive and
+		// the list would stay lifted.
+		listEl?.setPointerCapture(event.pointerId);
 		drag = { pointerId: event.pointerId, originY: event.clientY };
 		lift(item, "pointer");
 	}
@@ -202,7 +205,15 @@
 	}
 </script>
 
-<ul bind:this={listEl} aria-label={ariaLabel} class="relative flex flex-col {variant === 'cards' ? 'gap-[8px]' : 'gap-[6px]'} {className}" {onfocusout}>
+<ul
+	bind:this={listEl}
+	aria-label={ariaLabel}
+	class="relative flex flex-col {variant === 'cards' ? 'gap-[8px]' : 'gap-[6px]'} {className}"
+	{onfocusout}
+	{onpointermove}
+	onpointerup={(event) => onpointerend(event, true)}
+	onpointercancel={(event) => onpointerend(event, false)}
+>
 	{#each shown as item, index (key(item))}
 		{@const isLifted = lifted?.key === key(item)}
 		<li
@@ -224,9 +235,6 @@
 				class="-my-[2px] shrink-0 cursor-grab touch-none select-none rounded-[4px] px-[2px] leading-none text-text-dimmer hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:cursor-default disabled:opacity-50 {isLifted ? 'cursor-grabbing text-text-secondary' : ''}"
 				onkeydown={(event) => onkeydown(event, item)}
 				onpointerdown={(event) => onpointerdown(event, item)}
-				{onpointermove}
-				onpointerup={(event) => onpointerend(event, true)}
-				onpointercancel={(event) => onpointerend(event, false)}
 				><span aria-hidden="true">{variant === "cards" ? "⠿" : "⋮⋮"}</span></button>
 			{@render row(item, index)}
 			</div>

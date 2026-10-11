@@ -297,13 +297,38 @@ Scenario Outline: desktop card dragging saves and replays the switch order
   And I drag the Usage account Spare above Personal
   Then the account order reads Spare, Personal, Work
   And the SetUsageLimitsSetting RPC saves auto-resume off, auto-switch off, order spare, claude, work
+  When I drag the Usage account Work above Personal
+  Then the account order reads Spare, Work, Personal
+  And the SetUsageLimitsSetting RPC saves auto-resume off, auto-switch off, order spare, work, claude
   When I reload the app and open the Usage tab
-  Then the account order reads Spare, Personal, Work
+  Then the account order reads Spare, Work, Personal
   And the usage-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
   | baseline                          | threshold |
   | usage-settings-reordered-desktop | 98        |
+
+Scenario: desktop cards drag down and up again
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  When I open settings to the Usage tab
+  And I drag the Usage account Personal below Work
+  Then the account order reads Work, Personal, Spare
+  When I drag the Usage account Personal below Spare
+  Then the account order reads Work, Spare, Personal
+  When I drag the Usage account Personal above Work
+  Then the account order reads Personal, Work, Spare
+
+Scenario: phone cards touch-drag repeatedly
+  Given the viewport is a phone
+  And Usage settings have several Claude accounts in the normal state
+  When I open settings to the Usage tab
+  And I touch-drag the Usage account Spare above Personal
+  Then the account order reads Spare, Personal, Work
+  When I touch-drag the Usage account Work above Personal
+  Then the account order reads Spare, Work, Personal
+  When I touch-drag the Usage account Spare below Personal
+  Then the account order reads Work, Personal, Spare
 
 Scenario: the card handle supports ArrowUp and ArrowDown without pickup
   Given the viewport is a desktop
