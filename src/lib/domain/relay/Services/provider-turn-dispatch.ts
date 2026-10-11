@@ -8,7 +8,7 @@ import {
 	Fiber,
 	FiberMap,
 	type Ref,
-	Runtime,
+	type Runtime,
 	Schema,
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
@@ -40,10 +40,10 @@ import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
 	getPermissionMode,
+	makeProcessingTimeoutHooks,
 	type OverridesState,
 	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
-	resetProcessingTimeout,
 	setPermissionMode,
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
@@ -257,21 +257,13 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
-		const runTimeout = Runtime.runFork(runtime);
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
-			clearTimeout: () => {
-				runTimeout(clearProcessingTimeout(sessionId));
-			},
-			resetTimeout: () => {
-				runTimeout(
-					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
-				);
-			},
+			...makeProcessingTimeoutHooks(runtime, sessionId),
 			applyReportedPermissionMode: (mode) =>
 				setPermissionMode(sessionId, mode).pipe(
 					Effect.provideService(OverridesStateTag, overridesRef),

@@ -18,6 +18,7 @@ import {
 	FiberMap,
 	Layer,
 	Ref,
+	Runtime,
 } from "effect";
 import type { SessionPermissionMode } from "../../../shared-types.js";
 
@@ -470,6 +471,22 @@ export const resetProcessingTimeout = (
 			yield* Fiber.interrupt(fiber);
 		}
 	});
+
+/** Sink hooks that keep a turn's processing timeout in step with its output. */
+export const makeProcessingTimeoutHooks = (
+	runtime: Runtime.Runtime<OverridesStateTag>,
+	sessionId: string,
+) => {
+	const run = Runtime.runFork(runtime);
+	return {
+		clearTimeout: () => {
+			run(clearProcessingTimeout(sessionId));
+		},
+		resetTimeout: () => {
+			run(resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION));
+		},
+	};
+};
 
 /** Cancel the processing timeout for a specific session. */
 export const clearProcessingTimeout = (sessionId: string) =>

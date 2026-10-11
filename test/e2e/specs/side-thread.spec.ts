@@ -507,7 +507,7 @@ test.describe("Claude Side Threads", () => {
 		test.describe(`$${command}`, () => {
 			test.use({
 				claudeReplay: {
-					turns: ["pong-thinking-text-turn", "side-thread-plan-turn"],
+					turns: ["pong-thinking-text-turn", "side-thread-ask-turn"],
 				},
 			});
 

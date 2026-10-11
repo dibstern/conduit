@@ -9,10 +9,13 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	FiberId,
 	Layer,
 	ManagedRuntime,
 	Schedule,
 	Scope,
+	TestClock,
+	TestContext,
 } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -23,6 +26,10 @@ import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import {
+	makeOverridesStateLive,
+	startProcessingTimeout,
+} from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -726,5 +733,64 @@ describe("Claude durable interaction resolution", () => {
 				}),
 			),
 		);
+	});
+});
+
+describe("Claude recovered runner processing timeout", () => {
+	it("keeps an answered question's timeout alive while the reattached runner streams", async () => {
+		const f = await persistentInteractions();
+		const fired = await f.persistence.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runtime = yield* makeClaudeProviderRuntime({
+						runnerFactory: (...args) =>
+							detachedRunnerFactory(Deferred.unsafeMake(FiberId.none))(
+								...args,
+							).pipe(
+								Effect.map((runner) => ({
+									...runner,
+									recoverEffect: Effect.void,
+								})),
+							),
+						workspaceRoot: "/tmp/ws",
+						capabilitiesService,
+					});
+					yield* runtime.recoverEffect;
+					// Answering a question re-arms the turn's timeout.
+					let timedOut = false;
+					yield* startProcessingTimeout("session-1", "2 minutes", () =>
+						Effect.sync(() => {
+							timedOut = true;
+						}),
+					);
+					for (let minute = 1; minute <= 3; minute++) {
+						yield* TestClock.adjust("1 minute");
+						yield* runtime.handleOutputEffect(
+							{
+								type: "event",
+								sinkId: "recovered-turn",
+								event: {
+									eventId: `busy-${minute}`,
+									type: "session.status",
+									providerId: "claude",
+									sessionId: "session-1",
+									providerRefs: {},
+									rawSource: { kind: "claude.sdk.translator" },
+									createdAt: 0,
+									data: { sessionId: "session-1", status: "busy" },
+								},
+							},
+							"session-1",
+						);
+						yield* Effect.yieldNow();
+					}
+					return timedOut;
+				}),
+			).pipe(
+				Effect.provide(makeOverridesStateLive()),
+				Effect.provide(TestContext.TestContext),
+			),
+		);
+		expect(fired).toBe(false);
 	});
 });
