@@ -111,6 +111,32 @@ export function nestTasks(
 	return nested;
 }
 
+/** Snapshot the selected task's subtree, or every live task, children first. */
+export function taskStopIds(
+	tasks: readonly BackgroundTask[],
+	taskId?: string,
+): string[] {
+	const ordered = [...tasks].reverse();
+	const visited = new Set<string>();
+	const ids: string[] = [];
+	const stop = (task: BackgroundTask): void => {
+		if (visited.has(task.id)) return;
+		visited.add(task.id);
+		for (const child of ordered) {
+			if (
+				child.parentTaskId === task.id ||
+				child.ancestorTaskIds?.includes(task.id)
+			)
+				stop(child);
+		}
+		ids.push(task.id);
+	};
+	for (const task of ordered) {
+		if (taskId === undefined || task.id === taskId) stop(task);
+	}
+	return ids;
+}
+
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */
 export function taskAge(task: BackgroundTask, now: number): string {
 	const seconds = Math.max(0, Math.floor((now - task.firstSeenAt) / 1000));
