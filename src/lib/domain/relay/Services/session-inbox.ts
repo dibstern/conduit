@@ -12,6 +12,7 @@ import {
 	Deferred,
 	Effect,
 	Layer,
+	Option,
 	Schema,
 	Stream,
 } from "effect";
@@ -25,20 +26,49 @@ import {
 	type SteerBlocker,
 } from "../../../contracts/stored-event.js";
 import {
+	loadDaemonConfig,
+	resolveProviderRoutingDriver,
+} from "../../../daemon/config-persistence.js";
+import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import {
+	type ProviderRegistry,
+	ProviderRegistryTag,
+} from "../../../provider/provider-registry.js";
+import type { ProjectRelayConfig } from "../../../types.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { LoggerTag } from "./services.js";
+import { ConfigTag, LoggerTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
+
+/**
+ * Whether a session's provider can steer. The registry holds one instance per
+ * driver, but a session names its provider instance (e.g. a second Claude
+ * account), so the instance is routed to its driver first.
+ */
+export const providerSteers = (
+	registry: Option.Option<ProviderRegistry>,
+	config: Option.Option<ProjectRelayConfig>,
+	provider: string,
+): boolean => {
+	if (Option.isNone(registry)) return false;
+	const driver = resolveProviderRoutingDriver(
+		Option.isSome(config) ? loadDaemonConfig(config.value.configDir) : null,
+		provider,
+	);
+	return (
+		driver !== undefined &&
+		registry.value.getInstance(driver)?.steering === true
+	);
+};
 
 // ─── Decider ────────────────────────────────────────────────────────────────
 
@@ -316,6 +346,7 @@ export const SessionInboxLive = Layer.scoped(
 				Effect.Effect.Context<ReturnType<Continuation["requestContinuation"]>>
 			>();
 		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		const config = yield* Effect.serviceOption(ConfigTag);
 		const permits = new Map<string, Effect.Semaphore>();
 		const serialised = (sessionId: string) => {
 			let permit = permits.get(sessionId);
@@ -442,8 +473,7 @@ export const SessionInboxLive = Layer.scoped(
 					known,
 					providerSteers:
 						facts?.provider != null &&
-						registry._tag === "Some" &&
-						registry.value.getInstance(facts.provider)?.steering === true,
+						providerSteers(registry, config, facts.provider),
 					promptOpen: (facts?.open_prompts ?? 0) > 0,
 					running,
 				} satisfies InboxView;

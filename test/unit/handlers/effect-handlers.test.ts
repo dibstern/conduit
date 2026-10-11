@@ -1320,6 +1320,7 @@ function makeSessionLifecycleLayer(options?: {
 			notifySSEEvent: vi.fn(),
 		}),
 		makeOverridesStateLive(),
+		ProjectSettingsLive,
 	);
 }
 
