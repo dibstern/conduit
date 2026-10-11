@@ -129,7 +129,7 @@ for (const viewport of [
 						.filter(({ tag }) => tag === recovery.tag)
 						.map(({ payload }) => payload),
 				)
-				.toEqual([{ projectSlug, sessionId: session.id }]);
+				.toEqual([{ _tag: recovery.tag, projectSlug, sessionId: session.id }]);
 			await expect(menu).not.toBeVisible();
 			const recreated = recovery.tag === "RecreateSessionWorktree";
 			rpc.upsertShellRow({
