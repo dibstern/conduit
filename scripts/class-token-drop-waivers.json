@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/input/InputArea.svelte :: mt-1.5,mx-1.5,px-1.5,py-1.5,rounded-3xl": "The composer becomes approved option D (soft square, roomy): 22px corners and 10px padding (20px/9px on phones) so its 10px-cornered buttons sit concentric. Literal px replace the rem tokens because the 12px root renders rem utilities at 0.75x; the status header's negative margins follow the new padding.",
 	"src/lib/frontend/components/layout/InstanceBadgeMenu.svelte :: flex,gap-2,items-center": "The project instance badge and its menu are intentionally deleted. Projects no longer own instances; the draft composer picker is the only instance control.",
 	"src/lib/frontend/components/overlays/UsageLimitsSettings.svelte :: font-mono,min-w-0,text-[10.5px],text-text-secondary,truncate": {
 		"movedTo": "src/lib/frontend/components/overlays/UsageSettingsTab.svelte",
