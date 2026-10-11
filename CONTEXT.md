@@ -101,6 +101,8 @@ At turn start, a missing recorded worktree with origin `existing` moves back to
 the main folder with cause `missing`, using the same pending Claude directive
 rules as a user move; a missing main folder still fails. Forks copy the parent's
 complete worktrees map and origin as a launch move before their first turn.
+Conduit-created worktrees never fall back automatically: a missing checkout is
+reported on read and requires explicit recreation or a user move to the main folder.
 
 ## Workspace Hint
 

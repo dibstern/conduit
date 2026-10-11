@@ -15,3 +15,41 @@ export class WorktreeCreationError extends Schema.TaggedError<WorktreeCreationEr
 		message: Schema.String,
 	},
 ) {}
+
+/** Filesystem availability is derived, never recorded as a workspace move. */
+export const WorkspaceMissingSchema = Schema.Struct({
+	path: Schema.String,
+	branch: Schema.optional(Schema.String),
+	canRecreate: Schema.Boolean,
+	reason: Schema.optional(
+		Schema.Literal(
+			"branch-missing",
+			"branch-unknown",
+			"branch-in-use",
+			"git-failed",
+			"not-owned",
+		),
+	),
+});
+export type WorkspaceMissing = typeof WorkspaceMissingSchema.Type;
+
+export class MissingWorktreeError extends Schema.TaggedError<MissingWorktreeError>()(
+	"MissingWorktreeError",
+	{ path: Schema.String, message: Schema.String },
+) {}
+
+export class WorktreeRecoveryError extends Schema.TaggedError<WorktreeRecoveryError>()(
+	"WorktreeRecoveryError",
+	{
+		reason: Schema.Literal(
+			"branch-missing",
+			"branch-unknown",
+			"branch-in-use",
+			"target-exists",
+			"git-failed",
+			"not-owned",
+		),
+		path: Schema.String,
+		message: Schema.String,
+	},
+) {}

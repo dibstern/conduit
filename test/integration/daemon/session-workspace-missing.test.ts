@@ -469,7 +469,7 @@ describe("Missing session worktrees through the built daemon", () => {
 		60_000,
 	);
 
-	it("does not fall back for a recorded workspace with another origin", async () => {
+	it("reports a missing conduit workspace without automatically falling back", async () => {
 		const { fixture, main, worktree, socket } = await start(
 			"missing-conduit-origin",
 		);
@@ -483,8 +483,8 @@ describe("Missing session worktrees through the built daemon", () => {
 				path: worktree,
 			}),
 		);
-		// No current creation flow emits this origin. Seed the future recorded row
-		// to pin unchanged dispatch behaviour, without implementing isolation.
+		// Seed conduit origin on an unowned path to pin fail-closed dispatch,
+		// including recorded state that cannot be recreated by the owned service.
 		const db = new Database(fixture.projectStorePath());
 		try {
 			db.prepare(
@@ -498,10 +498,11 @@ describe("Missing session worktrees through the built daemon", () => {
 		expect(
 			events(fixture, sessionId)
 				.filter(({ type }) => type === "turn.error")
-				.at(-1)?.data["error"],
-		).toBe(
-			`Failed to send message: Main project folder does not exist: ${worktree}`,
-		);
+				.at(-1)?.data,
+		).toMatchObject({
+			code: "WORKTREE_MISSING",
+			error: `Worktree missing: ${worktree}. Recreate worktree or Continue in main folder before sending another message.`,
+		});
 		expect(
 			events(fixture, sessionId).filter(
 				({ data }) => data["cause"] === "missing",

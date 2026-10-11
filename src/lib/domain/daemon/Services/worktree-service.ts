@@ -1,5 +1,9 @@
 import { Context, type Effect } from "effect";
-import type { WorktreeCreationError } from "../../../contracts/worktree.js";
+import type {
+	WorkspaceMissing,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "../../../contracts/worktree.js";
 
 export interface WorktreeFolder {
 	readonly path: string;
@@ -20,6 +24,16 @@ export interface CreatedWorktrees {
 }
 
 export interface WorktreeService {
+	/** Read Git's registration, including prunable entries, without changing any refs. */
+	readonly inspectMissing: (
+		folder: WorktreeFolder,
+		directory?: string,
+	) => Effect.Effect<WorkspaceMissing | undefined, WorktreeRecoveryError>;
+	/** Re-add an owned checkout from its existing branch; never create a new branch. */
+	readonly recreate: (
+		folder: WorktreeFolder,
+		directory?: string,
+	) => Effect.Effect<string, WorktreeRecoveryError>;
 	readonly create: (
 		folders: readonly WorktreeFolder[],
 		baseBranches?: Readonly<Record<string, string>>,
