@@ -63,19 +63,18 @@ const worktreeUsers = (sessionId: string) =>
 		};
 	});
 
-export const prepareSessionWorktreeDeletion = (sessionId: string) =>
+/** Launch checkout identity is immutable; canonical renames update only its owned branch. */
+export const readSessionWorktreeOwnership = (
+	sessionId: string,
+	includeLegacy = true,
+) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* sql<{
 			data: string;
-		}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'session.workspace_changed' AND json_extract(data, '$.cause') = 'launch' AND json_extract(data, '$.origin') = 'conduit' ORDER BY sequence`;
-		if (events.length === 0)
-			return {
-				ownership: [],
-				worktrees: [],
-				removeWorktrees: true,
-			} satisfies SessionWorktreeDeletionPlan;
+		}>`SELECT data FROM events WHERE session_id = ${sessionId} AND type = 'session.workspace_changed' AND ((json_extract(data, '$.cause') = 'launch' AND json_extract(data, '$.origin') = 'conduit') OR json_extract(data, '$.cause') = 'branch-rename') ORDER BY sequence`;
+		if (events.length === 0) return [];
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		if (service._tag === "None")
 			return yield* new SessionCommandError({
@@ -92,6 +91,20 @@ export const prepareSessionWorktreeDeletion = (sessionId: string) =>
 		for (const launch of launches) {
 			for (const owned of launch.ownership ?? []) {
 				const previous = ownership.get(owned.path);
+				if (launch.cause === "branch-rename") {
+					if (
+						!previous ||
+						previous.folder !== owned.folder ||
+						previous.head !== owned.head
+					)
+						return yield* new SessionCommandError({
+							operation: "worktree.inspect",
+							cause:
+								"Branch rename does not match launch ownership. Worktrees will be kept.",
+						});
+					ownership.set(owned.path, owned);
+					continue;
+				}
 				if (
 					previous &&
 					(previous.folder !== owned.folder ||
@@ -109,9 +122,8 @@ export const prepareSessionWorktreeDeletion = (sessionId: string) =>
 				for (const [folder, path] of Object.entries(launch.worktrees))
 					legacy.set(folder, path);
 		}
-		for (const [folder, path] of launches.every(
-			(launch) => launch.ownership === undefined,
-		)
+		for (const [folder, path] of includeLegacy &&
+		launches.every((launch) => launch.ownership === undefined)
 			? legacy
 			: []) {
 			const owned = yield* service.value
@@ -127,13 +139,31 @@ export const prepareSessionWorktreeDeletion = (sessionId: string) =>
 				);
 			if (owned && !ownership.has(owned.path)) ownership.set(owned.path, owned);
 		}
-		const owned = [...ownership.values()];
+		return [...ownership.values()];
+	}).pipe(
+		Effect.mapError((cause) =>
+			cause instanceof SessionCommandError
+				? cause
+				: new SessionCommandError({ operation: "worktree.inspect", cause }),
+		),
+	);
+
+export const prepareSessionWorktreeDeletion = (sessionId: string) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const owned = yield* readSessionWorktreeOwnership(sessionId);
 		if (owned.length === 0)
 			return {
 				ownership: [],
 				worktrees: [],
 				removeWorktrees: true,
 			} satisfies SessionWorktreeDeletionPlan;
+		const service = yield* Effect.serviceOption(WorktreeServiceTag);
+		if (service._tag === "None")
+			return yield* new SessionCommandError({
+				operation: "worktree.inspect",
+				cause: "Worktree inspection is unavailable.",
+			});
 		const users = yield* worktreeUsers(sessionId);
 		const worktrees = yield* Effect.forEach(owned, (checkout) =>
 			Effect.gen(function* () {

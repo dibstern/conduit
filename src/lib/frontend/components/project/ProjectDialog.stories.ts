@@ -474,3 +474,22 @@ export const Edit: Story = {
 		});
 	},
 };
+
+export const WithSetupScript: Story = {
+	args: {
+		project: {
+			...editedProject,
+			setupScript: "pnpm install\nprintf 'Workspace ready\\n'",
+		},
+		projects: [editedProject],
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.getByRole("textbox", { name: /^Setup script$/ }),
+		).toHaveValue("pnpm install\nprintf 'Workspace ready\\n'");
+		await expect(
+			canvas.getByText("It runs in each new worktree before the agent starts."),
+		).toBeVisible();
+	},
+};

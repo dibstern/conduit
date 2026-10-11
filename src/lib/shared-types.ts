@@ -5,6 +5,7 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
+import type { ProjectSetupState } from "./contracts/project-setup.js";
 import type {
 	ProviderDriverKind,
 	ProviderSessionCapabilities,
@@ -281,6 +282,8 @@ export const SessionFolderGitSchema = Schema.Struct({
 	label: Schema.String,
 	/** Derived from conduit workspace origin and an absent worktree mapping. */
 	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** An unavailable recorded checkout has no healthy Git status fields. */
+	missing: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	...GitStatusSchema.fields,
 });
 export type SessionFolderGit = typeof SessionFolderGitSchema.Type;
@@ -346,6 +349,8 @@ export const SessionInfoSchema = Schema.Struct({
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
 	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
+	/** Explicit Conduit launch ownership permits renaming its branches. */
+	canRenameBranch: Schema.optional(Schema.Boolean),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),
@@ -443,7 +448,9 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking" | "error";
+	type: PartType | "thinking" | "error" | "setup";
+	/** Daemon setup notice, carried by the normal durable transcript. */
+	setup?: ProjectSetupState;
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */
@@ -541,6 +548,7 @@ export interface ProjectInfo {
 	title: string;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
+	setupScript?: string | undefined;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;

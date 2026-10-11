@@ -34,8 +34,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"tapping the collapsed banners row opens the full header with its banners",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
-	"input-newsessioncontext--multi-folder-supported | input-newsessioncontext--multi-folder-unknown":
-		"unknown worktree support is offered like supported support, so the open start menu is identical",
 
 	// Verified legitimate (conduit-test-cju0.13). On desktop both open General.
 	"overlays-settingspanel--composer | overlays-settingspanel--default":

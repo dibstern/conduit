@@ -19,6 +19,9 @@ async function openDraft(
 	baseUrl: string,
 	options: {
 		provider?: "claude" | "opencode";
+		supportsWorktree?: boolean;
+		supportsNewWorktree?: boolean;
+		switchProviders?: boolean;
 		multiFolder?: boolean;
 		nonGitPrimary?: boolean;
 		git?: boolean;
@@ -71,17 +74,40 @@ async function openDraft(
 				id: provider,
 				name: "Draft provider",
 				driver: provider,
-				port: 0,
-				managed: false,
-				status: "healthy",
-				restartCount: 0,
-				createdAt: 0,
-				capabilities: {
-					supportsMultiFolder: true,
-					supportsWorktree: provider === "claude",
-				},
+				supportsWorktree: options.supportsWorktree ?? provider === "claude",
+				supportsNewWorktree: options.supportsNewWorktree ?? true,
 			},
-		],
+			...(options.switchProviders
+				? [
+						{
+							id: "opencode",
+							name: "OpenCode",
+							driver: "opencode",
+							supportsWorktree: false,
+							supportsNewWorktree: true,
+						},
+						{
+							id: "limited-provider",
+							name: "Local provider",
+							driver: "opencode",
+							supportsWorktree: false,
+							supportsNewWorktree: false,
+						},
+					]
+				: []),
+		].map(({ supportsWorktree, supportsNewWorktree, ...instance }) => ({
+			...instance,
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 0,
+			capabilities: {
+				supportsMultiFolder: true,
+				supportsWorktree,
+				supportsNewWorktree,
+			},
+		})),
 	};
 	let sessions: readonly Record<string, unknown>[] = [];
 	let workspaceCreated = false;
@@ -90,10 +116,10 @@ async function openDraft(
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
 			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetAgents: () => ({
+			GetAgents: ({ instanceId }) => ({
 				projectSlug: "e2e-replay",
-				instanceId: provider,
-				providerScope: { id: provider, name: "Draft provider" },
+				instanceId: instanceId ?? provider,
+				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
 				agents: [],
 			}),
 			ListDaemonSessions: () => ({
@@ -488,6 +514,11 @@ for (const mode of [
 				);
 				await page.keyboard.press("Escape");
 				if (mode.hasTouch) {
+					// The ⋯ sheet is modal, so the session bar is inert until it closes.
+					await page.keyboard.press("Escape");
+					await expect(
+						page.getByRole("dialog", { name: "Composer" }),
+					).toBeHidden();
 					await press(page.getByTestId("session-bar-island-overflow"));
 					await press(page.getByTestId("overflow-view-files"));
 				} else {
@@ -567,8 +598,113 @@ for (const mode of [
 			).toEqual([]);
 		});
 
-		for (const options of [{ provider: "opencode" as const }, { git: false }]) {
-			test(`New worktree stays disabled for ${options.provider ?? "folders without git"}`, async ({
+		test("OpenCode offers New worktree and sends the launch request", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl, {
+				provider: "opencode",
+			});
+			await press(page.getByTestId("draft-start-chip"));
+			await expect(
+				page.getByRole("menuitem", { name: /^Existing worktree/ }),
+			).toHaveAttribute("aria-disabled", "true");
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await page.locator("#input").fill("Run OpenCode in isolation");
+			await press(page.locator("#send"));
+			const request = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({
+				instanceId: "opencode",
+				newWorktree: true,
+			});
+			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+		});
+
+		test("switching the draft provider updates the offer and clears unsupported New worktree and base selections", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl, {
+				switchProviders: true,
+			});
+			await page
+				.locator("#input")
+				.fill("Keep this draft while switching providers");
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
+			);
+			const picker = page.locator(
+				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			);
+			for (const provider of [
+				"opencode",
+				"limited-provider",
+				"claude",
+				"limited-provider",
+			]) {
+				await press(picker);
+				const back = page.getByTestId("picker-back");
+				if (await back.isVisible()) await press(back);
+				await press(
+					page.getByTestId(
+						`picker-harness-${provider === "claude" ? "claude" : "opencode"}`,
+					),
+				);
+				if (provider !== "claude")
+					await press(page.getByTestId(`picker-account-${provider}`));
+				await page.keyboard.press("Escape");
+				await expect(picker).toHaveAttribute("data-instance-id", provider);
+				if (provider === "opencode") {
+					await expect(page.getByTestId("draft-start-chip")).toHaveText(
+						"New worktree",
+					);
+					await expect(page.getByTestId("draft-base-branch-chip")).toHaveText(
+						"from feature/base",
+					);
+				} else {
+					await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
+					await expect(page.getByTestId("draft-base-branch-chip")).toHaveCount(
+						0,
+					);
+				}
+				await press(page.getByTestId("draft-start-chip"));
+				const choice = page.getByRole("menuitem", { name: /New worktree/ });
+				if (provider === "limited-provider") {
+					await expect(choice).toHaveAttribute("aria-disabled", "true");
+					await expect(choice).toContainText("Not supported by Local provider");
+				} else {
+					await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+					await expect(choice).toHaveText("New worktree");
+				}
+				await page.keyboard.press("Escape");
+				await expect(page.locator("#input")).toHaveValue(
+					"Keep this draft while switching providers",
+				);
+			}
+			await press(page.locator("#send"));
+			const request = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({ instanceId: "limited-provider" });
+			for (const key of ["newWorktree", "worktreePath", "worktreeBase"])
+				expect(request.payload).not.toHaveProperty(key);
+			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+		});
+
+		for (const options of [
+			{ supportsWorktree: false, supportsNewWorktree: false },
+			{ git: false },
+		]) {
+			test(`New worktree stays disabled for ${options.supportsWorktree === false ? "an unsupported provider" : "folders without git"}`, async ({
 				page,
 				harness,
 			}) => {

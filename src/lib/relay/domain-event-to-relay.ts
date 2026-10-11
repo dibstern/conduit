@@ -130,6 +130,13 @@ export function translateDomainEventToRelay(
 				"persistence-only; browsers read pending inputs from the detail stream",
 			);
 
+		case "session.setup_started":
+		case "session.setup_output":
+		case "session.setup_finished":
+			return silent(
+				"projected into a setup message; browsers read it from the detail stream",
+			);
+
 		case "session.status":
 			return silent(
 				"the shell row carries session status, including a retry; the terminal done covers completion",

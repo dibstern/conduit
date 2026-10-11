@@ -10,7 +10,11 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError, WorktreeRecoveryError } from "./worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -170,6 +174,7 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	setupScript: Schema.optional(Schema.String),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -609,6 +614,7 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
+	readonly setupScript?: string | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -1001,6 +1007,7 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
+			setupScript: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -1434,6 +1441,19 @@ export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSession
 			removeWorktrees: Schema.Boolean,
 		}),
 		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranch>()(
+	"RenameSessionBranch",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
+		success: Schema.Struct({ ok: Schema.Literal(true) }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			branchName: Schema.String,
+		},
 	},
 ) {}
 
@@ -2218,6 +2238,7 @@ export const WsRpcRequest = Schema.Union(
 	ListBranches,
 	ListWorktrees,
 	InspectSessionWorktrees,
+	RenameSessionBranch,
 	MoveSessionWorkspace,
 	RecreateSessionWorktree,
 	ContinueSessionInMainFolder,
@@ -2636,6 +2657,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(InspectSessionWorktrees),
+	Rpc.fromTaggedRequest(RenameSessionBranch),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(RecreateSessionWorktree),
 	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),

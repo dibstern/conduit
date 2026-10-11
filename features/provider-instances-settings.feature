@@ -46,6 +46,40 @@ Scenario: editing a named instance updates it in the settings list
   Then the Instances list shows Prod OC
   And the Instances list does not show Staging OC
 
+Scenario: the default Claude account shares the editor and cannot be removed
+  Given the default Claude account is named Personal Claude with folder /profiles/personal
+  When I open settings to the Server section
+  And I edit the default Claude account
+  Then the default Claude editor shows name Personal Claude and folder /profiles/personal
+  And the default Claude account cannot be removed
+  When I save the default Claude account as Home Claude with folder /profiles/home
+  Then the Instances list shows Home Claude
+  And the default Claude account shows folder /profiles/home with Applies after restart
+  And UpdateInstance saves the default Claude name Home Claude and folder /profiles/home
+
+Scenario: the default Claude account can return to the environment's login
+  Given the default Claude account is named Personal Claude with folder /profiles/personal
+  When I open settings to the Server section
+  And I edit the default Claude account
+  And I save the default Claude account as Personal Claude with folder empty
+  Then the default Claude account shows folder env with Applies after restart
+  And UpdateInstance saves the default Claude name Personal Claude and folder empty
+
+Scenario: the OpenCode empty state includes setup guides even with a Claude account
+  Given no OpenCode servers are configured and CCS is detected
+  When I open settings to the Server section
+  Then the OpenCode empty state offers the serve command and Scan link
+  And the OpenCode setup guides are collapsed with the CCS tick
+
+Scenario: the Add form switches between managed and external OpenCode servers
+  When I open settings to the Server section
+  And I start adding an OpenCode instance
+  Then the OpenCode editor offers name and port with environment variables collapsed
+  When I expand the instance environment variables
+  Then the instance environment field is visible
+  When I turn off Conduit starts it
+  Then the OpenCode editor offers name and URL
+
 Scenario: removing a named instance drops it from the settings list
   Given a named OpenCode instance Staging OC is already configured
   When I open settings to the Server section
@@ -54,12 +88,12 @@ Scenario: removing a named instance drops it from the settings list
 
 Scenario Outline: the instance editor matches the approved layout
   When I open settings to the Server section
-  And I start adding a Claude instance
+  And I start adding a <driver> instance
   Then the instances-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | baseline                         | threshold |
-  | provider-instances-settings-dark | 98        |
+  | driver | baseline                         | threshold |
+  | Claude | provider-instances-settings-dark | 98        |
 
 Scenario: Usage owns the limit settings beside the Claude and Server sections
   When I open settings to the Server section

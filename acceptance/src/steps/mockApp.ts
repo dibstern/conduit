@@ -496,6 +496,10 @@ export const mockAppHandlers: StepHandler[] = [
 										...(typeof payload["name"] === "string"
 											? { name: payload["name"] }
 											: {}),
+										...(i["id"] === "claude" &&
+										typeof payload["configDir"] === "string"
+											? { configDir: payload["configDir"] }
+											: {}),
 									}
 								: i,
 						);

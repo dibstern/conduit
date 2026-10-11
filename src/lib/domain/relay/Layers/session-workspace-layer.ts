@@ -1,7 +1,7 @@
 import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, Schema } from "effect";
+import { Cause, Effect, Either, Layer, Schema } from "effect";
 import {
 	isKnownDriverKind,
 	PROVIDER_SESSION_CAPABILITIES,
@@ -11,6 +11,7 @@ import {
 	SessionWorkspaceSchema,
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
+import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
@@ -24,6 +25,7 @@ import {
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { readClaudeWorktreeState } from "../../../session/claude-worktree-state.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "../Services/services.js";
 import {
 	applySessionCommand,
@@ -34,6 +36,7 @@ import {
 	type SessionWorkspace,
 	SessionWorkspaceTag,
 } from "../Services/session-workspace.js";
+import { readSessionWorktreeOwnership } from "../Services/session-worktree-deletion.js";
 
 type Dependencies = Effect.Effect.Context<
 	ReturnType<typeof applySessionCommand>
@@ -87,6 +90,7 @@ export const SessionWorkspaceLive = Layer.effect(
 		}>`
 			SELECT sequence, json_extract(data, '$.cause') AS cause FROM events
 			WHERE session_id = ${sessionId} AND type = 'session.workspace_changed'
+			AND json_extract(data, '$.cause') != 'branch-rename'
 			ORDER BY sequence DESC LIMIT 1`;
 		const worktreesFor = (
 			target: ResolvedWorkspaceTarget,
@@ -124,17 +128,23 @@ export const SessionWorkspaceLive = Layer.effect(
 					!driver ||
 					!isKnownDriverKind(driver) ||
 					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
-						// OpenCode accepts declarations and fallbacks, but not direct user moves.
 						!(
-							driver === "opencode" &&
-							(cause === "agent" ||
-								(cause === "missing" &&
-									path === config.projectDir &&
-									previous?.origin === "existing" &&
-									effectiveWorkingDirectory(config.projectDir, previous) !==
-										config.projectDir) ||
-								// A hint acceptance records work already observed in that folder.
-								(cause === "user" && row.workspace_hint === path))
+							(PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree &&
+								cause === "launch" &&
+								origin === "conduit") ||
+							// OpenCode declarations acknowledge an already observed workspace.
+							(driver === "opencode" &&
+								(cause === "agent" ||
+									(cause === "missing" &&
+										path === config.projectDir &&
+										previous?.origin === "existing" &&
+										effectiveWorkingDirectory(config.projectDir, previous) !==
+											config.projectDir) ||
+									(cause === "user" &&
+										(row.workspace_hint === path ||
+											// Recovery of an owned launch stays in its original repository.
+											(previous?.origin === "conduit" &&
+												path === config.projectDir)))))
 						))
 				)
 					return yield* new WorkspaceMoveError({
@@ -351,6 +361,97 @@ export const SessionWorkspaceLive = Layer.effect(
 		};
 		return {
 			withLaunch: launches.withPermits(1),
+			renameBranch: (sessionId, branchName) =>
+				launches.withPermits(1)(
+					Effect.gen(function* () {
+						const { workspace } = yield* readWorkspace(sessionId);
+						const ownership = yield* readSessionWorktreeOwnership(
+							sessionId,
+							false,
+						);
+						if (ownership.length === 0)
+							return yield* new WorktreeBranchRenameError({
+								folder: config.projectDir,
+								reason: "not-owned",
+								message: "This session has no Conduit launch ownership.",
+							});
+						const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
+						if (worktrees._tag === "None")
+							return yield* new SessionCommandError({
+								operation: "workspace.renameBranch",
+								cause: "Branch rename is unavailable.",
+							});
+						// Git and the canonical ownership update must finish together even if
+						// the requesting browser disconnects while Git is running.
+						yield* Effect.gen(function* () {
+							yield* worktrees.value.renameBranch(ownership, branchName);
+							if (ownership.every((owned) => owned.branchName === branchName))
+								return;
+							const renamed = ownership.map((owned) => ({
+								...owned,
+								branchName,
+							}));
+							yield* applySessionCommand({
+								type: "session.workspace_changed",
+								data: {
+									sessionId,
+									cause: "branch-rename",
+									worktrees: { ...workspace?.worktrees },
+									origin: workspace?.origin ?? "existing",
+									ownership: renamed,
+								},
+							}).pipe(
+								Effect.catchAllCause((cause) =>
+									Effect.gen(function* () {
+										// A post-COMMIT signal failure must not undo recorded ownership.
+										const recorded = yield* Effect.either(
+											readSessionWorktreeOwnership(sessionId, false),
+										);
+										if (Either.isLeft(recorded))
+											return yield* new WorktreeBranchRenameError({
+												folder: ownership[0]?.folder ?? config.projectDir,
+												reason: "git-failed",
+												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Cause.pretty(cause).slice(0, 2_000)}. ${String(recorded.left.cause).slice(0, 2_000)}`,
+											});
+										if (
+											recorded.right.length === renamed.length &&
+											recorded.right.every(
+												(owned) => owned.branchName === branchName,
+											)
+										)
+											return yield* Effect.failCause(cause);
+										const originalName = ownership[0]?.branchName;
+										if (originalName !== undefined)
+											yield* worktrees.value
+												.renameBranch(renamed, originalName)
+												.pipe(
+													Effect.mapError(
+														(error) =>
+															new WorktreeBranchRenameError({
+																folder: error.folder,
+																reason: "git-failed",
+																message: `${Cause.pretty(cause).slice(0, 2_000)}. Branch rollback failed: ${error.message}`,
+															}),
+													),
+												);
+										return yield* Effect.failCause(cause);
+									}),
+								),
+							);
+						}).pipe(Effect.uninterruptible);
+					}).pipe(
+						Effect.provide(services),
+						Effect.mapError((cause) =>
+							cause instanceof WorktreeBranchRenameError ||
+							cause instanceof SessionCommandError
+								? cause
+								: new SessionCommandError({
+										operation: "workspace.renameBranch",
+										cause,
+									}),
+						),
+					),
+				),
 			get: (sessionId) =>
 				readWorkspace(sessionId).pipe(
 					Effect.map(({ workspace }) =>

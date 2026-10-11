@@ -483,6 +483,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
+						...(request.setupScript !== undefined && {
+							setupScript: request.setupScript,
+						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")

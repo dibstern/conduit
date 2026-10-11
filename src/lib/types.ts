@@ -119,6 +119,7 @@ export interface StoredProject {
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
+	readonly setupScript?: string | undefined;
 }
 
 export interface RecentProject {
@@ -188,6 +189,7 @@ export interface ProjectRelayConfig {
 			slug: string;
 			title: string;
 			folders: readonly [string, ...string[]];
+			setupScript?: string | undefined;
 		}>
 	>;
 	/** List sessions across every registered project without starting relays. */

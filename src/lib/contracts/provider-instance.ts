@@ -21,6 +21,8 @@ export function isKnownDriverKind(
 export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 	supportsMultiFolder: Schema.Boolean,
 	supportsWorktree: Schema.Boolean,
+	/** Launch in Conduit-owned worktrees without enabling arbitrary workspace moves. */
+	supportsNewWorktree: Schema.optional(Schema.Boolean),
 	/** Individual background tasks can be stopped without interrupting a turn. */
 	supportsTaskStop: Schema.optional(Schema.Boolean),
 });
@@ -34,13 +36,16 @@ export const PROVIDER_SESSION_CAPABILITIES = {
 	claude: {
 		supportsMultiFolder: true,
 		supportsWorktree: true,
+		supportsNewWorktree: true,
 		supportsTaskStop: true,
 	},
 	// The multi-folder-project replay pins external_directory session rules.
-	// No captured session worktree/cwd-switch contract is wired for this adapter.
+	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
+	// Native moves reject destinations belonging to another OpenCode project.
 	opencode: {
 		supportsMultiFolder: true,
 		supportsWorktree: false,
+		supportsNewWorktree: true,
 		supportsTaskStop: false,
 	},
 } as const satisfies Record<

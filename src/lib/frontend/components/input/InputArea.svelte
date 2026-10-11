@@ -79,7 +79,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -1402,6 +1402,7 @@
 												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
 												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
 												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
 											>
 												{#snippet children(attention, checkout, warning)}
 													{@render phoneMore(rows, attention, checkout, warning)}
@@ -1422,20 +1423,23 @@
 				{#snippet send()}
 					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && currentSession && composerDirectory}
 						{@const session = currentSession}
-						<GitIdentity
-							presentation="control"
-							directory={composerDirectory}
-							git={composerGit}
-							workspaceCause={session.workspace?.cause}
-							workspaceMissing={session.workspaceMissing}
-							workspaceMismatch={session.workspaceMismatch}
-							workspaceHint={session.workspaceHint}
-							loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-							onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-							onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-							oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-							ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-						/>
+						{#key session.id}
+							<GitIdentity
+								presentation="control"
+								directory={composerDirectory}
+								git={composerGit}
+								workspaceCause={session.workspace?.cause}
+								workspaceMissing={session.workspaceMissing}
+								workspaceMismatch={session.workspaceMismatch}
+								workspaceHint={session.workspaceHint}
+								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+							/>
+						{/key}
 					{/if}
 					{#snippet sendAtLabel()}
 						<span data-testid="composer-send-at-label">{sessionViewState.compact ? sendAtTime.replace(/^(\d\S*) (?:am|pm)$/, "$1") : `Send at ${sendAtTime}`}</span>
@@ -1559,20 +1563,23 @@
 					{#if currentSession}
 						{@const session = currentSession}
 						{#if composerDirectory}
-							<GitIdentity
-								presentation="word"
-								directory={composerDirectory}
-								git={composerGit}
-								workspaceCause={session.workspace?.cause}
-								workspaceMissing={session.workspaceMissing}
-								workspaceMismatch={session.workspaceMismatch}
-								workspaceHint={session.workspaceHint}
-								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-							/>
+							{#key session.id}
+								<GitIdentity
+									presentation="word"
+									directory={composerDirectory}
+									git={composerGit}
+									workspaceCause={session.workspace?.cause}
+									workspaceMissing={session.workspaceMissing}
+									workspaceMismatch={session.workspaceMismatch}
+									workspaceHint={session.workspaceHint}
+									loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+									onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+									onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+									oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
+									ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
+									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+								/>
+							{/key}
 						{/if}
 						{#if currentChat().contextPercent > 0}
 							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0 pl-[4px]">{Math.round(currentChat().contextPercent)}%</span>

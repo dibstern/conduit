@@ -38,8 +38,28 @@
  * - A recorded path points outside the owned location: refuse recovery.
  * - The main checkout's project subfolder disappears while its isolated copy
  *   remains: keep that checkout usable and recover through the main Git root.
+ * - Multi-folder list inspection calls Git for present checkouts, or skips a
+ *   missing extra checkout. Inspect only the absent or unusable folders.
+ * - The first missing folder can recover but a later branch is deleted:
+ *   aggregate availability must refuse partial recreation.
+ * - Branch rename preflight checks every repository before writing any ref.
+ * - Same-name renames are no-ops; shared checkouts are renamed once.
+ * - A failed or interrupted rename restores earlier refs, including a Git
+ *   command that updated the ref before reporting failure.
+ * - Setup exits non-zero: stream its output and report the original exit code.
+ * - Setup hangs beyond its deadline: kill its process group and report timeout.
+ * - Setup prints excessive or split UTF-8 output: preserve text within 64 KiB,
+ *   emit one truncation note, and keep draining until the script finishes.
+ * - A background child holds the pipes after setup exits: kill it, preserve the
+ *   shell's outcome, and finish without waiting for the child's natural exit.
+ * - Stream interruption closes ownership: kill both the shell and descendants.
+ * - The daemon dies without finalizers: pipe EOF stops the detached setup
+ *   process group; the user's script still receives /dev/null as stdin.
+ * - Setup uses its effective directory and project environment through the
+ *   user's login shell; an unset or missing shell falls back to /bin/sh -c.
+ * - Setup cannot spawn in its directory: return a failed update, never a defect.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -53,7 +73,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Effect, Either, Exit, Fiber } from "effect";
+import { Cause, Chunk, Effect, Either, Exit, Fiber, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	isConduitWorktreePath,
@@ -65,6 +85,7 @@ import {
 	type WorktreeFolder,
 	WorktreeServiceTag,
 } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
+import { inspectSessionWorktree } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 
 describe("daemon Worktree service", () => {
 	let fixture: string;
@@ -138,6 +159,108 @@ describe("daemon Worktree service", () => {
 		expect(repositoryState()).toEqual(before);
 		expect(existsSync(ownedWorktreePath(configDir, folder))).toBe(false);
 	};
+
+	it.each([
+		"invalid",
+		"taken",
+		"missing",
+		"head",
+	] as const)("branch rename rejects %s before changing either repository", async (failure) => {
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect("owned", undefined, [folder, second]),
+		);
+		const secondPath = created.worktrees[second.path];
+		if (!secondPath) throw new Error("Missing second worktree");
+		if (failure === "taken") git("-C", second.path, "branch", "renamed");
+		if (failure === "missing") rmSync(secondPath, { recursive: true });
+		if (failure === "head") git("-C", secondPath, "switch", "--detach");
+		const before = [repositoryState(), repositoryState(second.path)];
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(
+					created.ownership,
+					failure === "invalid" ? "bad name" : "renamed",
+				),
+			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+		);
+		if (Either.isRight(result)) throw new Error("Expected rename to fail");
+		expect(result.left).toMatchObject({
+			folder: failure === "invalid" ? repository : second.path,
+			reason: {
+				invalid: "invalid-name",
+				taken: "already-exists",
+				missing: "worktree-missing",
+				head: "head-mismatch",
+			}[failure],
+		});
+		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
+	});
+
+	it("renames a shared checkout once and treats the current name as a no-op", async () => {
+		const created = await Effect.runPromise(
+			createEffect("owned", undefined, [
+				folder,
+				{ ...folder, path: join(repository, "app") },
+			]),
+		);
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(created.ownership, "renamed"),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		const ownership = created.ownership.map((owned) => ({
+			...owned,
+			branchName: "renamed",
+		}));
+		const before = repositoryState();
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(ownership, "renamed"),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(repositoryState()).toEqual(before);
+		expect(git("branch", "--list", "owned")).toBe("");
+		expect(git("branch", "--list", "renamed")).toContain("renamed");
+	});
+
+	it("rolls back both refs when the second Git rename writes then fails", async () => {
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect("owned", undefined, [folder, second]),
+		);
+		const secondOwned = created.ownership.find(
+			(owned) => owned.folder === second.path,
+		);
+		if (!secondOwned) throw new Error("Missing second ownership");
+		const marker = join(fixture, "rename-failed");
+		const executable = gitWrapper(`${runRealGit}
+if (args.includes("branch") && args.includes("-m") && args.at(-1) === "renamed" && process.cwd() === ${JSON.stringify(secondOwned.path)} && result.status === 0) {
+  writeFileSync(${JSON.stringify(marker)}, "failed after rename");
+  process.stderr.write("forced second rename failure");
+  process.exit(42);
+}
+process.exit(result.status ?? 1);`);
+		const before = [repositoryState(), repositoryState(second.path)];
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.renameBranch(created.ownership, "renamed"),
+			).pipe(
+				Effect.either,
+				Effect.provide(
+					makeWorktreeLive(configDir, { gitExecutable: executable }),
+				),
+			),
+		);
+		if (Either.isRight(result)) throw new Error("Expected rename to fail");
+		expect(result.left).toMatchObject({
+			folder: second.path,
+			reason: "git-failed",
+		});
+		expect(result.left.message).toContain("forced second rename failure");
+		expect(existsSync(marker)).toBe(true);
+		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
+	});
 
 	beforeEach(() => {
 		fixture = realpathSync(
@@ -695,6 +818,80 @@ finish();
 			).pipe(Effect.provide(makeWorktreeLive(configDir))),
 		);
 
+	it("inspects every mapped folder while skipping Git for each present checkout", async () => {
+		const extra = secondGitFolder();
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* WorktreeServiceTag;
+				const created = yield* service.create([folder, extra]);
+				const inspect = () =>
+					inspectSessionWorktree(
+						{
+							id: folder.sessionId,
+							workspace: {
+								origin: "conduit",
+								cause: "launch",
+								worktrees: created.worktrees,
+							},
+						},
+						{ projectDir: folder.path, slug: folder.projectSlug },
+					);
+				const calls = vi.spyOn(service, "inspectMissing");
+				expect(yield* inspect()).toBeUndefined();
+				expect(calls).not.toHaveBeenCalled();
+				const path = created.worktrees[extra.path] ?? "";
+				rmSync(path, { recursive: true });
+				expect(yield* inspect()).toMatchObject({
+					path,
+					canRecreate: true,
+					folders: [{ folder: extra.path, path }],
+				});
+				expect(calls).toHaveBeenCalledTimes(1);
+				expect(calls).toHaveBeenCalledWith(extra, path, [
+					folder.path,
+					extra.path,
+				]);
+			}).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+	});
+
+	it("reports both missing folders and a deleted extra branch blocks the whole recovery", async () => {
+		const extra = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect(undefined, undefined, [folder, extra]),
+		);
+		for (const path of Object.values(created.worktrees))
+			rmSync(path, { recursive: true });
+		git(
+			"-C",
+			extra.path,
+			"update-ref",
+			"-d",
+			`refs/heads/${created.branchName}`,
+		);
+		const state = await Effect.runPromise(
+			inspectSessionWorktree(
+				{
+					id: folder.sessionId,
+					workspace: {
+						origin: "conduit",
+						cause: "launch",
+						worktrees: created.worktrees,
+					},
+				},
+				{ projectDir: folder.path, slug: folder.projectSlug },
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(state?.folders?.map(({ folder }) => folder)).toEqual([
+			folder.path,
+			extra.path,
+		]);
+		expect(state).toMatchObject({
+			canRecreate: false,
+			reason: "branch-missing",
+		});
+	});
+
 	it("recreates a missing checkout from the registered renamed branch without changing its ref", async () => {
 		const created = await Effect.runPromise(createEffect());
 		const path = created.worktrees[repository] ?? "";
@@ -916,5 +1113,282 @@ finish();
 			isConduitWorktreePath(alias, join(alias, "worktrees", "outward")),
 		).toBe(true);
 		expect(isConduitWorktreePath(alias, outward)).toBe(true);
+	});
+});
+
+describe("daemon Worktree setup runner", () => {
+	let fixture: string;
+	let directory: string;
+	const setupEffect = (
+		script: string,
+		env: Readonly<Record<string, string | undefined>> = {
+			...process.env,
+			SHELL: "/bin/sh",
+		},
+		setupTimeoutMs = 2_000,
+		cwd = directory,
+	) =>
+		Effect.flatMap(WorktreeServiceTag, (service) =>
+			Stream.runCollect(service.runSetup(cwd, script, env)),
+		).pipe(
+			Effect.provide(makeWorktreeLive(fixture, { setupTimeoutMs })),
+			Effect.map(Chunk.toReadonlyArray),
+		);
+	const outputText = (
+		updates: readonly { readonly _tag: string; readonly output?: string }[],
+	) =>
+		updates
+			.filter((update) => update._tag === "output")
+			.map((update) => update.output ?? "")
+			.join("");
+	const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+	const pidIsAlive = (pid: number) => {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const expectStopped = async (pidFile: string) => {
+		const pid = Number(readFileSync(pidFile, "utf8"));
+		expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+		await expect.poll(() => pidIsAlive(pid), { timeout: 2_000 }).toBe(false);
+	};
+
+	beforeEach(() => {
+		fixture = realpathSync(
+			mkdtempSync(join(tmpdir(), "conduit-worktree-setup-")),
+		);
+		directory = join(fixture, "worktree");
+		mkdirSync(directory);
+	});
+
+	afterEach(() => {
+		rmSync(fixture, { recursive: true, force: true });
+	});
+
+	it("runs in the effective directory and streams output before finishing", async () => {
+		const updates = await Effect.runPromise(
+			setupEffect(
+				"printf 'stdout-first\\n'; printf 'stderr-second\\n' >&2; printf '%s' \"$CONDUIT_SETUP_ENV\" > marker",
+				{ ...process.env, SHELL: "/bin/sh", CONDUIT_SETUP_ENV: "project" },
+			),
+		);
+		expect(readFileSync(join(directory, "marker"), "utf8")).toBe("project");
+		expect(outputText(updates)).toBe("stdout-first\nstderr-second\n");
+		expect(updates.at(-1)).toEqual({
+			_tag: "finished",
+			status: "succeeded",
+			exitCode: 0,
+		});
+	});
+
+	it("reports non-zero exit with stdout and stderr intact", async () => {
+		const updates = await Effect.runPromise(
+			setupEffect(
+				"printf 'failed output\\n'; printf 'error detail\\n' >&2; exit 23",
+			),
+		);
+		expect(outputText(updates)).toBe("failed output\nerror detail\n");
+		expect(updates.at(-1)).toEqual({
+			_tag: "finished",
+			status: "failed",
+			exitCode: 23,
+		});
+	});
+
+	it("times out a hanging script and kills the entire process group", async () => {
+		const updates = await Effect.runPromise(
+			setupEffect(
+				"echo $$ > shell.pid; sleep 60 & echo $! > child.pid; wait",
+				{ ...process.env, SHELL: "/bin/sh" },
+				100,
+			),
+		);
+		expect(updates.at(-1)).toMatchObject({
+			_tag: "finished",
+			status: "timed_out",
+		});
+		await expectStopped(join(directory, "shell.pid"));
+		await expectStopped(join(directory, "child.pid"));
+	});
+
+	it("caps large output once without splitting a UTF-8 character", async () => {
+		const body = "process.stdout.write('🙂'.repeat(40_000));";
+		const updates = await Effect.runPromise(
+			setupEffect(`${shellQuote(process.execPath)} -e ${shellQuote(body)}`),
+		);
+		const text = outputText(updates);
+		expect(text).not.toContain("\uFFFD");
+		expect(text.startsWith("🙂".repeat(16_384))).toBe(true);
+		expect(text.match(/\[Setup output truncated after 64 KiB\]/g)).toHaveLength(
+			1,
+		);
+		expect(Buffer.byteLength(text)).toBeLessThan(65_700);
+		expect(updates.at(-1)).toMatchObject({ status: "succeeded", exitCode: 0 });
+	});
+
+	it("decodes UTF-8 characters split between streamed chunks", async () => {
+		const body =
+			"const bytes = Buffer.from('🙂'); process.stdout.write(bytes.subarray(0, 2)); setTimeout(() => process.stdout.write(bytes.subarray(2)), 30);";
+		const updates = await Effect.runPromise(
+			setupEffect(`${shellQuote(process.execPath)} -e ${shellQuote(body)}`),
+		);
+		expect(outputText(updates)).toBe("🙂");
+	});
+
+	it("kills a background descendant holding output pipes after the shell exits", async () => {
+		const updates = await Effect.runPromise(
+			setupEffect("sleep 60 & echo $! > child.pid; printf 'shell done\\n'"),
+		);
+		expect(outputText(updates)).toBe("shell done\n");
+		expect(updates.at(-1)).toMatchObject({ status: "succeeded", exitCode: 0 });
+		await expectStopped(join(directory, "child.pid"));
+	});
+
+	it("interrupts the setup shell and its descendants when the stream closes", async () => {
+		const fiber = Effect.runFork(
+			setupEffect("echo $$ > shell.pid; sleep 60 & echo $! > child.pid; wait"),
+		);
+		try {
+			await expect
+				.poll(() => existsSync(join(directory, "child.pid")))
+				.toBe(true);
+		} finally {
+			await Effect.runPromise(Fiber.interrupt(fiber));
+		}
+		await expectStopped(join(directory, "shell.pid"));
+		await expectStopped(join(directory, "child.pid"));
+	});
+
+	it("gives the user's setup script closed stdin", async () => {
+		const updates = await Effect.runPromise(
+			setupEffect(
+				"if IFS= read -r value; then printf 'unexpected input'; else printf 'stdin closed'; fi",
+			),
+		);
+		expect(outputText(updates)).toBe("stdin closed");
+		expect(updates.at(-1)).toMatchObject({ status: "succeeded", exitCode: 0 });
+	});
+
+	it("stops the setup process group when its fixture daemon is killed abruptly", async () => {
+		const serviceUrl = new URL(
+			"../../../src/lib/domain/daemon/Services/worktree-service.ts",
+			import.meta.url,
+		).href;
+		const layerUrl = new URL(
+			"../../../src/lib/domain/daemon/Layers/worktree-layer.ts",
+			import.meta.url,
+		).href;
+		const script = "echo $$ > shell.pid; sleep 60 & echo $! > child.pid; wait";
+		const parent = spawn(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"--input-type=module",
+				"-e",
+				`import { Effect, Stream } from "effect";
+import { WorktreeServiceTag } from ${JSON.stringify(serviceUrl)};
+import { makeWorktreeLive } from ${JSON.stringify(layerUrl)};
+Effect.runFork(Effect.flatMap(WorktreeServiceTag, (service) =>
+  Stream.runDrain(service.runSetup(${JSON.stringify(directory)}, ${JSON.stringify(script)}, { ...process.env, SHELL: "/bin/sh" }))
+).pipe(Effect.provide(makeWorktreeLive(${JSON.stringify(fixture)}, { setupTimeoutMs: 60_000 }))));`,
+			],
+			{ cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
+		);
+		let parentStderr = "";
+		parent.stderr.on("data", (chunk: Buffer) => {
+			parentStderr = (parentStderr + chunk.toString()).slice(-2_000);
+		});
+		const parentExited = new Promise<void>((accept, reject) => {
+			parent.once("close", () => accept());
+			parent.once("error", reject);
+		});
+		let groupPid: number | undefined;
+		try {
+			await expect
+				.poll(
+					() => {
+						if (parent.exitCode !== null || parent.signalCode !== null)
+							throw new Error(
+								`Fixture daemon exited before setup: ${parentStderr}`,
+							);
+						return existsSync(join(directory, "child.pid"));
+					},
+					{ timeout: 3_000 },
+				)
+				.toBe(true);
+			groupPid = Number(readFileSync(join(directory, "shell.pid"), "utf8"));
+			expect(Number.isSafeInteger(groupPid) && groupPid > 0).toBe(true);
+			expect(parent.kill("SIGKILL")).toBe(true);
+			await parentExited;
+			await expectStopped(join(directory, "shell.pid"));
+			await expectStopped(join(directory, "child.pid"));
+		} finally {
+			parent.kill("SIGKILL");
+			await parentExited;
+			// This PID came from the process group started by this fixture, never
+			// from persisted daemon state. Clean it up even if the assertion fails.
+			if (groupPid) {
+				try {
+					process.kill(-groupPid, "SIGKILL");
+				} catch {
+					// Successful watchdog cleanup already removed this owned group.
+				}
+			}
+		}
+	});
+
+	it("uses the configured user's shell with login and command flags", async () => {
+		const shell = join(fixture, "user-shell");
+		writeFileSync(
+			shell,
+			'#!/bin/sh\nprintf \'%s\' "$1" > shell-flags\nexec /bin/sh -c "$2"\n',
+		);
+		chmodSync(shell, 0o755);
+		await Effect.runPromise(
+			setupEffect("printf 'custom shell' > marker", {
+				...process.env,
+				SHELL: shell,
+			}),
+		);
+		expect(readFileSync(join(directory, "shell-flags"), "utf8")).toBe("-lc");
+		expect(readFileSync(join(directory, "marker"), "utf8")).toBe(
+			"custom shell",
+		);
+	});
+
+	it.each([
+		undefined,
+		"/conduit-test-missing-shell",
+	])("falls back to /bin/sh when SHELL is %s", async (shell) => {
+		const updates = await Effect.runPromise(
+			setupEffect("printf 'fallback' > marker", {
+				...process.env,
+				SHELL: shell,
+			}),
+		);
+		expect(readFileSync(join(directory, "marker"), "utf8")).toBe("fallback");
+		expect(updates.at(-1)).toMatchObject({ status: "succeeded", exitCode: 0 });
+	});
+
+	it("returns a failed terminal update when its working directory is missing", async () => {
+		const updates = await Effect.runPromise(
+			setupEffect(
+				"printf 'unreachable'",
+				{ ...process.env, SHELL: "/bin/sh" },
+				2_000,
+				join(fixture, "missing"),
+			),
+		);
+		expect(updates).toEqual([
+			{
+				_tag: "finished",
+				status: "failed",
+				message: expect.stringContaining("Could not start setup script"),
+			},
+		]);
 	});
 });

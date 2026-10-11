@@ -1,7 +1,8 @@
-import { Context, type Effect } from "effect";
+import { Context, type Effect, type Stream } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import type {
 	WorkspaceMissing,
+	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
@@ -19,7 +20,29 @@ export interface CreatedWorktrees {
 	readonly ownership: readonly SessionWorktreeOwnership[];
 }
 
+export interface WorktreeSetupResult {
+	readonly _tag: "finished";
+	readonly status: "succeeded" | "failed" | "timed_out";
+	readonly exitCode?: number;
+	readonly message?: string;
+}
+
+export type WorktreeSetupUpdate =
+	| { readonly _tag: "output"; readonly output: string }
+	| WorktreeSetupResult;
+
 export interface WorktreeService {
+	/** Validate all owned checkouts before renaming; restore refs on a Git failure. */
+	readonly renameBranch: (
+		ownership: readonly SessionWorktreeOwnership[],
+		newName: string,
+	) => Effect.Effect<void, WorktreeBranchRenameError>;
+	/** Own the setup process group until completion or stream interruption. */
+	readonly runSetup: (
+		effectiveWorkingDirectory: string,
+		script: string,
+		env: Readonly<Record<string, string | undefined>>,
+	) => Stream.Stream<WorktreeSetupUpdate>;
 	/** Read-only proof for historical launch events that predate ownership metadata. */
 	readonly legacyOwnership: (
 		folder: WorktreeFolder,
@@ -43,12 +66,22 @@ export interface WorktreeService {
 	readonly inspectMissing: (
 		folder: WorktreeFolder,
 		directory?: string,
+		/** Recorded Project Folders can share a checkout created for any one of them. */
+		workspaceFolders?: readonly string[],
 	) => Effect.Effect<WorkspaceMissing | undefined, WorktreeRecoveryError>;
 	/** Re-add an owned checkout from its existing branch; never create a new branch. */
 	readonly recreate: (
 		folder: WorktreeFolder,
 		directory?: string,
+		workspaceFolders?: readonly string[],
 	) => Effect.Effect<string, WorktreeRecoveryError>;
+	/** Restore missing checkouts together, keeping present checkouts and all branch refs. */
+	readonly recreateAll: (
+		folders: readonly {
+			readonly folder: WorktreeFolder;
+			readonly directory: string;
+		}[],
+	) => Effect.Effect<void, WorktreeRecoveryError>;
 	/** One branch in every git folder; optional bases name local branches. Non-git folders stay in place. Failure rolls back all ownership. */
 	readonly create: (
 		folders: readonly WorktreeFolder[],

@@ -38,7 +38,7 @@ export const WorktreeInfoSchema = Schema.Struct({
 });
 export type WorktreeInfo = typeof WorktreeInfoSchema.Type;
 
-/** Immutable launch ownership. `head` is the chosen committed launch base. */
+/** Launch ownership with the latest Conduit branch name. `head` stays the launch base. */
 export const SessionWorktreeOwnershipSchema = Schema.Struct({
 	folder: Schema.String,
 	path: Schema.String,
