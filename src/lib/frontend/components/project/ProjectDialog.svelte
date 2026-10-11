@@ -410,7 +410,7 @@
 					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
 				</Field>
 				<Field label="Repository grouping" hint="How this project's sessions are labelled in the session list.">
-					<Select bind:value={groupingMode} disabled={saving}>
+					<Select bind:value={groupingMode} disabled={saving} touchTarget>
 						<option value="">Use global default</option>
 						<option value="repository">By repository</option>
 						<option value="repository+subfolder">By repository and subfolder</option>

@@ -336,7 +336,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	const input = page.locator("#input");
 	await input.fill("Read both folders");
 	await expect(
-		page.getByRole("button", { name: "Send message", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeDisabled();
 	await input.press("Enter");
 	await startChip.click();
@@ -359,7 +359,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await expect(startChip).not.toHaveAttribute("aria-describedby");
 	await expect(explanation).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Send message", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeEnabled();
 	await page.screenshot({
 		path: testInfo.outputPath("supported-provider-start.png"),
@@ -386,10 +386,14 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await expect(startChip).not.toHaveAttribute("aria-describedby");
 	await expect(explanation).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Send message", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeEnabled();
 	await startChip.click();
-	await expect(startMenu).toContainText("New worktree soon");
+	await expect(
+		startMenu.getByRole("menuitem", {
+			name: "New worktree Not supported by This provider",
+		}),
+	).toHaveAttribute("aria-disabled", "true");
 	await page.keyboard.press("Escape");
 	await page.screenshot({
 		path: testInfo.outputPath("unknown-provider-start.png"),

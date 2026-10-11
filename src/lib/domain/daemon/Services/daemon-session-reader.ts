@@ -13,12 +13,15 @@ import {
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
+import { computeProjectGroups } from "../../../project-grouping.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
+import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
@@ -273,9 +276,27 @@ export const listDaemonSessions = (
 	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
 	Effect.gen(function* () {
-		const projects = (yield* allProjects).filter(
+		const registered = yield* allProjects;
+		const groupKey = getScopeGroupKey(options.scope);
+		const defaultMode =
+			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
+		const groups =
+			groupKey === null
+				? null
+				: computeProjectGroups(
+						registered.map((project) => ({
+							...project,
+							groupingMode: project.groupingMode ?? defaultMode,
+						})),
+					);
+		// Scope before querying or merging any project pages. The same pure
+		// function owns membership in the registry and in the frontend.
+		const projects = registered.filter(
 			(project) =>
-				(options.scope === undefined || project.slug === options.scope) &&
+				(options.scope === undefined ||
+					(groupKey === null
+						? project.slug === options.scope
+						: groups?.[project.slug]?.key === groupKey)) &&
 				project.slug !== options.exclude,
 		);
 		const limit =

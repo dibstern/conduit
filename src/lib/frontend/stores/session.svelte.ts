@@ -3,6 +3,7 @@
 
 import { SvelteMap } from "svelte/reactivity";
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
+import { getScopeGroupKey } from "../../session-scope.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
@@ -55,6 +56,7 @@ import {
 	followSessionModelSettings,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
+import { getProjectGroup } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
@@ -917,11 +919,19 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
+	const groupKey = getScopeGroupKey(scope);
 	const currentSlug = getCurrentSlug();
 	// Local rows carry no projectSlug: they belong to the project this socket
 	// is attached to.
-	const inScope = (session: SessionInfo) =>
-		scope === null || (session.projectSlug ?? currentSlug) === scope;
+	const inScope = (session: SessionInfo) => {
+		const slug = session.projectSlug ?? currentSlug;
+		return (
+			scope === null ||
+			(groupKey === null
+				? slug === scope
+				: slug != null && getProjectGroup(slug)?.key === groupKey)
+		);
+	};
 	if (sessionState.searchResults !== null) {
 		const searchSlug = currentSlug;
 		// Root rows carry the subtree rollup, so local search hits use the
