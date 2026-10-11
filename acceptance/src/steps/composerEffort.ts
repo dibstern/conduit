@@ -111,8 +111,10 @@ export const composerEffortHandlers: StepHandler[] = [
 			);
 			await expect(trigger).not.toHaveAttribute("aria-busy", "true");
 			// Closing hands focus back to the trigger, which lights the composer
-			// ring; baselines taken mid-close caught it either way.
+			// ring. Focus can land after the menu hides, so wait for both or a
+			// baseline taken under load catches the ring unlit.
 			await expect(menu).toBeHidden();
+			await expect(trigger).toBeFocused();
 		},
 	},
 	{
