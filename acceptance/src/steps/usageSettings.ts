@@ -1289,12 +1289,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap a phone usage chip to open Usage",
-		match: /^I tap the phone usage chip (\S+)$/,
-		run: ({ world, match }) =>
-			tapUsage(world.page, `usage-phone-chip-${match[1]}`),
-	},
-	{
 		name: "tap the phone single-account usage row to open Usage",
 		match: /^I tap the phone single-account usage row$/,
 		run: ({ world }) => tapUsage(world.page, "usage-phone-single"),
@@ -1304,29 +1298,6 @@ export const usageSettingsHandlers: StepHandler[] = [
 		match: /^I press the Usage back button$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("settings-back-btn").click();
-		},
-	},
-	{
-		name: "assert the footer's empty space allows the phone list to scroll",
-		match: /^the phone usage footer allows list scrolling around its chips$/,
-		run: async ({ world }) => {
-			const footer = world.page.getByTestId("usage-footer-phone");
-			await expect(footer).toHaveCSS("pointer-events", "none");
-			await expect(world.page.getByTestId("usage-phone-chip-claude")).toHaveCSS(
-				"pointer-events",
-				"auto",
-			);
-			const scroller = world.page.locator("#session-list-scroller");
-			await scroller.evaluate((element) => {
-				element.scrollTop = 0;
-			});
-			const box = await footer.boundingBox();
-			if (!box) throw new Error("Missing phone usage footer");
-			await world.page.mouse.move(box.x + 3, box.y + 3);
-			await world.page.mouse.wheel(0, 300);
-			await expect
-				.poll(() => scroller.evaluate((element) => element.scrollTop))
-				.toBeGreaterThan(0);
 		},
 	},
 ];
