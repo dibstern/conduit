@@ -590,13 +590,17 @@ export const sessionHandlers: {
 
 	// Task outcomes settle background children. Only the first attach to an
 	// open part starts a child; repeated links cannot reopen a settled child.
+	// Runners older than the `outcome` stamp report only the raw task status,
+	// and they outlive daemon upgrades, so a terminal status settles too.
 	"tool.running": (event) => {
 		const child = event.data.metadata?.["childSessionId"];
-		const outcome = event.data.metadata?.["outcome"];
+		const outcome =
+			event.data.metadata?.["outcome"] ?? event.data.metadata?.["status"];
 		if (
 			outcome === "completed" ||
 			outcome === "failed" ||
-			outcome === "stopped"
+			outcome === "stopped" ||
+			outcome === "killed"
 		)
 			return [
 				{
