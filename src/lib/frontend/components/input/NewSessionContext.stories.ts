@@ -15,6 +15,7 @@ function seed(
 	folders = 2,
 	supportsWorktree = true,
 	driver: "claude" | "opencode" = "opencode",
+	supportsNewWorktree = supportsWorktree,
 ) {
 	const previous = {
 		instances: instanceState.instances,
@@ -35,7 +36,13 @@ function seed(
 			restartCount: 0,
 			createdAt: 0,
 			...(supportsMultiFolder !== undefined
-				? { capabilities: { supportsMultiFolder, supportsWorktree } }
+				? {
+						capabilities: {
+							supportsMultiFolder,
+							supportsWorktree,
+							supportsNewWorktree,
+						},
+					}
 				: {}),
 		},
 	];
@@ -104,7 +111,7 @@ export const MultiFolderSupported: Story = {
 		await expect(canvas.queryByTestId("draft-provider-explanation")).toBeNull();
 		await userEvent.click(startChip);
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
-			"New worktree soon",
+			"New worktree Requires a Git folder",
 		);
 		await expect(canvas.queryByText("Provider folder support")).toBeNull();
 	},
@@ -139,7 +146,7 @@ export const MultiFolderUnknown: Story = {
 		await expect(canvas.queryByTestId("draft-provider-explanation")).toBeNull();
 		await userEvent.click(startChip);
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
-			"New worktree soon",
+			"New worktree Not supported by Folder provider",
 		);
 	},
 };
@@ -170,6 +177,63 @@ export const NewWorktreeEnabled: Story = {
 export const NewWorktreeSelected: Story = {
 	beforeEach: () => seed(true, 1, true, "claude"),
 	args: { newWorktree: true },
+};
+
+export const OpenCodeNewWorktreeEnabled: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, false, "opencode", true);
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			title: "OpenCode workspace",
+			git: { branch: "feature/opencode-workspace" },
+		}));
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		await expect(
+			canvas.getByRole("menuitem", { name: /^Existing worktree/ }),
+		).toHaveAttribute("aria-disabled", "true");
+		const choice = canvas.getByRole("menuitem", { name: /^New worktree$/ });
+		await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(choice);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^New worktree$/,
+		);
+		await expect(
+			canvas.getByTestId("draft-base-branch-chip"),
+		).toHaveTextContent(/^from feature\/opencode-workspace$/);
+	},
+};
+
+export const NewWorktreeUnsupportedProvider: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, false, "opencode");
+		instanceState.instances = instanceState.instances.map((instance) => ({
+			...instance,
+			name: "Local provider",
+		}));
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			title: "Local workspace",
+			git: { branch: "main" },
+		}));
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		for (const label of ["New worktree", "Existing worktree"]) {
+			const choice = canvas.getByRole("menuitem", {
+				name: new RegExp(`^${label}`),
+			});
+			await expect(choice).toHaveAttribute("aria-disabled", "true");
+			await expect(choice).toHaveTextContent(
+				`${label} Not supported by Local provider`,
+			);
+		}
+	},
 };
 
 export const BaseBranchDefault: Story = {

@@ -79,6 +79,7 @@ export interface DaemonConfig {
 		title?: string;
 		addedAt: number;
 		shellEnv?: ProjectShellEnvConfig;
+		setupScript?: string;
 		/** Cached session count from last run — for instant CLI display. */
 		sessionCount?: number;
 	}>;
@@ -107,6 +108,7 @@ const ProjectSchema = Schema.Struct({
 	title: Schema.optional(Schema.String),
 	addedAt: Schema.Number,
 	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
+	setupScript: Schema.optional(Schema.String),
 	sessionCount: Schema.optional(Schema.Number),
 });
 

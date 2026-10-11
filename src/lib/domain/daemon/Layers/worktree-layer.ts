@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, realpath, rm } from "node:fs/promises";
@@ -11,8 +11,9 @@ import {
 	resolve,
 	sep,
 } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
-import { Cause, Effect, Either, Layer } from "effect";
+import { Cause, Effect, Either, Layer, Stream } from "effect";
 import type { SessionWorktreeOwnership } from "../../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
@@ -24,6 +25,8 @@ import {
 	type WorktreeFolder,
 	type WorktreeService,
 	WorktreeServiceTag,
+	type WorktreeSetupResult,
+	type WorktreeSetupUpdate,
 } from "../Services/worktree-service.js";
 
 const execFileAsync = promisify(execFile);
@@ -108,11 +111,132 @@ export const makeWorktreeLive = (
 	options: {
 		readonly gitExecutable?: string;
 		readonly gitTimeoutMs?: number;
+		readonly setupTimeoutMs?: number;
 	} = {},
 ) =>
 	Layer.effect(
 		WorktreeServiceTag,
 		Effect.sync(() => {
+			const runSetup: WorktreeService["runSetup"] = (cwd, script, env) =>
+				Stream.asyncPush<WorktreeSetupUpdate>((emit) =>
+					Effect.acquireRelease(
+						Effect.sync(() => {
+							const timeoutMs = options.setupTimeoutMs ?? 10 * 60_000;
+							const limit = 64 * 1024;
+							let child: ChildProcess | undefined;
+							let timeout: ReturnType<typeof setTimeout> | undefined;
+							let finished = false;
+							let groupStopped = false;
+							let capturedBytes = 0;
+							let truncated = false;
+							const decoder = new StringDecoder("utf8");
+							const output = (text: string) => {
+								if (text && !finished)
+									emit.single({ _tag: "output", output: text });
+							};
+							const collect = (chunk: Buffer) => {
+								if (truncated || finished) return;
+								const remaining = limit - capturedBytes;
+								const accepted = chunk.subarray(0, remaining);
+								capturedBytes += accepted.length;
+								output(decoder.write(accepted));
+								if (chunk.length > remaining) {
+									truncated = true;
+									output("\n[Setup output truncated after 64 KiB]\n");
+								}
+							};
+							const killGroup = () => {
+								if (groupStopped || !child?.pid) return;
+								groupStopped = true;
+								try {
+									if (process.platform === "win32") child.kill("SIGKILL");
+									else process.kill(-child.pid, "SIGKILL");
+								} catch {
+									// The owned group may already be gone.
+								}
+							};
+							const finish = (result: WorktreeSetupResult) => {
+								if (finished) return;
+								clearTimeout(timeout);
+								killGroup();
+								if (!truncated) output(decoder.end());
+								finished = true;
+								emit.single(result);
+								emit.end();
+							};
+							const failedToStart = (cause: unknown) =>
+								finish({
+									_tag: "finished",
+									status: "failed",
+									message: `Could not start setup script: ${cause instanceof Error ? cause.message : String(cause)}`,
+								});
+							timeout = setTimeout(
+								() =>
+									finish({
+										_tag: "finished",
+										status: "timed_out",
+										message: `Setup script timed out after ${timeoutMs}ms.`,
+									}),
+								timeoutMs,
+							);
+							timeout.unref();
+							try {
+								// Pipe EOF also owns cleanup after abrupt daemon death. Save
+								// stdin before background shells substitute /dev/null; only
+								// the watchdog keeps it while exec preserves the PID/group.
+								const spawned = spawn(
+									"/bin/sh",
+									[
+										"-c",
+										`exec 2>&1
+setup_group=$$
+exec 3<&0
+(
+  while IFS= read -r setup_line; do :; done
+  kill -KILL -- "-$setup_group"
+) <&3 3<&- >/dev/null 2>&1 &
+exec 3<&- </dev/null
+if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else exec /bin/sh -c "$2"; fi`,
+										"conduit-setup",
+										env["SHELL"]?.trim() ?? "",
+										script,
+									],
+									{
+										cwd,
+										env,
+										stdio: ["pipe", "pipe", "ignore"],
+										detached: process.platform !== "win32",
+									},
+								);
+								child = spawned;
+								spawned.stdout.on("data", collect);
+								spawned.once("error", failedToStart);
+								spawned.once("exit", killGroup);
+								spawned.once("close", (code, signal) => {
+									finish({
+										_tag: "finished",
+										status: code === 0 ? "succeeded" : "failed",
+										...(code !== null
+											? { exitCode: code }
+											: {
+													message: `Setup script terminated by ${signal ?? "an unknown signal"}.`,
+												}),
+									});
+								});
+							} catch (cause) {
+								failedToStart(cause);
+							}
+							return () => {
+								clearTimeout(timeout);
+								finished = true;
+								killGroup();
+								child?.stdin?.destroy();
+								child?.stdout?.destroy();
+							};
+						}),
+						(cleanup) => Effect.sync(cleanup),
+					),
+				);
 			const git = (folder: string, args: readonly string[], input?: string) =>
 				Effect.tryPromise({
 					try: async (signal) => {
@@ -982,6 +1106,7 @@ export const makeWorktreeLive = (
 					);
 				});
 			return {
+				runSetup,
 				create,
 				rollback,
 				inspectMissing,

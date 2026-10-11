@@ -127,6 +127,9 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	title: project.title ?? project.slug,
 	lastUsed: project.addedAt,
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
+	...(project.setupScript !== undefined && {
+		setupScript: project.setupScript,
+	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
 	}),
@@ -282,6 +285,9 @@ export const projectInfos = Effect.gen(function* () {
 			slug: project.slug,
 			folders: project.folders,
 			title: project.title,
+			...(project.setupScript !== undefined && {
+				setupScript: project.setupScript,
+			}),
 			...(project.repositoryIdentities !== undefined && {
 				repositoryIdentities: project.repositoryIdentities,
 			}),
@@ -520,7 +526,10 @@ export const remove = (slug: string) =>
 export const updateProject = (
 	slug: string,
 	updates: Partial<
-		Pick<StoredProject, "title" | "folders" | "repositoryIdentities">
+		Pick<
+			StoredProject,
+			"title" | "folders" | "repositoryIdentities" | "setupScript"
+		>
 	>,
 ) =>
 	Effect.gen(function* () {
@@ -1023,17 +1032,25 @@ export const saveProject = (input: SaveProjectInput) =>
 				const canonicalFolders = Arr.map(folders, normalizeProjectDirectory);
 				const repositoryIdentities =
 					yield* deriveRepositoryIdentities(canonicalFolders);
+				const setupScript =
+					input.setupScript === undefined
+						? existing?.setupScript
+						: input.setupScript.trim()
+							? input.setupScript
+							: undefined;
 				const project: StoredProject = existing
 					? {
 							...existing,
 							folders: canonicalFolders,
 							repositoryIdentities,
+							setupScript,
 							...(title !== undefined && { title }),
 						}
 					: {
 							slug,
 							folders: canonicalFolders,
 							repositoryIdentities,
+							setupScript,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
 						};
@@ -1042,6 +1059,7 @@ export const saveProject = (input: SaveProjectInput) =>
 						folders: canonicalFolders,
 						repositoryIdentities,
 						title: project.title,
+						setupScript,
 					});
 				} else {
 					yield* addWithoutRelay(project);

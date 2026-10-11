@@ -2,6 +2,8 @@
 // Converts SQLite MessageWithParts[] → HistoryMessage[] for transcript consumers.
 // Pure conversion with no I/O.
 
+import { Option, Schema } from "effect";
+import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import { truncateContent } from "../relay/truncate-content.js";
 import type {
@@ -98,6 +100,24 @@ function partRowToHistoryPart(
 	row: MessagePartRow,
 	previewToolOutput: boolean,
 ): HistoryMessagePart {
+	if (row.type === "text" && row.metadata != null) {
+		const value = parseObjectJson(row.metadata)?.["setup"];
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			const setup = Schema.decodeUnknownOption(ProjectSetupStateSchema)(
+				Object.fromEntries(
+					Object.entries(value).filter(([, field]) => field !== null),
+				),
+			);
+			if (Option.isSome(setup))
+				return {
+					id: row.id,
+					type: "setup",
+					text: row.text ?? "",
+					setup: setup.value,
+					time: { start: row.created_at },
+				};
+		}
+	}
 	if (row.type === "compaction") {
 		const metadata =
 			row.metadata != null ? parseObjectJson(row.metadata) : undefined;

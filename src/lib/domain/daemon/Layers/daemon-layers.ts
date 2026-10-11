@@ -29,7 +29,7 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
-import { resolveTraceConfig } from "../../../env.js";
+import { ENV, resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import { ServerBuildUpdateLive } from "../../../server/build-update.js";
@@ -811,9 +811,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			Layer.merge(makeWorktreeLive(configDir), UsageLive()).pipe(
-				Layer.provideMerge(withOpenCodeInstances),
-			),
+			Layer.merge(
+				makeWorktreeLive(configDir, {
+					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
+				}),
+				UsageLive(),
+			).pipe(Layer.provideMerge(withOpenCodeInstances)),
 		),
 	);
 

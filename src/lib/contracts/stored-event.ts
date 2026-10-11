@@ -3,6 +3,11 @@ import {
 	type ContinuationReason,
 	ContinuationReasonSchema,
 } from "./limit-recovery.js";
+import {
+	SessionSetupFinishedPayloadSchema,
+	SessionSetupOutputPayloadSchema,
+	SessionSetupStartedPayloadSchema,
+} from "./project-setup.js";
 import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-event.js";
 import {
 	type SessionWorkspace,
@@ -67,6 +72,9 @@ export const CANONICAL_EVENT_TYPES = [
 	"session.workspace_changed",
 	"session.workspace_hint_changed",
 	"session.workspace_started",
+	"session.setup_started",
+	"session.setup_output",
+	"session.setup_finished",
 	"session.read",
 	"session.unread",
 	"session.settled",
@@ -612,6 +620,9 @@ export interface EventPayloadMap {
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
 	"session.workspace_hint_changed": SessionWorkspaceHintChangedPayload;
 	"session.workspace_started": SessionWorkspaceStartedPayload;
+	"session.setup_started": typeof SessionSetupStartedPayloadSchema.Type;
+	"session.setup_output": typeof SessionSetupOutputPayloadSchema.Type;
+	"session.setup_finished": typeof SessionSetupFinishedPayloadSchema.Type;
 	"session.read": SessionReadPayload;
 	"session.unread": SessionUnreadPayload;
 	"session.settled": SessionSettledPayload;
@@ -1330,6 +1341,18 @@ const SessionWorkspaceStartedEventSchema = eventEnvelope(
 	"session.workspace_started",
 	SessionWorkspaceStartedPayloadSchema,
 );
+const SessionSetupStartedEventSchema = eventEnvelope(
+	"session.setup_started",
+	SessionSetupStartedPayloadSchema,
+);
+const SessionSetupOutputEventSchema = eventEnvelope(
+	"session.setup_output",
+	SessionSetupOutputPayloadSchema,
+);
+const SessionSetupFinishedEventSchema = eventEnvelope(
+	"session.setup_finished",
+	SessionSetupFinishedPayloadSchema,
+);
 const SessionReadEventSchema = eventEnvelope(
 	"session.read",
 	SessionReadPayloadSchema,
@@ -1479,6 +1502,9 @@ export const CanonicalEventSchema = Schema.Union(
 	SessionWorkspaceChangedEventSchema,
 	SessionWorkspaceHintChangedEventSchema,
 	SessionWorkspaceStartedEventSchema,
+	SessionSetupStartedEventSchema,
+	SessionSetupOutputEventSchema,
+	SessionSetupFinishedEventSchema,
 	SessionReadEventSchema,
 	SessionUnreadEventSchema,
 	SessionSettledEventSchema,

@@ -330,10 +330,51 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"turn.error",
 		"turn.interrupted",
 		"session.compaction",
+		"session.setup_started",
+		"session.setup_output",
+		"session.setup_finished",
 	],
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "session.setup_started")) {
+				const messageId = `setup-${event.sessionId}`;
+				yield* sql`INSERT INTO messages
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
+					VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					ON CONFLICT (id) DO NOTHING`;
+				// Like other daemon notices, this uses the transcript's existing
+				// part storage. Typed metadata distinguishes it from agent text.
+				yield* sql`INSERT INTO message_parts
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					VALUES (${`${messageId}-part`}, ${messageId}, 'text', '',
+						${encodeJson({ setup: { source: event.data.source, status: "running" } })},
+						0, ${event.createdAt}, ${event.createdAt})
+					ON CONFLICT (id) DO NOTHING`;
+				return [messageId];
+			}
+			if (isEventType(event, "session.setup_output")) {
+				const messageId = `setup-${event.sessionId}`;
+				yield* sql`UPDATE message_parts SET text = text || ${event.data.output},
+					updated_at = ${event.createdAt} WHERE id = ${`${messageId}-part`}`;
+				return ids(
+					yield* sql<{ id: string }>`UPDATE messages
+					SET updated_at = ${event.createdAt} WHERE id = ${messageId} RETURNING id`,
+				);
+			}
+			if (isEventType(event, "session.setup_finished")) {
+				const messageId = `setup-${event.sessionId}`;
+				yield* sql`UPDATE message_parts SET
+					metadata = json_set(metadata, '$.setup.status', ${event.data.status},
+						'$.setup.exitCode', ${event.data.exitCode ?? null},
+						'$.setup.message', ${event.data.message ?? null}),
+					updated_at = ${event.createdAt} WHERE id = ${`${messageId}-part`}`;
+				return ids(
+					yield* sql<{ id: string }>`UPDATE messages
+					SET updated_at = ${event.createdAt}, completed_at = ${event.createdAt}
+					WHERE id = ${messageId} RETURNING id`,
+				);
+			}
 			// A turn that ends without thinking.end must not leave thinking open.
 			const closeThinking = (messageId: string) =>
 				Effect.map(
