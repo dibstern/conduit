@@ -150,6 +150,7 @@ function makeReadQueryEffect(
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 		getSessionsForReconciliation: () => Effect.succeed([]),
+		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionInfos: vi.fn((options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
