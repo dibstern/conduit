@@ -246,6 +246,16 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert the window's warning level against the saved threshold",
+		match:
+			/^the usage footer (\S+) (five_hour|seven_day|month) window is at level (normal|warning|danger)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(`usage-footer-cell-${match[1]}-${match[2]}`),
+			).toHaveAttribute("data-level", match[3] ?? "");
+		},
+	},
+	{
 		name: "assert the window's threshold colour and filled share",
 		match:
 			/^the usage footer (\S+) (five_hour|seven_day|month) meter is (normal|warning|danger) at (\d+) percent$/,
@@ -588,88 +598,118 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the phone chips follow shared account order",
-		match: /^the phone usage chips are (.+) in that order$/,
+		name: "assert the phone dock's rows follow shared account order",
+		match: /^the phone usage rows are (.+) in that order$/,
 		run: async ({ world, match }) => {
 			const expected = (match[1] ?? "").split(", ");
-			const chips = world.page
+			const rows = world.page
 				.getByTestId("usage-footer-phone")
-				.locator('[data-testid^="usage-phone-chip-"]');
-			await expect(chips).toHaveCount(expected.length);
-			for (const [index, accountId] of expected.entries()) {
-				await expect(chips.nth(index)).toBeVisible();
-				await expect(chips.nth(index)).toHaveAttribute(
-					"data-account",
-					accountId,
+				.locator('[data-testid^="usage-footer-row-"]');
+			await expect(rows).toHaveCount(expected.length);
+			for (const [index, accountId] of expected.entries())
+				await expect(rows.nth(index)).toHaveAttribute(
+					"data-testid",
+					`usage-footer-row-${accountId}`,
 				);
-			}
 		},
 	},
 	{
-		name: "assert the phone default chip highlight and design dimensions",
-		match: /^the phone usage chip (\S+) is the highlighted current account$/,
+		name: "assert the highlighted current account in the phone dock or sheet",
+		match:
+			/^the (phone usage|usage sheet) row (\S+) is the highlighted current account$/,
 		run: async ({ world, match }) => {
-			const chip = world.page.getByTestId(`usage-phone-chip-${match[1]}`);
+			const [scope, prefix] =
+				match[1] === "usage sheet"
+					? ["usage-sheet", "usage-sheet"]
+					: ["usage-footer-phone", "usage-footer"];
+			const row = world.page.getByTestId(`${prefix}-row-${match[2]}`);
 			await expect(
-				world.page
-					.getByTestId("usage-footer-phone")
-					.locator('[data-default="true"]'),
+				world.page.getByTestId(scope).locator('[data-default="true"]'),
 			).toHaveCount(1);
-			await expect(chip).toHaveAttribute("data-default", "true");
-			await expect(chip).toHaveAttribute("title", "Current account");
-			await expect(chip).toHaveCSS(
+			await expect(row).toHaveAttribute("data-default", "true");
+			await expect(row).toHaveAttribute("title", "Current account");
+			await expect(row).toHaveCSS(
 				"background-color",
 				await themeColour(world.page, "--color-bg-alt"),
 			);
-			await expect(chip).toHaveCSS("height", "22px");
-			await expect(chip).toHaveCSS("padding-left", "7px");
-			await expect(chip).toHaveCSS("padding-right", "7px");
 			await expect(
-				world.page.getByTestId(`usage-phone-dot-${match[1]}`),
-			).toHaveAttribute("data-account", match[1] ?? "");
+				world.page.getByTestId(`${prefix}-name-${match[2]}`),
+			).toHaveCSS("color", await themeColour(world.page, "--color-text"));
 		},
 	},
 	{
-		name: "assert a phone chip's window, display value and colour",
-		match:
-			/^the phone usage chip (\S+) shows (5h|wk|mo|none) (\S+) at level (ok|warn|limited|unknown)$/,
+		name: "assert the accounts folded behind the phone dock's count",
+		match: /^the phone usage footer folds (\d+) more accounts?$/,
 		run: async ({ world, match }) => {
-			const [accountId, kind, value, level] = match.slice(1);
-			const chip = world.page.getByTestId(`usage-phone-chip-${accountId}`);
-			await expect(chip).toBeVisible();
-			await expect(chip).toHaveAttribute("data-level", level ?? "");
-			const window = world.page.getByTestId(`usage-phone-window-${accountId}`);
-			if (kind === "none") await expect(window).toHaveCount(0);
-			else {
-				await expect(window).toHaveText(kind ?? "");
-				await expect(window).toHaveCSS(
-					"color",
-					await themeColour(world.page, "--color-text-dimmer"),
-				);
-			}
-			const caption = world.page.getByTestId(`usage-phone-value-${accountId}`);
-			await expect(caption).toHaveText(value ?? "");
-			const token =
-				level === "limited"
-					? "--color-error"
-					: level === "warn"
-						? "--color-fill-amber"
-						: level === "unknown"
-							? "--color-text-dimmer"
-							: "--color-text-secondary";
-			await expect(caption).toHaveCSS(
-				"color",
-				await themeColour(world.page, token),
-			);
-		},
-	},
-	{
-		name: "assert the count includes every remaining account",
-		match: /^the phone usage footer counts (\d+) remaining accounts$/,
-		run: async ({ world, match }) => {
+			const count = Number(match[1]);
 			const more = world.page.getByTestId("usage-phone-more");
-			if (Number(match[1]) === 0) await expect(more).toHaveCount(0);
-			else await expect(more).toHaveText(`+${match[1]}`);
+			if (count === 0) {
+				await expect(more).toHaveCount(0);
+				return;
+			}
+			await expect(world.page.getByTestId("usage-phone-more-count")).toHaveText(
+				`+${count} more`,
+			);
+			await expect(
+				more.locator('[data-testid^="usage-phone-folded-"]'),
+			).toHaveCount(count);
+		},
+	},
+	{
+		name: "open the usage sheet from the phone dock",
+		match: /^I open the phone usage sheet$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("usage-phone-dock").click();
+			await expect(world.page.getByTestId("usage-sheet")).toBeVisible();
+			await expect(
+				world.page.getByRole("dialog", { name: "Usage" }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the usage sheet lists every account by harness",
+		match: /^the usage sheet groups read CLAUDE, CODEX, CURSOR with rows (.+)$/,
+		run: async ({ world, match }) => {
+			const sheet = world.page.getByTestId("usage-sheet");
+			await expect(
+				sheet.locator('[data-testid^="usage-sheet-heading-"]'),
+			).toHaveText(["CLAUDE", "CODEX", "CURSOR"]);
+			const expected = (match[1] ?? "").split(", ");
+			const rows = sheet.locator('[data-testid^="usage-sheet-row-"]');
+			await expect(rows).toHaveCount(expected.length);
+			for (const [index, accountId] of expected.entries())
+				await expect(rows.nth(index)).toHaveAttribute(
+					"data-testid",
+					`usage-sheet-row-${accountId}`,
+				);
+		},
+	},
+	{
+		name: "assert an account's two windows in the usage sheet",
+		match: /^the usage sheet (\S+) shows five_hour (\S+) and seven_day (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(`usage-sheet-value-${match[1]}-five_hour`),
+			).toHaveText(match[2] ?? "");
+			await expect(
+				world.page.getByTestId(`usage-sheet-value-${match[1]}-seven_day`),
+			).toHaveText(match[3] ?? "");
+		},
+	},
+	{
+		name: "open Usage settings from the usage sheet",
+		match: /^I tap Settings in the usage sheet$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("usage-sheet-settings").click();
+		},
+	},
+	{
+		name: "assert the sheet gave way to Usage settings",
+		match: /^the usage sheet is closed and Usage settings are open$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("usage-sheet")).toHaveCount(0);
+			await expect(world.page.locator("#settings-panel")).toBeVisible();
+			await expect(world.page.locator("#usage-limit-settings")).toBeVisible();
 		},
 	},
 	{
@@ -677,10 +717,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		match: /^the single phone usage footer shows 5h (\S+) and Wk (\S+)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("usage-phone-single")).toBeVisible();
-			await expect(
-				world.page.locator('[data-testid^="usage-phone-chip-"]'),
-			).toHaveCount(0);
-			await expect(world.page.getByTestId("usage-phone-more")).toHaveCount(0);
+			await expect(world.page.getByTestId("usage-phone-dock")).toHaveCount(0);
 			await expect(
 				world.page.getByTestId("usage-phone-column-five_hour"),
 			).toHaveText("5h");
@@ -712,7 +749,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone footer and last-row geometry after scrolling",
+		name: "assert the dock, new-session button and last row stack without overlap",
 		match:
 			/^the phone usage footer clears the new-session button and the last row text$/,
 		run: async ({ world }) => {
@@ -741,38 +778,24 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						const textBounds = Array.from(text, (item) =>
 							item.getBoundingClientRect(),
 						).filter((box) => box.width > 0 && box.height > 0);
-						const chips = Array.from(
-							element.querySelectorAll(
-								'[data-testid^="usage-phone-chip-"], [data-testid="usage-phone-more"], [data-testid="usage-phone-single"]',
-							),
-							(item) => item.getBoundingClientRect(),
-						);
 						return {
 							scrollable: scroller.scrollHeight > scroller.clientHeight,
-							clearOfButton: chips.every((box) => box.right <= button.left),
-							lastTextVisible:
+							dockAtBottom: Math.round(bounds.bottom) === window.innerHeight,
+							buttonAboveDock: button.bottom <= bounds.top,
+							lastTextClearOfButton:
 								textBounds.length > 0 &&
 								textBounds.every(
 									(box) =>
-										box.top >= listBounds.top && box.bottom <= bounds.top,
-								),
-							contentContained:
-								chips.length > 0 &&
-								chips.every(
-									(box) =>
-										box.left >= bounds.left &&
-										box.right <= bounds.right &&
-										box.top >= bounds.top &&
-										box.bottom <= bounds.bottom,
+										box.top >= listBounds.top && box.bottom <= button.top,
 								),
 						};
 					});
 				})
 				.toEqual({
 					scrollable: true,
-					clearOfButton: true,
-					lastTextVisible: true,
-					contentContained: true,
+					dockAtBottom: true,
+					buttonAboveDock: true,
+					lastTextClearOfButton: true,
 				});
 		},
 	},
