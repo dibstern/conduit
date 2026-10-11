@@ -1,5 +1,5 @@
 <script module lang="ts">
-	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}`;
+	export type ServerForm = "shutdown" | "instance-add" | `instance-edit:${string}` | `instance-rename:${string}` | "pin-set" | "pin-change" | "pin-remove";
 </script>
 
 <script lang="ts">
@@ -33,7 +33,7 @@
 <div bind:this={sectionEl} class="flex flex-col gap-[7px]" data-testid="server-settings">
 	<ServerStatusSettings {openForm} onToggleForm={toggleForm} {onClose} />
 	<InstancesSettingsTab {openForm} onToggleForm={toggleForm} {onOpenUsage} />
-	<ServerSecuritySettings />
+	<ServerSecuritySettings {openForm} onToggleForm={toggleForm} />
 	<ServerPowerSettings />
 	<ServerAccessSettings />
 	<ServerLogsSettings />

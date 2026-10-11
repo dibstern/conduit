@@ -172,6 +172,51 @@ export const NewWorktreeSelected: Story = {
 	args: { newWorktree: true },
 };
 
+export const BaseBranchDefault: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, true, "claude");
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			git: { branch: "feature/session-ui" },
+		}));
+		return cleanup;
+	},
+	args: { newWorktree: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(
+			canvas.getByTestId("draft-base-branch-chip"),
+		).toHaveTextContent(/^from feature\/session-ui$/);
+		await expect(canvas.queryByRole("menu")).toBeNull();
+	},
+};
+
+export const BaseBranchList: Story = {
+	beforeEach: () => seed(true, 1, true, "claude"),
+	args: {
+		newWorktree: true,
+		loadBranches: async () => ({
+			current: "main",
+			branches: ["feature/session-ui", "main", "release"],
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-base-branch-chip"));
+		await expect(
+			await canvas.findByRole("menuitemradio", { name: "main" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			canvas.getByRole("menuitemradio", {
+				name: "feature/session-ui",
+			}),
+		).toHaveAttribute("aria-checked", "false");
+		await expect(
+			canvas.getByRole("menuitemradio", { name: "release" }),
+		).toBeVisible();
+	},
+};
+
 export const MultiFolderNewWorktree: Story = {
 	beforeEach: () => {
 		const cleanup = seed(true, 2, true, "claude");

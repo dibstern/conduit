@@ -436,6 +436,7 @@ export const makeWorktreeLive = (
 						const discovered = yield* restore(
 							Effect.forEach(folders, (folder) =>
 								Effect.gen(function* () {
+									const baseBranch = baseBranches?.[folder.path];
 									const source = yield* filesystem(folder.path, () =>
 										realpath(folder.path),
 									);
@@ -448,7 +449,16 @@ export const makeWorktreeLive = (
 											() => Effect.succeed("false"),
 										),
 									);
-									if (insideWorkTree !== "true") return undefined;
+									if (insideWorkTree !== "true") {
+										if (baseBranch !== undefined)
+											return yield* new WorktreeCreationError({
+												path: folder.path,
+												reason: "unsupported-project",
+												message:
+													"A worktree base requires a Git project folder.",
+											});
+										return undefined;
+									}
 									const rootPath = yield* git(source, [
 										"rev-parse",
 										"--show-toplevel",
@@ -468,7 +478,7 @@ export const makeWorktreeLive = (
 										"branch",
 										"--show-current",
 									]);
-									if (!currentBranch)
+									if (!currentBranch && baseBranch === undefined)
 										return yield* new WorktreeCreationError({
 											path: folder.path,
 											reason: "detached-head",
@@ -476,11 +486,30 @@ export const makeWorktreeLive = (
 												"The project folder has detached HEAD. Check out a branch before creating a worktree.",
 										});
 									// Snapshot the committed base. Staged, unstaged and untracked edits stay in source.
-									const head = yield* git(source, [
-										"rev-parse",
-										"--verify",
-										`${baseBranches?.[folder.path] ?? "HEAD"}^{commit}`,
-									]);
+									const head = yield* baseBranch === undefined
+										? git(source, ["rev-parse", "--verify", "HEAD^{commit}"])
+										: git(source, [
+												"show-ref",
+												"--verify",
+												"--hash",
+												`refs/heads/${baseBranch}`,
+											]).pipe(
+												Effect.flatMap((ref) =>
+													git(source, [
+														"rev-parse",
+														"--verify",
+														`${ref}^{commit}`,
+													]),
+												),
+												Effect.mapError(
+													() =>
+														new WorktreeCreationError({
+															path: folder.path,
+															reason: "invalid-branch",
+															message: `Local base branch does not exist or is invalid: ${baseBranch}`,
+														}),
+												),
+											);
 									if (requestedBranch !== undefined) {
 										const valid = yield* git(source, [
 											"check-ref-format",

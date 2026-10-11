@@ -15,6 +15,7 @@ import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
 export type { GoalDetails } from "../../contracts/ws-rpc.js";
+export { SetPinRejected } from "../../contracts/ws-rpc.js";
 // Keep the public URL helper available to existing callers.
 export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
@@ -173,6 +174,7 @@ export interface CreateSessionRpcInput {
 	readonly providerId?: string;
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
+	readonly worktreeBase?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -536,6 +538,23 @@ export const restartServerRpc = () =>
 export const shutdownServerRpc = () =>
 	runTransportEffect(callDaemon((client) => client.Shutdown({})));
 
+export async function setPinRpc(input: {
+	readonly pin: string | null;
+	readonly currentPin?: string;
+}): Promise<{ readonly ok: true }> {
+	const result = await runTransportEffect(
+		Effect.either(callDaemon((client) => client.SetPin(input))),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
+
+export async function listBranchesRpc(projectSlug: string) {
+	return runTransportEffect(
+		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
+	);
+}
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,
@@ -707,6 +726,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { worktreePath: input.worktreePath }
 				: {}),
 			...(input.newWorktree ? { newWorktree: true } : {}),
+			...(input.worktreeBase != null
+				? { worktreeBase: input.worktreeBase }
+				: {}),
 		}),
 	);
 

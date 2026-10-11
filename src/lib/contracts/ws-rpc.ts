@@ -1370,6 +1370,18 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 	},
 ) {}
 
+export class ListBranches extends Schema.TaggedRequest<ListBranches>()(
+	"ListBranches",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			current: Schema.optional(Schema.String),
+			branches: Schema.Array(Schema.String),
+		}),
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
 export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 	"ListWorktrees",
 	{
@@ -1826,6 +1838,8 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
+			// Local base for the primary folder; requires newWorktree.
+			worktreeBase: Schema.optional(NonEmptyString),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.
@@ -2169,6 +2183,7 @@ export const WsRpcRequest = Schema.Union(
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListBranches,
 	ListWorktrees,
 	MoveSessionWorkspace,
 	RecreateSessionWorktree,
@@ -2584,6 +2599,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
 	Rpc.fromTaggedRequest(RecreateSessionWorktree),

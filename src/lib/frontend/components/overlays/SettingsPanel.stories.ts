@@ -461,6 +461,13 @@ export const Server: Story = {
 	args: { initialTab: "server" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		// The fixture has no PIN, so this frame is also the PIN-off state.
+		await expect(
+			canvas.getByTestId("server-security-settings"),
+		).toHaveTextContent(
+			"Off · anyone who can reach this address can open conduit",
+		);
+		await expect(canvas.getByTestId("server-pin-set-btn")).toBeVisible();
 		await expect(canvas.getByTestId("server-status-uptime")).toHaveTextContent(
 			"up 3d 4h",
 		);
@@ -480,6 +487,43 @@ export const Server: Story = {
 			canvas.queryByTestId("server-shutdown-confirmation"),
 		).not.toBeInTheDocument();
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+
+export const PinOn: Story = {
+	args: { initialTab: "server" },
+	beforeEach: () => {
+		if (serverStatus.status)
+			serverStatus.status = { ...serverStatus.status, pinEnabled: true };
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const security = canvas.getByTestId("server-security-settings");
+		await expect(security).toHaveTextContent(
+			"On · asked once on each new device",
+		);
+		await expect(canvas.getByTestId("server-pin-change-btn")).toBeVisible();
+		await expect(canvas.getByTestId("server-pin-remove-btn")).toBeVisible();
+		security.scrollIntoView({ block: "nearest" });
+	},
+};
+
+export const ChangePin: Story = {
+	...PinOn,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("server-pin-change-btn"));
+		await expect(canvas.getByTestId("server-pin-current")).toHaveFocus();
+		await expect(
+			canvas.getByLabelText("New PIN", { exact: true }),
+		).toBeVisible();
+		await expect(canvas.getByLabelText("Confirm new PIN")).toBeVisible();
+		await expect(canvas.getByTestId("server-pin-form")).toHaveTextContent(
+			"Every browser, including this one, will ask for the new PIN.",
+		);
+		canvas.getByTestId("server-security-settings").scrollIntoView({
+			block: "end",
+		});
 	},
 };
 

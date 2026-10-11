@@ -23,6 +23,7 @@ async function openDraft(
 		nonGitPrimary?: boolean;
 		git?: boolean;
 		fail?: boolean;
+		secondProject?: boolean;
 	} = {},
 ) {
 	const provider = options.provider ?? "claude";
@@ -52,6 +53,17 @@ async function openDraft(
 			folders,
 			...(projectGit ? { git: projectGit } : {}),
 		},
+		...(options.secondProject
+			? [
+					{
+						slug: "second",
+						title: "Second project",
+						instanceId: provider,
+						folders: ["/workspace/second"],
+						git: { branch: "develop" },
+					},
+				]
+			: []),
 	];
 	const instances = {
 		instances: [
@@ -109,6 +121,22 @@ async function openDraft(
 				path,
 				...(root ? { root } : {}),
 				entries: [],
+			}),
+			ListBranches: ({ projectSlug }) =>
+				projectSlug === "second"
+					? { current: "develop", branches: ["develop", "main"] }
+					: options.nonGitPrimary
+						? { branches: [] }
+						: { current: "main", branches: ["feature/base", "main"] },
+			ListWorktrees: () => ({
+				worktrees: [
+					{ path: main, branch: "main", main: true },
+					{
+						path: "/workspace/existing",
+						branch: "feature/existing",
+						main: false,
+					},
+				],
 			}),
 			CreateSession: ({ projectSlug, newWorktree }) => {
 				if (options.fail)
@@ -217,6 +245,7 @@ for (const mode of [
 			harness,
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl);
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveCount(0);
 			await page.locator("#input").fill("Work in isolation");
 			await press(page.getByTestId("draft-start-chip"));
 			const choice = page.getByRole("menuitem", {
@@ -229,6 +258,18 @@ for (const mode of [
 				"New worktree",
 			);
 			await expect(page.locator("#input")).toHaveValue("Work in isolation");
+			const basePicker = page.getByTestId("draft-base-branch-chip");
+			await expect(basePicker).toHaveText("from main");
+			expect(
+				rpc.getRequests().filter(({ tag }) => tag === "ListBranches"),
+			).toEqual([]);
+			await press(basePicker);
+			const current = page.getByRole("menuitemradio", {
+				name: "main",
+				exact: true,
+			});
+			await expect(current).toHaveAttribute("aria-checked", "true");
+			await press(current);
 			expect(rpc.getRequests().some(({ tag }) => tag === "CreateSession")).toBe(
 				false,
 			);
@@ -241,10 +282,155 @@ for (const mode of [
 				newWorktree: true,
 			});
 			expect(request.payload).not.toHaveProperty("worktreePath");
+			expect(request.payload).not.toHaveProperty("worktreeBase");
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 			const pill = page.getByTestId("session-bar-identity");
 			await expect(pill).toContainText(branch);
 			await expect(pill.locator('[data-icon="worktree"]')).toBeVisible();
+		});
+
+		test("picking another local branch sends its base in CreateSession", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl);
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
+			);
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveText(
+				"from feature/base",
+			);
+			await page.locator("#input").fill("Start from the feature branch");
+			await press(page.locator("#send"));
+			const request = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({
+				_tag: "CreateSession",
+				newWorktree: true,
+				worktreeBase: "feature/base",
+			});
+			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+		});
+
+		test("the selected base survives switching between phone and desktop composer layouts", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl);
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
+			);
+			await page.setViewportSize(
+				mode.hasTouch
+					? { width: 1440, height: 900 }
+					: { width: 390, height: 844 },
+			);
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveText(
+				"from feature/base",
+			);
+			await page.setViewportSize(mode.viewport);
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveText(
+				"from feature/base",
+			);
+			await page.locator("#input").fill("Keep the selected base");
+			await press(page.locator("#send"));
+			const request = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({
+				newWorktree: true,
+				worktreeBase: "feature/base",
+			});
+			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+		});
+
+		test("Existing worktree hides the base picker and sends only its path", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl);
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
+			);
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "Existing worktree", exact: true }),
+			);
+			await press(
+				page.getByRole("menuitemradio", { name: /feature\/existing/ }),
+			);
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveCount(0);
+			await page.locator("#input").fill("Use the existing checkout");
+			await press(page.locator("#send"));
+			const request = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({
+				worktreePath: "/workspace/existing",
+			});
+			expect(request.payload).not.toHaveProperty("worktreeBase");
+			expect(request.payload).not.toHaveProperty("newWorktree");
+			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
+		});
+
+		test("changing projects resets the chosen base to the new project's current branch", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl, {
+				secondProject: true,
+			});
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
+			);
+			await press(page.getByTestId("draft-project-chip"));
+			await press(page.getByRole("menuitemradio", { name: /Second project/ }));
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveCount(0);
+			await press(page.getByTestId("draft-start-chip"));
+			await press(
+				page.getByRole("menuitem", { name: "New worktree", exact: true }),
+			);
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveText(
+				"from develop",
+			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			const current = page.getByRole("menuitemradio", {
+				name: "develop",
+				exact: true,
+			});
+			await expect(current).toHaveAttribute("aria-checked", "true");
+			await press(current);
+			await page.locator("#input").fill("Use the new project's default");
+			await press(page.locator("#send"));
+			const request = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({
+				projectSlug: "second",
+				newWorktree: true,
+			});
+			expect(request.payload).not.toHaveProperty("worktreeBase");
 		});
 
 		for (const nonGitPrimary of [false, true]) {
@@ -330,11 +516,16 @@ for (const mode of [
 			await press(
 				page.getByRole("menuitem", { name: "New worktree", exact: true }),
 			);
+			await press(page.getByTestId("draft-base-branch-chip"));
+			await press(
+				page.getByRole("menuitemradio", { name: "feature/base", exact: true }),
+			);
 			await press(page.getByTestId("draft-start-chip"));
 			await press(
 				page.getByRole("menuitemradio", { name: "Current checkout" }),
 			);
 			await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
+			await expect(page.getByTestId("draft-base-branch-chip")).toHaveCount(0);
 			await page.locator("#input").fill("Stay local");
 			await press(page.locator("#send"));
 			const request = await rpc.waitForRequest(
@@ -342,6 +533,7 @@ for (const mode of [
 			);
 			expect(request.payload).not.toHaveProperty("newWorktree");
 			expect(request.payload).not.toHaveProperty("worktreePath");
+			expect(request.payload).not.toHaveProperty("worktreeBase");
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 		});
 
