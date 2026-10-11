@@ -9,7 +9,11 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
 	["general", "General", "[data-testid=settings-composer-controls-icons]"],
-	["models", "Models & agents", "p:has-text('Unchecked items are hidden')"],
+	[
+		"models",
+		"Models & agents",
+		"p:has-text('Hidden models stay out of the model picker')",
+	],
 	["claude", "Claude", "[data-testid=claude-setting-defaultModel-select]"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
