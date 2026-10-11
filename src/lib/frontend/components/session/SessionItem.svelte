@@ -234,6 +234,16 @@
 	let consumeTouchEnd = false;
 
 	const displayTitle = $derived(session.title || "New Session");
+	// A title that changes while the row is on screen (auto-name or rename)
+	// plays the gleam once. The row's first render must not, or every row would
+	// shine on page load, so the previous title is tracked outside state.
+	let renderedTitle: string | undefined;
+	let gleamingTitle = $state<string>();
+	$effect(() => {
+		if (renderedTitle !== undefined && displayTitle !== renderedTitle) gleamingTitle = displayTitle;
+		renderedTitle = displayTitle;
+	});
+	const gleaming = $derived(gleamingTitle === displayTitle);
 	const actions = $derived(getSessionActionState(session, now));
 	const swipeStage = $derived.by(() => {
 		const stage = getSwipeStage(offset, rowEl?.getBoundingClientRect().width ?? 0);
@@ -653,10 +663,16 @@
 				onend={() => onrenameend?.()}
 			/>
 		{:else}
-			<span
-				class="session-title-inner inline-block group-hover:session-title-marquee overflow-hidden text-ellipsis whitespace-nowrap min-w-0 group-hover:text-clip"
-				>{displayTitle}</span
-			>
+			<!-- Keyed so a second rename mid-gleam restarts it on a fresh element.
+			     The hover marquee waits for the gleam: both are `animation`, so
+			     hovering would cut the gleam short and replay it on leave. -->
+			{#key displayTitle}
+				<span
+					class="session-title-inner inline-block overflow-hidden text-ellipsis whitespace-nowrap min-w-0 {gleaming ? 'session-title-gleam motion-reduce:animate-none' : 'group-hover:session-title-marquee group-hover:text-clip'}"
+					onanimationend={() => { gleamingTitle = undefined; }}
+					>{displayTitle}</span
+				>
+			{/key}
 			{#if sessionAttention(session) === "done-unread"}
 				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
 			{/if}
@@ -779,4 +795,7 @@
 		</div>
 	{/if}
 </a>
+{#if gleaming}
+	<div class="session-row-sheen motion-reduce:hidden" aria-hidden="true"></div>
+{/if}
 </div>
