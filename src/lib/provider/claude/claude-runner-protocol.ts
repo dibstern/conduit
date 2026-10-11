@@ -58,7 +58,6 @@ export interface ClaudeRunnerHello {
 		readonly workspaceRoot: string;
 		readonly extraFolders?: readonly string[];
 		readonly daemonConfigDir?: string;
-		readonly materializeSubagents: boolean;
 		readonly subagentPollTimeoutMs?: number;
 	};
 }

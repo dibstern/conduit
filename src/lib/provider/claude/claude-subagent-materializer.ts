@@ -4,22 +4,16 @@ import {
 	listSubagents,
 	type SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
-import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import type {
 	CanonicalEvent,
 	EventPayloadMap,
 	MessageRole,
 } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
-import {
-	type ClaudeAdapterError,
-	ClaudeBoundaryError,
-} from "../event-sink-errors.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
@@ -43,37 +37,13 @@ export interface ClaudeSubagentSdk {
 	): Promise<readonly SessionMessage[]>;
 }
 
-export interface MaterializeClaudeSubagentsInput {
-	readonly parentConduitSessionId: string;
-	readonly parentClaudeSessionId: string;
-	readonly workspaceRoot: string;
-	readonly configDir?: string;
-	readonly knownTasks: ReadonlyMap<
-		string,
-		{
-			readonly toolUseId: string;
-			readonly description?: string;
-			readonly subagentType?: string;
-		}
-	>;
-}
-
-export interface MaterializedClaudeSubagent {
-	readonly sdkSubagentId: string;
-	readonly childSessionId: string;
-	readonly parentToolUseId?: string;
-}
-
-export interface ClaudeSubagentPersist {
-	readonly persistClaudeSubagent: ClaudeEventPersistEffect["persistClaudeSubagent"];
-}
-
 export interface ClaudeSubagentTranscriptCursor {
 	readonly messageRoles: Map<string, "user" | "assistant">;
 	readonly textOffsets: Map<string, number>;
 	readonly thinkingOffsets?: Map<string, number>;
 	readonly toolStarts: Set<string>;
 	readonly toolCompletions: Set<string>;
+	readonly toolMessageIds?: Map<string, string>;
 }
 
 export interface ClaudeSubagentTranscriptStage {
@@ -87,6 +57,7 @@ type MutableClaudeSubagentTranscriptCursor = {
 	thinkingOffsets?: Map<string, number>;
 	toolStarts: Set<string>;
 	toolCompletions: Set<string>;
+	toolMessageIds?: Map<string, string>;
 };
 
 export const defaultClaudeSubagentSdk: ClaudeSubagentSdk = {
@@ -123,99 +94,6 @@ export function claudeSubagentSessionId(input: {
 	return `claude-subagent-${hash}`;
 }
 
-export function makeClaudeSubagentMaterializer(deps: {
-	readonly sdk: ClaudeSubagentSdk;
-	readonly persist: ClaudeSubagentPersist;
-}): (
-	input: MaterializeClaudeSubagentsInput,
-) => Effect.Effect<readonly MaterializedClaudeSubagent[], ClaudeAdapterError> {
-	return (input) =>
-		Effect.gen(function* () {
-			const options = {
-				dir: input.workspaceRoot,
-				...(input.configDir !== undefined && { configDir: input.configDir }),
-			};
-			const subagentIds = yield* Effect.tryPromise({
-				try: () => deps.sdk.listSubagents(input.parentClaudeSessionId, options),
-				catch: (cause) =>
-					new ClaudeBoundaryError({ operation: "listSubagents", cause }),
-			});
-			const materialized: MaterializedClaudeSubagent[] = [];
-
-			for (const sdkSubagentId of subagentIds) {
-				const task = input.knownTasks.get(sdkSubagentId);
-				const childSessionId = claudeSubagentSessionId({
-					parentConduitSessionId: input.parentConduitSessionId,
-					parentClaudeSessionId: input.parentClaudeSessionId,
-					sdkSubagentId,
-				});
-				const messages = yield* Effect.tryPromise({
-					try: () =>
-						deps.sdk.getSubagentMessages(
-							input.parentClaudeSessionId,
-							sdkSubagentId,
-							options,
-						),
-					catch: (cause) =>
-						new ClaudeBoundaryError({
-							operation: "getSubagentMessages",
-							cause,
-						}),
-				});
-				// Prefer the Task's human description — the raw subagent type is
-				// an internal identifier (e.g. "local_agent") and reads as noise
-				// in the session sidebar.
-				const title =
-					task?.description ??
-					(task?.subagentType
-						? `${capitalize(task.subagentType)} Agent`
-						: "Claude Subagent");
-
-				yield* deps.persist.persistClaudeSubagent({
-					childSessionId,
-					parentSessionId: input.parentConduitSessionId,
-					providerSessionId: sdkSubagentId,
-					title,
-					events: sessionMessagesToEvents(childSessionId, messages),
-				});
-
-				materialized.push({
-					sdkSubagentId,
-					childSessionId,
-					...(task ? { parentToolUseId: task.toolUseId } : {}),
-				});
-			}
-
-			return materialized;
-		});
-}
-
-function capitalize(value: string): string {
-	if (value.length === 0) return value;
-	return `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
-}
-
-function sessionMessagesToEvents(
-	sessionId: string,
-	messages: readonly SessionMessage[],
-): CanonicalEvent[] {
-	return diffSessionMessagesToEvents({
-		childSessionId: sessionId,
-		messages,
-		cursor: createClaudeSubagentTranscriptCursor(),
-	});
-}
-
-function createClaudeSubagentTranscriptCursor(): ClaudeSubagentTranscriptCursor {
-	return {
-		messageRoles: new Map(),
-		textOffsets: new Map(),
-		thinkingOffsets: new Map(),
-		toolStarts: new Set(),
-		toolCompletions: new Set(),
-	};
-}
-
 export function cloneClaudeSubagentTranscriptCursor(
 	cursor: ClaudeSubagentTranscriptCursor,
 ): ClaudeSubagentTranscriptCursor {
@@ -225,6 +103,7 @@ export function cloneClaudeSubagentTranscriptCursor(
 		thinkingOffsets: new Map(cursor.thinkingOffsets ?? []),
 		toolStarts: new Set(cursor.toolStarts),
 		toolCompletions: new Set(cursor.toolCompletions),
+		toolMessageIds: new Map(cursor.toolMessageIds ?? []),
 	};
 }
 
@@ -242,6 +121,7 @@ export function commitClaudeSubagentTranscriptCursor(
 	replaceMap(getThinkingOffsets(target), getThinkingOffsets(source));
 	replaceSet(target.toolStarts, source.toolStarts);
 	replaceSet(target.toolCompletions, source.toolCompletions);
+	replaceMap(getToolMessageIds(target), getToolMessageIds(source));
 }
 
 export function diffSessionMessagesToEvents(input: {
@@ -299,7 +179,7 @@ export function stageSessionMessagesToEvents(input: {
 }): ClaudeSubagentTranscriptStage {
 	const events: ProviderRuntimeEvent[] = [];
 	const cursor = cloneClaudeSubagentTranscriptCursor(input.cursor);
-	const toolMessageIds = new Map<string, string>();
+	const toolMessageIds = getToolMessageIds(cursor);
 	const baseCreatedAt = Date.now();
 	let eventIndex = 0;
 	const eventOptions = () => ({
@@ -512,6 +392,14 @@ function readToolResultContent(value: unknown): unknown {
 			.join("\n");
 	}
 	return value ?? null;
+}
+
+function getToolMessageIds(
+	cursor: ClaudeSubagentTranscriptCursor,
+): Map<string, string> {
+	const mutable = cursor as MutableClaudeSubagentTranscriptCursor;
+	mutable.toolMessageIds ??= new Map();
+	return mutable.toolMessageIds;
 }
 
 function getThinkingOffsets(

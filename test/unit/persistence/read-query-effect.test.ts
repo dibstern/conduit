@@ -149,6 +149,74 @@ describe("typed session row derivations", () => {
 			}).pipe(Effect.provide(testLayer)),
 	);
 
+	// A background child's busy status must not turn its idle parent Working.
+	// Suppressing every child would hide a foreground sibling or the parent's
+	// own busy/retry status; sidebar and family reads must make the same choice.
+	it.effect(
+		"keeps background child turns busy while the parent monitors without hiding foreground siblings",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				yield* seedSession("monitor");
+				yield* seedSession("agent", { parentId: "monitor" });
+				yield* seedSession("foreground", { parentId: "monitor" });
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 'agent'`;
+				const tasks = [
+					{
+						id: "agent-1",
+						type: "local_agent",
+						description: "Audit auth",
+						firstSeenAt: 100,
+						childSessionId: "agent",
+					},
+				];
+				const options = {
+					backgroundOf: (id: string) =>
+						id === "monitor"
+							? { work: "monitoring" as const, tasks }
+							: undefined,
+				};
+				const readQuery = yield* makeReadQueryEffect;
+				for (const [status, siblingStatus, attention] of [
+					["idle", "idle", "monitoring"],
+					["idle", "busy", "working"],
+					["busy", "idle", "working"],
+					["retry", "idle", "working"],
+				] as const) {
+					yield* sql`UPDATE sessions SET status = ${status} WHERE id = 'monitor'`;
+					yield* sql`UPDATE sessions SET status = ${siblingStatus} WHERE id = 'foreground'`;
+					yield* projectSidebar();
+					const lists = [
+						yield* readQuery.listSessionInfos(options),
+						(yield* readQuery.readSessionList(options)).rows.map(
+							(row) => row.item,
+						),
+						(yield* readQuery.readSessionList({
+							...options,
+							familyOf: "monitor",
+						})).rows.map((row) => row.item),
+					];
+					for (const list of lists) {
+						const parent = list.find((row) => row.id === "monitor");
+						expect(parent).toMatchObject({
+							status,
+							attention,
+							backgroundTasks: tasks,
+						});
+						if (attention === "monitoring")
+							expect(parent).not.toHaveProperty("processing");
+						else expect(parent?.processing).toBe(true);
+					}
+					expect(lists[0]?.find((row) => row.id === "agent")).toMatchObject({
+						status: "busy",
+						attention: "working",
+						processing: true,
+					});
+				}
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect(
 		"derives approval, reply, error, working, unread and idle in priority order",
 		() =>

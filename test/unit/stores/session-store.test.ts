@@ -30,6 +30,7 @@ import {
 	isSessionSnoozed,
 	isSessionWoken,
 	parentOf,
+	rootBackgroundTasks,
 	sessionState,
 	setCurrentSession,
 	setSearchQuery,
@@ -136,6 +137,45 @@ it("keeps a newer root row when an older family arrives", () => {
 		"root",
 		"child",
 	]);
+});
+
+it.each([
+	false,
+	true,
+])("reads live tasks from the Claude runtime owning a fork or side thread (sideThread=%s)", (sideThread) => {
+	const tasks = [
+		{
+			id: "fork-task",
+			type: "local_agent",
+			description: "Work in the fork",
+			firstSeenAt: 1000,
+		},
+	];
+	seedSessions([
+		{ id: "original", title: "Original", backgroundTasks: [] },
+		{
+			id: "fork",
+			title: "Fork",
+			parentID: "original",
+			sideThread,
+			backgroundTasks: tasks,
+		},
+	]);
+	applyFamilyChange({
+		_tag: "snapshot",
+		sequence: 100,
+		rows: [
+			makeSession({ id: "claude-subagent-one", parentID: "fork" }),
+			makeSession({
+				id: "claude-subagent-two",
+				parentID: "claude-subagent-one",
+			}),
+		],
+	});
+
+	expect(rootBackgroundTasks("fork")).toEqual(tasks);
+	expect(rootBackgroundTasks("claude-subagent-one")).toEqual(tasks);
+	expect(rootBackgroundTasks("claude-subagent-two")).toEqual(tasks);
 });
 
 it("keeps a newer family row when an older family upsert arrives", () => {

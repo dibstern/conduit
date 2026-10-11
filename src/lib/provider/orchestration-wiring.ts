@@ -26,10 +26,7 @@ import type { EventStoreEffectTag } from "../persistence/effect/event-store-effe
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { SSEEvent } from "../relay/opencode-events.js";
 import { loadRelaySettings } from "../relay/relay-settings.js";
-import {
-	defaultClaudeSubagentSdk,
-	makeClaudeSubagentMaterializer,
-} from "./claude/claude-subagent-materializer.js";
+import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
 import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
@@ -64,6 +61,8 @@ export interface OrchestrationLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
+	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
@@ -78,6 +77,8 @@ export interface OrchestrationRuntimeLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
+	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
 }
 
@@ -200,10 +201,6 @@ const createOrchestrationComponentsEffect = (
 		registry.registerInstance(openCodeInstance);
 
 		const persist = yield* ClaudeEventPersistEffectTag;
-		const materializeSubagents = makeClaudeSubagentMaterializer({
-			sdk: defaultClaudeSubagentSdk,
-			persist,
-		});
 		let shellEnv = options.shellEnv;
 		let prepareShellEnv = options.prepareShellEnv;
 		if (!shellEnv) {
@@ -233,7 +230,7 @@ const createOrchestrationComponentsEffect = (
 				: {}),
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
-			materializeSubagents,
+			subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
 			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
@@ -352,6 +349,9 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeSubagentSdk
+					? { claudeSubagentSdk: options.claudeSubagentSdk }
 					: {}),
 				...(options.claudeRunnerFactory
 					? { claudeRunnerFactory: options.claudeRunnerFactory }

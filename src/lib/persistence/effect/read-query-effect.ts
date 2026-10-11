@@ -164,10 +164,18 @@ export const sessionRowsToSessionInfoList = (
 	};
 	if (opts.parentMap) {
 		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
-		for (const id of new Set([
-			...rowStatuses.keys(),
-			...opts.parentMap.keys(),
-		])) {
+		const members = new Set([...rowStatuses.keys(), ...opts.parentMap.keys()]);
+		const backgroundChildren = new Set(
+			[...new Set([...members, ...opts.parentMap.values()])].flatMap(
+				(id) =>
+					opts
+						.backgroundOf?.(id)
+						?.tasks.flatMap((task) =>
+							task.childSessionId ? [task.childSessionId] : [],
+						) ?? [],
+			),
+		);
+		for (const id of members) {
 			let root = id;
 			let activityRoot: string | undefined;
 			const seen = new Set<string>();
@@ -190,8 +198,12 @@ export const sessionRowsToSessionInfoList = (
 			const activity = stateFor(activityRoot ?? root);
 			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
 			const work = opts.backgroundOf?.(id)?.work;
+			// A live background agent keeps its own busy status; its owner
+			// monitors that work rather than inheriting a foreground turn.
 			activity.processing ||=
-				status === "busy" || status === "retry" || work === "working";
+				(!backgroundChildren.has(id) &&
+					(status === "busy" || status === "retry")) ||
+				work === "working";
 			activity.monitoring ||= work === "monitoring";
 			activity.unread ||= opts.unreadSessionIds?.has(id) === true;
 		}
@@ -319,15 +331,33 @@ const decodeSidebarRow = Schema.decodeUnknownSync(
 const sidebarItem = (
 	row: SidebarRow,
 	backgroundOf?: (sessionId: string) => SessionBackground | undefined,
+	busyMembers?: ReadonlySet<string>,
 ): SessionInfo => {
 	const work = new Set(row.members.map((id) => backgroundOf?.(id)?.work));
 	const background = backgroundOf?.(row.session.id);
+	const backgroundChildren = new Set(
+		row.members.flatMap(
+			(id) =>
+				backgroundOf?.(id)?.tasks.flatMap((task) =>
+					task.childSessionId ? [task.childSessionId] : [],
+				) ?? [],
+		),
+	);
+	const { processing: storedProcessing, ...session } = row.session;
+	const processing =
+		backgroundChildren.size > 0 && busyMembers !== undefined
+			? row.members.some(
+					(id) => busyMembers.has(id) && !backgroundChildren.has(id),
+				)
+			: storedProcessing === true;
 	const quiet =
-		row.session.attention === "idle" || row.session.attention === "done-unread";
+		row.session.attention === "idle" ||
+		row.session.attention === "done-unread" ||
+		(row.session.attention === "working" && !processing);
 	return {
-		...row.session,
+		...session,
 		updatedAt: row.lastActivity,
-		...(work.has("working") ? { processing: true } : {}),
+		...(processing || work.has("working") ? { processing: true } : {}),
 		...(background?.work ? { backgroundWork: background.work } : {}),
 		...(background?.tasks.length ? { backgroundTasks: background.tasks } : {}),
 		...deriveSessionSnooze(row.snooze),
@@ -696,6 +726,7 @@ export class ReadQueryEffectTag extends Context.Tag("ReadQueryEffect")<
 >() {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
@@ -775,6 +806,7 @@ function groupMessagesWithPartsAndTurnModels(
 	}
 	return messages.map((message) => {
 		const {
+			turn_cost,
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
@@ -786,6 +818,7 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(turn_cost === null ? {} : { turnCost: turn_cost }),
 			...(message.role === "user" && turn_started_at !== null
 				? {
 						turnTiming: {
@@ -825,7 +858,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	);
 	// A prompt queued behind a running turn starts working when that turn
 	// ends, not when it was sent: waiting in the queue is not work.
-	const turnTimingColumns = sql`
+	const turnMetadataColumns = sql`
+		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
+			THEN turns.cost ELSE NULL END AS turn_cost,
 		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
 			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
 		) AS turn_started_at,
@@ -1214,7 +1249,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
 					turns.actual_model AS turn_actual_model,
-					${turnTimingColumns}
+					${turnMetadataColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
 				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1392,7 +1427,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1408,7 +1443,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1422,7 +1457,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 									turns.expected_model AS turn_expected_model,
 									turns.actual_model AS turn_actual_model,
-									${turnTimingColumns}
+									${turnMetadataColumns}
 								FROM messages
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
@@ -1536,6 +1571,33 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							range?.listing === true &&
 							floor <= version &&
 							floor >= (removedSince ?? floor);
+						const sidebars = stored.flatMap(({ row }) =>
+							row === null ? [] : [decodeSidebarRow(row)],
+						);
+						// Stored rows aggregate busy children without live task ownership.
+						// Read projected statuses once for families with background agents
+						// so a foreground sibling still outranks monitoring.
+						const members = [
+							...new Set(
+								sidebars.flatMap((row) =>
+									row.members.some((id) =>
+										range
+											?.backgroundOf?.(id)
+											?.tasks.some((task) => task.childSessionId),
+									)
+										? row.members
+										: [],
+								),
+							),
+						];
+						const busyMembers =
+							members.length === 0
+								? undefined
+								: new Set(
+										(yield* sql<{ id: string }>`
+								SELECT id FROM sessions WHERE id IN ${sql.in(members)}
+								AND status IN ('busy', 'retry')`).map(({ id }) => id),
+									);
 						return {
 							rows: stored.flatMap(({ row, workspace_hint_sequence }) => {
 								if (row === null) return [];
@@ -1543,7 +1605,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								return [
 									{
 										item: {
-											...sidebarItem(sidebar, range?.backgroundOf),
+											...sidebarItem(sidebar, range?.backgroundOf, busyMembers),
 											workspaceHint:
 												hintDismissals?.get(sidebar.session.id) ===
 												workspace_hint_sequence
@@ -1753,7 +1815,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							turns.requested_model AS turn_requested_model,
 							turns.expected_model AS turn_expected_model,
 							turns.actual_model AS turn_actual_model,
-							${turnTimingColumns}
+							${turnMetadataColumns}
 						FROM messages
 						LEFT JOIN turns ON turns.id = messages.turn_id
 						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'

@@ -539,15 +539,6 @@ export function deriveTranscriptMessages(
 		.concat(atEnd);
 }
 
-let viewed: {
-	project: ProjectRef;
-	sessionId: string | null;
-	/** Settles true once the first load completes, false if left first. */
-	loaded: Promise<boolean>;
-	settle: (loaded: boolean) => void;
-} | null = null;
-let generation = 0;
-let fiber: RuntimeFiber<void, unknown> | null = null;
 /** The session drawn from its saved page at load, until the server places it. */
 export const savedDraw = $state({ sessionId: null as string | null });
 /** The record each drawn slot came from; its view resumes from it. */
@@ -579,19 +570,7 @@ const emptyTranscript = (project: ProjectRef): TranscriptEntry => ({
 	waiting: new Map(),
 	partOrder: new Map(),
 });
-let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
 const paging = new Map<string, Promise<void>>();
-
-function cancelFrame(): void {
-	if (pendingFrame === null) return;
-	if (
-		typeof cancelAnimationFrame === "function" &&
-		typeof pendingFrame === "number"
-	)
-		cancelAnimationFrame(pendingFrame);
-	else clearTimeout(pendingFrame);
-	pendingFrame = null;
-}
 
 function install(
 	sessionId: string,
@@ -614,13 +593,6 @@ function install(
 		slot.messages.messages,
 	);
 	restoreContextFromMessages(slot.messages);
-}
-
-async function stopFeed(): Promise<void> {
-	const old = fiber;
-	fiber = null;
-	cancelFrame();
-	if (old) await runTransportEffect(Fiber.interrupt(old));
 }
 
 /**
@@ -659,176 +631,224 @@ export function placeSavedDraw(
 	if (sessionState.currentId === sessionId) sessionState.currentId = null;
 }
 
-export function viewTranscript(
-	project: ProjectRef,
-	sessionId: string | null,
-): void {
-	if (viewed?.project === project && viewed.sessionId === sessionId) return;
-	viewed?.settle(false);
-	let settle: (loaded: boolean) => void = () => {};
-	const loaded = new Promise<boolean>((resolve) => {
-		settle = resolve;
-	});
-	viewed = { project, sessionId, loaded, settle };
-	const currentGeneration = ++generation;
-	const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
-	// Only a session this page has not loaded yet opens from a saved page.
-	let saved: Promise<SavedTranscript | undefined> = Promise.resolve(undefined);
-	const draw = slot ? drawn.get(slot.messages) : undefined;
-	if (slot) drawn.delete(slot.messages);
-	if (slot && sessionId) {
-		if (draw?.project === project) {
-			// Drawn at load and placed by the server: resume from that page.
-			saved = Promise.resolve(draw);
-			ledgers.delete(slot.messages);
-		} else if (
-			!slot.messages.transcript ||
-			slot.messages.transcript.project !== project
-		) {
-			saved = openSavedTranscript(sessionId);
-			ledgers.delete(slot.messages);
-			slot.messages.transcript = emptyTranscript(project);
-			slot.messages.loadLifecycle = "loading";
-		} else {
-			// The cached copy is only as current as the feed that stopped when we
-			// left; it is not live again until the new feed synchronizes.
-			slot.messages.transcript.status = { _tag: "cold" };
-			install(sessionId, slot);
-		}
+/** One live transcript feed: viewing a session stops the feed of the one
+ *  viewed before. Each view (the open session, the task drawer) owns one. */
+function transcriptView(): {
+	view: (project: ProjectRef, sessionId: string | null) => void;
+	/** The viewed session's load: the same promise throughout, settling true
+	 *  once its first load completes and false if it is left first. */
+	loaded: (
+		project: ProjectRef,
+		sessionId: string,
+	) => Promise<boolean> | undefined;
+} {
+	let viewed: {
+		project: ProjectRef;
+		sessionId: string | null;
+		/** Settles true once the first load completes, false if left first. */
+		loaded: Promise<boolean>;
+		settle: (loaded: boolean) => void;
+	} | null = null;
+	let generation = 0;
+	let fiber: RuntimeFiber<void, unknown> | null = null;
+	let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
+
+	function cancelFrame(): void {
+		if (pendingFrame === null) return;
+		if (
+			typeof cancelAnimationFrame === "function" &&
+			typeof pendingFrame === "number"
+		)
+			cancelAnimationFrame(pendingFrame);
+		else clearTimeout(pendingFrame);
+		pendingFrame = null;
 	}
-	void stopFeed().then(async () => {
-		if (currentGeneration !== generation || !sessionId || !slot) return;
-		const [runtime, record] = await Promise.all([getRuntime(), saved]);
-		if (currentGeneration !== generation) return;
-		const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
-		ledgers.set(slot.messages, ledger);
-		// Drawn first, once; a restarted feed resumes from what it applied.
-		const opened = record?.project === project ? record.snapshot : undefined;
-		let unopened = opened;
-		// The server's snapshot, saved once it synchronizes with no change
-		// between: only then is it exactly the rows at its sequence.
-		let unsaved: SavedSnapshot | undefined;
-		const next = runtime.runFork(
-			Effect.flatMap(WsRpcClients, (clients) =>
-				Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
-					Stream.runForEach(
-						supervise(
-							Stream.suspend(() => {
-								const first = unopened;
-								unopened = undefined;
-								return subscriptions.sessionDetail({
-									sessionId,
-									ledger,
-									saved: first,
-									...(slot.messages.transcript?.hwm == null
-										? {}
-										: { resumeFromSequence: slot.messages.transcript.hwm }),
-								});
-							}),
-							(status) => {
-								if (
-									currentGeneration === generation &&
-									slot.messages.transcript
-								)
-									slot.messages.transcript.status = status;
-							},
-						),
-						(envelope) =>
-							Effect.sync(() => {
-								if (
-									currentGeneration !== generation ||
-									!slot.messages.transcript
-								)
-									return;
-								const before = slot.messages.transcript;
-								const item =
-									envelope._tag === "upsert" ? envelope.item : undefined;
-								const messageId =
-									item?._tag === "part"
-										? item.messageId
-										: item?._tag === "message"
-											? item.message.id
-											: undefined;
-								const was = before.rows.find((row) => row.id === messageId);
-								// Skill names and running state follow the tool's input,
-								// output and status, which can arrive in separate updates.
-								if (
-									item?._tag === "part" &&
-									item.part.tool?.toLowerCase() === "skill" &&
-									JSON.stringify(item.part.state) !==
-										JSON.stringify(
-											(was?.parts ?? before.waiting.get(item.messageId))?.find(
-												(old) => old.id === item.part.id,
-											)?.state,
+
+	async function stopFeed(): Promise<void> {
+		const old = fiber;
+		fiber = null;
+		cancelFrame();
+		if (old) await runTransportEffect(Fiber.interrupt(old));
+	}
+
+	return {
+		view: (project, sessionId) => {
+			if (viewed?.project === project && viewed.sessionId === sessionId) return;
+			viewed?.settle(false);
+			let settle: (loaded: boolean) => void = () => {};
+			const loaded = new Promise<boolean>((resolve) => {
+				settle = resolve;
+			});
+			viewed = { project, sessionId, loaded, settle };
+			const currentGeneration = ++generation;
+			const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
+			// Only a session this page has not loaded yet opens from a saved page.
+			let saved: Promise<SavedTranscript | undefined> =
+				Promise.resolve(undefined);
+			const draw = slot ? drawn.get(slot.messages) : undefined;
+			if (slot) drawn.delete(slot.messages);
+			if (slot && sessionId) {
+				if (draw?.project === project) {
+					// Drawn at load and placed by the server: resume from that page.
+					saved = Promise.resolve(draw);
+					ledgers.delete(slot.messages);
+				} else if (
+					!slot.messages.transcript ||
+					slot.messages.transcript.project !== project
+				) {
+					saved = openSavedTranscript(sessionId);
+					ledgers.delete(slot.messages);
+					slot.messages.transcript = emptyTranscript(project);
+					slot.messages.loadLifecycle = "loading";
+				} else {
+					// The cached copy is only as current as the feed that stopped when we
+					// left; it is not live again until the new feed synchronizes.
+					slot.messages.transcript.status = { _tag: "cold" };
+					install(sessionId, slot);
+				}
+			}
+			void stopFeed().then(async () => {
+				if (currentGeneration !== generation || !sessionId || !slot) return;
+				const [runtime, record] = await Promise.all([getRuntime(), saved]);
+				if (currentGeneration !== generation) return;
+				const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
+				ledgers.set(slot.messages, ledger);
+				// Drawn first, once; a restarted feed resumes from what it applied.
+				const opened =
+					record?.project === project ? record.snapshot : undefined;
+				let unopened = opened;
+				// The server's snapshot, saved once it synchronizes with no change
+				// between: only then is it exactly the rows at its sequence.
+				let unsaved: SavedSnapshot | undefined;
+				const next = runtime.runFork(
+					Effect.flatMap(WsRpcClients, (clients) =>
+						Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+							Stream.runForEach(
+								supervise(
+									Stream.suspend(() => {
+										const first = unopened;
+										unopened = undefined;
+										return subscriptions.sessionDetail({
+											sessionId,
+											ledger,
+											saved: first,
+											...(slot.messages.transcript?.hwm == null
+												? {}
+												: { resumeFromSequence: slot.messages.transcript.hwm }),
+										});
+									}),
+									(status) => {
+										if (
+											currentGeneration === generation &&
+											slot.messages.transcript
 										)
-								)
-									refreshSessionSkills(sessionId);
-								if (envelope._tag === "synchronized" && unsaved)
-									void saveTranscript(
-										sessionId,
-										project,
-										unsaved,
-										opened?.resumePoint,
-									);
-								unsaved =
-									envelope._tag === "snapshot" && envelope !== opened
-										? envelope
-										: undefined;
-								const after = applyTranscriptEnvelope(before, envelope);
-								slot.messages.transcript = after;
-								const now = after.rows.find((row) => row.id === messageId);
-								if (
-									now?.role === "assistant" &&
-									!was &&
-									before.status._tag === "live"
-								)
-									advanceTurnIfNewMessage(slot.activity, slot.messages, now.id);
-								// A user row is new when it first has parts to show. A message
-								// may name a skill; the chip reloads the session's skills.
-								if (
-									now?.role === "user" &&
-									now.parts?.length &&
-									!was?.parts?.length
-								)
-									refreshSessionSkills(sessionId);
-								if (
-									envelope._tag === "snapshot" ||
-									envelope._tag === "synchronized"
-								) {
-									cancelFrame();
-									install(sessionId, slot);
-									if (envelope._tag === "synchronized") viewed?.settle(true);
-								} else if (pendingFrame === null) {
-									const render = () => {
-										pendingFrame = null;
-										if (currentGeneration === generation)
+											slot.messages.transcript.status = status;
+									},
+								),
+								(envelope) =>
+									Effect.sync(() => {
+										if (
+											currentGeneration !== generation ||
+											!slot.messages.transcript
+										)
+											return;
+										const before = slot.messages.transcript;
+										const item =
+											envelope._tag === "upsert" ? envelope.item : undefined;
+										const messageId =
+											item?._tag === "part"
+												? item.messageId
+												: item?._tag === "message"
+													? item.message.id
+													: undefined;
+										const was = before.rows.find((row) => row.id === messageId);
+										// Skill names and running state follow the tool's input,
+										// output and status, which can arrive in separate updates.
+										if (
+											item?._tag === "part" &&
+											item.part.tool?.toLowerCase() === "skill" &&
+											JSON.stringify(item.part.state) !==
+												JSON.stringify(
+													(
+														was?.parts ?? before.waiting.get(item.messageId)
+													)?.find((old) => old.id === item.part.id)?.state,
+												)
+										)
+											refreshSessionSkills(sessionId);
+										if (envelope._tag === "synchronized" && unsaved)
+											void saveTranscript(
+												sessionId,
+												project,
+												unsaved,
+												opened?.resumePoint,
+											);
+										unsaved =
+											envelope._tag === "snapshot" && envelope !== opened
+												? envelope
+												: undefined;
+										const after = applyTranscriptEnvelope(before, envelope);
+										slot.messages.transcript = after;
+										const now = after.rows.find((row) => row.id === messageId);
+										if (
+											now?.role === "assistant" &&
+											!was &&
+											before.status._tag === "live"
+										)
+											advanceTurnIfNewMessage(
+												slot.activity,
+												slot.messages,
+												now.id,
+											);
+										// A user row is new when it first has parts to show. A message
+										// may name a skill; the chip reloads the session's skills.
+										if (
+											now?.role === "user" &&
+											now.parts?.length &&
+											!was?.parts?.length
+										)
+											refreshSessionSkills(sessionId);
+										if (
+											envelope._tag === "snapshot" ||
+											envelope._tag === "synchronized"
+										) {
+											cancelFrame();
 											install(sessionId, slot);
-									};
-									pendingFrame =
-										typeof requestAnimationFrame === "function"
-											? requestAnimationFrame(render)
-											: setTimeout(render, FRAME_FALLBACK_DELAY_MS);
-								}
-							}),
+											if (envelope._tag === "synchronized")
+												viewed?.settle(true);
+										} else if (pendingFrame === null) {
+											const render = () => {
+												pendingFrame = null;
+												if (currentGeneration === generation)
+													install(sessionId, slot);
+											};
+											pendingFrame =
+												typeof requestAnimationFrame === "function"
+													? requestAnimationFrame(render)
+													: setTimeout(render, FRAME_FALLBACK_DELAY_MS);
+										}
+									}),
+							),
+						),
 					),
-				),
-			),
-		);
-		if (currentGeneration === generation) fiber = next;
-		else runtime.runFork(Fiber.interrupt(next));
-	});
+				);
+				if (currentGeneration === generation) fiber = next;
+				else runtime.runFork(Fiber.interrupt(next));
+			});
+		},
+		loaded: (project, sessionId) =>
+			viewed?.project === project && viewed.sessionId === sessionId
+				? viewed.loaded
+				: undefined,
+	};
 }
 
-/** This session's view while it is open: the same promise throughout,
- *  settling true once its first load completes and false if it is left first. */
-export function sessionViewLoaded(
-	project: ProjectRef,
-	sessionId: string,
-): Promise<boolean> | undefined {
-	return viewed?.project === project && viewed.sessionId === sessionId
-		? viewed.loaded
-		: undefined;
-}
+const openView = transcriptView();
+/** The open session's transcript feed. */
+export const viewTranscript = openView.view;
+/** The open session's view while it is open. */
+export const sessionViewLoaded = openView.loaded;
+/** The desktop task drawer's feed for the selected task's Child Session. */
+export const viewTaskTranscript = transcriptView().view;
 
 export function transcriptStatus(sessionId: string): FeedStatus {
 	return sessionMessages.get(sessionId)?.transcript?.status ?? { _tag: "cold" };

@@ -552,7 +552,6 @@ describe("Claude runners survive server replacement through built dist", () => {
 						config: {
 							workspaceRoot: harness.projectDir,
 							daemonConfigDir: harness.configDir,
-							materializeSubagents: false,
 						},
 					}),
 				);

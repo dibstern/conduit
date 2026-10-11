@@ -299,17 +299,6 @@ export const connectClaudeRunner = (options: {
 													),
 												);
 											if (sequence <= acknowledged) {
-												if (
-													options.receipts &&
-													message.output.type === "materialize-subagents"
-												)
-													return yield* options.receipts
-														.replyAt(options.runnerId, sequence)
-														.pipe(
-															Effect.mapError((cause) =>
-																claudeRunnerFailure("read runner reply", cause),
-															),
-														);
 												return sequence === acknowledged ? lastReply : {};
 											}
 											if (sequence !== acknowledged + 1)
@@ -371,10 +360,7 @@ export const connectClaudeRunner = (options: {
 													message.output.type === "question-request"
 												)
 													yield* Deferred.await(committed);
-												else if (
-													!receipt.consumed ||
-													result.children !== undefined
-												)
+												else if (!receipt.consumed)
 													yield* options.receipts
 														.acknowledge(
 															options.runnerId,
@@ -461,7 +447,6 @@ export const connectClaudeRunner = (options: {
 							...(options.deps.daemonConfigDir !== undefined
 								? { daemonConfigDir: options.deps.daemonConfigDir }
 								: {}),
-							materializeSubagents: options.deps.materializeSubagents ?? false,
 							...(options.deps.subagentPollTimeoutMs !== undefined
 								? { subagentPollTimeoutMs: options.deps.subagentPollTimeoutMs }
 								: {}),

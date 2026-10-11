@@ -358,6 +358,7 @@ export function historyToChatMessages(
 			// the step that ends the turn gets a result, billed for every step.
 			const hasCost = msg.cost !== undefined && msg.cost > 0;
 			const hasTokens =
+				msg.contextTokens !== undefined ||
 				msg.tokens?.input !== undefined ||
 				msg.tokens?.output !== undefined ||
 				msg.tokens?.context_window !== undefined;
@@ -377,8 +378,14 @@ export function historyToChatMessages(
 				result.push({
 					type: "result",
 					uuid: uuidFor ? uuidFor(msg.id, "result") : generateUuid(),
-					...(msg.cost != null && { cost }),
+					// The projection includes all completions, including unloaded steps.
+					...((msg.turnCost ?? msg.cost) != null && {
+						cost: msg.turnCost ?? cost,
+					}),
 					duration,
+					...(msg.contextTokens != null && {
+						contextTokens: msg.contextTokens,
+					}),
 					...(msg.tokens?.input != null && { inputTokens: msg.tokens.input }),
 					...(msg.tokens?.output != null && {
 						outputTokens: msg.tokens.output,

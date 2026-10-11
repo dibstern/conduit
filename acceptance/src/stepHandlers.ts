@@ -13,6 +13,7 @@ import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
 import { harnessHandlers } from "./steps/harness.js";
+import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
 import { opencodeConnectionBannerHandlers } from "./steps/opencodeConnectionBanner.js";
@@ -23,6 +24,7 @@ import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionPresentationHandlers } from "./steps/sessionPresentation.js";
 import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
+import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
@@ -35,6 +37,8 @@ const driver = new PlaywrightDriver();
 export const conduitVisualHandlers: StepHandler[] = [
 	...sessionPresentationHandlers,
 	...backgroundTasksHandlers,
+	...launchingRowsHandlers,
+	...taskDrillInHandlers,
 	...sideThreadsHandlers,
 	...sessionGoalDetailsHandlers,
 	...sessionGoalHandlers,

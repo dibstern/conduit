@@ -90,14 +90,19 @@ async function oldStore() {
 describe("Bound project provenance", () => {
 	it("registers provenance after main's migrations with the file/key offset", () => {
 		expect(PROJECT_PROVENANCE_MIGRATION).toBe("0044_project_provenance.sql");
-		const keys = Object.keys(effectMigrationEntries);
-		const first = keys.indexOf("0041_messages_input_id");
-		expect(keys.slice(first, first + 5)).toEqual([
+		expect(Object.keys(effectMigrationEntries).slice(40)).toEqual([
 			"0041_messages_input_id",
 			"0042_pending_inputs",
 			"0043_messages_steered",
 			"0044_sessions_last_turn_end_input_id",
 			"0045_project_provenance",
+			"0046_messages_context_tokens",
+			"0047_messages_completed_at",
+			"0048_sessions_claude_worktree_state",
+			"0049_sessions_workspace_hint",
+			"0050_message_part_versions",
+			"0051_session_git_published",
+			"0052_store_identity",
 		]);
 	});
 

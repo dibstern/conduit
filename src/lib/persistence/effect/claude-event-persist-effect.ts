@@ -64,14 +64,6 @@ export interface ClaudeEventPersistEffect {
 		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
-	readonly persistClaudeSubagent: (input: {
-		readonly childSessionId: string;
-		readonly parentSessionId: string;
-		readonly providerSessionId: string;
-		readonly title: string;
-		readonly events: readonly CanonicalEvent[];
-	}) => Effect.Effect<void, ClaudeEventPersistFailure>;
-
 	readonly ensureClaudeSubagentSession: (input: {
 		readonly childSessionId: string;
 		readonly parentSessionId: string;
@@ -83,12 +75,6 @@ export interface ClaudeEventPersistEffect {
 export class ClaudeEventPersistEffectTag extends Context.Tag(
 	"ClaudeEventPersistEffect",
 )<ClaudeEventPersistEffectTag, ClaudeEventPersistEffect>() {}
-
-type ExistingMessagePart = {
-	readonly id: string;
-	readonly text: string | null;
-	readonly status: string | null;
-};
 
 /**
  * Terminal events that may act on an existing read-model session without a
@@ -103,6 +89,58 @@ function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
 		`evt_claude_subagent_session_created_${childSessionId}`,
 	);
 }
+
+/** Called inside the append transaction by both Claude persistence and runtime ingestion. */
+export const makeAppendEventsWithClaudeTurnCosts = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const eventStore = yield* EventStoreEffectTag;
+
+	return (events: readonly CanonicalEvent[]) =>
+		Effect.gen(function* () {
+			if (
+				!events.some(
+					(event) =>
+						event.provider === "claude" &&
+						event.type === "turn.completed" &&
+						event.data.providerCostTotalUsd !== undefined,
+				)
+			)
+				return yield* eventStore.appendBatch(events);
+
+			const stored: StoredEvent[] = [];
+			for (const event of events) {
+				let normalized = event;
+				if (
+					event.provider === "claude" &&
+					event.type === "turn.completed" &&
+					event.data.providerCostTotalUsd !== undefined
+				) {
+					const total = event.data.providerCostTotalUsd;
+					const [previous] = yield* sql<{ total: number }>`
+						SELECT json_extract(data, '$.providerCostTotalUsd') AS total
+						FROM events
+						WHERE session_id = ${event.sessionId} AND type = 'turn.completed'
+							AND provider = 'claude'
+							AND json_extract(data, '$.providerSessionId') = ${event.data.providerSessionId ?? null}
+							AND json_extract(data, '$.providerCostTotalUsd') IS NOT NULL
+						ORDER BY sequence DESC LIMIT 1`;
+					const delta = total - (previous?.total ?? 0);
+					if (delta < 0) {
+						yield* Effect.logWarning(
+							`Claude cost total went backwards: session=${event.sessionId} providerSessionId=${event.data.providerSessionId} previous=${previous?.total ?? 0} total=${total}`,
+						);
+					}
+					normalized = {
+						...event,
+						data: { ...event.data, cost: Math.max(0, delta) },
+					};
+				}
+				// Append before looking up the next total, including within one batch.
+				stored.push(...(yield* eventStore.appendBatch([normalized])));
+			}
+			return stored;
+		});
+});
 
 export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
@@ -185,6 +223,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 	const commitAndSignal = yield* makeCommitAndSignal;
 	const eventStore = yield* EventStoreEffectTag;
+	const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 
 	const mapPersistError =
 		(operation: string) =>
@@ -206,7 +245,10 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						"existing-session",
 					)
 				: requireSession(event.sessionId, "persistEvent", "existing-session");
-			yield* commitAndSignal([event], options);
+			yield* commitAndSignal.write(
+				(project) => Effect.flatMap(appendEvents([event]), project),
+				options,
+			);
 		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
@@ -246,7 +288,10 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			for (const sessionId of new Set(events.map((event) => event.sessionId))) {
 				yield* requireSession(sessionId, "persistEvents", "existing-session");
 			}
-			yield* commitAndSignal(events, options);
+			yield* commitAndSignal.write(
+				(project) => Effect.flatMap(appendEvents(events), project),
+				options,
+			);
 		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
 
 	const persistUserMessage = (
@@ -407,97 +452,11 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 				)
 				.pipe(Effect.mapError(mapPersistError("ensureClaudeSubagentSession")));
 
-	const persistClaudeSubagent: ClaudeEventPersistEffect["persistClaudeSubagent"] =
-		(input) =>
-			Effect.gen(function* () {
-				yield* ensureClaudeSubagentSession(input);
-
-				const existingRows = yield* sql<{ id: string }>`
-					SELECT id FROM messages WHERE session_id = ${input.childSessionId}`;
-				const existingMessageIds = new Set(existingRows.map((row) => row.id));
-				const existingPartRows = yield* sql<ExistingMessagePart>`
-					SELECT id, text, status FROM message_parts
-					WHERE message_id IN (
-						SELECT id FROM messages WHERE session_id = ${input.childSessionId}
-					)`;
-				const existingParts = new Map(
-					existingPartRows.map((row) => [row.id, row]),
-				);
-				const events = filterExistingSubagentEvents(
-					input.events,
-					existingMessageIds,
-					existingParts,
-				);
-				yield* commitAndSignal(events);
-			}).pipe(Effect.mapError(mapPersistError("persistClaudeSubagent")));
-
 	return {
 		persistHandoffDelivered,
 		persistEvent,
 		persistEvents,
 		persistUserMessage,
 		ensureClaudeSubagentSession,
-		persistClaudeSubagent,
 	} satisfies ClaudeEventPersistEffect;
 });
-
-function filterExistingSubagentEvents(
-	events: readonly CanonicalEvent[],
-	existingMessageIds: ReadonlySet<string>,
-	existingParts: ReadonlyMap<string, ExistingMessagePart>,
-): CanonicalEvent[] {
-	const filtered: CanonicalEvent[] = [];
-	for (const event of events) {
-		const next = filterExistingSubagentEvent(
-			event,
-			existingMessageIds,
-			existingParts,
-		);
-		if (next) filtered.push(next);
-	}
-	return filtered;
-}
-
-function filterExistingSubagentEvent(
-	event: CanonicalEvent,
-	existingMessageIds: ReadonlySet<string>,
-	existingParts: ReadonlyMap<string, ExistingMessagePart>,
-): CanonicalEvent | undefined {
-	if (
-		event.type === "message.created" &&
-		existingMessageIds.has(event.data.messageId)
-	) {
-		return undefined;
-	}
-
-	if (event.type === "text.delta" || event.type === "thinking.delta") {
-		const existingText = existingParts.get(event.data.partId)?.text ?? "";
-		if (existingText.length === 0) return event;
-		if (!event.data.text.startsWith(existingText)) return undefined;
-		const suffix = event.data.text.slice(existingText.length);
-		if (suffix.length === 0) return undefined;
-		return {
-			...event,
-			data: {
-				...event.data,
-				text: suffix,
-			},
-		} as CanonicalEvent;
-	}
-
-	if (
-		(event.type === "thinking.start" || event.type === "tool.started") &&
-		existingParts.has(event.data.partId)
-	) {
-		return undefined;
-	}
-
-	if (
-		event.type === "tool.completed" &&
-		existingParts.get(event.data.partId)?.status === "completed"
-	) {
-		return undefined;
-	}
-
-	return event;
-}

@@ -3,48 +3,51 @@
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
 <script lang="ts">
-	import { onMount, onDestroy } from "svelte";
-	import { currentChat } from "../../stores/chat.svelte.js";
+	import { currentChat, sessionMessages } from "../../stores/chat.svelte.js";
 	import { loadOlderTranscript, placedSessionId } from "../../stores/transcript.svelte.js";
 
 	let {
 		sentinelEl,
+		sessionId,
+		scrollRoot,
 	}: {
-		sentinelEl?: HTMLElement;
+		sentinelEl?: HTMLElement | undefined;
+		sessionId?: string | undefined;
+		scrollRoot?: HTMLElement | undefined;
 	} = $props();
 
-	let observer: IntersectionObserver | null = null;
-
-	onMount(() => {
-		if (sentinelEl) {
-			observer = new IntersectionObserver(
+	$effect(() => {
+		if (sentinelEl && (sessionId === undefined || scrollRoot)) {
+			const observer = new IntersectionObserver(
 				(entries) => {
 					for (const entry of entries) {
-						if (
-							entry.isIntersecting &&
-							currentChat().historyHasMore &&
-							!currentChat().historyLoading
-						) {
+						if (entry.isIntersecting) {
 							loadMore();
 						}
 					}
 				},
-				{ rootMargin: "200px" },
+				{ root: scrollRoot ?? null, rootMargin: "200px" },
 			);
 			observer.observe(sentinelEl);
+			return () => observer.disconnect();
 		}
-	});
-
-	onDestroy(() => {
-		observer?.disconnect();
+		return undefined;
 	});
 
 	function loadMore() {
-		const chat = currentChat();
-		const sessionId = placedSessionId();
-		if (!sessionId || chat.historyLoading || !chat.historyHasMore) return;
+		const id = sessionId ?? placedSessionId();
+		const chat = sessionId === undefined
+			? currentChat()
+			: sessionMessages.get(sessionId);
+		if (
+			!id ||
+			!chat ||
+			chat.historyLoading ||
+			!chat.historyHasMore
+		)
+			return;
 
-		void loadOlderTranscript(sessionId).catch(() => undefined);
+		void loadOlderTranscript(id).catch(() => undefined);
 	}
 </script>
 

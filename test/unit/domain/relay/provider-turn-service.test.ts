@@ -237,7 +237,6 @@ const makePersistService = (
 	persistEvent: vi.fn(() => Effect.void),
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
-	persistClaudeSubagent: vi.fn(() => Effect.void),
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
 });
 

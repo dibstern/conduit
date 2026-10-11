@@ -427,7 +427,7 @@ export const mockToolSubagentCompleted: ToolMessage = {
 		subagentType: "general",
 		prompt: "Build the component...",
 	},
-	metadata: { childSessionId: "claude-subagent-abc123" },
+	metadata: { sessionId: "claude-subagent-abc123" },
 	result: "Completed implementation of feature X.",
 	isError: false,
 };

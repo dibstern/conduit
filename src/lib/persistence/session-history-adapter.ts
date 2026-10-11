@@ -81,6 +81,7 @@ function snapshotRowToHistory(
 		role: parsed.role,
 		parts,
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
+		...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 		...(row.input_id ? { inputId: row.input_id } : {}),
 		...(row.steered === 1 ? { steered: true } : {}),
 		...(row.role === "user" && row.turnTiming
@@ -256,7 +257,17 @@ export function messageRowsToHistory(
 
 	const messages: HistoryMessage[] = pageRows.map((row) => {
 		const snapshot = snapshotRowToHistory(row);
-		if (snapshot) return snapshot;
+		if (snapshot)
+			return row.completed_at == null
+				? snapshot
+				: {
+						...snapshot,
+						time: {
+							created: row.created_at,
+							...snapshot.time,
+							completed: row.completed_at,
+						},
+					};
 		const parts = row.parts.map(partRowToHistoryPart);
 
 		return {
@@ -267,11 +278,15 @@ export function messageRowsToHistory(
 			...(row.steered === 1 ? { steered: true } : {}),
 			time: {
 				created: row.created_at,
-				completed: row.updated_at,
+				completed: row.completed_at ?? row.updated_at,
 			},
 			...(row.text ? { text: row.text } : {}),
 			parts,
 			...(row.cost != null ? { cost: row.cost } : {}),
+			...(row.context_tokens != null
+				? { contextTokens: row.context_tokens }
+				: {}),
+			...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 			...(row.role === "user" && row.turnTiming
 				? { turnTiming: row.turnTiming }
 				: {}),
