@@ -5,6 +5,10 @@ import {
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
 import {
+	isKnownDriverKind,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../contracts/provider-instance.js";
+import {
 	SessionWorkspaceSchema,
 	WorkspaceMoveError,
 } from "../../contracts/session-workspace.js";
@@ -482,11 +486,14 @@ export const sessionsHandlers = {
 					request.providerId ??
 					overrides.defaultModel?.providerID ??
 					"claude";
+				const driver = resolveProviderRoutingDriver(
+					loadDaemonConfig(config.configDir),
+					provider === "claude-sdk" ? "claude" : provider,
+				);
 				if (
-					resolveProviderRoutingDriver(
-						loadDaemonConfig(config.configDir),
-						provider === "claude-sdk" ? "claude" : provider,
-					) !== "claude"
+					!driver ||
+					!isKnownDriverKind(driver) ||
+					!PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree
 				)
 					return yield* new WorkspaceMoveError({
 						path: config.projectDir,

@@ -46,8 +46,9 @@
 	const instance = $derived(getAvailableInstances().find((provider) => provider.id === getEffectiveInstanceId()));
 	const providerName = $derived(getInstanceById(instance?.id ?? "")?.name ?? instance?.label ?? "This provider");
 	const supportsWorktree = $derived(instance?.capabilities?.supportsWorktree !== false);
+	const supportsNewWorktree = $derived(instance?.capabilities?.supportsNewWorktree ?? instance?.capabilities?.supportsWorktree ?? false);
 	const hasGitFolder = $derived(Boolean(project?.git?.folders?.length || branch || project?.git?.head || Object.keys(project?.repositoryIdentities ?? {}).length));
-	const canCreateWorktree = $derived(Boolean(slug && hasGitFolder && instance?.driver === "claude" && supportsWorktree));
+	const canCreateWorktree = $derived(Boolean(slug && hasGitFolder && instance && supportsNewWorktree));
 	const checkout = $derived(newWorktree ? "New worktree" : worktree ? worktree.branch ?? "Detached HEAD" : branch ?? "Current folder");
 	const worktreeContext = $derived(`${slug ?? ""}:${instance?.id ?? ""}:${supportsWorktree}`);
 	$effect(() => {
@@ -55,7 +56,10 @@
 		showWorktrees = false;
 		worktrees = undefined;
 		if (!supportsWorktree) worktree = null;
-		if (!canCreateWorktree) newWorktree = false;
+		if (!canCreateWorktree) {
+			newWorktree = false;
+			worktreeBase = null;
+		}
 	});
 	const uid = $props.id();
 	const explanationId = `${uid}-provider-explanation`;
@@ -173,7 +177,7 @@
 					{/if}
 				</MenuGroup>
 			{/if}
-			<MenuItem disabled={!canCreateWorktree} onselect={() => { worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{instance?.capabilities?.supportsWorktree === false ? `Not supported by ${providerName}` : "soon"}</span>{/if}</MenuItem>
+			<MenuItem disabled={!canCreateWorktree} onselect={() => { worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
 		</MenuGroup>
 		{#if branch}
 			<MenuSeparator />

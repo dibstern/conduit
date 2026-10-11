@@ -124,17 +124,23 @@ export const SessionWorkspaceLive = Layer.effect(
 					!driver ||
 					!isKnownDriverKind(driver) ||
 					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
-						// OpenCode accepts declarations and fallbacks, but not direct user moves.
 						!(
-							driver === "opencode" &&
-							(cause === "agent" ||
-								(cause === "missing" &&
-									path === config.projectDir &&
-									previous?.origin === "existing" &&
-									effectiveWorkingDirectory(config.projectDir, previous) !==
-										config.projectDir) ||
-								// A hint acceptance records work already observed in that folder.
-								(cause === "user" && row.workspace_hint === path))
+							(PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree &&
+								cause === "launch" &&
+								origin === "conduit") ||
+							// OpenCode declarations acknowledge an already observed workspace.
+							(driver === "opencode" &&
+								(cause === "agent" ||
+									(cause === "missing" &&
+										path === config.projectDir &&
+										previous?.origin === "existing" &&
+										effectiveWorkingDirectory(config.projectDir, previous) !==
+											config.projectDir) ||
+									(cause === "user" &&
+										(row.workspace_hint === path ||
+											// Recovery of an owned launch stays in its original repository.
+											(previous?.origin === "conduit" &&
+												path === config.projectDir)))))
 						))
 				)
 					return yield* new WorkspaceMoveError({

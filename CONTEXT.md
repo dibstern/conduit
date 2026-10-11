@@ -70,7 +70,11 @@ same starting commit. Non-git folders and folders attached later are used in pla
 reported as shared; detaching a folder keeps its worktree on disk.
 
 Direct user moves require the session provider's `supportsWorktree` capability.
-OpenCode refuses those moves before recording an event; Claude supports moves.
+Claude supports moves. OpenCode keeps that capability disabled: its native
+`moveSession` rejects a destination belonging to another repository. The narrower
+`supportsNewWorktree` capability permits Conduit-owned launches, recreation and
+recovery to the primary folder. OpenCode reserves the launch id through its v2
+session API and aligns its native directory before the next turn.
 
 **Effective Working Directory** is the primary Project Folder's worktree,
 otherwise the primary folder for a conduit-created workspace. An existing move
