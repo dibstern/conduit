@@ -368,6 +368,23 @@ const editedProject = {
 	folders: [app, docs] as const,
 };
 
+export const SessionModeSet: Story = {
+	args: {
+		project: {
+			...editedProject,
+			title: "Isolated workspace",
+			sessionMode: "worktree",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: "Default session mode" }),
+		).toHaveValue("worktree");
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+	},
+};
+
 const capabilityInstances = [
 	{
 		id: "all-folders",

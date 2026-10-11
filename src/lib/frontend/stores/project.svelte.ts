@@ -88,6 +88,9 @@ const toProjectInfoList = (
 		...(project.setupScript !== undefined
 			? { setupScript: project.setupScript }
 			: {}),
+		...(project.sessionMode !== undefined
+			? { sessionMode: project.sessionMode }
+			: {}),
 		...(project.repositoryIdentities != null
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),

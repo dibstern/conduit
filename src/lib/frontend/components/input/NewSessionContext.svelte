@@ -9,7 +9,7 @@
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { listBranchesRpc, listWorktreesRpc } from "../../transport/ws-rpc-client.js";
+	import { listBranchesRpc, listWorktreesRpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
@@ -21,10 +21,12 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), loadWorktrees = listWorktreesRpc, loadBranches = listBranchesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, loadWorktrees = listWorktreesRpc, loadBranches = listBranchesRpc }: {
 		worktree?: WorktreeInfo | null;
 		newWorktree?: boolean;
 		worktreeBase?: string | null;
+		modeChosen?: boolean;
+		sessionModeDefault?: Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined;
 		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
 		loadBranches?: typeof listBranchesRpc;
 	} = $props();
@@ -49,6 +51,13 @@
 	const supportsNewWorktree = $derived(instance?.capabilities?.supportsNewWorktree ?? instance?.capabilities?.supportsWorktree ?? false);
 	const hasGitFolder = $derived(Boolean(project?.git?.folders?.length || branch || project?.git?.head || Object.keys(project?.repositoryIdentities ?? {}).length));
 	const canCreateWorktree = $derived(Boolean(slug && hasGitFolder && instance && supportsNewWorktree));
+	$effect(() => {
+		if (!sessionModeDefault || modeChosen) return;
+		const useWorktree = sessionModeDefault.mode === "worktree" && canCreateWorktree;
+		newWorktree = useWorktree;
+		worktree = null;
+		if (!useWorktree) worktreeBase = null;
+	});
 	const checkout = $derived(newWorktree ? "New worktree" : worktree ? worktree.branch ?? "Detached HEAD" : branch ?? "Current folder");
 	const worktreeContext = $derived(`${slug ?? ""}:${instance?.id ?? ""}:${supportsWorktree}`);
 	$effect(() => {
@@ -63,6 +72,11 @@
 	});
 	const uid = $props.id();
 	const explanationId = `${uid}-provider-explanation`;
+	const warningId = `${uid}-session-mode-warning`;
+	const startDescription = $derived([
+		multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : "",
+		sessionModeDefault?.warning ? warningId : "",
+	].filter(Boolean).join(" ") || undefined);
 	const available = $derived(projectState.projects.filter((p) => !p.missing));
 	const missing = $derived(projectState.projects.filter((p) => p.missing));
 	const presentation = $derived(sessionViewState.compact ? "sheet" : "popover");
@@ -75,6 +89,7 @@
 		worktree = null;
 		newWorktree = false;
 		worktreeBase = null;
+		modeChosen = false;
 		const params = getCurrentSearchParams();
 		params.set(DRAFT_PROJECT_PARAM, next);
 		replaceRoute(`/new?${params}`);
@@ -146,15 +161,15 @@
 
 	<Menu ariaLabel="Where the session starts" {presentation} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 		{#snippet trigger({ props })}
-			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={multiFolder && instance?.capabilities?.supportsMultiFolder === false ? explanationId : undefined}>
+			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={startDescription}>
 				<Icon name={worktree || newWorktree ? "worktree" : branch ? "git-branch" : "folder"} size={12} />
 				<span class="truncate">{checkout}</span>
 				<Icon name="chevron-down" size={12} />
 			</Button>
 		{/snippet}
 		<MenuGroup label="Workspace">
-			<MenuRadioGroup value={worktree || newWorktree ? "" : "current"} onvaluechange={() => { worktree = null; newWorktree = false; }}>
-				<MenuRadioItem value="current" class={rowClass}>Current checkout</MenuRadioItem>
+			<MenuRadioGroup value={worktree || newWorktree ? "" : "current"}>
+				<MenuRadioItem value="current" onselect={() => { modeChosen = true; worktree = null; newWorktree = false; worktreeBase = null; }} class={rowClass}>Current checkout</MenuRadioItem>
 			</MenuRadioGroup>
 			<MenuItem disabled={!slug || !supportsWorktree} closeOnSelect={false} onselect={() => void openWorktrees()} class={rowClass}>Existing worktree {#if !supportsWorktree}<span class="ml-auto text-text-dimmer">Not supported by {providerName}</span>{/if}</MenuItem>
 			{#if showWorktrees}
@@ -164,7 +179,7 @@
 					{:else if worktrees.length === 0}
 						<MenuItem disabled class={rowClass}>No worktrees available</MenuItem>
 					{:else}
-						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { newWorktree = false; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
+						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { modeChosen = true; newWorktree = false; worktreeBase = null; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
 							{#each worktrees as entry (entry.path)}
 								<MenuRadioItem value={entry.path} class={rowClass}>
 									<span class="flex min-w-0 flex-1 flex-col">
@@ -177,7 +192,7 @@
 					{/if}
 				</MenuGroup>
 			{/if}
-			<MenuItem disabled={!canCreateWorktree} onselect={() => { worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
+			<MenuItem disabled={!canCreateWorktree} onselect={() => { modeChosen = true; worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
 		</MenuGroup>
 		{#if branch}
 			<MenuSeparator />
@@ -205,7 +220,7 @@
 				{:else if branchList.branches.length === 0}
 					<MenuItem disabled class={rowClass}>No local branches available</MenuItem>
 				{:else}
-					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { worktreeBase = value === currentBranch ? null : value; }}>
+					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { modeChosen = true; worktreeBase = value === currentBranch ? null : value; }}>
 						{#each branchList.branches as name (name)}
 							<MenuRadioItem value={name} class={rowClass}>{name}</MenuRadioItem>
 						{/each}
@@ -217,6 +232,10 @@
 		<span class="truncate font-brand text-[11.5px] md:text-[11px] text-text-muted">{worktree ? "existing worktree" : "current checkout"}</span>
 	{/if}
 </div>
+
+{#if sessionModeDefault?.warning}
+	<p id={warningId} role="status" data-testid="draft-session-mode-warning" class="px-1 pt-1 break-words text-[11px] text-warning">{sessionModeDefault.warning}</p>
+{/if}
 
 {#if multiFolder && instance?.capabilities?.supportsMultiFolder === false}
 	<p id={explanationId} role="status" data-testid="draft-provider-explanation" class="px-1 pt-1 text-[11px] text-text-secondary">{providerName} works in the main folder only. Pick another provider to use every folder.</p>

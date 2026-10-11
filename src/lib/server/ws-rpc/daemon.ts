@@ -18,6 +18,7 @@ export const daemonOnlyHandlers = {
 	GetInstances: (_request) => daemonRequired("GetInstances"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
+	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetStatus"
@@ -31,4 +32,5 @@ export const daemonOnlyHandlers = {
 	| "GetInstances"
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
+	| "ResolveSessionMode"
 >;

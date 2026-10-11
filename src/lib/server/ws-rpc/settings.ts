@@ -11,6 +11,7 @@ import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../../domain/daemon/Services/daemon-config-ref.js";
+import { publishGlobalProjectSetting } from "../../domain/relay/Services/project-settings.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import {
 	getClaudeSettingsOverrides,
@@ -20,6 +21,7 @@ import {
 import { setDefaultPermissionModeForRelay } from "../../handlers/permissions.js";
 import { setHiddenEntriesForRelay } from "../../handlers/visibility.js";
 import { setLogLevel } from "../../logger.js";
+import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const settingsHandlers = {
@@ -85,6 +87,20 @@ export const settingsHandlers = {
 				),
 			),
 		),
+	SetDefaultSessionMode: ({ mode }) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			yield* Effect.try({
+				try: () =>
+					saveRelaySettings({ defaultSessionMode: mode }, config.configDir),
+				catch: (cause) =>
+					new WsRpcError({
+						message: `SetDefaultSessionMode failed: ${String(cause)}`,
+					}),
+			});
+			yield* publishGlobalProjectSetting("defaultSessionMode");
+			return { mode };
+		}),
 	SetHiddenEntries: (request) =>
 		setHiddenEntriesForRelay({
 			clientId: request.originId ?? "rpc",
@@ -156,6 +172,7 @@ export const settingsHandlers = {
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "SetDefaultPermissionMode"
+	| "SetDefaultSessionMode"
 	| "SetHiddenEntries"
 	| "GetClaudeSettings"
 	| "SetClaudeSettings"

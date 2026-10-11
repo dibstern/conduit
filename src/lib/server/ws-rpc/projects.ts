@@ -55,6 +55,9 @@ export const projectsHandlers = {
 				...(request.setupScript !== undefined && {
 					setupScript: request.setupScript,
 				}),
+				...(request.sessionMode !== undefined && {
+					sessionMode: request.sessionMode,
+				}),
 			});
 			const current = yield* projectService.currentSlug();
 			return {

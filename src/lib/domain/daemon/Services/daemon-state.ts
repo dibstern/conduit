@@ -24,6 +24,7 @@ export interface DaemonProject {
 	addedAt: number;
 	shellEnv?: import("../../../contracts/project-shell-env.js").ProjectShellEnvConfig;
 	setupScript?: string;
+	sessionMode?: import("../../../contracts/project-file.js").SessionMode;
 	/** Cached session count from last run — for instant CLI display. */
 	sessionCount?: number;
 }

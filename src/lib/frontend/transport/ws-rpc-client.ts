@@ -1,6 +1,7 @@
 import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
+import type { SessionMode } from "../../contracts/project-file.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import {
@@ -578,6 +579,23 @@ export async function setPinRpc(input: {
 export async function listBranchesRpc(projectSlug: string) {
 	return runTransportEffect(
 		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
+	);
+}
+
+export async function resolveSessionModeRpc(projectSlug: string) {
+	return runTransportEffect(
+		callDaemon((client) => client.ResolveSessionMode({ projectSlug })),
+	);
+}
+
+export async function setDefaultSessionModeRpc(input: {
+	readonly projectSlug: string;
+	readonly mode: SessionMode;
+}) {
+	return runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.SetDefaultSessionMode(input),
+		),
 	);
 }
 

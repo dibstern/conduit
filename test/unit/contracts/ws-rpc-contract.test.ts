@@ -428,6 +428,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						mode: request.mode,
 					}),
+				SetDefaultSessionMode: (request) =>
+					Effect.succeed({ mode: request.mode }),
+				ResolveSessionMode: (_request) =>
+					Effect.succeed({ mode: "local" as const, source: "global" as const }),
 				SetHiddenEntries: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -890,6 +894,8 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("SwitchModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultPermissionMode")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetDefaultSessionMode")).toBe(true);
+		expect(WsRpcGroup.requests.has("ResolveSessionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);

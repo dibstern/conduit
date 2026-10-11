@@ -240,6 +240,10 @@ const globalSettingRows = (
 			_tag: "defaultPermissionMode",
 			mode: defaults.defaultPermissionMode,
 		},
+		defaultSessionMode: {
+			_tag: "defaultSessionMode",
+			mode: settings.defaultSessionMode ?? "local",
+		},
 		claudeSettings: {
 			_tag: "claudeSettings",
 			overrides: settings.claudeSettings ?? {},

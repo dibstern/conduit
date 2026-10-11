@@ -16,6 +16,10 @@ import {
 	type ManagedOpenCodeProcessIdentity,
 	ManagedOpenCodeProcessIdentitySchema,
 } from "../contracts/managed-opencode.js";
+import {
+	type SessionMode,
+	SessionModeSchema,
+} from "../contracts/project-file.js";
 
 import {
 	type ProjectShellEnvConfig,
@@ -80,6 +84,7 @@ export interface DaemonConfig {
 		addedAt: number;
 		shellEnv?: ProjectShellEnvConfig;
 		setupScript?: string;
+		sessionMode?: SessionMode;
 		/** Cached session count from last run — for instant CLI display. */
 		sessionCount?: number;
 	}>;
@@ -109,6 +114,7 @@ const ProjectSchema = Schema.Struct({
 	addedAt: Schema.Number,
 	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
 	setupScript: Schema.optional(Schema.String),
+	sessionMode: Schema.optional(SessionModeSchema),
 	sessionCount: Schema.optional(Schema.Number),
 });
 

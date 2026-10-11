@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
+	import type { SessionMode } from "../../../contracts/project-file.js";
 	import {
 		ProjectSaveRejected,
 		type FindFoldersResponse,
@@ -33,6 +34,7 @@
 	import Dialog from "../ui/Dialog.svelte";
 	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Select from "../ui/Select.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -67,6 +69,7 @@
 	const optionId = (index: number) => `${listboxId}-${index}`;
 	let draft = $state<ProjectDraft>(createDraft());
 	let setupScript = $state("");
+	let sessionMode = $state<SessionMode | "">("");
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
@@ -108,7 +111,7 @@
 		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
-		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "")),
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "")),
 	);
 
 	onMount(() => {
@@ -140,6 +143,7 @@
 		}
 		draft = original;
 		setupScript = project?.setupScript ?? "";
+		sessionMode = project?.sessionMode ?? "";
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -239,6 +243,7 @@
 				title: draft.name,
 				folders: draft.folders,
 				...(setupValue ? { setupScript: setupValue } : project?.setupScript ? { setupScript: "" } : {}),
+				...(sessionMode ? { sessionMode } : project?.sessionMode ? { sessionMode: null } : {}),
 			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
@@ -401,6 +406,13 @@
 						{/each}
 					</section>
 				{/if}
+				<Field label="Default session mode" hint="Without a project override, conduit.json takes precedence over the global default.">
+					<Select bind:value={sessionMode} disabled={saving}>
+						<option value="">Use global default</option>
+						<option value="local">Local</option>
+						<option value="worktree">New worktree</option>
+					</Select>
+				</Field>
 				<Field label="Setup script" hint="It runs in each new worktree before the agent starts.">
 					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
 				</Field>
