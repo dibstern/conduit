@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
+import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -513,6 +514,115 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await page
 				.getByTestId("instance-form")
 				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "seed the default Claude account",
+		match: /^the default Claude account is named (.+) with folder (.+)$/,
+		run: async ({ world, match }) => {
+			const id = defaultInstanceIdForDriver("claude");
+			const list = [
+				...(mockInstances.get(world.page) ?? []).filter(
+					(instance) => instance["id"] !== id,
+				),
+				{
+					id,
+					name: match[1] ?? "",
+					configDir: match[2] ?? "",
+					driver: "claude",
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			];
+			mockInstances.set(world.page, list);
+			await requireRelayControl(world.page).sendMessages([
+				{ type: "instance_list", instances: list },
+			]);
+		},
+	},
+	{
+		name: "open the shared default Claude editor",
+		match: /^I edit the default Claude account$/,
+		run: async ({ world }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+			);
+			await row.getByRole("button").first().click();
+			await row.getByTestId("edit-instance-btn").click();
+			await expect(world.page.getByTestId("instance-form-name")).toBeFocused();
+		},
+	},
+	{
+		name: "assert the default Claude edit fields and restart notice",
+		match: /^the default Claude editor shows name (.+) and folder (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("instance-form-name")).toHaveValue(
+				match[1] ?? "",
+			);
+			await expect(
+				world.page.getByTestId("instance-form-configdir"),
+			).toHaveValue(match[2] ?? "");
+			await expect(world.page.getByTestId("instance-form")).toContainText(
+				"Folder changes apply after restart",
+			);
+			await expect(
+				world.page.getByRole("radiogroup", { name: "Type" }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the default Claude account has no Remove action",
+		match: /^the default Claude account cannot be removed$/,
+		run: async ({ world }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+			);
+			await expect(row.getByTestId("remove-instance-btn")).toHaveCount(0);
+			await expect(row).toContainText("The default account can't be removed");
+		},
+	},
+	{
+		name: "save the default Claude account through the shared form",
+		match: /^I save the default Claude account as (.+) with folder (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page.getByTestId("instance-form-name").fill(match[1] ?? "");
+			await world.page
+				.getByTestId("instance-form-configdir")
+				.fill(match[2] === "empty" ? "" : (match[2] ?? ""));
+			await world.page.getByTestId("instance-form-save").click();
+			await expect(world.page.getByTestId("instance-form")).toBeHidden();
+		},
+	},
+	{
+		name: "assert the saved default Claude folder and restart copy",
+		match:
+			/^the default Claude account shows folder (.+) with Applies after restart$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+			);
+			await row.getByRole("button").first().click();
+			await expect(row).toContainText(match[1] ?? "");
+			await expect(row).toContainText("Applies after restart");
+		},
+	},
+	{
+		name: "assert UpdateInstance sends the default account's name and folder",
+		match:
+			/^UpdateInstance saves the default Claude name (.+) and folder (.+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "UpdateInstance",
+			);
+			expect(request.payload).toMatchObject({
+				instanceId: defaultInstanceIdForDriver("claude"),
+				name: match[1] ?? "",
+				configDir: match[2] === "empty" ? "" : (match[2] ?? ""),
+			});
+			expect(request.payload).not.toHaveProperty("projectSlug");
 		},
 	},
 	{

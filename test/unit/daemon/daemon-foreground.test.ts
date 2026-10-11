@@ -171,6 +171,7 @@ describe("startForegroundDaemon", () => {
 		try {
 			expect(daemon.getInstances()).toEqual([
 				expect.objectContaining({ id: "opencode", status: "stopped" }),
+				expect.objectContaining({ id: "claude", driver: "claude" }),
 			]);
 			expect(requests).toEqual([]);
 			await sendRpcRequest(
@@ -185,6 +186,7 @@ describe("startForegroundDaemon", () => {
 						port: opencodePort,
 						status: "healthy",
 					}),
+					expect.objectContaining({ id: "claude", driver: "claude" }),
 				]);
 			});
 		} finally {
@@ -240,6 +242,7 @@ describe("startForegroundDaemon", () => {
 						port: opencodePort,
 						status: "healthy",
 					}),
+					expect.objectContaining({ id: "claude", driver: "claude" }),
 				]);
 			});
 		} finally {
@@ -329,6 +332,7 @@ describe("startForegroundDaemon", () => {
 			);
 			expect(stopResult.instances).toEqual([
 				expect.objectContaining({ id: added.id, status: "stopped" }),
+				expect.objectContaining({ id: "claude", driver: "claude" }),
 			]);
 
 			const statusResult = await sendRpcRequest(
@@ -349,6 +353,7 @@ describe("startForegroundDaemon", () => {
 					name: "Renamed Provider",
 					status: "stopped",
 				}),
+				expect.objectContaining({ id: "claude", driver: "claude" }),
 			]);
 
 			const removeResult = await sendRpcRequest(
@@ -357,8 +362,12 @@ describe("startForegroundDaemon", () => {
 					instanceId: added.id,
 				}),
 			);
-			expect(removeResult.instances).toEqual([]);
-			expect(daemon.getInstances()).toEqual([]);
+			expect(removeResult.instances).toEqual([
+				expect.objectContaining({ id: "claude", driver: "claude" }),
+			]);
+			expect(daemon.getInstances()).toEqual([
+				expect.objectContaining({ id: "claude", driver: "claude" }),
+			]);
 		} finally {
 			await daemon.stop();
 			rmSync(root, { recursive: true, force: true });

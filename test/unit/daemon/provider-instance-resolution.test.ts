@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type DaemonConfig,
 	DaemonConfigSchema,
@@ -12,6 +12,7 @@ import {
 	resolveInstanceDriver,
 	resolveOpenCodeInstanceUrl,
 	resolveProviderRoutingDriver,
+	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 
 let tempDir: string;
@@ -21,6 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.unstubAllEnvs();
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -228,7 +230,8 @@ describe("provider instance resolution", () => {
 		expect(resolveProviderRoutingDriver(null, "opencode")).toBe("opencode");
 	});
 
-	it("resolves config directories only for Claude instances", () => {
+	it("uses the running environment for the default Claude folder until restart", () => {
+		vi.stubEnv("CLAUDE_CONFIG_DIR", "/tmp/running-claude");
 		const config: DaemonConfig = {
 			...configWithoutInstances,
 			claudeConfigDir: "/tmp/default-claude",
@@ -256,7 +259,7 @@ describe("provider instance resolution", () => {
 			"/tmp/work-claude",
 		);
 		expect(resolveClaudeInstanceConfigDir(config, "claude")).toBe(
-			"/tmp/default-claude",
+			"/tmp/running-claude",
 		);
 		expect(resolveClaudeInstanceConfigDir(config, "work-opencode")).toBe(
 			undefined,
@@ -266,6 +269,55 @@ describe("provider instance resolution", () => {
 			resolveClaudeInstanceConfigDir(configWithoutInstances, "claude"),
 		).toBe(undefined);
 		expect(resolveClaudeInstanceConfigDir(null, "claude")).toBe(undefined);
+	});
+
+	it("keeps the default folder after its label is stored without a folder", () => {
+		const config: DaemonConfig = {
+			...configWithoutInstances,
+			claudeConfigDir: "/tmp/default-claude",
+			instances: [
+				{
+					id: "claude",
+					name: "Personal",
+					port: 0,
+					managed: false,
+					driver: "claude",
+				},
+			],
+		};
+		expect(
+			resolveConfiguredInstances(config).find(({ id }) => id === "claude"),
+		).toEqual({
+			id: "claude",
+			driver: "claude",
+			configDir: "/tmp/default-claude",
+		});
+	});
+
+	it("loads and saves a legacy explicit default folder in one stored home", async () => {
+		writeFileSync(
+			join(tempDir, "daemon.json"),
+			JSON.stringify({
+				...configWithoutInstances,
+				claudeConfigDir: "/implicit/claude",
+				instances: [
+					{
+						id: "claude",
+						name: "Personal",
+						port: 0,
+						managed: false,
+						driver: "claude",
+						configDir: "/explicit/claude",
+					},
+				],
+			}),
+		);
+		const config = loadDaemonConfig(tempDir);
+		if (!config) throw new Error("Missing daemon config");
+		expect(config.claudeConfigDir).toBe("/explicit/claude");
+		expect(config.instances?.[0]).not.toHaveProperty("configDir");
+		await saveDaemonConfig(config, tempDir);
+		expect(loadDaemonConfig(tempDir)).toEqual(config);
 	});
 
 	it("resolves server URLs only for named OpenCode instances", () => {

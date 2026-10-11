@@ -18,6 +18,7 @@ export default defineConfig({
 		"settings-server-status.spec.ts",
 		"settings-pin.spec.ts",
 		"settings-opencode-instances.spec.ts",
+		"settings-default-claude-account.spec.ts",
 		// playwright-live.config.ts: an ephemeral OpenCode instance.
 		"live-smoke.spec.ts",
 		// playwright-multi-instance.config.ts: Vite preview with a mocked WebSocket.

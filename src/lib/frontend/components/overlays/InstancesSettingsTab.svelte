@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
+	import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
@@ -19,9 +20,11 @@
 	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
+	const defaultClaudeId = defaultInstanceIdForDriver("claude");
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
 	const instanceFormMode = $derived(openForm === "instance-add" ? "add" : openForm?.startsWith("instance-edit:") ? "edit" : null);
 	const editingInstanceId = $derived(instanceFormMode === "edit" ? openForm?.slice("instance-edit:".length) : null);
+	const editingDefaultClaude = $derived(editingInstanceId === defaultClaudeId);
 
 	let state = $state({
 		expandedInstanceId: null as string | null,
@@ -176,7 +179,7 @@
 						instanceId: editingInstanceId,
 						name,
 						...(isClaude
-							? { ...(configDir !== undefined ? { configDir } : {}) }
+							? { ...(editingDefaultClaude ? { configDir: configDir ?? "" } : configDir !== undefined ? { configDir } : {}) }
 							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
 					})
 				: addInstanceRpc({
@@ -310,7 +313,7 @@
 			{/if}
 		</div>
 		{#if state.formDriver === "claude"}
-			<p class="text-[11px] text-text-muted">Leave the folder empty to use the environment's default Claude login.</p>
+			<p class="text-[11px] text-text-muted">{editingDefaultClaude ? "Folder changes apply after restart. " : ""}Leave the folder empty to use the environment's default Claude login.</p>
 		{:else if state.formManaged}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
 				<label for="instance-form-env" class="block p-3">
@@ -343,7 +346,7 @@
 						<div class="flex-1 min-w-0">
 							<div class="flex items-center gap-2">
 								<span class="font-medium text-text truncate">{inst.name}</span>
-								{#if inst.id === "claude"}<Badge variant="tag" shape="pill" class="shrink-0">default</Badge>{/if}
+								{#if inst.id === defaultClaudeId}<Badge variant="tag" shape="pill" class="shrink-0">default</Badge>{/if}
 							</div>
 							<div class="font-mono text-xs text-text-secondary truncate">{inst.configDir || "env"}</div>
 						</div>
@@ -354,11 +357,15 @@
 								<dt class="text-text-muted">Config dir</dt>
 								<dd class="font-mono text-text break-all">{inst.configDir || "env"}</dd>
 								<dt class="text-text-muted">Used by</dt>
-								<dd class="text-text">{inst.id === "claude" ? "New sessions, unless you pick another account" : "Sessions you move to it, and auto-switch"}</dd>
+								<dd class="text-text">{inst.id === defaultClaudeId ? "New sessions, unless a project picks another account" : "Sessions you move to it, and auto-switch"}</dd>
+								{#if inst.id === defaultClaudeId}
+									<dt class="text-text-muted">Change</dt>
+									<dd class="text-text">Applies after restart</dd>
+								{/if}
 							</dl>
 							<div class="flex flex-wrap items-center gap-2">
-								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" onclick={() => openEditInstance(inst)}>Edit</Button>
-								{#if inst.id === "claude"}
+								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+								{#if inst.id === defaultClaudeId}
 									<span class="text-xs text-text-muted">The default account can't be removed</span>
 								{:else}
 									<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>

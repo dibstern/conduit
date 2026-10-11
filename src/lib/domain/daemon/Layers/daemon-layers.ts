@@ -16,6 +16,7 @@ import {
 	Runtime,
 	Stream,
 } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import { migrateDaemonConfigFolders } from "../../../daemon/config-persistence.js";
 import {
 	closeHttpServer,
@@ -725,18 +726,41 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			: makeDaemonStateLive()
 	).pipe(
 		Layer.tap((context) =>
-			Ref.update(Context.get(context, DaemonStateTag), (current) => ({
-				...current,
-				configDir,
-				socketPath,
-				keepAwake: options.initialConfig.keepAwake,
-				...(options.initialConfig.keepAwakeCommand !== undefined && {
-					keepAwakeCommand: options.initialConfig.keepAwakeCommand,
-				}),
-				...(options.initialConfig.keepAwakeArgs !== undefined && {
-					keepAwakeArgs: options.initialConfig.keepAwakeArgs,
-				}),
-			})),
+			Ref.update(Context.get(context, DaemonStateTag), (current) => {
+				const defaultId = defaultInstanceIdForDriver("claude");
+				const existing = current.instances.find(({ id }) => id === defaultId);
+				const defaultClaude = {
+					...(existing ?? {
+						id: defaultId,
+						name: "Claude",
+						driver: "claude" as const,
+						port: 0,
+						managed: false,
+					}),
+					...(options.initialConfig.claudeConfigDir !== undefined && {
+						configDir: options.initialConfig.claudeConfigDir,
+					}),
+				};
+				return {
+					...current,
+					configDir,
+					socketPath,
+					keepAwake: options.initialConfig.keepAwake,
+					...(options.configPath !== undefined && {
+						instances: existing
+							? current.instances.map((instance) =>
+									instance.id === defaultId ? defaultClaude : instance,
+								)
+							: [...current.instances, defaultClaude],
+					}),
+					...(options.initialConfig.keepAwakeCommand !== undefined && {
+						keepAwakeCommand: options.initialConfig.keepAwakeCommand,
+					}),
+					...(options.initialConfig.keepAwakeArgs !== undefined && {
+						keepAwakeArgs: options.initialConfig.keepAwakeArgs,
+					}),
+				};
+			}),
 		),
 	);
 

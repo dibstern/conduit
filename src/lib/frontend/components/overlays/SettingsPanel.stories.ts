@@ -601,6 +601,37 @@ export const ClaudeAccountExpanded: Story = {
 	},
 };
 
+export const DefaultClaudeAccountEdit: Story = {
+	args: { initialTab: "server" },
+	beforeEach: populateInstances,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const account = within(canvas.getByTestId("instance-row-claude"));
+		await userEvent.click(
+			account.getByRole("button", { name: /Personal Claude/ }),
+		);
+		await expect(
+			account.queryByTestId("remove-instance-btn"),
+		).not.toBeInTheDocument();
+		await expect(account.getByText("Applies after restart")).toBeVisible();
+		await userEvent.click(account.getByTestId("edit-instance-btn"));
+		await expect(canvas.getByTestId("instance-form-name")).toHaveValue(
+			"Personal Claude",
+		);
+		await expect(canvas.getByTestId("instance-form-configdir")).toHaveValue(
+			"~/.claude",
+		);
+		await expect(
+			within(canvas.getByTestId("instance-form")).getByText(
+				/Folder changes apply after restart/,
+			),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("radiogroup", { name: "Type" }),
+		).not.toBeInTheDocument();
+	},
+};
+
 export const InstancesEmpty: Story = {
 	args: { initialTab: "server" },
 	beforeEach: () => {

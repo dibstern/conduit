@@ -8,6 +8,7 @@ export default defineConfig({
 		"settings-server-status.spec.ts",
 		"settings-pin.spec.ts",
 		"settings-opencode-instances.spec.ts",
+		"settings-default-claude-account.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
