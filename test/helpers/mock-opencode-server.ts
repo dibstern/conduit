@@ -9,6 +9,7 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
+import type { PtyInfo } from "../../src/lib/shared-types.js";
 import type {
 	OpenCodeInteraction,
 	OpenCodeRecording,
@@ -97,8 +98,11 @@ export class MockOpenCodeServer {
 	/** Counter for generating unique PTY IDs when no recording exists. */
 	private ptyCounter = 0;
 
-	/** Dynamically created PTY IDs (not from recording). */
-	private dynamicPtyIds = new Set<string>();
+	/** Dynamically created PTYs (not from recording). */
+	private dynamicPtys = new Map<string, Record<string, unknown>>();
+	private ptyListHold: Promise<void> | undefined;
+	ptyListFailures = 0;
+	readonly rejectedPtyConnections = new Set<string>();
 
 	/** Sessions injected via POST /session (tracked separately for merging into all GET /session responses). */
 	private injectedSessions = new Map<string, Record<string, unknown>>();
@@ -275,7 +279,8 @@ export class MockOpenCodeServer {
 		this.sseSegments = [[]];
 		this.promptsFired = 0;
 		this.ptyCounter = 0;
-		this.dynamicPtyIds.clear();
+		this.ptyListFailures = 0;
+		this.dynamicPtys.clear();
 		this.injectedSessions.clear();
 		this.sessionDirectories.clear();
 		this.deletedSessionIds.clear();
@@ -319,6 +324,21 @@ export class MockOpenCodeServer {
 		const allEvents = this.sseSegments.flat();
 		this.emitEvents(allEvents);
 		this.promptsFired = this.sseSegments.length;
+	}
+
+	/** Keep provider discovery pending while a test exercises local terminals. */
+	holdPtyListsUntil(released: Promise<void>): void {
+		this.ptyListHold = released;
+	}
+
+	/** Drop the transport while preserving authoritative provider state. */
+	disconnectSseClients(): void {
+		this.cleanupSseClients();
+	}
+
+	/** Change provider state independently of lifecycle SSE delivery. */
+	setPtyInfo(info: PtyInfo): void {
+		this.dynamicPtys.set(info.id, { args: [], ...info });
 	}
 
 	/**
@@ -455,7 +475,7 @@ export class MockOpenCodeServer {
 		this.ptyQueues.clear();
 		this.promptsFired = 0;
 		this.ptyCounter = 0;
-		this.dynamicPtyIds.clear();
+		this.dynamicPtys.clear();
 		this.injectedSessions.clear();
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
@@ -695,14 +715,33 @@ export class MockOpenCodeServer {
 
 		if (method === "POST" && basePath === "/pty") {
 			const id = `pty_mock${String(++this.ptyCounter).padStart(3, "0")}`;
-			this.dynamicPtyIds.add(id);
+			const pty = {
+				id,
+				title: "Terminal",
+				command: "bash",
+				args: [],
+				cwd: this.defaultDirectory,
+				status: "running",
+				pid: 0,
+			};
+			this.dynamicPtys.set(id, pty);
 			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify({ id }));
+			res.end(JSON.stringify(pty));
 			return;
 		}
 
 		if (method === "GET" && basePath === "/pty") {
-			const list = [...this.dynamicPtyIds].map((id) => ({ id }));
+			const list = [...this.dynamicPtys.values()];
+			this.diagnostics.push({ ts: Date.now(), event: "pty_list" });
+			if (this.ptyListFailures > 0) {
+				this.ptyListFailures--;
+				res.writeHead(503, { "Content-Type": "application/json" });
+				res.end(
+					JSON.stringify({ error: "PTY discovery temporarily unavailable" }),
+				);
+				return;
+			}
+			await this.ptyListHold;
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(list));
 			return;
@@ -710,9 +749,10 @@ export class MockOpenCodeServer {
 
 		if (method === "DELETE" && /^\/pty\/[^/]+$/.test(basePath)) {
 			const id = basePath.split("/").pop() ?? "";
-			this.dynamicPtyIds.delete(id);
-			res.writeHead(204);
-			res.end();
+			this.dynamicPtys.delete(id);
+			// OpenCode answers pty.remove with a JSON boolean, and the client decodes it.
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end("true");
 			return;
 		}
 
@@ -896,6 +936,16 @@ export class MockOpenCodeServer {
 			this.removeFromSessionListFallback(id);
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(true));
+			return;
+		}
+
+		// Recordings carry the recording machine's folder, so every replayed
+		// turn asks to move its session into the test workspace.
+		if (
+			method === "POST" &&
+			basePath === "/experimental/control-plane/move-session"
+		) {
+			res.writeHead(204).end();
 			return;
 		}
 
@@ -1441,6 +1491,15 @@ export class MockOpenCodeServer {
 		}
 
 		const ptyId = ptyMatch[1];
+		this.diagnostics.push({
+			ts: Date.now(),
+			event: "pty_connect",
+			detail: ptyId,
+		});
+		if (this.rejectedPtyConnections.has(ptyId)) {
+			socket.destroy();
+			return;
+		}
 		const queue = this.ptyQueues.get(ptyId);
 
 		if (!queue || queue.length === 0) {

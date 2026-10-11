@@ -137,6 +137,10 @@ test("settings, commands and skill documents follow a workspace change and sessi
 	async function openSettings(directory: string) {
 		await page.getByTestId("session-bar-overflow").click();
 		await page.getByTestId("overflow-settings").click();
+		await expect(page.getByTestId("settings-tab-general")).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 		await page.getByTestId("settings-tab-claude").click();
 		const row = page.getByTestId("claude-setting-alwaysThinkingEnabled");
 		await expect(row.getByRole("switch")).toHaveAttribute(

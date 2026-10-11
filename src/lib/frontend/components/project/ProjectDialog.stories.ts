@@ -113,6 +113,44 @@ export const Empty: Story = {
 	},
 };
 
+export const FolderRepositories: Story = {
+	args: {
+		project: {
+			slug: "conduit",
+			title: "Conduit",
+			folders: [app, docs, notes],
+			repositoryIdentities: {
+				[app]: { key: "example.test/team/conduit", name: "Conduit", root: app },
+				[docs]: {
+					key: "example.test/team/docs",
+					name: "Documentation",
+					root: docs,
+				},
+			},
+			git: {
+				branch: "main",
+				folders: [
+					{ root: app, label: "conduit", branch: "main", dirty: false },
+					{
+						root: docs,
+						label: "conduit-docs",
+						branch: "docs/folders",
+						dirty: true,
+					},
+				],
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const rows = canvasFor(canvasElement).getAllByTestId("project-folder-row");
+		await expect(rows[0]).toHaveTextContent("Conduit");
+		await expect(rows[0]).toHaveTextContent("main");
+		await expect(rows[1]).toHaveTextContent("Documentation");
+		await expect(rows[1]).toHaveTextContent("docs/folders");
+		await expect(rows[2]).toHaveTextContent("Not a git repository");
+	},
+};
+
 export const PathMatchesOpen: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
@@ -188,13 +226,22 @@ export const NewFolder: Story = {
 	},
 };
 
+// Adding another project's main folder opens that project, so the clash only
+// shows when an edit makes it this project's main folder.
 export const Errors: Story = {
 	args: {
-		projects: [{ slug: "conduit", title: "Conduit", folders: [app] }],
+		project: { slug: "docs", title: "Docs", folders: [docs] },
+		projects: [
+			{ slug: "conduit", title: "Conduit", folders: [app] },
+			{ slug: "docs", title: "Docs", folders: [docs] },
+		],
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
 		await addPath(canvasElement, app);
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Make main: ${app}` }),
+		);
 		await expect(canvas.getByRole("alert")).toHaveTextContent(
 			"already the main folder",
 		);
@@ -202,9 +249,7 @@ export const Errors: Story = {
 			"href",
 			"/?p=conduit",
 		);
-		await expect(
-			canvas.getByRole("button", { name: "Add project" }),
-		).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
 	},
 };
 

@@ -150,6 +150,7 @@ function makeReadQueryEffect(
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 		getSessionsForReconciliation: () => Effect.succeed([]),
+		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionInfos: vi.fn((options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
@@ -1095,6 +1096,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const engine = new OrchestrationEngine({
@@ -1287,6 +1289,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const dispatchObservations: ReturnType<typeof readTombstoneFirstState>[] =
@@ -1575,6 +1578,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const dispatch = vi.fn(async () => undefined);
@@ -1674,6 +1678,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const engine = withDispatchEffect({
@@ -1745,6 +1750,7 @@ describe("SessionManagerService", () => {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
 			ifRunning: () => Effect.succeedNone,
+			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
 		} satisfies OpenCodeInstances;
 		const engine = withDispatchEffect({
@@ -1940,6 +1946,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const layer = Layer.provideMerge(
@@ -2015,6 +2022,7 @@ describe("SessionManagerService", () => {
 					events: () => Stream.empty,
 					use,
 					ifRunning: () => Effect.succeedNone,
+					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,
 				} satisfies OpenCodeInstances;
 				const layer = Layer.provideMerge(

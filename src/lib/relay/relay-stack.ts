@@ -289,8 +289,6 @@ export interface ProjectRelay {
 		idleWindowMs: number,
 		now: number,
 	): Effect.Effect<number, SqlError | SessionManagerError>;
-	/** The OpenCode instance this relay drives, fixed when it was built. */
-	openCodeInstanceId: string | undefined;
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
@@ -666,7 +664,6 @@ export async function createProjectRelay(
 				idleWindowMs,
 				now,
 			).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
-		openCodeInstanceId: config.openCodeInstanceId,
 		wsHandler,
 		rpcWsHandler,
 		sseStream,

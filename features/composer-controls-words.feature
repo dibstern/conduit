@@ -6,7 +6,7 @@ Scenario Outline: phone Settings selects Words and reload keeps the preference
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Words for composer controls
   Then the composer words row shows Sonnet 5, 200K, DEF and ask
   And the composer icon controls are absent
@@ -27,7 +27,7 @@ Scenario Outline: phone effort word cycles on tap and opens the existing menu on
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Words for composer controls
   Then the effort word shows DEF
   When I tap the effort word
@@ -53,7 +53,7 @@ Scenario Outline: phone approvals word cycles on tap and opens the existing menu
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are plan
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Words for composer controls
   Then the approvals word shows plan
   And the approvals word uses the plan tone
@@ -79,7 +79,7 @@ Scenario Outline: phone model word opens the shared P2 bottom sheet
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Words for composer controls
   And I open the model picker
   Then the picker root shows Claude and Sonnet 5
@@ -100,7 +100,7 @@ Scenario Outline: desktop renders Words below the composer border
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
-  When I open settings to the Composer tab
+  When I open settings to the General section
   And I choose Words for composer controls
   Then the composer words row shows Sonnet 5, 200K, DEF and ask
   And the composer icon controls are absent

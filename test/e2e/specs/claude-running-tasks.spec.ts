@@ -3,7 +3,9 @@
 // breathing on the strip after the turn's result, until the tasks finish. The
 // session lists background agents beside shells in its tasks row, composer
 // dots and pull-down, nests an agent's tasks under it, reads as monitoring
-// while they run, and Stop all ends agents and shells. Spec: conduit-test-i7fy.8.
+// while they run. Task stops cross the real process runner in
+// harness-background-task-stop.spec.ts; recorded replay has no stopTask replies.
+// Spec: conduit-test-i7fy.8.
 //
 // Replays a captured trace (no model call): concurrent-background-work, a 40s
 // shell, agent A (with two nested background shells) and agent B, all launched
@@ -254,60 +256,6 @@ test.describe("Claude running tasks", () => {
 			expect.soft(reloaded.breathing, "launching steps breathing").toBe(0);
 		} finally {
 			await steps.write("running-tasks-report.json");
-		}
-	});
-
-	test("Stop all ends background agents and shells and the session stops monitoring", async ({
-		page,
-		relayUrl,
-		harness,
-	}, testInfo) => {
-		test.setTimeout(90_000);
-		const sessionId = decodeURIComponent(
-			harness.projectUrl.slice("/s/".length),
-		);
-		const app = new AppPage(page);
-		const chat = new ChatPage(page);
-		const replayer = harness.claudeReplayer;
-		if (!replayer) throw new Error("no Claude replayer");
-		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
-		const tasksRow = page.getByTestId("background-tasks-row");
-		const sidebarRow = page.locator(
-			`#session-list [data-session-id="${sessionId}"]`,
-		);
-		try {
-			await app.goto(relayUrl);
-			await app.sendMessage("Launch the background work");
-			await expect
-				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
-				.toContain("launched.");
-			await replayer.held();
-			replayer.release();
-			await replayer.held();
-			await chat.waitForStreamingComplete();
-			await expect(tasksRow).toHaveAttribute(
-				"aria-label",
-				"5 background tasks",
-			);
-			await expect(sidebarRow).toHaveAttribute("aria-label", /^Monitoring/);
-			await tasksRow.click();
-			await steps.record("before-stop");
-
-			await page.getByTestId("background-tasks-stop-all").click();
-			await expect(
-				tasksRow,
-				"Stop all left the background tasks row up",
-			).toBeHidden();
-			await expect(page.getByTestId("composer-task-dots")).toBeHidden();
-			await expect(page.locator(".turn-running")).toHaveCount(0);
-			await expect(
-				sidebarRow,
-				"Stop all ended the agents but the sidebar still says monitoring",
-			).not.toHaveAttribute("aria-label", /^Monitoring/);
-			const stopped = await steps.record("after-stop");
-			expect.soft(stopped.breathing, "launching steps breathing").toBe(0);
-		} finally {
-			await steps.write("stop-all-report.json");
 		}
 	});
 });

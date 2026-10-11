@@ -5,9 +5,10 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Either,
 	Fiber,
 	FiberMap,
-	type Ref,
+	Ref,
 	type Runtime,
 	Schema,
 } from "effect";
@@ -29,13 +30,33 @@ import {
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
-import type { SendTurnInput, TurnResult } from "../../../provider/types.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	catalogFromProviderList,
+	harnessForModelProvider,
+	resolveTurnSettings,
+	type TurnPick,
+	type TurnSettings,
+} from "../../../provider/turn-settings.js";
+import type {
+	ModelInfo,
+	SendTurnInput,
+	TurnResult,
+} from "../../../provider/types.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
+import { ProjectSettingsTag } from "./project-settings.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import type { ProviderTurnServiceSendInput } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
+} from "./services.js";
 import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
@@ -116,11 +137,10 @@ export const resolveSessionFolders = (
 			);
 			state = null;
 		}
-		const worktrees = state?.worktrees;
-		const effectiveFolders = [
-			config.projectDir,
-			...(config.extraFolders ?? []),
-		].map((root) => ({ root, directory: worktrees?.[root] ?? root }));
+		const effectiveFolders = effectiveSessionFolders(
+			[config.projectDir, ...(config.extraFolders ?? [])],
+			state,
+		);
 		const extraFolders: string[] = [];
 		const launchFolders = state
 			? effectiveFolders
@@ -156,10 +176,10 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 			return {
 				workspaceRoot: config.projectDir,
 				extraFolders,
-				effectiveFolders: [config.projectDir, ...extraFolders].map((root) => ({
-					root,
-					directory: root,
-				})),
+				effectiveFolders: effectiveSessionFolders(
+					[config.projectDir, ...extraFolders],
+					null,
+				),
 			};
 		}
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
@@ -420,6 +440,7 @@ const resolveClaudeModel = (
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 		let resolvedInput = input;
+		let catalog: readonly ModelInfo[] | undefined;
 		if (isClaudeDriver(driver) && input.model === undefined) {
 			const discovery = yield* Effect.either(
 				orchestrationEngine.dispatchEffect({
@@ -429,6 +450,7 @@ const resolveClaudeModel = (
 			);
 			const models =
 				discovery._tag === "Right" ? (discovery.right.models ?? []) : [];
+			catalog = models;
 			const inferred =
 				models.find((model) => model.id === "default") ?? models[0];
 			if (inferred === undefined) {
@@ -473,7 +495,7 @@ const resolveClaudeModel = (
 			};
 		}
 
-		return resolvedInput;
+		return { resolvedInput, catalog };
 	});
 
 const prepareEngineTurnInput = (
@@ -481,8 +503,87 @@ const prepareEngineTurnInput = (
 	providerId: string,
 	driver: ProviderDriverKind,
 	claudeConfigDir: string | undefined,
+	discoveredCatalog: readonly ModelInfo[] | undefined,
 ) =>
 	Effect.gen(function* () {
+		// OpenCode keeps its own session model, so we only override it on an
+		// explicit pick. The Claude SDK has no such memory: omitting `model`
+		// makes it resolve the config dir's settings.json `model` instead, so a
+		// session inheriting the global default (or one whose per-session pick
+		// was lost to a daemon restart) would silently run a different model
+		// than the one conduit displays. Always send what we display.
+		const sendModel =
+			resolvedInput.model &&
+			(resolvedInput.modelUserSelected ||
+				(isClaudeDriver(driver) &&
+					harnessForModelProvider(resolvedInput.model.providerID) ===
+						"claude"));
+		// An effort belongs to its model. One inherited with the other harness's
+		// default model would run on a model that may not offer it.
+		const sendVariant =
+			resolvedInput.model === undefined ||
+			isClaudeDriver(driver) ===
+				(harnessForModelProvider(resolvedInput.model.providerID) === "claude");
+		let settings: TurnSettings | undefined;
+		// Both gates omit an inherited model from the other harness. In that
+		// case the engine's model is unknown, so there is no model pick to resolve.
+		if (resolvedInput.model && (sendModel || sendVariant)) {
+			let catalog = discoveredCatalog;
+			if (catalog === undefined && isClaudeDriver(driver)) {
+				const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
+				const providerModels =
+					projectSettings._tag === "Some"
+						? (yield* Ref.get(projectSettings.value.live)).providerModels
+						: undefined;
+				if (providerModels !== undefined)
+					catalog = catalogFromProviderList(providerModels.providers);
+			} else if (catalog === undefined) {
+				const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
+				if (models._tag === "Some") {
+					const cached = yield* models.value.cachedProviders();
+					if (cached._tag === "Some")
+						catalog = cached.value.providers.flatMap((provider) =>
+							(provider.models ?? []).map((model) => ({
+								...model,
+								providerId: provider.id || provider.name,
+							})),
+						);
+				}
+			}
+			const pick: TurnPick = {
+				harness: isClaudeDriver(driver) ? "claude" : "opencode",
+				model: {
+					providerId: resolvedInput.model.providerID,
+					modelId: resolvedInput.model.modelID,
+				},
+				effort: resolvedInput.variant ?? "",
+				contextWindow: resolvedInput.contextWindow ?? "",
+			};
+			if (catalog === undefined) {
+				const log = yield* LoggerTag;
+				log.debug(
+					`session=${resolvedInput.sessionId} turn pick sent unvalidated: ${driver} catalog unavailable`,
+				);
+				settings = pick;
+			} else {
+				const resolved = resolveTurnSettings(pick, catalog);
+				if (Either.isLeft(resolved)) {
+					yield* clearProcessingTimeout(resolvedInput.sessionId);
+					const failTurn = yield* makeFailTurn;
+					yield* failTurn(
+						resolvedInput.sessionId,
+						resolved.left.message,
+						"PICK_REJECTED",
+						resolvedInput.continuation ? undefined : resolvedInput.commandId,
+					);
+					return undefined;
+				}
+				settings = resolved.right;
+			}
+		}
+		const variant = settings?.effort ?? resolvedInput.variant;
+		const contextWindow =
+			settings?.contextWindow ?? resolvedInput.contextWindow;
 		const priorHistoryMetadata = isClaudeDriver(driver)
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
@@ -532,17 +633,6 @@ const prepareEngineTurnInput = (
 			resolvedInput.images && resolvedInput.images.length > 0
 				? Array.from(resolvedInput.images)
 				: undefined;
-		// OpenCode keeps its own session model, so we only override it on an
-		// explicit pick. The Claude SDK has no such memory: omitting `model`
-		// makes it resolve the config dir's settings.json `model` instead, so a
-		// session inheriting the global default (or one whose per-session pick
-		// was lost to a daemon restart) would silently run a different model
-		// than the one conduit displays. Always send what we display.
-		const sendModel =
-			resolvedInput.model &&
-			(resolvedInput.modelUserSelected ||
-				(isClaudeDriver(driver) &&
-					resolvedInput.model.providerID === CLAUDE_PROVIDER_ID));
 		let workspaceMoveSequence: number | undefined;
 		let workspaceMoveDirective: string | undefined;
 		if (isClaudeDriver(driver) && !resolvedInput.steer) {
@@ -568,12 +658,6 @@ const prepareEngineTurnInput = (
 				}
 			}
 		}
-		// An effort belongs to its model. One inherited with the other harness's
-		// default model would run on a model that may not offer it.
-		const sendVariant =
-			resolvedInput.model === undefined ||
-			isClaudeDriver(driver) ===
-				(resolvedInput.model.providerID === CLAUDE_PROVIDER_ID);
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			inputId,
@@ -587,14 +671,7 @@ const prepareEngineTurnInput = (
 			history: [],
 			providerState,
 			instanceId: providerId,
-			...(sendModel && resolvedInput.model
-				? {
-						model: {
-							providerId: resolvedInput.model.providerID,
-							modelId: resolvedInput.model.modelID,
-						},
-					}
-				: {}),
+			...(sendModel && settings ? { model: settings.model } : {}),
 			...folders,
 			...(claudeConfigDir === undefined ? {} : { configDir: claudeConfigDir }),
 			...(isClaudeDriver(driver) && sessionRow
@@ -611,12 +688,8 @@ const prepareEngineTurnInput = (
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
 			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-			...(sendVariant && resolvedInput.variant
-				? { variant: resolvedInput.variant }
-				: {}),
-			...(resolvedInput.contextWindow
-				? { contextWindow: resolvedInput.contextWindow }
-				: {}),
+			...(sendVariant && variant ? { variant } : {}),
+			...(contextWindow ? { contextWindow } : {}),
 		};
 
 		return { sendTurnInput, workspaceMoveSequence };
@@ -752,13 +825,15 @@ const sendViaEngine = (
 	claudeConfigDir: string | undefined,
 ) =>
 	Effect.gen(function* () {
-		const resolvedInput = yield* resolveClaudeModel(input, providerId, driver);
-		if (!resolvedInput) return;
+		const resolved = yield* resolveClaudeModel(input, providerId, driver);
+		if (!resolved) return;
+		const { resolvedInput, catalog } = resolved;
 		const prepared = yield* prepareEngineTurnInput(
 			resolvedInput,
 			providerId,
 			driver,
 			claudeConfigDir,
+			catalog,
 		).pipe(
 			Effect.catchIf(
 				(cause) =>
@@ -807,9 +882,7 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 		const engine = yield* OrchestrationEngineTag;
 		const providerId =
 			(yield* engine.getProviderForSessionEffect(input.sessionId)) ??
-			(input.model && input.model.providerID === CLAUDE_PROVIDER_ID
-				? CLAUDE_PROVIDER_ID
-				: OPENCODE_PROVIDER_ID);
+			harnessForModelProvider(input.model?.providerID ?? "");
 		const daemonConfig = loadDaemonConfig(config.configDir);
 		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
 		if (driver === undefined) {

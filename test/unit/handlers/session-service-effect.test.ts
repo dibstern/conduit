@@ -186,6 +186,7 @@ describe("session handler metadata", () => {
 			getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 			getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 			getSessionsForReconciliation: () => Effect.succeed([]),
+			getStrandedChildren: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),

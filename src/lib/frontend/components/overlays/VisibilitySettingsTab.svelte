@@ -9,7 +9,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getAgentsRpc, getModelsRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
-	let { visible, state = $bindable() }: { visible: boolean; state: { modelsFetchPending: boolean } } = $props();
+	let state = $state({ modelsFetchPending: false });
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
 	const hiddenAgentSet = $derived(new Set(discoveryState.hiddenAgents));
 	const agentScopeId = $derived(discoveryState.agentProviderScope?.id ?? null);
@@ -19,7 +19,6 @@
 
 	// Lazy-load lists when the tab opens with empty discovery state.
 	$effect(() => {
-		if (!visible) return;
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		if (discoveryState.providers.length === 0) {

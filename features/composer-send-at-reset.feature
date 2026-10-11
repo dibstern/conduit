@@ -25,7 +25,7 @@ Examples:
 Scenario Outline: warnings off and readings below warnAt keep the ordinary button
   Given the viewport is a <viewport>
   And Usage settings have one Claude account in the normal state
-  When I open settings to the Usage tab
+  When I open settings to the Usage section
   And I select the Usage warning choice <warnAt>
   And I close settings
   And the mock usage window five_hour for claude is <percent> percent resetting at 2026-01-01T15:13:00Z

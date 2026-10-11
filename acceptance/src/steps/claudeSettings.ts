@@ -61,19 +61,18 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open settings to claude tab",
-		match: /^I open settings to the Claude tab$/,
+		name: "open settings to claude section",
+		match: /^I open settings to the Claude section$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await page.evaluate(() =>
 				window.dispatchEvent(
-					new CustomEvent("settings:open", { detail: { tab: "claude" } }),
+					new CustomEvent("settings:open", { detail: { section: "claude" } }),
 				),
 			);
 			await page
 				.locator("#settings-panel")
 				.waitFor({ state: "visible", timeout: 5_000 });
-			await page.getByTestId("settings-tab-claude").click();
 			await page
 				.getByTestId("claude-setting-autoCompactEnabled")
 				.waitFor({ state: "visible", timeout: 5_000 });

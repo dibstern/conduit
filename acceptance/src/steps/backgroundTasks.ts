@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
+import { PROVIDER_SESSION_CAPABILITIES } from "../../../src/lib/contracts/provider-instance.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { mockInstances, requireRpcControl } from "./shared.js";
 
 // Oldest first, as the relay sends them. Ages are against the frozen clock.
 const TASKS = [
@@ -92,6 +93,10 @@ export async function setLiveTasks(
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
+	rpc.setDaemonList("SubscribeInstances", {
+		instances: mockInstances.get(page) ?? [],
+		providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+	});
 	const id = sessionIdOf(page.url());
 	// Merge into the existing row: a row replaces the session's goal state too.
 	const row = rpc.shellRows?.find(
@@ -306,26 +311,86 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert task-specific stop controls",
+		match:
+			/^the background tasks pull-down offers a named stop control for each task$/,
+		run: async ({ world }) => {
+			for (const task of TASKS)
+				await expect(
+					world.page.getByRole("button", {
+						name: `Stop ${task.description}`,
+						exact: true,
+					}),
+				).toBeVisible();
+		},
+	},
+	{
+		name: "stop a named background task",
+		match: /^I stop the background task (.+)$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
+				ok: true,
+			});
+			await world.page
+				.getByRole("button", { name: `Stop ${match[1]}`, exact: true })
+				.click();
+		},
+	},
+	{
+		name: "SDK confirms vitest stopped",
+		match: /^the SDK reports the vitest task stopped$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, TASKS.slice(0, 1));
+		},
+	},
+	{
+		name: "hide stop controls for unsupported providers",
+		match: /^the background tasks pull-down has no stop controls$/,
+		run: async ({ world }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toBeVisible();
+			await expect(panel.getByRole("button", { name: /^Stop / })).toHaveCount(
+				0,
+			);
+		},
+	},
+	{
 		name: "press Stop all",
 		match: /^I press Stop all in the background tasks pull-down$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("CancelSession", { ok: true });
+			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
+				ok: true,
+			});
 			await world.page.getByTestId("background-tasks-stop-all").click();
 		},
 	},
 	{
-		name: "assert Stop all cancels the session",
+		name: "assert task stops leave the session and rows intact",
 		match:
-			/^the background tasks pull-down asks to cancel the current session$/,
-		run: async ({ world }) => {
+			/^the background tasks pull-down asks to stop (.+) without cancelling the session$/,
+		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
-			const request = await rpc.waitForRequest(
-				(candidate) => candidate.tag === "CancelSession",
-			);
-			expect(request.payload["sessionId"]).toBe(sessionIdOf(world.page.url()));
+			const ids = (match[1] ?? "").split(", ");
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter((request) => request.tag === "StopBackgroundTask")
+						.map((request) => request.payload["taskId"]),
+				)
+				.toEqual(ids);
+			for (const request of rpc
+				.getRequests()
+				.filter((request) => request.tag === "StopBackgroundTask"))
+				expect(request.payload["sessionId"]).toBe(
+					sessionIdOf(world.page.url()),
+				);
+			expect(
+				rpc.getRequests().some((request) => request.tag === "CancelSession"),
+			).toBe(false);
 			await expect(
 				world.page.getByTestId("background-tasks-panel"),
-			).toBeHidden();
+			).toBeVisible();
 		},
 	},
 ];

@@ -776,6 +776,12 @@ export class ClaudeProviderRuntime {
 			Effect.andThen(this.commandEffect({ type: "interrupt", sessionId })),
 		);
 	}
+	stopTaskEffect(
+		sessionId: string,
+		taskId: string,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.commandEffect({ type: "stop-task", sessionId, taskId });
+	}
 	resolvePermissionEffect(
 		sessionId: string,
 		requestId: string,
@@ -1219,6 +1225,16 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				case "interrupt":
 					yield* this.interruptTurnEffect(command.sessionId);
 					return;
+				case "stop-task": {
+					const ctx = yield* getSession(this.stateRef, command.sessionId);
+					if (!ctx || ctx.stopped) return;
+					yield* Effect.tryPromise({
+						try: () => ctx.query.stopTask(command.taskId),
+						catch: (cause) =>
+							new ClaudeBoundaryError({ operation: "stopTask", cause }),
+					});
+					return;
+				}
 				case "abort":
 					this.sinkBindings.get(command.sinkId)?.abortController.abort();
 					return;
@@ -2491,7 +2507,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const message = decision.message;
 				if (
 					(message.type === "system" &&
-						message.subtype === "task_notification") ||
+						message.subtype === "task_notification" &&
+						message.status !== "stopped") ||
 					((message.type === "assistant" ||
 						(message.type === "stream_event" &&
 							message.event.type === "message_start")) &&

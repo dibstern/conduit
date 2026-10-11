@@ -3,7 +3,8 @@
 <script lang="ts">
 	import { connectionState, getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import {
 		applyInstanceListResponse,
 		getInstanceById,
@@ -13,6 +14,7 @@
 	import { startInstanceRpc } from "../../transport/ws-rpc-client.js";
 	import type { InstanceStatus } from "../../types.js";
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
+	import { openSettings } from "../layout/chrome-actions.js";
 	import ConduitLogo from '../ui/ConduitLogo.svelte';
 	import Button from '../ui/Button.svelte';
 
@@ -32,17 +34,16 @@
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
 	let cachedProviderId = $state<string | null>(null);
+	const instanceId = $derived(sessionState.currentId
+		? findSession(sessionState.currentId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionState.currentId]
+		: getEffectiveInstanceId());
+	const currentInstance = $derived(instanceId
+		? getInstanceById(instanceId) ?? getCachedInstanceById(instanceId)
+		: undefined);
 
 	const instanceName = $derived.by(() => {
-		const slug = projectState.currentSlug;
-		if (!slug) return cachedInstanceName;
-		const project = projectState.projects.find((p) => p.slug === slug);
-		if (project?.instanceId) {
-			// Try live store first, fall back to cache (survives WS disconnect)
-			const instance = getInstanceById(project.instanceId) ?? getCachedInstanceById(project.instanceId);
-			if (instance?.name) return instance.name;
-		}
-		// Only update cache when we have fresh store data (instances loaded)
+		if (currentInstance?.name) return currentInstance.name;
+		if (instanceId === "claude" && cachedInstanceId === null) return "Claude";
 		return cachedInstanceName;
 	});
 
@@ -64,16 +65,10 @@
 	// on WS disconnect. This lets the overlay show "Start Instance" / "Switch
 	// Instance" buttons even after clearInstanceState() empties the store.
 	$effect(() => {
-		const slug = projectState.currentSlug;
-		if (!slug) return;
-		const project = projectState.projects.find((p) => p.slug === slug);
-		if (project?.instanceId) {
-			// Try live store first, fall back to cache
-			const instance = getInstanceById(project.instanceId) ?? getCachedInstanceById(project.instanceId);
-			if (instance) {
-				cachedInstanceId = instance.id;
-				cachedInstanceStatus = instance.status;
-			}
+		if (currentInstance) {
+			cachedInstanceId = currentInstance.id;
+			cachedInstanceStatus = currentInstance.status;
+			cachedProviderId = currentInstance.driver ?? "opencode";
 		}
 		// Only update when instances are loaded (not after clearInstanceState)
 		if (instanceState.instances.length > 0) {
@@ -88,10 +83,6 @@
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
 	);
 
-	const connectionTargetName = $derived(
-		cachedProviderId === "claude" ? "Claude" : instanceName,
-	);
-
 	// Keep reconnect copy generic; instance/provider names remain available for
 	// action buttons and connecting state.
 
@@ -101,7 +92,7 @@
 			connectionState.statusText === "" ||
 			!connectionState.statusText
 		) {
-			return `Connecting to ${connectionTargetName} server...`;
+			return `Connecting to ${instanceName} server...`;
 		}
 		if (connectionState.statusText === "Disconnected") {
 			return "Reconnecting...";
@@ -140,7 +131,7 @@
 	}
 
 	function handleSwitchInstance() {
-		window.dispatchEvent(new CustomEvent("settings:open", { detail: { tab: "instances" } }));
+		openSettings("server", "instances");
 	}
 </script>
 

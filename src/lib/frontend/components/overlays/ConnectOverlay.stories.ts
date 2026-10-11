@@ -56,7 +56,7 @@ export const RelayRegistering: Story = {
 };
 
 /**
- * The instance picker, shown when the connection is down and the project's
+ * The instance actions, shown when the connection is down and the draft's
  * OpenCode instance is stopped while other instances exist.
  *
  * This story exists because those two buttons were in ZERO baselines
@@ -78,7 +78,6 @@ export const InstanceActions: Story = {
 				slug: "demo",
 				title: "Demo",
 				folders: ["/tmp/demo"],
-				instanceId: "instance-stopped",
 			},
 		];
 		// Two instances is not padding: `cachedMultiInstance` gates these buttons
