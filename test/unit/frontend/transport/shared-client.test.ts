@@ -12,17 +12,7 @@
 
 import { RpcClient, type RpcMessage } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	ManagedRuntime,
-	RuntimeFlags,
-	RuntimeFlagsPatch,
-	Scope,
-	Supervisor,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, Schedule } from "effect";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { connectionState } from "../../../../src/lib/frontend/transport/connection-status.svelte.js";
 import {
@@ -182,226 +172,80 @@ describe("shared two-socket RPC client in memory", () => {
 		}),
 	);
 
+	// The server routes by payload, so a project switch must not reopen the pair:
+	// closing it would fail every in-flight call and flip `connected`, which
+	// re-ran ChatLayout's effects into a switch-projects ping-pong.
 	it.effect(
-		"replaces the pair when the project changes, holding the ceiling at two",
+		"shares one pair across projects, never closing it on a switch",
 		() =>
 			Effect.gen(function* () {
 				const { transports, connect } = recordingConnect();
 
 				yield* withClients(connect, (clients) =>
 					Effect.gen(function* () {
+						const alpha = yield* clients.forProject("alpha");
+						const beta = yield* clients.forProject("beta");
 						yield* clients.forProject("alpha");
-						yield* clients.forProject("beta");
-						expect(transports.filter((t) => !t.closed)).toHaveLength(2);
+						expect(beta.control).toBe(alpha.control);
+						expect(beta.stream).toBe(alpha.stream);
+						expect(transports.filter((t) => t.closed)).toEqual([]);
 					}),
 				);
 
-				expect(transports.map((t) => t.url)).toEqual([
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-				]);
+				expect(transports).toHaveLength(2);
 			}),
 	);
 
-	it.effect(
-		"drops the cache and the half-open pair when a replacement fails",
-		() =>
-			Effect.gen(function* () {
-				const { transports, connect } = recordingConnect();
-				// beta's control transport opens; its stream transport does not.
-				let attempts = 0;
-				const halfOpen: WsRpcConnect = (options) =>
-					++attempts === 4
-						? Effect.die(new Error("beta stream refused"))
-						: connect(options);
+	it.effect("leaves the cache empty and nothing open when an open fails", () =>
+		Effect.gen(function* () {
+			const { transports, connect } = recordingConnect();
+			// The control transport opens; the stream transport does not.
+			let attempts = 0;
+			const halfOpen: WsRpcConnect = (options) =>
+				++attempts === 2
+					? Effect.die(new Error("stream refused"))
+					: connect(options);
 
-				yield* withClients(halfOpen, (clients) =>
-					Effect.gen(function* () {
-						const alpha = yield* clients.forProject("alpha");
+			yield* withClients(halfOpen, (clients) =>
+				Effect.gen(function* () {
+					const failed = yield* Effect.exit(clients.forProject("alpha"));
+					expect(Exit.isFailure(failed)).toBe(true);
+					expect(transports.filter((t) => !t.closed)).toEqual([]);
 
-						const failed = yield* Effect.exit(clients.forProject("beta"));
-						expect(Exit.isFailure(failed)).toBe(true);
-
-						// Nothing the failed attempt opened is still running: not the
-						// alpha pair it displaced, and not beta's half of a pair.
-						expect(transports.filter((t) => !t.closed)).toEqual([]);
-
-						// And the cache does not hand the closed alpha pair back.
-						const reopened = yield* clients.forProject("alpha");
-						expect(reopened.control).not.toBe(alpha.control);
-						expect(transports.filter((t) => !t.closed)).toHaveLength(2);
-					}),
-				);
-
-				expect(transports.map((t) => t.url)).toEqual([
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-					makeWsRpcUrl(),
-				]);
-			}),
-	);
-
-	it.effect(
-		"finishes closing the old pair when replacement is interrupted",
-		() =>
-			Effect.gen(function* () {
-				const { transports, connect } = recordingConnect();
-				const closing = yield* Deferred.make<void>();
-				const releaseClose = yield* Deferred.make<void>();
-				let attempts = 0;
-				const slowClose: WsRpcConnect = (options) =>
-					Effect.gen(function* () {
-						const attempt = ++attempts;
-						const client = yield* connect(options);
-						if (attempt === 2) {
-							// Registered last, so this pauses Scope.close before either
-							// transport finalizer runs, after the scope is marked closed.
-							yield* Scope.addFinalizer(
-								yield* Effect.scope,
-								Deferred.succeed(closing, undefined).pipe(
-									Effect.zipRight(Deferred.await(releaseClose)),
-								),
-							);
-						}
-						return client;
-					});
-				const runtime = ManagedRuntime.make(makeWsRpcClientsLayer(slowClose));
-				const clients = yield* Effect.promise(() =>
-					runtime.runPromise(WsRpcClients),
-				);
-				let openAfterGamma = 0;
-				yield* Effect.gen(function* () {
 					yield* clients.forProject("alpha");
-					const replacement = yield* Effect.fork(clients.forProject("beta"));
-					yield* Deferred.await(closing);
-					yield* Fiber.interruptFork(replacement);
-					yield* Deferred.succeed(releaseClose, undefined);
-					expect(Exit.isInterrupted(yield* Fiber.await(replacement))).toBe(
-						true,
-					);
-					yield* clients.forProject("gamma");
-					openAfterGamma = transports.filter((t) => !t.closed).length;
-				}).pipe(Effect.ensuring(runtime.disposeEffect));
-				expect(transports.filter((t) => !t.closed)).toEqual([]);
-				expect(openAfterGamma).toBe(2);
-			}),
+					expect(transports.filter((t) => !t.closed)).toHaveLength(2);
+				}),
+			);
+
+			expect(transports).toHaveLength(3);
+		}),
 	);
 
-	it.effect(
-		"does not leak a replacement interrupted between acquisition and publication",
-		() =>
-			Effect.gen(function* () {
-				const { transports, connect } = recordingConnect();
-				const acquired = yield* Deferred.make<void>();
-				const releaseConnect = yield* Deferred.make<void>();
-				let attempts = 0;
-				const gatedConnect: WsRpcConnect = (options) =>
-					Effect.gen(function* () {
-						const attempt = ++attempts;
-						const client = yield* connect(options);
-						if (attempt === 4) {
-							yield* Deferred.succeed(acquired, undefined);
-							yield* Deferred.await(releaseConnect);
-						}
-						return client;
-					});
-				// Cancelling at the Deferred alone would still be inside connect,
-				// which the old onError already covered. Observe open's successful
-				// result to interrupt precisely before the cache can publish it.
-				class InterruptAcquiredPair extends Supervisor.AbstractSupervisor<void> {
-					readonly value = Effect.void;
-					triggered = false;
-					override onEffect<A, E>(
-						fiber: Fiber.RuntimeFiber<A, E>,
-						effect: Effect.Effect<unknown, unknown, unknown>,
-					): void {
-						if (
-							this.triggered ||
-							!Exit.isExit(effect) ||
-							!Exit.isSuccess(effect)
+	it.effect("cancels a slow open and closes its partially acquired pair", () =>
+		Effect.gen(function* () {
+			const { transports, connect } = recordingConnect();
+			const connecting = yield* Deferred.make<void>();
+			let attempts = 0;
+			const slowConnect: WsRpcConnect = (options) =>
+				++attempts === 2
+					? Deferred.succeed(connecting, undefined).pipe(
+							Effect.zipRight(Effect.never),
 						)
-							return;
-						const value = effect.value;
-						if (
-							typeof value === "object" &&
-							value !== null &&
-							"projectSlug" in value &&
-							value.projectSlug === "beta" &&
-							"sockets" in value
-						) {
-							this.triggered = true;
-							fiber.unsafeInterruptAsFork(fiber.id());
-						}
-					}
-				}
-				const supervisor = new InterruptAcquiredPair();
-				const runtime = ManagedRuntime.make(
-					makeWsRpcClientsLayer(gatedConnect),
-				);
-				const clients = yield* Effect.promise(() =>
-					runtime.runPromise(WsRpcClients),
-				);
-				let openAfterGamma = 0;
-				yield* Effect.gen(function* () {
-					yield* clients.forProject("alpha");
-					const replacement = yield* clients
-						.forProject("beta")
-						.pipe(
-							Effect.supervised(supervisor),
-							Effect.withRuntimeFlagsPatch(
-								RuntimeFlagsPatch.enable(RuntimeFlags.OpSupervision),
-							),
-							Effect.fork,
-						);
-					yield* Deferred.await(acquired);
-					expect(transports.filter((t) => !t.closed).map((t) => t.url)).toEqual(
-						[makeWsRpcUrl(), makeWsRpcUrl()],
-					);
-					yield* Deferred.succeed(releaseConnect, undefined);
-					expect(Exit.isInterrupted(yield* Fiber.await(replacement))).toBe(
+					: connect(options);
+			yield* withClients(slowConnect, (clients) =>
+				Effect.gen(function* () {
+					const opening = yield* Effect.fork(clients.forProject("alpha"));
+					yield* Deferred.await(connecting);
+					expect(Exit.isInterrupted(yield* Fiber.interrupt(opening))).toBe(
 						true,
 					);
-					expect(supervisor.triggered).toBe(true);
-					yield* clients.forProject("gamma");
-					openAfterGamma = transports.filter((t) => !t.closed).length;
-				}).pipe(Effect.ensuring(runtime.disposeEffect));
-				expect(transports.filter((t) => !t.closed)).toEqual([]);
-				expect(openAfterGamma).toBe(2);
-			}),
-	);
-
-	it.effect(
-		"cancels a slow replacement and closes its partially acquired pair",
-		() =>
-			Effect.gen(function* () {
-				const { transports, connect } = recordingConnect();
-				const connecting = yield* Deferred.make<void>();
-				let attempts = 0;
-				const slowConnect: WsRpcConnect = (options) =>
-					++attempts === 4
-						? Deferred.succeed(connecting, undefined).pipe(
-								Effect.zipRight(Effect.never),
-							)
-						: connect(options);
-				yield* withClients(slowConnect, (clients) =>
-					Effect.gen(function* () {
-						const alpha = yield* clients.forProject("alpha");
-						const replacement = yield* Effect.fork(clients.forProject("beta"));
-						yield* Deferred.await(connecting);
-						expect(
-							Exit.isInterrupted(yield* Fiber.interrupt(replacement)),
-						).toBe(true);
-						expect(transports.filter((t) => !t.closed)).toEqual([]);
-						const reopened = yield* clients.forProject("alpha");
-						expect(reopened.control).not.toBe(alpha.control);
-					}),
-				);
-				expect(transports.filter((t) => !t.closed)).toEqual([]);
-			}),
+					expect(transports.filter((t) => !t.closed)).toEqual([]);
+					yield* clients.forProject("alpha");
+					expect(transports.filter((t) => !t.closed)).toHaveLength(2);
+				}),
+			);
+			expect(transports.filter((t) => !t.closed)).toEqual([]);
+		}),
 	);
 
 	it.effect("closes both transports when the owning runtime scope closes", () =>
@@ -425,6 +269,7 @@ describe("shared two-socket RPC client in memory", () => {
 
 const fakeSockets: Array<FakeWebSocket> = [];
 let onFrame: () => void = () => {};
+let dial: (ws: FakeWebSocket) => void = (ws) => ws.open();
 
 /**
  * The smallest WebSocket `Socket.fromWebSocket` will drive: it reads
@@ -438,10 +283,12 @@ class FakeWebSocket {
 
 	constructor(readonly url: string) {
 		fakeSockets.push(this);
-		queueMicrotask(() => {
-			this.readyState = 1;
-			this.emit("open", {});
-		});
+		queueMicrotask(() => dial(this));
+	}
+
+	open(): void {
+		this.readyState = 1;
+		this.emit("open", {});
 	}
 
 	addEventListener(type: string, handler: (event: unknown) => void): void {
@@ -493,6 +340,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 	beforeEach(() => {
 		fakeSockets.length = 0;
 		onFrame = () => {};
+		dial = (ws) => ws.open();
 	});
 
 	it.effect("carries a request placed after forProject has returned", () =>
@@ -533,5 +381,72 @@ describe("shared two-socket RPC client over WebSockets", () => {
 				),
 			).toHaveLength(1);
 		}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
+	);
+
+	// Live clock: the protocol's redial waits on a real schedule.
+	it.live(
+		"carries the first request placed once a redialled control socket reports connected",
+		() =>
+			Effect.gen(function* () {
+				const until = (done: () => boolean) =>
+					Effect.sync(done).pipe(
+						Effect.repeat({
+							until: (finished) => finished,
+							schedule: Schedule.spaced("1 millis"),
+						}),
+						Effect.timeoutFail({
+							duration: "3 seconds",
+							onTimeout: () => new Error("condition never held"),
+						}),
+					);
+				const clients = yield* WsRpcClients;
+				const { control } = yield* clients.forProject("alpha");
+				yield* until(() => connectionState.status === "connected");
+
+				// The app reads as soon as it sees `connected` (ChatLayout loads the
+				// file tree), so place the request at the first moment that holds:
+				// right after the redialled socket opens, or on a later poll.
+				const outcome = yield* Deferred.make<string>();
+				let placed = false;
+				const placeIfConnected = () => {
+					if (placed || connectionState.status !== "connected") return placed;
+					placed = true;
+					Effect.runFork(
+						control
+							.SetLogLevel({ projectSlug: "alpha", level: "debug" })
+							.pipe(
+								Effect.catchAll((error) =>
+									Deferred.succeed(outcome, String(error)),
+								),
+							),
+					);
+					return placed;
+				};
+				onFrame = () => {
+					if (
+						fakeSockets.some((ws) =>
+							ws.sent.some((frame) => frame.includes("SetLogLevel")),
+						)
+					)
+						Deferred.unsafeDone(outcome, Effect.succeed("sent"));
+				};
+				dial = (ws) => {
+					ws.open();
+					placeIfConnected();
+				};
+
+				// The daemon restarts: both sockets drop and redial.
+				for (const ws of fakeSockets) ws.close(1006);
+				yield* until(placeIfConnected);
+
+				expect(
+					yield* Deferred.await(outcome).pipe(
+						Effect.timeoutFail({
+							duration: "3 seconds",
+							onTimeout: () => new Error("the request neither sent nor failed"),
+						}),
+					),
+				).toBe("sent");
+			}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
 	);
 });

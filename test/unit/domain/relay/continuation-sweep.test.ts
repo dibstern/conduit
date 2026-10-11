@@ -735,7 +735,6 @@ for (const scenario of [
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{

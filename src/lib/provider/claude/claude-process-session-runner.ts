@@ -496,8 +496,7 @@ export const makeProcessClaudeSessionRunner = (
 							),
 						);
 					});
-					return received.type === "materialize-subagents" ||
-						received.type === "ensure-subagent-session"
+					return received.type === "ensure-subagent-session"
 						? operation
 						: entry.outputs.withPermits(1)(operation);
 				},

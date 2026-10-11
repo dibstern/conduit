@@ -79,6 +79,8 @@ const expectedNames = [
 	"messages_steered",
 	"sessions_last_turn_end_input_id",
 	"project_provenance",
+	"messages_context_tokens",
+	"messages_completed_at",
 	"sessions_claude_worktree_state",
 	"sessions_workspace_hint",
 ];
@@ -99,6 +101,197 @@ const legacyNames = [
 ];
 
 describe("Effect migration lineage", () => {
+	it.effect(
+		"catches up unpadded keys in numeric order and repeats as a no-op",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const entries = {
+					"30_seed_users": sql`INSERT INTO users (name) VALUES ('ada')`,
+					"1_create_users": sql`CREATE TABLE users (name TEXT)`,
+				};
+				expect(yield* makeEffectSqlMigrator(entries)).toEqual([
+					[1, "create_users"],
+					[30, "seed_users"],
+				]);
+				expect(yield* makeEffectSqlMigrator(entries)).toEqual([]);
+				const filled = {
+					...entries,
+					"10_fill_tag": sql`UPDATE users SET tag = 'caught up'`,
+					"2_add_tag": sql`ALTER TABLE users ADD COLUMN tag TEXT`,
+				};
+				expect(yield* makeEffectSqlMigrator(filled)).toEqual([
+					[2, "add_tag"],
+					[10, "fill_tag"],
+				]);
+				expect(yield* sql`SELECT name, tag FROM users`).toEqual([
+					{ name: "ada", tag: "caught up" },
+				]);
+				expect(yield* makeEffectSqlMigrator(filled)).toEqual([]);
+			}).pipe(
+				Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" })),
+			),
+	);
+
+	it.effect(
+		"fills main's missing messages migrations without replaying workspace migrations",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(
+					Object.fromEntries([
+						...migrationEntries.slice(0, 45),
+						...migrationEntries.slice(47),
+					]),
+				);
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE effect_sql_migrations SET created_at = '2001-01-01 00:00:00'
+					WHERE migration_id IN (48, 49)`;
+				const before = yield* sql<{
+					migration_id: number;
+					name: string;
+					created_at: string;
+				}>`SELECT migration_id, name, created_at FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(before.map(({ migration_id }) => migration_id)).toEqual([
+					...Array.from({ length: 45 }, (_, index) => index + 1),
+					48,
+					49,
+				]);
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
+					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+					VALUES ('main-message', 'main-database', 'assistant', 1, 2)`;
+
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[46, "messages_context_tokens"],
+					[47, "messages_completed_at"],
+				]);
+				const after = yield* sql<{
+					migration_id: number;
+					name: string;
+					created_at: string;
+				}>`SELECT migration_id, name, created_at FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(
+					after.filter(
+						({ migration_id }) => migration_id !== 46 && migration_id !== 47,
+					),
+				).toEqual(before);
+				expect(
+					after.map(({ migration_id, name }) => ({ migration_id, name })),
+				).toEqual(
+					expectedNames.map((name, index) => ({
+						migration_id: index + 1,
+						name,
+					})),
+				);
+				expect(
+					yield* sql`SELECT context_tokens, completed_at FROM messages WHERE id = 'main-message'`,
+				).toEqual([{ context_tokens: null, completed_at: null }]);
+				expect(
+					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence FROM sessions WHERE id = 'main-database'`,
+				).toEqual([
+					{
+						title: "Preserved",
+						workspace_hint: "/repo/worktree",
+						workspace_hint_sequence: 123,
+					},
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect("rolls back a failed catch-up below the recorded maximum", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const entries = {
+				"0001_create_users": sql`CREATE TABLE users (name TEXT)`,
+				"0003_seed_users": sql`INSERT INTO users (name) VALUES ('ada')`,
+			};
+			yield* makeEffectSqlMigrator(entries);
+			const failed = yield* Effect.exit(
+				makeEffectSqlMigrator({
+					...entries,
+					"0002_failing_gap": Effect.gen(function* () {
+						yield* sql`ALTER TABLE users ADD COLUMN email TEXT`;
+						yield* sql.unsafe("CREATE TABLE broken_table (");
+					}),
+				}),
+			);
+			expect(Exit.isFailure(failed)).toBe(true);
+			expect(
+				yield* sql<{
+					name: string;
+				}>`SELECT name FROM pragma_table_info('users')`,
+			).toEqual([{ name: "name" }]);
+			expect(
+				yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
+			).toEqual([
+				{ migration_id: 1, name: "create_users" },
+				{ migration_id: 3, name: "seed_users" },
+			]);
+			expect(yield* sql`SELECT name FROM users`).toEqual([{ name: "ada" }]);
+			expect(yield* makeEffectSqlMigrator(entries)).toEqual([]);
+		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
+	);
+
+	it("registers the contiguous production chain from 1 through 49", () => {
+		expect(migrationEntries).toHaveLength(49);
+		expect(migrationEntries.map(([key]) => key)).toEqual(
+			expectedNames.map(
+				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
+			),
+		);
+	});
+
+	it.effect(
+		"upgrades a database with messages migrations 1 through 47 to 49",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(prefix(47));
+				const sql = yield* SqlClient.SqlClient;
+				const before = yield* sql<{ migration_id: number; name: string }>`
+					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(before).toEqual(
+					expectedNames.slice(0, 47).map((name, index) => ({
+						migration_id: index + 1,
+						name,
+					})),
+				);
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('already-migrated', 'claude', 'Preserved', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at, context_tokens, completed_at)
+					VALUES ('kept-message', 'already-migrated', 'assistant', 1, 2, 123456, 2)`;
+
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[48, "sessions_claude_worktree_state"],
+					[49, "sessions_workspace_hint"],
+				]);
+				const after = yield* sql<{ migration_id: number; name: string }>`
+					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+				expect(after.slice(0, 47)).toEqual(before);
+				expect(after).toEqual(
+					expectedNames.map((name, index) => ({
+						migration_id: index + 1,
+						name,
+					})),
+				);
+				expect(
+					yield* sql`SELECT context_tokens, completed_at FROM messages WHERE id = 'kept-message'`,
+				).toEqual([{ context_tokens: 123456, completed_at: 2 }]);
+				expect(
+					yield* sql`SELECT title, claude_worktree_state, workspace_hint, workspace_hint_sequence
+						FROM sessions WHERE id = 'already-migrated'`,
+				).toEqual([
+					{
+						title: "Preserved",
+						claude_worktree_state: null,
+						workspace_hint: null,
+						workspace_hint_sequence: null,
+					},
+				]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
 	it.effect(
 		"hint columns must remain nullable without inventing historical generations",
 		() =>
@@ -481,11 +674,18 @@ describe("Effect migration lineage", () => {
 		() =>
 			Effect.gen(function* () {
 				const applied = yield* makeEffectSqlMigrator();
-				expect(applied).toHaveLength(expectedNames.length);
+				expect(applied).toEqual(
+					expectedNames.map((name, index) => [index + 1, name]),
+				);
 				const sql = yield* SqlClient.SqlClient;
 				const history = yield* sql<{ migration_id: number; name: string }>`
 				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
-				expect(history.map((row) => row.name)).toEqual(expectedNames);
+				expect(history).toEqual(
+					expectedNames.map((name, index) => ({
+						migration_id: index + 1,
+						name,
+					})),
+				);
 				const columns = yield* sql<{
 					name: string;
 				}>`PRAGMA table_info(sessions)`;
@@ -501,6 +701,9 @@ describe("Effect migration lineage", () => {
 						"fork_point_message_id",
 						"last_turn_end_version",
 						"seen_version",
+						"claude_worktree_state",
+						"workspace_hint",
+						"workspace_hint_sequence",
 					]),
 				);
 				for (const retired of ["read_at", "marked_unread_at", "last_viewed_at"])
@@ -721,6 +924,8 @@ describe("Effect migration lineage", () => {
 				[43, "messages_steered"],
 				[44, "sessions_last_turn_end_input_id"],
 				[45, "project_provenance"],
+				[46, "messages_context_tokens"],
+				[47, "messages_completed_at"],
 				[48, "sessions_claude_worktree_state"],
 				[49, "sessions_workspace_hint"],
 			]);
@@ -805,6 +1010,8 @@ describe("Effect migration lineage", () => {
 					[43, "messages_steered"],
 					[44, "sessions_last_turn_end_input_id"],
 					[45, "project_provenance"],
+					[46, "messages_context_tokens"],
+					[47, "messages_completed_at"],
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
 				]);

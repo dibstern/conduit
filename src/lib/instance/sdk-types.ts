@@ -31,72 +31,7 @@ export type SessionDetail = Omit<Session, "slug"> & {
 	permission?: PermissionRuleset;
 };
 
-export type {
-	AgentPart,
-	AssistantMessage,
-	CompactionPart,
-	// Event types
-	Event,
-	EventCommandExecuted,
-	EventFileEdited,
-	EventFileWatcherUpdated,
-	EventInstallationUpdateAvailable,
-	EventInstallationUpdated,
-	EventLspUpdated,
-	EventMessagePartRemoved,
-	EventMessagePartUpdated,
-	EventMessageRemoved,
-	EventMessageUpdated,
-	EventPermissionAsked,
-	EventPermissionReplied,
-	EventPtyCreated,
-	EventPtyDeleted,
-	EventPtyExited,
-	EventPtyUpdated,
-	EventServerConnected,
-	EventServerInstanceDisposed,
-	EventSessionCompacted,
-	EventSessionCreated,
-	EventSessionDeleted,
-	EventSessionDiff,
-	EventSessionError,
-	EventSessionIdle,
-	EventSessionStatus,
-	EventSessionUpdated,
-	EventTodoUpdated,
-	EventVcsBranchUpdated,
-	FileDiff,
-	FilePart,
-	GlobalEvent,
-	Message as SdkMessage,
-	// Part types
-	Part,
-	PatchPart,
-	// Permission types
-	PermissionRequest,
-	Project,
-	Pty,
-	ReasoningPart,
-	RetryPart,
-	// Session types
-	Session,
-	SessionStatus,
-	SnapshotPart,
-	StepFinishPart,
-	StepStartPart,
-	TextPart,
-	// Other types
-	Todo,
-	ToolPart,
-	// Tool state types
-	ToolState,
-	ToolStateCompleted,
-	ToolStateError,
-	ToolStatePending,
-	ToolStateRunning,
-	// Message types
-	UserMessage,
-} from "@opencode-ai/sdk/v2/types";
+export type { SessionStatus } from "@opencode-ai/sdk/v2/types";
 
 // These replace the hand-maintained string unions in shared-types.ts with
 // types derived directly from the SDK's discriminated unions.

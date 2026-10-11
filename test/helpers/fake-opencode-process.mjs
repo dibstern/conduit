@@ -456,7 +456,7 @@ const server = createServer(async (request, response) => {
 		} else {
 			response.end("[]");
 		}
-	} else if (["/agent", "/command", "/file", "/file/content"].includes(path)) {
+	} else if (["/agent", "/command"].includes(path)) {
 		const discoveryFile = join(configDir, "fake-opencode-discovery.json");
 		const discovery = existsSync(discoveryFile)
 			? JSON.parse(readFileSync(discoveryFile, "utf8"))
@@ -465,11 +465,7 @@ const server = createServer(async (request, response) => {
 			JSON.stringify(
 				path === "/agent"
 					? (discovery.agents ?? [])
-					: path === "/command"
-						? (discovery.commands ?? [])
-						: path === "/file/content"
-							? { type: "text", content: "" }
-							: (discovery.files ?? []),
+					: (discovery.commands ?? []),
 			),
 		);
 	} else if (/^\/session\/[^/]+$/.test(path)) {
@@ -522,6 +518,14 @@ const server = createServer(async (request, response) => {
 		response.end(JSON.stringify(session ?? {}));
 	} else if (path === "/file" || path === "/file/content") {
 		try {
+			const discoveryFile = join(configDir, "fake-opencode-discovery.json");
+			const discovery = existsSync(discoveryFile)
+				? JSON.parse(readFileSync(discoveryFile, "utf8"))
+				: {};
+			if (path === "/file" && discovery.files !== undefined) {
+				response.end(JSON.stringify(discovery.files));
+				return;
+			}
 			const target = join(
 				directory ?? configDir,
 				url.searchParams.get("path") ?? ".",

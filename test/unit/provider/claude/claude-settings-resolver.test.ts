@@ -120,7 +120,6 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{

@@ -183,6 +183,7 @@ const makeInitialStatus = (options: DaemonOptions): DaemonStatus => ({
 	pinEnabled: options.pinHash != null,
 	tlsEnabled: options.tlsEnabled ?? false,
 	keepAwake: options.keepAwake ?? false,
+	keepAwakeCommand: null,
 	projects: [],
 });
 

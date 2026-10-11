@@ -8,7 +8,7 @@ import {
 	Fiber,
 	FiberMap,
 	type Ref,
-	Runtime,
+	type Runtime,
 	Schema,
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
@@ -40,10 +40,10 @@ import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
 	getPermissionMode,
+	makeProcessingTimeoutHooks,
 	type OverridesState,
 	OverridesStateTag,
 	PROCESSING_TIMEOUT_DURATION,
-	resetProcessingTimeout,
 	setPermissionMode,
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
@@ -55,7 +55,7 @@ import { makeFailTurn } from "./turn-failure.js";
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
 
-/** Recheck saved folders at launch, shared by sends and speculative warming. */
+/** Shared folder mapping for launches and browser requests; recheck session folders at launch. */
 export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
 	{
@@ -116,10 +116,15 @@ export const resolveSessionFolders = (
 			);
 			state = null;
 		}
+		const worktrees = state?.worktrees;
+		const effectiveFolders = [
+			config.projectDir,
+			...(config.extraFolders ?? []),
+		].map((root) => ({ root, directory: worktrees?.[root] ?? root }));
 		const extraFolders: string[] = [];
 		const launchFolders = state
-			? [config.projectDir, ...(config.extraFolders ?? [])]
-					.map((folder) => state.worktrees[folder] ?? folder)
+			? effectiveFolders
+					.map(({ directory }) => directory)
 					.filter((folder) => folder !== workspaceRoot)
 			: (config.extraFolders ?? []);
 		for (const folder of launchFolders) {
@@ -139,7 +144,7 @@ export const resolveSessionFolders = (
 				});
 			}
 		}
-		return { workspaceRoot, extraFolders };
+		return { workspaceRoot, extraFolders, effectiveFolders };
 	});
 
 /** Browser requests identify a session; project-level requests keep the primary folder. */
@@ -147,9 +152,14 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 	Effect.gen(function* () {
 		if (sessionId === undefined) {
 			const config = yield* ConfigTag;
+			const extraFolders = config.extraFolders ?? [];
 			return {
 				workspaceRoot: config.projectDir,
-				extraFolders: config.extraFolders ?? [],
+				extraFolders,
+				effectiveFolders: [config.projectDir, ...extraFolders].map((root) => ({
+					root,
+					directory: root,
+				})),
 			};
 		}
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
@@ -270,21 +280,13 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
-		const runTimeout = Runtime.runFork(runtime);
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
-			clearTimeout: () => {
-				runTimeout(clearProcessingTimeout(sessionId));
-			},
-			resetTimeout: () => {
-				runTimeout(
-					resetProcessingTimeout(sessionId, PROCESSING_TIMEOUT_DURATION),
-				);
-			},
+			...makeProcessingTimeoutHooks(runtime, sessionId),
 			applyReportedPermissionMode: (mode) =>
 				setPermissionMode(sessionId, mode).pipe(
 					Effect.provideService(OverridesStateTag, overridesRef),

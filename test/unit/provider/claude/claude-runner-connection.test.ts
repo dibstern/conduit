@@ -465,21 +465,17 @@ it("replays a retained frame after one transient ingestion failure and continues
 	expect(f.published).toHaveLength(2);
 });
 
-it("keeps a replacement attachment's cached reply when a stale data request finishes", async () => {
+it("keeps a replacement attachment's acknowledgement when a stale output request finishes", async () => {
 	const f = await fixture();
-	const children = [
-		{ sdkSubagentId: "replacement-sdk", childSessionId: "replacement-child" },
-	];
 	await f.runtime.runPromise(f.receipts.attach("runner", "old"));
 	await f.runtime.runPromise(f.receipts.attach("runner", "replacement"));
 	await f.runtime.runPromise(
-		f.receipts.acknowledge("runner", 1, { children }, "replacement"),
+		f.receipts.acknowledge("runner", 1, {}, "replacement"),
 	);
-	await f.runtime.runPromise(
-		f.receipts.acknowledge("runner", 1, { children: [] }, "old"),
-	);
-	expect(await f.runtime.runPromise(f.receipts.replyAt("runner", 1))).toEqual({
-		children,
+	await f.runtime.runPromise(f.receipts.acknowledge("runner", 2, {}, "old"));
+	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toEqual({
+		sequence: 1,
+		result: {},
 	});
 });
 

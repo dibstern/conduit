@@ -221,7 +221,10 @@ const authenticateUpgrade = (
 		const pinHeader = req.headers["x-relay-pin"];
 		if (typeof pinHeader !== "string") return false;
 
-		const result = yield* auth.authenticate(pinHeader, getClientIp(req));
+		const result = yield* auth.authenticate(
+			pinHeader,
+			getClientIp(req.socket.remoteAddress, req.headers["x-forwarded-for"]),
+		);
 		return result.ok;
 	});
 

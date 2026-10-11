@@ -73,9 +73,10 @@ export const sessionViewState = $state({
 	/** Composer requests; MessageList owns following and scroll placement. */
 	followRequest: 0,
 
-	/** The chevron's override: the bar stays expanded even at the bottom. Starts
-	 *  true so a fresh load arrives with the full bar on screen. */
-	forcedOpen: true,
+	/** The phone bar follows the reading direction: open after a scroll up into
+	 *  history, closed to the island after a scroll down or on reaching the
+	 *  bottom. Starts true so a fresh load arrives with the full bar on screen. */
+	barOpen: true,
 	/** Files view, rendered as an overlay on phones and a pane on desktop. */
 	filesOpen: false,
 	filesEverOpened: false,
@@ -89,22 +90,14 @@ export const sessionViewState = $state({
 			: false,
 });
 
-/**
- * The collapse rule, derived rather than stored so the bar and the transcript
- * cannot disagree about it. `forcedOpen` is its only mutable input.
- */
 export function isBarCollapsed(): boolean {
-	return (
-		sessionViewState.compact &&
-		sessionViewState.atBottom &&
-		!sessionViewState.forcedOpen
-	);
+	return sessionViewState.compact && !sessionViewState.barOpen;
 }
 
 /**
  * The only path by which `atBottom` is written from outside the store. It exists
- * because the false->true edge is what clears the force, and an edge cannot be
- * observed by a plain assignment at the call site.
+ * because the false->true edge closes the bar (jump-to-latest is not a scroll
+ * gesture), and an edge cannot be observed by a plain assignment at the call site.
  *
  * The edge is read off a private non-reactive copy, not off `atBottom` itself:
  * the caller is a Svelte `$effect`, and reading the same state it writes would
@@ -112,7 +105,7 @@ export function isBarCollapsed(): boolean {
  */
 let lastAtBottom = true;
 export function publishAtBottom(next: boolean): void {
-	if (next && !lastAtBottom) sessionViewState.forcedOpen = false;
+	if (next && !lastAtBottom) sessionViewState.barOpen = false;
 	lastAtBottom = next;
 	sessionViewState.atBottom = next;
 }
@@ -123,19 +116,18 @@ export function requestTranscriptFollow(): void {
 
 /** The chevron. Expands the bar without moving the transcript. */
 export function forceBarOpen(): void {
-	sessionViewState.forcedOpen = true;
+	sessionViewState.barOpen = true;
 }
 
-// A scroll-up smaller than the controller's 50px detach threshold never flips
-// atBottom. Without this, a small nudge could leave a forced-open bar stuck open
-// indefinitely, because there is no rising edge to clear the force.
-export function noteUserScroll(): void {
-	sessionViewState.forcedOpen = false;
+export function noteScrollGesture(direction: "up" | "down"): void {
+	sessionViewState.barOpen = direction === "up";
 }
 
 /** Arrive at a new session with the full bar open, whatever the last one did. */
 export function noteSessionChanged(sessionId: string | null = null): void {
-	sessionViewState.forcedOpen = true;
+	sessionViewState.barOpen = true;
+	// The new session's pin to the bottom is not a rising edge to close on.
+	lastAtBottom = true;
 	activeSessionId = sessionId;
 	const memory =
 		sessionId && !sessionViewState.compact

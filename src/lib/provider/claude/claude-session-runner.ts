@@ -14,7 +14,6 @@ import type {
 	TurnResult,
 } from "../types.js";
 import type { ClaudeRunnerSettingsSnapshot } from "./claude-runner-upgrade.js";
-import type { MaterializedClaudeSubagent } from "./claude-subagent-materializer.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type ClaudeSessionTurn = Omit<
@@ -122,24 +121,6 @@ export type ClaudeSessionOutput =
 			  }
 			| { readonly type: "release-sink" }
 			| {
-					readonly type: "materialize-subagents";
-					readonly input: {
-						readonly parentConduitSessionId: string;
-						readonly parentClaudeSessionId: string;
-						readonly workspaceRoot: string;
-						readonly knownTasks: ReadonlyArray<
-							readonly [
-								string,
-								{
-									readonly toolUseId: string;
-									readonly description?: string;
-									readonly subagentType?: string;
-								},
-							]
-						>;
-					};
-			  }
-			| {
 					/** Places a send's user message before the query admits it. */
 					readonly type: "place-user-message";
 					readonly input: {
@@ -160,9 +141,7 @@ export type ClaudeSessionOutput =
 	  ));
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
-export interface ClaudeSessionOutputReply {
-	readonly children?: readonly MaterializedClaudeSubagent[];
-}
+export type ClaudeSessionOutputReply = Readonly<Record<string, never>>;
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
 export interface ClaudeSessionFailure {

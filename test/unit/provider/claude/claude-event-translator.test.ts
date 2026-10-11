@@ -1,6 +1,5 @@
 // test/unit/provider/claude/claude-event-translator.test.ts
 
-import type { SDKTaskStartedMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema, TestClock, TestContext } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,14 +7,19 @@ import {
 	ProviderRuntimeEventSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { historyToChatMessages } from "../../../../src/lib/frontend/utils/history-logic.js";
+import { createToolMessage } from "../../../../src/lib/frontend/utils/tool-message-factory.js";
+import { launchRow } from "../../../../src/lib/frontend/utils/turns.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
 import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { createClaudeMessageOwnership } from "../../../../src/lib/provider/claude/claude-message-ownership.js";
+import {
+	applyClaudeOwnershipDecisionEffect,
+	decideClaudeMessageOwnershipEffect,
+} from "../../../../src/lib/provider/claude/claude-message-ownership-runtime.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
-	SDKPartialAssistantMessage,
-	SDKTaskProgressMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
@@ -188,7 +192,8 @@ function plannedRuntimeEventsForClaudeSdkFixture(
 			createdAt: Date.now(),
 			data: {
 				messageId,
-				cost: message.total_cost_usd,
+				providerCostTotalUsd: message.total_cost_usd,
+				providerSessionId: message.session_id,
 				tokens: {
 					input: message.usage.input_tokens,
 					output: message.usage.output_tokens,
@@ -413,73 +418,6 @@ describe("ClaudeEventTranslator", () => {
 		expect(dataOf(statusEvent)["status"]).toBe("idle");
 	});
 
-	// 3. system (subtype task_progress)
-
-	it("does not translate system/task_progress to main turn completion", async () => {
-		await runTranslate(translator, ctx, {
-			type: "system",
-			subtype: "task_progress",
-			task_id: "task-1",
-			tool_use_id: "tool-task-1",
-			description: "Working...",
-			usage: {
-				total_tokens: 500,
-				tool_uses: 3,
-				duration_ms: 2000,
-				input_tokens: 300,
-				output_tokens: 200,
-				cache_read_input_tokens: 50,
-			},
-			uuid: "00000000-0000-0000-0000-000000000003",
-			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
-
-		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
-		expect(turnCompleted).toBeUndefined();
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const data = dataOf(running);
-		expect(data["partId"]).toBe("tool-task-1");
-		expect(data["metadata"]).toMatchObject({
-			providerTaskId: "task-1",
-			status: "running",
-			description: "Working...",
-			totalTokens: 500,
-			toolUses: 3,
-			durationMs: 2000,
-		});
-	});
-
-	it("maps system/task_started to child task metadata", async () => {
-		const taskStarted: SDKTaskStartedMessage = {
-			type: "system",
-			subtype: "task_started",
-			task_id: "task-2",
-			tool_use_id: "tool-task-2",
-			description: "Explore code",
-			task_type: "explore",
-			prompt: "Find the route",
-			uuid: "00000000-0000-0000-0000-000000000026",
-			session_id: "sdk-sess",
-		};
-
-		await runTranslate(translator, ctx, taskStarted);
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const data = dataOf(running);
-		expect(data["partId"]).toBe("tool-task-2");
-		expect(data["metadata"]).toMatchObject({
-			providerTaskId: "task-2",
-			status: "running",
-			description: "Explore code",
-			subagentType: "explore",
-			prompt: "Find the route",
-		});
-		expect(data["metadata"]).not.toHaveProperty("subagent_type");
-	});
-
 	it("starts each live Agent tool before task_started metadata updates it", async () => {
 		await runTranslate(
 			translator,
@@ -571,35 +509,6 @@ describe("ClaudeEventTranslator", () => {
 			description: "Audit frontend rendering",
 			subagentType: "explore",
 		});
-	});
-
-	it("maps system/task_progress to canonical task metadata names", async () => {
-		const taskProgress = {
-			type: "system",
-			subtype: "task_progress",
-			task_id: "task-1",
-			tool_use_id: "tool-task-1",
-			description: "Exploring...",
-			subagent_type: "explore",
-			usage: {
-				total_tokens: 500,
-				tool_uses: 3,
-				duration_ms: 2000,
-			},
-			uuid: "00000000-0000-0000-0000-000000000027",
-			session_id: "sdk-sess",
-		} satisfies SDKTaskProgressMessage & { subagent_type: string };
-
-		await runTranslate(translator, ctx, taskProgress);
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const metadata = dataOf(running)["metadata"] as Record<string, unknown>;
-		expect(metadata).toMatchObject({
-			providerTaskId: "task-1",
-			subagentType: "explore",
-		});
-		expect(metadata).not.toHaveProperty("subagent_type");
 	});
 
 	it("completes the live Agent tool when Claude reports task completion", async () => {
@@ -694,163 +603,6 @@ describe("ClaudeEventTranslator", () => {
 		});
 		expect(completed).toHaveLength(1);
 		expect(dataOf(completed[0])["partId"]).toBe("toolu-local-bash");
-	});
-
-	it("maps Claude Task input from SDK events through relay, history, and frontend ToolMessage", async () => {
-		const harness = makeEffectProjectionHarness();
-		try {
-			await harness.query(
-				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-				["sess-contract", "claude", "Test", "idle", Date.now(), Date.now()],
-			);
-			const relaySink = createRelayEventSink({
-				sessionId: "sess-contract",
-				persist: {
-					persistEvent: (event) =>
-						Effect.promise(() =>
-							harness
-								.ingest(providerRuntimeEventFromCanonical(event))
-								.then(() => undefined),
-						),
-				},
-			});
-			const relayTranslator = new ClaudeEventTranslator({
-				getSink: () => relaySink,
-			});
-			const relayCtx = makeCtx({
-				sessionId: "sess-contract",
-				eventSink: relaySink,
-			});
-
-			const messageStart: SDKPartialAssistantMessage = {
-				type: "stream_event",
-				event: {
-					type: "message_start",
-					message: {
-						id: "msg-contract",
-						type: "message",
-						role: "assistant",
-						content: [],
-						diagnostics: null,
-						container: null,
-						context_management: null,
-						model: "claude-sonnet-4-5",
-						stop_details: null,
-						stop_reason: null,
-						stop_sequence: null,
-						usage: {
-							cache_creation: null,
-							cache_creation_input_tokens: null,
-							cache_read_input_tokens: null,
-							fallback_credit: null,
-							inference_geo: null,
-							input_tokens: 0,
-							iterations: null,
-							output_tokens: 0,
-							output_tokens_details: null,
-							server_tool_use: null,
-							service_tier: null,
-							speed: null,
-						},
-					},
-				},
-				parent_tool_use_id: null,
-				uuid: "00000000-0000-0000-0000-000000000201",
-				session_id: "sdk-sess-contract",
-			};
-			const taskToolUse: SDKPartialAssistantMessage = {
-				type: "stream_event",
-				event: {
-					type: "content_block_start",
-					index: 0,
-					content_block: {
-						type: "tool_use",
-						id: "tool-task-1",
-						name: "Task",
-						input: {
-							description: "Audit Claude provider",
-							prompt: "Find SDK mapping gaps",
-							subagent_type: "explore",
-						},
-					},
-				},
-				parent_tool_use_id: null,
-				uuid: "00000000-0000-0000-0000-000000000202",
-				session_id: "sdk-sess-contract",
-			};
-			const taskToolStop: SDKPartialAssistantMessage = {
-				type: "stream_event",
-				event: {
-					type: "content_block_stop",
-					index: 0,
-				},
-				parent_tool_use_id: null,
-				uuid: "00000000-0000-0000-0000-000000000203",
-				session_id: "sdk-sess-contract",
-			};
-			const taskStarted = {
-				type: "system",
-				subtype: "task_started",
-				task_id: "task-1",
-				tool_use_id: "tool-task-1",
-				description: "Audit Claude provider",
-				task_type: "explore",
-				prompt: "Find SDK mapping gaps",
-				child_session_id: "claude-subagent-abc",
-				uuid: "00000000-0000-0000-0000-000000000204",
-				session_id: "sdk-sess-contract",
-			} satisfies SDKTaskStartedMessage & { child_session_id: string };
-			const taskProgress = {
-				type: "system",
-				subtype: "task_progress",
-				task_id: "task-1",
-				tool_use_id: "tool-task-1",
-				description: "Audit Claude provider",
-				subagent_type: "explore",
-				child_session_id: "claude-subagent-abc",
-				usage: {
-					total_tokens: 12,
-					tool_uses: 1,
-					duration_ms: 300,
-				},
-				uuid: "00000000-0000-0000-0000-000000000205",
-				session_id: "sdk-sess-contract",
-			} satisfies SDKTaskProgressMessage & {
-				child_session_id: string;
-				subagent_type: string;
-			};
-
-			await runTranslate(relayTranslator, relayCtx, messageStart);
-			await runTranslate(relayTranslator, relayCtx, taskToolUse);
-			await runTranslate(relayTranslator, relayCtx, taskToolStop);
-			await runTranslate(relayTranslator, relayCtx, taskStarted);
-			await runTranslate(relayTranslator, relayCtx, taskProgress);
-
-			const rows = await harness.sessionMessagesWithParts("sess-contract");
-			const history = messageRowsToHistory(rows, { pageSize: 50 });
-			const messages = historyToChatMessages(history.messages);
-			const taskMessage = messages.find(
-				(message) => message.type === "tool" && message.name === "Task",
-			);
-
-			expect(taskMessage).toBeDefined();
-			if (taskMessage?.type === "tool") {
-				expect(taskMessage.input).toMatchObject({
-					tool: "Task",
-					description: "Audit Claude provider",
-					prompt: "Find SDK mapping gaps",
-					subagentType: "explore",
-				});
-				expect(taskMessage.input).not.toHaveProperty("taskId");
-				expect(taskMessage.input).not.toHaveProperty("task_id");
-				expect(taskMessage.metadata?.["providerTaskId"]).toBe("task-1");
-				expect(taskMessage.metadata?.["childSessionId"]).toBe(
-					"claude-subagent-abc",
-				);
-			}
-		} finally {
-			await harness.dispose();
-		}
 	});
 
 	it("maps assistant snapshot thinking blocks through relay, history, and frontend messages", async () => {
@@ -1308,7 +1060,8 @@ describe("ClaudeEventTranslator", () => {
 			},
 			data: {
 				messageId: "assistant-result-1",
-				cost: 0.12,
+				providerCostTotalUsd: 0.12,
+				providerSessionId: "sdk-session-1",
 				tokens: {
 					input: 10,
 					output: 20,
@@ -1715,7 +1468,7 @@ describe("ClaudeEventTranslator", () => {
 
 	// 13. result (success)
 
-	it("translates result/success to turn.completed with tokens, cost, duration", async () => {
+	it("keeps the Claude session total and identity for durable cost conversion", async () => {
 		// Set assistant uuid so messageId is populated
 		ctx.lastAssistantUuid = "assist-uuid-1";
 
@@ -1750,7 +1503,9 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["output"]).toBe(50);
 		expect(tokens["cacheRead"]).toBe(10);
 		expect(tokens["cacheWrite"]).toBe(5);
-		expect(data["cost"]).toBeCloseTo(0.0123);
+		expect(data["providerCostTotalUsd"]).toBe(0.0123);
+		expect(data["providerSessionId"]).toBe("sdk-sess");
+		expect(data["cost"]).toBeUndefined();
 		expect(data["duration"]).toBe(1200);
 	});
 
@@ -1821,14 +1576,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(tokens["contextWindow"]).toBe(1_000_000);
 	});
 
-	// Regression: SDK result.usage is cumulative across every API request in
-	// the turn — cache_read re-counts the whole prompt per tool round, so a
-	// long turn reports millions of tokens and the context bar showed >5000%.
-	// The last assistant message's per-request usage is the actual context
-	// occupancy; turn.completed must prefer it. Subagent assistant messages
-	// (parent_tool_use_id set) must not overwrite the main-chain capture.
-
-	it("emits last main-chain per-request usage on turn.completed, ignoring cumulative result usage", async () => {
+	it("reports result usage separately from the last main request's context, ignoring subagent chatter", async () => {
 		const assistantMsg = (
 			uuid: string,
 			usage: Record<string, number>,
@@ -1899,7 +1647,6 @@ describe("ClaudeEventTranslator", () => {
 			result: "done",
 			stop_reason: "end_turn",
 			total_cost_usd: 1.5,
-			// Cumulative turn aggregate — must NOT be used for tokens
 			usage: {
 				input_tokens: 500,
 				output_tokens: 20_000,
@@ -1915,12 +1662,102 @@ describe("ClaudeEventTranslator", () => {
 		const turnCompleted = sink.events.find((e) => e.type === "turn.completed");
 		expect(turnCompleted).toBeDefined();
 		const tokens = dataOf(turnCompleted)["tokens"] as Record<string, unknown>;
-		expect(tokens["input"]).toBe(30);
-		expect(tokens["output"]).toBe(800);
-		expect(tokens["cacheRead"]).toBe(110_000);
-		expect(tokens["cacheWrite"]).toBe(1_500);
-		// Cost and duration still reflect the whole turn
-		expect(dataOf(turnCompleted)["cost"]).toBeCloseTo(1.5);
+		expect(tokens).toEqual({
+			input: 500,
+			output: 20_000,
+			cacheRead: 3_300_000,
+			cacheWrite: 80_000,
+		});
+		expect(dataOf(turnCompleted)["contextTokens"]).toBe(111_530);
+		// The raw session total is converted only when the result is persisted.
+		expect(dataOf(turnCompleted)["providerCostTotalUsd"]).toBe(1.5);
+		expect(dataOf(turnCompleted)["cost"]).toBeUndefined();
+	});
+
+	it.each([
+		undefined,
+		{},
+	])("keeps missing result usage unknown while retaining context: %j", async (usage) => {
+		await runTranslate(translator, ctx, makeAssistantMessage("claude-fable-5"));
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "done",
+			duration_ms: 100,
+			total_cost_usd: 0,
+			...(usage === undefined ? {} : { usage }),
+			modelUsage: {},
+			uuid: "00000000-0000-0000-0000-000000000311",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		const completed = sink.events.find(
+			(event) => event.type === "turn.completed",
+		);
+		expect(dataOf(completed)["tokens"]).toEqual({});
+		expect(dataOf(completed)["contextTokens"]).toBe(10);
+
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "next",
+			duration_ms: 100,
+			total_cost_usd: 0,
+			usage: {
+				input_tokens: 100,
+				output_tokens: 300,
+				cache_read_input_tokens: 1_000,
+				cache_creation_input_tokens: 200,
+			},
+			modelUsage: {},
+			uuid: "00000000-0000-0000-0000-000000000312",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		const next = sink.events
+			.filter((event) => event.type === "turn.completed")
+			.at(-1);
+		expect(dataOf(next)["tokens"]).toEqual({
+			input: 100,
+			output: 300,
+			cacheRead: 1_000,
+			cacheWrite: 200,
+		});
+		expect(dataOf(next)).not.toHaveProperty("contextTokens");
+	});
+
+	it("preserves a reported zero context independently of result usage", async () => {
+		const assistant = makeAssistantMessage("claude-fable-5");
+		if (assistant.type !== "assistant") throw new Error("expected assistant");
+		await runTranslate(translator, ctx, {
+			...assistant,
+			message: {
+				...assistant.message,
+				usage: { input_tokens: 0, output_tokens: 50 },
+			},
+		} as unknown as SDKMessage);
+		await runTranslate(translator, ctx, {
+			type: "result",
+			subtype: "success",
+			is_error: false,
+			result: "done",
+			duration_ms: 100,
+			total_cost_usd: 0,
+			usage: {
+				input_tokens: 0,
+				output_tokens: 500,
+				cache_read_input_tokens: 0,
+				cache_creation_input_tokens: 0,
+			},
+			modelUsage: {},
+			uuid: "00000000-0000-0000-0000-000000000313",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		const completed = sink.events.find(
+			(event) => event.type === "turn.completed",
+		);
+		expect(dataOf(completed)["tokens"]).toEqual({ input: 0, output: 500 });
+		expect(dataOf(completed)["contextTokens"]).toBe(0);
 	});
 
 	// 13b. result (success, no streaming, text in result field)
@@ -2174,32 +2011,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events).toHaveLength(0);
 	});
 
-	it("maps tool_progress messages to child task metadata", async () => {
-		await runTranslate(translator, ctx, {
-			type: "tool_progress",
-			tool_use_id: "tool-1",
-			tool_name: "Bash",
-			parent_tool_use_id: "tool-task-1",
-			elapsed_time_seconds: 5,
-			task_id: "task-1",
-			uuid: "00000000-0000-0000-0000-000000000023",
-			session_id: "sdk-sess",
-		} as unknown as SDKMessage);
-
-		const running = sink.events.find((e) => e.type === "tool.running");
-		expect(running).toBeDefined();
-		const data = dataOf(running);
-		expect(data["partId"]).toBe("tool-task-1");
-		expect(data["metadata"]).toMatchObject({
-			providerTaskId: "task-1",
-			parentToolUseId: "tool-task-1",
-			activeToolUseId: "tool-1",
-			activeToolName: "Bash",
-			elapsedTimeSeconds: 5,
-		});
-	});
-
-	it("silently ignores system/task_notification messages", async () => {
+	it("ignores system/task_notification messages without a tool_use_id", async () => {
 		await runTranslate(translator, ctx, {
 			type: "system",
 			subtype: "task_notification",
@@ -2211,7 +2023,6 @@ describe("ClaudeEventTranslator", () => {
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
 
-		// system/task_notification is not init, status, or task_progress, so it's ignored
 		expect(sink.events).toHaveLength(0);
 	});
 
@@ -2226,6 +2037,635 @@ describe("ClaudeEventTranslator", () => {
 		} as unknown as SDKMessage);
 
 		expect(sink.events).toHaveLength(0);
+	});
+
+	it.each([
+		"local_bash",
+		"local_agent",
+	])("keeps the first SDK receipt time when a nested %s start is held and duplicated", async (taskType) => {
+		const ownership = createClaudeMessageOwnership({
+			childSessionIdFor: (taskId) => `claude-subagent-${taskId}`,
+		});
+		const runtimeCtx = makeCtx({
+			messageOwnership: ownership,
+			subagentTasks: new Map(),
+			eventSink: sink,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "assistant",
+				uuid: "parent-message",
+				parent_tool_use_id: null,
+				message: {
+					content: [
+						{ type: "tool_use", id: "agent-tool", name: "Agent", input: {} },
+					],
+				},
+			} as unknown as SDKMessage,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "system",
+				subtype: "task_started",
+				task_id: "agent-task",
+				tool_use_id: "agent-tool",
+				task_type: "local_agent",
+				description: "Parent agent",
+			} as unknown as SDKMessage,
+		});
+		const start = {
+			type: "system",
+			subtype: "task_started",
+			task_id: "nested-task",
+			tool_use_id: "nested-tool",
+			task_type: taskType,
+			description: "Nested work",
+			is_backgrounded: true,
+		} as unknown as SDKMessage;
+		const apply: Parameters<typeof decideClaudeMessageOwnershipEffect>[2] = (
+			decisions,
+		) =>
+			Effect.forEach(
+				decisions,
+				(decision) =>
+					applyClaudeOwnershipDecisionEffect(undefined, runtimeCtx, decision),
+				{ discard: true },
+			);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(1000);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{ kind: "sdk", message: start },
+					apply,
+				);
+				yield* TestClock.setTime(1200);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{ kind: "sdk", message: start },
+					apply,
+				);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{
+						kind: "sdk",
+						message: {
+							type: "system",
+							subtype: "task_updated",
+							task_id: "nested-task",
+							patch: { status: "completed", end_time: 1500 },
+						} as unknown as SDKMessage,
+					},
+					apply,
+				);
+				yield* TestClock.setTime(2500);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{
+						kind: "transcript",
+						taskId: "agent-task",
+						messages: [
+							{
+								type: "assistant",
+								uuid: "agent-message",
+								session_id: "sdk-sess",
+								parent_tool_use_id: null,
+								parent_agent_id: null,
+								message: {
+									content: [
+										{
+											type: "tool_use",
+											id: "nested-tool",
+											name: "Bash",
+											input: {},
+										},
+									],
+								},
+							},
+						],
+					},
+					apply,
+				);
+				yield* TestClock.setTime(3000);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{ kind: "sdk", message: start },
+					apply,
+				);
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+
+		const metadata: Record<string, unknown> = {};
+		const starts: unknown[] = [];
+		for (const event of sink.events) {
+			if (
+				event.type !== "tool.running" ||
+				dataOf(event)["partId"] !== "nested-tool"
+			)
+				continue;
+			const patch = dataOf(event)["metadata"] as Record<string, unknown>;
+			if (patch["taskStartedAt"] !== undefined)
+				starts.push(patch["taskStartedAt"]);
+			Object.assign(metadata, patch);
+		}
+		expect(starts).toEqual([1000, 1000, 1000]);
+		expect(
+			launchRow(
+				createToolMessage({
+					uuid: "nested-tool",
+					id: "nested-tool",
+					name: "Bash",
+					status: "completed",
+					metadata,
+				}),
+				[],
+				3000,
+			),
+		).toMatchObject({ state: { kind: "finished" }, time: 500 });
+	});
+
+	it.each([
+		false,
+		true,
+	])("uses ingress time for a held nested pause (resumed while held=%s)", async (resumedWhileHeld) => {
+		const ownership = createClaudeMessageOwnership({
+			childSessionIdFor: (taskId) => `claude-subagent-${taskId}`,
+		});
+		const runtimeCtx = makeCtx({
+			messageOwnership: ownership,
+			subagentTasks: new Map(),
+			eventSink: sink,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "assistant",
+				uuid: "parent-message",
+				parent_tool_use_id: null,
+				message: {
+					content: [
+						{ type: "tool_use", id: "agent-tool", name: "Agent", input: {} },
+					],
+				},
+			} as unknown as SDKMessage,
+		});
+		ownership.decide({
+			kind: "sdk",
+			message: {
+				type: "system",
+				subtype: "task_started",
+				task_id: "agent-task",
+				tool_use_id: "agent-tool",
+				task_type: "local_agent",
+				description: "Parent agent",
+			} as unknown as SDKMessage,
+		});
+		const apply: Parameters<typeof decideClaudeMessageOwnershipEffect>[2] = (
+			decisions,
+		) =>
+			Effect.forEach(
+				decisions,
+				(decision) =>
+					applyClaudeOwnershipDecisionEffect(undefined, runtimeCtx, decision),
+				{ discard: true },
+			);
+		const metadata: Record<string, unknown> = {};
+		let seen = 0;
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const messages: readonly (readonly [number, SDKMessage])[] = [
+					[
+						1000,
+						{
+							type: "system",
+							subtype: "task_started",
+							task_id: "nested-task",
+							tool_use_id: "nested-tool",
+							task_type: "local_bash",
+							description: "Nested work",
+							is_backgrounded: true,
+						} as unknown as SDKMessage,
+					],
+					[
+						1500,
+						{
+							type: "system",
+							subtype: "task_updated",
+							task_id: "nested-task",
+							patch: { status: "paused" },
+						} as unknown as SDKMessage,
+					],
+					...(resumedWhileHeld
+						? [
+								[
+									2000,
+									{
+										type: "system",
+										subtype: "task_updated",
+										task_id: "nested-task",
+										patch: { status: "running" },
+									} as unknown as SDKMessage,
+								] as const,
+								[
+									2200,
+									{
+										type: "system",
+										subtype: "task_updated",
+										task_id: "nested-task",
+										patch: { status: "paused" },
+									} as unknown as SDKMessage,
+								] as const,
+							]
+						: []),
+				];
+				for (const [at, message] of messages) {
+					yield* TestClock.setTime(at);
+					yield* decideClaudeMessageOwnershipEffect(
+						runtimeCtx,
+						{ kind: "sdk", message },
+						apply,
+					);
+				}
+				yield* TestClock.setTime(2500);
+				yield* decideClaudeMessageOwnershipEffect(
+					runtimeCtx,
+					{
+						kind: "transcript",
+						taskId: "agent-task",
+						messages: [
+							{
+								type: "assistant",
+								uuid: "agent-message",
+								session_id: "sdk-sess",
+								parent_tool_use_id: null,
+								parent_agent_id: null,
+								message: {
+									content: [
+										{
+											type: "tool_use",
+											id: "nested-tool",
+											name: "Bash",
+											input: {},
+										},
+									],
+								},
+							},
+						],
+					},
+					apply,
+				);
+				for (const [at, status, now, time, pausedAt] of [
+					[
+						2500,
+						undefined,
+						3000,
+						resumedWhileHeld ? 700 : 500,
+						resumedWhileHeld ? 2200 : 1500,
+					],
+					[
+						3500,
+						"paused",
+						4000,
+						resumedWhileHeld ? 700 : 500,
+						resumedWhileHeld ? 2200 : 1500,
+					],
+					[4500, "running", 5000, resumedWhileHeld ? 1200 : 1000, null],
+					[5500, "paused", 6000, resumedWhileHeld ? 1700 : 1500, 5500],
+					[6500, "running", 7000, resumedWhileHeld ? 2200 : 2000, null],
+				] as const) {
+					yield* TestClock.setTime(at);
+					if (status)
+						yield* decideClaudeMessageOwnershipEffect(
+							runtimeCtx,
+							{
+								kind: "sdk",
+								message: {
+									type: "system",
+									subtype: "task_updated",
+									task_id: "nested-task",
+									patch: { status },
+								} as unknown as SDKMessage,
+							},
+							apply,
+						);
+					for (const event of sink.events.slice(seen)) {
+						if (
+							event.type === "tool.running" &&
+							dataOf(event)["partId"] === "nested-tool"
+						)
+							Object.assign(metadata, dataOf(event)["metadata"]);
+					}
+					seen = sink.events.length;
+					expect(
+						launchRow(
+							createToolMessage({
+								uuid: "nested-tool",
+								id: "nested-tool",
+								name: "Bash",
+								status: "running",
+								metadata,
+							}),
+							[{ id: "nested-task" }],
+							now,
+						)?.time,
+					).toBe(time);
+					expect(metadata["pausedAt"]).toBe(pausedAt);
+				}
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+	});
+
+	it("shows the latest step from either task progress or tool progress", async () => {
+		seededToolPartIds = new Set(["progress-tool"]);
+		ctx = makeCtx({ lastAssistantUuid: "assistant" });
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "progress-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		const toolProgress = (toolName: string): SDKMessage =>
+			({
+				type: "tool_progress",
+				tool_use_id: `active-${toolName}`,
+				parent_tool_use_id: "progress-tool",
+				task_id: "progress-task",
+				tool_name: toolName,
+				elapsed_time_seconds: 1,
+				uuid: `progress-${toolName}`,
+				session_id: "sdk-session",
+			}) as unknown as SDKMessage;
+		const taskProgress = (description: string): SDKMessage =>
+			({
+				type: "system",
+				subtype: "task_progress",
+				task_id: "progress-task",
+				tool_use_id: "progress-tool",
+				description,
+				usage: { total_tokens: 100, tool_uses: 1, duration_ms: 1000 },
+				uuid: `progress-${description}`,
+				session_id: "sdk-session",
+			}) as unknown as SDKMessage;
+		let seen = 0;
+		for (const [message, step] of [
+			[toolProgress("Bash"), "Bash"],
+			[taskProgress("Running pnpm test"), "Running pnpm test"],
+			[toolProgress("Read"), "Read"],
+			[taskProgress("Writing docs"), "Writing docs"],
+		] as const) {
+			await runTranslate(translator, ctx, message);
+			for (const event of sink.events.slice(seen)) {
+				if (event.type === "tool.running")
+					Object.assign(metadata, dataOf(event)["metadata"]);
+			}
+			seen = sink.events.length;
+			expect(
+				launchRow(
+					createToolMessage({
+						uuid: "progress-tool",
+						id: "progress-tool",
+						name: "Task",
+						status: "running",
+						input: { tool: "Task", description: "Audit", prompt: "Go" },
+						metadata,
+					}),
+					[{ id: "progress-task" }],
+					1000,
+				)?.step,
+			).toBe(step);
+		}
+	});
+
+	it("persists the active pause start and clears it on resume", async () => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(10_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status: "paused", total_paused_ms: 2_000 },
+				} as unknown as SDKMessage);
+				yield* TestClock.setTime(70_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status: "running", total_paused_ms: 62_000 },
+				} as unknown as SDKMessage);
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+		const updates = sink.events.filter(
+			(event) => event.type === "tool.running",
+		);
+		expect(dataOf(updates[0])["metadata"]).toMatchObject({
+			pausedAt: 10_000,
+			pausedMs: 2_000,
+		});
+		expect(dataOf(updates[1])["metadata"]).toMatchObject({
+			pausedAt: null,
+			pausedMs: 62_000,
+		});
+	});
+
+	it("accounts for status-only resumes, authoritative totals, and later pauses", async () => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "paused-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		let seen = 0;
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				for (const [at, patch, now, time, pausedAt] of [
+					[
+						10_000,
+						{ status: "paused", total_paused_ms: 2_000 },
+						20_000,
+						8_000,
+						10_000,
+					],
+					[70_000, { status: "running" }, 72_000, 10_000, null],
+					[71_000, { total_paused_ms: 60_000 }, 72_000, 12_000, null],
+					[73_000, { status: "paused" }, 78_000, 13_000, 73_000],
+					[80_000, { status: "running" }, 83_000, 16_000, null],
+					[81_000, { status: "running" }, 83_000, 16_000, null],
+				] as const) {
+					yield* TestClock.setTime(at);
+					yield* translator.translate(ctx, {
+						type: "system",
+						subtype: "task_updated",
+						task_id: "paused-task",
+						patch,
+					} as unknown as SDKMessage);
+					for (const event of sink.events.slice(seen)) {
+						if (event.type === "tool.running")
+							Object.assign(metadata, dataOf(event)["metadata"]);
+					}
+					seen = sink.events.length;
+					expect(
+						launchRow(
+							createToolMessage({
+								uuid: "paused-tool",
+								id: "paused-tool",
+								name: "Task",
+								status: "running",
+								metadata,
+							}),
+							[{ id: "paused-task" }],
+							now,
+						)?.time,
+					).toBe(time);
+					expect(metadata["pausedAt"]).toBe(pausedAt);
+				}
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+	});
+
+	it("keeps the current pause start across repeated paused patches", async () => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				for (const at of [10_000, 40_000]) {
+					yield* TestClock.setTime(at);
+					yield* translator.translate(ctx, {
+						type: "system",
+						subtype: "task_updated",
+						task_id: "paused-task",
+						patch: { status: "paused", total_paused_ms: 2_000 },
+					} as unknown as SDKMessage);
+				}
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "paused-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		for (const event of sink.events) {
+			if (event.type === "tool.running")
+				Object.assign(metadata, dataOf(event)["metadata"]);
+		}
+		expect(
+			launchRow(
+				createToolMessage({
+					uuid: "paused-tool",
+					id: "paused-tool",
+					name: "Task",
+					status: "running",
+					metadata,
+				}),
+				[{ id: "paused-task" }],
+				50_000,
+			)?.time,
+		).toBe(8_000);
+		expect(metadata["pausedAt"]).toBe(10_000);
+	});
+
+	it.each([
+		"completed",
+		"failed",
+		"killed",
+	] as const)("ends an active pause at the SDK end time when %s arrives late", async (status) => {
+		seededToolPartIds = new Set(["paused-tool"]);
+		ctx = makeCtx({
+			lastAssistantUuid: "assistant",
+			subagentTasks: new Map([["paused-task", { toolUseId: "paused-tool" }]]),
+		});
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* TestClock.setTime(10_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status: "paused", total_paused_ms: 2_000 },
+				} as unknown as SDKMessage);
+				yield* TestClock.setTime(25_000);
+				yield* translator.translate(ctx, {
+					type: "system",
+					subtype: "task_updated",
+					task_id: "paused-task",
+					patch: { status, end_time: 20_000 },
+				} as unknown as SDKMessage);
+			}).pipe(Effect.provide(TestContext.TestContext)),
+		);
+		const metadata: Record<string, unknown> = {
+			providerTaskId: "paused-task",
+			backgrounded: true,
+			taskStartedAt: 0,
+		};
+		for (const event of sink.events) {
+			if (event.type === "tool.running")
+				Object.assign(metadata, dataOf(event)["metadata"]);
+		}
+		expect(
+			launchRow(
+				createToolMessage({
+					uuid: "paused-tool",
+					id: "paused-tool",
+					name: "Task",
+					status: "running",
+					metadata,
+				}),
+				[{ id: "paused-task" }],
+				30_000,
+			),
+		).toMatchObject({
+			state: {
+				kind: "finished",
+				outcome: status === "killed" ? "stopped" : status,
+			},
+			time: 8_000,
+		});
+		expect(metadata["pausedAt"]).toBeNull();
+	});
+
+	it("publishes a live task's ancestry even after its parents leave the list", async () => {
+		const liveness = makeSessionBackgroundLiveness();
+		const trackingTranslator = new ClaudeEventTranslator({
+			getSink: () => sink,
+			onBackgroundTask: liveness.record,
+		});
+		const nestedCtx = makeCtx({
+			subagentTasks: new Map([
+				["agentA", { toolUseId: "launch-a" }],
+				["middle", { toolUseId: "launch-middle", parentTaskId: "agentA" }],
+				["deeper", { toolUseId: "launch-deeper", parentTaskId: "middle" }],
+			]),
+		});
+		await runTranslate(trackingTranslator, nestedCtx, {
+			type: "system",
+			subtype: "background_tasks_changed",
+			tasks: [
+				{ task_id: "deeper", task_type: "local_bash", description: "Watch" },
+			],
+			uuid: "ancestry-snapshot",
+			session_id: "sdk-sess",
+		} as unknown as SDKMessage);
+		expect(liveness.backgroundOf(nestedCtx.sessionId)?.tasks).toMatchObject([
+			{
+				id: "deeper",
+				parentTaskId: "middle",
+				ancestorTaskIds: ["middle", "agentA"],
+			},
+		]);
 	});
 
 	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {

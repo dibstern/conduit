@@ -148,28 +148,34 @@ function wakeSession(
 	};
 }
 
-// A Claude subagent has no status stream of its own: its lifecycle is the
-// parent's Task tool part, which names the child in metadata.childSessionId
-// (conduit-test-zbct). OpenCode children emit their own session.status and
+// Claude ownership emits child status, while Task tool parts provide a fallback
+// through metadata.childSessionId (conduit-test-zbct). OpenCode children emit
+// their own session.status and
 // name the child under `sessionId`, so none of this touches them. Parts are
 // read before the message projector applies the same event, and corrupt
 // metadata reads as no child rather than failing the projection.
 const PART_CHILD =
 	"CASE WHEN json_valid(p.metadata) THEN json_extract(p.metadata, '$.childSessionId') END";
+const PART_BACKGROUND_RUNNING =
+	"CASE WHEN json_valid(p.metadata) THEN COALESCE(json_extract(p.metadata, '$.backgrounded'), 0) = 1 AND json_extract(p.metadata, '$.outcome') IS NULL ELSE 0 END";
 
-// A parent turn that is interrupted or fails leaves its Task parts open, so the
-// children they name settle with it rather than staying busy forever.
+// A parent turn that is interrupted or fails leaves its foreground Task parts
+// open. Background tasks keep running until their own outcome arrives.
 function settleOpenSubagents(
 	parentSessionId: string,
 	createdAt: number,
 ): SessionStatement {
 	return {
-		sql: `UPDATE sessions SET status = 'idle', updated_at = ?
-			WHERE status IN ('busy', 'retry') AND id IN (
-				SELECT ${PART_CHILD} FROM message_parts p
-				JOIN messages m ON m.id = p.message_id
-				WHERE m.session_id = ? AND p.type = 'tool' AND p.status IN ('started', 'running'))`,
-		params: [createdAt, parentSessionId],
+		sql: `WITH RECURSIVE foreground(id) AS (
+				SELECT ? UNION
+				SELECT ${PART_CHILD} FROM foreground f
+				JOIN messages m ON m.session_id = f.id
+				JOIN message_parts p ON p.message_id = m.id
+				WHERE p.type = 'tool' AND p.status IN ('started', 'running')
+				AND ${PART_CHILD} IS NOT NULL AND NOT (${PART_BACKGROUND_RUNNING}))
+			UPDATE sessions SET status = 'idle', updated_at = ?
+			WHERE status IN ('busy', 'retry') AND id <> ? AND id IN (SELECT id FROM foreground)`,
+		params: [parentSessionId, createdAt, parentSessionId],
 	};
 }
 
@@ -585,11 +591,48 @@ export const sessionHandlers: {
 		},
 	],
 
-	// Only the first attach of a child to a still-open part starts it: progress
-	// and post-result materialization re-send the same child id on parts that
-	// already name it, or that have completed or been interrupted.
+	// Task outcomes settle background children. Only the first attach to an
+	// open part starts a child; repeated links cannot reopen a settled child.
+	// Runners older than the `outcome` stamp report only the raw task status,
+	// and they outlive daemon upgrades, so a terminal status settles too.
 	"tool.running": (event) => {
 		const child = event.data.metadata?.["childSessionId"];
+		const outcome =
+			event.data.metadata?.["outcome"] ?? event.data.metadata?.["status"];
+		if (
+			outcome === "completed" ||
+			outcome === "failed" ||
+			outcome === "stopped" ||
+			outcome === "killed"
+		)
+			return [
+				{
+					sql: `UPDATE sessions SET status = 'idle', updated_at = ?
+						WHERE status IN ('busy', 'retry') AND id = COALESCE(?,
+							(SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))`,
+					params: [
+						event.createdAt,
+						typeof child === "string" ? child : null,
+						event.data.partId,
+					],
+				},
+			];
+		if (event.data.metadata?.["backgrounded"] === true)
+			return [
+				{
+					sql: `UPDATE sessions SET status = 'busy', updated_at = ?
+						WHERE id = COALESCE(?, (SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))
+						AND status <> 'busy' AND NOT EXISTS (
+							SELECT 1 FROM message_parts p WHERE p.id = ? AND json_valid(p.metadata)
+							AND json_extract(p.metadata, '$.outcome') IS NOT NULL)`,
+					params: [
+						event.createdAt,
+						typeof child === "string" ? child : null,
+						event.data.partId,
+						event.data.partId,
+					],
+				},
+			];
 		if (typeof child !== "string") return [];
 		return [
 			{
@@ -609,10 +652,13 @@ export const sessionHandlers: {
 			{
 				sql: `UPDATE sessions SET status = 'idle', updated_at = ?
 					WHERE status IN ('busy', 'retry') AND id = COALESCE(?,
-						(SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))`,
+						(SELECT ${PART_CHILD} FROM message_parts p WHERE p.id = ?))
+					AND NOT EXISTS (SELECT 1 FROM message_parts p
+						WHERE p.id = ? AND (${PART_BACKGROUND_RUNNING}))`,
 				params: [
 					event.createdAt,
 					typeof child === "string" ? child : null,
+					event.data.partId,
 					event.data.partId,
 				],
 			},

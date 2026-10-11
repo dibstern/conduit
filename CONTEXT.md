@@ -54,9 +54,14 @@ OpenCode refuses those moves before recording an event; Claude supports moves.
 
 **Effective Working Directory** is the primary project folder's mapped worktree,
 otherwise the only mapped worktree, otherwise the primary project folder. The
-session's git pill, next provider launch, new terminals and file reads use it.
-The file tree and mention completion list that folder. Already-open terminals
-keep their start folder. Other launch folders are the
+session's git pill and next provider launch use it; new terminals default to it
+and the picker can start one in any Effective Folder.
+The file tree lists every Effective Folder, each Project Folder mapped through
+the workspace, as a labelled root, primary first. Single-folder projects keep
+their existing tree without an extra root row. File list and content requests
+can target a root; requests without one still use the Effective Working
+Directory. Mention completion continues to list that directory. Already-open
+terminals keep their start folder. Other launch folders are the
 remaining project folders mapped through the workspace. A user move updates the
 session immediately and takes effect on the next turn, leaving a running turn
 undisturbed.

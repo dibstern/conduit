@@ -31,7 +31,6 @@ const configWithoutInstances: DaemonConfig = {
 	tls: false,
 	debug: false,
 	keepAwake: false,
-	dangerouslySkipPermissions: false,
 	projects: [],
 };
 
@@ -44,7 +43,6 @@ describe("provider instance resolution", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			projects: [
 				{
 					path: "/src/project",
@@ -99,7 +97,6 @@ describe("provider instance resolution", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			claudeConfigDir: "/tmp/claude",
 			projects: [],
 		};
@@ -118,7 +115,6 @@ describe("provider instance resolution", () => {
 			tls: false,
 			debug: false,
 			keepAwake: false,
-			dangerouslySkipPermissions: false,
 			claudeConfigDir: "/implicit/claude",
 			projects: [],
 			instances: [

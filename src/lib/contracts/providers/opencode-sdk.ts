@@ -1,28 +1,19 @@
 import type {
-	PermissionRespondData,
 	Agent as SdkAgent,
 	Command as SdkCommand,
 	Config as SdkConfig,
 	Event as SdkEvent,
-	File as SdkFile,
 	FileContent as SdkFileContent,
 	FileNode as SdkFileNode,
 	FindFilesResponse as SdkFindFilesResponse,
-	FindSymbolsResponse as SdkFindSymbolsResponse,
-	FindTextResponse as SdkFindTextResponse,
 	Message as SdkMessage,
 	Part as SdkPart,
 	Path as SdkPath,
 	Project as SdkProject,
-	ProviderListResponse as SdkProviderListResponse,
 	Pty as SdkPty,
 	Session as SdkSession,
 	SessionMessageResponse as SdkSessionMessageResponse,
 	SessionStatus as SdkSessionStatus,
-	Symbol as SdkSymbol,
-	SessionCreateData,
-	SessionPromptAsyncData,
-	SessionUpdateData,
 } from "@opencode-ai/sdk/v2/types";
 import { Schema } from "effect";
 
@@ -167,26 +158,6 @@ type _OpenCodePathCoversSdkPath = AssertExtends<
 	Pick<SdkPath, keyof OpenCodePath>
 >;
 
-export const OpenCodeFileStatusEntrySchema = Schema.Struct({
-	path: Schema.String,
-	added: Schema.Number,
-	removed: Schema.Number,
-	status: Schema.Literal("added", "deleted", "modified"),
-});
-
-export type OpenCodeFileStatusEntry = Schema.Schema.Type<
-	typeof OpenCodeFileStatusEntrySchema
->;
-
-type _OpenCodeSdkFileCoversSchema = AssertExtends<
-	SdkFile,
-	OpenCodeFileStatusEntry
->;
-type _OpenCodeFileStatusEntryCoversSdkFile = AssertExtends<
-	NormalizeSchemaType<OpenCodeFileStatusEntry>,
-	SdkFile
->;
-
 export const OpenCodePtySchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
@@ -269,65 +240,6 @@ type _OpenCodeFileContentCoversSdkFileContent = AssertExtends<
 	SdkFileContent
 >;
 
-const OpenCodeRangePositionSchema = Schema.Struct({
-	line: Schema.Number,
-	character: Schema.Number,
-});
-
-const OpenCodeRangeSchema = Schema.Struct({
-	start: OpenCodeRangePositionSchema,
-	end: OpenCodeRangePositionSchema,
-});
-
-export const OpenCodeFindTextMatchSchema = Schema.Struct({
-	path: Schema.Struct({ text: Schema.String }),
-	lines: Schema.Struct({ text: Schema.String }),
-	line_number: Schema.Number,
-	absolute_offset: Schema.Number,
-	submatches: Schema.Array(
-		Schema.Struct({
-			match: Schema.Struct({ text: Schema.String }),
-			start: Schema.Number,
-			end: Schema.Number,
-		}),
-	),
-});
-
-export type OpenCodeFindTextMatch = Schema.Schema.Type<
-	typeof OpenCodeFindTextMatchSchema
->;
-
-type _OpenCodeSdkFindTextMatchCoversSchema = AssertExtends<
-	SdkFindTextResponse[number],
-	OpenCodeFindTextMatch
->;
-type _OpenCodeFindTextMatchCoversSdkFindTextMatch = AssertExtends<
-	NormalizeSchemaType<OpenCodeFindTextMatch>,
-	SdkFindTextResponse[number]
->;
-
-export const OpenCodeFindSymbolSchema = Schema.Struct({
-	name: Schema.String,
-	kind: Schema.Number,
-	location: Schema.Struct({
-		uri: Schema.String,
-		range: OpenCodeRangeSchema,
-	}),
-});
-
-export type OpenCodeFindSymbol = Schema.Schema.Type<
-	typeof OpenCodeFindSymbolSchema
->;
-
-type _OpenCodeSdkFindSymbolCoversSchema = AssertExtends<
-	SdkSymbol,
-	OpenCodeFindSymbol
->;
-type _OpenCodeFindSymbolCoversSdkFindSymbol = AssertExtends<
-	NormalizeSchemaType<OpenCodeFindSymbol>,
-	SdkSymbol
->;
-
 export const OpenCodeFindFilesResponseSchema = Schema.Array(Schema.String);
 
 export type OpenCodeFindFilesResponse = Schema.Schema.Type<
@@ -343,23 +255,8 @@ type _OpenCodeFindFilesCoversSdkFindFiles = AssertExtends<
 	SdkFindFilesResponse
 >;
 
-type _OpenCodeSdkFindSymbolsCoversSchema = AssertExtends<
-	SdkFindSymbolsResponse,
-	Array<OpenCodeFindSymbol>
->;
-type _OpenCodeFindSymbolsCoversSdkFindSymbols = AssertExtends<
-	Array<NormalizeSchemaType<OpenCodeFindSymbol>>,
-	SdkFindSymbolsResponse
->;
-
-export const OpenCodeFindTextResponseSchema = Schema.Array(
-	OpenCodeFindTextMatchSchema,
-);
 export const OpenCodeFindFilesArrayResponseSchema =
 	OpenCodeFindFilesResponseSchema;
-export const OpenCodeFindSymbolsResponseSchema = Schema.Array(
-	OpenCodeFindSymbolSchema,
-);
 
 export const OpenCodeConfigResponseSchema = Schema.Record({
 	key: Schema.String,
@@ -469,13 +366,6 @@ const OpenCodeOpaquePropertiesSchema = Schema.Record({
 	value: Schema.Unknown,
 });
 
-type OpenCodeProviderModel = {
-	id: string;
-	name: string;
-	limit: { context: number; output: number };
-	variants?: Record<string, Record<string, unknown>>;
-};
-
 const OpenCodeProviderModelSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
@@ -491,12 +381,6 @@ const OpenCodeProviderModelSchema = Schema.Struct({
 	),
 }).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
 
-type OpenCodeProviderListEntry = {
-	name: string;
-	id: string;
-	models: Record<string, OpenCodeProviderModel>;
-};
-
 const OpenCodeProviderListEntrySchema = Schema.Struct({
 	name: Schema.String,
 	id: Schema.String,
@@ -506,38 +390,11 @@ const OpenCodeProviderListEntrySchema = Schema.Struct({
 	}),
 }).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
 
-export type OpenCodeProviderListResponse = {
-	all: OpenCodeProviderListEntry[];
-	default: Record<string, string>;
-	connected: string[];
-};
-
 export const OpenCodeProviderListResponseSchema = Schema.Struct({
 	all: Schema.Array(OpenCodeProviderListEntrySchema),
 	default: Schema.Record({ key: Schema.String, value: Schema.String }),
 	connected: Schema.Array(Schema.String),
 });
-
-type _OpenCodeSdkProviderListCoversSchema = AssertExtends<
-	SdkProviderListResponse,
-	OpenCodeProviderListResponse
->;
-
-type SdkProviderListEntry = SdkProviderListResponse["all"][number];
-type SdkProviderListModel = SdkProviderListEntry["models"][string];
-type SdkProviderListReadView = {
-	all: Array<{
-		id: SdkProviderListEntry["id"];
-		name: SdkProviderListEntry["name"];
-		models: Record<string, Pick<SdkProviderListModel, "id" | "name" | "limit">>;
-	}>;
-	default: SdkProviderListResponse["default"];
-	connected: SdkProviderListResponse["connected"];
-};
-type _OpenCodeProviderListCoversSdkReadView = AssertExtends<
-	NormalizeSchemaType<OpenCodeProviderListResponse>,
-	SdkProviderListReadView
->;
 // SDK 1.17.18 also declares provider api/env/npm and model release_date,
 // attachment, reasoning, temperature, tool_call, cost, modalities,
 // experimental, status, options, headers, and provider. Live servers have also
@@ -1709,176 +1566,9 @@ type _OpenCodeSdkConsumedEventsCoverSchemaEnvelopes = AssertExtends<
 	OpenCodeEvent
 >;
 
-export const OpenCodeSessionCreateRequestSchema = Schema.Struct({
-	parentID: Schema.optional(Schema.String),
-	title: Schema.optional(Schema.String),
-});
-
-export type OpenCodeSessionCreateRequest = Schema.Schema.Type<
-	typeof OpenCodeSessionCreateRequestSchema
->;
-
-type _OpenCodeSdkSessionCreateRequestCoversSchema = AssertExtends<
-	NonNullable<SessionCreateData["body"]>,
-	OpenCodeSessionCreateRequest
->;
-type _OpenCodeSessionCreateRequestCoversSdk = AssertExtends<
-	NormalizeSchemaType<OpenCodeSessionCreateRequest>,
-	NonNullable<SessionCreateData["body"]>
->;
-
-export const OpenCodeSessionUpdateRequestSchema = Schema.Struct({
-	title: Schema.optional(Schema.String),
-});
-
-export type OpenCodeSessionUpdateRequest = Schema.Schema.Type<
-	typeof OpenCodeSessionUpdateRequestSchema
->;
-
-type _OpenCodeSdkSessionUpdateRequestCoversSchema = AssertExtends<
-	NonNullable<SessionUpdateData["body"]>,
-	OpenCodeSessionUpdateRequest
->;
-type _OpenCodeSessionUpdateRequestCoversSdk = AssertExtends<
-	NormalizeSchemaType<OpenCodeSessionUpdateRequest>,
-	NonNullable<SessionUpdateData["body"]>
->;
-
-const OpenCodePartInputTimeSchema = Schema.Struct({
-	start: Schema.Number,
-	end: Schema.optional(Schema.Number),
-});
-
-const OpenCodeTextPartInputSchema = Schema.Struct({
-	id: Schema.optional(Schema.String),
-	type: Schema.Literal("text"),
-	text: Schema.String,
-	synthetic: Schema.optional(Schema.Boolean),
-	ignored: Schema.optional(Schema.Boolean),
-	time: Schema.optional(OpenCodePartInputTimeSchema),
-	metadata: Schema.optional(OpenCodeOpaquePropertiesSchema),
-});
-
-const OpenCodeFilePartInputSchema = Schema.Struct({
-	id: Schema.optional(Schema.String),
-	type: Schema.Literal("file"),
-	mime: Schema.String,
-	filename: Schema.optional(Schema.String),
-	url: Schema.String,
-	source: Schema.optional(
-		Schema.Union(
-			Schema.Struct({
-				text: Schema.Struct({
-					value: Schema.String,
-					start: Schema.Number,
-					end: Schema.Number,
-				}),
-				type: Schema.Literal("file"),
-				path: Schema.String,
-			}),
-			Schema.Struct({
-				text: Schema.Struct({
-					value: Schema.String,
-					start: Schema.Number,
-					end: Schema.Number,
-				}),
-				type: Schema.Literal("symbol"),
-				path: Schema.String,
-				range: OpenCodeRangeSchema,
-				name: Schema.String,
-				kind: Schema.Number,
-			}),
-			Schema.Struct({
-				text: Schema.Struct({
-					value: Schema.String,
-					start: Schema.Number,
-					end: Schema.Number,
-				}),
-				type: Schema.Literal("resource"),
-				clientName: Schema.String,
-				uri: Schema.String,
-			}),
-		),
-	),
-});
-
-const OpenCodeAgentPartInputSchema = Schema.Struct({
-	id: Schema.optional(Schema.String),
-	type: Schema.Literal("agent"),
-	name: Schema.String,
-	source: Schema.optional(
-		Schema.Struct({
-			value: Schema.String,
-			start: Schema.Number,
-			end: Schema.Number,
-		}),
-	),
-});
-
-const OpenCodeSubtaskPartInputSchema = Schema.Struct({
-	id: Schema.optional(Schema.String),
-	type: Schema.Literal("subtask"),
-	prompt: Schema.String,
-	description: Schema.String,
-	agent: Schema.String,
-});
-
-const OpenCodePartInputSchema = Schema.Union(
-	OpenCodeTextPartInputSchema,
-	OpenCodeFilePartInputSchema,
-	OpenCodeAgentPartInputSchema,
-	OpenCodeSubtaskPartInputSchema,
-);
-
-export const OpenCodeSessionPromptRequestSchema = Schema.Struct({
-	messageID: Schema.optional(Schema.String),
-	model: Schema.optional(OpenCodeModelRefSchema),
-	agent: Schema.optional(Schema.String),
-	noReply: Schema.optional(Schema.Boolean),
-	system: Schema.optional(Schema.String),
-	tools: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Boolean }),
-	),
-	parts: Schema.Array(OpenCodePartInputSchema),
-});
-
-export type OpenCodeSessionPromptRequest = Schema.Schema.Type<
-	typeof OpenCodeSessionPromptRequestSchema
->;
-
-type _OpenCodeSdkSessionPromptRequestCoversSchema = AssertExtends<
-	NonNullable<SessionPromptAsyncData["body"]>,
-	OpenCodeSessionPromptRequest
->;
-type _OpenCodeSessionPromptRequestCoversSdk = AssertExtends<
-	NormalizeSchemaType<OpenCodeSessionPromptRequest>,
-	NonNullable<SessionPromptAsyncData["body"]>
->;
-
-export const OpenCodePermissionReplyRequestSchema = Schema.Struct({
-	response: Schema.Literal("once", "always", "reject"),
-});
-
-export type OpenCodePermissionReplyRequest = Schema.Schema.Type<
-	typeof OpenCodePermissionReplyRequestSchema
->;
-
-type _OpenCodeSdkPermissionReplyRequestCoversSchema = AssertExtends<
-	Required<NonNullable<PermissionRespondData["body"]>>,
-	OpenCodePermissionReplyRequest
->;
-type _OpenCodePermissionReplyRequestCoversSdk = AssertExtends<
-	NormalizeSchemaType<OpenCodePermissionReplyRequest>,
-	NonNullable<PermissionRespondData["body"]>
->;
-
 export const OpenCodeQuestionReplyRequestSchema = Schema.Struct({
 	answers: Schema.Array(Schema.Array(Schema.String)),
 });
-
-export type OpenCodeQuestionReplyRequest = Schema.Schema.Type<
-	typeof OpenCodeQuestionReplyRequestSchema
->;
 
 export const OpenCodeBooleanResponseSchema = Schema.Boolean;
 const OpenCodeEmptyObjectResponseSchema = Schema.Struct({}).pipe(
@@ -1899,28 +1589,11 @@ export const decodeOpenCodeQuestionActionResponse = Schema.decodeUnknownSync(
 	Schema.Union(Schema.Boolean, OpenCodeUndefinedResponseSchema),
 );
 
-export const OpenCodeShareResponseSchema = Schema.Struct({
-	url: Schema.String,
-});
-
-export const OpenCodeDiffResponseSchema = Schema.Struct({
-	diffs: Schema.Array(
-		Schema.Struct({
-			path: Schema.String,
-			diff: Schema.String,
-		}),
-	),
-});
-
 export const OpenCodeFileEntryListResponseSchema = Schema.Array(
 	OpenCodeFileNodeSchema,
 );
 
 export const OpenCodeFileReadResponseSchema = OpenCodeFileContentSchema;
-
-export const OpenCodeFileStatusListResponseSchema = Schema.Array(
-	OpenCodeFileStatusEntrySchema,
-);
 
 export const OpenCodeVcsResponseSchema = Schema.Struct({
 	branch: Schema.optional(Schema.String),
@@ -1959,10 +1632,6 @@ export const OpenCodePendingQuestionSchema = Schema.Struct({
 	questions: Schema.Array(Schema.Unknown),
 }).pipe(Schema.extend(OpenCodeOpaquePropertiesSchema));
 
-export type OpenCodePendingQuestion = Schema.Schema.Type<
-	typeof OpenCodePendingQuestionSchema
->;
-
 export const OpenCodePendingQuestionListResponseSchema = Schema.Array(
 	OpenCodePendingQuestionSchema,
 );
@@ -1991,12 +1660,6 @@ export const decodeOpenCodeBooleanResponse = Schema.decodeUnknownSync(
 export const decodeOpenCodeUndefinedResponse = Schema.decodeUnknownSync(
 	OpenCodeUndefinedResponseSchema,
 );
-export const decodeOpenCodeShareResponse = Schema.decodeUnknownSync(
-	OpenCodeShareResponseSchema,
-);
-export const decodeOpenCodeDiffResponse = Schema.decodeUnknownSync(
-	OpenCodeDiffResponseSchema,
-);
 export const decodeOpenCodeConfigResponse = Schema.decodeUnknownSync(
 	OpenCodeConfigResponseSchema,
 );
@@ -2014,17 +1677,8 @@ export const decodeOpenCodeFileEntryListResponse = Schema.decodeUnknownSync(
 export const decodeOpenCodeFileReadResponse = Schema.decodeUnknownSync(
 	OpenCodeFileReadResponseSchema,
 );
-export const decodeOpenCodeFileStatusListResponse = Schema.decodeUnknownSync(
-	OpenCodeFileStatusListResponseSchema,
-);
-export const decodeOpenCodeFindTextResponse = Schema.decodeUnknownSync(
-	OpenCodeFindTextResponseSchema,
-);
 export const decodeOpenCodeFindFilesResponse = Schema.decodeUnknownSync(
 	OpenCodeFindFilesArrayResponseSchema,
-);
-export const decodeOpenCodeFindSymbolsResponse = Schema.decodeUnknownSync(
-	OpenCodeFindSymbolsResponseSchema,
 );
 export const decodeOpenCodeAgentListResponse = Schema.decodeUnknownSync(
 	OpenCodeAgentListResponseSchema,
@@ -2049,12 +1703,6 @@ export const decodeOpenCodePendingQuestionListResponse =
 	Schema.decodeUnknownSync(OpenCodePendingQuestionListResponseSchema);
 export const decodeOpenCodeSkillListResponse = Schema.decodeUnknownSync(
 	OpenCodeSkillListResponseSchema,
-);
-export const decodeOpenCodePermissionReplyBody = Schema.decodeUnknownSync(
-	OpenCodePermissionReplyRequestSchema,
-);
-export const encodeOpenCodePermissionReplyBody = Schema.encodeUnknownSync(
-	OpenCodePermissionReplyRequestSchema,
 );
 export const decodeOpenCodeQuestionReplyBody = Schema.decodeUnknownSync(
 	OpenCodeQuestionReplyRequestSchema,

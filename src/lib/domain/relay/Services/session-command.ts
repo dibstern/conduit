@@ -402,11 +402,11 @@ export const forkOpenCodeSession = (
 			: normalizeSessionTitle(session.title);
 		if (side) {
 			// OpenCode's later session.updated events must carry the same title.
-			// The read-only rules land before session.created is applied.
+			// The Ask rules land before session.created is applied.
 			yield* Effect.tryPromise(() =>
 				api.session.update(session.id, {
 					title,
-					permission: sideThreadPermissionRules("plan"),
+					permission: sideThreadPermissionRules("ask"),
 				}),
 			).pipe(
 				Effect.mapError(
@@ -458,7 +458,7 @@ export const forkOpenCodeSession = (
 				title,
 				provider: parent?.provider ?? "opencode",
 				parentId: parentSessionId,
-				...(side ? { sideThread: true, permissionMode: "plan" as const } : {}),
+				...(side ? { sideThread: true, permissionMode: "ask" as const } : {}),
 				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
 				providerSessionId: session.id,
 			},
@@ -556,7 +556,7 @@ const forkSessionInWorkspace = (
 			);
 			const initializedFork = options?.side
 				? fork.pipe(
-						Effect.tap((session) => setPermissionMode(session.id, "plan")),
+						Effect.tap((session) => setPermissionMode(session.id, "ask")),
 						Effect.uninterruptible,
 					)
 				: fork;
@@ -722,7 +722,7 @@ const forkSessionInWorkspace = (
 								: {}),
 							parentId: parentSessionId,
 							...(side
-								? { sideThread: true, permissionMode: "plan" as const }
+								? { sideThread: true, permissionMode: "ask" as const }
 								: {}),
 							forkPointEvent,
 							forkPointTimestamp: forkPointMessage.created_at,
@@ -758,9 +758,9 @@ const forkSessionInWorkspace = (
 							}),
 						},
 					]);
-				// Plan applies before the row is announced, so no send can reach the
+				// Ask applies before the row is announced, so no send can reach the
 				// Side Thread first.
-				if (side) yield* setPermissionMode(forked.sdkSessionId, "plan");
+				if (side) yield* setPermissionMode(forked.sdkSessionId, "ask");
 			}),
 		);
 		// The copied turns were the parent's to read, so the fork starts seen up

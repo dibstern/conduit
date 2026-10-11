@@ -9,6 +9,8 @@
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
+	import TaskDrawer from "../session/TaskDrawer.svelte";
+	import { taskDrawer } from "../session/background-tasks.svelte.js";
 	import { activeSessionView, matchSessionViewShortcut } from "./session-views.js";
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
@@ -452,9 +454,10 @@
 		const slug = attachedProjectState.slug;
 		const sessionId = getCurrentSessionId();
 		const session = sessionId ? findSession(sessionId) : undefined;
-		const primary = projectState.projects.find((project) => project.slug === slug)?.folders[0] ?? "";
+		const folders = projectState.projects.find((project) => project.slug === slug)?.folders ?? [];
+		const primary = folders[0] ?? "";
 		const directory = effectiveWorkingDirectory(primary, session?.workspace);
-		return JSON.stringify([slug, sessionId, directory]);
+		return JSON.stringify([slug, sessionId, directory, folders, session?.workspace]);
 	});
 	$effect(() => {
 		const scope = fileScope;
@@ -495,6 +498,16 @@
 			viewTodos(project, null);
 			viewInputDraft(project, null);
 		};
+	});
+	// The task drawer belongs to the session it was opened from.
+	$effect(() => {
+		void sessionState.currentId;
+		return () => {
+			taskDrawer.task = null;
+		};
+	});
+	$effect(() => {
+		if (sessionViewState.compact) taskDrawer.task = null;
 	});
 	// No null cleanup: moving within a family keeps its subscription.
 	$effect(() => {
@@ -788,7 +801,7 @@
 							</div>
 						{/if}
 						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "padding-top: var(--phone-chrome-clearance);" : `height: ${terminalHeight}px;`}>
-							<TerminalPanel onTabBarTouchStart={handleTabBarTouchStart} />
+							<TerminalPanel folders={fileTreeState.roots} onTabBarTouchStart={handleTabBarTouchStart} />
 						</div>
 					{/if}
 				</div>
@@ -833,6 +846,9 @@
 						</div>
 						{#if uiState.fileViewerOpen}<div class="absolute inset-0 flex min-h-0"><FileViewer pane {paneTitle} {paneActions} visible onClose={closeFileViewer} /></div>{/if}
 					</div>
+				{/if}
+				{#if !sessionViewState.compact && taskDrawer.task}
+					<TaskDrawer task={taskDrawer.task} />
 				{/if}
 			</div>
 			<ViewsRail />

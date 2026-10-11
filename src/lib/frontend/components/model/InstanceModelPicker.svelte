@@ -112,13 +112,13 @@
 			? discoveryState.currentModelId
 			: discoveryState.defaultModelId,
 	);
+	const activeProviderId = $derived(
+		sessionState.currentId || draftChosen
+			? discoveryState.currentProviderId
+			: discoveryState.defaultProviderId,
+	);
 	const activeModel = $derived(
-		getActiveModel(
-			activeModelId,
-			sessionState.currentId || draftChosen
-				? discoveryState.currentProviderId
-				: discoveryState.defaultProviderId,
-		),
+		getActiveModel(activeModelId, activeProviderId),
 	);
 	const hasModel = $derived(!!activeModelId);
 	// A draft model change has no server context-info refresh. Prefer its catalog
@@ -714,6 +714,11 @@
 			hoverFill="none"
 			data-testid="composer-word-model"
 			data-instance-id={selectedId}
+			data-shown-harness={selectedDriver}
+			data-shown-provider={activeProviderId ?? ""}
+			data-shown-model={activeModelId ?? ""}
+			data-shown-effort={effort.current ?? ""}
+			data-shown-context-window={selectedContext?.value ?? ""}
 			class="min-w-0 gap-[5px] rounded-md px-[5px] py-[2px] text-[11.5px] font-normal font-brand max-w-[200px] max-sm:max-w-[130px] overflow-hidden"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
@@ -756,6 +761,11 @@
 			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
+			data-shown-harness={selectedDriver}
+			data-shown-provider={activeProviderId ?? ""}
+			data-shown-model={activeModelId ?? ""}
+			data-shown-effort={effort.current ?? ""}
+			data-shown-context-window={selectedContext?.value ?? ""}
 			class="model-btn min-w-0 h-[32px] text-text-secondary font-brand hover:bg-text/7 {phone
 				? 'gap-[3px] px-[5px] rounded-[10px]'
 				: 'gap-[6px] px-[9px] rounded-[9px] text-[12px] font-semibold max-w-[260px]'} {hasModel ? '' : 'opacity-50'}"

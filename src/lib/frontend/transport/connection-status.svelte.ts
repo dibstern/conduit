@@ -79,14 +79,6 @@ export function trackControlSocket(socket: WebSocket): void {
 
 	socket.addEventListener("open", () => {
 		opened = true;
-		if (controlSocket !== socket) return;
-		lastMessageAt = Date.now();
-		connectionState.status = "connected";
-		connectionState.statusText = "Connected";
-		connectionState.attempts = 0;
-		connectionState.relayStatus = undefined;
-		connectionState.relayError = undefined;
-		wsDebugLog("rpc:open", connectionState.status);
 	});
 	socket.addEventListener("close", () => {
 		if (controlSocket !== socket) return;
@@ -101,6 +93,23 @@ export function trackControlSocket(socket: WebSocket): void {
 	});
 
 	if (attachedProjectState.slug) fetchRelayStatus(attachedProjectState.slug);
+}
+
+/**
+ * Called by the RPC protocol once it accepts the open control socket. The raw
+ * "open" event is too early: requests placed then still fail with the previous
+ * drop's error.
+ */
+export function markControlSocketOpen(): void {
+	// A socket that closed before the protocol got here has already reported it.
+	if (!controlSocket) return;
+	lastMessageAt = Date.now();
+	connectionState.status = "connected";
+	connectionState.statusText = "Connected";
+	connectionState.attempts = 0;
+	connectionState.relayStatus = undefined;
+	connectionState.relayError = undefined;
+	wsDebugLog("rpc:open", connectionState.status);
 }
 
 function reconnectIfStale(): void {

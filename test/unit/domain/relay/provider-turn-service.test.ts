@@ -230,7 +230,6 @@ const makePersistService = (
 	persistEvent: vi.fn(() => Effect.void),
 	persistEvents: vi.fn(() => Effect.void),
 	persistUserMessage,
-	persistClaudeSubagent: vi.fn(() => Effect.void),
 	ensureClaudeSubagentSession: vi.fn(() => Effect.void),
 });
 
@@ -917,7 +916,6 @@ describe("ProviderTurnService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 				instances: [
 					{
@@ -970,7 +968,6 @@ describe("ProviderTurnService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 			});
 			const engine = makeEngine({ providerId: "deleted-instance" });
@@ -1009,7 +1006,6 @@ describe("ProviderTurnService", () => {
 				tls: false,
 				debug: false,
 				keepAwake: false,
-				dangerouslySkipPermissions: false,
 				projects: [],
 			});
 			const engine = makeEngine({ providerId: "claude" });

@@ -34,6 +34,11 @@ it("preserves main's launch-folder order, paths and duplicates for an unmoved se
 		expect(result).toEqual({
 			workspaceRoot: alias,
 			extraFolders: [extra, alias],
+			effectiveFolders: [
+				{ root: alias, directory: alias },
+				{ root: extra, directory: extra },
+				{ root: alias, directory: alias },
+			],
 		});
 	} finally {
 		rmSync(root, { recursive: true, force: true });

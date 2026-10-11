@@ -74,3 +74,19 @@ Scenario: The row and dots disappear when the last task ends
   Then the background tasks row is gone
   And the background tasks pull-down is closed
   And the composer shows no task dots
+
+Scenario Outline: The pull-down nests an agent's tasks under it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session's live background tasks are an agent with 2 nested shells and a shell
+  Then the composer shows 4 task dots
+  When I click the background tasks row
+  Then the background tasks pull-down lists the agent's 2 shells indented under it
+  And the layout region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                                | threshold |
+  | phone    | session-background-tasks-nested-phone   | 98        |
+  | desktop  | session-background-tasks-nested-desktop | 98        |

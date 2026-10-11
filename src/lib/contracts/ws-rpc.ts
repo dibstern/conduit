@@ -257,6 +257,8 @@ export const HistoryMessageSchema = Schema.Struct({
 		}),
 	),
 	cost: Schema.optional(Schema.Number),
+	turnCost: Schema.optionalWith(Schema.Number, { exact: true }),
+	contextTokens: Schema.optionalWith(Schema.Number, { exact: true }),
 	tokens: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	),
@@ -640,6 +642,7 @@ export const GetStatusResponseSchema = Schema.Struct({
 		),
 	),
 	keepAwake: Schema.Boolean,
+	keepAwakeCommand: Schema.NullOr(Schema.String),
 	projects: Schema.Array(
 		Schema.Struct({
 			slug: Schema.String,
@@ -699,16 +702,28 @@ export const FindFoldersResponseSchema = Schema.Struct({
 export const GetFileTreeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	entries: Schema.Array(Schema.String),
+	/** Present only for projects with several folders, primary first. */
+	roots: Schema.optional(
+		Schema.Array(
+			Schema.Struct({
+				/** Stable Project Folder identity, independent of its mapped worktree. */
+				root: NonEmptyString,
+				label: NonEmptyString,
+			}),
+		),
+	),
 });
 
 export const GetFileListResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	root: Schema.optional(NonEmptyString),
 	path: Schema.String,
 	entries: Schema.Array(FileEntrySchema),
 });
 
 export const GetFileContentResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
+	root: Schema.optional(NonEmptyString),
 	path: Schema.String,
 	content: Schema.String,
 	binary: Schema.optional(Schema.Boolean),
@@ -818,11 +833,22 @@ export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
 	payload: {},
 }) {}
 
+export class SetPinRejected extends Schema.TaggedError<SetPinRejected>()(
+	"SetPinRejected",
+	{
+		reason: Schema.Literal("wrong_pin", "locked_out"),
+		retryAfterSeconds: Schema.optional(Schema.Number),
+	},
+) {}
+
 export class SetPin extends Schema.TaggedRequest<SetPin>()("SetPin", {
-	failure: WsRpcError,
+	failure: Schema.Union(WsRpcError, SetPinRejected),
 	success: OkResponseSchema,
 	payload: {
 		pin: Schema.NullOr(Schema.String.pipe(Schema.pattern(/^\d{4,8}$/))),
+		currentPin: Schema.optional(
+			Schema.String.pipe(Schema.pattern(/^\d{4,8}$/)),
+		),
 	},
 }) {}
 
@@ -866,11 +892,7 @@ export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()
 	{
 		failure: WsRpcError,
 		success: OkResponseSchema,
-		payload: {
-			config: Schema.optional(
-				Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-			),
-		},
+		payload: {},
 	},
 ) {}
 
@@ -1132,6 +1154,7 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
 		sessionId: Schema.optional(NonEmptyString),
+		root: Schema.optional(NonEmptyString),
 	},
 }) {}
 
@@ -1649,6 +1672,7 @@ export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
 			path: Schema.optional(Schema.String),
 		},
 	},
@@ -1662,6 +1686,7 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
 			path: NonEmptyString,
 		},
 	},
