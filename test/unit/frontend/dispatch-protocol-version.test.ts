@@ -26,7 +26,7 @@ vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 type Module =
-	typeof import("../../../src/lib/frontend/stores/server-status.js");
+	typeof import("../../../src/lib/frontend/stores/server-status.svelte.js");
 
 const status = (overrides: Partial<ServerStatus> = {}): ServerStatus => ({
 	protocolVersion: WS_PROTOCOL_VERSION,
@@ -42,7 +42,9 @@ describe("server status: protocol version", () => {
 	beforeEach(async () => {
 		vi.resetModules();
 		vi.clearAllMocks();
-		server = await import("../../../src/lib/frontend/stores/server-status.js");
+		server = await import(
+			"../../../src/lib/frontend/stores/server-status.svelte.js"
+		);
 	});
 
 	it("shows the stale-daemon banner for an older daemon and clears the reload banner", () => {

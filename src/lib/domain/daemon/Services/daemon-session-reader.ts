@@ -26,6 +26,7 @@ import type {
 	SessionInfo,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
+import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
@@ -132,14 +133,24 @@ const readProjectSessions = (
 				),
 			catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
 		});
-		return sessions.map(
-			(session): ProjectSessionCandidate => ({
-				sortKey: { updatedAt: session.updatedAt, id: session.id },
-				session: {
-					...withCachedSessionGit(session, project.folders, gitCache),
-					projectSlug,
+		return yield* Effect.forEach(sessions, (session) =>
+			withSessionWorktreeStatus(
+				withCachedSessionGit(session, project.folders, gitCache),
+				{
+					projectDir: projectDirectory,
+					slug: projectSlug,
 				},
-			}),
+			).pipe(
+				Effect.map(
+					(enriched): ProjectSessionCandidate => ({
+						sortKey: { updatedAt: session.updatedAt, id: session.id },
+						session: {
+							...enriched,
+							projectSlug,
+						},
+					}),
+				),
+			),
 		);
 	});
 
@@ -245,9 +256,11 @@ export const hasColdAutoSettleCandidate = (
 			readonly: true,
 			disableWAL: true,
 		}).pipe(Layer.provide(Reactivity.layer));
-		const facts = yield* readPersistedAutoSettleFacts(now).pipe(
-			Effect.provide(sqliteLayer),
-		);
+		const facts = yield* readPersistedAutoSettleFacts(
+			now,
+			undefined,
+			project.folders[0],
+		).pipe(Effect.provide(sqliteLayer));
 		return [...facts.values()].some((item) =>
 			shouldSettleIdleSession(item, now, idleWindowMs),
 		);

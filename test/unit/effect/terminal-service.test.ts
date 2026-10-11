@@ -1,8 +1,11 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, TestClock } from "effect";
 import { expect, vi } from "vitest";
 import type { PtyEvent } from "../../../src/lib/contracts/ws-rpc.js";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	ConfigTag,
 	type ConnectPtyUpstreamShape,
@@ -75,6 +78,7 @@ const published = (ptyManager: PtyManager): PtyEvent[] => {
 
 const makeLayer = (options?: {
 	readonly api?: OpenCodeAPI;
+	readonly instances?: OpenCodeInstances;
 	readonly ptyManager?: PtyManager;
 	readonly connectPtyUpstream?: ConnectPtyUpstreamShape;
 	readonly localPty?: LocalPtyService;
@@ -123,7 +127,7 @@ const makeLayer = (options?: {
 			Layer.mergeAll(
 				Layer.succeed(
 					OpenCodeInstancesTag,
-					makeOpenCodeInstancesStub({ opencode: api }),
+					options?.instances ?? makeOpenCodeInstancesStub({ opencode: api }),
 				),
 				Layer.succeed(PtyManagerTag, ptyManager),
 				Layer.succeed(ConnectPtyUpstreamTag, connectPtyUpstream),
@@ -137,6 +141,247 @@ const makeLayer = (options?: {
 };
 
 describe("OpenCodeTerminalServiceLive", () => {
+	it.effect(
+		"holds one reconcile lease through restoration, discovery and attachment",
+		() => {
+			let holds = 0;
+			let acquisitions = 0;
+			const phases: number[] = [];
+			const api = makeApi({
+				list: vi.fn(async () => {
+					phases.push(holds);
+					return [{ id: "external", status: "running" }];
+				}),
+			});
+			const instances = {
+				...makeOpenCodeInstancesStub({ opencode: api }),
+				useIfRunning: () =>
+					Effect.acquireRelease(
+						Effect.sync(() => {
+							holds++;
+							acquisitions++;
+							return Option.some(api);
+						}),
+						() =>
+							Effect.sync(() => {
+								holds--;
+							}),
+					),
+			};
+			const localPty = partialFake<LocalPtyService>({
+				list: () =>
+					Effect.sync(() => {
+						phases.push(holds);
+						return [];
+					}),
+			});
+			const connectPtyUpstream = () =>
+				Effect.sync(() => {
+					phases.push(holds);
+				});
+			return Effect.gen(function* () {
+				const service = yield* OpenCodeTerminalServiceTag;
+				yield* service.list();
+				expect(phases).toEqual([1, 1, 1]);
+				expect(acquisitions).toBe(1);
+				expect(holds).toBe(0);
+			}).pipe(
+				Effect.provide(
+					makeLayer({ api, instances, localPty, connectPtyUpstream }),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"a cancelled list cannot register a PTY after a later empty reconcile",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const scope = yield* Effect.scope;
+					const attaching = yield* Deferred.make<void>();
+					const release = yield* Deferred.make<void>();
+					const registered = yield* Deferred.make<void>();
+					const ptyManager = new PtyManager({ log: makeMockLogger() });
+					let present = true;
+					const api = makeApi({
+						list: vi.fn(async () =>
+							present ? [{ id: "external", status: "running" }] : [],
+						),
+					});
+					const connectPtyUpstream: ConnectPtyUpstreamShape = (id) =>
+						Effect.gen(function* () {
+							const ready = yield* Deferred.make<void>();
+							yield* Effect.gen(function* () {
+								yield* Deferred.succeed(attaching, undefined);
+								yield* Deferred.await(release);
+								ptyManager.registerSession(id, makeUpstream(), "opencode");
+								yield* Deferred.succeed(registered, undefined);
+								yield* Deferred.succeed(ready, undefined);
+							}).pipe(Effect.forkIn(scope));
+							yield* Deferred.await(ready);
+						});
+					yield* Effect.gen(function* () {
+						const service = yield* OpenCodeTerminalServiceTag;
+						const first = yield* Effect.fork(service.list());
+						yield* Deferred.await(attaching);
+						yield* Fiber.interrupt(first);
+						present = false;
+						const second = yield* Effect.fork(service.list());
+						yield* TestClock.adjust("0 millis");
+						yield* Deferred.succeed(release, undefined);
+						yield* Deferred.await(registered);
+						yield* Fiber.join(second);
+						expect(ptyManager.hasSession("external")).toBe(false);
+					}).pipe(
+						Effect.provide(makeLayer({ api, ptyManager, connectPtyUpstream })),
+					);
+				}),
+			),
+	);
+
+	it.effect("retries failed discovery without another lifecycle signal", () => {
+		const ptyManager = new PtyManager({ log: makeMockLogger() });
+		let attempts = 0;
+		const list = vi.fn(async () => {
+			if (++attempts === 1) throw new Error("temporarily unavailable");
+			return [{ id: "recovered", status: "exited" }];
+		});
+		return Effect.gen(function* () {
+			const service = yield* OpenCodeTerminalServiceTag;
+			expect(yield* service.list()).toEqual([]);
+			yield* TestClock.adjust("999 millis");
+			expect(list).toHaveBeenCalledTimes(1);
+			yield* TestClock.adjust("1 millis");
+			expect(list).toHaveBeenCalledTimes(2);
+			expect(ptyManager.hasSession("recovered")).toBe(true);
+		}).pipe(Effect.provide(makeLayer({ api: makeApi({ list }), ptyManager })));
+	});
+
+	it.effect("stops retrying failed discovery until the next signal", () => {
+		const list = vi.fn(async () => {
+			throw new Error("unavailable");
+		});
+		return Effect.gen(function* () {
+			const service = yield* OpenCodeTerminalServiceTag;
+			yield* service.list();
+			yield* TestClock.adjust("10 minutes");
+			const capped = list.mock.calls.length;
+			expect(capped).toBe(6);
+			service.onOpenCodePtysChanged("opencode");
+			yield* TestClock.adjust("1 millis");
+			expect(list).toHaveBeenCalledTimes(capped + 1);
+		}).pipe(Effect.provide(makeLayer({ api: makeApi({ list }) })));
+	});
+
+	it.effect(
+		"restores hosted local terminals on subscribe while OpenCode is stopped",
+		() => {
+			const api = makeApi();
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
+			const hosted: LocalPtySession = {
+				pty: {
+					id: "hosted",
+					title: "Shell",
+					command: "sh",
+					cwd: "/project",
+					status: "running",
+					pid: 1,
+				},
+				upstream: makeUpstream(),
+				onData: vi.fn(),
+				onExit: vi.fn(),
+			};
+			const localPty = partialFake<LocalPtyService>({
+				list: vi.fn(() => Effect.succeed([hosted.pty])),
+				attach: () => Effect.succeed(hosted),
+			});
+			const instances = {
+				...makeOpenCodeInstancesStub({ opencode: api }),
+				ifRunning: () => Effect.succeed(Option.none()),
+				useIfRunning: () => Effect.succeed(Option.none()),
+			};
+			return Effect.gen(function* () {
+				const service = yield* OpenCodeTerminalServiceTag;
+				service.onOpenCodePtysChanged("opencode");
+				yield* TestClock.adjust("0 millis");
+				expect(localPty.list).not.toHaveBeenCalled();
+				expect(yield* service.list()).toEqual([hosted.pty]);
+				expect(ptyManager.getSession(hosted.pty.id)?.source).toBe("local");
+				expect(api.pty.list).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.provide(makeLayer({ api, instances, ptyManager, localPty })),
+			);
+		},
+	);
+
+	it.effect(
+		"a failed provider delete preserves the cached PTY for reconciliation",
+		() => {
+			const ptyManager = new PtyManager({ log: makeMockLogger() });
+			const upstream = makeUpstream();
+			const row = ptyManager.registerSession("external", upstream, "opencode");
+			const api = makeApi({
+				delete: vi.fn(async () => {
+					throw new Error("delete unavailable");
+				}),
+			});
+			return Effect.gen(function* () {
+				const service = yield* OpenCodeTerminalServiceTag;
+				yield* Effect.flip(service.close("external"));
+				expect(ptyManager.getSession("external")).toBe(row);
+				expect(upstream.close).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(makeLayer({ api, ptyManager })));
+		},
+	);
+
+	it.effect(
+		"backs off, releases demand between attempts and pauses while stopped",
+		() => {
+			let running = true;
+			let holds = 0;
+			const list = vi.fn(async () => {
+				throw new Error("temporarily unavailable");
+			});
+			const api = makeApi({ list });
+			const instances = {
+				...makeOpenCodeInstancesStub({ opencode: api }),
+				useIfRunning: () =>
+					running
+						? Effect.acquireRelease(
+								Effect.sync(() => {
+									holds++;
+									return Option.some(api);
+								}),
+								() =>
+									Effect.sync(() => {
+										holds--;
+									}),
+							)
+						: Effect.succeed(Option.none()),
+			};
+			return Effect.gen(function* () {
+				const service = yield* OpenCodeTerminalServiceTag;
+				yield* service.list();
+				let reads = 1;
+				for (const delay of [1000, 2000, 4000]) {
+					expect(holds).toBe(0);
+					yield* TestClock.adjust(`${delay - 1} millis`);
+					expect(list).toHaveBeenCalledTimes(reads);
+					yield* TestClock.adjust("1 millis");
+					expect(list).toHaveBeenCalledTimes(++reads);
+				}
+				running = false;
+				yield* TestClock.adjust("8 seconds");
+				running = true;
+				yield* TestClock.adjust("60 seconds");
+				expect(list).toHaveBeenCalledTimes(reads);
+				yield* service.list();
+				expect(list).toHaveBeenCalledTimes(reads + 1);
+			}).pipe(Effect.provide(makeLayer({ api, instances })));
+		},
+	);
+
 	it.effect("creates a local terminal without requiring OpenCode PTY", () => {
 		const dataHandlers: Array<(data: string) => void> = [];
 		const exitHandlers: Array<(exitCode: number) => void> = [];

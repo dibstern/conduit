@@ -516,6 +516,15 @@ const callDaemon = <A, E>(
 	call: (client: WsRpcClient) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E, WsRpcClients> => callControl("", call);
 
+export const getServerStatusRpc = () =>
+	runTransportEffect(callDaemon((client) => client.GetStatus({})));
+
+export const restartServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.RestartWithConfig({})));
+
+export const shutdownServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,
@@ -539,6 +548,34 @@ export async function moveSessionWorkspaceRpc(input: {
 		Effect.either(
 			callControl(input.projectSlug, (client) =>
 				client.MoveSessionWorkspace(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function recreateSessionWorktreeRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.RecreateSessionWorktree(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function continueSessionInMainFolderRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.ContinueSessionInMainFolder(input),
 			),
 		),
 	);

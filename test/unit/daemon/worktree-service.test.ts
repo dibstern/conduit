@@ -17,7 +17,24 @@
  * - Git environment variables point elsewhere: operate only on the requested repository.
  * - A path beneath the owned root is an outward symlink: reject its original spelling.
  * - A project folder is a repository subdirectory: map it to that same relative folder.
- * - The tracer receives zero or several folders: reject before changing any repository.
+ * - The second repository fails after creation: remove every owned checkout and branch.
+ * - A branch exists only in a later repository: preserve it and change neither repository.
+ * - Generated branch namespaces conflict in another repository: choose one name free in all.
+ * - Non-git folders are skipped; zero git folders cannot create a worktree session.
+ * - Folders sharing a repository must map into one owned checkout on the new branch.
+ * - A missing checkout is recreated from its existing, possibly renamed branch,
+ *   preserving branch commits and the source checkout's edits.
+ * - The recovery branch is deleted or its worktree registration was pruned:
+ *   refuse recovery without guessing a branch or creating a replacement ref.
+ * - A recovery target is occupied by a directory, file or symlink: preserve it.
+ * - The recovery branch is checked out in another live worktree: refuse instead
+ *   of forcing two live checkouts onto the same branch.
+ * - Git fails before or after adding the recovered checkout: preserve the branch
+ *   and main checkout, and leave no partially populated directory.
+ * - Two recreations race for one target: only one owns it, the loser preserves it.
+ * - A recorded path points outside the owned location: refuse recovery.
+ * - The main checkout's project subfolder disappears while its isolated copy
+ *   remains: keep that checkout usable and recover through the main Git root.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -60,14 +77,27 @@ describe("daemon Worktree service", () => {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 		}).trim();
-	const repositoryState = () => ({
+	const repositoryState = (directory = repository) => ({
 		branches: git(
+			"-C",
+			directory,
 			"for-each-ref",
 			"--format=%(refname) %(objectname)",
 			"refs/heads",
 		),
-		worktrees: git("worktree", "list", "--porcelain"),
+		worktrees: git("-C", directory, "worktree", "list", "--porcelain"),
 	});
+	const secondGitFolder = () => {
+		const path = join(fixture, "second");
+		mkdirSync(path);
+		git("-C", path, "init", "-q", "--initial-branch=main");
+		git("-C", path, "config", "user.name", "Worktree test");
+		git("-C", path, "config", "user.email", "worktree@example.test");
+		writeFileSync(join(path, "tracked.txt"), "second committed\n");
+		git("-C", path, "add", ".");
+		git("-C", path, "commit", "-qm", "Second base");
+		return { ...folder, path };
+	};
 	const createEffect = (
 		branchName?: string,
 		options?: { gitExecutable?: string; gitTimeoutMs?: number },
@@ -130,6 +160,157 @@ describe("daemon Worktree service", () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
 		rmSync(fixture, { recursive: true, force: true });
+	});
+
+	it("rolls back the first repository when the second worktree fails after being added", async () => {
+		const second = secondGitFolder();
+		const before = [repositoryState(), repositoryState(second.path)];
+		const firstAdded = join(fixture, "first-added");
+		const executable = gitWrapper(
+			`${runRealGit}
+if (args.includes("worktree") && args.includes("add") && result.status === 0) {
+  if (process.cwd() === ${JSON.stringify(repository)}) writeFileSync(${JSON.stringify(firstAdded)}, "added");
+  if (process.cwd() === ${JSON.stringify(second.path)}) { console.error("forced second worktree failure"); process.exit(42); }
+}
+process.exit(result.status ?? 1);`,
+		);
+		const error = await creationError(
+			"feature/together",
+			{ gitExecutable: executable },
+			[folder, second],
+		);
+		expect(error.path).toBe(second.path);
+		expect(error.message).toContain("forced second worktree failure");
+		expect(existsSync(firstAdded)).toBe(true);
+		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
+		for (const entry of [folder, second])
+			expect(existsSync(ownedWorktreePath(configDir, entry))).toBe(false);
+	});
+
+	it.each([
+		undefined,
+		"feature/together",
+	])("creates the same branch in both git folders, requested=%s", async (branch) => {
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect(branch, undefined, [folder, second]),
+		);
+		expect(Object.keys(created.worktrees)).toEqual([repository, second.path]);
+		expect(created.ownership).toHaveLength(2);
+		for (const entry of [folder, second]) {
+			const path = created.worktrees[entry.path] ?? "";
+			expect(git("-C", path, "branch", "--show-current")).toBe(
+				created.branchName,
+			);
+			expect(git("-C", path, "rev-parse", "HEAD")).toBe(
+				git("-C", entry.path, "rev-parse", "HEAD"),
+			);
+		}
+		if (branch) expect(created.branchName).toBe(branch);
+	});
+
+	it.each([
+		"siblings",
+		"nested",
+	])("maps %s folders of one repository into the same owned checkout", async (layout) => {
+		const app = { ...folder, path: join(repository, "app") };
+		const api = { ...folder, path: join(repository, "api") };
+		mkdirSync(api.path);
+		writeFileSync(join(api.path, "api.txt"), "api committed\n");
+		git("add", ".");
+		git("commit", "-qm", "Add API");
+		const entries = layout === "siblings" ? [app, api] : [folder, app];
+		const before = repositoryState();
+		const created = await Effect.runPromise(
+			createEffect("feature/together", undefined, entries),
+		);
+		expect(created.ownership).toHaveLength(1);
+		const checkout = created.ownership[0]?.path ?? "";
+		for (const entry of entries) {
+			const path = created.worktrees[entry.path] ?? "";
+			expect(path).toBe(
+				entry.path === repository
+					? checkout
+					: join(checkout, entry.path === app.path ? "app" : "api"),
+			);
+			expect(git("-C", path, "branch", "--show-current")).toBe(
+				"feature/together",
+			);
+		}
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.rollback(created),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(repositoryState()).toEqual(before);
+		expect(existsSync(checkout)).toBe(false);
+	});
+
+	it("rejects different base commits for folders sharing a repository", async () => {
+		const extra = { ...folder, path: join(fixture, "different-base") };
+		git("worktree", "add", "-b", "different", extra.path);
+		writeFileSync(join(extra.path, "tracked.txt"), "different base\n");
+		git("-C", extra.path, "commit", "-qam", "Different base");
+		const before = repositoryState();
+		const error = await creationError("feature/together", undefined, [
+			folder,
+			extra,
+		]);
+		expect(error.reason).toBe("unsupported-project");
+		expect(error.message).toContain("different base commits");
+		expect(repositoryState()).toEqual(before);
+		for (const entry of [folder, extra])
+			expect(existsSync(ownedWorktreePath(configDir, entry))).toBe(false);
+	});
+
+	it("skips non-git folders, including a non-git primary", async () => {
+		const scratch = { ...folder, path: join(fixture, "scratch") };
+		mkdirSync(scratch.path);
+		writeFileSync(join(scratch.path, "keep.txt"), "shared\n");
+		const second = secondGitFolder();
+		const created = await Effect.runPromise(
+			createEffect(undefined, undefined, [scratch, folder, second]),
+		);
+		expect(Object.keys(created.worktrees)).toEqual([repository, second.path]);
+		expect(created.ownership).toHaveLength(2);
+		expect(existsSync(ownedWorktreePath(configDir, scratch))).toBe(false);
+		expect(readFileSync(join(scratch.path, "keep.txt"), "utf8")).toBe(
+			"shared\n",
+		);
+	});
+
+	it("preserves an explicit branch that exists only in the second repository", async () => {
+		const second = secondGitFolder();
+		git("-C", second.path, "branch", "feature/taken");
+		const before = [repositoryState(), repositoryState(second.path)];
+		const error = await creationError("feature/taken", undefined, [
+			folder,
+			second,
+		]);
+		expect(error.reason).toBe("branch-exists");
+		expect(error.path).toBe(second.path);
+		expect([repositoryState(), repositoryState(second.path)]).toEqual(before);
+		for (const entry of [folder, second])
+			expect(existsSync(ownedWorktreePath(configDir, entry))).toBe(false);
+	});
+
+	it("chooses a generated branch free in every repository namespace", async () => {
+		const second = secondGitFolder();
+		git("-C", second.path, "branch", "conduit");
+		git("branch", "conduit-session-trace-sessio");
+		const created = await Effect.runPromise(
+			createEffect(undefined, undefined, [folder, second]),
+		);
+		expect(created.branchName).toBe("conduit-session-trace-sessio-2");
+		for (const entry of [folder, second])
+			expect(
+				git(
+					"-C",
+					created.worktrees[entry.path] ?? "",
+					"branch",
+					"--show-current",
+				),
+			).toBe(created.branchName);
 	});
 
 	it("creates under the daemon root from the current branch and can roll it back", async () => {
@@ -420,13 +601,219 @@ finish();
 		).toBe("app committed\n");
 	});
 
-	it.each([0, 2])("rejects %s folders before doing any work", async (count) => {
+	const recreateEffect = (
+		directory?: string,
+		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+	) =>
+		Effect.flatMap(WorktreeServiceTag, (service) =>
+			service.recreate(folder, directory),
+		).pipe(Effect.provide(makeWorktreeLive(configDir, options)));
+	const recoveryError = async (
+		directory?: string,
+		options?: { gitExecutable?: string; gitTimeoutMs?: number },
+	) => {
+		const result = await Effect.runPromise(
+			Effect.either(recreateEffect(directory, options)),
+		);
+		if (Either.isRight(result)) throw new Error("Expected recreation to fail");
+		return result.left;
+	};
+	const inspectMissing = (directory?: string) =>
+		Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.inspectMissing(folder, directory),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+
+	it("recreates a missing checkout from the registered renamed branch without changing its ref", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		git("-C", path, "branch", "-m", "renamed-session");
+		writeFileSync(join(path, "tracked.txt"), "branch commit\n");
+		git("-C", path, "commit", "-qam", "Session commit");
+		const head = git("rev-parse", "renamed-session");
+		writeFileSync(join(repository, "tracked.txt"), "main edit\n");
+		const main = git("status", "--porcelain");
+		rmSync(path, { recursive: true });
+		expect(await inspectMissing()).toEqual({
+			path,
+			branch: "renamed-session",
+			canRecreate: true,
+		});
+		expect(await Effect.runPromise(recreateEffect())).toBe(path);
+		expect(await inspectMissing()).toBeUndefined();
+		expect(git("-C", path, "branch", "--show-current")).toBe("renamed-session");
+		expect(git("-C", path, "rev-parse", "HEAD")).toBe(head);
+		expect(readFileSync(join(path, "tracked.txt"), "utf8")).toBe(
+			"branch commit\n",
+		);
+		expect(git("status", "--porcelain")).toBe(main);
+	});
+
+	it("refuses a deleted branch and reports why recreation is unavailable", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		git("update-ref", "-d", `refs/heads/${created.branchName}`);
 		const before = repositoryState();
-		const folders = Array.from({ length: count }, () => folder);
-		expect((await creationError(undefined, undefined, folders)).reason).toBe(
+		expect(await inspectMissing()).toEqual({
+			path,
+			branch: created.branchName,
+			canRecreate: false,
+			reason: "branch-missing",
+		});
+		expect((await recoveryError()).reason).toBe("branch-missing");
+		assertUnchanged(before);
+	});
+
+	it("does not guess a branch after the missing worktree registration was pruned", async () => {
+		const created = await Effect.runPromise(createEffect());
+		rmSync(created.worktrees[repository] ?? "", { recursive: true });
+		git("worktree", "prune");
+		const before = repositoryState();
+		expect((await inspectMissing())?.reason).toBe("branch-unknown");
+		expect((await recoveryError()).reason).toBe("branch-unknown");
+		assertUnchanged(before);
+	});
+
+	it("refuses a recovery branch checked out in another live worktree", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		const other = join(fixture, "other-checkout");
+		git("worktree", "add", "--force", other, created.branchName);
+		const before = repositoryState();
+		expect(await inspectMissing()).toEqual({
+			path,
+			branch: created.branchName,
+			canRecreate: false,
+			reason: "branch-in-use",
+		});
+		expect((await recoveryError()).reason).toBe("branch-in-use");
+		assertUnchanged(before);
+		expect(git("-C", other, "branch", "--show-current")).toBe(
+			created.branchName,
+		);
+	});
+
+	it.each([
+		"directory",
+		"file",
+		"symlink",
+	])("preserves an occupied recovery target: %s", async (kind) => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		if (kind === "directory") {
+			mkdirSync(path);
+			writeFileSync(join(path, "keep.txt"), "keep\n");
+		} else if (kind === "file") writeFileSync(path, "keep\n");
+		else symlinkSync(repository, path);
+		const before = repositoryState();
+		expect((await inspectMissing())?.canRecreate).toBe(true);
+		expect((await recoveryError()).reason).toBe("target-exists");
+		expect(repositoryState()).toEqual(before);
+		expect(existsSync(path)).toBe(true);
+		if (kind !== "symlink")
+			expect(
+				readFileSync(
+					kind === "directory" ? join(path, "keep.txt") : path,
+					"utf8",
+				),
+			).toBe("keep\n");
+		expect(readFileSync(join(repository, "tracked.txt"), "utf8")).toBe(
+			"committed\n",
+		);
+	});
+
+	it.each([
+		false,
+		true,
+	])("preserves the branch when Git recreation fails, after add=%s", async (afterAdd) => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		const head = git("rev-parse", created.branchName);
+		rmSync(path, { recursive: true });
+		const executable = gitWrapper(
+			`if (args.includes("worktree") && args.includes("add")) { ${afterAdd ? runRealGit : ""} console.error("forced recreation failure"); process.exit(42); }\n${runRealGit}\nprocess.exit(result.status ?? 1);`,
+		);
+		const error = await recoveryError(undefined, { gitExecutable: executable });
+		expect(error.reason).toBe("git-failed");
+		expect(error.message).toContain("forced recreation failure");
+		expect(git("rev-parse", created.branchName)).toBe(head);
+		expect(git("status", "--porcelain")).toBe("");
+		expect(existsSync(path)).toBe(false);
+		expect((await inspectMissing())?.canRecreate).toBe(true);
+	});
+
+	it("preserves the winning checkout when two recreations race", async () => {
+		const created = await Effect.runPromise(createEffect());
+		const path = created.worktrees[repository] ?? "";
+		rmSync(path, { recursive: true });
+		const results = await Promise.all([
+			Effect.runPromise(Effect.either(recreateEffect())),
+			Effect.runPromise(Effect.either(recreateEffect())),
+		]);
+		expect(results.filter(Either.isRight)).toHaveLength(1);
+		expect(
+			results.filter(Either.isLeft).map(({ left }) => left.reason),
+		).toEqual(["target-exists"]);
+		expect(git("-C", path, "branch", "--show-current")).toBe(
+			created.branchName,
+		);
+	});
+
+	it("recreates a repository subdirectory at its original mapping", async () => {
+		folder = { ...folder, path: join(repository, "app") };
+		const created = await Effect.runPromise(createEffect());
+		const directory = created.worktrees[folder.path] ?? "";
+		rmSync(ownedWorktreePath(configDir, folder), { recursive: true });
+		expect(await Effect.runPromise(recreateEffect(directory))).toBe(directory);
+		expect(readFileSync(join(directory, "app.txt"), "utf8")).toBe(
+			"app committed\n",
+		);
+	});
+
+	it("keeps and recreates the isolated subfolder when its main copy is missing", async () => {
+		folder = { ...folder, path: join(repository, "app") };
+		const created = await Effect.runPromise(createEffect());
+		const directory = created.worktrees[folder.path] ?? "";
+		rmSync(folder.path, { recursive: true });
+		expect(await inspectMissing(directory)).toBeUndefined();
+		const main = git("status", "--porcelain");
+		rmSync(ownedWorktreePath(configDir, folder), { recursive: true });
+		expect((await inspectMissing(directory))?.canRecreate).toBe(true);
+		expect(await Effect.runPromise(recreateEffect(directory))).toBe(directory);
+		expect(readFileSync(join(directory, "app.txt"), "utf8")).toBe(
+			"app committed\n",
+		);
+		expect(git("status", "--porcelain")).toBe(main);
+		expect(existsSync(folder.path)).toBe(false);
+	});
+
+	it("refuses a path outside the owned location", async () => {
+		const before = repositoryState();
+		expect((await recoveryError(join(fixture, "unowned"))).reason).toBe(
+			"not-owned",
+		);
+		assertUnchanged(before);
+	});
+
+	it("rejects an empty folder list before doing any work", async () => {
+		const before = repositoryState();
+		expect((await creationError(undefined, undefined, [])).reason).toBe(
 			"unsupported-project",
 		);
 		assertUnchanged(before);
+	});
+
+	it("rejects a project with no git folders without creating anything", async () => {
+		const scratch = { ...folder, path: join(fixture, "scratch") };
+		mkdirSync(scratch.path);
+		expect((await creationError(undefined, undefined, [scratch])).reason).toBe(
+			"unsupported-project",
+		);
+		expect(existsSync(worktreesRoot(configDir))).toBe(false);
 	});
 
 	it("guards the root and descendants, including symlink aliases and absent children", () => {

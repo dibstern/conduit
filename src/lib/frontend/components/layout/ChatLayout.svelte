@@ -532,9 +532,8 @@
 		};
 	});
 	$effect(() => {
-		const connection = attachedProjectState.slug ?? "";
-		untrack(() => followDaemonLists(connection));
-		return () => followDaemonLists(null);
+		followDaemonLists(true);
+		return () => followDaemonLists(false);
 	});
 	// The version is daemon-wide, so it follows the connection, not the project:
 	// a reconnect after a restart can be a new build.

@@ -165,6 +165,8 @@ const relayOpenCodeInstances = (
 					),
 				),
 		use,
+		useIfRunning: (instanceId, directory = scope) =>
+			instances.useIfRunning(target(instanceId), directory),
 		ifRunning: (instanceId, directory = scope) =>
 			instances.ifRunning(target(instanceId), directory),
 		stop: (instanceId) => instances.stop(target(instanceId)),

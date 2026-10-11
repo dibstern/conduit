@@ -31,6 +31,20 @@ describe("PtyManager", () => {
 		expect(mgr.hasSession("pty-1")).toBe(true);
 	});
 
+	it("rejects provider registration when a local terminal now owns the id", () => {
+		const mgr = new PtyManager({ log: createSilentLogger() });
+		const local = createMockUpstream();
+		const session = mgr.registerSession("collision", local, "local");
+		mgr.appendScrollback("collision", "local output");
+		expect(mgr.registerSession("collision", createMockUpstream())).toBe(
+			session,
+		);
+		expect(mgr.getSession("collision")?.source).toBe("local");
+		expect(mgr.getScrollback("collision")).toBe("local output");
+		expect(local.close).not.toHaveBeenCalled();
+		expect(local.terminate).not.toHaveBeenCalled();
+	});
+
 	it("getSession returns the session state", () => {
 		const mgr = new PtyManager({ log: createSilentLogger() });
 		const mockUpstream = createMockUpstream();
