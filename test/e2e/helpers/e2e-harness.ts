@@ -155,7 +155,7 @@ export interface ReplayHarness {
 const CLAUDE_TRACE_MODEL = "claude-fable-5";
 
 /** Create a relay-owned replay session over the typed WS RPC. */
-async function createSession(
+export async function createSession(
 	relayPort: number,
 	providerId: "claude" | "opencode",
 	instanceId?: string,
