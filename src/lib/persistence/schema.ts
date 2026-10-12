@@ -79,8 +79,10 @@ export const SESSIONS_PENDING_REWIND_MIGRATION =
 export const MESSAGE_PART_VERSIONS_MIGRATION = "0050_message_part_versions.sql";
 export const SESSION_GIT_PUBLISHED_MIGRATION = "0051_session_git_published.sql";
 export const STORE_IDENTITY_MIGRATION = "0052_store_identity.sql";
+export const EVENTS_UNSTAMPED_INDEX_MIGRATION =
+	"0053_events_unstamped_index.sql";
 export const EVENTS_SESSION_TYPE_INDEX_MIGRATION =
-	"0053_events_session_type_index.sql";
+	"0054_events_session_type_index.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

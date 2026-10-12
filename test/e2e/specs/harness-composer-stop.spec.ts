@@ -1,8 +1,16 @@
 // Real browser/RPC/runner IPC, with the task-stop SDK's independent result and
 // confirmation gates. Query marks prove continuity, including the runner PID.
+// Run with --workers=1 to collect all stop-and-run scenarios in one JSON artifact.
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import type { TestInfo } from "@playwright/test";
 import { Effect } from "effect";
 import {
 	responseChunks,
@@ -34,6 +42,8 @@ function marks(harness: ProcessHarness): Record<string, unknown>[] {
 }
 
 test.afterEach(async ({ page, harness }, testInfo) => {
+	if (testInfo.title.startsWith("stop and run:"))
+		recordStopAndRun(harness, testInfo);
 	const report = testInfo.outputPath("composer-stop-report.json");
 	writeFileSync(
 		report,
@@ -80,6 +90,36 @@ test.afterEach(async ({ page, harness }, testInfo) => {
 function queryMarks(harness: ProcessHarness, queryId: string, kind: string) {
 	return marks(harness).filter(
 		(mark) => mark["queryId"] === queryId && mark["kind"] === kind,
+	);
+}
+
+function recordStopAndRun(harness: ProcessHarness, testInfo: TestInfo) {
+	const artifact = join("test-results", "7hjw-stop-and-run.json");
+	mkdirSync("test-results", { recursive: true });
+	const previous: unknown = existsSync(artifact)
+		? JSON.parse(readFileSync(artifact, "utf8"))
+		: {};
+	if (!previous || typeof previous !== "object" || Array.isArray(previous))
+		throw new Error("Invalid stop-and-run artifact");
+	const observed = marks(harness);
+	writeFileSync(
+		artifact,
+		JSON.stringify(
+			{
+				...previous,
+				[`${testInfo.project.name}/${testInfo.title}`]: {
+					status: testInfo.status,
+					requests: observed
+						.filter((mark) => mark["kind"] === "enqueue")
+						.map((mark) => mark["request"]),
+					interruptObserved: observed.some(
+						(mark) => mark["kind"] === "query-interrupted",
+					),
+				},
+			},
+			null,
+			2,
+		),
 	);
 }
 
@@ -278,6 +318,139 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 		4,
 	);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
+});
+
+test("stop and run: a slash command interrupts a never-ending turn from the composer", async ({
+	page,
+	harness,
+}) => {
+	const { app, chat, queryId } = await start(page, harness);
+	await app.input.fill("/goal clear");
+	await app.input.press("ControlOrMeta+Enter");
+	await expect
+		.poll(() => queryMarks(harness, queryId, "query-interrupted").length)
+		.toBe(1);
+	await expect
+		.poll(() =>
+			marks(harness)
+				.filter((mark) => mark["kind"] === "enqueue")
+				.map((mark) => mark["request"]),
+		)
+		.toEqual(["task-stop-foreground-turn-only", "/goal clear"]);
+	await expect(app.input).toHaveValue("");
+	await expect(page.getByTestId("composer-steer-refused")).toHaveCount(0);
+	await expect(chat.stopBtn).toBeHidden();
+	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+});
+
+test("stop and run: Run now sends the command ahead of the queued message and drains both", async ({
+	page,
+	harness,
+	isMobile,
+}) => {
+	const { app, chat, queryId } = await start(page, harness);
+	for (const text of ["after-command", "/goal clear"]) {
+		await app.input.fill(text);
+		// Mobile Enter inserts a newline; its Send button uses the same queue delivery.
+		if (isMobile) await app.sendBtn.click();
+		else await app.input.press("Enter");
+	}
+	await expect(page.getByTestId("pending-input-text")).toHaveText([
+		"after-command",
+		"/goal clear",
+	]);
+	const command = page
+		.getByTestId("pending-input-row")
+		.filter({ hasText: "/goal clear" });
+	await expect(command.getByTestId("pending-input-steer")).toHaveText(
+		"Run now",
+	);
+	await command.getByRole("button", { name: "Run now", exact: true }).click();
+	await expect
+		.poll(() => queryMarks(harness, queryId, "query-interrupted").length)
+		.toBe(1);
+	await expect
+		.poll(() =>
+			marks(harness)
+				.filter((mark) => mark["kind"] === "enqueue")
+				.map((mark) => mark["request"]),
+		)
+		.toEqual([
+			"task-stop-foreground-turn-only",
+			"/goal clear",
+			"after-command",
+		]);
+	await expect
+		.poll(() => chat.getLastAssistantText())
+		.toBe(responseChunks("after-command").join(""));
+	await expect(chat.stopBtn).toBeHidden();
+	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+});
+
+test("stop and run: an open question still refuses the command without interrupting", async ({
+	page,
+	harness,
+}) => {
+	const browser = await harness.connect();
+	const sessionId = await browser.createSession("Stop-and-run question proof");
+	const app = new AppPage(page);
+	await app.goto(`${harness.baseUrl}/s/${sessionId}`);
+	await app.sendMessage("question-stop-and-run");
+	await expect(page.locator(".question-card")).toBeVisible();
+	await app.input.fill("/goal clear");
+	await app.input.press("ControlOrMeta+Enter");
+	await expect(page.getByTestId("composer-steer-refused")).toContainText(
+		"Answer the open prompt first.",
+	);
+	await expect(app.input).toHaveValue("/goal clear");
+	await expect(page.locator(".question-card")).toBeVisible();
+	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+	expect(
+		marks(harness)
+			.filter((mark) => mark["kind"] === "enqueue")
+			.map((mark) => mark["request"]),
+	).toEqual(["question-stop-and-run"]);
+	expect(
+		marks(harness).filter((mark) => mark["kind"] === "query-interrupted"),
+	).toEqual([]);
+});
+
+test("stop and run: an interrupt failure keeps the command queued and first when the turn ends", async ({
+	page,
+	harness,
+}) => {
+	const { app, chat, queryId } = await start(
+		page,
+		harness,
+		"correction-reject-monitor",
+	);
+	await app.sendMessage("after-command");
+	await app.input.fill("/goal clear");
+	await app.input.press("ControlOrMeta+Enter");
+	await expect
+		.poll(() => queryMarks(harness, queryId, "query-interrupt-rejected").length)
+		.toBe(1);
+	await expect(app.input).toHaveValue("");
+	await expect(page.getByTestId("composer-steer-refused")).toHaveCount(0);
+	await expect(chat.stopBtn).toBeVisible();
+	await expect(page.getByTestId("pending-input-text")).toHaveText([
+		"after-command",
+		"/goal clear",
+	]);
+	writeFileSync(join(harness.root, "task-stop-release-result"), "release");
+	await expect
+		.poll(() =>
+			marks(harness)
+				.filter((mark) => mark["kind"] === "enqueue")
+				.map((mark) => mark["request"]),
+		)
+		.toEqual([
+			"task-stop-foreground-correction-reject-monitor",
+			"/goal clear",
+			"after-command",
+		]);
+	await expect(chat.stopBtn).toBeHidden();
+	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
 });
 
 test("a Monitor counts as live work and the toast disappears on session navigation", async ({

@@ -87,6 +87,7 @@ const expectedNames = [
 	"message_part_versions",
 	"session_git_published",
 	"store_identity",
+	"events_unstamped_index",
 	"events_session_type_index",
 ];
 const legacyNames = [
@@ -165,6 +166,7 @@ describe("Effect migration lineage", () => {
 					52,
 					53,
 					54,
+					55,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -329,8 +331,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 54", () => {
-		expect(migrationEntries).toHaveLength(54);
+	it("registers the contiguous production chain from 1 through 55", () => {
+		expect(migrationEntries).toHaveLength(55);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -364,7 +366,8 @@ describe("Effect migration lineage", () => {
 					[51, "message_part_versions"],
 					[52, "session_git_published"],
 					[53, "store_identity"],
-					[54, "events_session_type_index"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				const after = yield* sql<{ migration_id: number; name: string }>`
 					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
@@ -413,7 +416,8 @@ describe("Effect migration lineage", () => {
 					[51, "message_part_versions"],
 					[52, "session_git_published"],
 					[53, "store_identity"],
-					[54, "events_session_type_index"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -467,7 +471,8 @@ describe("Effect migration lineage", () => {
 					[51, "message_part_versions"],
 					[52, "session_git_published"],
 					[53, "store_identity"],
-					[54, "events_session_type_index"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1051,7 +1056,8 @@ describe("Effect migration lineage", () => {
 				[51, "message_part_versions"],
 				[52, "session_git_published"],
 				[53, "store_identity"],
-				[54, "events_session_type_index"],
+				[54, "events_unstamped_index"],
+				[55, "events_session_type_index"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1142,7 +1148,8 @@ describe("Effect migration lineage", () => {
 					[51, "message_part_versions"],
 					[52, "session_git_published"],
 					[53, "store_identity"],
-					[54, "events_session_type_index"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				const rows = yield* sql<{
 					id: string;

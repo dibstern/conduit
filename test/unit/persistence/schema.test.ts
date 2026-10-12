@@ -22,11 +22,11 @@ describe("Schema Migration", () => {
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(
 					Object.fromEntries(
-						Object.entries(effectMigrationEntries).slice(0, 53),
+						Object.entries(effectMigrationEntries).slice(0, 54),
 					),
 				);
 				expect(yield* makeEffectSqlMigrator()).toEqual([
-					[54, "events_session_type_index"],
+					[55, "events_session_type_index"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -140,6 +140,7 @@ describe("Schema Migration", () => {
 					unique: true,
 				},
 				{ name: "idx_events_type", table: "events", unique: false },
+				{ name: "idx_events_unstamped", table: "events", unique: false },
 				{
 					name: "idx_message_part_tombstones_session_version",
 					table: "message_part_tombstones",

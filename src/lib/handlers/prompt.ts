@@ -77,6 +77,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			sessionId: activeId,
 			...(sessionModel ? { model: sessionModel } : {}),
 			modelUserSelected: sessionModelUserSelected,
+			...(input.delivery === "steer" ? { delivery: input.delivery } : {}),
 		});
 		// Talking to a settled or snoozed session brings it back. Triage bookkeeping must
 		// never stop the message itself, so a failure here is only logged.

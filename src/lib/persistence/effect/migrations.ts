@@ -8,6 +8,7 @@ import {
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
+	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
@@ -1162,7 +1163,10 @@ export const effectMigrationEntries = {
 	"0053_store_identity": executeSqlStatements(
 		readMigrationSql(STORE_IDENTITY_MIGRATION),
 	),
-	"0054_events_session_type_index": executeSqlStatements(
+	"0054_events_unstamped_index": executeSqlStatements(
+		readMigrationSql(EVENTS_UNSTAMPED_INDEX_MIGRATION),
+	),
+	"0055_events_session_type_index": executeSqlStatements(
 		readMigrationSql(EVENTS_SESSION_TYPE_INDEX_MIGRATION),
 	),
 } satisfies Record<

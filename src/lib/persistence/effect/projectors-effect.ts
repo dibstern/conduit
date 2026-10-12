@@ -1664,6 +1664,7 @@ export const makeInputProjector = (): EffectProjector => ({
 		"input.admitted",
 		"input.sent",
 		"input.cancelled",
+		"input.interrupt_requested",
 		"message.created",
 	],
 	project: (event: StoredEvent, ctx: ProjectionContext) =>
@@ -1682,6 +1683,10 @@ export const makeInputProjector = (): EffectProjector => ({
 						RETURNING session_id`,
 				);
 			}
+
+			// The interrupt marker stays in events; the input remains queued.
+			if (isEventType(event, "input.interrupt_requested"))
+				return [event.data.sessionId];
 
 			// Sent as a steer, the input stays in the tray until its message lands.
 			// Otherwise it starts its own turn and leaves now.
