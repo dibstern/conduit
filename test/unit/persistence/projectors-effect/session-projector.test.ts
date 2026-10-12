@@ -1,5 +1,6 @@
 // test/unit/persistence/projectors-effect/session-projector.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AUTO_TITLE_SOURCE } from "../../../../src/lib/contracts/session-title.js";
 import type { ClaudeWorktreeState } from "../../../../src/lib/contracts/session-workspace.js";
 import {
 	createAllEffectProjectors,
@@ -737,6 +738,128 @@ describe("SessionProjector", () => {
 			);
 			expect(row?.title).toBe("Renamed Session");
 			expect(row?.updated_at).toBe(now + 1000);
+		});
+
+		// Title rules (ticket o4yo.2): each event is appended to the store as
+		// applySessionCommand would, so the auto-title guard can see prior renames.
+		const rename = (
+			sequence: number,
+			title: string,
+			source?: typeof AUTO_TITLE_SOURCE,
+		): StoredEvent => ({
+			...makeStored(
+				"session.renamed",
+				"s1",
+				{ sessionId: "s1", title } satisfies SessionRenamedPayload,
+				sequence,
+				now + sequence,
+			),
+			metadata: source ? { source } : {},
+		});
+
+		async function append(event: StoredEvent): Promise<void> {
+			await harness.query(
+				`INSERT INTO events (project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				[
+					event.projectId,
+					event.sequence,
+					event.eventId,
+					event.sessionId,
+					event.streamVersion,
+					event.type,
+					JSON.stringify(event.data),
+					JSON.stringify(event.metadata),
+					event.provider,
+					event.createdAt,
+				],
+			);
+		}
+
+		async function appendAndProject(event: StoredEvent): Promise<void> {
+			await append(event);
+			await project(event);
+		}
+
+		async function titleAfter(...events: StoredEvent[]): Promise<string> {
+			await appendAndProject(
+				makeStored(
+					"session.created",
+					"s1",
+					{
+						sessionId: "s1",
+						title: "Untitled",
+						provider: "opencode",
+					} satisfies SessionCreatedPayload,
+					1,
+					now,
+				),
+			);
+			for (const event of events) await appendAndProject(event);
+			const row = await queryOne<SessionRow>(
+				"SELECT title FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			return row?.title ?? "";
+		}
+
+		it("applies an auto-title after placeholder renames", async () => {
+			expect(
+				await titleAfter(
+					rename(2, "Untitled"),
+					rename(3, "New session - 2026-10-12T00:00:00.000Z"),
+					rename(4, "Fix Header Selector", AUTO_TITLE_SOURCE),
+				),
+			).toBe("Fix Header Selector");
+		});
+
+		it("skips an auto-title after a real manual rename", async () => {
+			expect(
+				await titleAfter(
+					rename(2, "Manual Title"),
+					rename(3, "Fix Header Selector", AUTO_TITLE_SOURCE),
+				),
+			).toBe("Manual Title");
+		});
+
+		it("keeps an auto-title when the provider echoes it back", async () => {
+			expect(
+				await titleAfter(
+					rename(2, "Fix Header Selector", AUTO_TITLE_SOURCE),
+					rename(3, "Fix Header Selector"),
+				),
+			).toBe("Fix Header Selector");
+		});
+
+		it("never lets a placeholder rename replace a real title", async () => {
+			expect(
+				await titleAfter(
+					rename(2, "Fix Header Selector", AUTO_TITLE_SOURCE),
+					rename(3, "Untitled"),
+					rename(4, "New session - 2026-10-12T00:00:00.000Z"),
+				),
+			).toBe("Fix Header Selector");
+		});
+
+		it("lets a manual rename appended before the auto-title win once projected", async () => {
+			const manual = rename(2, "Manual Title");
+			expect(await titleAfter()).toBe("Untitled");
+			await append(manual);
+			await appendAndProject(
+				rename(3, "Fix Header Selector", AUTO_TITLE_SOURCE),
+			);
+			const raced = await queryOne<SessionRow>(
+				"SELECT title FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			expect(raced?.title).toBe("Untitled");
+
+			await project(manual);
+			const row = await queryOne<SessionRow>(
+				"SELECT title FROM sessions WHERE id = ?",
+				["s1"],
+			);
+			expect(row?.title).toBe("Manual Title");
 		});
 	});
 

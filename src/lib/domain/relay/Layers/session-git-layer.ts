@@ -1,4 +1,5 @@
 import { channel } from "node:diagnostics_channel";
+import { lstat } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
 import { type Context, Effect, Layer, Option, Schema } from "effect";
@@ -70,6 +71,24 @@ export const SessionGitLive = Layer.effect(
 			});
 			daemonSessionGitCache.seed(row.directory, git.value);
 		}
+		// Settled-only folders still need a disk read after a restart. A failed
+		// read looks like no git, so a folder that still exists gets a few full
+		// refreshes to return git before it is left to its next turn.
+		const startupDirectories = new Map(
+			[...published.keys()].map((directory) => [directory, 3]),
+		);
+		const settleStartup = (next: typeof published) =>
+			Effect.gen(function* () {
+				for (const [directory, attempts] of startupDirectories) {
+					const gone = yield* Effect.tryPromise(() => lstat(directory)).pipe(
+						Effect.as(false),
+						Effect.orElseSucceed(() => true),
+					);
+					if (next.get(directory)?.git !== undefined || gone || attempts <= 1)
+						startupDirectories.delete(directory);
+					else startupDirectories.set(directory, attempts - 1);
+				}
+			});
 		let queued:
 			| {
 					all: boolean;
@@ -113,6 +132,9 @@ export const SessionGitLive = Layer.effect(
 											])
 										: [],
 								);
+								if (request.all)
+									for (const directory of startupDirectories.keys())
+										directories.set(directory, true);
 								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
 									if (
@@ -184,6 +206,7 @@ export const SessionGitLive = Layer.effect(
 										read: fromDisk,
 										changed: changed.size,
 									} satisfies SessionGitRefresh);
+								if (request.all) yield* settleStartup(next);
 								if (changed.size === 0) continue;
 								// Git lives in the cache, so version both the session and its sidebar
 								// row without changing recency or storing the branch. Recheck workspace

@@ -454,13 +454,25 @@ describe("subscription RPC handlers", () => {
 					}
 					const resumed = Array.from(
 						yield* subscribe(cursor).pipe(
-							Stream.take(member === "SubscribeShell" ? 2 : 3),
+							Stream.take(member === "SubscribeShell" ? 2 : 4),
 							Stream.runCollect,
 						),
 					);
 					expect(resumed.at(-1)).toEqual({ _tag: "synchronized" });
-					// Both catch up from the cursor.
-					expect(resumed.slice(0, -1)).toMatchObject(expected);
+					// Both catch up from the cursor; the detail re-sends its held
+					// rows as they stand, since its checksum covers only the transcript.
+					expect(resumed.slice(0, -1)).toMatchObject(
+						member === "SubscribeShell"
+							? expected
+							: [
+									...expected,
+									{
+										_tag: "upsert",
+										sequence: liveVersion,
+										item: { _tag: "rewind", messageId: null },
+									},
+								],
+					);
 				}).pipe(Effect.provide(makeLayer())),
 			{ timeout: 10000 },
 		);

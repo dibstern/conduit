@@ -3,7 +3,10 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect } from "vitest";
-import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
+import {
+	effectMigrationEntries,
+	makeEffectSqlMigrator,
+} from "../../../src/lib/persistence/effect/migrations.js";
 
 // A fresh in-memory store per test, migrated the way production migrates it.
 const migratedStore = Layer.effectDiscard(makeEffectSqlMigrator()).pipe(
@@ -12,6 +15,33 @@ const migratedStore = Layer.effectDiscard(makeEffectSqlMigrator()).pipe(
 const T = 1_000_000_000_000;
 
 describe("Schema Migration", () => {
+	// Guard the index with the launch-ownership lookup used by list reads.
+	it.effect(
+		"indexes launch ownership by session and event type when upgrading an existing store",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(
+					Object.fromEntries(
+						Object.entries(effectMigrationEntries).slice(0, 54),
+					),
+				);
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[55, "events_session_type_index"],
+				]);
+				const sql = yield* SqlClient.SqlClient;
+				const plan = yield* sql<{ detail: string }>`
+				EXPLAIN QUERY PLAN
+				SELECT EXISTS(SELECT 1 FROM events WHERE session_id = 'launched-session'
+					AND type = 'session.workspace_changed' AND json_extract(data, '$.cause') = 'launch'
+					AND json_extract(data, '$.origin') = 'conduit'
+					AND json_array_length(data, '$.ownership') > 0) AS owned`;
+				expect(plan.map(({ detail }) => detail)).toContain(
+					"SEARCH events USING INDEX idx_events_session_type (session_id=? AND type=?)",
+				);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
+	);
+
 	it.effect("creates all durable event-store tables", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -96,6 +126,11 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_events_session_seq",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_session_type",
 					table: "events",
 					unique: false,
 				},

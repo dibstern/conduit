@@ -316,6 +316,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 52, name: "session_git_published" },
 				{ migration_id: 53, name: "store_identity" },
 				{ migration_id: 54, name: "events_unstamped_index" },
+				{ migration_id: 55, name: "events_session_type_index" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

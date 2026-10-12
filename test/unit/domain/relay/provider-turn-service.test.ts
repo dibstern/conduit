@@ -252,8 +252,24 @@ const makeProviderState = (
 	...overrides,
 });
 
+const withPlaceholderSession = (
+	readQuery: ReadQueryEffect,
+): ReadQueryEffect => ({
+	...readQuery,
+	getSession: vi.fn(() =>
+		Effect.succeed(
+			partialFake<SessionRow>({
+				id: "session-1",
+				title: "Untitled",
+				side_thread: 0,
+				goal_state: null,
+			}),
+		),
+	),
+});
+
 const makeTitleService = (): SessionTitleService => ({
-	startForFirstClaudeMessage: vi.fn(() => Effect.void),
+	titleFromMessage: vi.fn(() => Effect.void),
 });
 
 const makeIngestion = (
@@ -834,15 +850,15 @@ describe("ProviderTurnService", () => {
 		() => {
 			const engine = makeEngine();
 			const events: string[] = [];
-			const readQuery = makeReadQuery(vi.fn(() => Effect.succeed([])));
+			const readQuery = withPlaceholderSession(
+				makeReadQuery(vi.fn(() => Effect.succeed([]))),
+			);
 			const persist = makePersistService(
 				vi.fn(() => Effect.sync(() => events.push("persist"))),
 			);
 			const ingestion = makeIngestion();
 			const titleService: SessionTitleService = {
-				startForFirstClaudeMessage: vi.fn(() =>
-					Effect.sync(() => events.push("title")),
-				),
+				titleFromMessage: vi.fn(() => Effect.sync(() => events.push("title"))),
 			};
 			const providerState = makeProviderState({
 				nativeThread: vi.fn(() =>
@@ -1004,6 +1020,29 @@ describe("ProviderTurnService", () => {
 		},
 	);
 
+	it.effect("does not start title generation for a continuation turn", () => {
+		const engine = makeEngine({ providerId: "claude" });
+		const titleService = makeTitleService();
+		const { layer } = serviceLayer({
+			engine,
+			readQuery: withPlaceholderSession(
+				makeReadQuery(vi.fn(() => Effect.succeed([]))),
+			),
+			titleService,
+		});
+
+		return Effect.gen(function* () {
+			yield* sendTurn({
+				continuation: { cutOffMessageId: "message-cut-off" },
+			});
+
+			expect(titleService.titleFromMessage).not.toHaveBeenCalled();
+			expect(engine.dispatchEffect).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "send_turn" }),
+			);
+		}).pipe(Effect.provide(layer));
+	});
+
 	it.effect(
 		"dispatches a later Claude turn without starting title generation",
 		() => {
@@ -1038,7 +1077,7 @@ describe("ProviderTurnService", () => {
 				yield* sendTurn();
 
 				expect(persist.persistUserMessage).not.toHaveBeenCalled();
-				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
+				expect(titleService.titleFromMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",
@@ -1093,7 +1132,7 @@ describe("ProviderTurnService", () => {
 				expect(readQuery.getSessionHistoryMetadata).toHaveBeenCalledWith(
 					"session-1",
 				);
-				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
+				expect(titleService.titleFromMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						input: expect.objectContaining({ history: [] }),
@@ -1303,7 +1342,7 @@ describe("ProviderTurnService", () => {
 
 				expect(readQuery.getSessionMessagesWithParts).not.toHaveBeenCalled();
 				expect(persist.persistUserMessage).not.toHaveBeenCalled();
-				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
+				expect(titleService.titleFromMessage).not.toHaveBeenCalled();
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",

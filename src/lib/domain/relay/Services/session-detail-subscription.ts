@@ -41,6 +41,7 @@ import {
 	messageRowsToHistory,
 	newestRowsWithin,
 	PAGE_FRAME_BUDGET,
+	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
@@ -117,8 +118,13 @@ const messageRowGroups = (
 		];
 	});
 
-/** The most messages a first page holds; a catch-up past it is a snapshot. */
-const PAGE_MESSAGES = 50;
+/**
+ * The most messages a catch-up onto the page a resume point names carries.
+ * Only a snapshot replaces a saved page, so every open from it catches up
+ * from the same point and the catch-up grows with each change since: past a
+ * few turns, a snapshot is sent to be saved instead (conduit-test-y7eo.18).
+ */
+const SAVED_PAGE_CATCH_UP_MESSAGES = 10;
 
 const partRowId = (messageId: string, partId: string) =>
 	Schema.encodeSync(PartRemovalId)([messageId, partId]);
@@ -204,6 +210,9 @@ export const subscribeSessionDetail = (options: {
 			);
 			// A saved snapshot resumes from the base its point names; a point
 			// this store did not send for this session gets a fresh snapshot.
+			// A client resuming from that very base holds the page as saved.
+			const fromSavedPage =
+				point !== undefined && options.resumeFromSequence === point.sequence;
 			const resume =
 				options.resumePoint === undefined
 					? options
@@ -231,6 +240,17 @@ export const subscribeSessionDetail = (options: {
 							// whatever transcript page it returns.
 							const held = (through: number) =>
 								Effect.gen(function* () {
+									// So does a resume, as they stand at its read: it starts from
+									// the newest version the client was sent, which may have been
+									// cut short, and the checksum covers only the transcript.
+									const resuming =
+										range?.after !== undefined && range.through === undefined;
+									const moved = (version: number) =>
+										range === undefined ||
+										resuming ||
+										(version > (range.after ?? -1) && version <= through);
+									const at = (version: number) =>
+										resuming ? through : Math.min(version, through);
 									const pending = yield* readQuery.readPendingInputs(
 										options.sessionId,
 										{
@@ -240,12 +260,17 @@ export const subscribeSessionDetail = (options: {
 											through,
 										},
 									);
-									const inputs = pending.rows.map(({ version, ...input }) => ({
+									const current = resuming
+										? yield* readQuery.readPendingInputs(options.sessionId, {
+												through,
+											})
+										: pending;
+									const inputs = current.rows.map(({ version, ...input }) => ({
 										item: {
 											_tag: "pendingInput" as const,
 											input,
 										} satisfies SessionDetailItem,
-										version,
+										version: at(version),
 									}));
 									// The inbox state moves with the session row. A base read
 									// always carries it; a window carries it when the row moved
@@ -254,10 +279,7 @@ export const subscribeSessionDetail = (options: {
 										options.sessionId,
 									);
 									const inboxRows =
-										inbox &&
-										(range === undefined ||
-											(inbox.version > (range.after ?? -1) &&
-												inbox.version <= through))
+										inbox && moved(inbox.version)
 											? [
 													{
 														item: {
@@ -276,7 +298,7 @@ export const subscribeSessionDetail = (options: {
 																	: "no_steering",
 															},
 														} satisfies SessionDetailItem,
-														version: Math.min(inbox.version, through),
+														version: at(inbox.version),
 													},
 												]
 											: [];
@@ -285,10 +307,7 @@ export const subscribeSessionDetail = (options: {
 										options.sessionId,
 									);
 									const rewindRows =
-										session &&
-										(range === undefined ||
-											(session.version > (range.after ?? -1) &&
-												session.version <= through))
+										session && moved(session.version)
 											? [
 													{
 														item: {
@@ -296,7 +315,7 @@ export const subscribeSessionDetail = (options: {
 															messageId:
 																session.pending_rewind_message_id ?? null,
 														} satisfies SessionDetailItem,
-														version: Math.min(session.version, through),
+														version: at(session.version),
 													},
 												]
 											: [];
@@ -391,7 +410,8 @@ export const subscribeSessionDetail = (options: {
 										? [item.message.id]
 										: [],
 							),
-						).size <= PAGE_MESSAGES &&
+						).size <=
+							(fromSavedPage ? SAVED_PAGE_CATCH_UP_MESSAGES : PAGE_MESSAGES) &&
 						newestRowsWithin(rows, PAGE_FRAME_BUDGET).length === rows.length,
 					resume: "catchUp",
 				},

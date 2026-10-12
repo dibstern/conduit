@@ -169,8 +169,8 @@ describe("session detail removal over WebSocket", () => {
 					.get("removed-part") as { version: number };
 
 				// Only what moved: the part's removal and its message's header, not
-				// the part that stayed.
-				expect(await resume(harness, sessionId, cursor.value, 3)).toMatchObject(
+				// the part that stayed, then the held rows every resume re-sends.
+				expect(await resume(harness, sessionId, cursor.value, 4)).toMatchObject(
 					[
 						{
 							_tag: "remove",
@@ -180,6 +180,11 @@ describe("session detail removal over WebSocket", () => {
 						{
 							_tag: "upsert",
 							item: { _tag: "message", message: { id: messageId } },
+							sequence: removal.version,
+						},
+						{
+							_tag: "upsert",
+							item: { _tag: "rewind", messageId: null },
 							sequence: removal.version,
 						},
 						{ _tag: "synchronized" },

@@ -292,6 +292,8 @@ export interface ProjectRelayConfig {
 	messagePollerInterval?: number;
 	/** SQLite event-store path for Effect-native persistence services. */
 	persistenceDbPath: string;
+	/** Test seam: replaces only the session-title query. Overrides `claudeSdk.titleQuery`. */
+	titleQuery?: import("./domain/relay/Services/claude-title-generator.js").ClaudeTitleQueryFactory;
 	/**
 	 * Test seam: replaces Claude session queries, title generation and forks.
 	 * Directly supplied fakes run Claude sessions in-process.
@@ -301,7 +303,7 @@ export interface ProjectRelayConfig {
 		readonly query: NonNullable<
 			import("./provider/claude/claude-provider-runtime.js").ClaudeProviderInstanceDeps["queryFactory"]
 		>;
-		readonly titleQuery: import("./domain/relay/Services/session-title-service.js").ClaudeTitleQueryFactory;
+		readonly titleQuery: import("./domain/relay/Services/claude-title-generator.js").ClaudeTitleQueryFactory;
 		readonly fork: import("./provider/claude/claude-session-fork.js").ClaudeSessionForkSdk;
 		/** Agent transcript reads; defaults to the real SDK's. */
 		readonly subagentSdk?: import("./provider/claude/claude-subagent-materializer.js").ClaudeSubagentSdk;

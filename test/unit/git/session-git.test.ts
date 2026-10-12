@@ -151,7 +151,134 @@ describe("readSessionGit", () => {
 		commit(directory, "feature-file");
 		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
 	});
-	it("prefers a resolving origin HEAD over local main", async () => {
+	it.each([
+		["main", "--no-ff"],
+		["main", "--ff-only"],
+		["master", "--no-ff"],
+		["master", "--ff-only"],
+	])("recognises a local %s %s merge while origin is stale, until the local branch resets", async (local, strategy) => {
+		const directory = repo();
+		commit(directory, "initial");
+		const initial = git(directory, "rev-parse", "HEAD");
+		if (local === "master") git(directory, "branch", "master");
+		git(directory, "update-ref", "refs/remotes/origin/main", initial);
+		git(
+			directory,
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/main",
+		);
+		git(directory, "checkout", "-qb", "feature");
+		commit(directory, "feature-file");
+		const tip = git(directory, "rev-parse", "HEAD");
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
+		git(directory, "checkout", "-q", local);
+		git(directory, "merge", strategy, "-q", "feature");
+		git(directory, "checkout", "-q", "feature");
+		expect(git(directory, "rev-parse", "origin/main")).toBe(initial);
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+		git(directory, "update-ref", `refs/heads/${local}`, initial);
+		const reset = await readSessionGit(directory);
+		expect(reset).toMatchObject({ merged: false });
+		expect(reset).not.toHaveProperty("mergedHead");
+	});
+	it.each([
+		"main",
+		"master",
+	])("uses local %s when origin HEAD points to a missing ref", async (local) => {
+		const directory = repo();
+		commit(directory, "initial");
+		if (local === "master") git(directory, "branch", "-m", "master");
+		git(
+			directory,
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/missing",
+		);
+		git(directory, "checkout", "-qb", "feature");
+		commit(directory, "feature-file");
+		const tip = git(directory, "rev-parse", "HEAD");
+		git(directory, "checkout", "-q", local);
+		git(directory, "merge", "--ff-only", "-q", "feature");
+		git(directory, "checkout", "-q", "feature");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+	});
+	it.each([
+		"main",
+		"master",
+		"trunk",
+	])("never marks default branch %s merged when multiple defaults contain its tip", async (branch) => {
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "branch", "master");
+		git(directory, "branch", "trunk");
+		git(directory, "checkout", "-q", branch);
+		commit(directory, "default-file");
+		git(directory, "update-ref", "refs/remotes/origin/trunk", "HEAD");
+		git(
+			directory,
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/trunk",
+		);
+		const state = await readSessionGit(directory);
+		expect(state).toMatchObject({ branch, merged: false });
+		expect(state).not.toHaveProperty("mergedHead");
+	});
+	it.each([
+		"main",
+		"master",
+	])("checks the creation-time history of local %s even when origin already contains the tip", async (local) => {
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+		const directory = repo();
+		commit(directory, "initial");
+		if (local === "master") git(directory, "branch", "master");
+		git(directory, "checkout", "-qb", "work");
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:01:00Z");
+		commit(directory, "feature-file");
+		const tip = git(directory, "rev-parse", "HEAD");
+		git(directory, "update-ref", "refs/remotes/origin/trunk", tip);
+		git(
+			directory,
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/trunk",
+		);
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
+		git(directory, "checkout", "-qb", "feature");
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
+		git(directory, "checkout", "-q", local);
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
+		git(directory, "merge", "--ff-only", "-q", "feature");
+		git(directory, "checkout", "-q", "feature");
+		expect(await readSessionGit(directory)).toMatchObject({
+			merged: true,
+			mergedHead: tip,
+		});
+		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:04:00Z");
+		git(directory, "checkout", "-qb", "fresh", local);
+		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
+	});
+	it("keeps squash merges undetected", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "checkout", "-qb", "feature");
+		commit(directory, "feature-file");
+		git(directory, "checkout", "-q", "main");
+		git(directory, "merge", "--squash", "-q", "feature");
+		git(directory, "commit", "-qm", "Squash feature");
+		git(directory, "checkout", "-q", "feature");
+		const state = await readSessionGit(directory);
+		expect(state).toMatchObject({ merged: false });
+		expect(state).not.toHaveProperty("mergedHead");
+	});
+	it("detects a merge in origin's default branch when local main is stale", async () => {
 		const directory = repo();
 		commit(directory, "initial");
 		git(directory, "checkout", "-qb", "feature");

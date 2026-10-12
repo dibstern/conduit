@@ -13,6 +13,10 @@ import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
 import {
+	type AutoTitleSource,
+	UNTITLED_SESSION_TITLE,
+} from "../../../contracts/session-title.js";
+import {
 	loadDaemonConfig,
 	resolveClaudeInstanceConfigDir,
 	resolveProviderRoutingDriver,
@@ -112,6 +116,7 @@ export interface SessionUpstreamAdapter {
 }
 
 export interface ApplySessionCommandOptions {
+	readonly source?: AutoTitleSource;
 	/** Join a caller's canonical commit, without publishing before that commit. */
 	readonly project?: CommitAndSignalProject;
 	/**
@@ -238,7 +243,7 @@ export const applySessionCommand = (
 				canonicalEvent(command.type, sessionId, command.data, {
 					provider: appendProvider,
 					createdAt: Date.now(),
-					metadata: { source: "relay" },
+					metadata: { source: options.source ?? "relay" },
 				}),
 			];
 			yield* (
@@ -254,6 +259,30 @@ export const applySessionCommand = (
 						}),
 				),
 			);
+		}
+
+		// ADR-0004: the local write is authoritative. A rejected rename must
+		// not reach upstream and echo back over the winning local title.
+		if (
+			appendProvider !== undefined &&
+			command.type === "session.renamed" &&
+			options.project === undefined
+		) {
+			const projected = yield* readQuery.getSession(sessionId).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionCommandError({
+							operation: `${command.type}.getSession`,
+							cause,
+						}),
+				),
+			);
+			if (projected?.title !== command.data.title) {
+				log.debug("Skipping upstream sync for unapplied session rename", {
+					sessionId,
+				});
+				return;
+			}
 		}
 
 		const adapter =
@@ -284,7 +313,7 @@ export const applySessionCommand = (
 
 export const normalizeSessionTitle = (title?: string): string => {
 	const trimmed = title?.trim();
-	return trimmed ? trimmed : "Untitled";
+	return trimmed ? trimmed : UNTITLED_SESSION_TITLE;
 };
 
 /**
@@ -311,8 +340,10 @@ export const createOpenCodeSession = (
 
 		// No retry: create is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
+			// "Untitled" keeps OpenCode's own titler, which only renames
+			// "New session - <ISO>" titles, off sessions Conduit titles itself.
 			api.session.create({
-				...(title ? { title } : {}),
+				title: normalizeSessionTitle(title),
 				...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
 			}),
 		).pipe(

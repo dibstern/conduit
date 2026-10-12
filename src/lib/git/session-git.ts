@@ -51,15 +51,19 @@ const operationAt = (gitDir: string): SessionGit["operation"] => {
 	return undefined;
 };
 
-const defaultRef = async (directory: string): Promise<string | undefined> => {
+const defaultRefs = async (directory: string): Promise<string[]> => {
+	const refs: string[] = [];
 	const origin = await git(
 		directory,
 		"symbolic-ref",
 		"-q",
 		"refs/remotes/origin/HEAD",
 	);
-	if (origin && (await git(directory, "rev-parse", "--verify", "-q", origin)))
-		return origin;
+	if (
+		origin &&
+		(await git(directory, "rev-parse", "--verify", "-q", `${origin}^{commit}`))
+	)
+		refs.push(origin);
 	const locals = await git(
 		directory,
 		"for-each-ref",
@@ -67,10 +71,14 @@ const defaultRef = async (directory: string): Promise<string | undefined> => {
 		"refs/heads/main",
 		"refs/heads/master",
 	);
-	return (
-		locals?.split("\n").find((ref) => ref === "refs/heads/main") ??
-		locals?.split("\n").find((ref) => ref === "refs/heads/master")
+	refs.push(
+		...(locals
+			?.split("\n")
+			.filter(
+				(ref) => ref === "refs/heads/main" || ref === "refs/heads/master",
+			) ?? []),
 	);
+	return refs;
 };
 
 export async function readSessionGit(
@@ -133,25 +141,32 @@ export async function readSessionGit(
 			...(operation ? { operation } : {}),
 		};
 		if (!branch) return result;
-		const defaultBranch = await defaultRef(directory);
-		if (!defaultBranch) return result;
+		const defaultBranches = await defaultRefs(directory);
+		if (defaultBranches.length === 0) return result;
 		if (
-			`refs/heads/${branch}` === defaultBranch ||
-			branch === defaultBranch.replace(/^refs\/remotes\/origin\//, "")
+			defaultBranches.some(
+				(ref) =>
+					`refs/heads/${branch}` === ref ||
+					branch === ref.replace(/^refs\/remotes\/origin\//, ""),
+			)
 		) {
 			return { ...result, merged: false };
 		}
 		if (!head) return { ...result, merged: false };
 		const tip = await git(directory, "rev-parse", `refs/heads/${branch}`);
 		if (!tip) return { ...result, merged: false };
-		const ancestor = await git(
-			directory,
-			"merge-base",
-			"--is-ancestor",
-			tip,
-			defaultBranch,
-		);
-		if (ancestor === undefined) return { ...result, merged: false };
+		const containingDefaults: string[] = [];
+		for (const ref of defaultBranches) {
+			const ancestor = await git(
+				directory,
+				"merge-base",
+				"--is-ancestor",
+				tip,
+				ref,
+			);
+			if (ancestor !== undefined) containingDefaults.push(ref);
+		}
+		if (containingDefaults.length === 0) return { ...result, merged: false };
 		const reflog = await git(
 			directory,
 			"reflog",
@@ -172,17 +187,20 @@ export async function readSessionGit(
 			// ref at creation must exclude the tip; a fresh branch on default is
 			// not merged work. Date lookup also resolves a clone's first fetch's old SHA.
 			const createdAt = new Date(Number(creation[2]) * 1_000).toISOString();
-			const previousDefault = await git(
-				directory,
-				"rev-parse",
-				"--verify",
-				"-q",
-				`${defaultBranch}@{${createdAt}}`,
-			);
-			const base = previousDefault
-				? await git(directory, "merge-base", tip, previousDefault)
-				: undefined;
-			merged = base !== undefined && base !== tip;
+			for (const ref of containingDefaults) {
+				const previousDefault = await git(
+					directory,
+					"rev-parse",
+					"--verify",
+					"-q",
+					`${ref}@{${createdAt}}`,
+				);
+				const base = previousDefault
+					? await git(directory, "merge-base", tip, previousDefault)
+					: undefined;
+				merged = base !== undefined && base !== tip;
+				if (merged) break;
+			}
 		}
 		return {
 			...result,

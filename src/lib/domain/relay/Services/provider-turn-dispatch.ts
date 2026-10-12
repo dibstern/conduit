@@ -13,6 +13,7 @@ import {
 	Schema,
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { MissingWorktreeError } from "../../../contracts/worktree.js";
 import {
@@ -637,14 +638,16 @@ const prepareEngineTurnInput = (
 			if (stream._tag === "Some")
 				yield* stream.value.includeDirectory(folders.workspaceRoot);
 		}
-		const isFirstClaudeMessage =
-			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const inputId = resolvedInput.commandId;
-		if (isFirstClaudeMessage && !resolvedInput.continuation) {
+		if (
+			sessionRow &&
+			!resolvedInput.continuation &&
+			isPlaceholderTitle(sessionRow.title)
+		) {
 			const titleService = yield* SessionTitleServiceTag;
-			yield* titleService.startForFirstClaudeMessage({
+			yield* titleService.titleFromMessage({
 				sessionId: resolvedInput.sessionId,
-				firstMessage: resolvedInput.text,
+				message: resolvedInput.text,
 			});
 		}
 
