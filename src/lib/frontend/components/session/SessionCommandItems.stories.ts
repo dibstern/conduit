@@ -15,7 +15,7 @@ type Story = StoryObj<typeof meta>;
 export const Menu: Story = {
 	play: async () => {
 		const menu = await within(document.body).findByRole("menu", {
-			name: "Session verbs",
+			name: "Session commands",
 		});
 		await expect(within(menu).getByTestId("command-demo-settle")).toBeVisible();
 		await expect(within(menu).getByTestId("command-demo-auto")).toHaveAttribute(
@@ -33,7 +33,7 @@ export const Sheet: Story = {
 	parameters: { viewport: { defaultViewport: "mobile1" } },
 	play: async () => {
 		const menu = await within(document.body).findByRole("menu", {
-			name: "Session verbs",
+			name: "Session commands",
 		});
 		for (const id of [
 			"command-demo-settle",

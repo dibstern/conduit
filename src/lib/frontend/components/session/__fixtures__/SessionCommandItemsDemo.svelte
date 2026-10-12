@@ -13,7 +13,7 @@
 	];
 </script>
 
-<Menu open presentation={presentation === "sheet" ? "sheet" : "popover"} ariaLabel="Session verbs">
-	{#snippet trigger({ props })}<button {...props} type="button">Session verbs</button>{/snippet}
+<Menu open presentation={presentation === "sheet" ? "sheet" : "popover"} ariaLabel="Session commands">
+	{#snippet trigger({ props })}<button {...props} type="button">Session commands</button>{/snippet}
 	<SessionCommandItems {commands} {presentation} onselect={(run) => run()} />
 </Menu>
