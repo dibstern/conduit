@@ -624,8 +624,11 @@ export interface EventPayloadMap {
 	"input.cancelled": InputCancelledPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
-	"session.rewound": { readonly messageId: string };
-	"session.rewind_undone": Record<string, never>;
+	"session.rewound": {
+		readonly messageId: string;
+		readonly previousMessageId?: string | null;
+	};
+	"session.rewind_undone": { readonly previousMessageId?: string | null };
 	"session.rewind_committed": { readonly messageId: string };
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
 	"session.workspace_hint_changed": SessionWorkspaceHintChangedPayload;
@@ -1513,8 +1516,19 @@ export const CanonicalEventSchema = Schema.Union(
 	InputCancelledEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
-	eventEnvelope("session.rewound", Schema.Struct({ messageId: Schema.String })),
-	eventEnvelope("session.rewind_undone", Schema.Struct({})),
+	eventEnvelope(
+		"session.rewound",
+		Schema.Struct({
+			messageId: Schema.String,
+			previousMessageId: Schema.optional(Schema.NullOr(Schema.String)),
+		}),
+	),
+	eventEnvelope(
+		"session.rewind_undone",
+		Schema.Struct({
+			previousMessageId: Schema.optional(Schema.NullOr(Schema.String)),
+		}),
+	),
 	eventEnvelope(
 		"session.rewind_committed",
 		Schema.Struct({ messageId: Schema.String }),

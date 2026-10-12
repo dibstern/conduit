@@ -41,6 +41,7 @@ import {
 	messageRowsToHistory,
 	newestRowsWithin,
 	PAGE_FRAME_BUDGET,
+	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
@@ -116,9 +117,6 @@ const messageRowGroups = (
 				: []),
 		];
 	});
-
-/** The most messages a first page holds; a catch-up past it is a snapshot. */
-const PAGE_MESSAGES = 50;
 
 /**
  * The most messages a catch-up onto the page a resume point names carries.

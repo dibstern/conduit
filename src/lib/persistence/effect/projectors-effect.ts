@@ -18,6 +18,7 @@ import {
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
+import { PAGE_MESSAGES } from "../session-history-adapter.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -190,27 +191,66 @@ const stampMessage = (
 			}
 			stamped.push(...owners(rows));
 		}
-		// Reconciliation can move the cut across otherwise unchanged messages.
-		// Re-query every sibling in live transcript deltas when that cut moves.
-		if (messageIds.length > 0) {
-			const rows = yield* sql<OwnedRow>`UPDATE messages SET version = ${version}
-				WHERE session_id IN (
-					SELECT id FROM sessions WHERE pending_rewind_message_id IN ${sql.in(messageIds)}
-				)
-				RETURNING session_id`;
-			// A message the moved cut restores comes back with its parts.
-			if (rows.length > 0)
-				yield* sql`UPDATE message_parts SET version = ${version}
-					WHERE message_id IN (
-						SELECT id FROM messages WHERE session_id IN ${sql.in(owners(rows))}
-					)`;
-			stamped.push(...owners(rows));
-		}
 		// A message row that vanished under its own event went with the session
 		// that owned it, and the session projector reports that removal by name.
 		// Nothing to add here: the missing id is a message id, and the advance
 		// speaks in sessions.
 		return { stamped, removed: [] };
+	});
+
+interface RewindCut {
+	readonly id: string;
+	readonly created_at: number;
+}
+
+const restampRewind = (
+	sessionId: string,
+	previousCut: RewindCut | null | undefined,
+	cut: RewindCut | null | undefined,
+	version: number,
+): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Old events did not carry the preceding cut. A missing cut row also
+		// leaves its ordering unknown, so preserve the full-restamp behavior.
+		if (previousCut === undefined || cut === undefined) {
+			yield* sql`UPDATE message_parts SET version = ${version}
+				WHERE message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId})`;
+			return ids(
+				yield* sql<{
+					id: string;
+				}>`SELECT id FROM messages WHERE session_id = ${sessionId}`,
+			);
+		}
+		const boundary = previousCut ?? cut;
+		// Either range starts at the earlier cut in SQLite's (created_at, id)
+		// ordering. Null means no pending cut, i.e. no hidden messages.
+		const affected =
+			previousCut && cut
+				? sql`(created_at, id) >= (${previousCut.created_at}, ${previousCut.id})
+					OR (created_at, id) >= (${cut.created_at}, ${cut.id})`
+				: boundary
+					? sql`(created_at, id) >= (${boundary.created_at}, ${boundary.id})`
+					: sql.literal("0");
+		const visible = cut
+			? sql`(created_at, id) < (${cut.created_at}, ${cut.id})`
+			: sql.literal("1");
+		const restored = previousCut
+			? sql`(created_at, id) >= (${previousCut.created_at}, ${previousCut.id})`
+			: sql.literal("0");
+		const page = sql`SELECT id FROM messages WHERE session_id = ${sessionId}
+			AND ${visible} ORDER BY created_at DESC, id DESC LIMIT ${PAGE_MESSAGES}`;
+		// Hidden messages need only headers for removals. Restored messages and
+		// the visible page before the new cut need their parts and headers whole.
+		yield* sql`UPDATE message_parts SET version = ${version} WHERE message_id IN (
+			SELECT id FROM messages WHERE session_id = ${sessionId} AND ${restored} AND ${visible}
+			UNION SELECT id FROM (${page})
+		)`;
+		return ids(
+			yield* sql<{ id: string }>`SELECT id FROM messages
+				WHERE session_id = ${sessionId} AND (${affected})
+				UNION SELECT id FROM (${page})`,
+		);
 	});
 
 function encodeJson(value: unknown): string {
@@ -397,16 +437,24 @@ export const makeMessageProjector = (): EffectProjector => ({
 				isEventType(event, "session.rewound") ||
 				isEventType(event, "session.rewind_undone")
 			) {
-				// A browser drops a hidden message's parts with it, so a message
-				// this restores needs its parts again, not only its header. The
-				// cut it replaced is already cleared, so every part moves.
-				yield* sql`UPDATE message_parts SET version = ${ctx.version}
-					WHERE message_id IN (
-						SELECT id FROM messages WHERE session_id = ${event.sessionId}
-					)`;
-				const rows = yield* sql<{ id: string }>`
-					SELECT id FROM messages WHERE session_id = ${event.sessionId}`;
-				return ids(rows);
+				const previousId = event.data.previousMessageId;
+				const cutId = isEventType(event, "session.rewound")
+					? event.data.messageId
+					: null;
+				const cutIds = [previousId, cutId].filter(
+					(id): id is string => typeof id === "string",
+				);
+				const cuts =
+					previousId === undefined || cutIds.length === 0
+						? []
+						: yield* sql<RewindCut>`SELECT id, created_at FROM messages
+							WHERE session_id = ${event.sessionId} AND id IN ${sql.in(cutIds)}`;
+				return yield* restampRewind(
+					event.sessionId,
+					previousId === null ? null : cuts.find(({ id }) => id === previousId),
+					cutId === null ? null : cuts.find(({ id }) => id === cutId),
+					ctx.version,
+				);
 			}
 			// A turn that ends without thinking.end must not leave thinking open.
 			const closeThinking = (messageId: string) =>
@@ -472,8 +520,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 					)
 					.map((part) => part["text"])
 					.join("");
-				const existing = yield* sql<{ is_backfilled: number }>`
-					SELECT is_backfilled FROM messages WHERE id = ${message.id}`;
+				// Only snapshots can change a stored message's ordering clock. Drive
+				// the cut lookup from this message's primary key, never scan sessions
+				// on ordinary writes or restamp siblings when the clock is unchanged.
+				const existing = yield* sql<{
+					is_backfilled: number;
+					created_at: number;
+					rewind_session_id: string | null;
+				}>`SELECT m.is_backfilled, m.created_at, s.id AS rewind_session_id
+					FROM messages m LEFT JOIN sessions s
+						ON s.id = m.session_id AND s.pending_rewind_message_id = m.id
+					WHERE m.id = ${message.id}`;
 				const written = yield* sql<{ id: string }>`
 					INSERT INTO messages
 					(id, session_id, role, text, cost, tokens_in, tokens_out,
@@ -552,7 +609,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
 						 ${encodeJson(part)}, ${ctx.version})`;
 				}
-				return written.map((row) => row.id);
+				const previous = existing[0];
+				const moved =
+					previous?.rewind_session_id && previous.created_at !== created
+						? yield* restampRewind(
+								previous.rewind_session_id,
+								{ id: message.id, created_at: previous.created_at },
+								{ id: message.id, created_at: created },
+								ctx.version,
+							)
+						: [];
+				return [...ids(written), ...moved];
 			}
 
 			if (isEventType(event, "message.part.removed")) {

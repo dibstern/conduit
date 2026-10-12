@@ -104,7 +104,10 @@ export const rewindSessionToMessage = ({
 					canonicalEvent(
 						"session.rewound",
 						sessionId,
-						{ messageId },
+						{
+							messageId,
+							previousMessageId: row.pending_rewind_message_id ?? null,
+						},
 						{ provider: row.provider },
 					),
 				);
@@ -143,7 +146,7 @@ export const undoSessionRewind = ({
 					canonicalEvent(
 						"session.rewind_undone",
 						sessionId,
-						{},
+						{ previousMessageId: row.pending_rewind_message_id },
 						{ provider: row.provider },
 					),
 				);
