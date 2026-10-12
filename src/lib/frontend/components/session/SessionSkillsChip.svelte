@@ -4,7 +4,7 @@
 	skill spends no width on it.
 -->
 <script lang="ts">
-	import { onDestroy, tick } from "svelte";
+	import { onDestroy, tick, untrack } from "svelte";
 	import { reveal } from "../../stores/reveal.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import {
@@ -39,7 +39,7 @@
 
 	const sessionId = $derived(placedSessionId());
 	$effect(() => {
-		if (sessionId) void loadSessionSkills(sessionId);
+		if (sessionId) void untrack(() => loadSessionSkills(sessionId));
 	});
 
 	const rows = $derived(

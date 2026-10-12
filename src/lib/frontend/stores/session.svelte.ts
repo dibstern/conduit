@@ -610,6 +610,11 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	// status it has. Key on parentID, not shell membership: a root that gains a
 	// parent leaves the shell, and its family row is the one kept current.
 	if (change._tag === "snapshot") {
+		// A bounded rebase can omit a child that finished while disconnected.
+		for (const row of previousRows.values()) {
+			if (row.parentID !== undefined && !next.rows.has(row.id) && isBusy(row))
+				followSessionBusy(row.id, false);
+		}
 		for (const row of next.rows.values()) {
 			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
 		}

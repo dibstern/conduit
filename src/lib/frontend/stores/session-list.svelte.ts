@@ -3,6 +3,7 @@ import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import {
 	applySessionChange,
+	discardForeignSavedShell,
 	noteTransportDrop,
 	sessionSubscription,
 	setShellFeedStatus,
@@ -12,6 +13,7 @@ import { type FeedStatus, supervise } from "../transport/supervise.js";
 import type { SessionInfo } from "../types.js";
 import { flushPendingSeen } from "../utils/attention.js";
 import { getCurrentSlug } from "./router.svelte.js";
+import { saveShell } from "./saved-shell.js";
 import {
 	clearSessionSearch,
 	getFilteredSessions,
@@ -21,6 +23,9 @@ import {
 	searchSessions,
 	sessionState,
 } from "./session.svelte.js";
+
+/** Paint the device's saved sidebar rows until the live snapshot lands. */
+export { drawSavedShell } from "../transport/session-subscription.svelte.js";
 
 type ProjectRef = string;
 type SessionRow = SessionInfo;
@@ -100,6 +105,7 @@ export const sessionList: SessionListView = {
 
 let attachGeneration = 0;
 let shellFiber: RuntimeFiber<void, unknown> | null = null;
+let shellSaveTimer: ReturnType<typeof setTimeout> | undefined;
 let attachedProject: ProjectRef | null = null;
 const shellSynchronizedListeners = new Set<(project: ProjectRef) => void>();
 
@@ -111,6 +117,8 @@ export function onShellSynchronized(
 }
 
 async function stopShell(): Promise<void> {
+	clearTimeout(shellSaveTimer);
+	shellSaveTimer = undefined;
 	const fiber = shellFiber;
 	shellFiber = null;
 	if (fiber) await runTransportEffect(Fiber.interrupt(fiber));
@@ -118,8 +126,17 @@ async function stopShell(): Promise<void> {
 
 export function attachSessionList(project: ProjectRef): void {
 	const generation = ++attachGeneration;
+	discardForeignSavedShell(project);
 	if (attachedProject !== project) setShellFeedStatus({ _tag: "cold" });
 	attachedProject = project;
+	let synchronized = false;
+	const save = () => {
+		if (generation !== attachGeneration) return;
+		clearTimeout(shellSaveTimer);
+		shellSaveTimer = undefined;
+		if (synchronized)
+			void saveShell(project, [...sessionSubscription.rows.values()]);
+	};
 	void stopShell().then(async () => {
 		const runtime = await getRuntime();
 		if (generation !== attachGeneration) return;
@@ -148,13 +165,22 @@ export function attachSessionList(project: ProjectRef): void {
 							Effect.sync(() => {
 								if (generation !== attachGeneration) return;
 								applySessionChange(change);
+								if (change._tag === "snapshot") {
+									synchronized = false;
+									clearTimeout(shellSaveTimer);
+									shellSaveTimer = undefined;
+								}
 								if (change._tag === "synchronized") {
+									synchronized = true;
+									save();
 									flushPendingSeen(project);
 									// Unary reads fail fast while the control socket is down; this
 									// marker rides that socket, so it is up. Repeats on every resume.
 									void loadDaemonSessions();
 									for (const listener of shellSynchronizedListeners)
 										listener(project);
+								} else if (synchronized && shellSaveTimer === undefined) {
+									shellSaveTimer = setTimeout(save, 3_000);
 								}
 							}),
 					),
