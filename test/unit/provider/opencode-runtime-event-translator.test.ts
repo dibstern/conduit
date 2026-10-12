@@ -627,4 +627,124 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 			expect(translator.translate(event, sessionId)).toBeNull();
 		}
 	});
+
+	describe("a turn that ends while OpenCode is retrying", () => {
+		const sessionId = "ses-retry";
+		const reason = "Upstream request failed: Model is unavailable.";
+		const busy = makeSSEEvent("session.status", {
+			sessionID: sessionId,
+			status: { type: "busy" },
+		});
+		const retry = (attempt: number) =>
+			makeSSEEvent("session.status", {
+				sessionID: sessionId,
+				status: { type: "retry", attempt, message: reason, next: 0 },
+			});
+		// OpenCode 1.18.34 sends a snapshot patch part when a turn is aborted.
+		const patch = makeSSEEvent("message.part.updated", {
+			part: {
+				id: "part-patch",
+				messageID: "msg-a1",
+				sessionID: sessionId,
+				type: "patch",
+				hash: "h",
+				files: [],
+			},
+		});
+		const completed = (messageId: string) =>
+			makeSSEEvent("message.updated", {
+				sessionID: sessionId,
+				info: {
+					id: messageId,
+					role: "assistant",
+					sessionID: sessionId,
+					time: { created: 1, completed: 2 },
+				},
+			});
+		const textDelta = makeSSEEvent("message.part.delta", {
+			sessionID: sessionId,
+			messageID: "msg-a1",
+			partID: "part-text",
+			field: "text",
+			delta: "Pong",
+		});
+		const types = (
+			translator: OpenCodeRuntimeEventTranslator,
+			events: readonly SSEEvent[],
+		) =>
+			events.flatMap(
+				(event) =>
+					translator.translate(event, sessionId)?.map((e) => ({
+						type: e.type,
+						error: (e.data as { error?: string }).error,
+					})) ?? [],
+			);
+
+		it("records the last retry reason as the turn's error when it is stopped", () => {
+			const translator = new OpenCodeRuntimeEventTranslator();
+			const out = types(translator, [
+				busy,
+				retry(1),
+				busy,
+				retry(2),
+				patch,
+				completed("msg-a1"),
+			]);
+			const errors = out.filter((e) => e.type === "turn.error");
+			expect(errors).toEqual([
+				{ type: "turn.error", error: `Stopped while retrying: ${reason}` },
+			]);
+			expect(out.findIndex((e) => e.type === "turn.error")).toBeLessThan(
+				out.findIndex((e) => e.type === "turn.completed"),
+			);
+		});
+
+		it("records nothing once the retry recovers and the model replies", () => {
+			const translator = new OpenCodeRuntimeEventTranslator();
+			const out = types(translator, [
+				busy,
+				retry(1),
+				busy,
+				textDelta,
+				completed("msg-a1"),
+			]);
+			expect(out.some((e) => e.type === "turn.error")).toBe(false);
+		});
+
+		it("does not add a second error when OpenCode reports one itself", () => {
+			const translator = new OpenCodeRuntimeEventTranslator();
+			const out = types(translator, [
+				busy,
+				retry(1),
+				makeSSEEvent("session.error", {
+					sessionID: sessionId,
+					error: { name: "APIError", data: { message: "Gave up" } },
+				}),
+				completed("msg-a1"),
+			]);
+			expect(out.filter((e) => e.type === "turn.error")).toHaveLength(1);
+		});
+
+		it("does not carry the reason into the next turn", () => {
+			const translator = new OpenCodeRuntimeEventTranslator();
+			types(translator, [busy, retry(1), completed("msg-a1")]);
+			const next = types(translator, [busy, textDelta, completed("msg-a2")]);
+			expect(next.some((e) => e.type === "turn.error")).toBe(false);
+		});
+
+		it("keeps the reason across committed forks and a reconnect", () => {
+			const translator = new OpenCodeRuntimeEventTranslator();
+			const step = (event: SSEEvent) => {
+				const working = translator.forkSession(sessionId);
+				const events = translator.translateInto(event, sessionId, working);
+				translator.commitSession(sessionId, working);
+				return events ?? [];
+			};
+			step(busy);
+			step(retry(1));
+			translator.resetAnnouncements();
+			const out = step(completed("msg-a1"));
+			expect(out.map((e) => e.type)).toContain("turn.error");
+		});
+	});
 });

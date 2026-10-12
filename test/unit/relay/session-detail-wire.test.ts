@@ -36,15 +36,13 @@ const wireRoundTrip = (
 		),
 	);
 
-const row = (text: string): SessionDetailItem => ({
-	_tag: "transcriptMessage",
-	message: {
-		id: "m",
-		role: "assistant",
-		text,
-		parts: [{ id: "p", type: "text", text }],
-	},
+const part = (id: string, text: string): SessionDetailItem => ({
+	_tag: "part",
+	messageId: "m",
+	sortOrder: 0,
+	part: { id, type: "text", text },
 });
+const row = (text: string): SessionDetailItem => part("p", text);
 
 const testLayer = () => {
 	const dir = mkdtempSync(join(process.cwd(), ".suffix-test-"));
@@ -65,47 +63,37 @@ const testLayer = () => {
 };
 
 describe("session detail wire", () => {
-	it.effect(
-		"an upsert outside the bounded snapshot sends a whole message",
-		() =>
-			Effect.gen(function* () {
-				const outside: SessionDetailItem = {
-					_tag: "transcriptMessage",
-					message: {
-						id: "old",
-						role: "assistant",
-						text: "Older text",
-						parts: [{ id: "old-part", type: "text", text: "Older text" }],
-					},
-				};
-				const input: SessionDetailEnvelope[] = [
-					{
-						_tag: "snapshot",
-						rows: [row("Newer")],
-						sequence: 1,
-						hasMore: true,
-						cursor: "m",
-					},
-					{ _tag: "synchronized" },
-					{ _tag: "upsert", item: outside, sequence: 2 },
-				];
-				const wire = Chunk.toReadonlyArray(
-					yield* Stream.fromIterable(input).pipe(
-						encodeSessionDetail,
-						Stream.map(wireRoundTrip),
+	it.effect("an upsert outside the bounded snapshot sends a whole part", () =>
+		Effect.gen(function* () {
+			const outside = part("old-part", "Older text");
+			const input: SessionDetailEnvelope[] = [
+				{
+					_tag: "snapshot",
+					rows: [row("Newer")],
+					sequence: 1,
+					hasMore: true,
+					cursor: "m",
+				},
+				{ _tag: "synchronized" },
+				{ _tag: "upsert", item: outside, sequence: 2 },
+			];
+			const wire = Chunk.toReadonlyArray(
+				yield* Stream.fromIterable(input).pipe(
+					encodeSessionDetail,
+					Stream.map(wireRoundTrip),
+					Stream.runCollect,
+				),
+			);
+			expect(wire[2]).toEqual(input[2]);
+			expect(
+				Chunk.toReadonlyArray(
+					yield* Stream.fromIterable(wire).pipe(
+						decodeSessionDetail,
 						Stream.runCollect,
 					),
-				);
-				expect(wire[2]).toEqual(input[2]);
-				expect(
-					Chunk.toReadonlyArray(
-						yield* Stream.fromIterable(wire).pipe(
-							decodeSessionDetail,
-							Stream.runCollect,
-						),
-					),
-				).toEqual(input);
-			}),
+				),
+			).toEqual(input);
+		}),
 	);
 
 	for (const seed of ["snapshot", "replay", "live"] as const) {
@@ -113,15 +101,8 @@ describe("session detail wire", () => {
 			`caps retained prefixes at eight with ${seed} seeding and decodes evicted rows`,
 			() =>
 				Effect.gen(function* () {
-					const message = (id: number, text: string): SessionDetailItem => ({
-						_tag: "transcriptMessage",
-						message: {
-							id: String(id),
-							role: "assistant",
-							text,
-							parts: [{ id: "p", type: "text", text }],
-						},
-					});
+					const message = (id: number, text: string): SessionDetailItem =>
+						part(String(id), text);
 					const rows = Array.from({ length: 24 }, (_, id) =>
 						message(id, "Hello"),
 					);
@@ -150,6 +131,8 @@ describe("session detail wire", () => {
 							sequence: input.length,
 						});
 					// Touch the oldest remaining entry, insert another, then check LRU promotion.
+					// The decoder evicts in lockstep: evicting early, or not promoting,
+					// loses a prefix the encoder still sends a suffix of.
 					for (const id of [7, 24, 7, 6])
 						input.push({
 							_tag: "upsert",
@@ -172,13 +155,13 @@ describe("session detail wire", () => {
 					const probes = wire.slice(probeStart, probeStart + 24);
 					expect(
 						probes.filter(
-							(envelope) => envelope._tag === "upsert" && envelope.textSuffixes,
+							(envelope) => envelope._tag === "upsert" && envelope.textSuffix,
 						),
 					).toHaveLength(8);
 					for (const envelope of probes.slice(8))
-						expect(envelope).not.toHaveProperty("textSuffixes");
-					expect(wire.at(-2)).toHaveProperty("textSuffixes");
-					expect(wire.at(-1)).not.toHaveProperty("textSuffixes");
+						expect(envelope).not.toHaveProperty("textSuffix");
+					expect(wire.at(-2)).toHaveProperty("textSuffix");
+					expect(wire.at(-1)).not.toHaveProperty("textSuffix");
 				}),
 		);
 	}
@@ -231,14 +214,7 @@ describe("session detail wire", () => {
 					{ _tag: "synchronized" },
 					{ _tag: "upsert", item: row("Other"), sequence: 2 },
 					{ _tag: "upsert", item: row("Oh"), sequence: 3 },
-					{
-						_tag: "upsert",
-						item: {
-							_tag: "transcriptMessage",
-							message: { id: "m", role: "assistant", parts: [] },
-						},
-						sequence: 4,
-					},
+					{ _tag: "remove", id: JSON.stringify(["m", "p"]), sequence: 4 },
 					{ _tag: "upsert", item: row("Restored"), sequence: 5 },
 					{ _tag: "snapshot", rows: [row("Base")], sequence: 6 },
 					{ _tag: "synchronized" },
@@ -277,10 +253,7 @@ describe("session detail wire", () => {
 				const staleSuffix = Chunk.last(sent);
 				if (staleSuffix._tag !== "Some") throw new Error("missing suffix");
 				expect(staleSuffix.value).toMatchObject({
-					textSuffixes: [
-						{ from: 5, total: 11 },
-						{ partId: "p", from: 5, total: 11 },
-					],
+					textSuffix: { from: 5, total: 11 },
 				});
 				const requests: (number | undefined)[] = [];
 				const delivered = yield* resumeStream(
@@ -354,10 +327,7 @@ describe("session detail wire", () => {
 					sequence: 1,
 				});
 				expect(wire[5]).toMatchObject({
-					textSuffixes: [
-						{ from: 5, total: 11 },
-						{ partId: "p", from: 5, total: 11 },
-					],
+					textSuffix: { from: 5, total: 11 },
 				});
 				expect(Chunk.toReadonlyArray(delivered)).toEqual([
 					{ _tag: "snapshot", rows: [], sequence: 0 },
@@ -412,15 +382,15 @@ describe("session detail wire", () => {
 							if (
 								corrupt &&
 								envelope._tag === "upsert" &&
-								envelope.textSuffixes
+								envelope.textSuffix
 							) {
 								corrupt = false;
 								return {
 									...envelope,
-									textSuffixes: envelope.textSuffixes.map((field) => ({
-										...field,
-										total: field.total + 1,
-									})),
+									textSuffix: {
+										...envelope.textSuffix,
+										total: envelope.textSuffix.total + 1,
+									},
 								};
 							}
 							return envelope;
@@ -445,14 +415,15 @@ describe("session detail wire", () => {
 						{ provider: "claude", createdAt: 4 },
 					),
 				]);
+				// The part moves first and its suffix is the damaged one, so the
+				// header behind it never arrives: the repair brings it.
 				const repair = yield* Queue.take(output);
 				expect(repair._tag).toBe("snapshot");
 				if (repair._tag !== "snapshot")
 					throw new Error("expected whole-row repair");
 				expect(repair.rows).toMatchObject([
-					{
-						message: { text: "Hello world", parts: [{ text: "Hello world" }] },
-					},
+					{ _tag: "part", part: { text: "Hello world" } },
+					{ _tag: "message", message: { id: "m" } },
 					{ _tag: "rewind", messageId: null },
 				]);
 				expect(yield* Queue.take(output)).toEqual({ _tag: "synchronized" });
@@ -467,12 +438,11 @@ describe("session detail wire", () => {
 				]);
 				expect(yield* Queue.take(output)).toMatchObject({
 					_tag: "upsert",
-					item: {
-						message: {
-							text: "Hello world!",
-							parts: [{ text: "Hello world!" }],
-						},
-					},
+					item: { _tag: "part", part: { text: "Hello world!" } },
+				});
+				expect(yield* Queue.take(output)).toMatchObject({
+					_tag: "upsert",
+					item: { _tag: "message", message: { id: "m" } },
 				});
 			}).pipe(Effect.provide(testLayer())),
 	);
@@ -518,6 +488,11 @@ describe("session detail wire", () => {
 							);
 						}),
 						decodeSessionDetail,
+						// Each write also moves the message header; count parts.
+						Stream.filter(
+							(envelope) =>
+								envelope._tag !== "upsert" || envelope.item._tag === "part",
+						),
 						Stream.runForEach((envelope) => Queue.offer(output, envelope)),
 						Effect.forkScoped,
 					);
@@ -536,12 +511,7 @@ describe("session detail wire", () => {
 						const delivered = yield* Queue.take(output);
 						if (i === writes - 1)
 							expect(delivered).toMatchObject({
-								item: {
-									message: {
-										text: piece.repeat(writes),
-										parts: [{ text: piece.repeat(writes) }],
-									},
-								},
+								item: { part: { text: piece.repeat(writes) } },
 							});
 					}
 					measurements.push({

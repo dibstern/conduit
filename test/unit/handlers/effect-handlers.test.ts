@@ -1,4 +1,5 @@
 import { SqlClient } from "@effect/sql";
+import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -798,8 +799,9 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -836,6 +838,7 @@ describe("switchModelForSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2296,8 +2299,9 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -2334,6 +2338,7 @@ describe("handleNewSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2395,8 +2400,9 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "session-in-flight",
@@ -2433,6 +2439,7 @@ describe("handleNewSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2686,8 +2693,9 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
-			getToolContent: vi.fn(() => Effect.succeed(undefined)),
+			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+			getSessionFamilyRoot: () => Effect.succeed(undefined),
 			getSession: vi.fn(() =>
 				Effect.succeed({
 					id: "session-1",
@@ -2724,6 +2732,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 			readInboxState: () => Effect.succeed(undefined),
+			readStoreIdentity: () => Effect.succeed("store"),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
@@ -2740,7 +2749,7 @@ describe("loadMoreHistoryForSession", () => {
 							tokens_cache_read: null,
 							tokens_cache_write: null,
 							context_window: null,
-							version: 0,
+							version: MessageVersion.make(0),
 							is_streaming: 0,
 							is_backfilled: 0,
 							created_at: 1,
@@ -2777,7 +2786,7 @@ describe("loadMoreHistoryForSession", () => {
 						tokens_cache_read: null,
 						tokens_cache_write: null,
 						context_window: null,
-						version: 0,
+						version: MessageVersion.make(0),
 						is_streaming: 0,
 						is_backfilled: 0,
 						created_at: 1,
@@ -3263,8 +3272,9 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() => Effect.succeed(undefined)),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
@@ -3278,6 +3288,7 @@ describe("handleMessage", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -3507,8 +3518,9 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -3545,6 +3557,7 @@ describe("handleMessage", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),

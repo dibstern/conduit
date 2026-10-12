@@ -27,7 +27,11 @@ import {
 	prepareSessionWorktreeDeletion,
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
+import {
+	messageRowsToHistory,
+	newestRowsWithin,
+	PAGE_FRAME_BUDGET,
+} from "../persistence/session-history-adapter.js";
 import {
 	harnessForModelProvider,
 	resolveTurnSettings,
@@ -553,14 +557,16 @@ export const loadMoreHistoryForSession = ({
 		const page = yield* readQuery.readSessionTranscriptPage(sessionId, {
 			...(before ? { before } : {}),
 			limit: 50,
+			previewTools: true,
 		});
+		const { messages } = messageRowsToHistory(page.messages, {
+			pageSize: page.messages.length,
+		});
+		const pageMessages = newestRowsWithin(messages, PAGE_FRAME_BUDGET);
 		return {
 			sessionId,
-			messages: messageRowsToHistory(page.messages, {
-				pageSize: page.messages.length,
-				toolOutputPreview: true,
-			}).messages,
-			hasMore: page.hasMore,
+			messages: pageMessages,
+			hasMore: page.hasMore || pageMessages.length < messages.length,
 		};
 	});
 

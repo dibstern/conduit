@@ -23,6 +23,7 @@ import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-l
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
+import { detailRowsOf } from "../../helpers/detail-rows.js";
 import { createMockQuery, makeSuccessResult } from "../../helpers/mock-sdk.js";
 import { testMessages } from "../../helpers/test-session-slot.js";
 import {
@@ -301,16 +302,15 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			hasMore: false,
 			status: { _tag: "cold" },
 			project: "integration-test",
+			waiting: new Map(),
+			partOrder: new Map(),
 		};
 		await client.sendMessage("Measure current context");
 		await client.waitForTurnEnd(sessionId);
 		const before = await client.loadMoreHistory(sessionId);
 		const beforeTranscript = applyTranscriptEnvelope(emptyTranscript, {
 			_tag: "snapshot",
-			rows: before.messages.map((message) => ({
-				_tag: "transcriptMessage",
-				message,
-			})),
+			rows: before.messages.flatMap(detailRowsOf),
 			sequence: 1,
 		});
 		setMessages(messages, historyToChatMessages(beforeTranscript.rows));
@@ -327,10 +327,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		const after = await client.loadMoreHistory(sessionId);
 		const afterTranscript = applyTranscriptEnvelope(emptyTranscript, {
 			_tag: "snapshot",
-			rows: after.messages.map((message) => ({
-				_tag: "transcriptMessage",
-				message,
-			})),
+			rows: after.messages.flatMap(detailRowsOf),
 			sequence: 2,
 		});
 		setMessages(messages, historyToChatMessages(afterTranscript.rows));
@@ -729,13 +726,12 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				hasMore: false,
 				status: { _tag: "cold" },
 				project: "integration-test",
+				waiting: new Map(),
+				partOrder: new Map(),
 			},
 			{
 				_tag: "snapshot",
-				rows: history.messages.map((message) => ({
-					_tag: "transcriptMessage",
-					message,
-				})),
+				rows: history.messages.flatMap(detailRowsOf),
 				sequence: 1,
 			},
 		);

@@ -357,6 +357,7 @@ describe("client-side resume at the shared client", () => {
 						sessionId: "s1",
 						textSuffixes: true,
 						resumeFromSequence: 12,
+						resumeBase: { sequence: 11 },
 					});
 				}),
 			),
@@ -419,6 +420,7 @@ describe("client-side resume at the shared client", () => {
 								sessionId: "s1",
 								textSuffixes: true,
 								resumeFromSequence: point.resumeFrom,
+								resumeBase: { sequence: 11 },
 							});
 
 							// The fake answers that request from its history the way the

@@ -201,6 +201,7 @@ const undoLaterMigrations = Effect.gen(function* () {
 	yield* sql`DROP INDEX idx_messages_input_id`;
 	yield* sql`ALTER TABLE messages DROP COLUMN input_id`;
 	yield* sql`ALTER TABLE messages DROP COLUMN steered`;
+	yield* sql`DROP TABLE session_git_published`;
 });
 
 const scenario = (store: Store) => {

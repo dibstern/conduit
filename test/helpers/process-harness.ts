@@ -73,6 +73,7 @@ import {
 	cleanupTestClaudeRunners,
 	testRunnerAlive,
 } from "./claude-runner-cleanup.js";
+import { assembleDetailRows } from "./detail-rows.js";
 import { type ProcessMark, responseChunks } from "./fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "./mock-opencode-server.js";
 import {
@@ -587,8 +588,18 @@ Object.assign(ClaudeDriver, { create: deps => {
 			opencodeIdleTimeoutMs?: number;
 			/** Listen on the previous port, so open tabs reconnect by themselves. */
 			keepPort?: boolean;
-			/** Record event-loop stalls and read-model reads to this JSON file. */
+			/**
+			 * Record event-loop stalls, read-model and sidebar reads to this JSON
+			 * file, flushed every 250ms.
+			 */
 			metricsFile?: string;
+			/**
+			 * With `metricsFile`, also append SQLite statements of 1ms or more to
+			 * `<metricsFile>.statements.jsonl`, and record a CPU profile between the
+			 * spec writing `<metricsFile>.start` and `.stop`; the server writes
+			 * `.started` once sampling and `.cpuprofile` once stopped.
+			 */
+			profile?: boolean;
 		} = {},
 	): Promise<void> {
 		if (this.disposed) throw new Error("Harness is disposed");
@@ -730,6 +741,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					...(options.metricsFile
 						? { CONDUIT_TEST_SERVER_METRICS: options.metricsFile }
 						: {}),
+					...(options.profile ? { CONDUIT_TEST_SERVER_PROFILE: "1" } : {}),
 					PATH:
 						this.managedOpenCode || this.foregroundCli
 							? `${join(this.root, "bin")}:${process.env["PATH"] ?? ""}`
@@ -2086,6 +2098,7 @@ export class ProcessBrowser {
 		if (existing) return existing;
 		const ready = (async () => {
 			const cursor = this.frames.length;
+			const assemble = assembleDetailRows();
 			this.detailFibers.add(
 				this.watch(
 					this.rpc.SubscribeSessionDetail({
@@ -2101,19 +2114,15 @@ export class ProcessBrowser {
 									: envelope._tag === "upsert"
 										? [envelope.item]
 										: [];
-							for (const item of items)
-								if (item._tag === "event")
+							for (const item of items) {
+								const message = assemble(item);
+								if (message)
 									this.record({
-										...item.event,
-										type: item.event.type,
-										sessionId,
-									});
-								else if (item._tag === "transcriptMessage")
-									this.record({
-										...item.message,
+										...message,
 										type: "transcript_message",
 										sessionId,
 									});
+							}
 						}),
 				),
 			);

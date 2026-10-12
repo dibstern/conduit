@@ -71,7 +71,7 @@ const LIGHT_STORY_IDS = new Set([
 	"project-projectdialog--warnings",
 	"project-projectdialog--suggestions-open",
 	"project-projectdialog--edit",
-	"session-sessionverbitems--sheet",
+	"session-sessioncommanditems--sheet",
 	"layout-sessionbar--collapsed",
 	"layout-sessionbar--overflow-menu-open",
 	"input-commandmenu--open",
@@ -455,9 +455,12 @@ if (stories.length > 0) {
 		["overlays-confirmmodal--hidden", "all"],
 		["overlays-imagelightbox--hidden", "all"],
 		["overlays-qrmodal--hidden", "all"],
-		["overlays-notifsettings--closed", "all"],
 		["overlays-rewindbanner--inactive", "all"],
 		["overlays-connectoverlay--connected", "all"],
+		// The full App dials a real socket that Storybook cannot answer, so the
+		// frame races between "Connecting" and "Reconnecting" on each redial. It
+		// only ever shows ConnectOverlay, whose own stories capture both states.
+		["app--default", "all"],
 		// Settles to the cleared viewer; the back-to-tree contract is its play().
 		["file-fileviewer--back-to-file-tree", "all"],
 		// Behavior-only: clicks through to Done; its contract is the play().
@@ -481,7 +484,7 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-long-title-narrow", "mobile"],
 		["layout-sessionbar--desktop-settled", "mobile"],
 		["layout-sessionbar--desktop-no-session", "mobile"],
-		// Row hover verbs exist only from md up; phones use swipe and long-press.
+		// Row hover commands exist only from md up; phones use swipe and long-press.
 		["session-sessionitem--hover-actions-narrow-sidebar", "mobile"],
 		["layout-sessionbar--desktop-with-skills", "mobile"],
 		// These stories exercise the desktop Files pane; phone Files uses a separate overlay.

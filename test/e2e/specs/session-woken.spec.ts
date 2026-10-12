@@ -116,7 +116,7 @@ async function wokenUntilOpened(
 	await expect(row(page, sessionId)).toBeVisible();
 	// Read before it is snoozed: nothing but the wake can show the badge. A
 	// pick of a session that has not woken does not touch its snooze. The
-	// title, not the row centre: that can land on a hover verb (e5b2819b).
+	// title, not the row centre: that can land on a hover command (e5b2819b).
 	await row(page, sessionId).locator(".session-item-title").click();
 	await expect(
 		row(page, sessionId).getByTestId("session-unread-dot"),

@@ -42,6 +42,8 @@ export interface ClaudeRunnerUpgrade {
 	retryAt: number;
 	attemptActivity?: number;
 	boundaryWaiting?: boolean;
+	/** Changed settings rule out a warm switch, so only a restart upgrades. */
+	settingsDeferred?: boolean;
 }
 
 /** Warming is independent of admission. A send invalidates only the attempt. */

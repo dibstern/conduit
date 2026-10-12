@@ -1,29 +1,29 @@
 import { Context, Data, Effect, Layer } from "effect";
+import type { ToolDetail } from "../../../contracts/tool-wire.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 
 export class ToolContentServiceError extends Data.TaggedError(
 	"ToolContentServiceError",
 )<{
-	readonly operation: "get";
-	readonly toolId: string;
+	readonly operation: "details";
+	readonly sessionId: string;
+	readonly toolIds: readonly string[];
 	readonly cause: unknown;
 }> {}
 
 export interface ToolContentService {
-	readonly get: (
-		toolId: string,
-	) => Effect.Effect<string | undefined, ToolContentServiceError>;
+	/** Full input and output of each of the session's tools; unknown ids are
+	 *  left out. */
+	readonly details: (
+		sessionId: string,
+		toolIds: readonly string[],
+	) => Effect.Effect<readonly ToolDetail[], ToolContentServiceError>;
 }
 
 export class ToolContentServiceTag extends Context.Tag("ToolContentService")<
 	ToolContentServiceTag,
 	ToolContentService
 >() {}
-
-const toError =
-	(toolId: string) =>
-	(cause: unknown): ToolContentServiceError =>
-		new ToolContentServiceError({ operation: "get", toolId, cause });
 
 export const ToolContentServiceLive: Layer.Layer<
 	ToolContentServiceTag,
@@ -34,13 +34,23 @@ export const ToolContentServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 		return {
-			get: (toolId) =>
-				readQuery.getToolContent(toolId).pipe(Effect.mapError(toError(toolId))),
+			details: (sessionId, toolIds) =>
+				readQuery.readToolDetails(sessionId, toolIds).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ToolContentServiceError({
+								operation: "details",
+								sessionId,
+								toolIds,
+								cause,
+							}),
+					),
+				),
 		} satisfies ToolContentService;
 	}),
 );
 
 export const ToolContentServiceNoop: Layer.Layer<ToolContentServiceTag> =
 	Layer.succeed(ToolContentServiceTag, {
-		get: () => Effect.succeed(undefined),
+		details: () => Effect.succeed([]),
 	});

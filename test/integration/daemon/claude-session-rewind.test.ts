@@ -9,6 +9,10 @@ import type {
 	SessionDetailEnvelopeSchema,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
+	applyTranscriptEnvelope,
+	type TranscriptEntry,
+} from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import {
 	firstQueryMark,
 	type QueryMark,
 } from "../../helpers/claude-process-marks.js";
@@ -27,26 +31,40 @@ function queries(harness: ProcessHarness): QueryMark[] {
 	);
 }
 
-function pendingRewind(browser: ProcessBrowser, sessionId: string) {
-	let pending: string | null = null;
-	for (const { message } of browser.frames) {
-		if (
-			message["type"] !== "session_detail" ||
-			message["sessionId"] !== sessionId
+/** Folds the daemon's frames through the browser's own transcript store. */
+function detailState(browser: ProcessBrowser, sessionId: string) {
+	const entry = browser.frames
+		.map(({ message }) => message)
+		.filter(
+			(message) =>
+				message["type"] === "session_detail" &&
+				message["sessionId"] === sessionId,
 		)
-			continue;
-		const envelope = message as unknown as DetailEnvelope;
-		const items =
-			envelope._tag === "snapshot"
-				? envelope.rows
-				: envelope._tag === "upsert"
-					? [envelope.item]
-					: [];
-		for (const item of items)
-			if (item._tag === "rewind") pending = item.messageId;
-	}
-	return pending;
+		.reduce<TranscriptEntry>(
+			(held, message) =>
+				applyTranscriptEnvelope(held, message as unknown as DetailEnvelope),
+			{
+				project: "process-test",
+				rows: [],
+				pending: [],
+				hwm: null,
+				hasMore: false,
+				status: { _tag: "live" },
+				waiting: new Map(),
+				partOrder: new Map(),
+			},
+		);
+	return {
+		pending: entry.pendingRewindMessageId ?? null,
+		/** The messages the browser holds whole: a header and its parts. */
+		whole: entry.rows
+			.filter((row) => (row.parts?.length ?? 0) > 0)
+			.map(({ id }) => id),
+	};
 }
+
+const pendingRewind = (browser: ProcessBrowser, sessionId: string) =>
+	detailState(browser, sessionId).pending;
 
 function nativeTranscript(harness: ProcessHarness, nativeSessionId: string) {
 	return readFileSync(
@@ -241,7 +259,11 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		);
 		await vi.waitFor(() => {
 			for (const tab of [browser, second, reloadedPending])
-				expect(pendingRewind(tab, sessionId)).toBeNull();
+				expect(detailState(tab, sessionId)).toEqual({
+					pending: null,
+					// Restored live, with their parts, without a reload.
+					whole: expect.arrayContaining(hidden.map(({ id }) => id)),
+				});
 		});
 		expect((await second.history(sessionId)).map(({ id }) => id)).toEqual(
 			before.map(({ id }) => id),

@@ -14,7 +14,7 @@
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
-	import { sessionVerbActions } from "./session-verbs.js";
+	import { sessionCommandActions } from "./session-commands.js";
 	import SessionItem from "./SessionItem.svelte";
 	import SessionPager from "./SessionPager.svelte";
 	import Button from "../ui/Button.svelte";
@@ -68,7 +68,7 @@
 	     in select mode and would leave the idref dangling. -->
 	<!-- One row, rendered by every section. It is a snippet rather than a copy
 	     per section because the row is about to grow: the shelves and the
-	     per-row verbs each land in their own ticket, and copies would mean one
+	     per-row commands each land in their own ticket, and copies would mean one
 	     edit each with any divergence between them invisible. -->
 	{#snippet sessionRow(s: SessionInfo)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
@@ -96,12 +96,12 @@
 			onswitchsession={() => handleSwitchSession(s)}
 			{ontoggleselection}
 			{oncontextmenu}
-			onsettle={(_id, next) => { void sessionVerbActions.settle(s, next); }}
+			onsettle={(_id, next) => { void sessionCommandActions.settle(s, next); }}
 			onmarkread={(_id) => { void toggleSessionRead(s); }}
-			onpin={(_id, next) => { void sessionVerbActions.pin(s, next); }}
+			onpin={(_id, next) => { void sessionCommandActions.pin(s, next); }}
 			onsnooze={() => openSnoozePicker(s, "center")}
-			onunsnooze={() => { void sessionVerbActions.unsnooze(s); }}
-			oncommitsnooze={() => sessionVerbActions.commitTomorrow(s)}
+			onunsnooze={() => { void sessionCommandActions.unsnooze(s); }}
+			oncommitsnooze={() => sessionCommandActions.commitTomorrow(s)}
 			onrenamestart={() => onrenamestart(s.id)}
 			{onrenameend}
 		/>

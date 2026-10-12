@@ -65,7 +65,7 @@ test("shell feed adds and removes sidebar roots", async ({
 	await expect(
 		page.locator('#session-list [data-session-id="feed-root"]'),
 	).toBeVisible();
-	// Open the row by its title: on desktop hover the row's verbs sit at its centre.
+	// Open the row by its title: on desktop hover the row's commands sit at its centre.
 	await page
 		.locator('#session-list [data-session-id="feed-root"] .session-item-title')
 		.click();

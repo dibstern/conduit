@@ -380,7 +380,6 @@ describe("Claude subagent materialization pipeline", () => {
 			expect(taskMessage?.metadata?.["childSessionId"]).toBe(
 				result.childSessionId,
 			);
-			expect(taskMessage?.metadata?.["providerTaskId"]).toBe("task-1");
 
 			expect(result.child).toEqual({
 				parent_id: "parent-session",

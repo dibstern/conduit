@@ -40,6 +40,9 @@ export interface ClaudeRunnerHello {
 	readonly pid?: number;
 	readonly acknowledgedSequence?: number;
 	readonly upgradeState?: ClaudeRunnerUpgradeState;
+	// Runners that predate stop-task acknowledge it without stopping anything,
+	// and they also speak this protocol version, so the daemon needs the flag.
+	readonly stopsTasks?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;

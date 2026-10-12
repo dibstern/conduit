@@ -79,8 +79,11 @@ const skillNavigationMessages = Array.from(
 									callID: `call-skill-nav-${turn}`,
 									state: {
 										status: "completed" as const,
-										input: { tool: "Skill", name: "paged-skill" },
-										output: "Loaded.",
+										input: {
+											_tag: "whole" as const,
+											value: { tool: "Skill", name: "paged-skill" },
+										},
+										output: { _tag: "whole" as const, text: "Loaded." },
 									},
 									time: { start: created + 1, end: created + 500 },
 								},

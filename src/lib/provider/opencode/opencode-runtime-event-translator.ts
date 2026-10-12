@@ -46,6 +46,10 @@ const defaultLog = createLogger("opencode-runtime-event-translator");
 export interface SessionTranslation {
 	droppedRewrite: boolean;
 	status: string | undefined;
+	/** Why OpenCode is retrying the current turn, until the model produces
+	 *  output. A retry is never persisted, so a turn that ends while this is
+	 *  set would otherwise leave no trace of why it produced nothing. */
+	retryReason: string | undefined;
 	compaction:
 		| {
 				messageId: string | undefined;
@@ -108,6 +112,7 @@ export class OpenCodeRuntimeEventTranslator {
 		return {
 			droppedRewrite: false,
 			status: committed?.status,
+			retryReason: committed?.retryReason,
 			compaction: committed?.compaction,
 			epoch: this.epoch,
 			parts: new Map(committed?.parts),
@@ -127,6 +132,7 @@ export class OpenCodeRuntimeEventTranslator {
 				: {
 						droppedRewrite: false,
 						status: state.status,
+						retryReason: state.retryReason,
 						compaction: state.compaction,
 						epoch: this.epoch,
 						parts: new Map(),
@@ -168,9 +174,19 @@ export class OpenCodeRuntimeEventTranslator {
 			];
 		}
 		if (isPartDeltaEvent(event)) {
+			state.retryReason = undefined;
 			return this.translatePartDelta(event, sessionId, state);
 		}
 		if (isPartUpdatedEvent(event)) {
+			// An aborted turn still writes a snapshot patch; only model output
+			// means the retry recovered.
+			const partType = event.properties.part?.type;
+			if (
+				partType === "text" ||
+				partType === "reasoning" ||
+				partType === "tool"
+			)
+				state.retryReason = undefined;
 			return this.translatePartUpdated(event, sessionId, state);
 		}
 		if (isMessageUpdatedEvent(event)) {
@@ -186,9 +202,12 @@ export class OpenCodeRuntimeEventTranslator {
 				state.compaction = undefined;
 			}
 			state.status = status;
+			if (event.properties.status?.type === "retry")
+				state.retryReason = event.properties.status.message;
 			return this.translateSessionStatus(event, sessionId);
 		}
 		if (isSessionErrorEvent(event)) {
+			state.retryReason = undefined;
 			const events = this.translateSessionError(event, sessionId) ?? [];
 			if (state.compaction?.state === "started") {
 				state.compaction = { ...state.compaction, state: "failed" };
@@ -261,6 +280,7 @@ export class OpenCodeRuntimeEventTranslator {
 			this.committed.set(sessionId, {
 				droppedRewrite: false,
 				status: state.status,
+				retryReason: state.retryReason,
 				compaction: state.compaction,
 				epoch: this.epoch,
 				parts: new Map(),
@@ -726,6 +746,16 @@ export class OpenCodeRuntimeEventTranslator {
 		if (Object.keys(tokens).length > 0) data.tokens = tokens;
 		if (duration != null) data.duration = duration;
 
+		if (state.retryReason !== undefined) {
+			events.push(
+				opencodeRuntimeEvent("turn.error", sessionId, event, {
+					messageId,
+					error: `Stopped while retrying: ${state.retryReason}`,
+					code: "RetryStopped",
+				}),
+			);
+			state.retryReason = undefined;
+		}
 		events.push(opencodeRuntimeEvent("turn.completed", sessionId, event, data));
 		if (compaction) {
 			state.compaction = undefined;

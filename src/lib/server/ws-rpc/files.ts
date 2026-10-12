@@ -6,6 +6,7 @@ import { DirectoryListingServiceTag } from "../../domain/relay/Services/director
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import { ToolContentServiceTag } from "../../domain/relay/Services/tool-content-service.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	getFileContentResponse,
@@ -13,7 +14,6 @@ import {
 	getFileTreeEntries,
 } from "../../handlers/files.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
-import { getToolContentValue } from "../../handlers/tool-content.js";
 import { labelProjectFolders } from "../../project-folders.js";
 import {
 	mapRpcFailure,
@@ -135,31 +135,14 @@ export const filesHandlers = {
 				),
 			),
 		),
-	GetToolContent: (request) =>
-		getToolContentValue(request.toolId).pipe(
-			Effect.flatMap((content) =>
-				content == null
-					? Effect.fail(
-							new WsRpcError({
-								message: "Full tool content not available",
-							}),
-						)
-					: Effect.succeed({
-							projectSlug: request.projectSlug,
-							toolId: request.toolId,
-							content,
-						}),
-			),
-			Effect.catchAll((error) =>
-				error instanceof WsRpcError
-					? Effect.fail(error)
-					: Effect.fail(
-							new WsRpcError({
-								message: `GetToolContent failed: ${String(error)}`,
-							}),
-						),
-			),
-		),
+	GetToolDetails: (request) =>
+		Effect.gen(function* () {
+			const toolContent = yield* ToolContentServiceTag;
+			return {
+				projectSlug: request.projectSlug,
+				tools: yield* toolContent.details(request.sessionId, request.toolIds),
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("GetToolDetails"))),
 	GetSkillContent: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -188,6 +171,6 @@ export const filesHandlers = {
 	| "GetFileTree"
 	| "GetFileList"
 	| "GetFileContent"
-	| "GetToolContent"
+	| "GetToolDetails"
 	| "GetSkillContent"
 >;

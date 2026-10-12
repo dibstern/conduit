@@ -13,17 +13,27 @@ const keptIds = ["a-kept-user", "b-kept-assistant"];
 const hiddenIds = ["c-cut-user", "d-hidden-assistant"];
 const seededIds = [...keptIds, ...hiddenIds];
 
+/**
+ * What a tab holds, folded as the browser folds it: a removed message takes
+ * its parts with it, so a message restored without its parts comes back empty.
+ * `ids` names only the seeded messages held whole, header and text part.
+ */
 function detailState(client: TestWsClient, sessionId: string) {
 	const ids = new Set<string>();
+	const parts = new Map<string, Set<string>>();
 	let pending: string | null = null;
 	for (const frame of client.getReceivedOfType("session_detail")) {
 		if (frame["sessionId"] !== sessionId) continue;
 		const envelope = frame as unknown as DetailEnvelope;
 		if (envelope._tag === "snapshot") {
 			ids.clear();
+			parts.clear();
 			pending = null;
 		}
-		if (envelope._tag === "remove") ids.delete(envelope.id);
+		if (envelope._tag === "remove") {
+			ids.delete(envelope.id);
+			parts.delete(envelope.id);
+		}
 		const items =
 			envelope._tag === "snapshot"
 				? envelope.rows
@@ -31,12 +41,21 @@ function detailState(client: TestWsClient, sessionId: string) {
 					? [envelope.item]
 					: [];
 		for (const item of items) {
-			if (item._tag === "transcriptMessage") ids.add(item.message.id);
+			if (item._tag === "message") ids.add(item.message.id);
+			else if (item._tag === "part")
+				parts.set(
+					item.messageId,
+					(parts.get(item.messageId) ?? new Set()).add(item.part.id),
+				);
 			else if (item._tag === "rewind") pending = item.messageId;
 		}
 	}
 	return {
-		ids: [...ids].filter((id) => seededIds.includes(id)).sort(),
+		ids: [...ids]
+			.filter(
+				(id) => seededIds.includes(id) && parts.get(id)?.has(`${id}-text`),
+			)
+			.sort(),
 		pending,
 	};
 }
