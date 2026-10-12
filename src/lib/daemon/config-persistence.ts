@@ -5,6 +5,7 @@
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { Data, Effect, Either, Schema } from "effect";
@@ -24,6 +25,11 @@ import {
 	migrateLegacyDefaultOpencodeInstanceId,
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
+import {
+	type ClaudeLaunchConfig,
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "../provider/claude/claude-sdk-env.js";
 import {
 	GroupingModeSchema,
 	RepositoryIdentitySchema,
@@ -348,6 +354,25 @@ export function resolveClaudeInstanceConfigDir(
 	return instanceId === defaultInstanceIdForDriver("claude")
 		? process.env["CLAUDE_CONFIG_DIR"]
 		: configuredInstance.configDir;
+}
+
+/** Explicit launch folder until the account directory owns this resolution. */
+export function resolveClaudeLaunchConfig(
+	config: DaemonConfig | null,
+	instanceId: string = defaultInstanceIdForDriver("claude"),
+	baseEnv: Readonly<Record<string, string | undefined>> = process.env,
+): ClaudeLaunchConfig {
+	const configured = resolveClaudeInstanceConfigDir(config, instanceId);
+	const configDir = configured ?? baseEnv["CLAUDE_CONFIG_DIR"];
+	return {
+		folderSource: configured === undefined ? "implicitDefault" : "account",
+		configDir:
+			configDir === undefined
+				? sdkDefaultClaudeConfigDir(
+						join(baseEnv["HOME"] ?? homedir(), ".claude"),
+					)
+				: configuredClaudeConfigDir(configDir),
+	};
 }
 
 /** Keep legacy explicit default folders in the daemon's single stored home. */

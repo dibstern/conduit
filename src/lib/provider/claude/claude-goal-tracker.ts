@@ -1,8 +1,9 @@
 import { open, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { isRecord } from "../../utils.js";
+import { ClaudeRuntimeError } from "../event-sink-errors.js";
+import type { ClaudeConfigDir } from "./claude-sdk-env.js";
 import type { SDKMessage } from "./types.js";
 
 export interface ClaudeGoalStatus {
@@ -16,20 +17,23 @@ export interface ClaudeGoalStatus {
 export type ReadClaudeGoalStatus = (input: {
 	readonly workspaceRoot: string;
 	readonly sdkSessionId: string;
-	readonly configDir?: string;
+	readonly configDir: ClaudeConfigDir;
 }) => Promise<ClaudeGoalStatus | undefined>;
 
 /** The goal evaluator writes attachments to the transcript, but does not
  *  forward them to the SDK. Only inspect its bounded tail at turn end. */
 export const readClaudeGoalStatus: ReadClaudeGoalStatus = async (input) => {
+	if (
+		typeof input.configDir?.path !== "string" ||
+		input.configDir.path.trim().length === 0
+	)
+		throw new ClaudeRuntimeError({
+			message: "Claude config directory must be non-empty",
+		});
 	const cwd = await realpath(input.workspaceRoot);
-	const configDir =
-		input.configDir ??
-		process.env["CLAUDE_CONFIG_DIR"] ??
-		join(homedir(), ".claude");
 	const file = await open(
 		join(
-			configDir,
+			input.configDir.path,
 			"projects",
 			cwd.replace(/[^a-zA-Z0-9]/g, "-"),
 			`${input.sdkSessionId}.jsonl`,

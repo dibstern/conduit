@@ -17,12 +17,14 @@ import type {
 	MessageWithParts,
 } from "../../persistence/read-model-types.js";
 import { toolOutputText } from "../../persistence/session-history-adapter.js";
+import { assertNever } from "../../utils.js";
 import { isClaudeResumeFailure } from "../event-sink-errors.js";
 import type {
 	ProviderNativeSession,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import type { ClaudeConfigDir, ClaudeLaunchConfig } from "./claude-sdk-env.js";
 import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 import {
 	type ClaudeSessionForkSdk,
@@ -39,9 +41,8 @@ export class ContinuationNotReady extends Data.TaggedError(
 	readonly reason: string;
 }> {}
 
-interface PrepareTurnOptions {
+interface PrepareTurnOptions extends ClaudeLaunchConfig {
 	readonly liveSession?: ProviderNativeSession | undefined;
-	readonly configDir?: string | undefined;
 	readonly tokenCap?: number | undefined;
 	readonly modelContextWindow?: number | undefined;
 	readonly agent?: string | undefined;
@@ -55,7 +56,7 @@ interface PrepareTurnOptions {
 
 export interface PreparedTurn {
 	readonly resumeSessionId?: string;
-	readonly configDir: string | undefined;
+	readonly configDir: ClaudeConfigDir;
 	readonly prompt: string;
 	readonly handoff?: HandoffSummary;
 	readonly nativeThread?: NativeThread;
@@ -151,16 +152,32 @@ function planTurn(input: {
 			? "[Conduit still-open note] The earlier request was cut off by a usage limit and is still open; some of its work may already be done.\n\n"
 			: "";
 	const live = options.nativeResumeFallback ? undefined : options.liveSession;
-	const sameLiveAccount =
-		live?.instanceId === input.instanceId &&
-		(options.configDir === undefined || live.configDir === options.configDir);
+	let sameLiveAccount: boolean;
+	let configDir: ClaudeConfigDir;
+	switch (options.folderSource) {
+		case "implicitDefault":
+			sameLiveAccount = live?.instanceId === input.instanceId;
+			configDir =
+				(live?.instanceId === input.instanceId ? live.configDir : undefined) ??
+				nativeThread?.configDir ??
+				options.configDir;
+			break;
+		case "account":
+		case "legacyDefault":
+			sameLiveAccount =
+				live?.instanceId === input.instanceId &&
+				(live.configDir === undefined ||
+					(live.configDir._tag === options.configDir._tag &&
+						live.configDir.path === options.configDir.path));
+			configDir = options.configDir;
+			break;
+		default:
+			return assertNever(options.folderSource);
+	}
 	const sameLiveAgent =
 		sameLiveAccount && (live?.agent ?? "") === (options.agent ?? "");
 	const base = {
-		configDir:
-			options.configDir ??
-			(sameLiveAccount ? live?.configDir : undefined) ??
-			nativeThread?.configDir,
+		configDir,
 		prompt: `${note}${userText}`,
 	};
 	if (options.rewind?.resumeSessionAt === null)
@@ -231,8 +248,24 @@ function planTurn(input: {
 				? { deliveredThrough: nativeThread.deliveredThrough }
 				: {}),
 		};
+	// Legacy commands normalized to the default account must keep that folder.
+	let catchUpConfigDir: ClaudeConfigDir;
+	switch (options.folderSource) {
+		case "account":
+		case "implicitDefault":
+			catchUpConfigDir = nativeThread?.configDir ?? base.configDir;
+			break;
+		case "legacyDefault":
+			catchUpConfigDir = base.configDir;
+			break;
+		default:
+			return assertNever(options.folderSource);
+	}
 	const prepared = resuming
-		? { ...resuming, configDir: nativeThread?.configDir ?? base.configDir }
+		? {
+				...resuming,
+				configDir: catchUpConfigDir,
+			}
 		: base;
 	const currentIndex = input.messages.findIndex(
 		(message) => message.id === options.userMessageId,
@@ -347,7 +380,7 @@ function planTurn(input: {
 }
 
 /** Resolve every Claude turn at the server, before the adapter sees its input. */
-export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
+export const makePrepareTurn = (options: PrepareTurnOptions) =>
 	Effect.gen(function* () {
 		const state = yield* ProviderStateEffectTag;
 		const read = yield* ReadQueryEffectTag;
@@ -367,6 +400,25 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 				const recordedThread = options.nativeResumeFallback
 					? undefined
 					: yield* state.nativeThread(sessionId, instanceId);
+				const liveSession =
+					options.liveSession?.instanceId === instanceId
+						? options.liveSession
+						: undefined;
+				let resumeConfigDir: ClaudeConfigDir;
+				switch (options.folderSource) {
+					case "implicitDefault":
+						resumeConfigDir =
+							recordedThread?.configDir ??
+							liveSession?.configDir ??
+							options.configDir;
+						break;
+					case "account":
+					case "legacyDefault":
+						resumeConfigDir = options.configDir;
+						break;
+					default:
+						return assertNever(options.folderSource);
+				}
 				const newerRewinds =
 					options.rewind !== undefined || options.nativeResumeFallback
 						? []
@@ -377,10 +429,6 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 				let needsCanonicalHandoff = false;
 				const rewindPoint = options.rewind?.resumeSessionAt;
 				if (rewindPoint !== undefined && rewindPoint !== null) {
-					const liveSession =
-						options.liveSession?.instanceId === instanceId
-							? options.liveSession
-							: undefined;
 					const nativeId =
 						recordedThread?.resumeSessionId ?? liveSession?.resumeSessionId;
 					const workspaceRoot = options.workspaceRoot;
@@ -394,14 +442,10 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 							testModule?.claudeSdk.fork ??
 							options.sessionForkSdk ??
 							defaultClaudeSessionForkSdk;
-						const configDir =
-							options.configDir ??
-							recordedThread?.configDir ??
-							liveSession?.configDir;
 						const transcript = yield* Effect.tryPromise(() =>
 							sdk.readTranscript(nativeId, {
 								dir: workspaceRoot,
-								...(configDir !== undefined ? { configDir } : {}),
+								configDir: resumeConfigDir,
 							}),
 						).pipe(Effect.catchAll(() => Effect.succeed([])));
 						needsCanonicalHandoff =
@@ -421,12 +465,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions = {}) =>
 				const turnOptions = invalidated
 					? {
 							...budgetOptions,
-							configDir:
-								options.configDir ??
-								recordedThread?.configDir ??
-								(options.liveSession?.instanceId === instanceId
-									? options.liveSession.configDir
-									: undefined),
+							configDir: resumeConfigDir,
 							liveSession: undefined,
 						}
 					: budgetOptions;

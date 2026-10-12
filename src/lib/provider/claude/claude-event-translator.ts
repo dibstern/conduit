@@ -585,9 +585,7 @@ export class ClaudeEventTranslator {
 					(this.deps.readGoalStatus ?? readClaudeGoalStatus)({
 						workspaceRoot: ctx.workspaceRoot,
 						sdkSessionId,
-						...(ctx.configDir !== undefined
-							? { configDir: ctx.configDir }
-							: {}),
+						configDir: ctx.configDir,
 					}),
 				catch: (cause) => cause,
 			}).pipe(

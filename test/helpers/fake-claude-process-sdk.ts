@@ -2352,16 +2352,20 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 	query,
 	fork: {
 		readTranscript: async (sessionId, options) => {
-			return readNativeTranscript(sessionId, options.configDir, options.dir);
+			return readNativeTranscript(
+				sessionId,
+				options.configDir.path,
+				options.dir,
+			);
 		},
 		forkSession: async (parentSessionId, options) => {
 			const transcript = readNativeTranscript(
 				parentSessionId,
-				options.configDir,
+				options.configDir.path,
 				options.dir,
 			);
 			const directoryFile = join(
-				options.configDir ?? "",
+				options.configDir.path,
 				`conduit-test-transcript-${parentSessionId}.ndjson.directory`,
 			);
 			const directory = existsSync(directoryFile)
@@ -2378,7 +2382,7 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 			for (const entry of transcript.slice(0, end + 1)) {
 				recordNativeMessage(
 					{ ...entry, session_id: sessionId },
-					options.configDir,
+					options.configDir.path,
 					directory,
 				);
 			}
@@ -2386,7 +2390,7 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 				kind: "native-fork",
 				parentSessionId,
 				sessionId,
-				configDir: options.configDir,
+				configDir: options.configDir.path,
 				upToMessageId: options.upToMessageId,
 			});
 			return { sessionId };

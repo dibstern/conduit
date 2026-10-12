@@ -25,6 +25,7 @@ import {
 	type ReadClaudeGoalStatus,
 } from "../../../../src/lib/provider/claude/claude-goal-tracker.js";
 import { buildClaudeQueryOptions } from "../../../../src/lib/provider/claude/claude-query-options.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -77,6 +78,7 @@ function harness(readGoalStatus?: ReadClaudeGoalStatus) {
 	const ctx = partialFake<ClaudeSessionContext>({
 		sessionId: "workspace-session",
 		workspaceRoot: mainFolder,
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),
 		inFlightTools: new Map(),
@@ -414,6 +416,8 @@ describe("Claude declared workspace reports", () => {
 			{
 				sessionId: "workspace-session",
 				workspaceRoot: mainFolder,
+				configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+				folderSource: "account",
 				extraFolders: [],
 				providerState: {},
 				model: { providerId: "claude", modelId: "claude-sonnet-5" },

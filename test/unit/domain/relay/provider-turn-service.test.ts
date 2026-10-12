@@ -60,6 +60,7 @@ import {
 	ReadQueryEffectTag,
 } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../../src/lib/persistence/read-model-types.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OpenCodeProviderInstance } from "../../../../src/lib/provider/opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
@@ -973,7 +974,7 @@ describe("ProviderTurnService", () => {
 						type: "send_turn",
 						providerId: "work-claude",
 						input: expect.objectContaining({
-							configDir: "/instances/work-claude",
+							configDir: configuredClaudeConfigDir("/instances/work-claude"),
 							history: [],
 						}),
 					}),
@@ -1092,7 +1093,10 @@ describe("ProviderTurnService", () => {
 				if (command?.type !== "send_turn") {
 					throw new Error("Expected a send_turn command");
 				}
-				expect(command.input).not.toHaveProperty("configDir");
+				expect(command.input.configDir).toEqual({
+					_tag: expect.stringMatching(/^(Configured|SdkDefault)$/),
+					path: expect.any(String),
+				});
 			}).pipe(Effect.provide(layer));
 		},
 	);

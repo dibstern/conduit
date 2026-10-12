@@ -1,3 +1,5 @@
+// Failure modes: subagent reads inherit the daemon account; a blank folder starts
+// a worker; transcript staging advances cursors before persistence succeeds.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,7 +7,7 @@ import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import {
 	ClaudeEventPersistEffectTag,
@@ -26,13 +28,42 @@ import {
 } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	type ClaudeSubagentTranscriptCursor,
 	commitClaudeSubagentTranscriptCursor,
+	defaultClaudeSubagentSdk,
 	diffSessionMessagesToEvents,
 	stageSessionMessagesToEvents,
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type { SessionMessage } from "../../../../src/lib/provider/claude/types.js";
+
+afterEach(() => vi.unstubAllEnvs());
+
+it.each([
+	"",
+	"  ",
+])("rejects a blank folder before reading any subagent transcript: %j", async (configDir) => {
+	vi.stubEnv("CLAUDE_CONFIG_DIR", "/daemon/claude");
+	await expect(
+		defaultClaudeSubagentSdk.listSubagents("sdk-parent", {
+			dir: "/project",
+			configDir: {
+				...configuredClaudeConfigDir("/instance-config"),
+				path: configDir,
+			},
+		}),
+	).rejects.toThrow("Claude config directory must be non-empty");
+	await expect(
+		defaultClaudeSubagentSdk.getSubagentMessages("sdk-parent", "agent", {
+			dir: "/project",
+			configDir: {
+				...configuredClaudeConfigDir("/instance-config"),
+				path: configDir,
+			},
+		}),
+	).rejects.toThrow("Claude config directory must be non-empty");
+});
 
 function dataOf(event: { readonly data: unknown }): Record<string, unknown> {
 	return event.data as Record<string, unknown>;

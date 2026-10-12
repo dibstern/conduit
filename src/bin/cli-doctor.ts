@@ -1,8 +1,13 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { loadDaemonConfig } from "../lib/daemon/config-persistence.js";
-import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../lib/daemon/config-persistence.js";
+import {
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+} from "../lib/provider/claude/claude-sdk-env.js";
 import {
 	findExecutable,
 	ProjectShellEnvResolver,
@@ -27,10 +32,17 @@ export async function handleDoctor(options: {
 		for (const project of projects) {
 			await resolver.refresh(project.path);
 			const snapshot = resolver.snapshot(project.path);
-			const configDir = config?.claudeConfigDir;
+			const launch =
+				config?.claudeConfigDir === undefined
+					? resolveClaudeLaunchConfig(
+							config,
+							undefined,
+							resolver.get(project.path),
+						)
+					: { configDir: configuredClaudeConfigDir(config.claudeConfigDir) };
 			const env = makeClaudeSdkEnv({
 				baseEnv: resolver.get(project.path),
-				...(configDir && { configDir }),
+				...launch,
 			});
 			stdout.write(`\n${project.slug} (${project.path})\n`);
 			stdout.write(`  Env sources: ${snapshot.sources.join(", ")}\n`);
@@ -43,8 +55,7 @@ export async function handleDoctor(options: {
 				stdout.write(
 					`  ${tool}: ${findExecutable(tool, env, project.path) ?? "missing"}\n`,
 				);
-			const claudeHome =
-				env["CLAUDE_CONFIG_DIR"] ?? join(env["HOME"] ?? homedir(), ".claude");
+			const claudeHome = launch.configDir.path;
 			const credentials = env["CLAUDE_CODE_OAUTH_TOKEN"]
 				? "OAuth token present"
 				: existsSync(join(claudeHome, ".credentials.json"))

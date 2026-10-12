@@ -16,6 +16,7 @@ import {
 	type ProbeDeps,
 	probeClaudeCapabilities,
 } from "./claude-capabilities-probe.js";
+import type { ClaudeLaunchConfig } from "./claude-sdk-env.js";
 
 const CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -47,6 +48,7 @@ export class ClaudeCapabilitiesServiceTag extends Context.Tag(
 )<ClaudeCapabilitiesServiceTag, ClaudeCapabilitiesService>() {}
 
 export interface ClaudeCapabilitiesServiceDeps {
+	readonly launchConfig: () => ClaudeLaunchConfig;
 	readonly queryFactory?: ProbeDeps["queryFactory"];
 	readonly ttlMs?: number;
 }
@@ -86,13 +88,16 @@ const makeClaudeCapabilitiesServiceWithCache = (
 				).pipe(
 					Effect.zipRight(
 						Effect.tryPromise({
-							try: () =>
-								probeClaudeCapabilities({
+							try: () => {
+								const launch = deps.launchConfig();
+								return probeClaudeCapabilities({
 									workspaceRoot,
+									...launch,
 									...(deps.queryFactory
 										? { queryFactory: deps.queryFactory }
 										: {}),
-								}),
+								});
+							},
 							catch: (cause) =>
 								new ClaudeBoundaryError({
 									operation: "probeCapabilities",
@@ -142,7 +147,7 @@ const makeClaudeCapabilitiesServiceWithCache = (
 };
 
 export const makeClaudeCapabilitiesService = (
-	deps: ClaudeCapabilitiesServiceDeps = {},
+	deps: ClaudeCapabilitiesServiceDeps,
 ): Effect.Effect<ClaudeCapabilitiesService> =>
 	Effect.gen(function* () {
 		const cacheRef = yield* Ref.make(HashMap.empty<string, CacheEntry>());
@@ -150,7 +155,7 @@ export const makeClaudeCapabilitiesService = (
 	});
 
 export const ClaudeCapabilitiesServiceLive = (
-	deps: ClaudeCapabilitiesServiceDeps = {},
+	deps: ClaudeCapabilitiesServiceDeps,
 ): Layer.Layer<ClaudeCapabilitiesServiceTag> =>
 	Layer.effect(
 		ClaudeCapabilitiesServiceTag,

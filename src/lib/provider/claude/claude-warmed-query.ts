@@ -1,5 +1,4 @@
 import { readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Settings } from "@anthropic-ai/claude-agent-sdk";
@@ -9,13 +8,18 @@ import {
 	ClaudeBoundaryError,
 	ClaudeRuntimeError,
 } from "../event-sink-errors.js";
-import type { PreWarmSessionInput } from "../types.js";
 import type { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
+import {
+	type ClaudeConfigDir,
+	type ClaudeLaunchConfig,
+	makeClaudeSdkEnv,
+} from "./claude-sdk-env.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import type {
 	CanUseTool,
+	ClaudePreWarmSessionInput,
 	ClaudeSessionContext,
 	PromptQueueController,
 	Query,
@@ -27,6 +31,7 @@ export interface EmptyClaudeQuery<Q extends { close(): void }> {
 	readonly query: Q;
 	readonly promptQueue: PromptQueueController;
 	readonly options: SDKOptions;
+	readonly configDir: ClaudeConfigDir;
 	readonly abortController: AbortController;
 }
 
@@ -37,10 +42,12 @@ export interface WarmedClaudeQuery extends EmptyClaudeQuery<Query> {
 /** Shared idle launch path: no prompt is enqueued until a real turn adopts it. */
 export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 	queryFactory: (params: {
+		configDir: ClaudeConfigDir;
 		prompt: AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => Q,
 	makeOptions: (abortController: AbortController) => SDKOptions,
+	launchConfig: Pick<ClaudeLaunchConfig, "configDir">,
 	prepareQuery?: () => Promise<void>,
 ): Effect.Effect<EmptyClaudeQuery<Q>, ClaudeAdapterError> =>
 	Effect.gen(function* () {
@@ -54,12 +61,24 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 		const abortController = new AbortController();
 		return yield* Effect.try({
 			try: () => {
-				const options = makeOptions(abortController);
+				const launch = makeOptions(abortController);
+				const options = {
+					...launch,
+					env: makeClaudeSdkEnv({
+						...launchConfig,
+						baseEnv: launch.env,
+					}),
+				};
 				return {
+					configDir: launchConfig.configDir,
 					promptQueue,
 					abortController,
 					options,
-					query: queryFactory({ prompt: promptQueue, options }),
+					query: queryFactory({
+						configDir: launchConfig.configDir,
+						prompt: promptQueue,
+						options,
+					}),
 				};
 			},
 			catch: (cause) =>
@@ -92,7 +111,7 @@ interface PendingWarmedQuery {
 
 export interface ClaudeWarmedQueryOwner {
 	preWarmEffect(
-		input: PreWarmSessionInput,
+		input: ClaudePreWarmSessionInput,
 		settings: Settings | undefined,
 		shellEnv: Readonly<Record<string, string | undefined>> | undefined,
 		bridge: ClaudePermissionBridge,
@@ -101,6 +120,7 @@ export interface ClaudeWarmedQueryOwner {
 	takeEffect(
 		sessionId: string,
 		options: SDKOptions,
+		configDir: ClaudeConfigDir,
 	): Effect.Effect<WarmedClaudeQuery | undefined, ClaudeAdapterError>;
 	discardEffect(sessionId: string): Effect.Effect<void>;
 	clearEffect(): Effect.Effect<void>;
@@ -118,14 +138,11 @@ function immutableOptions(options: SDKOptions) {
 /** File metadata is cheap to recheck once, without resolving settings on a send. */
 export function inheritedSettingsFingerprint(
 	options: SDKOptions,
+	folder: ClaudeConfigDir,
 ): string | undefined {
 	try {
 		const cwd = resolve(options.cwd ?? process.cwd());
-		const configDir = resolve(
-			cwd,
-			options.env?.["CLAUDE_CONFIG_DIR"] ??
-				join(options.env?.["HOME"] ?? homedir(), ".claude"),
-		);
+		const configDir = resolve(cwd, folder.path);
 		const files = new Set([
 			join(configDir, "settings.json"),
 			join(cwd, ".claude", "settings.json"),
@@ -233,9 +250,13 @@ export const makeClaudeWarmedQueryOwner = (
 										settings,
 										shellEnv,
 									);
-									inheritedSettings = inheritedSettingsFingerprint(options);
+									inheritedSettings = inheritedSettingsFingerprint(
+										options,
+										input.configDir,
+									);
 									return options;
 								},
+								input,
 								prepareQuery,
 							);
 							const resource: WarmedClaudeQuery = {
@@ -290,7 +311,7 @@ export const makeClaudeWarmedQueryOwner = (
 					);
 					yield* Deferred.await(entry.ready);
 				}),
-			takeEffect: (sessionId, options) =>
+			takeEffect: (sessionId, options, configDir) =>
 				Effect.gen(function* () {
 					const entry = yield* lock.withPermits(1)(
 						Effect.sync(() => pending.get(sessionId)),
@@ -317,7 +338,8 @@ export const makeClaudeWarmedQueryOwner = (
 					if (
 						!entry.inheritedSettingsFrozen &&
 						(entry.inheritedSettings === undefined ||
-							entry.inheritedSettings !== inheritedSettingsFingerprint(options))
+							entry.inheritedSettings !==
+								inheritedSettingsFingerprint(options, configDir))
 					) {
 						yield* discardEntry(sessionId, entry);
 						return;

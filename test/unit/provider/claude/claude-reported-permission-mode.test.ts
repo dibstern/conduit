@@ -11,6 +11,7 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -43,6 +44,7 @@ function makeCtx(
 	return {
 		sessionId: "sess-1",
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: "2026-04-05T00:00:00.000Z",
 		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),

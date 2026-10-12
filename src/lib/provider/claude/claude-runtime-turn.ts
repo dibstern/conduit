@@ -294,9 +294,7 @@ export function sdkResultToTurnResult(
 						{
 							key: nativeThreadKey(ctx.instanceId ?? "claude"),
 							value: JSON.stringify({
-								...(ctx.configDir !== undefined
-									? { configDir: ctx.configDir }
-									: {}),
+								configDir: ctx.configDir,
 								resumeSessionId: ctx.resumeSessionId,
 								firstSequence: ctx.nativeThread?.firstSequence ?? 0,
 								deliveredThrough: ctx.nativeThread?.deliveredThrough ?? 0,

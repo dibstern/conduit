@@ -21,7 +21,7 @@ import {
 	contextWindowOptionsForModel,
 	hasContextWindowRow,
 } from "./claude-api-model-id.js";
-import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+import { type ClaudeConfigDir, makeClaudeSdkEnv } from "./claude-sdk-env.js";
 
 const defaultLog = createLogger("claude-capabilities-probe");
 
@@ -100,6 +100,7 @@ export interface ProbeResult {
 
 export interface ProbeDeps {
 	readonly workspaceRoot: string;
+	readonly configDir: ClaudeConfigDir;
 	readonly queryFactory?: (params: {
 		prompt: string | AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
@@ -240,7 +241,7 @@ export async function probeClaudeCapabilities(
 			persistSession: false,
 			maxTurns: 0,
 			cwd: deps.workspaceRoot,
-			env: makeClaudeSdkEnv(),
+			env: makeClaudeSdkEnv(deps),
 			settingSources: ["user", "project", "local"],
 			abortController,
 			allowedTools: [],

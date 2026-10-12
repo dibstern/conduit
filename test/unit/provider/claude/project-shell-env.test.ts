@@ -13,7 +13,11 @@ import { performance } from "node:perf_hooks";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClaudeProviderInstanceDeps } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
-import { makeClaudeSdkEnv } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+	sdkDefaultClaudeConfigDir,
+} from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	findExecutable,
 	ProjectShellEnvResolver,
@@ -92,7 +96,7 @@ describe("project shell environment", () => {
 				makeBaseSendTurnInput({
 					workspaceRoot: project,
 					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
-					configDir: "/named/claude",
+					configDir: configuredClaudeConfigDir("/named/claude"),
 				}),
 			),
 		);
@@ -149,7 +153,10 @@ describe("project shell environment", () => {
 				queryFactory.mock.calls[0]?.[0]?.options?.env?.["CLAUDE_CONFIG_DIR"],
 			).toBe(configDir);
 		const nativeThread = {
-			configDir,
+			configDir:
+				source === "default"
+					? sdkDefaultClaudeConfigDir(configDir)
+					: configuredClaudeConfigDir(configDir),
 			resumeSessionId: "sdk-session-1",
 			firstSequence: 0,
 			deliveredThrough: 0,
@@ -179,8 +186,18 @@ describe("project shell environment", () => {
 		);
 		expect(queryFactory.mock.calls[1]?.[0]?.options).toMatchObject({
 			resume: "sdk-session-1",
-			env: { CLAUDE_CONFIG_DIR: configDir },
 		});
+		if (source === "default") {
+			expect(queryFactory.mock.calls[1]?.[0]?.options?.env).toMatchObject({
+				HOME: home,
+			});
+			expect(queryFactory.mock.calls[1]?.[0]?.options?.env).not.toHaveProperty(
+				"CLAUDE_CONFIG_DIR",
+			);
+		} else
+			expect(queryFactory.mock.calls[1]?.[0]?.options?.env).toMatchObject({
+				CLAUDE_CONFIG_DIR: configDir,
+			});
 		const namedConfigDir = join(home, "explicit-instance");
 		const namedInstance = makeTestClaudeProviderInstance({
 			workspaceRoot: project,
@@ -190,7 +207,7 @@ describe("project shell environment", () => {
 		const namedResult = await Effect.runPromise(
 			namedInstance.sendTurnEffect({
 				...input,
-				configDir: namedConfigDir,
+				configDir: configuredClaudeConfigDir(namedConfigDir),
 				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,
 			}),
@@ -200,7 +217,10 @@ describe("project shell environment", () => {
 		).toBe(namedConfigDir);
 		expect(namedResult.providerStateUpdates).toContainEqual({
 			key: "nativeThread:claude",
-			value: JSON.stringify({ ...nativeThread, configDir: namedConfigDir }),
+			value: JSON.stringify({
+				...nativeThread,
+				configDir: configuredClaudeConfigDir(namedConfigDir),
+			}),
 		});
 	});
 
@@ -251,9 +271,12 @@ describe("project shell environment", () => {
 			PROJECT_MISE_OVERRIDE: "explicit",
 		});
 		expect(env.get(project)).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
-		expect(makeClaudeSdkEnv({ baseEnv: env.get(project) })).not.toHaveProperty(
-			"CLAUDE_CODE_OAUTH_TOKEN",
-		);
+		expect(
+			makeClaudeSdkEnv({
+				configDir: sdkDefaultClaudeConfigDir(join(home, ".claude")),
+				baseEnv: env.get(project),
+			}),
+		).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
 		expect(env.snapshot(project).sources).toEqual([
 			"login",
 			"mise",
@@ -298,9 +321,12 @@ describe("project shell environment", () => {
 		env.register(project, { overrides: { PROJECT_OVERRIDE: "explicit" } });
 		await env.refresh(project);
 		expect(env.snapshot(project).warnings).toEqual([]);
-		expect(makeClaudeSdkEnv({ baseEnv: env.get(project) })).not.toHaveProperty(
-			"CLAUDE_CODE_OAUTH_TOKEN",
-		);
+		expect(
+			makeClaudeSdkEnv({
+				configDir: sdkDefaultClaudeConfigDir(join(home, ".claude")),
+				baseEnv: env.get(project),
+			}),
+		).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
 		expect(env.get(project)).toMatchObject({
 			PROJECT_KEEP: "login",
 			PROJECT_ADDED: "mise=value\nline two",
@@ -555,7 +581,10 @@ describe("project shell environment", () => {
 			ANTHROPIC_SMALL_FAST_MODEL: "fast",
 			PATH: "/project/bin",
 		};
-		const env = makeClaudeSdkEnv({ baseEnv: base });
+		const env = makeClaudeSdkEnv({
+			configDir: sdkDefaultClaudeConfigDir(join(home, ".claude")),
+			baseEnv: base,
+		});
 		for (const key of Object.keys(base).filter((key) =>
 			key.startsWith("ANTHROPIC_"),
 		))

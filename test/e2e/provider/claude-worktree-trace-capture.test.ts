@@ -23,7 +23,11 @@ import { join } from "node:path";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
-import { makeClaudeSdkEnv } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+	sdkDefaultClaudeConfigDir,
+} from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { isRecord } from "../../../src/lib/utils.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
@@ -86,7 +90,12 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 			const repo = join(root, "repo");
 			const linkedWorktree = join(root, "repo-wt");
 			const enteredWorktree = join(repo, ".claude/worktrees", WORKTREE_NAME);
-			const configDir = process.env["CLAUDE_CONFIG_DIR"];
+			const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
+			const configDir = configuredDir ?? join(homedir(), ".claude");
+			const launchConfigDir =
+				configuredDir === undefined
+					? sdkDefaultClaudeConfigDir(configDir)
+					: configuredClaudeConfigDir(configDir);
 			const hookObservations: {
 				turn: string;
 				oldCwd: string;
@@ -141,7 +150,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 						includePartialMessages: true,
 						maxTurns: 6,
 						abortController,
-						env: makeClaudeSdkEnv({ configDir }),
+						env: makeClaudeSdkEnv({ configDir: launchConfigDir }),
 						hooks: {
 							CwdChanged: [
 								{

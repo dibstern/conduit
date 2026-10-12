@@ -1,3 +1,4 @@
+import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 // src/lib/provider/orchestration-engine.ts
 // Central command processor for the provider instance layer (CQRS core loop).
 // Routes commands to the correct provider instance via ProviderRegistry.
@@ -174,6 +175,7 @@ export interface DurableCommandStoreOptions {
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
 	readonly resolveProviderDriver?: (
@@ -268,6 +270,9 @@ export class OrchestrationEngine {
 						? { claudeSessionForkSdk: durable.claudeSessionForkSdk }
 						: {}),
 					nowMs: durable.now,
+					...(options.defaultClaudeLaunchConfig
+						? { defaultClaudeLaunchConfig: options.defaultClaudeLaunchConfig }
+						: {}),
 					...(this.resolveProviderDriver
 						? { resolveProviderDriver: this.resolveProviderDriver }
 						: {}),

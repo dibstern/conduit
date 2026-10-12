@@ -1,12 +1,29 @@
 import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { BUILD_ID } from "../../build-id.js";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../../daemon/config-persistence.js";
 import { isRecord } from "../../utils.js";
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type { TurnResult } from "../types.js";
-import type { ClaudeRunnerUpgradeState } from "./claude-runner-upgrade.js";
+import type {
+	ClaudeRunnerSettingsSnapshot,
+	ClaudeRunnerUpgradeState,
+} from "./claude-runner-upgrade.js";
+import {
+	type ClaudeConfigDir,
+	ClaudeConfigDirSchema,
+	ClaudeFolderSourceSchema,
+	type ClaudeLaunchConfig,
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+	sdkDefaultClaudeConfigDir,
+} from "./claude-sdk-env.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -43,6 +60,7 @@ export interface ClaudeRunnerHello {
 	// Runners that predate stop-task acknowledge it without stopping anything,
 	// and they also speak this protocol version, so the daemon needs the flag.
 	readonly stopsTasks?: true;
+	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;
@@ -132,13 +150,67 @@ export type ClaudeRunnerMessage =
 			readonly preserveRole?: boolean;
 	  };
 
+/** Only absent legacy fields inherit the default; an explicit blank is invalid. */
+export function normalizeClaudeLaunchInput<
+	T extends {
+		readonly configDir?: ClaudeConfigDir | string | undefined;
+		readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
+	},
+>(
+	input: T,
+	defaultFolder: () => ClaudeLaunchConfig = () =>
+		resolveClaudeLaunchConfig(loadDaemonConfig()),
+): Omit<T, "configDir" | "folderSource"> & ClaudeLaunchConfig {
+	const { configDir: folder, folderSource: source, ...payload } = input;
+	const launch =
+		folder === undefined
+			? { ...defaultFolder(), folderSource: "legacyDefault" }
+			: {
+					folderSource: source ?? "account",
+					configDir:
+						typeof folder === "string"
+							? configuredClaudeConfigDir(folder)
+							: folder,
+				};
+	const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
+		launch.configDir,
+	);
+	const folderSource = Schema.decodeUnknownSync(ClaudeFolderSourceSchema)(
+		launch.folderSource,
+	);
+	// Retained snapshots compare their JSON byte-for-byte across an upgrade.
+	const normalized = {
+		...input,
+		...payload,
+		...launch,
+		configDir,
+		folderSource,
+	};
+	if ("nativeThread" in input && isRecord(input.nativeThread)) {
+		const folder = input.nativeThread["configDir"];
+		if (folder !== undefined)
+			Reflect.set(normalized, "nativeThread", {
+				...input.nativeThread,
+				configDir: Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
+					typeof folder === "string"
+						? configuredClaudeConfigDir(folder)
+						: folder,
+				),
+			});
+	}
+	return normalized;
+}
+
 export function normalizeClaudeSessionTurn(
-	input: Omit<ClaudeSessionTurn, "inputId"> & {
+	input: Omit<ClaudeSessionTurn, "inputId" | "configDir" | "folderSource"> & {
+		readonly configDir?: ClaudeConfigDir | string | undefined;
+		readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 		readonly inputId?: string;
 		readonly userMessageId?: string;
 		readonly commandId?: string;
 		readonly turnId?: string;
 	},
+	defaultFolder?: () => ClaudeLaunchConfig,
 ): ClaudeSessionTurn {
 	const { inputId, userMessageId, commandId, turnId, ...turn } = input;
 	const id = inputId ?? userMessageId ?? commandId ?? turnId;
@@ -147,7 +219,30 @@ export function normalizeClaudeSessionTurn(
 			operation: "decodeRunnerTurn",
 			cause: "Claude turn input id is required",
 		});
-	return { ...turn, inputId: id };
+	return { ...normalizeClaudeLaunchInput(turn, defaultFolder), inputId: id };
+}
+
+function normalizeClaudeSnapshotInput(
+	snapshot: ClaudeRunnerSettingsSnapshot,
+	defaultFolder: () => ClaudeLaunchConfig,
+) {
+	return normalizeClaudeLaunchInput(snapshot.input, () => {
+		// A retained runner has already launched: preserve its recorded login.
+		const env = snapshot.options.env;
+		const configDir = env?.["CLAUDE_CONFIG_DIR"];
+		if (configDir !== undefined)
+			return {
+				configDir: configuredClaudeConfigDir(configDir),
+				folderSource: "legacyDefault",
+			};
+		const home = env?.["HOME"];
+		return home === undefined
+			? defaultFolder()
+			: {
+					configDir: sdkDefaultClaudeConfigDir(join(home, ".claude")),
+					folderSource: "legacyDefault",
+				};
+	});
 }
 
 export function claudeRunnerHelloFailure(
@@ -207,27 +302,84 @@ export class ClaudeRunnerSocket {
 	>();
 	private failure: ClaudeSessionFailure | undefined;
 	private idleExiting = false;
+	private peerTaggedConfigDir = false;
 
 	constructor(
 		private readonly socket: Socket,
 		onMessage: (message: ClaudeRunnerMessage) => void,
 		onClose: (failure: ClaudeSessionFailure) => void,
 		private readonly beforeCommandFailure?: () => Effect.Effect<void>,
+		private readonly defaultClaudeFolder: () => ClaudeLaunchConfig = () =>
+			resolveClaudeLaunchConfig(loadDaemonConfig()),
 	) {
 		const lines = createInterface({ input: socket, crlfDelay: Infinity });
 		lines.on("line", (line) => {
 			try {
 				const decoded = JSON.parse(line) as ClaudeRunnerMessage;
-				const message =
+				let message =
 					decoded.type === "command" && decoded.command.type === "send-turn"
 						? {
 								...decoded,
 								command: {
 									...decoded.command,
-									input: normalizeClaudeSessionTurn(decoded.command.input),
+									input: normalizeClaudeSessionTurn(
+										decoded.command.input,
+										this.defaultClaudeFolder,
+									),
 								},
 							}
 						: decoded;
+				if (message.type === "command" && message.command.type === "pre-warm") {
+					const command = message.command;
+					const settingsSnapshot = command.settingsSnapshot
+						? {
+								...command.settingsSnapshot,
+								input: normalizeClaudeSnapshotInput(
+									command.settingsSnapshot,
+									this.defaultClaudeFolder,
+								),
+							}
+						: undefined;
+					message = {
+						...message,
+						command: {
+							...command,
+							input: normalizeClaudeLaunchInput(command.input, () =>
+								settingsSnapshot
+									? {
+											configDir: settingsSnapshot.input.configDir,
+											folderSource: settingsSnapshot.input.folderSource,
+										}
+									: this.defaultClaudeFolder(),
+							),
+							...(settingsSnapshot ? { settingsSnapshot } : {}),
+						},
+					};
+				}
+				const state =
+					message.type === "hello"
+						? message.upgradeState
+						: message.type === "upgrade-state"
+							? message.state
+							: undefined;
+				if (state?.snapshot) {
+					const normalized = {
+						...state,
+						snapshot: {
+							...state.snapshot,
+							input: normalizeClaudeSnapshotInput(
+								state.snapshot,
+								this.defaultClaudeFolder,
+							),
+						},
+					};
+					if (message.type === "hello")
+						message = { ...message, upgradeState: normalized };
+					else if (message.type === "upgrade-state")
+						message = { ...message, state: normalized };
+				}
+				if (message.type === "hello")
+					this.peerTaggedConfigDir = message.taggedConfigDir === true;
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
@@ -285,7 +437,7 @@ export class ClaudeRunnerSocket {
 		// Runners can outlive the daemon. Older builds read these aliases for
 		// turn correlation (a continuation's turn is its cut-off message) and
 		// report commandId in their attachment bindings.
-		const frame =
+		let frame =
 			message.type === "command" && message.command.type === "send-turn"
 				? {
 						...message,
@@ -302,7 +454,56 @@ export class ClaudeRunnerSocket {
 						},
 					}
 				: message;
-		this.socket.write(`${JSON.stringify(frame)}\n`);
+		if (
+			!this.peerTaggedConfigDir &&
+			frame.type === "command" &&
+			(frame.command.type === "send-turn" ||
+				frame.command.type === "pre-warm") &&
+			frame.command.input.configDir._tag === "SdkDefault"
+		) {
+			// Older runners apply the shell env before launching on their default login.
+			frame = {
+				...frame,
+				command: {
+					...frame.command,
+					shellEnv: makeClaudeSdkEnv({
+						configDir: frame.command.input.configDir,
+						baseEnv: frame.command.shellEnv,
+					}),
+				},
+			};
+		}
+		const taggedConfigDir = this.peerTaggedConfigDir;
+		this.socket.write(
+			`${JSON.stringify(
+				frame,
+				function (this: unknown, key: string, value: unknown) {
+					if (
+						!taggedConfigDir &&
+						key === "nativeThread" &&
+						isRecord(value) &&
+						isRecord(this) &&
+						isRecord(this["configDir"]) &&
+						this["configDir"]["_tag"] === "SdkDefault"
+					) {
+						// Old queries fall back to the native folder when input has none.
+						return { ...value, configDir: undefined };
+					}
+					if (
+						key !== "configDir" ||
+						!isRecord(value) ||
+						(value["_tag"] !== "Configured" && value["_tag"] !== "SdkDefault")
+					)
+						return value;
+					const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
+						value,
+					);
+					if (taggedConfigDir) return configDir;
+					if (configDir._tag === "Configured") return configDir.path;
+					return undefined;
+				},
+			)}\n`,
+		);
 	}
 
 	get closed(): boolean {

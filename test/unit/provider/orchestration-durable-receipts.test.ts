@@ -8,6 +8,7 @@ import {
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import {
 	effectiveDispatchFingerprint,
@@ -67,7 +68,7 @@ function sendTurnCommand(
 		commandId?: string;
 		prompt?: string;
 		providerId?: string;
-		configDir?: string;
+		configDir?: SendTurnCommand["input"]["configDir"];
 	} = {},
 ): SendTurnCommand {
 	return {
@@ -204,13 +205,13 @@ describe("OrchestrationEngine durable receipts", () => {
 			yield* engine.dispatchEffect(
 				sendTurnCommand({
 					providerId: "claude",
-					configDir: "/instances/work-claude",
+					configDir: configuredClaudeConfigDir("/instances/work-claude"),
 				}),
 			);
 
 			expect(instance.sendTurnEffect).toHaveBeenCalledWith(
 				expect.objectContaining({
-					configDir: "/instances/work-claude",
+					configDir: configuredClaudeConfigDir("/instances/work-claude"),
 				}),
 			);
 		}).pipe(

@@ -2,6 +2,7 @@
 // firstSequence or after deliveredThrough; losing an intermediate account after
 // switching back; rejecting an uncovered point; copying history past the point;
 // resuming a fresh child or handing it unbounded history instead of prepareTurn.
+
 import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
 import {
@@ -16,6 +17,7 @@ import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effe
 import { ProviderStateEffectTag } from "../../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makePrepareTurn } from "../../../../src/lib/provider/claude/prepare-turn.js";
 import { claudeSdk } from "../../../helpers/fake-claude-process-sdk.js";
 import {
@@ -147,7 +149,12 @@ it.each([
 			);
 			const expectedAccount = point === "before" ? "claude" : "claude-sdk";
 			expect(childRow?.provider).toBe(expectedAccount);
-			const prepare = yield* makePrepareTurn();
+			const prepare = yield* makePrepareTurn({
+				folderSource: "account",
+				configDir: configuredClaudeConfigDir(
+					point === "before" ? "/source" : "/target",
+				),
+			});
 			const prepared = yield* prepare(
 				child.id,
 				expectedAccount,
@@ -173,13 +180,17 @@ it.each([
 				expect(readTranscript).toHaveBeenCalledWith(
 					point === "before" ? "source-sdk" : "target-sdk",
 					{
-						configDir: point === "before" ? "/source" : "/target",
+						configDir: configuredClaudeConfigDir(
+							point === "before" ? "/source" : "/target",
+						),
 					},
 				);
 				expect(forkNative).toHaveBeenCalledWith(
 					point === "before" ? "source-sdk" : "target-sdk",
 					{
-						configDir: point === "before" ? "/source" : "/target",
+						configDir: configuredClaudeConfigDir(
+							point === "before" ? "/source" : "/target",
+						),
 						title: "Parent (fork)",
 						upToMessageId: boundary,
 					},
@@ -288,7 +299,10 @@ it.each([
 				.soft(history.map((row) => row.text))
 				.toEqual(["Kept request", "Kept response"]);
 			expect.soft(forkNative).not.toHaveBeenCalled();
-			const prepare = yield* makePrepareTurn();
+			const prepare = yield* makePrepareTurn({
+				folderSource: "account",
+				configDir: configuredClaudeConfigDir("/source"),
+			});
 			const prepared = yield* prepare(child.id, "claude", "Continue child");
 			expect.soft(prepared.resumeSessionId).toBeUndefined();
 			expect.soft(prepared.prompt).toContain("Kept request");

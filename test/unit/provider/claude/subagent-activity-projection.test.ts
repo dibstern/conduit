@@ -1,4 +1,5 @@
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 // The translator-level regression test (regression-subagent-activity.test.ts)
 // proves the right ProviderRuntimeEvents come out. This one carries a real
 // captured subagent turn all the way to the surface the user complained about:
@@ -54,6 +55,7 @@ function makeCtx(): ClaudeSessionContext {
 	return {
 		sessionId: SESSION_ID,
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: "2026-08-12T00:00:00.000Z",
 		promptQueue: {
 			enqueue: () => Effect.void,

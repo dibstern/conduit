@@ -15,6 +15,10 @@ import type {
 	ProviderPermissionUpdate,
 	SessionPermissionMode,
 } from "../shared-types.js";
+import type {
+	ClaudeConfigDir,
+	ClaudeLaunchConfig,
+} from "./claude/claude-sdk-env.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 import type { EventSinkError } from "./event-sink-errors.js";
 
@@ -231,7 +235,8 @@ export interface SendTurnInput {
 	readonly model?: ModelSelection;
 	readonly workspaceRoot: string;
 	readonly extraFolders: readonly string[];
-	readonly configDir?: string | undefined;
+	readonly configDir?: ClaudeConfigDir | undefined;
+	readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 	/** Projected Claude goal facts and cumulative usage seed a reopened SDK query. */
 	readonly goalState?: SessionGoalChangedPayload;
 	readonly cumulativeTokens?: number;
@@ -259,6 +264,7 @@ export type PreWarmSessionInput = Pick<
 	| "resumeSessionAt"
 	| "model"
 	| "configDir"
+	| "folderSource"
 	| "permissionMode"
 	| "variant"
 	| "contextWindow"
@@ -304,7 +310,7 @@ export interface ProviderCapabilities {
 /** Live SDK facts can exist before the first completed native-thread receipt. */
 export interface ProviderNativeSession {
 	readonly instanceId: string;
-	readonly configDir?: string | undefined;
+	readonly configDir?: ClaudeConfigDir | undefined;
 	readonly agent?: string | undefined;
 	readonly resumeSessionId?: string | undefined;
 }

@@ -72,6 +72,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	SDKMessage,
 	SDKUserMessage,
@@ -231,7 +232,10 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		prompts.push("first");
@@ -260,7 +264,10 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		const turns: SDKMessage[][] = [];
@@ -306,6 +313,7 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const parent = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			prompt: prompts.iterable,
 			options: { resume: "restored-parent" },
 		});
@@ -318,6 +326,7 @@ describe("createClaudeTraceReplayer", () => {
 		) as { parentSessionId: string; forkSession: { sessionId: string } };
 		const transcript = await replayer.sdk.fork.readTranscript(parentId, {
 			dir: "/replay",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 		});
 		expect(transcript.some((entry) => entry.type === "user")).toBe(true);
 		expect(transcript.some((entry) => entry.type === "assistant")).toBe(true);
@@ -326,16 +335,19 @@ describe("createClaudeTraceReplayer", () => {
 
 		const fork = await replayer.sdk.fork.forkSession(parentId, {
 			dir: "/replay",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			title: "Fork",
 		});
 		const sibling = await replayer.sdk.fork.forkSession(parentId, {
 			dir: "/replay",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			title: "Another fork",
 		});
 		expect(new Set([parentId, fork.sessionId, sibling.sessionId]).size).toBe(3);
 		expect(fork.sessionId).not.toBe(captured.forkSession.sessionId);
 		const forkPrompts = promptQueue();
 		const resumed = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			prompt: forkPrompts.iterable,
 			options: { resume: fork.sessionId },
 		});
@@ -365,22 +377,30 @@ describe("createClaudeTraceReplayer", () => {
 			turns: ["pong-thinking-text-turn"],
 		});
 		const prompts = promptQueue();
-		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const query = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		prompts.push("parent");
 		await readTurn(query);
 		prompts.close();
 		query.close();
 		await expect(
-			replayer.sdk.fork.readTranscript("unknown", { dir: "/replay" }),
+			replayer.sdk.fork.readTranscript("unknown", {
+				dir: "/replay",
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+			}),
 		).rejects.toThrow(/unknown session/);
 		await expect(
 			replayer.sdk.fork.forkSession("unknown", {
 				dir: "/replay",
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
 				title: "Fork",
 			}),
 		).rejects.toThrow(/unknown session/);
 		expect(() =>
 			replayer.sdk.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
 				prompt: promptQueue().iterable,
 				options: { resume: "unknown" },
 			}),
@@ -394,7 +414,10 @@ describe("createClaudeTraceReplayer", () => {
 			turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
 		});
 		const prompts = promptQueue();
-		const parent = replayer.sdk.query({ prompt: prompts.iterable });
+		const parent = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		prompts.push("first");
 		const first = await readTurn(parent);
 		prompts.push("second");
@@ -403,6 +426,7 @@ describe("createClaudeTraceReplayer", () => {
 		if (!parentId) throw new Error("Replay returned no SDK session id");
 		const transcript = await replayer.sdk.fork.readTranscript(parentId, {
 			dir: "/replay",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 		});
 		const promptAt = (text: string) =>
 			transcript.findIndex(
@@ -426,12 +450,14 @@ describe("createClaudeTraceReplayer", () => {
 
 		const fork = await replayer.sdk.fork.forkSession(parentId, {
 			dir: "/replay",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			title: "Fork",
 			upToMessageId: cut,
 		});
 		expect(
 			await replayer.sdk.fork.readTranscript(fork.sessionId, {
 				dir: "/replay",
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
 			}),
 		).toEqual(
 			transcript
@@ -448,6 +474,7 @@ describe("createClaudeTraceReplayer", () => {
 		await expect(
 			replayer.sdk.fork.forkSession(parentId, {
 				dir: "/replay",
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
 				title: "Fork",
 				upToMessageId: "never-replayed",
 			}),
@@ -465,7 +492,10 @@ describe("createClaudeTraceReplayer", () => {
 			holdTurnBeforeToolResult: 1,
 		});
 		const prompts = promptQueue();
-		const parent = replayer.sdk.query({ prompt: prompts.iterable });
+		const parent = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		const parentTurn = parent[Symbol.asyncIterator]();
 		prompts.push("read");
 		const beforeHold: SDKMessage[] = [];
@@ -493,10 +523,12 @@ describe("createClaudeTraceReplayer", () => {
 		if (!parentId) throw new Error("Replay returned no SDK session id");
 		const fork = await replayer.sdk.fork.forkSession(parentId, {
 			dir: "/replay",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			title: "Fork",
 		});
 		const forkPrompts = promptQueue();
 		const side = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			prompt: forkPrompts.iterable,
 			options: { resume: fork.sessionId },
 		});
@@ -557,7 +589,10 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		prompts.push("planned");
@@ -576,7 +611,10 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		prompts.push("only one");
@@ -591,6 +629,7 @@ describe("createClaudeTraceReplayer", () => {
 	it("rejects Query methods it does not replay", async () => {
 		const replayer = createClaudeTraceReplayer({ turns: [] });
 		const query = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			prompt: promptQueue().iterable,
 		});
 
@@ -608,7 +647,10 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		const started = performance.now();
@@ -625,7 +667,10 @@ describe("createClaudeTraceReplayer", () => {
 			turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
 		});
 		const prompts = promptQueue();
-		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const query = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		const iterator = query[Symbol.asyncIterator]();
 
 		prompts.push("interrupted");
@@ -645,7 +690,10 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		prompts.push("first", SENT_A);
@@ -685,7 +733,10 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 
 		prompts.push("a", SENT_A);
@@ -705,7 +756,10 @@ describe("createClaudeTraceReplayer", () => {
 		const [, recordedB = ""] = recordedInputs(lines);
 		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
 		const prompts = promptQueue();
-		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const query = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		const iterator = query[Symbol.asyncIterator]();
 
 		prompts.push("a", SENT_A);
@@ -742,7 +796,10 @@ describe("createClaudeTraceReplayer", () => {
 	it("rejects an interrupt the trace does not record, and fails assertComplete", async () => {
 		const replayer = createClaudeTraceReplayer({ turns: [TWO_INPUTS] });
 		const prompts = promptQueue();
-		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const query = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		const iterator = query[Symbol.asyncIterator]();
 
 		prompts.push("a", SENT_A);
@@ -813,7 +870,10 @@ describe("createClaudeTraceReplayer", () => {
 			tracesDir: writeTrace(interrupted),
 		});
 		const prompts = promptQueue();
-		const query = replayer.sdk.query({ prompt: prompts.iterable });
+		const query = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: prompts.iterable,
+		});
 		const iterator = query[Symbol.asyncIterator]();
 
 		prompts.push("a", SENT_A);
@@ -853,10 +913,16 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({ turns: [name] });
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 		prompts.push("launch");
-		const options = { dir: "/workspace" };
+		const options = {
+			dir: "/workspace",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+		};
 		const lengths: string[] = [];
 		const expected: string[] = [];
 		for (let played = 1; played <= traceLineCount(name); played++) {
@@ -893,7 +959,10 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({ turns: [name] });
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 		prompts.push("launch");
 		const played: SDKMessage[] = [];
@@ -903,7 +972,10 @@ describe("createClaudeTraceReplayer", () => {
 			played.push(next.value);
 		}
 		const sessionId = played[0]?.session_id ?? "";
-		const options = { dir: "/workspace" };
+		const options = {
+			dir: "/workspace",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+		};
 		const reads = (
 			await Promise.all(
 				(
@@ -941,7 +1013,10 @@ describe("createClaudeTraceReplayer", () => {
 		const replayer = createClaudeTraceReplayer({
 			turns: ["concurrent-background-work-turn"],
 		});
-		const options = { dir: "/workspace" };
+		const options = {
+			dir: "/workspace",
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+		};
 		await expect(
 			replayer.sdk.subagentSdk.listSubagents("unknown", options),
 		).rejects.toThrow("unknown session");
@@ -959,7 +1034,10 @@ describe("createClaudeTraceReplayer", () => {
 			],
 		});
 		const before = promptQueue();
-		const first = replayer.sdk.query({ prompt: before.iterable });
+		const first = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
+			prompt: before.iterable,
+		});
 		before.push("first");
 		const firstTurn = await readTurn(first[Symbol.asyncIterator]());
 		first.close();
@@ -967,6 +1045,7 @@ describe("createClaudeTraceReplayer", () => {
 
 		const after = promptQueue();
 		const second = replayer.sdk.query({
+			configDir: configuredClaudeConfigDir("/accounts/replay"),
 			prompt: after.iterable,
 			options: { resume: sessionId },
 		});
@@ -1000,7 +1079,10 @@ describe("createClaudeTraceReplayer", () => {
 		});
 		const prompts = promptQueue();
 		const iterator = replayer.sdk
-			.query({ prompt: prompts.iterable })
+			.query({
+				configDir: configuredClaudeConfigDir("/accounts/replay"),
+				prompt: prompts.iterable,
+			})
 			[Symbol.asyncIterator]();
 		prompts.push("launch");
 		const tick = () =>

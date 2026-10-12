@@ -1,3 +1,6 @@
+// Failure modes: a missing or blank account folder inherits the daemon login;
+// transcript reads and forks use different accounts; a worker mutates daemon env;
+// an SDK-default folder is accidentally treated as explicitly configured.
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -10,12 +13,18 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	defaultClaudeSessionForkSdk,
 	forkClaudeTranscript,
 	resolveForkUpToUuid,
 } from "../../../../src/lib/provider/claude/claude-session-fork.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 const entry = (
 	uuid: string,
@@ -60,6 +69,32 @@ describe("resolveForkUpToUuid", () => {
 });
 
 describe("forkClaudeTranscript", () => {
+	it.each([
+		"",
+		"  ",
+	])("rejects a blank account folder before any SDK call: %j", async (configDir) => {
+		vi.stubEnv("CLAUDE_CONFIG_DIR", "/daemon/claude");
+		const readTranscript = vi.fn(async () => []);
+		const forkSession = vi.fn(async () => ({ sessionId: "sdk-fork" }));
+		await expect(
+			forkClaudeTranscript(
+				{
+					parentSdkId: "sdk-parent",
+					projectDir: "/project",
+					configDir: {
+						...configuredClaudeConfigDir("/instance-config"),
+						path: configDir,
+					},
+					title: "Fork",
+					messageId: "msg_1",
+				},
+				{ readTranscript, forkSession },
+			),
+		).rejects.toThrow("Claude config directory must be non-empty");
+		expect(readTranscript).not.toHaveBeenCalled();
+		expect(forkSession).not.toHaveBeenCalled();
+	});
+
 	it("passes the instance config dir to every SDK call", async () => {
 		const readTranscript = vi.fn(async () => [
 			entry("u1", "user", { role: "user", content: "Question" }),
@@ -70,7 +105,7 @@ describe("forkClaudeTranscript", () => {
 			{
 				parentSdkId: "sdk-parent",
 				projectDir: "/project",
-				configDir: "/instance-config",
+				configDir: configuredClaudeConfigDir("/instance-config"),
 				title: "Fork",
 				messageId: "msg_1",
 			},
@@ -79,11 +114,11 @@ describe("forkClaudeTranscript", () => {
 		expect(result).toEqual({ sdkSessionId: "sdk-fork" });
 		expect(readTranscript).toHaveBeenCalledWith("sdk-parent", {
 			dir: "/project",
-			configDir: "/instance-config",
+			configDir: configuredClaudeConfigDir("/instance-config"),
 		});
 		expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
 			dir: "/project",
-			configDir: "/instance-config",
+			configDir: configuredClaudeConfigDir("/instance-config"),
 			title: "Fork",
 			upToMessageId: "a1",
 		});
@@ -96,6 +131,7 @@ describe("forkClaudeTranscript", () => {
 				{
 					parentSdkId: "sdk-parent",
 					projectDir: "/project",
+					configDir: configuredClaudeConfigDir("/instance-config"),
 					title: "Fork",
 					messageId: "missing",
 				},
@@ -118,6 +154,7 @@ describe("forkClaudeTranscript", () => {
 			{
 				parentSdkId: "sdk-parent",
 				projectDir: "/project",
+				configDir: configuredClaudeConfigDir("/instance-config"),
 				title: "Fork",
 				messageId: "result-only",
 				fallbackMessageIds: ["missing", "known"],
@@ -126,6 +163,7 @@ describe("forkClaudeTranscript", () => {
 		);
 		expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
 			dir: "/project",
+			configDir: configuredClaudeConfigDir("/instance-config"),
 			title: "Fork",
 			upToMessageId: "answer-1",
 		});
@@ -138,6 +176,7 @@ describe("forkClaudeTranscript", () => {
 				{
 					parentSdkId: "sdk-parent",
 					projectDir: "/project",
+					configDir: configuredClaudeConfigDir("/instance-config"),
 					title: "Fork",
 					messageId: "result-only",
 					fallbackMessageIds: ["also-missing"],
@@ -150,9 +189,43 @@ describe("forkClaudeTranscript", () => {
 });
 
 describe("defaultClaudeSessionForkSdk", () => {
-	it("works under the instance config dir without touching the daemon env", async () => {
-		const configDir = realpathSync(mkdtempSync(join(tmpdir(), "claude-fork-")));
-		const projectDir = join(configDir, "workspace");
+	it.each([
+		"",
+		"  ",
+	])("rejects a blank folder before starting a transcript worker: %j", async (configDir) => {
+		vi.stubEnv("CLAUDE_CONFIG_DIR", "/daemon/claude");
+		await expect(
+			defaultClaudeSessionForkSdk.readTranscript("sdk-parent", {
+				dir: "/project",
+				configDir: {
+					...configuredClaudeConfigDir("/instance-config"),
+					path: configDir,
+				},
+			}),
+		).rejects.toThrow("Claude config directory must be non-empty");
+		await expect(
+			defaultClaudeSessionForkSdk.forkSession("sdk-parent", {
+				dir: "/project",
+				configDir: {
+					...configuredClaudeConfigDir("/instance-config"),
+					path: configDir,
+				},
+				title: "Fork",
+			}),
+		).rejects.toThrow("Claude config directory must be non-empty");
+	});
+
+	it.each([
+		"configured",
+		"sdk-default",
+	])("works under a %s config dir without touching the daemon env", async (source) => {
+		const home = realpathSync(mkdtempSync(join(tmpdir(), "claude-fork-")));
+		const configDir = join(home, ".claude");
+		const accountFolder =
+			source === "sdk-default"
+				? sdkDefaultClaudeConfigDir(configDir)
+				: configuredClaudeConfigDir(configDir);
+		const projectDir = join(home, "workspace");
 		const transcriptDir = join(
 			configDir,
 			"projects",
@@ -178,16 +251,17 @@ describe("defaultClaudeSessionForkSdk", () => {
 				"\n",
 			)}\n`,
 		);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(configDir, "conflicting-account"));
 		const daemonEnv = process.env["CLAUDE_CONFIG_DIR"];
 		try {
 			const messages = await defaultClaudeSessionForkSdk.readTranscript(
 				sessionId,
-				{ dir: projectDir, configDir },
+				{ dir: projectDir, configDir: accountFolder },
 			);
 			expect(messages).toHaveLength(1);
 			const fork = await defaultClaudeSessionForkSdk.forkSession(sessionId, {
 				dir: projectDir,
-				configDir,
+				configDir: accountFolder,
 				title: "Fork",
 			});
 			expect(existsSync(join(transcriptDir, `${fork.sessionId}.jsonl`))).toBe(
@@ -195,7 +269,7 @@ describe("defaultClaudeSessionForkSdk", () => {
 			);
 			expect(process.env["CLAUDE_CONFIG_DIR"]).toBe(daemonEnv);
 		} finally {
-			rmSync(configDir, { recursive: true, force: true });
+			rmSync(home, { recursive: true, force: true });
 		}
 	});
 });

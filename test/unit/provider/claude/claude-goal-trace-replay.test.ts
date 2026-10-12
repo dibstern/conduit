@@ -1,14 +1,86 @@
-import { readFileSync } from "node:fs";
+// Failure modes: goal status comes from the daemon's account rather than the
+// session's; a blank folder reaches filesystem reads; replay changes goal facts.
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { readClaudeGoalStatus } from "../../../../src/lib/provider/claude/claude-goal-tracker.js";
+import {
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
+
+afterEach(() => vi.unstubAllEnvs());
+
+it.each([
+	"",
+	"  ",
+])("rejects a blank goal-status folder before filesystem access: %j", async (configDir) => {
+	vi.stubEnv("CLAUDE_CONFIG_DIR", "/daemon/claude");
+	await expect(
+		readClaudeGoalStatus({
+			workspaceRoot: "/missing/goal-workspace",
+			sdkSessionId: "sdk-goal",
+			configDir: {
+				...configuredClaudeConfigDir("/instance-config"),
+				path: configDir,
+			},
+		}),
+	).rejects.toThrow("Claude config directory must be non-empty");
+});
+
+it.each([
+	"configured",
+	"sdk-default",
+])("reads goal status from the %s account folder", async (source) => {
+	const home = realpathSync(
+		mkdtempSync(join(tmpdir(), "claude-goal-account-")),
+	);
+	const configDir = join(home, ".claude");
+	const accountFolder =
+		source === "sdk-default"
+			? sdkDefaultClaudeConfigDir(configDir)
+			: configuredClaudeConfigDir(configDir);
+	const workspaceRoot = home;
+	const transcriptDir = join(
+		configDir,
+		"projects",
+		workspaceRoot.replace(/[^a-zA-Z0-9]/g, "-"),
+	);
+	const status = { met: true, condition: "Ship it" };
+	try {
+		mkdirSync(transcriptDir, { recursive: true });
+		writeFileSync(
+			join(transcriptDir, "sdk-goal.jsonl"),
+			`${JSON.stringify({ attachment: { type: "goal_status", ...status } })}\n`,
+		);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(configDir, "conflicting-account"));
+		await expect(
+			readClaudeGoalStatus({
+				workspaceRoot,
+				sdkSessionId: "sdk-goal",
+				configDir: accountFolder,
+			}),
+		).resolves.toEqual(status);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
 
 it("replays captured goal set, nine not-yet checks, status, and clear", async () => {
 	const messages = readFileSync(
@@ -28,6 +100,7 @@ it("replays captured goal set, nine not-yet checks, status, and clear", async ()
 	const ctx = partialFake<ClaudeSessionContext>({
 		sessionId: "goal-replay-session",
 		workspaceRoot: "/tmp/goal-replay",
+		configDir: configuredClaudeConfigDir("/instance-config"),
 		startedAt: "2026-10-02T00:00:00.000Z",
 		pendingApprovals: new Map(),
 		pendingQuestions: new Map(),

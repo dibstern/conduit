@@ -13,6 +13,7 @@ import type {
 	ClaudeProviderInstanceDeps,
 } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import {
 	type ClaudeSubagentSdk,
@@ -466,7 +467,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
 					sessionId: "session-named-instance",
-					configDir: "/instances/work-claude",
+					configDir: configuredClaudeConfigDir("/instances/work-claude"),
 				}),
 			),
 		);
@@ -1547,7 +1548,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			sessionId: "session-resume",
 			resumeSessionId: "prev-sdk-session-123",
 			nativeThread: {
-				configDir: "/claude/resume",
+				configDir: configuredClaudeConfigDir("/claude/resume"),
 				resumeSessionId: "legacy-native-thread-session",
 				projectId: "test-project",
 				firstSequence: 12,

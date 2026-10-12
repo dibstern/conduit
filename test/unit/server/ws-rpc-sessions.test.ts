@@ -26,6 +26,7 @@ import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/prov
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { refreshSidebar } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
@@ -697,16 +698,16 @@ describe("WsRpcServerLayer ListSessions", () => {
 					yield* providerState.nativeThread(result.sessionId, "my-claude"),
 				).toMatchObject({
 					resumeSessionId: "sdk-fork",
-					configDir: claudeConfigDir,
+					configDir: configuredClaudeConfigDir(claudeConfigDir),
 				});
 				expect(api.session.fork).not.toHaveBeenCalled();
 				expect(forkSession).toHaveBeenCalledWith("sdk-parent", {
-					configDir: claudeConfigDir,
+					configDir: configuredClaudeConfigDir(claudeConfigDir),
 					title: "Parent (fork)",
 					upToMessageId: "parent-final",
 				});
 				expect(readTranscript).toHaveBeenCalledWith("sdk-parent", {
-					configDir: claudeConfigDir,
+					configDir: configuredClaudeConfigDir(claudeConfigDir),
 				});
 				expect(readTranscript).toHaveBeenCalledTimes(1);
 				expect(result).toMatchObject({
@@ -764,7 +765,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					originId: "browser-tab-a",
 				});
 				expect(forkSession).toHaveBeenLastCalledWith("sdk-parent", {
-					configDir: claudeConfigDir,
+					configDir: configuredClaudeConfigDir(claudeConfigDir),
 					title: "Parent (fork)",
 					upToMessageId: "parent-final",
 				});

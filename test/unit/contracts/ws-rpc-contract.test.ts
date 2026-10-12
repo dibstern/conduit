@@ -74,6 +74,7 @@ import {
 	WsRpcRequest,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcGroup as FrontendWsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { resolveClaudeSettingsFromDisk } from "../../../src/lib/provider/claude/claude-settings-resolver.js";
 import { daemonOnlyHandlers } from "../../../src/lib/server/ws-rpc/daemon.js";
 import { WsRpcGroup as ServerWsRpcGroup } from "../../../src/lib/server/ws-rpc.js";
@@ -456,7 +457,10 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				ResolveClaudeSettings: (request) =>
 					resolveClaudeSettingsFromDisk(
-						{ workspaceRoot: "/workspace/project" },
+						{
+							workspaceRoot: "/workspace/project",
+							configDir: configuredClaudeConfigDir("/profiles/work"),
+						},
 						async () => ({
 							stdout: JSON.stringify({
 								...Object.fromEntries(

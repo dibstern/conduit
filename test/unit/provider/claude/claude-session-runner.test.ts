@@ -5,6 +5,7 @@ import {
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { makeClaudeRunnerIdleExit } from "../../../../src/lib/provider/claude/claude-runner-idle.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionOutput,
@@ -37,6 +38,8 @@ const send = (
 		history: [],
 		providerState: {},
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+		folderSource: "account",
 		extraFolders: [],
 		model: { providerId: "claude", modelId: "sonnet" },
 	},

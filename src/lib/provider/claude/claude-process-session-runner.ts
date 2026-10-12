@@ -1228,9 +1228,7 @@ export const makeProcessClaudeSessionRunner = (
 						return undefined;
 					return {
 						instanceId: snapshot.input.instanceId ?? "claude",
-						configDir:
-							snapshot.options.env?.["CLAUDE_CONFIG_DIR"] ??
-							snapshot.input.configDir,
+						configDir: snapshot.input.configDir,
 						agent: snapshot.input.agent,
 						resumeSessionId: state?.resumeSessionId,
 					};

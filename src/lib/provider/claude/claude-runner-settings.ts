@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
@@ -10,6 +9,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../contracts/claude-settings.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
+import type { ClaudeConfigDir } from "./claude-sdk-env.js";
 
 /** Failure code for a replacement that cannot reproduce the old runner's settings. */
 export const CLAUDE_SETTINGS_REPLAY_DEFERRED = "settings-replay-deferred";
@@ -42,16 +42,17 @@ function directories(options: Options): string[] {
 	}
 }
 
-function configDirectory(options: Options): string {
-	return resolve(
-		options.cwd ?? process.cwd(),
-		options.env?.["CLAUDE_CONFIG_DIR"] ??
-			join(options.env?.["HOME"] ?? homedir(), ".claude"),
-	);
+function configDirectory(options: Options, configDir: ClaudeConfigDir): string {
+	if (typeof configDir.path !== "string" || configDir.path.trim().length === 0)
+		throw new ClaudeRuntimeError({
+			message: "Claude config directory must be non-empty",
+		});
+	return resolve(options.cwd ?? process.cwd(), configDir.path);
 }
 
 export function claudeRunnerFileSettingsFingerprint(
 	options: Options,
+	configDir: ClaudeConfigDir,
 ): string | undefined {
 	try {
 		if (
@@ -59,10 +60,10 @@ export function claudeRunnerFileSettingsFingerprint(
 			process.env["CLAUDE_CODE_USE_COWORK_PLUGINS"]
 		)
 			return;
-		const native = inheritedSettingsFingerprint(options);
+		const native = inheritedSettingsFingerprint(options, configDir);
 		if (native === undefined) return;
 		const files = [
-			join(configDirectory(options), "settings.json"),
+			join(configDirectory(options, configDir), "settings.json"),
 			...directories(options).flatMap((directory) => [
 				join(directory, ".claude/settings.json"),
 				join(directory, ".claude/settings.local.json"),
@@ -94,7 +95,11 @@ function hasOnceHook(value: unknown): boolean {
 	);
 }
 
-function replayable(resolved: ResolvedSettings, options: Options): boolean {
+function replayable(
+	resolved: ResolvedSettings,
+	options: Options,
+	configDir: ClaudeConfigDir,
+): boolean {
 	if (
 		resolved.sources.some(({ source }) => source === "managed") ||
 		Object.keys(resolved.effective).some((key) => !replayKeys.has(key)) ||
@@ -131,7 +136,7 @@ function replayable(resolved: ResolvedSettings, options: Options): boolean {
 			].map((asset) => join(directory, asset)),
 		);
 		paths.push(
-			join(configDirectory(options), ".config.json"),
+			join(configDirectory(options, configDir), ".config.json"),
 			...[
 				"CLAUDE.md",
 				"rules",
@@ -144,15 +149,15 @@ function replayable(resolved: ResolvedSettings, options: Options): boolean {
 				"routines",
 				".claude.json",
 				".mcp.json",
-			].map((asset) => join(configDirectory(options), asset)),
+			].map((asset) => join(configDirectory(options, configDir), asset)),
 		);
 		// User/local MCP servers live in the global config, which [] also
 		// disables. The default root and OAuth-suffixed files differ from
 		// the explicit CLAUDE_CONFIG_DIR root used for ordinary settings.
-		const globalRoot = resolve(
-			options.cwd ?? process.cwd(),
-			options.env?.["CLAUDE_CONFIG_DIR"] || options.env?.["HOME"] || homedir(),
-		);
+		const globalRoot =
+			configDir._tag === "SdkDefault"
+				? dirname(configDirectory(options, configDir))
+				: configDirectory(options, configDir);
 		if (
 			statSync(globalRoot, { throwIfNoEntry: false }) &&
 			readdirSync(globalRoot).some(
@@ -160,7 +165,7 @@ function replayable(resolved: ResolvedSettings, options: Options): boolean {
 			)
 		)
 			return false;
-		const projects = join(configDirectory(options), "projects");
+		const projects = join(configDirectory(options, configDir), "projects");
 		if (statSync(projects, { throwIfNoEntry: false })) {
 			const sessions = readdirSync(projects, { withFileTypes: true });
 			if (
@@ -215,18 +220,22 @@ function replayable(resolved: ResolvedSettings, options: Options): boolean {
 export async function captureClaudeRunnerFileSettings(
 	options: Options,
 	resolver: typeof resolveSettings,
+	configDir: ClaudeConfigDir,
 ): Promise<ClaudeRunnerFileSettings> {
-	const before = claudeRunnerFileSettingsFingerprint(options);
+	configDirectory(options, configDir);
+	const before = claudeRunnerFileSettingsFingerprint(options, configDir);
 	const resolved = await resolver({
 		cwd: options.cwd ?? process.cwd(),
 		settingSources: options.settingSources ?? ["user", "project", "local"],
 	});
-	const after = claudeRunnerFileSettingsFingerprint(options);
+	const after = claudeRunnerFileSettingsFingerprint(options, configDir);
 	return {
 		resolved,
 		...(before !== undefined && before === after ? { fingerprint: after } : {}),
 		replayable:
-			before !== undefined && before === after && replayable(resolved, options),
+			before !== undefined &&
+			before === after &&
+			replayable(resolved, options, configDir),
 	};
 }
 
@@ -260,6 +269,7 @@ export async function replayClaudeRunnerFileSettings(
 	options: Options,
 	resolver: typeof resolveSettings,
 	candidate: boolean,
+	configDir: ClaudeConfigDir,
 ): Promise<Pick<Options, "settings" | "settingSources">> {
 	if (!fileSettings?.fingerprint)
 		throw new ClaudeRuntimeError({
@@ -273,7 +283,11 @@ export async function replayClaudeRunnerFileSettings(
 			...(options.settings !== undefined ? { settings: options.settings } : {}),
 			settingSources: [],
 		};
-	const current = await captureClaudeRunnerFileSettings(options, resolver);
+	const current = await captureClaudeRunnerFileSettings(
+		options,
+		resolver,
+		configDir,
+	);
 	const unchanged =
 		current.fingerprint === fileSettings.fingerprint &&
 		isDeepStrictEqual(current.resolved, fileSettings.resolved);

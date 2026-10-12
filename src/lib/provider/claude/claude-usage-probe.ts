@@ -1,7 +1,15 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../../daemon/config-persistence.js";
 import type { UsageRead, UsageReader } from "../usage-reader.js";
-import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+import {
+	type ClaudeConfigDir,
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+} from "./claude-sdk-env.js";
 import { decodeClaudeUsage } from "./claude-usage-schema.js";
 import {
 	closeClaudeEmptyQuery,
@@ -19,6 +27,7 @@ interface UsageQuery {
 
 export interface ClaudeUsageReaderOptions {
 	readonly queryFactory?: (params: {
+		configDir: ClaudeConfigDir;
 		prompt: AsyncIterable<SDKUserMessage>;
 		options?: Options;
 	}) => UsageQuery;
@@ -51,6 +60,11 @@ export const makeClaudeUsageReader = (
 	read: (account) =>
 		Effect.suspend(() => {
 			let stderr = "";
+			const baseEnv = { ...(options.shellEnv ?? process.env), ...account.env };
+			const launch =
+				account.configDir === undefined
+					? resolveClaudeLaunchConfig(loadDaemonConfig(), account.id, baseEnv)
+					: { configDir: configuredClaudeConfigDir(account.configDir) };
 			return Effect.acquireUseRelease(
 				makeClaudeEmptyQuery(
 					options.queryFactory ?? query,
@@ -58,8 +72,8 @@ export const makeClaudeUsageReader = (
 						cwd: options.cwd ?? process.cwd(),
 						abortController,
 						env: makeClaudeSdkEnv({
-							configDir: account.configDir,
-							baseEnv: { ...(options.shellEnv ?? process.env), ...account.env },
+							...launch,
+							baseEnv,
 						}),
 						persistSession: false,
 						settingSources: ["user"],
@@ -69,6 +83,7 @@ export const makeClaudeUsageReader = (
 							stderr = `${stderr}${chunk}`.slice(-4096);
 						},
 					}),
+					launch,
 					options.prepareQuery,
 				).pipe(Effect.interruptible),
 				(resource) =>

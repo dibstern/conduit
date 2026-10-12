@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestLogger } from "../../../../src/lib/logger.js";
 import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 
 describe("probeClaudeCapabilities", () => {
 	const workspaceRoot = "/tmp/claude-workspace";
+	const configDir = configuredClaudeConfigDir("/tmp/claude-account");
 
 	function makeFakeQuery(opts: {
 		initResult?: {
@@ -58,6 +60,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models).toHaveLength(2);
 		expect(result.models[0]).toMatchObject({
@@ -97,6 +100,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 			logger,
 		});
 
@@ -129,6 +133,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.variants).toEqual({
 			low: {},
@@ -148,6 +153,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.variants).toBeUndefined();
 	});
@@ -162,6 +168,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.subscriptionType).toBe("Max");
 	});
@@ -182,6 +189,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.commands).toEqual([
 			{
@@ -196,6 +204,7 @@ describe("probeClaudeCapabilities", () => {
 	it("distinguishes plugin skills from plugin commands and preserves builtins", async () => {
 		const result = await probeClaudeCapabilities({
 			workspaceRoot,
+			configDir,
 			queryFactory: makeFakeQuery({
 				initResult: {
 					models: [],
@@ -229,6 +238,7 @@ describe("probeClaudeCapabilities", () => {
 		logger.warn = vi.fn();
 		const result = await probeClaudeCapabilities({
 			workspaceRoot,
+			configDir,
 			logger,
 			queryFactory: makeFakeQuery({
 				initResult: {
@@ -263,6 +273,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.agents).toEqual([
 			{
@@ -280,6 +291,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.commands).toEqual([]);
 		expect(result.agents).toEqual([]);
@@ -294,6 +306,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.subscriptionType).toBeUndefined();
 	});
@@ -318,6 +331,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		const optionsFor = (modelId: string) =>
 			result.models.find((model) => model.id === modelId)?.contextWindowOptions;
@@ -351,6 +365,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]).toMatchObject({
 			id: "opus[1m]",
@@ -373,6 +388,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		// The rail must not claim a window the selector beside it contradicts.
 		expect(result.models[0]?.name).toBe("Opus");
@@ -391,6 +407,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		// Without a control owning the fact, the parenthetical is the user's
 		// only signal — stripping it would delete information, not de-duplicate.
@@ -407,6 +424,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.name).toBe("(1M context)");
 	});
@@ -438,6 +456,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.limit?.context).toBe(1_000_000);
 		expect(result.models[1]?.limit?.context).toBe(200_000);
@@ -453,6 +472,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.limit?.context).toBe(1_000_000);
 	});
@@ -469,7 +489,12 @@ describe("probeClaudeCapabilities", () => {
 				],
 			},
 		});
-		await probeClaudeCapabilities({ queryFactory, workspaceRoot, logger });
+		await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+			configDir,
+			logger,
+		});
 		const rowWarnings = (logger.warn as ReturnType<typeof vi.fn>).mock.calls
 			.map(([message]) => String(message))
 			.filter((message) => message.includes("context-window row"));
@@ -491,6 +516,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 			logger,
 		});
 		// A model the SDK ships tomorrow must not lose its selector entirely.
@@ -516,6 +542,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.contextWindowOptions).toBeUndefined();
 	});
@@ -530,6 +557,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.contextWindowOptions).toEqual([
 			{ value: "200k", label: "200k" },
@@ -547,6 +575,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.contextWindowOptions?.[0]).toMatchObject({
 			value: "200k",
@@ -570,6 +599,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.contextWindowOptions?.[0]).toMatchObject({
 			value: "200k",
@@ -601,6 +631,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		const onem = result.models[0]?.contextWindowOptions?.find(
 			(o) => o.value === "1m",
@@ -618,6 +649,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.contextWindowOptions).toEqual([
 			{ value: "200k", label: "200k" },
@@ -627,7 +659,7 @@ describe("probeClaudeCapabilities", () => {
 
 	it("calls query() with runtime-equivalent workspace discovery options", async () => {
 		const queryFactory = makeFakeQuery({ initResult: { models: [] } });
-		await probeClaudeCapabilities({ queryFactory, workspaceRoot });
+		await probeClaudeCapabilities({ queryFactory, workspaceRoot, configDir });
 		expect(queryFactory).toHaveBeenCalledTimes(1);
 		const callArg = queryFactory.mock.calls[0]?.[0] as {
 			options: Record<string, unknown>;
@@ -655,7 +687,7 @@ describe("probeClaudeCapabilities", () => {
 					};
 				},
 			);
-		await probeClaudeCapabilities({ queryFactory, workspaceRoot });
+		await probeClaudeCapabilities({ queryFactory, workspaceRoot, configDir });
 		expect(capturedController?.signal.aborted).toBe(true);
 	});
 
@@ -674,7 +706,7 @@ describe("probeClaudeCapabilities", () => {
 				},
 			);
 		await expect(
-			probeClaudeCapabilities({ queryFactory, workspaceRoot }),
+			probeClaudeCapabilities({ queryFactory, workspaceRoot, configDir }),
 		).rejects.toThrow("boom");
 		expect(capturedController?.signal.aborted).toBe(true);
 	});
@@ -684,6 +716,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models).toEqual([]);
 	});
@@ -697,6 +730,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.limit).toEqual({
 			context: 200_000,
@@ -713,6 +747,7 @@ describe("probeClaudeCapabilities", () => {
 		const result = await probeClaudeCapabilities({
 			queryFactory,
 			workspaceRoot,
+			configDir,
 		});
 		expect(result.models[0]?.limit).toBeUndefined();
 	});
@@ -737,6 +772,7 @@ describe("probeClaudeCapabilities", () => {
 			const result = await probeClaudeCapabilities({
 				queryFactory,
 				workspaceRoot,
+				configDir,
 				logger,
 			});
 			expect(result.models).toHaveLength(1);
@@ -752,6 +788,7 @@ describe("probeClaudeCapabilities", () => {
 			const result = await probeClaudeCapabilities({
 				queryFactory,
 				workspaceRoot,
+				configDir,
 				logger,
 			});
 			expect(result.commands).toEqual([]);

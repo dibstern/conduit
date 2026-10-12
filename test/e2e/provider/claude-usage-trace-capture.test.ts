@@ -6,12 +6,16 @@
  * for capturing a second account. Review the fixture before committing.
  */
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeClaudeSdkEnv } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+	sdkDefaultClaudeConfigDir,
+} from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ClaudeUsageResponseSchema } from "../../../src/lib/provider/claude/claude-usage-schema.js";
 import {
 	closeClaudeEmptyQuery,
@@ -25,20 +29,27 @@ describe.skipIf(process.env["RUN_EXPENSIVE_E2E"] !== "1")(
 			const projectDir = realpathSync(
 				mkdtempSync(join(tmpdir(), "conduit-usage-capture-")),
 			);
+			const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
+			const configDir =
+				configuredDir === undefined
+					? sdkDefaultClaudeConfigDir(join(homedir(), ".claude"))
+					: configuredClaudeConfigDir(configuredDir);
 			try {
 				const response = await Effect.runPromise(
 					Effect.acquireUseRelease(
-						makeClaudeEmptyQuery(query, (abortController) => ({
-							cwd: projectDir,
-							abortController,
-							env: makeClaudeSdkEnv({
-								configDir: process.env["CLAUDE_CONFIG_DIR"],
+						makeClaudeEmptyQuery(
+							query,
+							(abortController) => ({
+								cwd: projectDir,
+								abortController,
+								env: makeClaudeSdkEnv({ configDir }),
+								persistSession: false,
+								settingSources: ["user"],
+								settings: { disableAllHooks: true },
+								tools: [],
 							}),
-							persistSession: false,
-							settingSources: ["user"],
-							settings: { disableAllHooks: true },
-							tools: [],
-						})),
+							{ configDir },
+						),
 						(resource) =>
 							Effect.tryPromise(async () => {
 								const init = await resource.query.initializationResult();

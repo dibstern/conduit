@@ -8,7 +8,7 @@ import {
 	type ResolvedClaudeSettings,
 	ResolvedClaudeSettingsSchema,
 } from "../../contracts/claude-settings.js";
-import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
+import { type ClaudeConfigDir, makeClaudeSdkEnv } from "./claude-sdk-env.js";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 1_048_576;
@@ -101,7 +101,7 @@ const runClaudeSettingsChild: ClaudeSettingsChildRunner = ({
 export const resolveClaudeSettingsFromDisk = (
 	input: {
 		readonly workspaceRoot: string;
-		readonly configDir?: string | undefined;
+		readonly configDir: ClaudeConfigDir;
 		readonly timeoutMs?: number | undefined;
 	},
 	runChild: ClaudeSettingsChildRunner = runClaudeSettingsChild,
@@ -111,11 +111,7 @@ export const resolveClaudeSettingsFromDisk = (
 			try: () =>
 				runChild({
 					cwd: input.workspaceRoot,
-					env: makeClaudeSdkEnv(
-						input.configDir === undefined
-							? undefined
-							: { configDir: input.configDir },
-					),
+					env: makeClaudeSdkEnv(input),
 					timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 				}),
 			catch: (cause) =>

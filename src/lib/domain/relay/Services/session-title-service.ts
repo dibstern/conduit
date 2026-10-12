@@ -15,6 +15,10 @@ import {
 	type SessionTitleModel,
 } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../../../daemon/config-persistence.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -143,6 +147,9 @@ export const makeSessionTitleServiceLive = (
 						Match.discriminator("harness")("claude", ({ model }) =>
 							makeClaudeTitleGenerator({
 								model,
+								...resolveClaudeLaunchConfig(
+									loadDaemonConfig(config.configDir),
+								),
 								log,
 								...(options.queryFactory === undefined
 									? {}

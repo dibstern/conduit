@@ -14,7 +14,7 @@ import {
 } from "../../../contracts/limit-recovery.js";
 import {
 	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
@@ -81,7 +81,11 @@ export const previewContinuation = (sessionId: string, instanceId: string) =>
 					);
 		const contextWindow = yield* getContextWindow(sessionId);
 		const prepare = yield* makePrepareTurn({
-			configDir: resolveClaudeInstanceConfigDir(daemonConfig, instanceId),
+			...resolveClaudeLaunchConfig(
+				daemonConfig,
+				instanceId,
+				config.shellEnv?.(config.projectDir),
+			),
 			agent: yield* getAgent(sessionId),
 			modelContextWindow: contextWindow === "1m" ? 1000000 : undefined,
 			continuation:

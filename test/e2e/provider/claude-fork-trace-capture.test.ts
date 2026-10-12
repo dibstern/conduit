@@ -9,7 +9,11 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
-import { makeClaudeSdkEnv } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+	sdkDefaultClaudeConfigDir,
+} from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
@@ -20,7 +24,12 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude fork trace capture (real SDK)", () => {
 		const projectDir = realpathSync(
 			mkdtempSync(join(tmpdir(), "conduit-fork-capture-")),
 		);
-		const configDir = process.env["CLAUDE_CONFIG_DIR"];
+		const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
+		const configDir = configuredDir ?? join(homedir(), ".claude");
+		const launchConfigDir =
+			configuredDir === undefined
+				? sdkDefaultClaudeConfigDir(configDir)
+				: configuredClaudeConfigDir(configDir);
 		const session = query({
 			prompt: PROMPT,
 			options: {
@@ -30,7 +39,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude fork trace capture (real SDK)", () => {
 				settingSources: [],
 				maxTurns: 1,
 				persistSession: true,
-				env: makeClaudeSdkEnv({ configDir }),
+				env: makeClaudeSdkEnv({ configDir: launchConfigDir }),
 			},
 		});
 		try {
@@ -48,7 +57,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude fork trace capture (real SDK)", () => {
 			if (!parentSessionId) throw new Error("Claude returned no session id");
 			const options = {
 				dir: projectDir,
-				...(configDir !== undefined && { configDir }),
+				configDir: launchConfigDir,
 			};
 			const readTranscript = await defaultClaudeSessionForkSdk.readTranscript(
 				parentSessionId,

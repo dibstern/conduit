@@ -18,7 +18,7 @@ import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js"
 import { MissingWorktreeError } from "../../../contracts/worktree.js";
 import {
 	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
@@ -31,6 +31,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import type { ClaudeLaunchConfig } from "../../../provider/claude/claude-sdk-env.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
@@ -523,7 +524,7 @@ const prepareEngineTurnInput = (
 	resolvedInput: ProviderTurnServiceSendInput,
 	providerId: string,
 	driver: ProviderDriverKind,
-	claudeConfigDir: string | undefined,
+	claudeLaunchConfig: ClaudeLaunchConfig | undefined,
 	discoveredCatalog: readonly ModelInfo[] | undefined,
 ) =>
 	Effect.gen(function* () {
@@ -700,7 +701,7 @@ const prepareEngineTurnInput = (
 			instanceId: providerId,
 			...(sendModel && settings ? { model: settings.model } : {}),
 			...folders,
-			...(claudeConfigDir === undefined ? {} : { configDir: claudeConfigDir }),
+			...(claudeLaunchConfig ?? {}),
 			...(isClaudeDriver(driver) && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),
@@ -854,7 +855,7 @@ const sendViaEngine = (
 	input: ProviderTurnServiceSendInput,
 	providerId: string,
 	driver: ProviderDriverKind,
-	claudeConfigDir: string | undefined,
+	claudeLaunchConfig: ClaudeLaunchConfig | undefined,
 ) =>
 	Effect.gen(function* () {
 		const resolved = yield* resolveClaudeModel(input, providerId, driver);
@@ -864,7 +865,7 @@ const sendViaEngine = (
 			resolvedInput,
 			providerId,
 			driver,
-			claudeConfigDir,
+			claudeLaunchConfig,
 			catalog,
 		).pipe(
 			Effect.catchIf(
@@ -934,6 +935,12 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 			input,
 			providerId,
 			driver,
-			resolveClaudeInstanceConfigDir(daemonConfig, providerId),
+			driver === "claude"
+				? resolveClaudeLaunchConfig(
+						daemonConfig,
+						providerId,
+						config.shellEnv?.(config.projectDir),
+					)
+				: undefined,
 		).pipe(Effect.provideService(OrchestrationEngineTag, engine));
 	});

@@ -1,3 +1,5 @@
+import { basename, dirname, resolve } from "node:path";
+import { Schema } from "effect";
 import type { Options as SDKOptions } from "./types.js";
 
 const DIRECT_ANTHROPIC_ENV_KEYS = [
@@ -17,12 +19,57 @@ const DIRECT_ANTHROPIC_ENV_KEYS = [
 	"ANTHROPIC_SMALL_FAST_MODEL",
 ] as const;
 
-export function makeClaudeSdkEnv(opts?: {
-	configDir?: string | undefined;
-	baseEnv?: Readonly<Record<string, string | undefined>> | undefined;
-}): NonNullable<SDKOptions["env"]> {
+const ConfigDirPath = Schema.String.pipe(
+	Schema.filter((path) => path.trim().length > 0, {
+		message: () => "Claude config directory must be non-empty",
+	}),
+);
+
+export const ClaudeConfigDirSchema = Schema.Union(
+	Schema.TaggedStruct("SdkDefault", {
+		path: ConfigDirPath.pipe(
+			Schema.filter((path) => basename(resolve(path)) === ".claude", {
+				message: () => "Claude SDK default folder must be a .claude directory",
+			}),
+		),
+	}),
+	Schema.TaggedStruct("Configured", { path: ConfigDirPath }),
+);
+
+export type ClaudeConfigDir = typeof ClaudeConfigDirSchema.Type;
+
+export const sdkDefaultClaudeConfigDir = (path: string): ClaudeConfigDir => ({
+	_tag: "SdkDefault",
+	path,
+});
+
+export const configuredClaudeConfigDir = (path: string): ClaudeConfigDir => ({
+	_tag: "Configured",
+	path,
+});
+
+export const ClaudeFolderSourceSchema = Schema.Literal(
+	"account",
+	"implicitDefault",
+	"legacyDefault",
+);
+
+/** A complete login and the policy for selecting its native folder. */
+export interface ClaudeLaunchConfig {
+	readonly configDir: ClaudeConfigDir;
+	readonly folderSource: typeof ClaudeFolderSourceSchema.Type;
+}
+
+export function makeClaudeSdkEnv(
+	opts: Pick<ClaudeLaunchConfig, "configDir"> & {
+		baseEnv?: Readonly<Record<string, string | undefined>> | undefined;
+	},
+): NonNullable<SDKOptions["env"]> {
+	const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
+		opts.configDir,
+	);
 	const env: Record<string, string | undefined> = {
-		...(opts?.baseEnv ?? process.env),
+		...(opts.baseEnv ?? process.env),
 	};
 	for (const key of DIRECT_ANTHROPIC_ENV_KEYS) {
 		delete env[key];
@@ -31,8 +78,12 @@ export function makeClaudeSdkEnv(opts?: {
 	// claude.ai account connectors (Gmail, Drive, ...) otherwise load into every
 	// session, and their "sign in again" notices leak into model replies.
 	env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
-	if (opts?.configDir !== undefined && opts.configDir.length > 0) {
-		env["CLAUDE_CONFIG_DIR"] = opts.configDir;
-	}
+	if (configDir._tag === "SdkDefault") {
+		const folder = resolve(configDir.path);
+		// An explicit standard root selects different Keychain and global-config
+		// locations. Pin HOME so the SDK keeps using the resolved default folder.
+		env["HOME"] = dirname(folder);
+		delete env["CLAUDE_CONFIG_DIR"];
+	} else env["CLAUDE_CONFIG_DIR"] = configDir.path;
 	return env;
 }

@@ -7,17 +7,19 @@ import type {
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
-	PreWarmSessionInput,
 	ProviderNativeSession,
 	QuestionRequest,
-	SendTurnInput,
 	TurnResult,
 } from "../types.js";
 import type { ClaudeRunnerSettingsSnapshot } from "./claude-runner-upgrade.js";
+import type {
+	ClaudePreWarmSessionInput,
+	ClaudeSendTurnInput,
+} from "./types.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type ClaudeSessionTurn = Omit<
-	SendTurnInput,
+	ClaudeSendTurnInput,
 	"eventSink" | "abortSignal"
 >;
 
@@ -25,7 +27,7 @@ export type ClaudeSessionCommand =
 	| {
 			readonly type: "pre-warm";
 			readonly sessionId: string;
-			readonly input: PreWarmSessionInput;
+			readonly input: ClaudePreWarmSessionInput;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
 			readonly settingsSnapshot?: ClaudeRunnerSettingsSnapshot;

@@ -7,6 +7,7 @@ import {
 	ClaudeCapabilitiesServiceTag,
 	makeClaudeCapabilitiesService,
 } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 
 describe("ClaudeCapabilitiesService", () => {
 	it.effect("caches per layer and expires with TestClock", () =>
@@ -28,7 +29,12 @@ describe("ClaudeCapabilitiesService", () => {
 					agents: [],
 				});
 			__setProbeOverrideForTesting(probe);
-			const service = yield* makeClaudeCapabilitiesService();
+			const service = yield* makeClaudeCapabilitiesService({
+				launchConfig: () => ({
+					folderSource: "account",
+					configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+				}),
+			});
 
 			const first = yield* service.get("/tmp/workspace");
 			yield* TestClock.adjust("4 minutes");
@@ -52,7 +58,12 @@ describe("ClaudeCapabilitiesService", () => {
 				return { models: [], commands: [], agents: [] };
 			});
 			__setProbeOverrideForTesting(probe);
-			const service = yield* makeClaudeCapabilitiesService();
+			const service = yield* makeClaudeCapabilitiesService({
+				launchConfig: () => ({
+					folderSource: "account",
+					configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+				}),
+			});
 
 			const first = yield* Effect.fork(service.get("/tmp/workspace"));
 			const second = yield* Effect.fork(service.get("/tmp/workspace"));
@@ -108,6 +119,10 @@ describe("ClaudeCapabilitiesService", () => {
 				Effect.provide(
 					Layer.fresh(
 						ClaudeCapabilitiesServiceLive({
+							launchConfig: () => ({
+								folderSource: "account",
+								configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+							}),
 							queryFactory: firstQueryFactory,
 						}),
 					),
@@ -117,6 +132,10 @@ describe("ClaudeCapabilitiesService", () => {
 				Effect.provide(
 					Layer.fresh(
 						ClaudeCapabilitiesServiceLive({
+							launchConfig: () => ({
+								folderSource: "account",
+								configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+							}),
 							queryFactory: secondQueryFactory,
 						}),
 					),

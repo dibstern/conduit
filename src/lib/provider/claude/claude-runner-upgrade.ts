@@ -1,13 +1,12 @@
 import type { Settings } from "@anthropic-ai/claude-agent-sdk";
 import { Cause, Effect } from "effect";
-import type { PreWarmSessionInput } from "../types.js";
 import type { ClaudeRunnerFileSettings } from "./claude-runner-settings.js";
 import type { ClaudeSessionFailure } from "./claude-session-runner.js";
-import type { Options } from "./types.js";
+import type { ClaudePreWarmSessionInput, Options } from "./types.js";
 
 /** Session launch data stays in memory, including across runner replacement. */
 export interface ClaudeRunnerSettingsSnapshot {
-	readonly input: PreWarmSessionInput;
+	readonly input: ClaudePreWarmSessionInput;
 	readonly claudeSettingsOverrides?: Settings;
 	readonly options: Omit<
 		Options,
@@ -21,7 +20,7 @@ export interface ClaudeRunnerSettingsSnapshot {
 
 /** Mutable SDK controls travel separately from the session's launch snapshot. */
 export type ClaudeRunnerLiveQueryConfiguration = Pick<
-	PreWarmSessionInput,
+	ClaudePreWarmSessionInput,
 	"model" | "contextWindow" | "variant" | "permissionMode"
 >;
 

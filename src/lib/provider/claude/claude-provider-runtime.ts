@@ -18,8 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
 	type Settings,
 	query as sdkQuery,
@@ -44,6 +43,10 @@ import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
 } from "../../contracts/providers/claude-agent-sdk.js";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../../daemon/config-persistence.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestionError,
@@ -144,6 +147,11 @@ import {
 	type TurnWaiters,
 } from "./claude-runtime-turn.js";
 import {
+	type ClaudeConfigDir,
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "./claude-sdk-env.js";
+import {
 	asError,
 	ClaudeSDKDecodeError,
 	decodeProviderMessage,
@@ -179,6 +187,7 @@ import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	CanUseTool,
+	ClaudeSendTurnInput,
 	ClaudeSessionContext,
 	PromptQueueController,
 	Query,
@@ -211,6 +220,7 @@ export interface ClaudeProviderInstanceDeps {
 	readonly claudeSettingsOverrides?: () => Settings | undefined;
 	/** Injectable factory for the SDK's query() function. Defaults to the real SDK. */
 	readonly queryFactory?: (params: {
+		configDir: ClaudeConfigDir;
 		prompt: AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => Query;
@@ -277,7 +287,11 @@ export const makeClaudeProviderRuntime = (
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
 		const capabilitiesService =
-			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
+			deps.capabilitiesService ??
+			(yield* makeClaudeCapabilitiesService({
+				launchConfig: () =>
+					resolveClaudeLaunchConfig(loadDaemonConfig(deps.daemonConfigDir)),
+			}));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
 		const preWarmFibers = yield* FiberMap.make<
@@ -353,7 +367,11 @@ export const makeClaudeSessionRunner = (
 			never
 		>();
 		const capabilitiesService =
-			deps.capabilitiesService ?? (yield* makeClaudeCapabilitiesService());
+			deps.capabilitiesService ??
+			(yield* makeClaudeCapabilitiesService({
+				launchConfig: () =>
+					resolveClaudeLaunchConfig(loadDaemonConfig(deps.daemonConfigDir)),
+			}));
 		const warmedQueries = yield* makeClaudeWarmedQueryOwner(
 			deps.queryFactory ??
 				(sdkQuery as NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>),
@@ -574,7 +592,21 @@ export class ClaudeProviderRuntime {
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return Effect.gen(this, function* () {
-			const { eventSink, abortSignal, ...turn } = input;
+			const { eventSink, abortSignal, ...payload } = input;
+			const folder = input.configDir ?? input.nativeThread?.configDir;
+			const turn = {
+				...payload,
+				...(folder === undefined
+					? resolveClaudeLaunchConfig(
+							loadDaemonConfig(this.deps.daemonConfigDir),
+							input.instanceId,
+							this.deps.shellEnv?.(input.workspaceRoot),
+						)
+					: {
+							configDir: folder,
+							folderSource: input.folderSource ?? "account",
+						}),
+			};
 			const claudeSettingsOverrides = yield* Effect.try({
 				try: () => this.deps.claudeSettingsOverrides?.(),
 				catch: (cause) =>
@@ -740,10 +772,24 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
+			const folder = input.configDir ?? input.nativeThread?.configDir;
 			yield* this.commandEffect({
 				type: "pre-warm",
 				sessionId: input.sessionId,
-				input: { ...input, model },
+				input: {
+					...input,
+					model,
+					...(folder === undefined
+						? resolveClaudeLaunchConfig(
+								loadDaemonConfig(this.deps.daemonConfigDir),
+								input.instanceId,
+								this.deps.shellEnv?.(input.workspaceRoot),
+							)
+						: {
+								configDir: folder,
+								folderSource: input.folderSource ?? "account",
+							}),
+				},
 				claudeSettingsOverrides,
 			});
 		});
@@ -1654,7 +1700,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	 */
 
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const attributes = {
 			providerId: this.providerId,
@@ -1696,7 +1742,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	}
 
 	private sendTurnLocalEffect(
-		input: SendTurnInput,
+		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const { sessionId } = input;
@@ -1768,7 +1814,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	}
 
 	private createSessionAndSendTurnEffect(
-		input: SendTurnInput,
+		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			const { sessionId } = input;
@@ -1832,14 +1878,14 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					input.resumeSessionId !== undefined
 				) {
 					const resumeSessionId = input.resumeSessionId;
-					const configDir = input.configDir ?? input.nativeThread?.configDir;
+					const configDir = input.configDir;
 					const transcript = yield* Effect.tryPromise({
 						try: () =>
 							(
 								this.deps.sessionForkSdk ?? defaultClaudeSessionForkSdk
 							).readTranscript(resumeSessionId, {
 								dir: input.workspaceRoot,
-								...(configDir !== undefined ? { configDir } : {}),
+								configDir,
 							}),
 						catch: (cause) =>
 							new ClaudeBoundaryError({
@@ -1902,6 +1948,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const warmed = yield* this.warmedQueries.takeEffect(
 					sessionId,
 					launchOptions,
+					input.configDir,
 				);
 				if (!warmed && this.deps.prepareQuery)
 					yield* Effect.tryPromise({
@@ -1932,9 +1979,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,
 					workspaceRoot: input.workspaceRoot,
-					...(input.configDir !== undefined
-						? { configDir: input.configDir }
-						: {}),
+					configDir: input.configDir,
 					goalTracker: new ClaudeGoalTracker(sessionId, input.goalState),
 					cumulativeTokens: input.cumulativeTokens ?? 0,
 					startedAt: new Date().toISOString(),
@@ -1982,7 +2027,12 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const query =
 					warmed?.query ??
 					(yield* Effect.try({
-						try: () => this.queryFactory({ prompt: queue, options }),
+						try: () =>
+							this.queryFactory({
+								configDir: launchInput.configDir,
+								prompt: queue,
+								options,
+							}),
 						catch: (cause) =>
 							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 					}));
@@ -1990,11 +2040,14 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx = {
 					...context,
 					query,
-					configDir: resolve(
-						input.workspaceRoot,
-						options.env?.["CLAUDE_CONFIG_DIR"] ??
-							join(options.env?.["HOME"] ?? homedir(), ".claude"),
-					),
+					configDir:
+						input.configDir._tag === "SdkDefault"
+							? sdkDefaultClaudeConfigDir(
+									resolve(input.workspaceRoot, input.configDir.path),
+								)
+							: configuredClaudeConfigDir(
+									resolve(input.workspaceRoot, input.configDir.path),
+								),
 				};
 				const ownershipContext = ctx;
 				ctx.messageOwnership = createClaudeMessageOwnership({
@@ -2210,7 +2263,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	private enqueueTurnEffect(
 		ctx: ClaudeSessionContext,
-		input: SendTurnInput,
+		input: ClaudeSendTurnInput,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {
 			if (this.hasAgentChanged(ctx, input)) {
@@ -2406,7 +2459,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	private restartSessionEffect(
 		ctx: ClaudeSessionContext,
-		input: SendTurnInput,
+		input: ClaudeSendTurnInput,
 		reason: string,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		return Effect.gen(this, function* () {

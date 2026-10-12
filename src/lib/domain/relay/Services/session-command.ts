@@ -18,7 +18,7 @@ import {
 } from "../../../contracts/session-title.js";
 import {
 	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
@@ -724,13 +724,13 @@ const forkSessionInWorkspace = (
 			(selected && lastRewindCommitSequence > selected.thread.deliveredThrough)
 				? undefined
 				: selected?.thread;
+		const launchConfig = resolveClaudeLaunchConfig(
+			loadDaemonConfig(config.value.configDir),
+			provider,
+			config.value.shellEnv?.(config.value.projectDir),
+		);
 		const claudeConfigDir =
-			selected?.thread.configDir ??
-			resolveClaudeInstanceConfigDir(
-				loadDaemonConfig(config.value.configDir),
-				provider,
-			) ??
-			config.value.shellEnv?.(config.value.projectDir)["CLAUDE_CONFIG_DIR"];
+			selected?.thread.configDir ?? launchConfig.configDir;
 		// The next launch workspace can differ from the native transcript's folder.
 		// Find the SDK id across the selected account's project directories.
 		const forked = parentThread
@@ -739,9 +739,7 @@ const forkSessionInWorkspace = (
 						forkClaudeTranscript(
 							{
 								parentSdkId: parentThread.resumeSessionId,
-								...(claudeConfigDir !== undefined && {
-									configDir: claudeConfigDir,
-								}),
+								configDir: claudeConfigDir,
 								title,
 								...(historyMessageId !== undefined && {
 									messageId: historyMessageId,
@@ -828,9 +826,7 @@ const forkSessionInWorkspace = (
 						{
 							key: nativeThreadKey(provider),
 							value: JSON.stringify({
-								...(claudeConfigDir !== undefined
-									? { configDir: claudeConfigDir }
-									: {}),
+								configDir: claudeConfigDir,
 								resumeSessionId: forked.sdkSessionId,
 								firstSequence: created[0]?.sequence ?? 0,
 								deliveredThrough: stored.at(-1)?.sequence ?? 0,

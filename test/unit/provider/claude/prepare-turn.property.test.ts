@@ -6,6 +6,7 @@
 // loses an open cut-off, counts full history, or advances a receipt before delivery;
 // stale-resume fallback retries twice, reuses the cursor, or clears another account;
 // unfit wrapper, wrong counts, reordered/truncated history, leaked private parts.
+
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import fc from "fast-check";
@@ -33,6 +34,7 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	makePrepareTurn,
 	sendPreparedClaudeTurn,
@@ -168,8 +170,11 @@ it("catches up whole undelivered messages and turn errors without repeating deli
 							]);
 						if (!continuation) yield* appendMessage("current", "user");
 						const options = {
+							folderSource: "account" as const,
 							tokenCap: 64000,
-							configDir: "/accounts/changed-personal",
+							configDir: configuredClaudeConfigDir(
+								"/accounts/changed-personal",
+							),
 							continuation,
 							...(!continuation ? { userMessageId: "current" } : {}),
 						};
@@ -180,7 +185,9 @@ it("catches up whole undelivered messages and turn errors without repeating deli
 							continuation ? undefined : "<<<current>>>",
 						);
 						expect(prepared.resumeSessionId).toBe("native-personal");
-						expect(prepared.configDir).toBe("/accounts/original-personal");
+						expect(prepared.configDir).toEqual(
+							configuredClaudeConfigDir("/accounts/original-personal"),
+						);
 						expect(prepared.nativeThread).toEqual(receipt);
 						for (let index = 0; index < deliveredCount; index++)
 							expect(prepared.prompt).not.toContain(`<<<delivered-${index}>>>`);
@@ -318,7 +325,10 @@ it("retries only startup-rejected native conversations once, preserving other re
 								sessionId: "s1",
 								instanceId: "personal",
 								userText: "Current request",
-								options: {},
+								options: {
+									folderSource: "account",
+									configDir: configuredClaudeConfigDir("/accounts/personal"),
+								},
 								send: (prepared, fallback) =>
 									Effect.gen(function* () {
 										calls.push({
@@ -467,11 +477,15 @@ it("prepends a hidden still-open note only until Dismiss or a reply, on fresh an
 							}),
 						]);
 						const prepare = yield* makePrepareTurn({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
 							userMessageId: "current",
 						});
 						const plan = yield* prepare("s1", "personal", text);
 						if (cutOff === "open") {
 							const continuation = yield* makePrepareTurn({
+								folderSource: "account",
+								configDir: configuredClaudeConfigDir("/accounts/work"),
 								continuation: true,
 							});
 							const switched = yield* continuation("s1", "work");
@@ -637,13 +651,16 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 							);
 						const current = "Current request 🧪";
 						const fresh = yield* prepare({
-							configDir: "/accounts/work",
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/work"),
 							tokenCap: cap,
 							modelContextWindow: window,
 						});
 						const plan = yield* fresh("s1", "work", current);
 						expect(plan.resumeSessionId).toBeUndefined();
-						expect(plan.configDir).toBe("/accounts/work");
+						expect(plan.configDir).toEqual(
+							configuredClaudeConfigDir("/accounts/work"),
+						);
 						if (messages.length === 0) {
 							expect(plan.prompt).toBe(current);
 							expect(plan.handoff).toBeUndefined();
@@ -692,7 +709,11 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 								"PRIVATE_TOOL_RESULT",
 							])
 								expect(hidden).not.toContain(secret);
-							const tiny = yield* prepare({ modelContextWindow: 16000 });
+							const tiny = yield* prepare({
+								folderSource: "account",
+								configDir: configuredClaudeConfigDir("/accounts/work"),
+								modelContextWindow: 16000,
+							});
 							const tooLarge = yield* Effect.either(
 								tiny("s1", "work", current),
 							);
@@ -702,26 +723,40 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 						}
 						const liveSession = {
 							instanceId: "personal",
-							configDir: "/accounts/personal",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
 							resumeSessionId: "live-personal",
 						};
-						const live = yield* prepare({ liveSession, modelContextWindow: 1 });
+						const live = yield* prepare({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
+							liveSession,
+							modelContextWindow: 1,
+						});
 						expect(yield* live("s1", "personal", current)).toMatchObject({
 							resumeSessionId: "live-personal",
-							configDir: "/accounts/personal",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
 							prompt: current,
 						});
 						expect(yield* state.nativeThread("s1", "personal")).toBeUndefined();
 						for (const options of [
-							{ configDir: "/accounts/work" },
+							{ configDir: configuredClaudeConfigDir("/accounts/work") },
 							{ agent: "reviewer" },
 						]) {
-							const other = yield* prepare({ liveSession, ...options });
+							const other = yield* prepare({
+								folderSource: "account",
+								configDir: configuredClaudeConfigDir("/accounts/personal"),
+								liveSession,
+								...options,
+							});
 							const plan = yield* other("s1", "personal", current);
 							expect(plan.resumeSessionId).toBeUndefined();
 							if (messages.length > 0) expect(plan.handoff).toBeDefined();
 						}
-						const otherAccount = yield* prepare({ liveSession });
+						const otherAccount = yield* prepare({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/work"),
+							liveSession,
+						});
 						expect(
 							(yield* otherAccount("s1", "work", current)).resumeSessionId,
 						).toBeUndefined();
@@ -735,9 +770,11 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 							]),
 						);
 						const interruptedHandoff = yield* prepare({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/work"),
 							liveSession: {
 								instanceId: "work",
-								configDir: "/accounts/work",
+								configDir: configuredClaudeConfigDir("/accounts/work"),
 								resumeSessionId: "live-interrupted-handoff",
 							},
 						});
@@ -757,7 +794,9 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 								]);
 							const repeated = yield* interruptedHandoff("s1", "work", current);
 							expect(repeated.resumeSessionId).toBeUndefined();
-							expect(repeated.configDir).toBe("/accounts/work");
+							expect(repeated.configDir).toEqual(
+								configuredClaudeConfigDir("/accounts/work"),
+							);
 							if (messages.length > 0) {
 								expect(repeated.handoff).toMatchObject({
 									firstMessageIncluded: true,
@@ -769,21 +808,31 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 						}
 						expect(yield* state.nativeThread("s1", "work")).toBeUndefined();
 						const resume = yield* prepare({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
 							liveSession,
 							modelContextWindow: 1,
 						});
 						const resumed = yield* resume("s1", "personal", current);
 						expect(resumed.resumeSessionId).toBe("native-personal");
-						expect(resumed.configDir).toBe("/accounts/personal");
+						expect(resumed.configDir).toEqual(
+							configuredClaudeConfigDir("/accounts/personal"),
+						);
 						expect(resumed.prompt).toBe(current);
 						expect(resumed.handoff).toBeUndefined();
 						const cleared = yield* prepare({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
 							liveSession: { ...liveSession, resumeSessionId: undefined },
 						});
 						const rejected = yield* cleared("s1", "personal", current);
 						expect(rejected.resumeSessionId).toBeUndefined();
 						if (messages.length > 0) expect(rejected.handoff).toBeDefined();
-						const agentChange = yield* prepare({ agent: "reviewer" });
+						const agentChange = yield* prepare({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir("/accounts/personal"),
+							agent: "reviewer",
+						});
 						const changed = yield* agentChange("s1", "personal", current);
 						expect(changed.resumeSessionId).toBeUndefined();
 						if (messages.length > 0)

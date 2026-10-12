@@ -2,7 +2,10 @@ import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { Duration, Effect } from "effect";
 import type { Logger } from "../../../logger.js";
-import { makeClaudeSdkEnv } from "../../../provider/claude/claude-sdk-env.js";
+import {
+	type ClaudeConfigDir,
+	makeClaudeSdkEnv,
+} from "../../../provider/claude/claude-sdk-env.js";
 import {
 	generationFailureReason,
 	SessionTitleGenerationFailure,
@@ -105,6 +108,7 @@ async function collectGeneratedText(
 
 export const makeClaudeTitleGenerator = (options: {
 	readonly model: string;
+	readonly configDir: ClaudeConfigDir;
 	readonly log: Logger;
 	readonly queryFactory?: ClaudeTitleQueryFactory;
 }): TitleGenerator => {
@@ -120,7 +124,7 @@ export const makeClaudeTitleGenerator = (options: {
 							cwd,
 							// Skipping startup telemetry/update traffic saves ~0.5s.
 							env: {
-								...makeClaudeSdkEnv(),
+								...makeClaudeSdkEnv(options),
 								CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
 							},
 							model: options.model,

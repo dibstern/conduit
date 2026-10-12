@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __setProbeOverrideForTesting } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { makeClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeTestClaudeProviderInstance } from "../../../helpers/claude-provider-instance.js";
 
 describe("ClaudeProviderInstance.discoverEffect()", () => {
@@ -184,7 +185,14 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 			});
 			__setProbeOverrideForTesting(probe);
 			const capabilitiesService = Effect.runSync(
-				makeClaudeCapabilitiesService(),
+				makeClaudeCapabilitiesService({
+					launchConfig: () => ({
+						folderSource: "account",
+						configDir: configuredClaudeConfigDir(
+							join(workspace, ".claude-account"),
+						),
+					}),
+				}),
 			);
 
 			const a1 = makeTestClaudeProviderInstance({

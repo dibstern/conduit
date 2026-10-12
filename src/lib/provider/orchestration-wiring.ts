@@ -10,6 +10,7 @@ import { Context, Effect, Layer, Option, type Scope } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
@@ -273,6 +274,8 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
+			defaultClaudeLaunchConfig: () =>
+				resolveClaudeLaunchConfig(loadDaemonConfig(options.configDir)),
 			resolveProviderDriver: (providerId) =>
 				resolveProviderRoutingDriver(
 					loadDaemonConfig(options.configDir),

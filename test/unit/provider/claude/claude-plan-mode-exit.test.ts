@@ -5,10 +5,12 @@
 // already the approval UI. What makes it a *loop* is the mode change: an
 // approved plan has to drop the session out of plan mode, or the SDK stays
 // read-only and Claude goes on planning against a plan the user just accepted.
+
 import type { PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClaudePermissionBridge } from "../../../../src/lib/provider/claude/claude-permission-bridge.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 import type {
 	EventSink,
@@ -38,6 +40,7 @@ function makeCtx(): ClaudeSessionContext {
 	return {
 		sessionId: "sess-plan",
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: new Date().toISOString(),
 		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),

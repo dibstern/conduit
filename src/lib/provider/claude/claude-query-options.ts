@@ -1,16 +1,19 @@
 import type { Settings } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
-import type { PreWarmSessionInput } from "../types.js";
 import { claudeApiModelId } from "./claude-api-model-id.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
 import { buildClaudeFlagSettings } from "./claude-sdk-settings.js";
 import { validateOptionsJsonShape } from "./claude-sdk-validation.js";
 import { toSdkPermissionMode } from "./permission-mode-map.js";
-import type { CanUseTool, Options as SDKOptions } from "./types.js";
+import type {
+	CanUseTool,
+	ClaudePreWarmSessionInput,
+	Options as SDKOptions,
+} from "./types.js";
 
 /** The same launch options are used by idle pre-warming and the first send. */
 export function buildClaudeQueryOptions(
-	input: PreWarmSessionInput,
+	input: ClaudePreWarmSessionInput,
 	abortController: AbortController,
 	canUseTool: CanUseTool,
 	claudeSettingsOverrides: Settings | undefined,
@@ -31,7 +34,7 @@ export function buildClaudeQueryOptions(
 			: {}),
 		abortController,
 		env: makeClaudeSdkEnv({
-			configDir: input.configDir ?? input.nativeThread?.configDir,
+			configDir: input.configDir,
 			baseEnv: shellEnv,
 		}),
 		includePartialMessages: true,

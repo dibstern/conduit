@@ -7,6 +7,7 @@ import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../../src/lib/contracts/
 import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../../../../src/lib/domain/relay/Services/session-workspace.js";
 import { resolveClaudeSettingsForInstance } from "../../../../src/lib/handlers/claude-settings.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	type ClaudeSettingsChildRunner,
 	resolveClaudeSettingsFromDisk,
@@ -63,7 +64,10 @@ describe("resolveClaudeSettingsFromDisk", () => {
 
 		try {
 			const result = await Effect.runPromise(
-				resolveClaudeSettingsFromDisk({ workspaceRoot, configDir }),
+				resolveClaudeSettingsFromDisk({
+					workspaceRoot,
+					configDir: configuredClaudeConfigDir(configDir),
+				}),
 			);
 
 			expect(result.autoCompactEnabled).toEqual({
@@ -90,7 +94,7 @@ describe("resolveClaudeSettingsFromDisk", () => {
 			resolveClaudeSettingsFromDisk(
 				{
 					workspaceRoot: "/workspace/project",
-					configDir: "/profiles/work",
+					configDir: configuredClaudeConfigDir("/profiles/work"),
 				},
 				runner,
 			),
@@ -194,7 +198,10 @@ describe("resolveClaudeSettingsFromDisk", () => {
 		const failure = await Effect.runPromise(
 			Effect.flip(
 				resolveClaudeSettingsFromDisk(
-					{ workspaceRoot: "/workspace/project" },
+					{
+						workspaceRoot: "/workspace/project",
+						configDir: configuredClaudeConfigDir("/profiles/work"),
+					},
 					async () => result,
 				),
 			),

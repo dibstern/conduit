@@ -8,6 +8,7 @@ import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { makeProviderStateEffect } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 const testLayer = SqliteClient.layer({ filename: ":memory:" });
 
@@ -63,7 +64,7 @@ describe("nativeThread", () => {
 
 				expect(yield* state.nativeThread("s1", "personal")).toEqual({
 					projectId: "test-project",
-					configDir: "/accounts/personal",
+					configDir: configuredClaudeConfigDir("/accounts/personal"),
 					resumeSessionId: "legacy-sdk-session",
 					firstSequence: 2,
 					deliveredThrough: 4,
@@ -87,13 +88,13 @@ describe("nativeThread", () => {
 					{ key: "turnCount", value: "3" },
 				]);
 				const personal = {
-					configDir: "/accounts/personal",
+					configDir: configuredClaudeConfigDir("/accounts/personal"),
 					resumeSessionId: "personal-sdk-session",
 					firstSequence: 2,
 					deliveredThrough: 4,
 				};
 				const work = {
-					configDir: "/accounts/work",
+					configDir: configuredClaudeConfigDir("/accounts/work"),
 					resumeSessionId: "work-sdk-session",
 					firstSequence: 4,
 					deliveredThrough: 4,
@@ -137,7 +138,7 @@ describe("nativeThread", () => {
 				]);
 				expect(yield* state.nativeThread("s1", "personal")).toEqual({
 					projectId: "test-project",
-					configDir: "/accounts/personal",
+					configDir: configuredClaudeConfigDir("/accounts/personal"),
 					resumeSessionId: "personal-sdk-session",
 					firstSequence: 2,
 					deliveredThrough: 4,
@@ -166,7 +167,7 @@ describe("nativeThread", () => {
 				]);
 				expect(yield* state.nativeThread("s1", "work")).toEqual({
 					projectId: "test-project",
-					configDir: "/accounts/work",
+					configDir: configuredClaudeConfigDir("/accounts/work"),
 					resumeSessionId: "work-sdk-session",
 					firstSequence: 5,
 					deliveredThrough: 5,

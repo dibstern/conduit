@@ -6,7 +6,7 @@ import {
 } from "../contracts/claude-settings.js";
 import {
 	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
@@ -95,9 +95,10 @@ export const resolveClaudeSettingsForInstance = (
 		return yield* resolveClaudeSettingsFromDisk(
 			{
 				workspaceRoot,
-				configDir: resolveClaudeInstanceConfigDir(
+				...resolveClaudeLaunchConfig(
 					daemonConfig,
 					input.instanceId,
+					config.shellEnv?.(workspaceRoot),
 				),
 			},
 			runChild,

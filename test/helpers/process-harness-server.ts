@@ -287,13 +287,25 @@ async function main(): Promise<void> {
 				),
 			).href
 		)) as typeof import("../../src/lib/provider/claude/claude-capabilities-service.js");
+		const { configuredClaudeConfigDir } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider/claude", `claude-sdk-env.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-sdk-env.js");
 		const create = ClaudeDriver.create;
 		Object.assign(ClaudeDriver, {
 			create: (
 				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
 			) =>
 				Effect.gen(function* () {
-					const service = yield* makeClaudeCapabilitiesService();
+					const service = yield* makeClaudeCapabilitiesService({
+						launchConfig: () => ({
+							folderSource: "account",
+							configDir: configuredClaudeConfigDir(
+								process.env["CLAUDE_CONFIG_DIR"] ?? join(root, "claude"),
+							),
+						}),
+					});
 					let consumerId = 0;
 					return yield* create({
 						...deps,

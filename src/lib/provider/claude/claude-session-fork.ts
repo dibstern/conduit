@@ -2,10 +2,16 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
+import { ClaudeRuntimeError } from "../event-sink-errors.js";
+import {
+	type ClaudeConfigDir,
+	configuredClaudeConfigDir,
+	makeClaudeSdkEnv,
+} from "./claude-sdk-env.js";
 
 interface SdkCallOptions {
 	readonly dir?: string;
-	readonly configDir?: string;
+	readonly configDir: ClaudeConfigDir;
 }
 
 export interface ClaudeSessionForkSdk {
@@ -20,10 +26,9 @@ export interface ClaudeSessionForkSdk {
 	): Promise<{ sessionId: string }>;
 }
 
-// The SDK's session functions find transcripts via process.env.CLAUDE_CONFIG_DIR
-// at call time and take no option for it. Setting it on the daemon would leak
-// into every process spawned meanwhile (Claude queries, terminals, OpenCode),
-// so each call runs in a worker with its own env.
+// The SDK's session functions choose their transcript root from their process
+// environment, rather than a per-call option. Each call runs in a worker so
+// account selection cannot leak into Claude queries, terminals, or OpenCode.
 //
 // Transcripts are read with importSessionToStore, not getSessionMessages: the
 // latter returns only the chain after the latest compaction, so earlier turns
@@ -74,8 +79,13 @@ export function runSdkInWorker<T>(
 	return new Promise((resolve, reject) => {
 		const worker = new Worker(SDK_WORKER_SOURCE, {
 			eval: true,
-			...(configDir !== undefined && {
-				env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+			// Native os.homedir() ignores a worker's private HOME. These SDK calls
+			// only access transcript files, so give them the resolved root explicitly.
+			env: makeClaudeSdkEnv({
+				configDir:
+					configDir?._tag === "SdkDefault"
+						? configuredClaudeConfigDir(configDir.path)
+						: configDir,
 			}),
 			workerData: {
 				sdkUrl: pathToFileURL(
@@ -212,16 +222,23 @@ export async function forkClaudeTranscript(
 	input: {
 		readonly parentSdkId: string;
 		readonly projectDir?: string;
-		readonly configDir?: string;
+		readonly configDir: ClaudeConfigDir;
 		readonly title: string;
 		readonly messageId?: string;
 		readonly fallbackMessageIds?: readonly string[];
 	},
 	sdk: ClaudeSessionForkSdk,
 ): Promise<{ sdkSessionId: string }> {
+	if (
+		typeof input.configDir?.path !== "string" ||
+		input.configDir.path.trim().length === 0
+	)
+		throw new ClaudeRuntimeError({
+			message: "Claude config directory must be non-empty",
+		});
 	const options = {
 		...(input.projectDir !== undefined && { dir: input.projectDir }),
-		...(input.configDir !== undefined && { configDir: input.configDir }),
+		configDir: input.configDir,
 	};
 	let upToMessageId: string | undefined;
 	if (input.messageId !== undefined) {

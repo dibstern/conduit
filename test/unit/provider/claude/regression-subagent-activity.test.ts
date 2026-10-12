@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -47,6 +48,7 @@ function makeCtx(): ClaudeSessionContext {
 	return {
 		sessionId: "parent-session",
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: "2026-08-12T00:00:00.000Z",
 		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),

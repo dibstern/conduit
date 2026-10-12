@@ -187,7 +187,7 @@ export class ProcessHarness {
 		| undefined;
 
 	private constructor(
-		private readonly dist?: string,
+		private dist?: string,
 		private readonly enqueueMarkDelayMs = 0,
 		private readonly realSdk = false,
 		private readonly shellEnvProof = false,
@@ -559,6 +559,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	async restart(
 		options: {
+			/** Replace daemon code while detached runners retain their old bundle. */
+			dist?: string;
 			/** Allow slow module loading without extending RPC or turn deadlines. */
 			startupTimeoutMs?: number;
 			/** A process fixture may need longer to load the test SDK in a runner. */
@@ -607,6 +609,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (this.child)
 			throw new Error("Kill or stop the current child before restarting");
 		this.buildId = options.buildId ?? this.buildId;
+		this.dist = options.dist === undefined ? this.dist : resolve(options.dist);
 		this.rpcDiagnostics.buildIdentity = this.rpcBuildIdentity();
 		this.continuationSweepIntervalMs =
 			options.continuationSweepIntervalMs ?? this.continuationSweepIntervalMs;

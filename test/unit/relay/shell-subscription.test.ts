@@ -625,7 +625,12 @@ describe("subscribeShell", () => {
 					_tag: "Left",
 					left: { message: expect.stringContaining("Claude transcript") },
 				});
-				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {});
+				expect(getSessionMessages).toHaveBeenCalledWith("sdk-parent", {
+					configDir: {
+						_tag: expect.stringMatching(/^(Configured|SdkDefault)$/),
+						path: expect.any(String),
+					},
+				});
 			}).pipe(Effect.provide(makeShellTestLayer())),
 	);
 	for (const messageId of ["fork-message", undefined]) {

@@ -13,6 +13,10 @@ import {
 import { NodeRuntime } from "@effect/platform-node";
 import { Cause, Deferred, Effect, Exit, FiberSet, Scope } from "effect";
 import { z } from "zod";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../lib/daemon/config-persistence.js";
 import { createLogger } from "../lib/logger.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -54,13 +58,14 @@ import type {
 import { defaultClaudeSubagentSdk } from "../lib/provider/claude/claude-subagent-materializer.js";
 import { fromSdkPermissionMode } from "../lib/provider/claude/permission-mode-map.js";
 import {
+	type ClaudePreWarmSessionInput,
 	type ClaudeThreadReadResult,
 	type Options,
 	THREAD_READ_MCP_SERVER,
 	THREAD_READ_QUALIFIED_NAME,
 	THREAD_READ_TOOL_NAME,
 } from "../lib/provider/claude/types.js";
-import type { PreWarmSessionInput, TurnResult } from "../lib/provider/types.js";
+import type { TurnResult } from "../lib/provider/types.js";
 
 const log = createLogger("claude-session-runner");
 
@@ -157,7 +162,8 @@ const main = Effect.gen(function* () {
 	let replayedSettings:
 		| Pick<Options, "settings" | "settingSources">
 		| undefined;
-	let launchInput: PreWarmSessionInput | undefined;
+	let launchInput: ClaudePreWarmSessionInput | undefined;
+	let daemonConfigDir: string | undefined;
 	let launchSettings: ClaudeRunnerSettingsSnapshot["claudeSettingsOverrides"];
 	let resumeSessionId: string | undefined;
 	let liveConfiguration: ClaudeRunnerLiveQueryConfiguration | undefined;
@@ -254,11 +260,14 @@ const main = Effect.gen(function* () {
 						}
 					: options;
 		const queryLaunchOptions = { ...effectiveOptions, ...replayedSettings };
+		const configDir = frozenSnapshot?.input.configDir ?? params.configDir;
+		if (!queryLaunchOptions.env)
+			throw new Error("Claude query launch environment is required");
 		const queryOptions = {
 			...queryLaunchOptions,
 			// Lets the agent's tools name the Conduit session they run in.
 			env: {
-				...(queryLaunchOptions.env ?? process.env),
+				...queryLaunchOptions.env,
 				CONDUIT_SESSION_ID: sessionId,
 			},
 			allowedTools: [
@@ -327,10 +336,13 @@ const main = Effect.gen(function* () {
 				}),
 			},
 		};
-		const query = (queryFactory ?? sdkQuery)({
-			...params,
-			options: queryOptions,
-		});
+		const query = queryFactory
+			? queryFactory({
+					configDir,
+					prompt: params.prompt,
+					options: queryOptions,
+				})
+			: sdkQuery({ prompt: params.prompt, options: queryOptions });
 		const {
 			abortController: _abort,
 			canUseTool: _tool,
@@ -344,14 +356,14 @@ const main = Effect.gen(function* () {
 			(queryOptions.settingSources?.length === 0 ||
 				(retainedFiles.fingerprint !== undefined &&
 					retainedFiles.fingerprint ===
-						claudeRunnerFileSettingsFingerprint(queryOptions)))
+						claudeRunnerFileSettingsFingerprint(queryOptions, configDir)))
 				? retainedFiles
 				: undefined;
 		snapshot =
 			(restoring ? frozenSnapshot : undefined) ??
 			(JSON.parse(
 				JSON.stringify({
-					input: launchInput,
+					input: { ...launchInput, configDir },
 					...((frozenSnapshot?.claudeSettingsOverrides ?? launchSettings)
 						? {
 								claudeSettingsOverrides:
@@ -375,7 +387,7 @@ const main = Effect.gen(function* () {
 					if (snapshot !== captured) return;
 					if (
 						captured.fileSettings?.fingerprint !==
-						claudeRunnerFileSettingsFingerprint(queryOptions)
+						claudeRunnerFileSettingsFingerprint(queryOptions, configDir)
 					) {
 						const { fileSettings: _files, ...launch } = captured;
 						snapshot = launch;
@@ -446,6 +458,7 @@ const main = Effect.gen(function* () {
 					initializing = true;
 					const config = message.config;
 					if (!config) return;
+					daemonConfigDir = config.daemonConfigDir;
 					runFork(
 						Effect.gen(function* () {
 							if (!runner) {
@@ -470,6 +483,7 @@ const main = Effect.gen(function* () {
 												frozenSnapshot.options,
 												settingsResolver,
 												role === "candidate",
+												frozenSnapshot.input.configDir,
 											);
 										},
 										subagentSdk: subagentSdk ?? defaultClaudeSubagentSdk,
@@ -596,6 +610,7 @@ const main = Effect.gen(function* () {
 								completedCommands: [...completedCommands.values()],
 								upgradeState: upgradeState(),
 								stopsTasks: true,
+								taggedConfigDir: true,
 							});
 							initializing = false;
 						}),
@@ -712,7 +727,8 @@ const main = Effect.gen(function* () {
 								: {}),
 							resumeSessionId: input.resumeSessionId,
 							...(input.model ? { model: input.model } : {}),
-							...(input.configDir ? { configDir: input.configDir } : {}),
+							configDir: input.configDir,
+							folderSource: input.folderSource,
 							...(input.permissionMode
 								? { permissionMode: input.permissionMode }
 								: {}),
@@ -776,7 +792,7 @@ const main = Effect.gen(function* () {
 										command.claudeSettingsOverrides,
 									),
 									env: makeClaudeSdkEnv({
-										configDir: input.configDir ?? input.nativeThread?.configDir,
+										configDir: input.configDir,
 										baseEnv: shellEnv,
 									}),
 								};
@@ -784,34 +800,34 @@ const main = Effect.gen(function* () {
 									fileSettingsPreparation = (async () => {
 										try {
 											// The public resolver has no env parameter. Preserve the
-											// SDK's distinction between explicit and default config roots.
-											const configDir = options.env?.["CLAUDE_CONFIG_DIR"];
-											if (configDir)
-												process.env["CLAUDE_CONFIG_DIR"] = resolve(
-													options.cwd ?? process.cwd(),
-													configDir,
-												);
-											else {
+											// runner-local env workaround; the daemon's env is never read.
+											if (input.configDir._tag === "SdkDefault") {
 												delete process.env["CLAUDE_CONFIG_DIR"];
 												if (
-													options.env?.["HOME"] &&
-													resolve(options.env["HOME"]) !== resolve(homedir())
+													resolve(input.configDir.path, "..") !==
+													resolve(homedir())
 												)
 													throw new Error(
 														"Claude settings HOME cannot match the SDK resolver; retaining the old runner",
 													);
-											}
+											} else
+												process.env["CLAUDE_CONFIG_DIR"] = resolve(
+													options.cwd ?? process.cwd(),
+													input.configDir.path,
+												);
 											if (frozenSnapshot)
 												replayedSettings = await replayClaudeRunnerFileSettings(
 													frozenSnapshot.fileSettings,
 													options,
 													resolver,
 													role === "candidate",
+													input.configDir,
 												);
 											else
 												fileSettings = await captureClaudeRunnerFileSettings(
 													options,
 													resolver,
+													input.configDir,
 												);
 										} catch (cause) {
 											if (frozenSnapshot) throw cause;
@@ -852,6 +868,7 @@ const main = Effect.gen(function* () {
 												const current = await captureClaudeRunnerFileSettings(
 													frozen.options,
 													resolver,
+													frozen.input.configDir,
 												);
 												if (
 													!frozen.fileSettings ||
@@ -981,6 +998,8 @@ const main = Effect.gen(function* () {
 					if (exiting) finishExit();
 				}
 			},
+			undefined,
+			() => resolveClaudeLaunchConfig(loadDaemonConfig(daemonConfigDir)),
 		);
 		connection = peer;
 	});

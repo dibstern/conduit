@@ -2,6 +2,7 @@ import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import {
 	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
@@ -83,6 +84,7 @@ export const recoverClaudeRunnerCommands = (
 				const input = {
 					...normalizeClaudeSessionTurn(
 						JSON.parse(row.payload_json) as ClaudeSessionTurn,
+						() => resolveClaudeLaunchConfig(config),
 					),
 					commandAttempt: row.attempt_count,
 				};
@@ -118,6 +120,7 @@ export const recoverClaudeRunnerCommands = (
 									options: {
 										liveSession: yield* liveSession,
 										configDir: input.configDir,
+										folderSource: input.folderSource,
 										agent: input.agent,
 										userMessageId:
 											input.continuation?.cutOffMessageId ?? input.inputId,

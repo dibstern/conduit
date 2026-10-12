@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Exit, Scope } from "effect";
 import { onTestFinished } from "vitest";
 import {
@@ -20,6 +23,8 @@ export function makeTestClaudeProviderInstance(
 		Scope.extend(
 			makeClaudeProviderRuntime({
 				runnerFactory: makeClaudeSessionRunner,
+				// Never fall back to the developer's real ~/.config/conduit.
+				daemonConfigDir: mkdtempSync(join(tmpdir(), "conduit-test-config-")),
 				...deps,
 				...(deps.queryFactory && !deps.capabilitiesService
 					? {

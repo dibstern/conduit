@@ -1,9 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-	getSubagentMessages,
-	listSubagents,
-	type SessionMessage,
-} from "@anthropic-ai/claude-agent-sdk";
+import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeEventType,
@@ -19,6 +15,7 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "../provider-runtime-event-to-domain.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
+import type { ClaudeConfigDir } from "./claude-sdk-env.js";
 import { runSdkInWorker } from "./claude-session-fork.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
@@ -27,13 +24,19 @@ const PROVIDER = "claude" as const;
 export interface ClaudeSubagentSdk {
 	listSubagents(
 		parentClaudeSessionId: string,
-		options: { dir: string; configDir?: string },
+		options: {
+			dir: string;
+			configDir: ClaudeConfigDir;
+		},
 	): Promise<readonly string[]>;
 
 	getSubagentMessages(
 		parentClaudeSessionId: string,
 		sdkSubagentId: string,
-		options: { dir: string; configDir?: string },
+		options: {
+			dir: string;
+			configDir: ClaudeConfigDir;
+		},
 	): Promise<readonly SessionMessage[]>;
 }
 
@@ -62,22 +65,18 @@ type MutableClaudeSubagentTranscriptCursor = {
 
 export const defaultClaudeSubagentSdk: ClaudeSubagentSdk = {
 	listSubagents: (parentClaudeSessionId, options) =>
-		options.configDir !== undefined
-			? runSdkInWorker<readonly string[]>(
-					"listSubagents",
-					parentClaudeSessionId,
-					options,
-				)
-			: listSubagents(parentClaudeSessionId, options),
+		runSdkInWorker<readonly string[]>(
+			"listSubagents",
+			parentClaudeSessionId,
+			options,
+		),
 	getSubagentMessages: (parentClaudeSessionId, sdkSubagentId, options) =>
-		options.configDir !== undefined
-			? runSdkInWorker<readonly SessionMessage[]>(
-					"getSubagentMessages",
-					parentClaudeSessionId,
-					options,
-					sdkSubagentId,
-				)
-			: getSubagentMessages(parentClaudeSessionId, sdkSubagentId, options),
+		runSdkInWorker<readonly SessionMessage[]>(
+			"getSubagentMessages",
+			parentClaudeSessionId,
+			options,
+			sdkSubagentId,
+		),
 };
 
 export function claudeSubagentSessionId(input: {

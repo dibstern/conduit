@@ -3,6 +3,7 @@
 // and history replay never restored contextPercent after a reload.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 vi.mock("dompurify", () => ({
 	default: { sanitize: (html: string) => html },
@@ -152,6 +153,7 @@ describe("claude capability probe — fable family limits", () => {
 	it("gives fable models a context limit and context-window options", async () => {
 		const result = await probeClaudeCapabilities({
 			workspaceRoot: "/tmp",
+			configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 			queryFactory: () => ({
 				async *[Symbol.asyncIterator]() {
 					yield* [];

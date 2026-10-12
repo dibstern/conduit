@@ -1,6 +1,10 @@
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { Cause, Deferred, Effect } from "effect";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../../daemon/config-persistence.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
@@ -430,6 +434,10 @@ export const connectClaudeRunner = (options: {
 						options.onClose(failure);
 					},
 					beforeCommandFailure,
+					() =>
+						resolveClaudeLaunchConfig(
+							loadDaemonConfig(options.deps.daemonConfigDir),
+						),
 				);
 				socket.once("connect", () =>
 					connection.write({
@@ -440,6 +448,7 @@ export const connectClaudeRunner = (options: {
 								? Number(process.env["CONDUIT_TEST_SERVER_PROTOCOL_VERSION"])
 								: CLAUDE_RUNNER_PROTOCOL_VERSION,
 						buildId: claudeRunnerBuildId(),
+						taggedConfigDir: true,
 						acknowledgedSequence: acknowledged,
 						config: {
 							workspaceRoot: options.deps.workspaceRoot,

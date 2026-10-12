@@ -25,6 +25,7 @@ import {
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -230,7 +231,7 @@ describe("ProviderSideEffectReactor", () => {
 				expect(sendTurn.mock.calls[0]?.[0]).toMatchObject({
 					instanceId: "work-claude",
 					nativeThread: {
-						configDir: "/accounts/work",
+						configDir: configuredClaudeConfigDir("/accounts/work"),
 						resumeSessionId: "legacy-work-sdk-session",
 						firstSequence: 2,
 						deliveredThrough: 4,

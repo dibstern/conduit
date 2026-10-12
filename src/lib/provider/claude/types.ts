@@ -18,15 +18,25 @@ import type { ClaudeSDKCommandLifecycleMessage } from "../../contracts/providers
 import type { NativeThread } from "../../persistence/effect/provider-state-effect.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
-import type { EventSink, PermissionDecision } from "../types.js";
+import type {
+	EventSink,
+	PermissionDecision,
+	PreWarmSessionInput,
+	SendTurnInput,
+} from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeMessageOwnership } from "./claude-message-ownership.js";
+import type { ClaudeConfigDir, ClaudeLaunchConfig } from "./claude-sdk-env.js";
 import type { ClaudeSubagentTranscriptCursor } from "./claude-subagent-materializer.js";
 import type { EffectPromptQueueClosed } from "./effect-prompt-queue.js";
 
 export const THREAD_READ_MCP_SERVER = "conduit";
 export const THREAD_READ_TOOL_NAME = "conduit_thread_read";
 export const THREAD_READ_QUALIFIED_NAME = `mcp__${THREAD_READ_MCP_SERVER}__${THREAD_READ_TOOL_NAME}`;
+
+export type ClaudeSendTurnInput = SendTurnInput & ClaudeLaunchConfig;
+export type ClaudePreWarmSessionInput = PreWarmSessionInput &
+	ClaudeLaunchConfig;
 
 export interface ClaudeThreadReadInput {
 	readonly cursor?: string | undefined;
@@ -203,7 +213,7 @@ export interface ClaudeSessionContext {
 	readonly promptQueue: PromptQueueController;
 	readonly query: Query;
 	/** Claude config directory selected when this SDK query was created. */
-	readonly configDir?: string;
+	readonly configDir: ClaudeConfigDir;
 	/** Serializes turn admission while each caller awaits the prior turn.
 	 *  Runtime-owned contexts always set this; translator-only test contexts may omit it. */
 	readonly turnAdmissionSemaphore?: Effect.Semaphore;

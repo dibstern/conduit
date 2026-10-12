@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import {
 	loadDaemonConfig,
-	resolveClaudeInstanceConfigDir,
+	resolveClaudeLaunchConfig,
 	resolveProviderRoutingDriver,
 } from "../daemon/config-persistence.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
@@ -45,9 +45,13 @@ export const preWarmSession = (sessionId: string) =>
 		const agent = yield* agentService.getActiveAgent(sessionId);
 		const variant = yield* getVariant(sessionId);
 		const contextWindow = yield* getContextWindow(sessionId);
-		const configDir = resolveClaudeInstanceConfigDir(daemonConfig, providerId);
+		const launch = resolveClaudeLaunchConfig(
+			daemonConfig,
+			providerId,
+			config.shellEnv?.(config.projectDir),
+		);
 		const state = yield* providerState.getState(sessionId);
-		const prepareTurn = yield* makePrepareTurn({ configDir, agent });
+		const prepareTurn = yield* makePrepareTurn({ ...launch, agent });
 		const prepared = yield* prepareTurn(sessionId, providerId);
 		const permissionMode = yield* getPermissionMode(sessionId);
 		// Skip preparation if the session disappeared or changed provider.

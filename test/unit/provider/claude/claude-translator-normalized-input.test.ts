@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ClaudeSessionContext } from "../../../../src/lib/provider/claude/types.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 
@@ -11,6 +12,7 @@ function makeCtx(
 	return {
 		sessionId: "ses-1",
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: "2026-04-22T00:00:00.000Z",
 		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			enqueue: vi.fn(),

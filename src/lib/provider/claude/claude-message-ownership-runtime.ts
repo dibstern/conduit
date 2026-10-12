@@ -597,7 +597,7 @@ function pollClaudeSubagentOnceEffect(
 					poller.sdkSubagentId,
 					{
 						dir: ctx.workspaceRoot,
-						...(ctx.configDir !== undefined && { configDir: ctx.configDir }),
+						configDir: ctx.configDir,
 					},
 				),
 			catch: (cause) =>

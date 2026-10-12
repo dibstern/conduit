@@ -23,6 +23,7 @@ import {
 	discoverClaudeRunners,
 	registerClaudeRunner,
 } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
@@ -265,6 +266,8 @@ describe("Claude runner admission socket probes", () => {
 					history: [],
 					providerState: {},
 					workspaceRoot,
+					configDir: configuredClaudeConfigDir(join(root, "claude")),
+					folderSource: "account" as const,
 					extraFolders: [],
 					model: { providerId: "anthropic", modelId: "claude-sonnet-4-5" },
 				},
@@ -275,6 +278,8 @@ describe("Claude runner admission socket probes", () => {
 				input: {
 					sessionId,
 					workspaceRoot,
+					configDir: configuredClaudeConfigDir(join(root, "claude")),
+					folderSource: "account" as const,
 					extraFolders: [],
 					providerState: {},
 				},

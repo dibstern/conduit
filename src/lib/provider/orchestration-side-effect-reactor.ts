@@ -1,6 +1,10 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
+import {
+	loadDaemonConfig,
+	resolveClaudeLaunchConfig,
+} from "../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -12,6 +16,8 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
+import { normalizeClaudeLaunchInput } from "./claude/claude-runner-protocol.js";
+import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {
 	type PreparedTurn,
@@ -124,6 +130,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
+	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
@@ -420,6 +427,15 @@ export class ProviderSideEffectReactor {
 									}),
 								);
 								const read = yield* makeReadQueryEffect;
+								const launch = yield* Effect.try({
+									try: () =>
+										normalizeClaudeLaunchInput(
+											payload,
+											this.options.defaultClaudeLaunchConfig ??
+												(() => resolveClaudeLaunchConfig(loadDaemonConfig())),
+										),
+									catch: storeFailure("decodeClaudeLaunch"),
+								});
 								return yield* sendPreparedClaudeTurn({
 									sessionId: payload.sessionId,
 									instanceId: payload.instanceId ?? row.provider_id,
@@ -429,7 +445,7 @@ export class ProviderSideEffectReactor {
 										liveSession: yield* instance.getNativeSessionEffect?.(
 											payload.sessionId,
 										) ?? Effect.succeed(undefined),
-										configDir: payload.configDir,
+										...launch,
 										agent: payload.agent,
 										userMessageId:
 											payload.continuation?.cutOffMessageId ?? payload.inputId,

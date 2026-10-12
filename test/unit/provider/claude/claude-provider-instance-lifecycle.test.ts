@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Deferred, Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	ClaudeSessionContext,
 	PendingApproval,
@@ -35,6 +36,7 @@ function makeFakeSessionContext(
 	return {
 		sessionId,
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: new Date().toISOString(),
 		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({
 			close: vi.fn(() => Effect.void),

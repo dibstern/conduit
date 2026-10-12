@@ -15,6 +15,7 @@ import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -159,6 +160,7 @@ function makeCtx(): ClaudeSessionContext {
 	return {
 		sessionId: "property-session",
 		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
 		startedAt: "2026-07-16T00:00:00.000Z",
 		promptQueue: partialFake<ClaudeSessionContext["promptQueue"]>({}),
 		query: partialFake<ClaudeSessionContext["query"]>({}),

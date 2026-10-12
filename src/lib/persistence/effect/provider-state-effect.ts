@@ -2,6 +2,11 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Schema } from "effect";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import {
+	type ClaudeConfigDir,
+	ClaudeConfigDirSchema,
+	configuredClaudeConfigDir,
+} from "../../provider/claude/claude-sdk-env.js";
 
 export class ProviderStateEffectError extends Data.TaggedError(
 	"ProviderStateEffectError",
@@ -17,7 +22,7 @@ export interface ProviderStateEffectUpdate {
 
 export interface NativeThread {
 	readonly projectId: string;
-	readonly configDir?: string | undefined;
+	readonly configDir?: ClaudeConfigDir | undefined;
 	readonly resumeSessionId: string;
 	readonly firstSequence: number;
 	readonly deliveredThrough: number;
@@ -25,7 +30,16 @@ export interface NativeThread {
 
 const NativeThreadSchema = Schema.parseJson(
 	Schema.Struct({
-		configDir: Schema.optional(Schema.String),
+		configDir: Schema.optional(
+			Schema.Union(
+				ClaudeConfigDirSchema,
+				Schema.transform(Schema.String, ClaudeConfigDirSchema, {
+					strict: true,
+					decode: configuredClaudeConfigDir,
+					encode: (value) => value.path,
+				}),
+			),
+		),
 		resumeSessionId: Schema.String,
 		firstSequence: Schema.NonNegativeInt,
 		deliveredThrough: Schema.NonNegativeInt,
@@ -102,6 +116,13 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 			if (owner?.provider !== instanceId) return undefined;
 			const resumeSessionId = state["resumeSessionId"];
 			if (!resumeSessionId) return undefined;
+			const legacyFolder = state["claudeConfigDir"];
+			const configDir =
+				legacyFolder === undefined
+					? undefined
+					: yield* Schema.decodeUnknown(ClaudeConfigDirSchema)(
+							configuredClaudeConfigDir(legacyFolder),
+						);
 			const [bounds] = yield* sql<{
 				firstSequence: number;
 				deliveredThrough: number;
@@ -110,9 +131,7 @@ export const makeProviderStateEffect = Effect.gen(function* () {
 				FROM events WHERE session_id = ${sessionId}`;
 			return {
 				projectId,
-				...(state["claudeConfigDir"] !== undefined
-					? { configDir: state["claudeConfigDir"] }
-					: {}),
+				...(configDir !== undefined ? { configDir } : {}),
 				resumeSessionId,
 				firstSequence: bounds?.firstSequence ?? 0,
 				deliveredThrough: bounds?.deliveredThrough ?? 0,
