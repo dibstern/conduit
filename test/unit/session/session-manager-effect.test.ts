@@ -698,12 +698,12 @@ describe("SessionManager Effect", () => {
 						id, provider, title, status, created_at, updated_at
 					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
 
-				const before = yield* listSessions();
+				const before = yield* listSessions("test-project");
 				expect(before.map((s) => s.id)).toContain("ses-doomed");
 
 				yield* deleteSession("ses-doomed");
 
-				const after = yield* listSessions();
+				const after = yield* listSessions("test-project");
 				expect(after.map((s) => s.id)).not.toContain("ses-doomed");
 			}).pipe(
 				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
@@ -734,7 +734,7 @@ describe("SessionManager Effect", () => {
 
 				yield* deleteSession("ses-parent");
 
-				const after = yield* listSessions();
+				const after = yield* listSessions("test-project");
 				const ids = after.map((s) => s.id);
 				expect(ids).not.toContain("ses-parent");
 				expect(ids).not.toContain("ses-child");

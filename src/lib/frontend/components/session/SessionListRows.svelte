@@ -4,7 +4,7 @@
 	import { projectState } from "../../stores/project.svelte.js";
 	import type { SessionProjection } from "../../stores/session.svelte.js";
 	import { isSessionSnoozed, isSessionWoken, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
+	import { getSessionHref } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { unsnoozeSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -51,7 +51,7 @@
 
 	function handleSwitchSession(session: SessionInfo) {
 		touch(session, "sidebar-pick");
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		const projectSlug = session.projectSlug;
 		if (projectSlug && isSessionWoken(session, sessionState.now)) {
 			unsnoozeSessionRpc({ projectSlug, sessionId: session.id, originId: getBrowserClientId() })
 				.catch(() => showToast("Couldn't clear the wake", { variant: "error" }));
@@ -73,7 +73,7 @@
 	{#snippet sessionRow(s: SessionInfo)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
-		{@const primary = projectState.projects.find((project) => project.slug === (s.projectSlug ?? getCurrentSlug()))?.folders[0]}
+		{@const primary = projectState.projects.find((project) => project.slug === s.projectSlug)?.folders[0]}
 		<SessionItem
 			session={s}
 			pinned={s.pinnedAt != null}

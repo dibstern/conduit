@@ -31,6 +31,7 @@ export const SidebarRowSchema = Schema.Struct({
 	 * processing are what the stored state alone gives.
 	 */
 	session: SessionInfoSchema.omit(
+		"projectSlug",
 		"updatedAt",
 		"backgroundWork",
 		"backgroundTasks",

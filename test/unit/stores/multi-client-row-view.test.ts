@@ -31,7 +31,15 @@ it("two client stores render the same row changes from their root snapshots", as
 		client.feed.applySessionChange({
 			_tag: "snapshot",
 			sequence: 1,
-			rows: [{ id: "shared", title: "Shared", status: "idle", unread: true }],
+			rows: [
+				{
+					projectSlug: "project-a",
+					id: "shared",
+					title: "Shared",
+					status: "idle",
+					unread: true,
+				},
+			],
 		});
 	}
 	expect(
@@ -44,6 +52,7 @@ it("two client stores render the same row changes from their root snapshots", as
 			sequence: 2,
 			rows: [
 				{
+					projectSlug: "project-a",
 					id: "shared",
 					title: "Shared",
 					status: "idle",

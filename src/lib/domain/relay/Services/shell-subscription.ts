@@ -67,16 +67,14 @@ export const subscribeShell = (
 ): Stream.Stream<
 	Envelope<SessionInfo>,
 	ShellSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag
+	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag | ConfigTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const backgroundOf = yield* BackgroundLivenessTag;
-			const config = Option.getOrUndefined(
-				yield* Effect.serviceOption(ConfigTag),
-			);
+			const config = yield* ConfigTag;
 			// Optional so read-only hosts need not wire it; the relay always does.
 			const compactingOf = Option.getOrUndefined(
 				yield* Effect.serviceOption(SessionCompactionsTag),
@@ -115,15 +113,16 @@ export const subscribeShell = (
 											return {
 												...row,
 												item: {
-													...(config
-														? yield* withSessionWorktreeStatus(
-																withCachedSessionGit(row.item, [
-																	config.projectDir,
-																	...(config.extraFolders ?? []),
-																]),
-																config,
-															)
-														: row.item),
+													...(yield* withSessionWorktreeStatus(
+														withCachedSessionGit(
+															{ ...row.item, projectSlug: config.slug },
+															[
+																config.projectDir,
+																...(config.extraFolders ?? []),
+															],
+														),
+														config,
+													)),
 													...(compacting === undefined ? {} : { compacting }),
 													...(retrying === undefined ? {} : { retrying }),
 												},

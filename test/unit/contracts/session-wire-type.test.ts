@@ -5,19 +5,49 @@
 
 import { Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	CreateSession,
+	SessionInfoSchema,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema as SharedSessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
 
 describe("session wire type", () => {
+	it.each([
+		undefined,
+		null,
+		"",
+	])("rejects CreateSession projectSlug %s", (projectSlug) => {
+		expectTypeOf<CreateSession["projectSlug"]>().toEqualTypeOf<string>();
+		expect(() =>
+			Schema.decodeUnknownSync(CreateSession)({
+				_tag: "CreateSession",
+				originId: "browser-client",
+				projectSlug,
+			}),
+		).toThrow(/projectSlug/);
+	});
+
 	it("is one declaration, not a contracts copy of a shared-types copy", () => {
 		expect(SessionInfoSchema).toBe(SharedSessionInfoSchema);
 	});
 
+	it("requires the owning project on every session row", () => {
+		expectTypeOf<SessionInfo["projectSlug"]>().toEqualTypeOf<string>();
+		expect(() =>
+			Schema.decodeUnknownSync(SessionInfoSchema)({
+				id: "ses_1",
+				title: "t",
+				status: "idle",
+			}),
+		).toThrow();
+	});
+
 	it("carries the row's status and survives a JSON round trip", () => {
 		const session: SessionInfo = {
+			projectSlug: "demo",
 			id: "ses_1",
 			title: "Fix the sidebar",
 			status: "busy",
@@ -41,6 +71,7 @@ describe("session wire type", () => {
 				id: "ses_1",
 				title: "t",
 				status: "processing",
+				projectSlug: "demo",
 			}),
 		).toThrow();
 	});
@@ -54,6 +85,7 @@ describe("session wire type", () => {
 
 	it("carries main's read and attention state on the session", () => {
 		const derived: SessionInfo = {
+			projectSlug: "demo",
 			id: "ses_1",
 			title: "t",
 			status: "idle",

@@ -25,7 +25,12 @@ it("a background session's busy row moves only that session's phase", () => {
 	sessionState.currentId = "A";
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
-	applySessionUpsert({ id: "B", title: "B", status: "busy" });
+	applySessionUpsert({
+		projectSlug: "project-a",
+		id: "B",
+		title: "B",
+		status: "busy",
+	});
 	expect(b.activity.phase).toBe("processing");
 	expect(a.activity.phase).toBe("idle");
 });
@@ -39,8 +44,18 @@ it("routes idle rows to the named background session", () => {
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
 	phaseToProcessing(b.activity);
-	applySessionUpsert({ id: "B", title: "B", status: "busy" });
-	applySessionUpsert({ id: "B", title: "B", status: "idle" });
+	applySessionUpsert({
+		projectSlug: "project-a",
+		id: "B",
+		title: "B",
+		status: "busy",
+	});
+	applySessionUpsert({
+		projectSlug: "project-a",
+		id: "B",
+		title: "B",
+		status: "idle",
+	});
 	expect(b.activity.phase).toBe("idle");
 	expect(b.activity.endedGeneration).toBe(b.activity.turnGeneration);
 	expect(a.activity.endedGeneration).toBe(-1);

@@ -29,6 +29,7 @@ describe("SessionList daemon sessions", () => {
 		seedRootSessions([
 			{
 				id: "local-session",
+				projectSlug: "current-project",
 				title: "Local session",
 				updatedAt: Date.now(),
 			},

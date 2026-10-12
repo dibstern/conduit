@@ -30,6 +30,7 @@ describe("SessionManager.listSessions — status", () => {
 
 	beforeEach(() => {
 		mgr = new SessionManager({
+			projectSlug: "test-project",
 			client: partialFake<OpenCodeAPI>({
 				session: partialFake<OpenCodeAPI["session"]>({
 					list: vi

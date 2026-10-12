@@ -30,6 +30,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
           "title": "New session - 2026-03-27T04:04:12.813Z",
           "status": "idle",
@@ -43,6 +44,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
           "title": "New session - 2026-03-27T04:04:12.813Z",
           "status": "idle",
@@ -490,6 +492,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -503,6 +506,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -516,6 +520,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -529,6 +534,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -542,6 +548,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "busy",
@@ -561,6 +568,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "busy",
@@ -575,6 +583,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -589,6 +598,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -682,6 +692,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -696,6 +707,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -809,6 +821,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -823,6 +836,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -940,6 +954,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -954,6 +969,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1023,6 +1039,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1041,6 +1058,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1054,6 +1072,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1067,6 +1086,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1102,6 +1122,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1115,6 +1136,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1128,6 +1150,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1141,6 +1164,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1154,6 +1178,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1173,6 +1198,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1313,6 +1339,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1327,6 +1354,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1396,6 +1424,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1414,6 +1443,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1427,6 +1457,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1440,6 +1471,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1475,6 +1507,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1488,6 +1521,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1501,6 +1535,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1514,6 +1549,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1527,6 +1563,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1546,6 +1583,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1659,6 +1697,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1673,6 +1712,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1742,6 +1782,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1760,6 +1801,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1773,6 +1815,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1786,6 +1829,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",

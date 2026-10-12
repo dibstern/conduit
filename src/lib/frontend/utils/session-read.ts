@@ -30,7 +30,7 @@ export function backToSessions(): void {
 export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 	if (session.settledAt != null || isSessionSnoozed(session, sessionState.now))
 		return;
-	const projectSlug = session.projectSlug ?? getCurrentSlug();
+	const projectSlug = session.projectSlug;
 	if (!projectSlug) return;
 	const foreign = projectSlug !== getCurrentSlug();
 	const input = {

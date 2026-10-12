@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
           "title": "New session - 2026-03-27T04:03:13.623Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
           "title": "New session - 2026-03-27T04:03:13.623Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "New session - 2026-03-27T04:03:13.623Z",
               "status": "busy",
@@ -579,6 +587,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
               "status": "busy",
@@ -593,6 +602,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
               "status": "busy",
@@ -692,6 +702,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
               "status": "idle",
@@ -710,6 +721,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
               "status": "idle",
@@ -723,6 +735,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
               "status": "idle",
@@ -736,6 +749,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a1da8ffetHB1Lk5YzNLvN0",
               "title": "Automated testing importance for software quality",
               "status": "idle",
