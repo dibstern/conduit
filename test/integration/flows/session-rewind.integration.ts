@@ -1,7 +1,17 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	applyTranscriptEnvelope,
+	type TranscriptEntry,
+} from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -18,45 +28,35 @@ const seededIds = [...keptIds, ...hiddenIds];
  * its parts with it, so a message restored without its parts comes back empty.
  * `ids` names only the seeded messages held whole, header and text part.
  */
-function detailState(client: TestWsClient, sessionId: string) {
-	const ids = new Set<string>();
-	const parts = new Map<string, Set<string>>();
-	let pending: string | null = null;
+function detailState(
+	client: TestWsClient,
+	sessionId: string,
+	messageIds = seededIds,
+) {
+	let entry: TranscriptEntry = {
+		project: "integration-test",
+		rows: [],
+		pending: [],
+		hwm: null,
+		hasMore: false,
+		status: { _tag: "live" },
+		waiting: new Map(),
+		partOrder: new Map(),
+	};
 	for (const frame of client.getReceivedOfType("session_detail")) {
 		if (frame["sessionId"] !== sessionId) continue;
-		const envelope = frame as unknown as DetailEnvelope;
-		if (envelope._tag === "snapshot") {
-			ids.clear();
-			parts.clear();
-			pending = null;
-		}
-		if (envelope._tag === "remove") {
-			ids.delete(envelope.id);
-			parts.delete(envelope.id);
-		}
-		const items =
-			envelope._tag === "snapshot"
-				? envelope.rows
-				: envelope._tag === "upsert"
-					? [envelope.item]
-					: [];
-		for (const item of items) {
-			if (item._tag === "message") ids.add(item.message.id);
-			else if (item._tag === "part")
-				parts.set(
-					item.messageId,
-					(parts.get(item.messageId) ?? new Set()).add(item.part.id),
-				);
-			else if (item._tag === "rewind") pending = item.messageId;
-		}
+		entry = applyTranscriptEnvelope(entry, frame as unknown as DetailEnvelope);
 	}
 	return {
-		ids: [...ids]
+		ids: entry.rows
 			.filter(
-				(id) => seededIds.includes(id) && parts.get(id)?.has(`${id}-text`),
+				({ id, parts }) =>
+					messageIds.includes(id) &&
+					parts?.some((part) => part.id === `${id}-text`),
 			)
+			.map(({ id }) => id)
 			.sort(),
-		pending,
+		pending: entry.pendingRewindMessageId ?? null,
 	};
 }
 
@@ -86,14 +86,18 @@ function persistedRewinds(harness: RelayHarness, sessionId: string) {
 	}
 }
 
-async function seedTurns(harness: RelayHarness, client: TestWsClient) {
+async function seedTurns(
+	harness: RelayHarness,
+	client: TestWsClient,
+	messageIds = seededIds,
+) {
 	const created = await client.createSession("Pending rewind", {
 		providerId: "opencode",
 	});
 	const sessionId = String(created["id"]);
 	const createdAt = Date.now();
 	harness.mock.injectSSEEvents(
-		seededIds.flatMap((id, index) => [
+		messageIds.flatMap((id, index) => [
 			{
 				type: "message.updated",
 				properties: {
@@ -123,10 +127,10 @@ async function seedTurns(harness: RelayHarness, client: TestWsClient) {
 		async () => {
 			const page = await client.loadMoreHistory(sessionId);
 			expect(page.messages.map((message) => message.id)).toEqual(
-				expect.arrayContaining(seededIds),
+				expect.arrayContaining(messageIds.slice(-50)),
 			);
 		},
-		{ timeout: 5000 },
+		{ timeout: messageIds.length > 50 ? 30_000 : 5000 },
 	);
 	return sessionId;
 }
@@ -153,6 +157,204 @@ describe("OpenCode pending rewind through the relay", () => {
 				JSON.stringify(evidence, null, 2),
 			);
 		}
+	});
+
+	// Failure cases: a short tail rewrite stamps the entire transcript, a moved
+	// cut loses restored parts, or a viewer's newest page leaks hidden messages.
+	it("bounds rewind and undo projection writes in a large transcript", async () => {
+		harness = await createRelayHarness();
+		evidence = { tickets: ["conduit-test-yyin", "conduit-test-qr9d"] };
+		const client = await harness.connectWsClient();
+		await client.waitForInitialState();
+		const messageIds = Array.from(
+			{ length: 200 },
+			(_, index) => `large-${String(index).padStart(4, "0")}`,
+		);
+		const sessionId = await seedTurns(harness, client, messageIds);
+		const viewer = await harness.connectWsClient();
+		await viewer.switchSession(sessionId);
+		expect(detailState(viewer, sessionId, messageIds)).toEqual({
+			ids: messageIds.slice(-50),
+			pending: null,
+		});
+		const db = new Database(harness.eventsDbPath, { readonly: true });
+		try {
+			const writes = () => {
+				const { version } = db
+					.prepare("SELECT version FROM sessions WHERE id = ?")
+					.get(sessionId) as { version: number };
+				return {
+					version,
+					messages: (
+						db
+							.prepare(
+								"SELECT count(*) AS n FROM messages WHERE session_id = ? AND version = ?",
+							)
+							.get(sessionId, version) as { n: number }
+					).n,
+					parts: (
+						db
+							.prepare(
+								"SELECT count(*) AS n FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ? AND p.version = ?",
+							)
+							.get(sessionId, version) as { n: number }
+					).n,
+				};
+			};
+			for (const cut of [190, 196, 180]) {
+				const messageId = messageIds[cut];
+				if (!messageId) throw new Error("Missing large transcript cut");
+				await client.rpcCall((rpc) =>
+					rpc.RewindSession({
+						projectSlug: "integration-test",
+						sessionId,
+						messageId,
+					}),
+				);
+				const projected = writes();
+				evidence[`cut-${cut}`] = projected;
+				// At most the affected tail's headers and one 50-message page.
+				expect.soft(projected.messages).toBeLessThanOrEqual(70);
+				expect.soft(projected.parts).toBe(50);
+				await vi.waitFor(() => {
+					const state = detailState(viewer, sessionId, messageIds);
+					expect(state.pending).toBe(messageId);
+					// The browser preserves the cold page's floor while hiding rows.
+					expect(state.ids).toEqual(messageIds.slice(150, cut));
+				});
+				const visible = await viewer.loadMoreHistory(sessionId);
+				expect(visible.messages.map(({ id }) => id)).toEqual(
+					messageIds.slice(cut - visible.messages.length, cut),
+				);
+			}
+			await client.rpcCall((rpc) =>
+				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
+			);
+			const undone = writes();
+			evidence["undo"] = undone;
+			expect.soft(undone.messages).toBeLessThanOrEqual(70);
+			expect.soft(undone.parts).toBe(50);
+			await vi.waitFor(() => {
+				const state = detailState(viewer, sessionId, messageIds);
+				expect(state.pending).toBeNull();
+				expect(state.ids).toEqual(messageIds.slice(150));
+			});
+			const restored = await viewer.loadMoreHistory(sessionId);
+			expect(restored.messages.map(({ id }) => id)).toEqual(
+				messageIds.slice(-restored.messages.length),
+			);
+			expect(persistedRewinds(harness, sessionId).messages).toHaveLength(200);
+		} finally {
+			db.close();
+		}
+	}, 60_000);
+
+	it("bounds cut timestamp reconciliation and retains legacy event replay", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const reads = yield* ReadQueryEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const sessionId = "rewind-reconciliation";
+				const messageIds = Array.from(
+					{ length: 200 },
+					(_, index) => `m${String(index).padStart(4, "0")}`,
+				);
+				yield* commit([
+					canonicalEvent("session.created", sessionId, {
+						sessionId,
+						title: "Cut timestamp reconciliation",
+						provider: "opencode",
+					}),
+					...messageIds.flatMap((messageId, createdAt) => [
+						canonicalEvent(
+							"message.created",
+							sessionId,
+							{ sessionId, messageId, role: "assistant" },
+							{ createdAt },
+						),
+						canonicalEvent("text.delta", sessionId, {
+							messageId,
+							partId: `${messageId}-text`,
+							text: messageId,
+						}),
+					]),
+				]);
+				const cutId = "m0190";
+				// Persisted pre-change events have no previousMessageId.
+				yield* commit([
+					canonicalEvent("session.rewound", sessionId, { messageId: cutId }),
+				]);
+				const writes = () =>
+					sql<{ messages: number; parts: number }>`SELECT
+						(SELECT count(*) FROM messages WHERE session_id = ${sessionId}
+							AND version = (SELECT value FROM read_model_counter WHERE id = 1)) AS messages,
+						(SELECT count(*) FROM message_parts p JOIN messages m ON m.id = p.message_id
+							WHERE m.session_id = ${sessionId}
+							AND p.version = (SELECT value FROM read_model_counter WHERE id = 1)) AS parts`;
+				expect((yield* writes())[0]).toEqual({ messages: 200, parts: 200 });
+				// Writing a hidden cut's text does not move the transcript ordering.
+				yield* commit([
+					canonicalEvent("text.delta", sessionId, {
+						messageId: cutId,
+						partId: `${cutId}-text`,
+						text: "continued",
+					}),
+				]);
+				expect.soft((yield* writes())[0]).toEqual({ messages: 1, parts: 1 });
+				let floor = (yield* reads.readSessionTranscript(sessionId)).version;
+				for (const [createdAt, visibleIds, maxMessages] of [
+					[196, messageIds.filter((id) => id < "m0196" && id !== cutId), 60],
+					[185, messageIds.slice(0, 186), 70],
+				] as const) {
+					yield* commit([
+						canonicalEvent(
+							"message.snapshot",
+							sessionId,
+							{
+								messageId: cutId,
+								digest: `cut-${createdAt}`,
+								message: {
+									id: cutId,
+									sessionID: sessionId,
+									role: "assistant",
+									time: { created: createdAt },
+									parts: [{ id: `${cutId}-text`, type: "text", text: cutId }],
+								},
+							},
+							{ metadata: { rawSource: "opencode.rest" } },
+						),
+					]);
+					const [projected] = yield* writes();
+					expect.soft(projected?.messages).toBeLessThanOrEqual(maxMessages);
+					// The cut's snapshot writes one part of its own.
+					expect.soft(projected?.parts).toBeLessThanOrEqual(51);
+					const transcript =
+						yield* reads.getSessionMessagesWithParts(sessionId);
+					expect(transcript.map(({ id }) => id)).toEqual(visibleIds);
+					const delta = yield* reads.readSessionTranscript(sessionId, {
+						after: floor,
+						through: (yield* reads.readSessionTranscript(sessionId)).version,
+					});
+					expect(delta.messages.slice(-50).map(({ id }) => id)).toEqual(
+						visibleIds.slice(-50),
+					);
+					expect(delta.messages.every(({ parts }) => parts.length === 1)).toBe(
+						true,
+					);
+					floor = delta.version;
+				}
+				yield* commit([canonicalEvent("session.rewind_undone", sessionId, {})]);
+				expect((yield* writes())[0]).toEqual({ messages: 200, parts: 200 });
+				expect(
+					yield* reads.getSessionMessagesWithParts(sessionId),
+				).toHaveLength(200);
+			}).pipe(
+				Effect.provide(
+					makePersistenceEffectLayer(":memory:", "rewind-regression"),
+				),
+			),
+		);
 	});
 
 	// Failure cases: equal timestamps change the cut, another tab misses the

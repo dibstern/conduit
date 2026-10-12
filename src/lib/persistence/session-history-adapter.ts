@@ -388,6 +388,8 @@ export function messageRowsToHistory(
 	return { messages, hasMore };
 }
 
+/** The most messages a detail page holds; rewind restores this visible page. */
+export const PAGE_MESSAGES = 50;
 /** The most a transcript page may weigh on the wire, as one encoded frame. */
 export const PAGE_FRAME_BUDGET = Utf8Bytes.make(256 * 1024);
 
