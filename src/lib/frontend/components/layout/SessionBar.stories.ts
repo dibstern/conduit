@@ -1295,7 +1295,7 @@ export const DesktopBackgroundTasks: Story = {
 			...[
 				"session-bar-title",
 				"session-skills-chip",
-				"session-bar-island-overflow",
+				"session-bar-overflow",
 			].map((id) => canvas.getByTestId(id)),
 		])
 			expect(
