@@ -1057,10 +1057,12 @@ finish();
 					folders: [{ folder: extra.path, path }],
 				});
 				expect(calls).toHaveBeenCalledTimes(1);
-				expect(calls).toHaveBeenCalledWith(extra, path, [
-					folder.path,
-					extra.path,
-				]);
+				expect(calls).toHaveBeenCalledWith(
+					extra,
+					path,
+					[folder.path, extra.path],
+					undefined,
+				);
 			}).pipe(Effect.provide(makeWorktreeLive(configDir))),
 		);
 	});

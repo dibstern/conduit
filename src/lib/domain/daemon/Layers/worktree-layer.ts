@@ -517,6 +517,7 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 				folder: WorktreeFolder,
 				directory?: string,
 				workspaceFolders: readonly string[] = [folder.path],
+				recordedBranch?: string,
 			) =>
 				Effect.gen(function* () {
 					const source = yield* filesystem(folder.path, async () =>
@@ -602,10 +603,11 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							(yield* filesystem(path, () => realpath(path))) === path &&
 							(yield* git(mapped, ["rev-parse", "--show-toplevel"])) === path,
 					);
-					const branch = entry
-						?.split("\0")
-						.find((field) => field.startsWith("branch refs/heads/"))
-						?.slice(18);
+					const branch =
+						entry
+							?.split("\0")
+							.find((field) => field.startsWith("branch refs/heads/"))
+							?.slice(18) ?? recordedBranch;
 					const refs =
 						branch && !usable
 							? (yield* git(root, [
@@ -650,8 +652,9 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 				folder,
 				directory,
 				workspaceFolders,
+				recordedBranch,
 			) =>
-				readRecovery(folder, directory, workspaceFolders).pipe(
+				readRecovery(folder, directory, workspaceFolders, recordedBranch).pipe(
 					Effect.map((state): WorkspaceMissing | undefined =>
 						state.usable
 							? undefined
@@ -667,11 +670,12 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 				folder,
 				directory,
 				workspaceFolders,
+				recordedBranch,
 			) =>
 				Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
 						const state = yield* restore(
-							readRecovery(folder, directory, workspaceFolders),
+							readRecovery(folder, directory, workspaceFolders, recordedBranch),
 						);
 						if (yield* pathStat(state.path))
 							return yield* new WorktreeRecoveryError({
@@ -731,13 +735,20 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 					const workspaceFolders = folders.map(({ folder }) => folder.path);
 					return Effect.forEach(
 						folders,
-						({ folder, directory }) =>
+						({ folder, directory, recordedBranch }) =>
 							Effect.gen(function* () {
 								const state = yield* restore(
-									readRecovery(folder, directory, workspaceFolders),
+									readRecovery(
+										folder,
+										directory,
+										workspaceFolders,
+										recordedBranch,
+									),
 								);
 								if (state.usable) return;
-								yield* restore(recreate(folder, directory, workspaceFolders));
+								yield* restore(
+									recreate(folder, directory, workspaceFolders, recordedBranch),
+								);
 								recreated.push({ folder: folder.path, path: state.path });
 							}).pipe(
 								Effect.mapError(

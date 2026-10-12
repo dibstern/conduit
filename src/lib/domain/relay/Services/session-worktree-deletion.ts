@@ -69,7 +69,6 @@ export const readSessionWorktreeOwnership = (
 	includeLegacy = true,
 ) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* sql<{
 			data: string;
@@ -126,9 +125,15 @@ export const readSessionWorktreeOwnership = (
 		launches.every((launch) => launch.ownership === undefined)
 			? legacy
 			: []) {
+			const config = yield* Effect.serviceOption(ConfigTag);
+			if (config._tag === "None")
+				return yield* new SessionCommandError({
+					operation: "worktree.inspect",
+					cause: "Legacy worktree inspection requires project configuration.",
+				});
 			const owned = yield* service.value
 				.legacyOwnership(
-					{ path: folder, projectSlug: config.slug, sessionId },
+					{ path: folder, projectSlug: config.value.slug, sessionId },
 					path,
 				)
 				.pipe(

@@ -62,24 +62,27 @@ export interface WorktreeService {
 		owned: SessionWorktreeOwnership,
 		inUse?: Effect.Effect<boolean, WorktreeRecoveryError, R>,
 	) => Effect.Effect<void, WorktreeRecoveryError, R>;
-	/** Read Git's registration, including prunable entries, without changing any refs. */
+	/** Read Git's registration, including prunable entries, without changing refs; fall back to the recorded branch only when Git has none. */
 	readonly inspectMissing: (
 		folder: WorktreeFolder,
 		directory?: string,
 		/** Recorded Project Folders can share a checkout created for any one of them. */
 		workspaceFolders?: readonly string[],
+		recordedBranch?: string,
 	) => Effect.Effect<WorkspaceMissing | undefined, WorktreeRecoveryError>;
-	/** Re-add an owned checkout from its existing branch; never create a new branch. */
+	/** Re-add an owned checkout from its existing branch; Git's registration takes precedence over recordedBranch. Never create a branch. */
 	readonly recreate: (
 		folder: WorktreeFolder,
 		directory?: string,
 		workspaceFolders?: readonly string[],
+		recordedBranch?: string,
 	) => Effect.Effect<string, WorktreeRecoveryError>;
-	/** Restore missing checkouts together, keeping present checkouts and all branch refs. */
+	/** Restore missing checkouts together, using recorded branches only when registrations lack them; keep present checkouts and all refs. */
 	readonly recreateAll: (
 		folders: readonly {
 			readonly folder: WorktreeFolder;
 			readonly directory: string;
+			readonly recordedBranch?: string;
 		}[],
 	) => Effect.Effect<void, WorktreeRecoveryError>;
 	/** One branch in every git folder; optional bases name local branches. Non-git folders stay in place. Failure rolls back all ownership. */

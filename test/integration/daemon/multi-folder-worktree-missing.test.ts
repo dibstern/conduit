@@ -496,9 +496,13 @@ process.exit(result.status ?? 1);
 		}, 180_000);
 	}
 
-	it("recovers one checkout shared by sibling repository folders", async () => {
-		const { fixture, socket, extra, row, create, recreate } =
-			await start("same-repository");
+	it.each([
+		"directory",
+		"registration",
+	] as const)("recovers one checkout shared by sibling repository folders (%s removed)", async (removal) => {
+		const { fixture, socket, extra, row, create, recreate } = await start(
+			`same-repository-${removal}`,
+		);
 		const app = join(fixture.projectDir, "app");
 		const api = join(fixture.projectDir, "api");
 		for (const directory of [app, api]) {
@@ -533,13 +537,16 @@ process.exit(result.status ?? 1);
 		expect(mappings[api]).toBe(join(root, "api"));
 		expect((await row(session.id)).workspaceMissing).toBeUndefined();
 		const events = workspaceEvents(fixture, session.id);
-		rmSync(root, { recursive: true, force: true });
+		if (removal === "registration")
+			git(app, "worktree", "remove", "--force", root);
+		else rmSync(root, { recursive: true, force: true });
 		await capture("beforeRecovery", fixture);
 		expect(
 			(await row(session.id)).workspaceMissing?.folders?.map(
 				({ folder }) => folder,
 			),
 		).toEqual([app, api]);
+		expect((await row(session.id)).workspaceMissing?.canRecreate).toBe(true);
 		await recreate(session.id);
 		for (const folder of [app, api])
 			expect(

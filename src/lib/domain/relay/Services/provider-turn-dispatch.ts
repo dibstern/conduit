@@ -15,7 +15,10 @@ import {
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import { MissingWorktreeError } from "../../../contracts/worktree.js";
+import {
+	MissingWorktreeError,
+	WorktreeRecoveryError,
+} from "../../../contracts/worktree.js";
 import {
 	loadDaemonConfig,
 	resolveClaudeInstanceConfigDir,
@@ -48,6 +51,7 @@ import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
+import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";
@@ -75,6 +79,7 @@ import { SessionSetupTag } from "./session-setup.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 import {
 	inspectSessionWorktree,
+	recreateSessionWorktrees,
 	SessionWorkspaceTag,
 } from "./session-workspace.js";
 import { SSEStreamTag } from "./sse-stream-service.js";
@@ -88,8 +93,10 @@ export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
 	{
 		fallbackMissingWorktree = false,
+		recreateMissingWorktree = false,
 	}: {
 		readonly fallbackMissingWorktree?: boolean;
+		readonly recreateMissingWorktree?: boolean;
 	} = {},
 ) =>
 	Effect.gen(function* () {
@@ -122,16 +129,48 @@ export const resolveSessionFolders = (
 						savedWorkspace,
 					);
 		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
-		if (
-			yield* inspectSessionWorktree(
-				{ id: session.id, workspace: state },
-				config,
-			)
-		)
-			return yield* new MissingWorktreeError({
+		const missing = yield* inspectSessionWorktree(
+			{ id: session.id, workspace: state },
+			config,
+		);
+		if (missing) {
+			const branch =
+				missing.folders?.find(({ reason }) => reason === "branch-missing")
+					?.branch ?? missing.branch;
+			const error = new MissingWorktreeError({
 				path: workspaceRoot,
-				message: `Worktree missing: ${workspaceRoot}. Recreate worktree or Continue in main folder before sending another message.`,
+				message:
+					missing.reason === "branch-missing"
+						? `Worktree missing: ${workspaceRoot}. Branch${branch ? ` ${branch}` : ""} no longer exists, so it cannot be recreated. Continue in main folder before sending another message.`
+						: `Worktree missing: ${workspaceRoot}. Recreate worktree or Continue in main folder before sending another message.`,
 			});
+			const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
+			if (
+				!recreateMissingWorktree ||
+				!missing.canRecreate ||
+				workspace._tag === "None" ||
+				read._tag === "None" ||
+				worktrees._tag === "None"
+			)
+				return yield* error;
+			// The locked reread above has finished. Recreation owns the same
+			// non-reentrant launch lock, so it must run outside that block.
+			const recreated = yield* recreateSessionWorktrees(session.id).pipe(
+				Effect.provideService(SessionWorkspaceTag, workspace.value),
+				Effect.provideService(ReadQueryEffectTag, read.value),
+				Effect.provideService(WorktreeServiceTag, worktrees.value),
+				Effect.mapError((cause) =>
+					cause instanceof WorktreeRecoveryError &&
+					cause.reason === "branch-missing"
+						? new MissingWorktreeError({
+								path: workspaceRoot,
+								message: `Worktree missing: ${workspaceRoot}. ${cause.message}`,
+							})
+						: error,
+				),
+			);
+			workspaceRoot = recreated.directory;
+		}
 		if (!existsSync(workspaceRoot)) {
 			const fallback =
 				fallbackMissingWorktree &&
@@ -631,7 +670,10 @@ const prepareEngineTurnInput = (
 				id: resolvedInput.sessionId,
 				workspace: sessionRow?.workspace ?? null,
 			},
-			{ fallbackMissingWorktree: !resolvedInput.steer },
+			{
+				fallbackMissingWorktree: !resolvedInput.steer,
+				recreateMissingWorktree: true,
+			},
 		);
 		if (driver === "opencode") {
 			const stream = yield* Effect.serviceOption(SSEStreamTag);

@@ -1,25 +1,31 @@
 import { lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect } from "effect";
-import type {
-	SessionWorkspace as RecordedWorkspace,
-	SessionWorktreeOwnership,
-	WorkspaceMoveCause,
-	WorkspaceMoveError,
+import { Context, Effect, Schema } from "effect";
+import {
+	type SessionWorkspace as RecordedWorkspace,
+	SessionWorkspaceSchema,
+	type SessionWorktreeOwnership,
+	type WorkspaceMoveCause,
+	type WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
-import type {
-	WorkspaceMissing,
-	WorktreeBranchRenameError,
+import {
+	type WorkspaceMissing,
+	type WorktreeBranchRenameError,
+	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
+import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { labelProjectFolders } from "../../../project-folders.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
+import { ConfigTag } from "./services.js";
 import type {
 	ApplySessionCommandOptions,
 	SessionCommandError,
 } from "./session-command.js";
+import { SessionGitServiceTag } from "./session-git-service.js";
+import { readSessionWorktreeOwnership } from "./session-worktree-deletion.js";
 
 export interface SessionWorkspace {
 	readonly renameBranch: (
@@ -93,6 +99,78 @@ export class SessionWorkspaceTag extends Context.Tag("SessionWorkspace")<
 	SessionWorkspace
 >() {}
 
+// Snapshot-only callers have no event store; Git registration remains sufficient
+// for them. Recovery uses only recorded ownership, never legacy branch inference.
+const readRecordedWorktreeOwnership = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (sql._tag === "None") return [];
+		return yield* readSessionWorktreeOwnership(sessionId, false).pipe(
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+		);
+	});
+
+// Several project folders can share one checkout and its single ownership row.
+const recordedBranchForFolder = (
+	ownership: readonly SessionWorktreeOwnership[],
+	folder: string,
+	directory: string,
+) =>
+	ownership.find(
+		(owned) =>
+			owned.folder === folder ||
+			directory === owned.path ||
+			directory.startsWith(`${owned.path}${sep}`),
+	)?.branchName;
+
+export const recreateSessionWorktrees = (sessionId: string) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const workspace = yield* SessionWorkspaceTag;
+		const worktrees = yield* WorktreeServiceTag;
+		const read = yield* ReadQueryEffectTag;
+		const result = yield* workspace.withLaunch(
+			Effect.gen(function* () {
+				const row = yield* read.getSession(sessionId);
+				const state =
+					row?.workspace == null
+						? null
+						: yield* Schema.decodeUnknown(
+								Schema.parseJson(SessionWorkspaceSchema),
+							)(row.workspace);
+				const directory = effectiveWorkingDirectory(config.projectDir, state);
+				const folders =
+					state?.origin === "conduit" ? Object.entries(state.worktrees) : [];
+				if (folders.length === 0)
+					return yield* new WorktreeRecoveryError({
+						path: directory,
+						reason: "not-owned",
+						message:
+							"Could not recreate worktree: the session has no Conduit-owned worktree.",
+					});
+				const ownership = yield* readRecordedWorktreeOwnership(sessionId);
+				yield* worktrees.recreateAll(
+					folders.map(([path, directory]) => {
+						const recordedBranch = recordedBranchForFolder(
+							ownership,
+							path,
+							directory,
+						);
+						return {
+							folder: { path, projectSlug: config.slug, sessionId },
+							directory,
+							...(recordedBranch ? { recordedBranch } : {}),
+						};
+					}),
+				);
+				return { directory };
+			}),
+		);
+		const git = yield* Effect.serviceOption(SessionGitServiceTag);
+		if (git._tag === "Some") yield* git.value.refresh({ sessionId });
+		return result;
+	});
+
 /** Enrich canonical workspace state with current filesystem/Git availability. */
 export const inspectSessionWorktree = (
 	session: Pick<SessionInfo, "id" | "workspace">,
@@ -106,6 +184,11 @@ export const inspectSessionWorktree = (
 		if (session.workspace?.origin !== "conduit") return undefined;
 		const entries = Object.entries(session.workspace.worktrees);
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
+		const ownership = yield* Effect.cached(
+			readRecordedWorktreeOwnership(session.id).pipe(
+				Effect.orElseSucceed(() => []),
+			),
+		);
 		const missing = (yield* Effect.forEach(entries, ([folder, directory]) =>
 			Effect.gen(function* () {
 				// List reads inspect every session. A real checkout with a `.git`
@@ -128,6 +211,7 @@ export const inspectSessionWorktree = (
 									},
 									directory,
 									entries.map(([folder]) => folder),
+									recordedBranchForFolder(yield* ownership, folder, directory),
 								)
 								.pipe(
 									Effect.catchAll((error) =>

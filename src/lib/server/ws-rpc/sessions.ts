@@ -8,10 +8,7 @@ import {
 	isKnownDriverKind,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../contracts/provider-instance.js";
-import {
-	SessionWorkspaceSchema,
-	WorkspaceMoveError,
-} from "../../contracts/session-workspace.js";
+import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
 	WorktreeBranchRenameError,
@@ -39,7 +36,10 @@ import {
 } from "../../domain/relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
-import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import {
+	recreateSessionWorktrees,
+	SessionWorkspaceTag,
+} from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { formatErrorDetail } from "../../errors.js";
@@ -72,7 +72,6 @@ import {
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection } from "../../provider/turn-settings.js";
-import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
@@ -151,48 +150,7 @@ export const sessionsHandlers = {
 			),
 		),
 	RecreateSessionWorktree: (request) =>
-		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-			const workspace = yield* SessionWorkspaceTag;
-			const worktrees = yield* WorktreeServiceTag;
-			const read = yield* ReadQueryEffectTag;
-			const result = yield* workspace.withLaunch(
-				Effect.gen(function* () {
-					const row = yield* read.getSession(request.sessionId);
-					const state =
-						row?.workspace == null
-							? null
-							: yield* Schema.decodeUnknown(
-									Schema.parseJson(SessionWorkspaceSchema),
-								)(row.workspace);
-					const directory = effectiveWorkingDirectory(config.projectDir, state);
-					const folders =
-						state?.origin === "conduit" ? Object.entries(state.worktrees) : [];
-					if (folders.length === 0)
-						return yield* new WorktreeRecoveryError({
-							path: directory,
-							reason: "not-owned",
-							message:
-								"Could not recreate worktree: the session has no Conduit-owned worktree.",
-						});
-					yield* worktrees.recreateAll(
-						folders.map(([path, directory]) => ({
-							folder: {
-								path,
-								projectSlug: config.slug,
-								sessionId: request.sessionId,
-							},
-							directory,
-						})),
-					);
-					return { directory };
-				}),
-			);
-			const git = yield* Effect.serviceOption(SessionGitServiceTag);
-			if (git._tag === "Some")
-				yield* git.value.refresh({ sessionId: request.sessionId });
-			return result;
-		}).pipe(
+		recreateSessionWorktrees(request.sessionId).pipe(
 			Effect.catchAll(
 				(error): Effect.Effect<never, WorktreeRecoveryError | WsRpcError> =>
 					error instanceof WorktreeRecoveryError
