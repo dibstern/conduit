@@ -13,6 +13,8 @@
 //   snapshot, or it is resumed from without the checksum confirming it;
 // - changes made while the daemon was down never reach a page drawn from a
 //   saved record;
+// - a saved page that every open only catches up from is never replaced, so
+//   each open re-sends every change made since it was saved;
 // - a record from another build, or one that no longer decodes, is drawn, or
 //   its resume point is sent;
 // - a resume point minted by another store (reset, fresh install) or for
@@ -621,9 +623,65 @@ test("a session opened from its saved page ends where a cold open does", async (
 	await seed(store, turns(SESSION, 2, "away", 1));
 	await restart();
 	const shown = replyEnd("away", 0);
-	await run("restart-with-changes", visit(tab, SESSION, shown), {
-		...clean,
-		...resumed,
+	const changed = await run(
+		"restart-with-changes",
+		visit(tab, SESSION, shown),
+		{ ...clean, ...resumed },
+	);
+
+	// Each later open catches up from the same saved page, so the catch-up
+	// grows with every change made since it was saved. Before it grows past a
+	// few turns the server answers with a snapshot instead, which is saved: the
+	// saved page moves forward (conduit-test-y7eo.18).
+	const savedAt = sequenceOf(changed.verdicts.record);
+	let opens = 0;
+	let snapshotted = false;
+	while (!snapshotted && opens < 8) {
+		opens += 1;
+		await harness.terminate();
+		await seed(store, turns(SESSION, 2 + opens / 10, `again${opens}`, 1));
+		await restart();
+		const again = await run(
+			`repeated-open-${opens}`,
+			visit(tab, SESSION, replyEnd(`again${opens}`, 0), { cold: false }),
+			{ resumePointSent: true, mismatches: 0, pageErrors: [] },
+		);
+		snapshotted = again.verdicts.detailSnapshots === 1;
+	}
+	const advancedTo = await atOrigin(tab, async (page) => {
+		await expect
+			.poll(async () => sequenceOf((await records(page))[SESSION]) ?? 0, {
+				timeout: 10_000,
+			})
+			.toBeGreaterThan(savedAt ?? 0)
+			.catch(() => undefined);
+		return sequenceOf((await records(page))[SESSION]);
+	});
+	await harness.terminate();
+	await seed(store, turns(SESSION, 2.9, "after-advance", 1));
+	await restart();
+	const afterAdvance = await run(
+		"open-after-advance",
+		visit(tab, SESSION, replyEnd("after-advance", 0)),
+		{ ...clean, ...resumed },
+	);
+	scenarios.push({
+		name: "saved-page-advances",
+		result: {
+			sessionId: SESSION,
+			cached: afterAdvance.cached,
+			cold: afterAdvance.cold,
+			verdicts: {
+				savedAt,
+				advancedTo,
+				opens,
+				advanced:
+					savedAt !== undefined &&
+					advancedTo !== undefined &&
+					advancedTo > savedAt,
+			},
+		},
+		expected: { advanced: true },
 	});
 
 	// A record from another build is dropped unread and replaced.

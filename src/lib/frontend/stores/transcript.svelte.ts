@@ -434,8 +434,9 @@ export function applyTranscriptEnvelope(
 }
 
 const convertedRows = new WeakMap<HistoryMessage, ChatMessage[]>();
-/** What each slot's feed has applied, so its resumes are checked. Keyed by the
- *  slot, so it goes when the slot is evicted; reset with the transcript. */
+/** What each slot's feed has applied, and where it resumes from, so its
+ *  resumes are checked. Keyed by the slot, so it goes when the slot is
+ *  evicted; reset with the transcript. */
 const ledgers = new WeakMap<SessionMessages, ResumeLedger>();
 // Projected UUIDs contain "/"; local generateUuid() values never do.
 const uuidFor = (messageId: string, partId: string): string =>
@@ -745,18 +746,6 @@ function transcriptView(): {
 											sessionId,
 											ledger,
 											saved: first,
-											// A version can carry several rows, and the feed may have
-											// stopped after only some of them: replay the held one.
-											// Rows the checksum does not cover (the rewind point, the
-											// inbox, pending inputs) are only recovered this way.
-											...(slot.messages.transcript?.hwm == null
-												? {}
-												: {
-														resumeFromSequence: Math.max(
-															0,
-															slot.messages.transcript.hwm - 1,
-														),
-													}),
 										});
 									}),
 									(status) => {
