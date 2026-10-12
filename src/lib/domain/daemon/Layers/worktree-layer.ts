@@ -892,8 +892,9 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						});
 					return { source: root, missing: false };
 				}).pipe(Effect.mapError(recoveryError));
-			const defaultBranch = (source: string) =>
+			const defaultBranches = (source: string) =>
 				Effect.gen(function* () {
+					const branches: { ref: string; head: string }[] = [];
 					const remote = yield* git(source, [
 						"symbolic-ref",
 						"-q",
@@ -909,15 +910,30 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							"--verify",
 							`${ref}^{commit}`,
 						]).pipe(Effect.orElseSucceed(() => undefined));
-						if (head) return { ref, head };
+						if (head) branches.push({ ref, head });
+					}
+					return branches;
+				});
+			const mergedDefault = (
+				source: string,
+				head: string,
+				defaults: readonly { ref: string; head: string }[],
+			) =>
+				Effect.gen(function* () {
+					for (const main of defaults) {
+						const merged = yield* git(source, [
+							"merge-base",
+							"--is-ancestor",
+							head,
+							main.head,
+						]).pipe(
+							Effect.as(true),
+							Effect.orElseSucceed(() => false),
+						);
+						if (merged) return main;
 					}
 					return undefined;
 				});
-			const isMerged = (source: string, head: string, base: string) =>
-				git(source, ["merge-base", "--is-ancestor", head, base]).pipe(
-					Effect.as(true),
-					Effect.orElseSucceed(() => false),
-				);
 			const inspectRemoval: WorktreeService["inspectRemoval"] = (
 				folder,
 				owned,
@@ -944,10 +960,11 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						"--count",
 						`${upstream ?? owned.head}..HEAD`,
 					]);
-					if (Number(ahead) > 0) reasons.push("Unpushed commits");
-					const main = yield* defaultBranch(state.source);
-					if (!main) reasons.push("Unknown default branch");
-					else if (!(yield* isMerged(owned.path, "HEAD", main.head)))
+					const defaults = yield* defaultBranches(state.source);
+					const main = yield* mergedDefault(owned.path, "HEAD", defaults);
+					if (!main && Number(ahead) > 0) reasons.push("Unpushed commits");
+					if (defaults.length === 0) reasons.push("Unknown default branch");
+					else if (!main)
 						reasons.push("Commits not merged into the default branch");
 					return reasons;
 				}).pipe(Effect.mapError(recoveryError));
@@ -969,8 +986,8 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							message: "Worktree kept because it has uncommitted changes.",
 						});
 					if (!(yield* git(owned.path, ["branch", "--show-current"]))) {
-						const main = yield* defaultBranch(state.source);
-						if (!main || !(yield* isMerged(owned.path, "HEAD", main.head)))
+						const defaults = yield* defaultBranches(state.source);
+						if (!(yield* mergedDefault(owned.path, "HEAD", defaults)))
 							return yield* new WorktreeRecoveryError({
 								path: owned.path,
 								reason: "git-failed",
@@ -995,9 +1012,19 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						"--verify",
 						`refs/heads/${owned.branchName}^{commit}`,
 					]).pipe(Effect.orElseSucceed(() => undefined));
-					const main = yield* defaultBranch(state.source);
-					if (!tip || !main || !(yield* isMerged(state.source, tip, main.head)))
+					const defaults = yield* defaultBranches(state.source);
+					if (
+						!tip ||
+						defaults.some(
+							({ ref }) =>
+								`refs/heads/${owned.branchName}` === ref ||
+								owned.branchName ===
+									ref.replace(/^refs\/remotes\/origin\//, ""),
+						)
+					)
 						return;
+					const main = yield* mergedDefault(state.source, tip, defaults);
+					if (!main) return;
 					const listed = yield* git(state.source, [
 						"worktree",
 						"list",
