@@ -61,7 +61,7 @@
 	import BannersRow from "../overlays/BannersRow.svelte";
 	import { stopBackgroundTasks, tasksPanel } from "../session/background-tasks.svelte.js";
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
-	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
+	import { getPrimaryVerb, getSessionVerbs, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
@@ -193,7 +193,7 @@
 		}));
 	}
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
-	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
+	const primaryVerb = $derived(session ? getPrimaryVerb(session, sessionState.now) : undefined);
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
 		switch (connectionState.status) {
@@ -391,7 +391,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if !sessionViewState.compact && settleVerb}
+			{#if primaryVerb}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button
 						{...props}
@@ -399,15 +399,16 @@
 						variant="ghost"
 						tone="default"
 						size="segment"
-						icon={settleVerb.icon ?? "check"}
+						icon={primaryVerb.icon ?? "check"}
+						touchTarget
 						class="shrink-0"
-						disabled={settleVerb.disabledReason != null}
-						title={settleVerb.disabledReason ?? undefined}
-						ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
+						disabled={primaryVerb.disabledReason != null}
+						title={primaryVerb.disabledReason ?? undefined}
+						ariaLabel={primaryVerb.disabledReason ? `${primaryVerb.label}: ${primaryVerb.disabledReason}` : primaryVerb.label}
 						data-testid="session-bar-settle"
-						onclick={() => settleVerb.run()}
-					><span id="session-bar-settle-label">{settleVerb.label}</span></Button>{/snippet}
-					{#snippet children()}{settleVerb.label}{#if settleVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(settleVerb.keys)}</span>{/if}{/snippet}
+						onclick={() => primaryVerb.run()}
+					><span id="session-bar-settle-label">{primaryVerb.label}</span></Button>{/snippet}
+					{#snippet children()}{primaryVerb.label}{#if primaryVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(primaryVerb.keys)}</span>{/if}{/snippet}
 				</Tooltip>
 			{/if}
 		</div>
