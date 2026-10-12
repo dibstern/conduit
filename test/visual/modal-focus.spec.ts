@@ -16,21 +16,23 @@ test.describe("Modal focus", () => {
 
 		await expect(page.getByRole("dialog")).toBeVisible();
 		await expect(first).toBeFocused();
-		await expect(outside).toHaveAttribute("inert", "");
-		expect(
-			await outside.evaluate((element: HTMLElement) => element.inert),
-		).toBe(true);
 
+		// Native showModal() does not wrap Tab inside the dialog: past the last
+		// control focus leaves for the browser UI. What it guarantees is that Tab
+		// never lands on the inert page behind.
 		await last.focus();
 		await page.keyboard.press("Tab");
-		await expect(first).toBeFocused();
+		await expect(outside).not.toBeFocused();
+		await expect(trigger).not.toBeFocused();
 
-		// Independent inert check: focusing the background button directly is a
-		// no-op under native inert (not merely masked by Bits' focus guard).
+		// The background is inert without an `inert` attribute, so test the
+		// behaviour: focusing the background button directly must be a no-op.
 		await page.evaluate(() => document.getElementById("outside-btn")?.focus());
 		await expect(outside).not.toBeFocused();
 
-		await last.click();
+		// A keyboard close hands focus back to the opener. A pointer close drops
+		// it on purpose (WebKit would ring the opener), so close with Enter.
+		await last.press("Enter");
 		await expect(page.getByRole("dialog")).toBeHidden();
 		await expect(trigger).toBeFocused();
 	});
