@@ -49,16 +49,21 @@ export function setClaudeAccounts(
 	page: Page,
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {
-	const instances = accounts.map(([id, name]) => ({
-		id,
-		name,
-		port: 0,
-		managed: false,
-		status: "healthy",
-		restartCount: 0,
-		createdAt: 1,
-		driver: "claude",
-	}));
+	const instances = [
+		...(mockInstances.get(page) ?? []).filter(
+			(instance) => instance["driver"] !== "claude",
+		),
+		...accounts.map(([id, name]) => ({
+			id,
+			name,
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 1,
+			driver: "claude",
+		})),
+	];
 	mockInstances.set(page, instances);
 	requireRpcControl(page).setDaemonList("SubscribeInstances", { instances });
 }

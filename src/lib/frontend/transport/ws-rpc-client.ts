@@ -181,6 +181,7 @@ export interface CreateSessionRpcInput {
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
 	readonly worktreeBase?: string;
+	readonly permissionMode: SessionPermissionMode;
 	/** The draft composer's displayed pick, including an untouched default. */
 	readonly model?: {
 		readonly modelId: string;
@@ -309,7 +310,7 @@ export interface SwitchContextWindowRpcInput {
 
 export interface SwitchModelRpcInput {
 	readonly projectSlug: string;
-	readonly sessionId?: string;
+	readonly sessionId: string;
 	readonly modelId: string;
 	readonly providerId: string;
 	readonly originId?: string;
@@ -795,6 +796,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
 			...(input.model != null ? { model: input.model } : {}),
+			permissionMode: input.permissionMode,
 			...(input.worktreePath != null
 				? { worktreePath: input.worktreePath }
 				: {}),
@@ -933,7 +935,7 @@ const callSwitchModel = (input: SwitchModelRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.SwitchModel({
 			projectSlug: input.projectSlug,
-			...(input.sessionId ? { sessionId: input.sessionId } : {}),
+			sessionId: input.sessionId,
 			modelId: input.modelId,
 			providerId: input.providerId,
 			...(input.originId ? { originId: input.originId } : {}),

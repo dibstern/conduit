@@ -137,6 +137,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.CreateSession({
+				permissionMode: "ask",
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
 				instanceId: ProviderInstanceIdSchema.make("opencode"),
@@ -155,6 +156,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 			expect(createSession).toHaveBeenCalledWith(undefined, {
 				instanceId: "opencode",
+				permissionMode: "ask",
 				pick: {
 					harness: "opencode",
 					model: { providerId: "openai", modelId: "gpt-4" },
@@ -193,6 +195,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const client = yield* rpcClient;
 				const result = yield* Effect.either(
 					client.CreateSession({
+						permissionMode: "ask",
 						projectSlug: "project-a",
 						originId: "browser-tab-a",
 						worktreeBase: "main",
@@ -272,6 +275,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const client = yield* rpcClient;
 				const error = yield* Effect.flip(
 					client.CreateSession({
+						permissionMode: "ask",
 						projectSlug: "project-a",
 						originId: "browser-tab-a",
 						instanceId: ProviderInstanceIdSchema.make("work-oc"),

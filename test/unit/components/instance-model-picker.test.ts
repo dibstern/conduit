@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
 	applyGetModelsResponse,
+	chooseModel,
 	clearDiscoveryState,
 	discoveryState,
 	handleDefaultModelInfo,
 	handleModelInfo,
 	handleModelList,
+	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
@@ -140,8 +142,12 @@ describe("InstanceModelPicker", () => {
 	it.each([
 		null,
 		"session-1",
-	])("derives the displayed model from a default update only without a session (%s)", async (sessionId) => {
+	])("keeps held draft and session models when the project default updates (%s)", async (sessionId) => {
 		sessionState.currentId = sessionId;
+		if (!sessionId) {
+			selectInstance("claude");
+			chooseModel({ modelId: "claude-sonnet-4-7", providerId: "claude" });
+		}
 		const { getByTitle } = render(InstanceModelPicker);
 		expect(getByTitle("Switch model").textContent).toContain("Sonnet 4.7");
 		handleDefaultModelInfo({
@@ -151,9 +157,7 @@ describe("InstanceModelPicker", () => {
 		});
 		await tick();
 		await waitFor(() => {
-			expect(getByTitle("Switch model").textContent).toContain(
-				sessionId ? "Sonnet 4.7" : "Opus 4.7",
-			);
+			expect(getByTitle("Switch model").textContent).toContain("Sonnet 4.7");
 		});
 	});
 
@@ -190,21 +194,21 @@ describe("InstanceModelPicker", () => {
 				},
 			],
 		});
-		if (sessionId)
-			applyGetModelsResponse(
-				{
-					projectSlug: "project-a",
-					instanceId: "claude",
-					providers: discoveryState.providers,
-					active: { model: "claude-sonnet-4-7", provider: "claude" },
-					variant: { variant: "", variants: [] },
-					contextWindow: {
-						contextWindow: "1m",
-						options: [{ value: "1m", label: "1M" }],
-					},
+		if (!sessionId) selectInstance("claude");
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				instanceId: "claude",
+				providers: discoveryState.providers,
+				active: { model: "claude-sonnet-4-7", provider: "claude" },
+				variant: { variant: "", variants: [] },
+				contextWindow: {
+					contextWindow: "1m",
+					options: [{ value: "1m", label: "1M" }],
 				},
-				sessionId,
-			);
+			},
+			sessionId ?? undefined,
+		);
 		const { getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTestId("composer-harness-trigger"));
 		expect(getByTestId("picker-row-context").textContent).toContain("1M");

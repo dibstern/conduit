@@ -15,11 +15,11 @@ import {
 	clearDiscoveryState,
 	discoveryState,
 	getActiveModelVariants,
-	getChosenModel,
+	getDraftPick,
 	getEffectiveInstanceId,
-	handleModelInfo,
 	handleModelList,
 	handlePermissionModeInfo,
+	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -62,7 +62,13 @@ describe("project-settings dispatch", () => {
 			},
 		];
 		handleModelList({ providers });
-		handleModelInfo({ model: "draft-choice", provider: "openai" });
+		selectInstance("opencode");
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers,
+			active: { model: "draft-choice", provider: "openai" },
+		});
 		let resolveModels!: (response: GetModelsResponse) => void;
 		const hydration = new Promise<GetModelsResponse>((resolve) => {
 			resolveModels = resolve;
@@ -81,6 +87,7 @@ describe("project-settings dispatch", () => {
 		if (order === "setting-first") applyDefault();
 		resolveModels({
 			projectSlug: "project-a",
+			instanceId: "opencode",
 			providers,
 			active: { model: "native-default", provider: "openai" },
 			variant: { variant: "low", variants: ["low", "high"] },
@@ -90,14 +97,40 @@ describe("project-settings dispatch", () => {
 		expect(discoveryState.defaultModelId).toBe("native-default");
 		expect(discoveryState.currentModelId).toBe(modelId);
 		expect(discoveryState.currentVariant).toBe("high");
-		expect(getChosenModel("opencode")).toEqual({
-			modelId,
-			providerId: "openai",
-			variant: "high",
+		expect(getDraftPick()).toEqual({
+			instanceId: "opencode",
+			model: {
+				modelId,
+				providerId: "openai",
+				variant: "high",
+				contextWindow: "",
+			},
+			permissionMode: "ask",
 		});
 	});
 
 	it("applies the session model after a draft binds to a session", () => {
+		selectInstance("opencode");
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers: [
+				{
+					id: "openai",
+					name: "OpenAI",
+					configured: true,
+					models: [
+						{
+							id: "draft-choice",
+							name: "Draft",
+							provider: "openai",
+							variants: ["high"],
+						},
+					],
+				},
+			],
+			active: { model: "draft-choice", provider: "openai" },
+		});
 		chooseModel({ modelId: "draft-choice", providerId: "openai" });
 		chooseVariant("high");
 		sessionState.currentId = "session-1";
@@ -118,33 +151,38 @@ describe("project-settings dispatch", () => {
 	it.each([
 		false,
 		true,
-	])("follows a hydrated default only before an explicit draft effort choice (%s)", (chosen) => {
-		handleModelList({
-			providers: [
-				{
-					id: "openai",
-					name: "OpenAI",
-					configured: true,
-					models: [
-						{ id: "old", name: "Old", provider: "openai", variants: ["high"] },
-					],
-				},
-				{
-					id: "claude",
-					name: "Claude",
-					configured: true,
-					models: [
-						{
-							id: "native",
-							name: "Native",
-							provider: "claude",
-							variants: ["max"],
-						},
-					],
-				},
-			],
+	])("keeps a held harness default when the project default changes (%s)", (chosen) => {
+		const providers = [
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [
+					{ id: "old", name: "Old", provider: "openai", variants: ["high"] },
+				],
+			},
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{
+						id: "native",
+						name: "Native",
+						provider: "claude",
+						variants: ["max"],
+					},
+				],
+			},
+		];
+		handleModelList({ providers });
+		selectInstance("opencode");
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers,
+			active: { model: "old", provider: "openai" },
 		});
-		handleModelInfo({ model: "old", provider: "openai" });
 		if (chosen) chooseVariant("high");
 		applyProjectSetting({
 			_tag: "defaultModel",
@@ -153,21 +191,28 @@ describe("project-settings dispatch", () => {
 			variant: "",
 		});
 		expect(discoveryState.defaultModelId).toBe("native");
-		expect(discoveryState.currentModelId).toBe(chosen ? "old" : "native");
-		expect(getEffectiveInstanceId()).toBe(chosen ? "opencode" : "claude");
-		expect(getActiveModelVariants()).toEqual(chosen ? ["high"] : ["max"]);
-		if (!chosen) chooseVariant("max");
-		expect(getChosenModel(chosen ? "opencode" : "claude")).toEqual(
-			chosen
-				? { modelId: "old", providerId: "openai", variant: "high" }
-				: { modelId: "native", providerId: "claude", variant: "max" },
-		);
+		expect(discoveryState.currentModelId).toBe("old");
+		expect(getEffectiveInstanceId()).toBe("opencode");
+		expect(getActiveModelVariants()).toEqual(["high"]);
+		if (!chosen) chooseVariant("high");
+		expect(getDraftPick()).toEqual({
+			instanceId: "opencode",
+			model: {
+				modelId: "old",
+				providerId: "openai",
+				variant: "high",
+				contextWindow: "",
+			},
+			permissionMode: "ask",
+		});
 	});
 	it.each([
 		"draft-choice",
 		"native-default",
 	])("keeps the draft model %s in the creation request when a default is hydrated", (modelId) => {
-		handleModelList({
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
 			providers: [
 				{
 					id: "openai",
@@ -180,10 +225,12 @@ describe("project-settings dispatch", () => {
 				},
 			],
 		});
+		selectInstance("opencode");
 		chooseModel({ modelId, providerId: "openai" });
-		expect(getChosenModel("opencode")).toEqual({
-			modelId,
-			providerId: "openai",
+		expect(getDraftPick()).toEqual({
+			instanceId: "opencode",
+			model: { modelId, providerId: "openai", variant: "", contextWindow: "" },
+			permissionMode: "ask",
 		});
 
 		applyProjectSetting({
@@ -195,9 +242,10 @@ describe("project-settings dispatch", () => {
 
 		expect(discoveryState.defaultModelId).toBe("native-default");
 		expect(discoveryState.currentModelId).toBe(modelId);
-		expect(getChosenModel("opencode")).toEqual({
-			modelId,
-			providerId: "openai",
+		expect(getDraftPick()).toEqual({
+			instanceId: "opencode",
+			model: { modelId, providerId: "openai", variant: "", contextWindow: "" },
+			permissionMode: "ask",
 		});
 	});
 
@@ -217,6 +265,7 @@ describe("project-settings dispatch", () => {
 	});
 
 	it("applies a defaultPermissionMode fact without changing the session mode", () => {
+		sessionState.currentId = "current-session";
 		handlePermissionModeInfo({ mode: "acceptEdits" });
 
 		applyProjectSetting({

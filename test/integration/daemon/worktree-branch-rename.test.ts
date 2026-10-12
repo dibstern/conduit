@@ -198,6 +198,7 @@ process.exit(result.status ?? 1);
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "worktree-branch-rename-test",
 					providerId: "claude",

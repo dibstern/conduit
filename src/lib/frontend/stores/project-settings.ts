@@ -18,20 +18,14 @@ import {
 	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
-	hydrateModelSettings,
 } from "./discovery.svelte.js";
 import { projectState } from "./project-state.svelte.js";
-import { sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
 export const applyProjectSetting = (setting: ProjectSetting): void => {
 	switch (setting._tag) {
 		case "defaultModel":
 			handleDefaultModelInfo(setting);
-			if (!sessionState.currentId && setting.model && setting.provider)
-				hydrateModelSettings({
-					active: { model: setting.model, provider: setting.provider },
-				});
 			break;
 		case "harnessDefaults":
 			handleHarnessDefaults(setting);

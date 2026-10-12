@@ -79,7 +79,6 @@
 	let triggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let pickerTriggerEl: HTMLElement | undefined = $state();
 	let backEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
-	const draftChosen = $derived(discoveryState.hasModelChoice);
 
 	// Prefix for the per-provider heading ids that each group's
 	// `aria-labelledby` points at. One base id per component instance, suffixed
@@ -173,45 +172,14 @@
 			.filter((g) => g.models.length > 0);
 	});
 
-	const activeModelId = $derived(
-		sessionState.currentId || draftChosen
-			? discoveryState.currentModelId
-			: discoveryState.defaultModelId,
-	);
-	const activeProviderId = $derived(
-		sessionState.currentId || draftChosen
-			? discoveryState.currentProviderId
-			: discoveryState.defaultProviderId,
-	);
+	const activeModelId = $derived(discoveryState.currentModelId);
+	const activeProviderId = $derived(discoveryState.currentProviderId);
 	const activeModel = $derived(
 		getActiveModel(activeModelId, activeProviderId),
 	);
 	const hasModel = $derived(!!activeModelId);
-	// A draft model change has no server context-info refresh. Prefer its catalog
-	// so the new harness cannot inherit the previous model's window choices.
-	const contextOptions = $derived(
-		sessionState.currentId ? contextWindow.options : selectedDriver === "claude"
-			? (activeModel?.contextWindowOptions ?? [])
-			: activeModel?.contextWindowOptions ??
-				(!sessionState.currentId && draftChosen && activeModel?.limit?.context ? [] : contextWindow.options),
-	);
-	const selectedContext = $derived(
-		sessionState.currentId ? contextWindow.current : contextOptions.find((option) => option.value === contextWindow.current?.value) ??
-			contextOptions.find((option) => option.isDefault) ?? contextOptions[0] ?? null,
-	);
-
-	/** Use the same values as the trigger's data-shown-* attributes on creation. */
-	export function getDisplayedPick() {
-		return {
-			instanceId: selectedId,
-			model: {
-				modelId: activeModelId,
-				providerId: activeProviderId,
-				variant: effort.current ?? "",
-				contextWindow: selectedContext?.value ?? "",
-			},
-		};
-	}
+	const contextOptions = $derived(contextWindow.options);
+	const selectedContext = $derived(contextWindow.current);
 	const contextLabel = $derived(sessionLoading ? "" : selectedContext?.label ??
 		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
 	const showContextWord = $derived(!!contextLabel && (!phone || (selectedContext !== null && !selectedContext.isDefault)));
@@ -265,7 +233,7 @@
 	/** The phone button's two-or-three letter model tag: "Sonnet 5" → S5, "GPT-6 Sol" → Sol. */
 	const shortModelLabel = $derived.by(() => {
 		const name = activeModel ? stripDateSuffix(formatModelName(activeModel)) : stripDateSuffix(activeModelId ?? "");
-		if (!name) return "—";
+		if (!name) return sessionLoading ? "Loading…" : "Select model";
 		const words = (/\s/.test(name) ? name.split(/\s+/) : name.split("-")).filter((word) => !/^claude$/i.test(word));
 		const index = words.findIndex((word, i) => /^[a-z]+$/i.test(word) && /^\d+(\.\d+)?$/.test(words[i + 1] ?? ""));
 		const word = words[index];
@@ -398,6 +366,10 @@
 		if (instance.id === selectedId) return;
 		selectInstance(instance.id);
 		const projectSlug = getDraftProject();
+		const applyModels = followModelsRead();
+		if (projectSlug) void getModelsRpc({ projectSlug, instanceId: instance.id })
+			.then(applyModels)
+			.catch(() => undefined);
 		if (projectSlug) void getAgentsRpc({ projectSlug, instanceId: instance.id })
 			.then((response) => {
 				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
@@ -922,6 +894,7 @@
 			data-shown-model={activeModelId ?? ""}
 			data-shown-effort={effort.current ?? ""}
 			data-shown-context-window={selectedContext?.value ?? ""}
+			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
 			class="shrink-0 text-[11.5px] font-normal font-brand"
 			title="Switch model"
@@ -993,6 +966,7 @@
 			data-shown-model={activeModelId ?? ""}
 			data-shown-effort={effort.current ?? ""}
 			data-shown-context-window={selectedContext?.value ?? ""}
+			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
 			class="model-btn h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7 {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
@@ -1021,6 +995,7 @@
 			data-shown-model={activeModelId ?? ""}
 			data-shown-effort={effort.current ?? ""}
 			data-shown-context-window={selectedContext?.value ?? ""}
+			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
 			class="model-btn min-w-0 h-[26px] text-[11.5px] font-normal text-text-secondary font-brand hover:bg-text/7 gap-[5px] px-[6px] rounded-[7px] {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"

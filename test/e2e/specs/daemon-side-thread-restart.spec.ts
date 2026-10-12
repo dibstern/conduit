@@ -78,6 +78,7 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		const sideId = await rpc(daemon, (client) =>
 			Effect.gen(function* () {
 				const parent = yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug,
 					originId: "daemon-side-thread-restart",
 					providerId: "opencode",

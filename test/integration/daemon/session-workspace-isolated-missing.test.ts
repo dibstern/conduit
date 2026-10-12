@@ -201,6 +201,7 @@ const gate = ${JSON.stringify(gate)};
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "missing-worktree-test",
 					providerId: "claude",

@@ -27,7 +27,6 @@ import {
 	getModelsRpc,
 	listDaemonSessionsRpc,
 	reloadProviderSessionRpc,
-	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
@@ -51,7 +50,6 @@ import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
 	clearDraftSelection,
-	flushPendingPermissionMode,
 	followModelsRead,
 	followSessionModelSettings,
 } from "./discovery.svelte.js";
@@ -1057,7 +1055,6 @@ export function switchToSession(
 		else navigate(`/s/${sessionId}`);
 	}
 	if (slug) {
-		flushPendingPermissionMode(slug, sessionId, switchPermissionModeRpc);
 		const input: ViewSessionRpcInput = {
 			projectSlug: slug,
 			sessionId,

@@ -48,7 +48,10 @@ import {
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
-import type { HistoryMessage } from "../../../shared-types.js";
+import type {
+	HistoryMessage,
+	SessionPermissionMode,
+} from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
 import {
 	DaemonEventBusTag,
@@ -111,9 +114,11 @@ import {
 	unsnoozeSession,
 } from "./session-manager-triage.js";
 import {
+	getDefaultPermissionMode,
 	OverridesStateTag,
 	setContextWindow,
 	setModel,
+	setPermissionMode,
 	setVariant,
 } from "./session-overrides-state.js";
 import {
@@ -168,6 +173,7 @@ export interface CreateSessionOptions {
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 	readonly pick?: TurnSettings;
+	readonly permissionMode?: SessionPermissionMode;
 	readonly sourceSessionId?: string;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
@@ -263,6 +269,7 @@ const createLocalSession = (
 	selectedInstanceId: ProviderInstanceId,
 	reservedSessionId: string | undefined,
 	pick: TurnSettings,
+	permissionMode: SessionPermissionMode,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -278,7 +285,7 @@ const createLocalSession = (
 		yield* applySessionCommand(
 			{
 				type: "session.created",
-				data: { sessionId, title: sessionTitle, provider },
+				data: { sessionId, title: sessionTitle, provider, permissionMode },
 			},
 			{ pick },
 		).pipe(
@@ -714,6 +721,8 @@ const makeServiceCreateSession = ({
 				(yield* loadServerSessionPick(harness, instanceId, source));
 			if (pick.harness !== harness)
 				return yield* new ModelNotInCatalog({ harness, ...pick.model });
+			const permissionMode =
+				options?.permissionMode ?? (yield* getDefaultPermissionMode());
 			const session = yield* Effect.scoped(
 				Effect.gen(function* () {
 					if (harness === "claude")
@@ -722,6 +731,7 @@ const makeServiceCreateSession = ({
 							instanceId,
 							options?.sessionId,
 							pick,
+							permissionMode,
 						);
 					const instanceApi = yield* instanceClients.use(instanceId);
 					return yield* createOpenCodeSession(
@@ -729,6 +739,7 @@ const makeServiceCreateSession = ({
 						instanceId,
 						pick,
 						options?.sessionId,
+						permissionMode,
 					).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
 				}),
 			).pipe(
@@ -748,6 +759,7 @@ const makeServiceCreateSession = ({
 			});
 			yield* setVariant(session.id, pick.effort);
 			yield* setContextWindow(session.id, pick.contextWindow);
+			yield* setPermissionMode(session.id, permissionMode);
 			return session;
 		}).pipe(
 			Effect.mapError((cause) =>

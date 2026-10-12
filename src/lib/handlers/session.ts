@@ -28,6 +28,7 @@ import {
 	resolveTurnSettings,
 } from "../provider/turn-settings.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
+import type { SessionPermissionMode } from "../shared-types.js";
 import { RelaySettingsSaveError } from "./model.js";
 import { getSessionInputDraft } from "./prompt.js";
 
@@ -39,6 +40,7 @@ interface NewSessionPayload {
 	readonly title?: string;
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
+	readonly permissionMode: SessionPermissionMode;
 	readonly model?: {
 		readonly modelId: string;
 		readonly providerId: string;
@@ -129,6 +131,7 @@ export const createSessionForClient = <E = never>({
 	instanceId,
 	providerId,
 	model,
+	permissionMode,
 	initializeWorkspace,
 	sessionId,
 }: {
@@ -137,6 +140,7 @@ export const createSessionForClient = <E = never>({
 	readonly instanceId?: ProviderInstanceId;
 	readonly providerId?: string;
 	readonly sessionId?: string;
+	readonly permissionMode: SessionPermissionMode;
 	readonly model?: {
 		readonly modelId: string;
 		readonly providerId: string;
@@ -148,7 +152,11 @@ export const createSessionForClient = <E = never>({
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
-		if (!model?.modelId.trim() || !model.providerId.trim())
+		if (
+			permissionMode == null ||
+			!model?.modelId.trim() ||
+			!model.providerId.trim()
+		)
 			return yield* new PickRequired();
 		const route = yield* resolveSessionCreationInstance({
 			...(instanceId === undefined ? {} : { instanceId }),
@@ -171,6 +179,7 @@ export const createSessionForClient = <E = never>({
 		const create = sessionManagerService.createSession(title, {
 			instanceId: route.instanceId,
 			pick: resolved.right,
+			permissionMode,
 			...(sessionId === undefined ? {} : { sessionId }),
 		});
 
@@ -247,6 +256,7 @@ export const handleNewSession = (
 ) =>
 	createSessionForClient({
 		clientId,
+		permissionMode: payload.permissionMode,
 		...(payload.title != null ? { title: payload.title } : {}),
 		...(payload.instanceId != null ? { instanceId: payload.instanceId } : {}),
 		...(payload.providerId != null ? { providerId: payload.providerId } : {}),

@@ -47,6 +47,16 @@ const listOf = (list: string) => (list === "none" ? [] : list.split(", "));
 
 export const providerInstancesHandlers: StepHandler[] = [
 	{
+		name: "seed an empty provider instance list",
+		match: /^no provider instances are configured$/,
+		run: ({ world }) => {
+			mockInstances.set(world.page, []);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances: [],
+			});
+		},
+	},
+	{
 		name: "seed the daemon's usage limit setting",
 		match: /^auto-resume limited sessions is (on|off) on the daemon$/,
 		run: ({ world, match }) => {

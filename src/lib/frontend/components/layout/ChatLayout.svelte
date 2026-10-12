@@ -397,10 +397,7 @@
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			const workspace = commandWorkspace;
-			const draftInstanceId =
-				routeSessionId == null && discoveryState.hasInstanceChoice
-					? getEffectiveInstanceId()
-					: undefined;
+			const draftInstanceId = routeSessionId == null ? getEffectiveInstanceId() : undefined;
 			void getAgentsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
@@ -410,7 +407,7 @@
 					if (
 						generation === attachGeneration &&
 						getCurrentSessionId() === routeSessionId &&
-						(routeSessionId != null || draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined))
+						(routeSessionId != null || draftInstanceId === getEffectiveInstanceId())
 					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
@@ -418,9 +415,10 @@
 			void getModelsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyModels(response);
+					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyModels(response);
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({
@@ -576,7 +574,11 @@
 					sessionState.currentId = null;
 					clearTodoState();
 					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
-						const draftInstanceId = discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined;
+						const draftInstanceId = getEffectiveInstanceId();
+						const applyModels = followModelsRead();
+						void getModelsRpc({ projectSlug: attachedSlug, instanceId: draftInstanceId })
+							.then(applyModels)
+								.catch(() => undefined);
 						void getAgentsRpc({
 							projectSlug: attachedSlug,
 							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
@@ -586,7 +588,7 @@
 									sessionState.currentId === null &&
 									getCurrentSessionId() === null &&
 									attachedProjectState.slug === attachedSlug &&
-									draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined)
+									draftInstanceId === getEffectiveInstanceId()
 								) applyGetAgentsResponse(response);
 							})
 							.catch(() => undefined);

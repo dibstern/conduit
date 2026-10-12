@@ -217,6 +217,7 @@ describe("Worktree branch settlement through the built daemon", () => {
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "settlement-test",
 					providerId: "claude",

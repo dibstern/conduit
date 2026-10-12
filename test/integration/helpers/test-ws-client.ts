@@ -229,6 +229,7 @@ export class TestWsClient {
 		const clientId = this.clientId;
 		const result = await this.rpcCall((client) =>
 			client.CreateSession({
+				permissionMode: "ask",
 				projectSlug: this.projectSlug,
 				originId: clientId,
 				...(title != null ? { title } : {}),

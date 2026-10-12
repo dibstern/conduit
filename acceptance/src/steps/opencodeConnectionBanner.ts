@@ -4,6 +4,7 @@ import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js"
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	mockInstances,
 	openModelPicker,
 	requireRelayControl,
 	requireRpcControl,
@@ -161,19 +162,24 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const instanceId = match[1] ?? "";
 			const rpc = requireRpcControl(world.page);
+			const instances = [
+				...(mockInstances.get(world.page) ?? []).filter(
+					(instance) => instance["id"] !== instanceId,
+				),
+				{
+					id: instanceId,
+					name: instanceId,
+					driver: "opencode",
+					port: 0,
+					managed: false,
+					status: "unhealthy",
+					restartCount: 0,
+					createdAt: PINNED_CLOCK_MS,
+				},
+			];
+			mockInstances.set(world.page, instances);
 			rpc.setDaemonList("SubscribeInstances", {
-				instances: [
-					{
-						id: instanceId,
-						name: instanceId,
-						driver: "opencode",
-						port: 0,
-						managed: false,
-						status: "unhealthy",
-						restartCount: 0,
-						createdAt: PINNED_CLOCK_MS,
-					},
-				],
+				instances,
 			});
 			rpc.setHandler("CreateSession", (payload) => {
 				expect(payload["instanceId"]).toBe(instanceId);

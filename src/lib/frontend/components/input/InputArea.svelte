@@ -31,7 +31,6 @@
 	import NewSessionContext from "./NewSessionContext.svelte";
 	import UsageLimitStrip from "./UsageLimitStrip.svelte";
 	import UsageWarningStrip from "./UsageWarningStrip.svelte";
-	// biome-ignore lint/style/useImportType: InstanceModelPicker is used as a value for bind:this
 	import InstanceModelPicker from "../model/InstanceModelPicker.svelte";
 	import GitIdentity from "../session/GitIdentity.svelte";
 	import PermissionModeSelector from "./PermissionModeSelector.svelte";
@@ -53,6 +52,7 @@
 		filterCommands,
 		getAvailableInstances,
 		getEffectiveInstanceId,
+		getDraftPick,
 		getSessionInstanceId,
 		getSessionDriver,
 		getModelDisplayName,
@@ -92,7 +92,6 @@
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
 	const inputAreaId = $props.id();
-	let modelPicker: InstanceModelPicker | undefined = $state();
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 	const composerMoreTitleId = `${inputAreaId}-more-title`;
@@ -491,7 +490,7 @@
 		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
 		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
 	);
-	const canSend = $derived(!unsupportedDraftFolders && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(!unsupportedDraftFolders && (sessionState.currentId !== null || getDraftPick() !== undefined) && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -672,6 +671,7 @@
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		if (unsupportedDraftFolders) return false;
+		if (!sessionState.currentId && !getDraftPick()) return false;
 		let text = textOverride ?? inputText.trim();
 		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
 		const builtins = providerBuiltinNameSet;
@@ -793,9 +793,9 @@
 					await tick();
 				}
 				if (context !== sessionModeContext || resolution !== pendingDraftSessionMode || sessionState.currentId) return false;
-				const displayed = modelPicker?.getDisplayedPick();
+					const displayed = getDraftPick();
 				if (!displayed) {
-					showToast("The model picker is not ready.", { variant: "error" });
+						showToast("Select model", { variant: "error" });
 					return false;
 				}
 				const created = await createSessionRpc({
@@ -1415,7 +1415,7 @@
 							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker bind:this={modelPicker}>
+						<InstanceModelPicker>
 								{#snippet phoneControls(rows)}
 									<PermissionModeSelector />
 									{#if currentSession && composerDirectory}
@@ -1585,7 +1585,7 @@
 				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
 				<div data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
-					<InstanceModelPicker variant="words" bind:this={modelPicker} />
+					<InstanceModelPicker variant="words" />
 					{#if composerDriver !== "opencode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />

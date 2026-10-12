@@ -6,6 +6,8 @@ import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 export const relayControls = new WeakMap<Page, WsMockControl>();
 export const rpcControls = new WeakMap<Page, RpcMockControl>();
 export const effortOptions = new WeakMap<Page, string[]>();
+/** Quota reads made while the fixture seeds a draft through the picker. */
+export const pickerFixtureQuotaReads = new WeakMap<Page, number>();
 export const rejectedEffortSwitches = new WeakSet<Page>();
 export const detailFeeds = new WeakMap<Page, RpcMockControl["detailFeed"]>();
 export const inheritedClaudeCommitAttribution = "Inherited commit attribution";
@@ -85,13 +87,34 @@ export async function serveModelCatalog(
 		const binding = payload["sessionId"]
 			? await previous?.(payload, request)
 			: undefined;
+		const instanceId =
+			!payload["sessionId"] && typeof payload["instanceId"] === "string"
+				? payload["instanceId"]
+				: undefined;
+		const claude =
+			instanceId === "claude" ||
+			mockInstances
+				.get(page)
+				?.some(
+					(instance) =>
+						instance["id"] === instanceId && instance["driver"] === "claude",
+				);
 		return {
 			projectSlug: "myapp",
 			...(typeof binding === "object" && binding !== null ? binding : {}),
 			...response,
-			providers: response.providers.filter(
-				(provider) => provider.id !== "claude",
-			),
+			...(instanceId
+				? {
+						instanceId,
+						active:
+							(response.active?.provider === "claude") === Boolean(claude)
+								? response.active
+								: undefined,
+					}
+				: {}),
+			providers: claude
+				? []
+				: response.providers.filter((provider) => provider.id !== "claude"),
 		};
 	});
 	rpc.setProjectSetting({

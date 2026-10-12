@@ -1303,8 +1303,7 @@ export class SwitchModel extends Schema.TaggedRequest<SwitchModel>()(
 		success: SwitchModelResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			// A draft has no session yet: it asks only for the model's efforts.
-			sessionId: Schema.optional(NonEmptyString),
+			sessionId: NonEmptyString,
 			modelId: NonEmptyString,
 			providerId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -1956,6 +1955,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			// Local base for the primary folder; requires newWorktree.
 			worktreeBase: Schema.optional(NonEmptyString),
 			// The composer's displayed pick. The handler requires a real model.
+			permissionMode: SessionPermissionModeSchema,
 			model: Schema.optional(
 				Schema.Struct({
 					modelId: Schema.String,

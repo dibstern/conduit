@@ -4,6 +4,7 @@ import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
 	openModelPicker,
+	pickerFixtureQuotaReads,
 	requireRpcControl,
 	serveModelCatalog,
 } from "./shared.js";
@@ -63,10 +64,25 @@ export async function seedComposerPickerCatalog(
 	const model = claude ? "claude-sonnet-5" : "claude-sonnet-4";
 	const provider = claude ? "claude" : "anthropic";
 	requireRpcControl(page).setProjectSetting({
-		_tag: "defaultModel",
-		model,
-		provider,
-		variant: "",
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				modelId: "claude-sonnet-5",
+				providerId: "claude",
+				effort: "",
+				contextWindow: "200k",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				modelId: "claude-sonnet-4",
+				providerId: "anthropic",
+				effort: "",
+				contextWindow: "200k",
+			},
+		},
 	});
 	await serveModelCatalog(page, {
 		providers,
@@ -74,13 +90,59 @@ export async function seedComposerPickerCatalog(
 		contextWindow: { contextWindow: "200k", options },
 		variant: { variant: "", variants: claude ? levels : [] },
 	});
+	if (!new URL(page.url()).pathname.startsWith("/s/")) {
+		// A held draft survives setting updates. Seed its displayed pick through the picker.
+		await openModelPicker(page);
+		const tab = page.getByTestId(`picker-harness-${harness.toLowerCase()}`);
+		if (await tab.isVisible()) await tab.click();
+		await page.getByTestId("picker-row-model").click();
+		await page
+			.locator("#model-picker .model-item")
+			.filter({ hasText: claude ? "Sonnet 5" : "Sonnet 4" })
+			.click();
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("model-picker")).toHaveCount(0);
+	}
 	// The phone button shows only a short tag (S5); its accessible name has the full model.
 	await expect(
 		page.getByTestId(/^(model-picker-trigger|composer-word-model)$/),
 	).toHaveAttribute("aria-label", claude ? /Sonnet 5/ : /Sonnet 4/);
+	pickerFixtureQuotaReads.set(
+		page,
+		requireRpcControl(page)
+			.getRequests()
+			.filter((request) => request.tag === "QuotaForAccounts").length,
+	);
 }
 
 export const composerPickerHandlers: StepHandler[] = [
+	{
+		name: "assert empty draft model label",
+		match: /^the draft composer reads Select model$/,
+		run: async ({ world }) => {
+			const trigger = world.page
+				.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				)
+				.first();
+			await expect(trigger).toHaveText("Select model");
+			await expect(trigger).toHaveAttribute("data-shown-model", "");
+			await expect(trigger).toHaveAttribute("data-shown-provider", "");
+		},
+	},
+	{
+		name: "assert explicit draft model pick",
+		match: /^the draft composer holds model (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.locator(
+						'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+					)
+					.first(),
+			).toHaveAttribute("data-shown-model", match[1] ?? "");
+		},
+	},
 	{
 		name: "assert shared composer picker is closed",
 		match: /^the shared composer picker is closed$/,

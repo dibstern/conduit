@@ -42,6 +42,7 @@ import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
+import type { SessionPermissionMode } from "../../../shared-types.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
@@ -312,6 +313,7 @@ export const createOpenCodeSession = (
 	provider: string,
 	pick?: TurnSettings,
 	reservedSessionId?: string,
+	permissionMode?: SessionPermissionMode,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -343,6 +345,7 @@ export const createOpenCodeSession = (
 						title: normalizeSessionTitle(session.title),
 						provider,
 						providerSessionId: session.id,
+						...(permissionMode === undefined ? {} : { permissionMode }),
 					},
 				},
 				{ pick: settings },

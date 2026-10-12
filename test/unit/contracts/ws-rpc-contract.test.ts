@@ -1306,6 +1306,7 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const created = yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "demo",
 					originId: "browser-tab-a",
 				});
@@ -1521,6 +1522,7 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("Left");
 		expect(
 			new CreateSession({
+				permissionMode: "ask",
 				projectSlug: "demo",
 				originId: "browser-tab-a",
 			})._tag,

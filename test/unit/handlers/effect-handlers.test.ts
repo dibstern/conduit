@@ -2262,11 +2262,12 @@ describe("handleNewSession", () => {
 
 			return handleNewSession("client-1", {
 				title: "New Session",
+				permissionMode: "ask",
 				model: { modelId: "sonnet", providerId: "claude" },
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", { instanceId: "claude", pick: { harness: "claude", model: { modelId: "sonnet", providerId: "claude" }, effort: "", contextWindow: "" } });
+					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", { instanceId: "claude", permissionMode: "ask", pick: { harness: "claude", model: { modelId: "sonnet", providerId: "claude" }, effort: "", contextWindow: "" } });
 					expect(legacyCreateSession).not.toHaveBeenCalled();
 					expect(ws.setClientSession).toHaveBeenCalledWith(
 						"client-1",
@@ -2304,6 +2305,7 @@ describe("handleNewSession", () => {
 
 		return handleNewSession("client-1", {
 			title: "OpenCode Session",
+			permissionMode: "ask",
 			providerId: "opencode",
 			model: { modelId: "gpt-4", providerId: "openai" },
 		}).pipe(
@@ -2311,6 +2313,7 @@ describe("handleNewSession", () => {
 			Effect.tap(() => {
 				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
 					instanceId: "opencode",
+					permissionMode: "ask",
 				pick: { harness: "opencode", model: { modelId: "gpt-4", providerId: "openai" }, effort: "", contextWindow: "" },
 			});
 				expect(ws.setClientSession).toHaveBeenCalledWith(

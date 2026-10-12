@@ -2244,6 +2244,7 @@ export class ProcessBrowser {
 	): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: this.projectSlug,
 				providerId,
 				...(instanceId

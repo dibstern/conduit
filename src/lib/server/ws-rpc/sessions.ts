@@ -489,7 +489,11 @@ export const sessionsHandlers = {
 				return yield* new WsRpcError({
 					message: "worktreeBase requires newWorktree: true.",
 				});
-			if (!request.model?.modelId.trim() || !request.model.providerId.trim())
+			if (
+				request.permissionMode == null ||
+				!request.model?.modelId.trim() ||
+				!request.model.providerId.trim()
+			)
 				return yield* new PickRequired();
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
@@ -503,6 +507,7 @@ export const sessionsHandlers = {
 					? { providerId: request.providerId }
 					: {}),
 				...(request.model != null ? { model: request.model } : {}),
+				permissionMode: request.permissionMode,
 			};
 			if (request.newWorktree) {
 				if (path !== undefined)

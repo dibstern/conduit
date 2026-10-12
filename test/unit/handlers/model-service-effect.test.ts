@@ -433,10 +433,10 @@ describe("model handlers with Effect-native model service", () => {
 	);
 
 	it.effect(
-		"switches OpenCode models using the model service for restored variants without requiring the Promise OpenCode API tag",
+		"switches a stored OpenCode session model using the model service without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => undefined),
+				getClientSession: vi.fn(() => "session-model-switch"),
 			});
 			const logger = makeMockLogger();
 			const modelService = {
@@ -476,10 +476,18 @@ describe("model handlers with Effect-native model service", () => {
 				makeOverridesStateLive(),
 			);
 
-			return switchModelForSession({
-				clientId: "client-1",
-				modelId: "gpt-4",
-				providerId: "openai",
+			return Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+					VALUES ('session-model-switch', 'opencode', 'Stored session', 'openai', 'gpt-4', '', '', 1, 1)`;
+				return yield* switchModelForSession({
+					clientId: "client-1",
+					sessionId: "session-model-switch",
+					modelId: "gpt-4",
+					providerId: "openai",
+				});
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap((result) => {
@@ -489,6 +497,7 @@ describe("model handlers with Effect-native model service", () => {
 						provider: "openai",
 						variant: "",
 						variants: ["standard", "fast"],
+						contextWindow: { contextWindow: "", options: [] },
 					});
 				}),
 			);
@@ -592,7 +601,7 @@ describe("model handlers with Effect-native model service", () => {
 		)))));
 	});
 
-	it.effect("honours the running project's native default for drafts without assigning it to sessions", () => {
+	it.effect("honours the harness's native default for drafts independently of project defaults and session picks", () => {
 		let running = false;
 		const nativeConfig = { model: "fake/model-b" };
 		const api = makeHandlerOpenCodeAPI({
@@ -651,9 +660,9 @@ describe("model handlers with Effect-native model service", () => {
 				expect((yield* getModelsResponse({ sessionId })).active).toBeUndefined();
 			}
 			yield* setDefaultModel({ providerID: "fake", modelID: "model-a" });
-			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-a" });
+			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-b" });
 			running = false;
-			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-a" });
+			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-b" });
 			expect(instances.use).not.toHaveBeenCalled();
 			expect(api.config.get).toHaveBeenCalledTimes(5);
 		}).pipe(Effect.provide(Layer.merge(deps, models)));

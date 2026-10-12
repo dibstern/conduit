@@ -165,6 +165,7 @@ export async function createSession(
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(WsRpcGroup);
 				return yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "e2e-replay",
 					originId: `e2e-${providerId}-replay`,
 					providerId,

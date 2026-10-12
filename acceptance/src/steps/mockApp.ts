@@ -510,6 +510,7 @@ export const mockAppHandlers: StepHandler[] = [
 		match: /^the conduit app is served with the ([a-z0-9-]+) mockup$/,
 		run: async ({ world, match }) => {
 			const mockup = match[1];
+			const modelRequired = mockup === "model-required";
 			const modelExecutionMockup =
 				mockup === "skill-navigation"
 					? skillNavigationMockup
@@ -518,7 +519,7 @@ export const mockAppHandlers: StepHandler[] = [
 								mockup as keyof typeof modelExecutionMockups
 							]
 						: undefined;
-			if (mockup !== "connected" && !modelExecutionMockup) {
+			if (mockup !== "connected" && !modelRequired && !modelExecutionMockup) {
 				throw new Error(`Unsupported conduit mockup: ${mockup ?? ""}`);
 			}
 			const providers = modelExecutionMockup
@@ -533,7 +534,17 @@ export const mockAppHandlers: StepHandler[] = [
 			});
 			relayControls.set(world.page, relayControl);
 			const page = world.page;
-			mockInstances.set(page, []);
+			const configuredInstances = ["claude", "opencode"].map((driver) => ({
+				id: driver,
+				name: driver === "claude" ? "Claude" : "OpenCode",
+				driver,
+				port: driver === "opencode" ? 4096 : 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+			}));
+			mockInstances.set(page, configuredInstances);
 			mockClaudeSettings.set(page, { autoCompactEnabled: true });
 			const sessionVariants = new Map<string, string>();
 			/** Instance bound by the composer's CreateSession — session-scoped
@@ -747,7 +758,11 @@ export const mockAppHandlers: StepHandler[] = [
 					// session fetches models, and a late reply must not rebind it.
 					GetModels: async (payload) => {
 						if (payload["sessionId"]) await heldModelLookups.get(page)?.promise;
-						const instanceId = sessionInstance(payload);
+						const instanceId = payload["sessionId"]
+							? sessionInstance(payload)
+							: typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: undefined;
 						const claude =
 							instanceId === "claude" ||
 							mockInstances
@@ -760,14 +775,18 @@ export const mockAppHandlers: StepHandler[] = [
 						return {
 							projectSlug: "myapp",
 							...(instanceId ? { instanceId } : {}),
-							providers: providers.filter(
-								(provider) => provider.id !== "claude",
-							),
-							active: modelExecutionMockup
-								? { model: "opus[1m]", provider: "claude" }
-								: claude
-									? { model: "claude-sonnet-4-5", provider: "claude" }
-									: { model: "claude-sonnet-4", provider: "anthropic" },
+							providers:
+								!payload["sessionId"] && payload["instanceId"] && claude
+									? []
+									: providers.filter((provider) => provider.id !== "claude"),
+							active:
+								modelRequired && !payload["sessionId"]
+									? undefined
+									: modelExecutionMockup
+										? { model: "opus[1m]", provider: "claude" }
+										: claude
+											? { model: "claude-sonnet-4-5", provider: "claude" }
+											: { model: "claude-sonnet-4", provider: "anthropic" },
 							...(modelExecutionMockup
 								? { modelExecution: modelExecutionMockup.modelExecution }
 								: {}),
@@ -810,10 +829,45 @@ export const mockAppHandlers: StepHandler[] = [
 			});
 			rpcControls.set(world.page, rpcControl);
 			rpcControl.detailFeed = detailFeeds.get(world.page) ?? "synchronize";
+			rpcControl.setDaemonList("SubscribeInstances", {
+				instances: configuredInstances,
+			});
 			rpcControl.setProjectSetting({
 				_tag: "providerModels",
 				providers: providers.filter((provider) => provider.id === "claude"),
 			});
+			rpcControl.setProjectSetting({
+				_tag: "harnessDefaults",
+				claude: modelRequired
+					? { status: "missing" }
+					: {
+							status: "ok",
+							pick: {
+								modelId: "claude-sonnet-4-5",
+								providerId: "claude",
+								effort: "",
+								contextWindow: "",
+							},
+						},
+				opencode: modelRequired
+					? { status: "missing" }
+					: {
+							status: "ok",
+							pick: {
+								modelId: "claude-sonnet-4",
+								providerId: "anthropic",
+								effort: "",
+								contextWindow: "",
+							},
+						},
+			});
+			if (modelRequired)
+				rpcControl.setProjectSetting({
+					_tag: "defaultModel",
+					model: "claude-sonnet-4",
+					provider: "anthropic",
+					variant: "",
+				});
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";

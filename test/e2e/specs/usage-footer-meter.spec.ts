@@ -270,6 +270,7 @@ test.describe("send at an account's reset", () => {
 		if (!projectSlug) throw new Error("No reset project slug");
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug,
 				instanceId: Schema.decodeUnknownSync(
 					Schema.String.pipe(Schema.brand("ProviderInstanceId")),

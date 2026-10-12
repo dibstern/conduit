@@ -186,6 +186,7 @@ async function openDraft(
 	driver: Driver,
 	prepare?: (browser: ProcessBrowser, slug: string) => Promise<void>,
 	expectedHarness: Driver | null = driver,
+	seedDefaults = true,
 ) {
 	const directory = mkdtempSync(join(harness.root, "pick-guard-project-"));
 	const browser = await harness.connect();
@@ -201,6 +202,20 @@ async function openDraft(
 		}),
 	);
 	if (driver === "opencode") await browser.startInstance("opencode");
+	if (seedDefaults) {
+		for (const harness of ["claude", "opencode"] as const)
+			await Effect.runPromise(
+				browser.rpc.SetHarnessDefault({
+					projectSlug: slug,
+					harness,
+					providerId:
+						harness === "claude" ? "claude" : openCodeModel.providerID,
+					modelId: harness === "claude" ? "sonnet" : openCodeModel.modelID,
+					effort: harness === "claude" ? "low" : "",
+					contextWindow: harness === "claude" ? "200k" : "",
+				}),
+			);
+	}
 	await prepare?.(browser, slug);
 	await new AppPage(page).goto(
 		`${harness.baseUrl}/?p=${encodeURIComponent(slug)}`,
@@ -463,6 +478,7 @@ async function openInheritedSession(
 	const draft = await openDraft(page, harness, "claude");
 	const { sessionId } = await Effect.runPromise(
 		draft.browser.rpc.CreateSession({
+			permissionMode: "ask",
 			projectSlug: draft.slug,
 			originId: `${caseId}-setup`,
 			instanceId: ProviderInstanceIdSchema.make("claude"),
@@ -741,6 +757,7 @@ async function createGuardSession(
 	const draft = await openDraft(page, harness, driver);
 	const { sessionId } = await Effect.runPromise(
 		draft.browser.rpc.CreateSession({
+			permissionMode: "ask",
 			projectSlug: draft.slug,
 			originId: `${caseId}-setup`,
 			instanceId: ProviderInstanceIdSchema.make(driver),
@@ -1174,6 +1191,7 @@ test.describe("session composer owns its stored pick", () => {
 		);
 		const { sessionId: sessionB } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: slug,
 				originId: `${caseId}-B`,
 				instanceId: ProviderInstanceIdSchema.make("claude"),
@@ -1616,6 +1634,7 @@ test.describe("session composer owns its stored pick", () => {
 		await browser.startInstance("opencode");
 		const { sessionId: openCodeId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: slug,
 				originId: `${caseId}-opencode`,
 				instanceId: ProviderInstanceIdSchema.make("opencode"),
@@ -1714,6 +1733,7 @@ test.describe("session composer owns its stored pick", () => {
 			if (driver === "claude") await browser.startInstance("opencode");
 			const { sessionId } = await Effect.runPromise(
 				browser.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: slug,
 					originId: `${caseId}-setup`,
 					instanceId: ProviderInstanceIdSchema.make(driver),
@@ -1822,15 +1842,958 @@ test.describe("session composer owns its stored pick", () => {
 	}
 });
 
+type DraftPick = Pick & { instanceId: string; permissionMode: string };
+type DraftCreatePayload = {
+	instanceId?: string;
+	model?: {
+		providerId?: string;
+		modelId?: string;
+		variant?: string;
+		contextWindow?: string;
+	};
+	permissionMode?: string;
+};
+type DraftSocketWindow = Window & { __draftGuardSockets?: WebSocket[] };
+
+async function observeDraftSockets(page: Page): Promise<void> {
+	await page.addInitScript(() => {
+		const sockets: WebSocket[] = [];
+		(window as DraftSocketWindow).__draftGuardSockets = sockets;
+		const NativeWebSocket = window.WebSocket;
+		window.WebSocket = class extends NativeWebSocket {
+			constructor(url: string | URL, protocols?: string | string[]) {
+				super(url, protocols);
+				sockets.push(this);
+			}
+		};
+	});
+}
+
+async function reconnectDraft(page: Page): Promise<void> {
+	const before = await page.evaluate(() => {
+		const sockets = (window as DraftSocketWindow).__draftGuardSockets ?? [];
+		const count = sockets.length;
+		for (const socket of sockets)
+			if (socket.readyState === WebSocket.OPEN)
+				socket.close(4001, "draft pick reconnect guard");
+		return count;
+	});
+	await page.waitForFunction((count) => {
+		const sockets = (window as DraftSocketWindow).__draftGuardSockets ?? [];
+		return (
+			sockets.length > count &&
+			sockets
+				.slice(count)
+				.some((socket) => socket.readyState === WebSocket.OPEN)
+		);
+	}, before);
+}
+
+async function selectDraftHarness(
+	page: Page,
+	picker: Locator,
+	driver: Driver,
+): Promise<void> {
+	await openPickerRoot(page, picker);
+	await page.getByTestId(`picker-harness-${driver}`).click();
+	await closePicker(page);
+	await expect(picker).toHaveAttribute("data-instance-id", driver);
+}
+
+async function selectFullPermission(page: Page): Promise<void> {
+	const trigger = page.locator(
+		'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
+	);
+	if (await trigger.count()) {
+		await trigger.click();
+	} else {
+		await page.getByTestId("composer-more").click();
+		await page.getByTestId("composer-more-mode").click();
+	}
+	await page.getByTestId("permission-mode-option-full").click();
+	await page.keyboard.press("Escape");
+	await expect(trigger).toHaveAttribute("title", "Approvals (Full access)");
+}
+
+function readDraftReceipt(
+	harness: ProcessHarness,
+	slug: string,
+	sessionId: string,
+) {
+	const db = new Database(harness.projectStorePath(slug), { readonly: true });
+	try {
+		const stored = db
+			.prepare<[string], StoredPickRow & { permission_mode: string | null }>(
+				`SELECT provider, model_id, model_provider, variant, context_window, permission_mode
+			 FROM sessions WHERE id = ?`,
+			)
+			.get(sessionId);
+		const row = db
+			.prepare<[string], { payload_json: string }>(
+				`SELECT payload_json FROM provider_command_outbox WHERE session_id = ?
+			 AND effect_type = 'send_turn' ORDER BY request_sequence LIMIT 1`,
+			)
+			.get(sessionId);
+		if (!stored || !row)
+			throw new Error("Draft send omitted its stored pick or provider command");
+		return {
+			stored,
+			command: JSON.parse(row.payload_json) as DraftCreatePayload & {
+				variant?: string;
+				contextWindow?: string;
+			},
+		};
+	} finally {
+		db.close();
+	}
+}
+
+async function assertDraftReceipt(
+	page: Page,
+	harness: ProcessHarness,
+	setup: { browser: ProcessBrowser; slug: string; picker: Locator },
+	driver: Driver,
+	caseId: string,
+	observed: Awaited<ReturnType<typeof observeSessionRpc>>,
+	testInfo: TestInfo,
+	permissionMode = "ask",
+) {
+	const shown: DraftPick = {
+		...(await readShown(setup.picker)),
+		instanceId: (await setup.picker.getAttribute("data-instance-id")) ?? "",
+		permissionMode:
+			(await setup.picker.getAttribute("data-shown-permission-mode")) ?? "",
+	};
+	expect(shown.permissionMode).toBe(permissionMode);
+	const sent = await sendAndCapture(page, harness, driver, `${caseId}-first`);
+	const sessionId = decodeURIComponent(
+		new URL(page.url()).pathname.match(/\/s\/([^/]+)/)?.[1] ?? "",
+	);
+	const reported = await Effect.runPromise(
+		setup.browser.rpc.GetModels({ projectSlug: setup.slug, sessionId }),
+	);
+	const receipt = readDraftReceipt(harness, setup.slug, sessionId);
+	const sentPick: DraftPick = {
+		...sent,
+		instanceId: receipt.command.instanceId ?? "",
+		contextWindow: receipt.command.contextWindow ?? "",
+		permissionMode: receipt.command.permissionMode ?? "",
+	};
+	const creates = observed.requests.filter(
+		(request) => request.tag === "CreateSession",
+	);
+	const created = creates[0]?.payload as DraftCreatePayload | undefined;
+	const expectedPayload = {
+		instanceId: shown.instanceId,
+		model: {
+			providerId: shown.provider,
+			modelId: shown.model,
+			variant: shown.effort,
+			contextWindow: shown.contextWindow,
+		},
+		permissionMode: shown.permissionMode,
+	};
+	const providerReceipt =
+		driver === "claude"
+			? enqueues(harness, false).filter(
+					(mark) => mark.prompt === `${caseId}-first`,
+				)
+			: openCodePrompts(harness);
+	const sessionlessSwitches = observed.requests.filter(
+		(request) =>
+			[
+				"SwitchModel",
+				"SwitchVariant",
+				"SwitchContextWindow",
+				"SwitchPermissionMode",
+			].includes(request.tag ?? "") && !request.payload?.["sessionId"],
+	);
+	await writeGuardArtifact(testInfo, {
+		case: caseId,
+		bead: "conduit-test-fmg0.6",
+		shown,
+		created,
+		stored: receipt.stored,
+		reported,
+		sent: sentPick,
+		providerReceipt,
+		command: receipt.command,
+		sessionlessSwitches,
+	});
+	expect(creates).toHaveLength(1);
+	expect(sentPick).toEqual(shown);
+	expect(created).toMatchObject(expectedPayload);
+	expect(shownFromGetModels(reported, driver)).toEqual({
+		harness: shown.harness,
+		provider: shown.provider,
+		model: shown.model,
+		effort: shown.effort,
+		contextWindow: shown.contextWindow,
+	});
+	expect(reported.permissionMode).toBe(shown.permissionMode);
+	expect(receipt.stored).toEqual({
+		provider: shown.instanceId,
+		model_provider: shown.provider,
+		model_id: shown.model,
+		variant: shown.effort,
+		context_window: shown.contextWindow,
+		permission_mode: shown.permissionMode,
+	});
+	expect(receipt.command).toMatchObject({
+		instanceId: shown.instanceId,
+		model: { providerId: shown.provider, modelId: shown.model },
+		variant: shown.effort,
+		contextWindow: shown.contextWindow,
+		permissionMode: shown.permissionMode,
+	});
+	expect(sent).toMatchObject({
+		harness: shown.harness,
+		provider: shown.provider,
+		model: shown.model,
+		effort: shown.effort,
+	});
+	if (driver === "claude") {
+		expect(sent.contextWindow).toBe(shown.contextWindow);
+		const enqueue = enqueues(harness, false).find(
+			(mark) => mark.prompt === `${caseId}-first`,
+		);
+		expect(enqueue?.liveOptions.permissionMode).toBe(
+			permissionMode === "full" ? "bypassPermissions" : "default",
+		);
+	}
+	expect(sessionlessSwitches).toEqual([]);
+	expect(
+		observed.requests.filter(
+			(request) => request.tag === "SwitchPermissionMode",
+		),
+	).toEqual([]);
+	return { shown, reported, receipt, created, sent: sentPick };
+}
+
+test.describe("draft owns one complete pick", () => {
+	test.use({
+		harnessOptions: {
+			opencodeRecording: "chat-simple",
+			capabilityModels: claudeModels,
+			capabilityAgents: [
+				{ id: "claude-draft-agent", name: "Claude draft agent" },
+			],
+			restartProof: true,
+		},
+	});
+
+	for (const driver of ["claude", "opencode"] as const) {
+		test(`draft-first-send-${driver}: displayed model effort context and permission are stored and sent`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const observed = await observeSessionRpc(page);
+			const draft = await openDraft(
+				page,
+				harness,
+				driver,
+				async (browser, slug) => {
+					await Effect.runPromise(
+						browser.rpc.SetDefaultPermissionMode({
+							projectSlug: slug,
+							mode: "ask",
+						}),
+					);
+				},
+			);
+			await openPickerRoot(page, draft.picker);
+			await page.getByTestId("picker-effort-option-high").click();
+			if (driver === "claude")
+				await page.getByTestId("picker-context-option-1m").click();
+			else
+				await expect(
+					page.locator('[data-testid^="picker-context-option-"]:visible'),
+				).toHaveCount(0);
+			await closePicker(page);
+			await expect(draft.picker).toHaveAttribute("data-shown-effort", "high");
+			await expect(draft.picker).toHaveAttribute(
+				"data-shown-context-window",
+				driver === "claude" ? "1m" : "",
+			);
+			await selectFullPermission(page);
+			await assertDraftReceipt(
+				page,
+				harness,
+				draft,
+				driver,
+				`draft-first-send-${driver}`,
+				observed,
+				testInfo,
+				"full",
+			);
+		});
+	}
+
+	test("draft-model-memory: effort and context are remembered per model and harness", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const draft = await openDraft(
+			page,
+			harness,
+			"claude",
+			async (browser, slug) => {
+				await browser.startInstance("opencode");
+				await Effect.runPromise(
+					browser.rpc.SetHarnessDefault({
+						projectSlug: slug,
+						harness: "claude",
+						providerId: "claude",
+						modelId: "opus",
+						effort: "high",
+						contextWindow: "1m",
+					}),
+				);
+			},
+		);
+		const snapshots: { step: string; shown: Pick }[] = [];
+		await pickModel(page, draft.picker, {
+			providerID: "claude",
+			modelID: "opus",
+		});
+		await openPickerRoot(page, draft.picker);
+		await page.getByTestId("picker-effort-option-max").click();
+		await page.getByTestId("picker-context-option-200k").click();
+		await closePicker(page);
+		snapshots.push({
+			step: "opus-saved",
+			shown: await readShown(draft.picker),
+		});
+		await pickModel(page, draft.picker, {
+			providerID: "claude",
+			modelID: "sonnet",
+		});
+		await expect(draft.picker).toHaveAttribute("data-shown-effort", "");
+		await openPickerRoot(page, draft.picker);
+		await expect(
+			page.locator('[data-testid^="picker-effort-option-"]:visible'),
+		).toHaveText(["low", "high"]);
+		await closePicker(page);
+		snapshots.push({
+			step: "unsupported-effort-reset",
+			shown: await readShown(draft.picker),
+		});
+		await pickModel(page, draft.picker, {
+			providerID: "claude",
+			modelID: "opus",
+		});
+		await expect(draft.picker).toHaveAttribute("data-shown-effort", "max");
+		await expect(draft.picker).toHaveAttribute(
+			"data-shown-context-window",
+			"200k",
+		);
+		snapshots.push({
+			step: "opus-restored",
+			shown: await readShown(draft.picker),
+		});
+		await selectDraftHarness(page, draft.picker, "opencode");
+		await pickModel(page, draft.picker, openCodeModel);
+		await expect(draft.picker).toHaveAttribute("data-shown-effort", "");
+		await openPickerRoot(page, draft.picker);
+		await page.getByTestId("picker-effort-option-medium").click();
+		await closePicker(page);
+		await pickModel(page, draft.picker, otherOpenCodeModel);
+		await expect(draft.picker).toHaveAttribute("data-shown-effort", "");
+		await pickModel(page, draft.picker, openCodeModel);
+		await expect(draft.picker).toHaveAttribute("data-shown-effort", "medium");
+		snapshots.push({
+			step: "opencode-restored",
+			shown: await readShown(draft.picker),
+		});
+		await selectDraftHarness(page, draft.picker, "claude");
+		await pickModel(page, draft.picker, {
+			providerID: "claude",
+			modelID: "opus",
+		});
+		await expect(draft.picker).toHaveAttribute("data-shown-effort", "max");
+		await expect(draft.picker).toHaveAttribute(
+			"data-shown-context-window",
+			"200k",
+		);
+		snapshots.push({
+			step: "claude-memory-isolated",
+			shown: await readShown(draft.picker),
+		});
+		const proof = await assertDraftReceipt(
+			page,
+			harness,
+			draft,
+			"claude",
+			"draft-model-memory",
+			observed,
+			testInfo,
+		);
+		await writeGuardArtifact(testInfo, {
+			case: "draft-model-memory",
+			bead: "conduit-test-fmg0.6",
+			...proof,
+			snapshots,
+			requests: observed.requests.filter((request) =>
+				/^Switch/.test(request.tag ?? ""),
+			),
+		});
+		expect(
+			observed.requests.filter((request) => /^Switch/.test(request.tag ?? "")),
+		).toEqual([]);
+	});
+
+	for (const driver of ["claude", "opencode"] as const) {
+		test(`mdpt-${driver}: a websocket reconnect preserves the held draft pick`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const observed = await observeSessionRpc(page);
+			await observeDraftSockets(page);
+			const draft = await openDraft(page, harness, driver);
+			await pickModel(
+				page,
+				draft.picker,
+				driver === "claude"
+					? { providerID: "claude", modelID: "opus" }
+					: otherOpenCodeModel,
+			);
+			await openPickerRoot(page, draft.picker);
+			await page.getByTestId("picker-effort-option-high").click();
+			await closePicker(page);
+			const before = await readShown(draft.picker);
+			const readsBefore = observed.requests.filter(
+				(request) =>
+					request.tag === "GetModels" && !request.payload?.["sessionId"],
+			).length;
+			await reconnectDraft(page);
+			await expect
+				.poll(
+					() =>
+						observed.requests.filter(
+							(request) =>
+								request.tag === "GetModels" && !request.payload?.["sessionId"],
+						).length,
+				)
+				.toBeGreaterThan(readsBefore);
+			const refresh = observed.requests
+				.filter(
+					(request) =>
+						request.tag === "GetModels" && !request.payload?.["sessionId"],
+				)
+				.at(-1);
+			await expect
+				.poll(() =>
+					observed.replies.some(({ request }) => request.id === refresh?.id),
+				)
+				.toBe(true);
+			const reply = observed.replies.find(
+				({ request }) => request.id === refresh?.id,
+			);
+			if (!reply) throw new Error("Reconnect GetModels omitted its reply");
+			await observed.received([reply.frame]);
+			await page.evaluate(
+				() =>
+					new Promise<void>((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+					),
+			);
+			await expectShown(draft.picker, before);
+			await assertDraftReceipt(
+				page,
+				harness,
+				draft,
+				driver,
+				`mdpt-${driver}`,
+				observed,
+				testInfo,
+			);
+		});
+	}
+
+	test("draft-catalog-isolation: a newly visited named OpenCode instance waits for its own models", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const caseId = "draft-catalog-isolation";
+		let instanceB = "";
+		let deliverEmpty = true;
+		const delivered: {
+			requestId: string | undefined;
+			response: GetModelsResponse;
+		}[] = [];
+		const observed = await observeSessionRpc(
+			page,
+			undefined,
+			(frame, request) => {
+				if (
+					request.tag !== "GetModels" ||
+					request.payload?.["instanceId"] !== instanceB ||
+					request.payload?.["sessionId"] ||
+					frame.exit?._tag !== "Success"
+				)
+					return frame;
+				const response = Schema.decodeUnknownSync(GetModelsResponseSchema)(
+					frame.exit.value,
+				);
+				const value: GetModelsResponse = deliverEmpty
+					? {
+							...response,
+							providers: [],
+							active: undefined,
+							variant: undefined,
+							contextWindow: undefined,
+						}
+					: response;
+				delivered.push({ requestId: request.id, response: value });
+				return { ...frame, exit: { ...frame.exit, value } };
+			},
+		);
+		let sessionA = "";
+		const draft = await openDraft(
+			page,
+			harness,
+			"opencode",
+			async (browser, slug) => {
+				const { instances } = await browser.instances();
+				const instanceA = instances.find(
+					(instance) => instance.id === "opencode",
+				);
+				if (!instanceA || (!instanceA.url && instanceA.port === 0))
+					throw new Error(
+						`The recorded OpenCode instance omitted its live URL: ${JSON.stringify(instanceA)}`,
+					);
+				const added = await Effect.runPromise(
+					browser.rpc.AddInstance({
+						projectSlug: slug,
+						name: "Catalog B",
+						driver: "opencode",
+						managed: false,
+						url: instanceA.url ?? `http://127.0.0.1:${instanceA.port}`,
+					}),
+				);
+				if (!added.addedInstanceId)
+					throw new Error("AddInstance did not return catalog instance B");
+				instanceB = added.addedInstanceId;
+				expect(instanceB).not.toBe("opencode");
+				const created = await Effect.runPromise(
+					browser.rpc.CreateSession({
+						permissionMode: "ask",
+						projectSlug: slug,
+						originId: `${caseId}-a`,
+						instanceId: ProviderInstanceIdSchema.make("opencode"),
+						model: {
+							providerId: openCodeModel.providerID,
+							modelId: openCodeModel.modelID,
+							variant: "high",
+							contextWindow: "",
+						},
+					}),
+				);
+				sessionA = created.sessionId;
+			},
+		);
+		await new AppPage(page).goto(
+			`${harness.baseUrl}/s/${encodeURIComponent(sessionA)}?p=${encodeURIComponent(draft.slug)}`,
+		);
+		await expect(draft.picker).toHaveAttribute("data-instance-id", "opencode");
+		await expect(draft.picker).toHaveAttribute(
+			"data-shown-model",
+			openCodeModel.modelID,
+		);
+		const viewedA = await readShown(draft.picker);
+		const aCatalog = await Effect.runPromise(
+			draft.browser.rpc.GetModels({
+				projectSlug: draft.slug,
+				sessionId: sessionA,
+			}),
+		);
+		if (!(await page.locator("#new-session-btn:visible").isVisible()))
+			await page.getByTestId("session-bar-back").click();
+		await page.locator("#new-session-btn:visible").click();
+		await expect(page).toHaveURL(/\/new\?/);
+		await expect(draft.picker).toHaveAttribute("data-instance-id", "opencode");
+		await expect(draft.picker).toHaveAttribute(
+			"data-shown-model",
+			openCodeModel.modelID,
+		);
+		await expect
+			.poll(() =>
+				observed.replies.some(
+					({ request }) =>
+						request.tag === "GetModels" &&
+						!request.payload?.["sessionId"] &&
+						request.payload?.["instanceId"] === "opencode",
+				),
+			)
+			.toBe(true);
+		const aDraftReplies = observed.replies.filter(
+			({ request }) =>
+				request.tag === "GetModels" &&
+				!request.payload?.["sessionId"] &&
+				request.payload?.["instanceId"] === "opencode",
+		);
+		await observed.received(aDraftReplies.map(({ frame }) => frame));
+		const held = observed.hold("GetModels", "undefined");
+		const blocked: {
+			phase: string;
+			shown: Pick;
+			instanceId: string | null;
+			sendDisabled: boolean;
+			models: { model: string | null; provider: string | null }[];
+		}[] = [];
+		let stage = "select-b";
+		let proof: Awaited<ReturnType<typeof assertDraftReceipt>> | undefined;
+		async function assertBlocked(phase: string) {
+			const app = new AppPage(page);
+			await app.input.fill(`${caseId}-first`);
+			await openPickerRoot(page, draft.picker);
+			await page.getByTestId("picker-row-model").click();
+			const models = await page
+				.getByTestId("model-picker-list")
+				.locator("[data-model-id]")
+				.evaluateAll((rows) =>
+					rows.map((row) => ({
+						model: row.getAttribute("data-model-id"),
+						provider: row.getAttribute("data-provider-id"),
+					})),
+				);
+			await closePicker(page);
+			const snapshot = {
+				phase,
+				shown: await readShown(draft.picker),
+				instanceId: await draft.picker.getAttribute("data-instance-id"),
+				sendDisabled: await app.sendBtn.isDisabled(),
+				models,
+			};
+			blocked.push(snapshot);
+			await writeGuardArtifact(testInfo, {
+				case: caseId,
+				bead: "conduit-test-fmg0.6",
+				stage,
+				instanceA: "opencode",
+				instanceB,
+				viewedA,
+				aCatalog,
+				blocked,
+				delivered,
+				heldReplies: held.frames,
+			});
+			expect(snapshot.instanceId).toBe(instanceB);
+			expect(
+				snapshot.shown.model,
+				`${phase}: B cannot adopt A's held or default model`,
+			).toBe("");
+			expect(snapshot.shown.provider).toBe("");
+			await expect(draft.picker).toHaveAccessibleName(/Select model/);
+			expect(
+				snapshot.sendDisabled,
+				`${phase}: B cannot send before a B model is selected`,
+			).toBe(true);
+			expect(
+				snapshot.models,
+				`${phase}: B cannot offer A's cached catalog`,
+			).toEqual([]);
+			expect(
+				observed.requests.filter((request) => request.tag === "CreateSession"),
+			).toEqual([]);
+		}
+		try {
+			await openPickerRoot(page, draft.picker);
+			await page.getByTestId(`picker-account-${instanceB}`).click();
+			await held.wait;
+			await closePicker(page);
+			stage = "b-reply-held";
+			await assertBlocked(stage);
+			held.release();
+			await observed.received(held.frames);
+			await page.evaluate(
+				() =>
+					new Promise<void>((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+					),
+			);
+			stage = "b-empty-catalog-delivered";
+			await assertBlocked(stage);
+			expect(delivered.length).toBeGreaterThan(0);
+			for (const reply of delivered)
+				expect(reply.response.providers).toEqual([]);
+			deliverEmpty = false;
+			await openPickerRoot(page, draft.picker);
+			await page.getByTestId("picker-account-opencode").click();
+			await page.getByTestId(`picker-account-${instanceB}`).click();
+			await closePicker(page);
+			await expect
+				.poll(() =>
+					delivered.some((reply) => reply.response.providers.length > 0),
+				)
+				.toBe(true);
+			const ownReply = delivered.find(
+				(reply) => reply.response.providers.length > 0,
+			);
+			if (!ownReply) throw new Error("B did not receive its own catalog");
+			const frame = observed.replies.find(
+				({ request }) => request.id === ownReply.requestId,
+			)?.frame;
+			if (!frame) throw new Error("B's catalog reply omitted its frame");
+			await observed.received([frame]);
+			const ownModel = ownReply.response.providers
+				.find((provider) => provider.id === otherOpenCodeModel.providerID)
+				?.models.find((model) => model.id === otherOpenCodeModel.modelID);
+			expect(ownModel).toBeDefined();
+			await pickModel(page, draft.picker, otherOpenCodeModel);
+			await expect(draft.picker).toHaveAttribute("data-instance-id", instanceB);
+			stage = "b-explicit-pick-first-send";
+			proof = await assertDraftReceipt(
+				page,
+				harness,
+				draft,
+				"opencode",
+				caseId,
+				observed,
+				testInfo,
+			);
+			stage = "complete";
+		} finally {
+			held.release();
+			await writeGuardArtifact(testInfo, {
+				case: caseId,
+				bead: "conduit-test-fmg0.6",
+				stage,
+				instanceA: "opencode",
+				instanceB,
+				viewedA,
+				aCatalog,
+				blocked,
+				delivered,
+				heldReplies: held.frames,
+				...proof,
+			});
+		}
+	});
+
+	test("4t9q: an OpenCode draft discovers OpenCode models and agents with a Claude project default", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const draft = await openDraft(page, harness, "claude", async (browser) => {
+			await browser.startInstance("opencode");
+		});
+		const requestBoundary = observed.requests.length;
+		await selectDraftHarness(page, draft.picker, "opencode");
+		await expect(draft.picker).toHaveAttribute("data-shown-model", /.+/);
+		const models = await Effect.runPromise(
+			draft.browser.rpc.GetModels({
+				projectSlug: draft.slug,
+				instanceId: "opencode",
+			}),
+		);
+		const agents = await Effect.runPromise(
+			draft.browser.rpc.GetAgents({
+				projectSlug: draft.slug,
+				instanceId: "opencode",
+			}),
+		);
+		await openPickerRoot(page, draft.picker);
+		await page.getByTestId("picker-row-model").click();
+		const displayedModels = await page
+			.getByTestId("model-picker-list")
+			.locator("[data-model-id]")
+			.evaluateAll((rows) =>
+				rows.map((row) => ({
+					provider: row.getAttribute("data-provider-id"),
+					model: row.getAttribute("data-model-id"),
+				})),
+			);
+		const catalogModels = models.providers.flatMap((provider) =>
+			provider.models.map((model) => ({
+				provider: provider.id,
+				model: model.id,
+			})),
+		);
+		expect(displayedModels.length).toBeGreaterThan(0);
+		for (const model of displayedModels)
+			expect(catalogModels).toContainEqual(model);
+		expect(displayedModels.every((model) => model.provider !== "claude")).toBe(
+			true,
+		);
+		await page.getByTestId("picker-back").click();
+		await page.getByTestId("picker-row-agent").click();
+		const agentRows = page.locator('[data-testid^="picker-agent-"]:visible');
+		await expect(agentRows.first()).toBeVisible();
+		const displayedAgents = await agentRows.evaluateAll((rows) =>
+			rows.map((row) => ({
+				id: row.getAttribute("data-testid")?.replace("picker-agent-", ""),
+				text: row.textContent,
+			})),
+		);
+		for (const agent of displayedAgents)
+			expect(agents.agents.some((entry) => entry.id === agent.id)).toBe(true);
+		expect(
+			displayedAgents.some((agent) => agent.id === "claude-draft-agent"),
+		).toBe(false);
+		await closePicker(page);
+		const reads = observed.requests
+			.slice(requestBoundary)
+			.filter((request) =>
+				["GetModels", "GetAgents"].includes(request.tag ?? ""),
+			);
+		const proof = await assertDraftReceipt(
+			page,
+			harness,
+			draft,
+			"opencode",
+			"4t9q",
+			observed,
+			testInfo,
+		);
+		await writeGuardArtifact(testInfo, {
+			case: "4t9q",
+			bead: "conduit-test-4t9q",
+			...proof,
+			displayedModels,
+			displayedAgents,
+			models,
+			agents,
+			reads,
+		});
+		expect(agents.providerScope.id).toBe("opencode");
+		for (const tag of ["GetModels", "GetAgents"]) {
+			const scoped = reads.filter((request) => request.tag === tag);
+			expect(scoped.length).toBeGreaterThan(0);
+			for (const request of scoped)
+				expect(request.payload).toMatchObject({ instanceId: "opencode" });
+		}
+	});
+});
+
+for (const status of ["missing", "invalid", "empty-catalog"] as const) {
+	test.describe(`draft default ${status}`, () => {
+		test.use({
+			harnessOptions: {
+				opencodeRecording: "chat-simple",
+				capabilityModels: claudeModels,
+				relaySettings: {
+					defaultModel: "claude/sonnet",
+					harnessDefaults: {
+						claude: {
+							providerId: "claude",
+							modelId: "sonnet",
+							contextWindow: "200k",
+						},
+						...(status === "missing"
+							? {}
+							: {
+									opencode: {
+										providerId: "opencode",
+										modelId:
+											status === "invalid"
+												? "missing-model"
+												: openCodeModel.modelID,
+										contextWindow: "",
+									},
+								}),
+					},
+				},
+			},
+		});
+		test(`draft-no-default-${status}: select model is required before sending`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			let emptyCatalog = status === "empty-catalog";
+			const observed = await observeSessionRpc(
+				page,
+				undefined,
+				(frame, request) => {
+					if (
+						emptyCatalog &&
+						request.tag === "GetModels" &&
+						request.payload?.["instanceId"] === "opencode" &&
+						frame.exit?._tag === "Success"
+					) {
+						const response = Schema.decodeUnknownSync(GetModelsResponseSchema)(
+							frame.exit.value,
+						);
+						return {
+							...frame,
+							exit: {
+								...frame.exit,
+								value: {
+									...response,
+									providers: [],
+									active: undefined,
+									variant: undefined,
+									contextWindow: undefined,
+								},
+							},
+						};
+					}
+					return frame;
+				},
+			);
+			const draft = await openDraft(
+				page,
+				harness,
+				"claude",
+				async (browser) => {
+					await browser.startInstance("opencode");
+				},
+				"claude",
+				false,
+			);
+			await selectDraftHarness(page, draft.picker, "opencode");
+			await expect(draft.picker).toHaveAttribute("data-shown-model", "");
+			await expect(draft.picker).toHaveAccessibleName(/Select model/);
+			const app = new AppPage(page);
+			await app.input.fill(`draft-no-default-${status}-first`);
+			await expect(app.sendBtn).toBeDisabled();
+			const blocked = {
+				shown: await readShown(draft.picker),
+				sendDisabled: await app.sendBtn.isDisabled(),
+				creates: observed.requests.filter(
+					(request) => request.tag === "CreateSession",
+				),
+			};
+			if (emptyCatalog) {
+				await openPickerRoot(page, draft.picker);
+				await page.getByTestId("picker-row-model").click();
+				await expect(
+					page.getByTestId("model-picker-list").locator("[data-model-id]"),
+				).toHaveCount(0);
+				await closePicker(page);
+				emptyCatalog = false;
+				await selectDraftHarness(page, draft.picker, "claude");
+				await selectDraftHarness(page, draft.picker, "opencode");
+			}
+			await pickModel(page, draft.picker, openCodeModel);
+			await expect(app.sendBtn).toBeEnabled();
+			const blockedFile = testInfo.outputPath("blocked-draft.json");
+			writeFileSync(blockedFile, JSON.stringify(blocked, null, 2));
+			await testInfo.attach("blocked-draft.json", {
+				path: blockedFile,
+				contentType: "application/json",
+			});
+			expect(blocked.creates).toEqual([]);
+			await assertDraftReceipt(
+				page,
+				harness,
+				draft,
+				"opencode",
+				`draft-no-default-${status}`,
+				observed,
+				testInfo,
+			);
+		});
+	});
+}
+
 test("zjdq: OpenCode draft with a Claude default", async ({
 	page,
 	harness,
 }, testInfo) => {
-	test.fail(
-		true,
-		"conduit-test-zjdq: the OpenCode draft displays the Claude default instead of its received model",
-	);
-	const { browser, slug, picker } = await openDraft(
+	const { slug, picker } = await openDraft(
 		page,
 		harness,
 		"opencode",
@@ -1843,75 +2806,29 @@ test("zjdq: OpenCode draft with a Claude default", async ({
 				}),
 			);
 		},
-		// Record the wrong harness in the artifact before the parity assertion.
 		null,
 	);
+	await selectDraftHarness(page, picker, "opencode");
 	await expect(picker).toHaveAttribute("data-shown-model", /.+/);
 	const shown = await readShown(picker);
-	if (shown.harness === "opencode" && shown.provider !== "claude") {
-		const sent = await sendAndCapture(page, harness, "opencode", "zjdq-first");
-		await assertParity(
-			{
-				case: "zjdq",
-				bead: "conduit-test-zjdq",
-				harness: "opencode",
-				flow: "draft first send",
-				change: "Claude default set",
-			},
-			shown,
-			sent,
-			testInfo,
-		);
-		return;
-	}
-	const result = await Effect.runPromise(
-		Effect.either(
-			browser.rpc.CreateSession({
-				projectSlug: slug,
-				originId: "zjdq-shown-pick",
-				instanceId: ProviderInstanceIdSchema.make("opencode"),
-				model: {
-					providerId: shown.provider,
-					modelId: shown.model,
-					variant: shown.effort,
-					contextWindow: shown.contextWindow,
-				},
-			}),
-		),
+	const sent = await sendAndCapture(page, harness, "opencode", "zjdq-first");
+	const sessionId = decodeURIComponent(
+		new URL(page.url()).pathname.match(/\/s\/([^/]+)/)?.[1] ?? "",
 	);
-	const error = result._tag === "Left" ? result.left : undefined;
-	const mismatches: string[] = [];
-	if (shown.harness !== "opencode")
-		mismatches.push(
-			`harness: shown ${JSON.stringify(shown.harness)}, bound harness "opencode"`,
-		);
-	if (shown.provider === "claude")
-		mismatches.push(
-			`provider: shown ${JSON.stringify(shown.provider)}, bound harness "opencode"`,
-		);
-	await writeGuardArtifact(testInfo, {
-		case: "zjdq",
-		bead: "conduit-test-zjdq",
-		harness: "opencode",
-		flow: "draft CreateSession with the displayed pick",
-		change: "Claude default set",
+	await assertParity(
+		{
+			case: "zjdq",
+			bead: "conduit-test-zjdq",
+			harness: "opencode",
+			flow: "draft first send",
+			change: "Claude project default set",
+		},
 		shown,
-		sent: null,
-		expectedRejection: "ModelNotInCatalog",
-		rpcResult:
-			error instanceof WsRpcError
-				? { _tag: "Left", error: { _tag: error._tag, message: error.message } }
-				: result,
-		equal: mismatches.length === 0,
-		mismatches,
-	});
-	expect(error).toBeInstanceOf(WsRpcError);
-	if (error instanceof WsRpcError)
-		expect(error.message).toMatch(/^ModelNotInCatalog:/);
-	expect(
-		mismatches,
-		"zjdq: the displayed provider belongs to its harness",
-	).toEqual([]);
+		sent,
+		testInfo,
+		undefined,
+		readStoredState(harness, slug, sessionId),
+	);
 });
 
 test("ob6u: another client changes an inherited session's default", async ({
@@ -2024,6 +2941,7 @@ async function createStoredPickSession(
 	const draft = await openDraft(page, harness, "claude");
 	const { sessionId } = await Effect.runPromise(
 		draft.browser.rpc.CreateSession({
+			permissionMode: "ask",
 			projectSlug: draft.slug,
 			originId: caseId,
 			instanceId: ProviderInstanceIdSchema.make("claude"),
@@ -2106,6 +3024,78 @@ test("switch-model-keeps-context: sonnet 1m switched to opus still sends 1m", as
 	).toBe("opus[1m]");
 });
 
+test("pick-required-permission-create: missing permission mode rejects before session creation", async ({
+	page,
+	harness,
+}, testInfo) => {
+	let sentPayload: Readonly<Record<string, unknown>> | undefined;
+	const rpc = await observeSessionRpc(page, (frame) => {
+		if (frame.tag !== "CreateSession") return frame;
+		const { permissionMode: _permissionMode, ...payload } = frame.payload ?? {};
+		sentPayload = payload;
+		return { ...frame, payload };
+	});
+	const { slug, picker } = await openDraft(
+		page,
+		harness,
+		"claude",
+		async (browser, projectSlug) => {
+			await Effect.runPromise(
+				browser.rpc.SetDefaultPermissionMode({
+					projectSlug,
+					mode: "full",
+				}),
+			);
+		},
+	);
+	const shown = {
+		...(await readShown(picker)),
+		permissionMode: await picker.getAttribute("data-shown-permission-mode"),
+	};
+	const snapshot = () => ({
+		sessions: readStoredState(harness, slug, "").sessionCount,
+		claudePrompts: enqueues(harness, true).length,
+		openCodePrompts: openCodePrompts(harness).length,
+		upstreamCreates: harness
+			.opencodeRequestBodies()
+			.filter(
+				(request) =>
+					request.method === "POST" && /^\/session\/?$/.test(request.path),
+			).length,
+	});
+	const before = snapshot();
+	await page.locator("#input").fill("must reject a missing permission mode");
+	await page.locator("#send").click();
+	await expect
+		.poll(() =>
+			rpc.replies.some(({ request }) => request.tag === "CreateSession"),
+		)
+		.toBe(true);
+	const reply = rpc.replies.find(
+		({ request }) => request.tag === "CreateSession",
+	);
+	const after = snapshot();
+	await writeGuardArtifact(testInfo, {
+		case: "pick-required-permission-create",
+		bead: "conduit-test-fmg0.6",
+		shown,
+		originalPayload: reply?.request.payload,
+		sentPayload,
+		reply: reply?.frame,
+		before,
+		after,
+		expectedRejection: "missing permissionMode",
+	});
+	expect(shown.permissionMode).toBe("full");
+	expect(reply?.request.payload?.["permissionMode"]).toBe("full");
+	expect(sentPayload).not.toHaveProperty("permissionMode");
+	expect(sentPayload?.["model"]).toEqual(reply?.request.payload?.["model"]);
+	expect(reply?.frame.exit?._tag).toBe("Failure");
+	expect(JSON.stringify(reply?.frame)).toContain("permissionMode");
+	expect(after).toEqual(before);
+	await expect(page).toHaveURL(/\/new\?/);
+});
+
 test("pick-required-create: no model rejects before session creation", async ({
 	page,
 	harness,
@@ -2135,6 +3125,7 @@ test("pick-required-create: no model rejects before session creation", async ({
 				Effect.either(
 					browser.rpc
 						.CreateSession({
+							permissionMode: "ask",
 							projectSlug: slug,
 							originId: "pick-required-create",
 							instanceId: ProviderInstanceIdSchema.make("opencode"),
@@ -2299,6 +3290,7 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 	const { browser, slug, picker } = await openDraft(page, harness, "opencode");
 	const { sessionId } = await Effect.runPromise(
 		browser.rpc.CreateSession({
+			permissionMode: "ask",
 			projectSlug: slug,
 			originId: caseId,
 			instanceId: ProviderInstanceIdSchema.make("opencode"),
@@ -2493,6 +3485,7 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 	for (const empty of ["effort", "context"] as const) {
 		const created = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: slug,
 				originId: `${caseId}-${empty}`,
 				instanceId: ProviderInstanceIdSchema.make("claude"),
@@ -2808,6 +3801,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 			await startManagedProject(harness);
 		const source = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: slug,
 				originId: caseId,
 				instanceId: ProviderInstanceIdSchema.make(instanceId),
@@ -2996,6 +3990,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		const { browser, slug, instanceId } = await startManagedProject(harness);
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: slug,
 				originId: caseId,
 				instanceId: ProviderInstanceIdSchema.make(instanceId),
@@ -3069,6 +4064,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		for (const empty of ["neither", "effort", "context"] as const) {
 			const { sessionId } = await Effect.runPromise(
 				browser.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: slug,
 					originId: `${caseId}-${empty}`,
 					instanceId: ProviderInstanceIdSchema.make(instanceId),
@@ -3508,6 +4504,7 @@ test.describe("server pick rejections", () => {
 				if (rejection !== "create") {
 					({ sessionId } = await Effect.runPromise(
 						browser.rpc.CreateSession({
+							permissionMode: "ask",
 							projectSlug: slug,
 							originId: `${caseId}-setup`,
 							instanceId: ProviderInstanceIdSchema.make(driver),
@@ -3539,6 +4536,7 @@ test.describe("server pick rejections", () => {
 					.map((session) => session.id)
 					.sort();
 				const createRequest = {
+					permissionMode: "ask" as const,
 					projectSlug: slug,
 					originId: caseId,
 					instanceId: ProviderInstanceIdSchema.make(driver),

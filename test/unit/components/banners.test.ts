@@ -6,9 +6,11 @@ import Banners from "../../../src/lib/frontend/components/overlays/Banners.svelt
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
+	chooseModel,
 	clearDiscoveryState,
 	handleModelInfo,
 	handleModelList,
+	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
 	applyInstanceListResponse,
@@ -97,9 +99,17 @@ describe("Banners", () => {
 	});
 
 	it("shows the OpenCode health warning when the active provider needs OpenCode", async () => {
-		instanceState.instances = [unhealthyInstance];
-		handleModelList({ providers: [claudeProvider, opencodeProvider] });
-		handleModelInfo({ model: "", provider: "openai" });
+		instanceState.instances = [
+			{ ...unhealthyInstance, id: "opencode", driver: "opencode" },
+		];
+		handleModelList({ providers: [claudeProvider] });
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers: [opencodeProvider],
+		});
+		selectInstance("opencode");
+		chooseModel({ modelId: "gpt-4.1", providerId: "openai" });
 
 		await renderBanners();
 
