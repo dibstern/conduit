@@ -171,6 +171,7 @@ export const RelayFactoryLive = (
 			const openCodeInstances = yield* OpenCodeInstancesTag;
 			const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 			const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
+			const tracer = yield* Effect.tracer;
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -408,6 +409,7 @@ export const RelayFactoryLive = (
 									signal: ac.signal,
 									configDir,
 									persistenceDbPath: dbPath,
+									tracer,
 									getProjects,
 									listDaemonSessions,
 									resolveSessionProject: (sessionId) =>
