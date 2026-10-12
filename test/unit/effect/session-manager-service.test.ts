@@ -1128,6 +1128,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1335,6 +1336,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1624,6 +1626,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1724,6 +1727,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
+				borrow: () => Effect.succeed(namedApi),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1796,6 +1800,7 @@ describe("SessionManagerService", () => {
 		const instanceClients = {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
+			borrow: () => Effect.succeed(namedApi),
 			ifRunning: () => Effect.succeedNone,
 			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
@@ -1992,6 +1997,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -2068,6 +2074,7 @@ describe("SessionManagerService", () => {
 				const instanceClients = {
 					events: () => Stream.empty,
 					use,
+					borrow: use,
 					ifRunning: () => Effect.succeedNone,
 					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,

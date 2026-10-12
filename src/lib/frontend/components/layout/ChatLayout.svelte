@@ -3,7 +3,7 @@
 <!-- Preserves element IDs and class names for E2E test compatibility. -->
 
 <script lang="ts">
-	import { onMount, tick, untrack } from "svelte";
+	import { onDestroy, onMount, tick, untrack } from "svelte";
 	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime } from "../../transport/runtime.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
@@ -57,7 +57,8 @@
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId, viewDraftModels } from "../../stores/discovery.svelte.js";
+	import { instanceState } from "../../stores/instance.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -107,6 +108,20 @@
 	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const draftSlug = $derived(getDraftProject());
+	$effect(() => {
+		const route = getCurrentRoute();
+		const projectSlug = route.page === "chat" && route.draft && !sessionState.currentId &&
+			(discoveryState.defaultsLoaded || discoveryState.hasInstanceChoice)
+			? getDraftProject() : null;
+		const instanceId = getEffectiveInstanceId();
+		const instancesLoaded = instanceState.loaded;
+		const attachedSlug = attachedProjectState.slug;
+		untrack(() => viewDraftModels(
+			projectSlug === attachedSlug && instancesLoaded ? projectSlug : null,
+			instanceId,
+		));
+	});
+	onDestroy(() => viewDraftModels(null));
 	const commandSessionId = $derived(getCurrentSessionId());
 	const commandWorkspace = $derived(JSON.stringify(commandSessionId ? findSession(commandSessionId)?.workspace ?? null : null));
 	let previousCommandContext: { sessionId: string | null; workspace: string } | undefined;

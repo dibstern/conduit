@@ -146,6 +146,11 @@ const makeSubscriptions = (
 		resumeStream(() =>
 			sockets.control.SubscribeProjectSettings({ projectSlug }),
 		),
+	/** This draft's OpenCode inventory also retains its borrowed instance. */
+	draftModels: (instanceId: string) =>
+		resumeStream(() =>
+			sockets.control.SubscribeDraftModels({ projectSlug, instanceId }),
+		),
 	/** Done/error alerts for sessions no tab is viewing. Live-only: a re-issue
 	 *  never replays one, so a reconnect cannot re-fire a ding. */
 	alerts: () =>

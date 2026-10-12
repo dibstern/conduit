@@ -132,6 +132,28 @@ subscribed directory. The module derives this from its shared event stream and
 reconcile results; nothing registers holds and no Conduit projection is read.
 The stream is open exactly while there is demand or a grace timer runs.
 
+An open OpenCode draft retains a scoped `borrow` through `SubscribeDraftModels`.
+It starts the selected instance and refreshes that instance's catalog on every
+connection, without binding a project or creating a session. Switching harness,
+closing or sending the draft, or disconnecting the browser releases its hold.
+The same instance owner stops a server started exclusively for inventory 30
+seconds after its last hold releases. A real `use` or observed session activity
+permanently returns that start to the ordinary idle policy. A server already
+running when borrowed keeps the ordinary policy too. Instance aliases resolve
+to one registered identity before demand is counted. A borrow released during
+startup still arms grace when the shared start finishes.
+
+`GetModels.defaultOpenCodeInstanceId` identifies the project's configured
+OpenCode instance for initial draft selection, including a named instance beside
+the lazy Default. The browser waits for the instance and default snapshots before
+holding an initial pick. Draft inventory errors surface even when an older
+in-memory catalog exists; passive discovery retains its cached fallback.
+
+`CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS` is a test-only positive integer
+millisecond override for that 30-second inventory grace. It leaves
+`CONDUIT_OPENCODE_IDLE_TIMEOUT_MS` unchanged. The process harness exposes it as
+`opencodeBorrowIdleTimeoutMs`; the draft borrow guards use 1,000 milliseconds.
+
 When demand reaches zero a grace timer arms (10 minutes;
 `CONDUIT_OPENCODE_IDLE_TIMEOUT_MS` overrides it). New demand cancels it. On
 expiry the connect-time reconcile runs again, so a missed busy event is caught,

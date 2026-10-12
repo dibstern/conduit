@@ -6,7 +6,9 @@ import { setDefaultAgent } from "../../../src/lib/domain/relay/Services/session-
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockOpenCodeAPI,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -58,6 +60,9 @@ describe("agent selection state", () => {
 				Layer.fresh(
 					makeTestHandlerLayer({
 						api,
+						openCodeModelService: makeMockOpenCodeModelService(
+							MOCK_OPENCODE_GPT4_CATALOG,
+						),
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
@@ -114,6 +119,9 @@ describe("agent selection state", () => {
 				Layer.fresh(
 					makeTestHandlerLayer({
 						api,
+						openCodeModelService: makeMockOpenCodeModelService(
+							MOCK_OPENCODE_GPT4_CATALOG,
+						),
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,

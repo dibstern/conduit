@@ -33,7 +33,11 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 	let scenario = "setup";
 	let evidence: Record<string, unknown> = {};
 
-	async function start(name: string, managedOpenCode = false) {
+	async function start(
+		name: string,
+		managedOpenCode = false,
+		primaryId: string = instanceId,
+	) {
 		scenario = name;
 		evidence = { ticket: "conduit-test-rqbc.4", at: new Date().toISOString() };
 		harness = ProcessHarness.create({
@@ -55,11 +59,11 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 					...config,
 					projects: config.projects.map((project) => ({
 						...project,
-						instanceId,
+						instanceId: primaryId,
 					})),
 					instances: [
 						{
-							id: instanceId,
+							id: primaryId,
 							name: "Default test",
 							port: 0,
 							managed: true,
@@ -348,7 +352,8 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 	}, 120_000);
 
 	it("settles stopped-instance busy rows, preserves user waits and unrelated sessions, and stops fallback warnings", async () => {
-		const fixture = await start("managed-stop", true);
+		const instanceId = "primary-test";
+		const fixture = await start("managed-stop", true, instanceId);
 		const browser = await fixture.connect();
 		const busyId = await browser.createSession(
 			"Viewed busy",
@@ -416,13 +421,23 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			}),
 		);
 		for (const id of [busyId, retryId, permissionId, questionId]) {
-			await fixture.setOpenCodeStatus(fixture.projectDir, id, { type: "busy" });
+			await fixture.setOpenCodeStatus(
+				fixture.projectDir,
+				id,
+				{ type: "busy" },
+				instanceId,
+			);
 		}
-		await fixture.setOpenCodeStatus(fixture.projectDir, retryId, {
-			type: "retry",
-			message: "Waiting to retry stopped work",
-			attempt: 1,
-		});
+		await fixture.setOpenCodeStatus(
+			fixture.projectDir,
+			retryId,
+			{
+				type: "retry",
+				message: "Waiting to retry stopped work",
+				attempt: 1,
+			},
+			instanceId,
+		);
 		await retryBrowser.waitFor(
 			(message) =>
 				message["type"] === "session_row" &&
@@ -435,28 +450,38 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			{ type: "busy" },
 			"managed-test",
 		);
-		await fixture.addOpenCodePrompt("permission", fixture.projectDir, {
-			id: "rqbc-4-permission",
-			sessionID: permissionId,
-			permission: "bash",
-			patterns: ["echo stop"],
-			metadata: {},
-			always: [],
-		});
+		await fixture.addOpenCodePrompt(
+			"permission",
+			fixture.projectDir,
+			{
+				id: "rqbc-4-permission",
+				sessionID: permissionId,
+				permission: "bash",
+				patterns: ["echo stop"],
+				metadata: {},
+				always: [],
+			},
+			instanceId,
+		);
 		await permissionBrowser.waitFor(
 			(message) => message["requestId"] === "rqbc-4-permission",
 		);
-		await fixture.addOpenCodePrompt("question", fixture.projectDir, {
-			id: "rqbc-4-question",
-			sessionID: questionId,
-			questions: [
-				{
-					question: "Proceed?",
-					header: "Proceed",
-					options: [{ label: "Yes" }],
-				},
-			],
-		});
+		await fixture.addOpenCodePrompt(
+			"question",
+			fixture.projectDir,
+			{
+				id: "rqbc-4-question",
+				sessionID: questionId,
+				questions: [
+					{
+						question: "Proceed?",
+						header: "Proceed",
+						options: [{ label: "Yes" }],
+					},
+				],
+			},
+			instanceId,
+		);
 		await questionBrowser.waitFor(
 			(message) => message["toolId"] === "rqbc-4-question",
 		);

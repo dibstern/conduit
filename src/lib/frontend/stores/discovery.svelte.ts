@@ -1,6 +1,7 @@
 // Agents, models, providers, and commands.
 
-import { Either } from "effect";
+import { Effect, Either, Fiber, Stream } from "effect";
+import type { RuntimeFiber } from "effect/Fiber";
 import { untrack } from "svelte";
 import type { SessionMode } from "../../contracts/project-file.js";
 import type {
@@ -13,7 +14,8 @@ import {
 	offeredOptions,
 	resolveTurnSettings,
 } from "../../provider/turn-settings.js";
-
+import { getRuntime, runTransportEffect } from "../transport/runtime.js";
+import { WsRpcClients } from "../transport/shared-client.js";
 import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
@@ -44,6 +46,7 @@ import type {
 import { instanceState } from "./instance.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { sessionState } from "./session.svelte.js";
+import { showToast } from "./ui.svelte.js";
 
 export const conduitCommands = [
 	{
@@ -170,6 +173,8 @@ const serverDiscovery = $state({
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
+	defaultsLoaded: false,
+	defaultOpenCodeInstanceId: null as string | null,
 	harnessDefaults: {
 		claude: { status: "missing" },
 		opencode: { status: "missing" },
@@ -228,8 +233,97 @@ let draftPermissionChosen = false;
 const instanceCatalogs = $state<Record<string, ProviderInfo[]>>({});
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 
+export const draftModelInventory = $state({
+	instanceId: null as string | null,
+	loading: false,
+	error: null as string | null,
+});
+let inventoryTarget: { projectSlug: string; instanceId: string } | null = null;
+let inventoryGeneration = 0;
+let inventoryFiber: RuntimeFiber<void, never> | null = null;
+
+/** The open browser draft owns one cancellable inventory subscription. */
+export function viewDraftModels(
+	projectSlug: string | null,
+	instanceId?: string,
+	retry = false,
+): void {
+	if (projectSlug) fillDraftDefault();
+	const target =
+		projectSlug &&
+		instanceId &&
+		instanceState.loaded &&
+		draftDriver(instanceId) === "opencode"
+			? { projectSlug, instanceId }
+			: null;
+	if (
+		inventoryTarget?.projectSlug === target?.projectSlug &&
+		inventoryTarget?.instanceId === target?.instanceId &&
+		(!retry || !draftModelInventory.error)
+	)
+		return;
+	inventoryTarget = target;
+	const generation = ++inventoryGeneration;
+	const previous = inventoryFiber;
+	inventoryFiber = null;
+	draftModelInventory.instanceId = target?.instanceId ?? null;
+	draftModelInventory.loading = target !== null;
+	draftModelInventory.error = null;
+	const fail = (message: string) => {
+		if (generation !== inventoryGeneration) return;
+		draftModelInventory.loading = false;
+		draftModelInventory.error = message;
+		if (
+			!sessionState.currentId &&
+			getEffectiveInstanceId() === target?.instanceId
+		)
+			draft.model = null;
+		showToast(message, { variant: "error" });
+	};
+	void (
+		previous ? runTransportEffect(Fiber.interrupt(previous)) : Promise.resolve()
+	)
+		.catch(() => undefined)
+		.then(async () => {
+			if (!target || generation !== inventoryGeneration) return;
+			const runtime = await getRuntime();
+			if (generation !== inventoryGeneration) return;
+			const applyModels = followModelsRead();
+			const next = runtime.runFork(
+				Effect.flatMap(WsRpcClients, (clients) =>
+					Effect.flatMap(
+						clients.forProject(target.projectSlug),
+						({ subscriptions }) =>
+							Stream.runForEach(
+								subscriptions.draftModels(target.instanceId),
+								(response) =>
+									Effect.sync(() => {
+										if (generation !== inventoryGeneration) return;
+										draftModelInventory.loading = false;
+										draftModelInventory.error = null;
+										applyModels(response);
+									}),
+							),
+					),
+				).pipe(
+					Effect.catchAll((error) => Effect.sync(() => fail(error.message))),
+				),
+			);
+			if (generation === inventoryGeneration) inventoryFiber = next;
+			else runtime.runFork(Fiber.interrupt(next));
+		})
+		.catch((error: unknown) =>
+			fail(`OpenCode model discovery failed: ${String(error)}`),
+		);
+}
+
 /** Creation copies the held draft; it does not resolve another pick. */
 export function getDraftPick(): Immutable<DraftPick> | undefined {
+	if (
+		draftModelInventory.instanceId === getEffectiveInstanceId() &&
+		(draftModelInventory.loading || draftModelInventory.error)
+	)
+		return undefined;
 	if (!draft.model || !draft.instanceId) return undefined;
 	return {
 		instanceId: draft.instanceId,
@@ -424,6 +518,14 @@ export const discoveryState = {
 	// Server-owned, with this tab's unconfirmed click read first.
 	get hasInstanceChoice(): boolean {
 		return draft.instanceId !== null;
+	},
+	get defaultsLoaded(): boolean {
+		return (
+			serverDiscovery.defaultsLoaded &&
+			(instanceIdForProviderId(serverDiscovery.defaultProviderId) ===
+				"claude" ||
+				serverDiscovery.defaultOpenCodeInstanceId !== null)
+		);
 	},
 	get hasModelChoice(): boolean {
 		if (sessionState.currentId) return false;
@@ -658,8 +760,14 @@ export function getEffectiveInstanceId(): string {
 	const isAvailable = (id: string) =>
 		available.length === 0 || available.some((i) => i.id === id);
 	const derived = instanceIdForProviderId(discoveryState.defaultProviderId);
+	if (derived === "opencode" && serverDiscovery.defaultOpenCodeInstanceId)
+		return serverDiscovery.defaultOpenCodeInstanceId;
 	if (isAvailable(derived)) return derived;
-	return available[0]?.id ?? derived;
+	return (
+		available.find((instance) => instance.driver === derived)?.id ??
+		available[0]?.id ??
+		derived
+	);
 }
 
 /** Only the session's GetModels reply supplies its bound instance. */
@@ -676,9 +784,21 @@ function draftDriver(instanceId: string): "claude" | "opencode" {
 
 /** Fill only an empty draft from the selected harness's resolved default. */
 function fillDraftDefault(): void {
-	if (sessionState.currentId || draft.model) return;
+	if (
+		!serverDiscovery.defaultsLoaded ||
+		(!instanceState.loaded && draft.instanceId === null) ||
+		sessionState.currentId ||
+		draft.model
+	)
+		return;
 	const instanceId = getEffectiveInstanceId();
 	const defaults = serverDiscovery.harnessDefaults[draftDriver(instanceId)];
+	if (
+		draft.instanceId === null &&
+		draftDriver(instanceId) === "opencode" &&
+		serverDiscovery.defaultOpenCodeInstanceId === null
+	)
+		return;
 	if (defaults.status !== "ok" || !defaults.pick) return;
 	const catalog = catalogFromProviderList(
 		draftDriver(instanceId) === "claude"
@@ -719,6 +839,11 @@ function setDraftModel(
 	contextWindow?: string,
 ): void {
 	const instanceId = getEffectiveInstanceId();
+	if (
+		draftModelInventory.instanceId === instanceId &&
+		draftModelInventory.error
+	)
+		return;
 	const harness = draftDriver(instanceId);
 	const catalog = catalogFromProviderList(
 		harness === "claude"
@@ -946,6 +1071,9 @@ export function applyGetModelsResponse(
 		// Cache off-screen picks without hydrating the open composer's shared state.
 		if (sessionState.currentId !== sessionId) return;
 	}
+	if (response.defaultOpenCodeInstanceId !== undefined)
+		serverDiscovery.defaultOpenCodeInstanceId =
+			response.defaultOpenCodeInstanceId;
 	// Scoped reads describe one instance, not the project's catalog.
 	if (sessionId || response.instanceId === undefined)
 		handleModelList({
@@ -968,6 +1096,8 @@ export function applyGetModelsResponse(
 				);
 			if (
 				!sessionState.currentId &&
+				(instanceState.loaded || draft.instanceId !== null) &&
+				(serverDiscovery.defaultsLoaded || draft.instanceId !== null) &&
 				response.instanceId === getEffectiveInstanceId() &&
 				!draft.model
 			) {
@@ -1036,8 +1166,10 @@ export function handleDefaultModelInfo(msg: {
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
+	serverDiscovery.defaultsLoaded = true;
 	choice.defaultModelId = null;
 	choice.defaultProviderId = null;
+	fillDraftDefault();
 }
 
 export function handleHarnessDefaults(
@@ -1335,6 +1467,8 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
+	serverDiscovery.defaultsLoaded = false;
+	serverDiscovery.defaultOpenCodeInstanceId = null;
 	serverDiscovery.harnessDefaults = {
 		claude: { status: "missing" },
 		opencode: { status: "missing" },

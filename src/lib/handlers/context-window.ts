@@ -29,7 +29,7 @@ export const switchContextWindowForSession = (
 				? { modelID: row.model_id, providerID: row.model_provider }
 				: undefined;
 		const harness = harnessForModelProvider(activeModel?.providerID ?? "");
-		const catalog = yield* loadModelCatalog(harness);
+		const catalog = yield* loadModelCatalog(harness, row?.provider ?? harness);
 		const resolved = resolveTurnSettings(
 			{
 				harness,

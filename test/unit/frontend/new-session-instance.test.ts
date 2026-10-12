@@ -209,6 +209,10 @@ describe("new session instance", () => {
 		const reloaded = await import(
 			"../../../src/lib/frontend/stores/discovery.svelte.js"
 		);
+		const { applyInstanceListResponse: applyReloadedInstances } = await import(
+			"../../../src/lib/frontend/stores/instance.svelte.js"
+		);
+		applyReloadedInstances({ instances });
 		reloaded.handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
 		reloaded.handleModelList({ providers: defaults.providers });
 		reloaded.applyGetModelsResponse({

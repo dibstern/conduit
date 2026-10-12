@@ -136,6 +136,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeProjectSettings: () => Stream.empty,
 				SubscribeAlerts: () => Stream.empty,
 				SubscribeInputDraft: () => Stream.empty,
+				SubscribeDraftModels: () => Stream.empty,
 				SubscribeInstances: () => Stream.empty,
 				SubscribeUsage: () =>
 					Stream.fromIterable(usageSnapshots).pipe(

@@ -44,6 +44,8 @@ import type {
 beforeEach(() => {
 	clearDiscoveryState();
 	clearInstanceState();
+	applyInstanceListResponse({ instances: [] });
+	handleDefaultModelInfo({});
 	sessionState.currentId = null;
 });
 

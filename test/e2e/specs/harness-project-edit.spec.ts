@@ -37,7 +37,10 @@ const MARKER = "CONDUIT-EXTRA-FOLDER-MARKER-7f3a";
 const providers = [
 	{
 		driver: "opencode",
-		harnessOptions: { opencodeRecording: "multi-folder-project" },
+		harnessOptions: {
+			opencodeRecording: "multi-folder-project",
+			opencodeInitiallyIdle: true,
+		},
 		prompt: () =>
 			"Use the Read tool to read marker.txt in the additional project folder, then reply with its contents.",
 	},
@@ -239,10 +242,18 @@ for (const provider of providers) {
 			await openPickerRoot(page, picker);
 			if ((await picker.getAttribute("data-instance-id")) !== provider.driver)
 				await page.getByTestId(`picker-harness-${provider.driver}`).click();
+			await page.getByTestId("picker-row-model").click();
+			await page
+				.getByTestId("model-picker-list")
+				.locator("[data-model-id]")
+				.first()
+				.click();
 			await page.keyboard.press("Escape");
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			await expect(picker).toHaveAttribute("data-instance-id", provider.driver);
-			await app.sendMessage(provider.prompt(markerPath));
+			await app.input.fill(provider.prompt(markerPath));
+			await expect(app.sendBtn).toBeEnabled();
+			await app.sendBtn.click();
 			await expect(page).toHaveURL(/\/s\/[^/?]+/);
 			await expect(chat.assistantMessages.last()).toContainText(MARKER, {
 				timeout: 60_000,

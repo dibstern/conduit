@@ -84,6 +84,7 @@ import {
 	type OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
 	type OrchestrationEngineTag,
+	openCodeInstanceTarget,
 	SessionCompactionsTag,
 	SessionRetriesTag,
 	type WebSocketHandlerTag,
@@ -145,8 +146,7 @@ const relayOpenCodeInstances = (
 ): OpenCodeInstances => {
 	const defaultId = defaultInstanceIdForDriver("opencode");
 	const selectedId = config.openCodeInstanceId ?? defaultId;
-	const target = (instanceId: string) =>
-		instanceId === defaultId ? selectedId : instanceId;
+	const target = openCodeInstanceTarget(selectedId);
 	const scope = config.noServer ? config.projectDir : undefined;
 	// Restored sessions receive events before the relay first uses their instance.
 	const used = new Set(persistedInstanceIds.map(target));
@@ -170,6 +170,12 @@ const relayOpenCodeInstances = (
 					),
 				),
 		use,
+		borrow: (instanceId, directory = scope) =>
+			instances.borrow(target(instanceId), directory).pipe(
+				Effect.tap(() => {
+					used.add(target(instanceId));
+				}),
+			),
 		useIfRunning: (instanceId, directory = scope) =>
 			instances.useIfRunning(target(instanceId), directory),
 		ifRunning: (instanceId, directory = scope) =>

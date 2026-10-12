@@ -354,6 +354,7 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
+	defaultOpenCodeInstanceId: Schema.optional(Schema.String),
 	/** OpenCode catalog; Claude's shared catalog follows providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
@@ -2642,6 +2643,14 @@ export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
 	stream: true,
 });
 
+/** Borrow OpenCode while this browser has its draft open; never binds it. */
+export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
+	payload: { projectSlug: NonEmptyString, instanceId: NonEmptyString },
+	success: GetModelsResponseSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 /** A session finished or failed in this project while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
@@ -2698,6 +2707,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,
+	SubscribeDraftModels,
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,

@@ -113,7 +113,7 @@ export const loadServerSessionPick = (
 		const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		const cached =
 			models._tag === "Some"
-				? yield* models.value.cachedProviders()
+				? yield* models.value.cachedProviders(instanceId)
 				: undefined;
 		const resolved = resolveServerSessionPick(
 			harness,

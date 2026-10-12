@@ -116,7 +116,7 @@ export const loadModelCatalog = (
 		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		if (modelService._tag === "None") return [] as ModelInfo[];
 		const provListResult = yield* Effect.either(
-			modelService.value.listProviders(options),
+			modelService.value.listProviders({ ...options, instanceId }),
 		);
 		if (provListResult._tag === "Left") {
 			log.warn(

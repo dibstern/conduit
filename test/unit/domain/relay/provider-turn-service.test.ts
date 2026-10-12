@@ -24,6 +24,7 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
@@ -73,6 +74,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 } from "../../../helpers/mock-factories.js";
@@ -87,6 +89,33 @@ const completedTurn = (overrides?: Partial<TurnResult>): TurnResult => ({
 	providerStateUpdates: [],
 	...overrides,
 });
+
+const openCodeCatalog = {
+	providers: [
+		{
+			id: "openai",
+			name: "OpenAI",
+			models: [
+				{
+					id: "gpt-4.1",
+					name: "GPT-4.1",
+					variants: { high: {} },
+					contextWindowOptions: [{ value: "128k", label: "128k" }],
+				},
+			],
+		},
+		{
+			id: "opencode",
+			name: "OpenCode",
+			models: [
+				{ id: "test-model", name: "Test Model" },
+				{ id: "test", name: "Test" },
+			],
+		},
+	],
+	defaults: {},
+	connected: ["openai", "opencode"],
+};
 
 const flushDispatch = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
@@ -290,6 +319,10 @@ const serviceLayer = (input: {
 	const ingestion = input.ingestion ?? makeIngestion();
 	let baseLayer = Layer.mergeAll(
 		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
+		Layer.succeed(
+			OpenCodeModelServiceTag,
+			makeMockOpenCodeModelService(openCodeCatalog),
+		),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(LoggerTag, log),
 		Layer.succeed(

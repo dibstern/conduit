@@ -30,7 +30,7 @@ const isClaudeModel = (model: unknown): boolean =>
 test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
 
 /** A project whose relay default is a Claude-harness model, as the reporter's
- *  was, opened on a new-session draft with OpenCode running. `prepare` runs
+ *  was, opened on a new-session draft. `prepare` runs
  *  before the page loads. Returns the composer's model picker. */
 async function openDraft(
 	page: Page,
@@ -51,9 +51,6 @@ async function openDraft(
 			provider: "claude",
 		}),
 	);
-	// The reporter's OpenCode was running. Model discovery never starts a
-	// stopped one, so a draft would list none of its models.
-	await browser.startInstance("opencode");
 	await Effect.runPromise(
 		browser.rpc.SetHarnessDefault({
 			projectSlug: slug,
@@ -433,6 +430,12 @@ test("an OpenCode draft with an empty catalog requires a model before send", asy
 	await editRpc(page, (frame, request) => {
 		if (frame.tag === "CreateSession") createRequest = frame;
 		if (request?.tag === "CreateSession") createReplies.push(frame);
+		if (
+			frame._tag === "Chunk" &&
+			request?.tag === "SubscribeDraftModels" &&
+			request.payload?.["instanceId"] === "opencode"
+		)
+			return withoutCatalogues(frame);
 		if (
 			frame.exit?._tag === "Success" &&
 			request?.tag === "GetModels" &&

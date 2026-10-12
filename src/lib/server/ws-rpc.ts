@@ -33,7 +33,7 @@ import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
-import { modelsHandlers } from "./ws-rpc/models.js";
+import { modelsHandlers, subscribeDraftModels } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
 import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
@@ -302,6 +302,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 			),
 		),
 	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
+	SubscribeDraftModels: (request) => Rpc.fork(subscribeDraftModels(request)),
 	SubscribeAlerts: () => Rpc.fork(subscribeAlerts()),
 	SubscribeInputDraft: (request) =>
 		Rpc.fork(subscribeInputDraft(request.sessionId)),
@@ -592,6 +593,8 @@ export const makeRoutedWsRpcServerLayer = <
 		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
 		SubscribeProjectSettings: (request) =>
 			routeStream(request.projectSlug, () => subscribeProjectSettings()),
+		SubscribeDraftModels: (request) =>
+			routeStream(request.projectSlug, () => subscribeDraftModels(request)),
 		SubscribeAlerts: (request) =>
 			routeStream(request.projectSlug, subscribeAlerts),
 		SubscribeInputDraft: (request) =>

@@ -13,6 +13,8 @@ import type { SessionRow } from "../../../src/lib/persistence/read-model-types.j
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -119,6 +121,9 @@ const providePromptLayer = (input: {
 	const sessionManagerService = makeMockSessionManagerService();
 	const baseLayer = makeTestHandlerLayer({
 		wsHandler,
+		openCodeModelService: makeMockOpenCodeModelService(
+			MOCK_OPENCODE_GPT4_CATALOG,
+		),
 		sessionManagerService,
 		orchestrationEngine: input.engine,
 		sessionTitleService: input.titleService,

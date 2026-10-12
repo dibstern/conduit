@@ -861,13 +861,12 @@ export const mockAppHandlers: StepHandler[] = [
 							},
 						},
 			});
-			if (modelRequired)
-				rpcControl.setProjectSetting({
-					_tag: "defaultModel",
-					model: "claude-sonnet-4",
-					provider: "anthropic",
-					variant: "",
-				});
+			rpcControl.setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-4",
+				provider: "anthropic",
+				variant: "",
+			});
 
 			const baseUrl =
 				process.env["CONDUIT_BASE_URL"] ?? "http://localhost:4173";

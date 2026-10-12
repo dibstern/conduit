@@ -216,6 +216,8 @@ export const getModelsResponse = (
 		readonly clientId?: string;
 		readonly sessionId?: string;
 		readonly instanceId?: string;
+		/** Interactive inventory must expose a discovery failure for retry. */
+		readonly requireCatalog?: boolean;
 	} = {},
 ): Effect.Effect<
 	GetModelsResponse,
@@ -283,11 +285,32 @@ export const getModelsResponse = (
 					),
 				)
 			: undefined;
+		const activeProviderId = activeId
+			? ((yield* engine.getProviderForSessionEffect(activeId)) ??
+				stored?.provider)
+			: undefined;
+		const activeDriver = activeProviderId
+			? resolveProviderRoutingDriver(
+					daemonConfig ??
+						(isKnownDriverKind(activeProviderId) || !config.configDir
+							? null
+							: loadDaemonConfig(config.configDir)),
+					activeProviderId,
+				)
+			: undefined;
+		const inventoryInstanceId =
+			(activeDriver === "opencode" ? activeProviderId : undefined) ??
+			instanceId;
 		const providers: ProviderInfo[] = [];
 		let nativeDefaultModel: string | undefined;
 		if (instanceDriver === undefined || instanceDriver === "opencode") {
 			const openCodeProviderResult = yield* Effect.either(
-				modelService.listProviders(),
+				modelService.listProviders({
+					...(input.requireCatalog ? { requireFresh: true } : {}),
+					...(inventoryInstanceId === undefined
+						? {}
+						: { instanceId: inventoryInstanceId }),
+				}),
 			);
 			if (openCodeProviderResult._tag === "Right") {
 				nativeDefaultModel = openCodeProviderResult.right.nativeDefaultModel;
@@ -296,32 +319,36 @@ export const getModelsResponse = (
 					openCodeProviderResult.right.nativeDefaultModel,
 				);
 				const { globalSync } = yield* ProjectSettingsTag;
-				yield* globalSync.withPermits(1)(
-					Effect.gen(function* () {
-						const state = yield* Ref.get(yield* OverridesStateTag);
-						if (
-							state.nativeDefaultModel?.providerID ===
-								nativeDefault?.providerID &&
-							state.nativeDefaultModel?.modelID === nativeDefault?.modelID
-						)
-							return;
-						yield* Ref.update(yield* OverridesStateTag, (current) => ({
-							...current,
-							nativeDefaultModel: nativeDefault,
-						}));
-						if (state.defaultModel === undefined)
-							yield* publishProjectSetting({
-								_tag: "defaultModel",
-								...(nativeDefault
-									? {
-											model: nativeDefault.modelID,
-											provider: nativeDefault.providerID,
-										}
-									: {}),
-								variant: state.defaultVariant,
-							});
-					}),
-				);
+				if (
+					inventoryInstanceId === undefined ||
+					inventoryInstanceId === (config.openCodeInstanceId ?? "opencode")
+				)
+					yield* globalSync.withPermits(1)(
+						Effect.gen(function* () {
+							const state = yield* Ref.get(yield* OverridesStateTag);
+							if (
+								state.nativeDefaultModel?.providerID ===
+									nativeDefault?.providerID &&
+								state.nativeDefaultModel?.modelID === nativeDefault?.modelID
+							)
+								return;
+							yield* Ref.update(yield* OverridesStateTag, (current) => ({
+								...current,
+								nativeDefaultModel: nativeDefault,
+							}));
+							if (state.defaultModel === undefined)
+								yield* publishProjectSetting({
+									_tag: "defaultModel",
+									...(nativeDefault
+										? {
+												model: nativeDefault.modelID,
+												provider: nativeDefault.providerID,
+											}
+										: {}),
+									variant: state.defaultVariant,
+								});
+						}),
+					);
 				const connectedSet = new Set(openCodeProviderResult.right.connected);
 				providers.push(
 					...openCodeProviderResult.right.providers
@@ -350,6 +377,8 @@ export const getModelsResponse = (
 						.filter((p) => p.configured),
 				);
 			} else {
+				if (input.requireCatalog)
+					return yield* Effect.fail(openCodeProviderResult.left);
 				log.warn(
 					`OpenCode provider discovery failed during model refresh: ${formatErrorDetail(openCodeProviderResult.left)}`,
 				);
@@ -363,19 +392,6 @@ export const getModelsResponse = (
 			);
 		}
 
-		const activeProviderId = activeId
-			? ((yield* engine.getProviderForSessionEffect(activeId)) ??
-				stored?.provider)
-			: undefined;
-		const activeDriver = activeProviderId
-			? resolveProviderRoutingDriver(
-					daemonConfig ??
-						(isKnownDriverKind(activeProviderId) || !config.configDir
-							? null
-							: loadDaemonConfig(config.configDir)),
-					activeProviderId,
-				)
-			: undefined;
 		const fallbackModel = activeId
 			? stored?.model_id && stored.model_provider
 				? { modelID: stored.model_id, providerID: stored.model_provider }
@@ -420,7 +436,8 @@ export const getModelsResponse = (
 			(catalog.length > 0 ||
 				(selectedDriver === "claude"
 					? claudeCatalog !== undefined
-					: (yield* modelService.cachedProviders())._tag === "Some"))
+					: (yield* modelService.cachedProviders(inventoryInstanceId))._tag ===
+						"Some"))
 				? catalog
 				: undefined;
 		const normalized = pick
@@ -470,6 +487,7 @@ export const getModelsResponse = (
 
 		return {
 			projectSlug: input.projectSlug ?? "",
+			defaultOpenCodeInstanceId: config.openCodeInstanceId ?? "opencode",
 			...((activeProviderId ?? instanceId) === undefined
 				? {}
 				: { instanceId: activeProviderId ?? instanceId }),
@@ -549,8 +567,20 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 
 		const { modelId, providerId } = input;
 		const sessionId = input.sessionId;
+		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
 		const harness = harnessForModelProvider(providerId);
-		const catalog = yield* loadModelCatalog(harness);
+		const config = yield* ConfigTag;
+		const boundDriver = row
+			? resolveProviderRoutingDriver(
+					loadDaemonConfig(config.configDir),
+					row.provider,
+				)
+			: undefined;
+		const instanceId =
+			row && (boundDriver === undefined || boundDriver === harness)
+				? row.provider
+				: harness;
+		const catalog = yield* loadModelCatalog(harness, instanceId);
 		const resolved = resolveTurnSettings(
 			{
 				harness,
@@ -744,7 +774,9 @@ export const switchVariantForSession = (
 				? { modelID: row.model_id, providerID: row.model_provider }
 				: undefined;
 		const harness = harnessForModelProvider(activeModel?.providerID ?? "");
-		const catalog = modelCatalog ?? (yield* loadModelCatalog(harness));
+		const catalog =
+			modelCatalog ??
+			(yield* loadModelCatalog(harness, row?.provider ?? harness));
 		const resolved = resolveTurnSettings(
 			{
 				harness,

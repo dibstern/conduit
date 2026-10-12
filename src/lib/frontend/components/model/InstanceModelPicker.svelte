@@ -26,6 +26,7 @@
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
+		draftModelInventory,
 		formatAgentLabel,
 		getActiveAgent,
 		getActiveModel,
@@ -41,6 +42,7 @@
 		type InstanceOption,
 		isProviderConfigured,
 		selectInstance,
+		viewDraftModels,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
@@ -98,6 +100,7 @@
 	const locked = $derived(boundInstanceId !== null);
 	const sessionLoading = $derived(!!sessionState.currentId && getSessionPick(sessionState.currentId) === undefined);
 	const selectedId = $derived(boundInstanceId ?? getEffectiveInstanceId());
+	const draftModelLoading = $derived(!locked && draftModelInventory.instanceId === selectedId && draftModelInventory.loading);
 	const selectedInstance = $derived(
 		instances.find((i) => i.id === selectedId) ?? null,
 	);
@@ -217,6 +220,7 @@
 	/** Display name for the trigger button, with date suffix stripped.
 	 *  Grouped models (Bedrock geo routing) append the active scope label. */
 	const displayName = $derived.by(() => {
+		if (draftModelLoading) return "Loading…";
 		if (activeModel) {
 			const base = stripDateSuffix(formatModelName(activeModel));
 			const scope = activeModel.routingOptions?.find(
@@ -446,6 +450,8 @@
 		const request = composerPickerState.request;
 		if (!request) return;
 		untrack(() => {
+			if (!locked && selectedDriver === "opencode")
+				viewDraftModels(getDraftProject(), selectedId, true);
 			void accounts.refreshQuotas();
 			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
 			variantRef?.close();
@@ -744,14 +750,16 @@
 						onclick={() => { favoritesOnly = !favoritesOnly; }}
 					/>
 				</div>
-				<div data-testid="model-picker-list" class="py-1.5">
+				<div data-testid="model-picker-list" class="py-1.5" aria-busy={draftModelLoading}>
 					{#if locked}
 						<div class="my-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] leading-[1.4] text-text-dimmer">
 							<Icon name="lock" size={12} class="shrink-0" />
 							<span>Harness fixed at creation — showing <b class="font-semibold text-text-secondary">{selectedLabel}</b> only. Model switching within it is allowed.</span>
 						</div>
 					{/if}
-					{#if filteredGroups.length === 0}
+					{#if draftModelLoading}
+						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">Loading models…</div>
+					{:else if filteredGroups.length === 0}
 						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">{searchQuery.trim() ? "No models match" : "No models available"}</div>
 					{:else}
 						{#each filteredGroups as group (group.provider.id)}

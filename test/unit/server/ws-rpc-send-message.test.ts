@@ -9,7 +9,9 @@ import { setModel } from "../../../src/lib/domain/relay/Services/session-overrid
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockConfig,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -131,6 +133,9 @@ describe("WsRpcServerLayer input.submit", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
+							openCodeModelService: makeMockOpenCodeModelService(
+								MOCK_OPENCODE_GPT4_CATALOG,
+							),
 							seedEvents: [
 								makeSessionCreatedEvent("session-1"),
 								...sessionPickEvents("session-1", {
@@ -191,6 +196,9 @@ describe("WsRpcServerLayer input.submit", () => {
 							makeTestHandlerLayer({
 								config: makeMockConfig({ projectDir: tmpdir() }),
 								orchestrationEngine: engine,
+								openCodeModelService: makeMockOpenCodeModelService(
+									MOCK_OPENCODE_GPT4_CATALOG,
+								),
 								seedEvents: [
 									makeSessionCreatedEvent("session-1"),
 									...sessionPickEvents("session-1", {

@@ -1,8 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import Database from "better-sqlite3";
-import { Effect, type Either, Schema } from "effect";
+import { Effect, type Either, Fiber, Option, Schema, Stream } from "effect";
 import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetAgentsResponseSchema,
@@ -90,7 +97,25 @@ type RpcFrame = {
 	readonly requestId?: string;
 	readonly payload?: Readonly<Record<string, unknown>>;
 	readonly exit?: { readonly _tag: string; readonly value?: unknown };
+	readonly values?: readonly unknown[];
 };
+
+/** A draft catalog can arrive as a unary reply or an inventory push. */
+function editModelInventories(
+	frame: RpcFrame,
+	edit: (response: GetModelsResponse) => GetModelsResponse,
+): RpcFrame {
+	const replace = (value: unknown) =>
+		edit(Schema.decodeUnknownSync(GetModelsResponseSchema)(value));
+	if (frame._tag === "Chunk" && frame.values)
+		return { ...frame, values: frame.values.map(replace) };
+	if (frame.exit?._tag === "Success" && frame.exit.value !== undefined)
+		return {
+			...frame,
+			exit: { ...frame.exit, value: replace(frame.exit.value) },
+		};
+	return frame;
+}
 
 async function writeGuardArtifact(
 	testInfo: TestInfo,
@@ -246,7 +271,7 @@ async function pickModel(
 		.locator(
 			`[data-model-id="${model.modelID}"][data-provider-id="${model.providerID}"]`,
 		)
-		.click();
+		.click({ timeout: 10_000 });
 	await closePicker(page);
 	await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
 }
@@ -625,14 +650,16 @@ async function observeSessionRpc(
 	>();
 	await editRpc(page, async (frame, request) => {
 		if (frame._tag === "Request") requests.push(frame);
-		if (frame._tag === "Exit" && request) {
+		const isReply =
+			frame._tag === "Exit" ||
+			(frame._tag === "Chunk" && request?.tag === "SubscribeDraftModels");
+		if (isReply && request) {
 			replies.push({ frame, request });
-			const hold = holds.get(
-				`${request.tag}:${request.payload?.["sessionId"]}`,
-			);
+			const tag =
+				request.tag === "SubscribeDraftModels" ? "GetModels" : request.tag;
+			const hold = holds.get(`${tag}:${request.payload?.["sessionId"]}`);
 			if (hold) {
-				if (hold.once)
-					holds.delete(`${request.tag}:${request.payload?.["sessionId"]}`);
+				if (hold.once) holds.delete(`${tag}:${request.payload?.["sessionId"]}`);
 				hold.frames.push(frame);
 				hold.arrived();
 				await hold.gate;
@@ -640,7 +667,7 @@ async function observeSessionRpc(
 		}
 		return frame._tag === "Request"
 			? (editRequest?.(frame) ?? frame)
-			: frame._tag === "Exit" && request
+			: isReply && request
 				? (editReply?.(frame, request) ?? frame)
 				: frame;
 	});
@@ -656,7 +683,10 @@ async function observeSessionRpc(
 				this.addEventListener("message", (event: MessageEvent<unknown>) => {
 					if (typeof event.data !== "string") return;
 					const frame = JSON.parse(event.data) as RpcFrame;
-					if (frame._tag === "Exit" && frame.requestId)
+					if (
+						(frame._tag === "Exit" || frame._tag === "Chunk") &&
+						frame.requestId
+					)
 						receipts.add(frame.requestId);
 				});
 			}
@@ -2327,26 +2357,25 @@ test.describe("draft owns one complete pick", () => {
 			undefined,
 			(frame, request) => {
 				if (
-					request.tag !== "GetModels" ||
+					(request.tag !== "GetModels" &&
+						request.tag !== "SubscribeDraftModels") ||
 					request.payload?.["instanceId"] !== instanceB ||
-					request.payload?.["sessionId"] ||
-					frame.exit?._tag !== "Success"
+					request.payload?.["sessionId"]
 				)
 					return frame;
-				const response = Schema.decodeUnknownSync(GetModelsResponseSchema)(
-					frame.exit.value,
-				);
-				const value: GetModelsResponse = deliverEmpty
-					? {
-							...response,
-							providers: [],
-							active: undefined,
-							variant: undefined,
-							contextWindow: undefined,
-						}
-					: response;
-				delivered.push({ requestId: request.id, response: value });
-				return { ...frame, exit: { ...frame.exit, value } };
+				return editModelInventories(frame, (response) => {
+					const value: GetModelsResponse = deliverEmpty
+						? {
+								...response,
+								providers: [],
+								active: undefined,
+								variant: undefined,
+								contextWindow: undefined,
+							}
+						: response;
+					delivered.push({ requestId: request.id, response: value });
+					return value;
+				});
 			},
 		);
 		let sessionA = "";
@@ -2485,7 +2514,9 @@ test.describe("draft owns one complete pick", () => {
 				`${phase}: B cannot adopt A's held or default model`,
 			).toBe("");
 			expect(snapshot.shown.provider).toBe("");
-			await expect(draft.picker).toHaveAccessibleName(/Select model/);
+			await expect(draft.picker).toHaveAccessibleName(
+				phase === "b-reply-held" ? /Loading/ : /Select model/,
+			);
 			expect(
 				snapshot.sendDisabled,
 				`${phase}: B cannot send before a B model is selected`,
@@ -2709,26 +2740,17 @@ for (const status of ["missing", "invalid", "empty-catalog"] as const) {
 				(frame, request) => {
 					if (
 						emptyCatalog &&
-						request.tag === "GetModels" &&
-						request.payload?.["instanceId"] === "opencode" &&
-						frame.exit?._tag === "Success"
+						(request.tag === "GetModels" ||
+							request.tag === "SubscribeDraftModels") &&
+						request.payload?.["instanceId"] === "opencode"
 					) {
-						const response = Schema.decodeUnknownSync(GetModelsResponseSchema)(
-							frame.exit.value,
-						);
-						return {
-							...frame,
-							exit: {
-								...frame.exit,
-								value: {
-									...response,
-									providers: [],
-									active: undefined,
-									variant: undefined,
-									contextWindow: undefined,
-								},
-							},
-						};
+						return editModelInventories(frame, (response) => ({
+							...response,
+							providers: [],
+							active: undefined,
+							variant: undefined,
+							contextWindow: undefined,
+						}));
 					}
 					return frame;
 				},
@@ -3732,6 +3754,1177 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 		code: "PICK_REQUIRED",
 	});
 	expect(enqueues(harness, true).length).toBe(receiptsBefore);
+});
+
+test.describe("OpenCode draft inventory borrows", () => {
+	// The daemon receives this only through the isolated process fixture's
+	// CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS test-only environment knob.
+	const borrowIdleTimeoutMs = 1_000;
+	const model = { providerID: "fake", modelID: "fake-model" };
+	const namedModel = { providerID: "fake", modelID: "named-model" };
+	test.use({
+		harnessOptions: {
+			managedOpenCode: true,
+			managedOpenCodeId: "opencode",
+			opencodeBorrowIdleTimeoutMs: borrowIdleTimeoutMs,
+			capabilityModels: claudeModels,
+			restartProof: true,
+		},
+	});
+
+	async function prepareDraft(
+		harness: ProcessHarness,
+		driver: Driver = "claude",
+		instanceId = "opencode",
+	) {
+		const directory = mkdtempSync(join(harness.root, "borrow-project-"));
+		const browser = await harness.connect();
+		const { savedSlug: slug } = await Effect.runPromise(
+			browser.rpc.SaveProject({ folders: [directory] }),
+		);
+		if (!slug) throw new Error("SaveProject did not return a slug");
+		await Effect.runPromise(
+			browser.rpc.SetDefaultModel({
+				projectSlug: slug,
+				provider: driver === "claude" ? "claude" : model.providerID,
+				model: driver === "claude" ? "sonnet" : model.modelID,
+			}),
+		);
+		for (const harness of ["claude", "opencode"] as const)
+			await Effect.runPromise(
+				browser.rpc.SetHarnessDefault({
+					projectSlug: slug,
+					harness,
+					providerId: harness === "claude" ? "claude" : model.providerID,
+					modelId: harness === "claude" ? "sonnet" : model.modelID,
+					effort: harness === "claude" ? "low" : "",
+					contextWindow: harness === "claude" ? "200k" : "",
+				}),
+			);
+		const defaultCatalog = await Effect.runPromise(
+			browser.rpc.GetModels({ projectSlug: slug }),
+		);
+		// Default validation can use the provider during fixture setup. The
+		// browser must begin with it stopped, as an idle-stopped draft would.
+		await browser.stopInstance(instanceId);
+		const initialInstance = (await browser.instances()).instances.find(
+			(instance) => instance.id === instanceId,
+		);
+		expect(initialInstance?.status).toBe("stopped");
+		return { browser, slug, defaultCatalog, initialInstance };
+	}
+
+	async function openDraftPage(
+		page: Page,
+		harness: ProcessHarness,
+		slug: string,
+		driver: Driver = "claude",
+	) {
+		await new AppPage(page).goto(
+			`${harness.baseUrl}/new?p=${encodeURIComponent(slug)}`,
+		);
+		await expect(page).toHaveURL(/\/new\?/);
+		const picker = page.locator(pickerSelector);
+		await expect(picker).toHaveAttribute("data-shown-harness", driver);
+		return picker;
+	}
+
+	async function instance(browser: ProcessBrowser, instanceId = "opencode") {
+		return (await browser.instances()).instances.find(
+			(entry) => entry.id === instanceId,
+		);
+	}
+
+	async function waitForHealthy(
+		browser: ProcessBrowser,
+		instanceId = "opencode",
+	) {
+		await expect
+			.poll(async () => (await instance(browser, instanceId))?.status, {
+				timeout: 20_000,
+			})
+			.toBe("healthy");
+		const running = await instance(browser, instanceId);
+		expect(running?.pid).toBeGreaterThan(0);
+		expect(isProcessAlive(running?.pid ?? 0)).toBe(true);
+		return running;
+	}
+
+	async function unboundState(setup: Awaited<ReturnType<typeof prepareDraft>>) {
+		const sessions = await Effect.runPromise(
+			setup.browser.rpc.ListDaemonSessions({ projectSlug: setup.slug }),
+		);
+		const defaults = await Effect.runPromise(
+			setup.browser.rpc.GetModels({ projectSlug: setup.slug }),
+		);
+		return {
+			sessions: sessions.sessions,
+			projectDefault: {
+				instanceId: defaults.instanceId,
+				active: defaults.active,
+			},
+		};
+	}
+
+	async function sendShownPick(
+		page: Page,
+		harness: ProcessHarness,
+		picker: Locator,
+		slug: string,
+		caseId: string,
+		observed: Awaited<ReturnType<typeof observeSessionRpc>>,
+		instanceId = "opencode",
+	) {
+		const shown = await readShown(picker);
+		await new AppPage(page).sendMessage(caseId);
+		await expect(page).toHaveURL(/\/s\/[^/?]+/);
+		await expect.poll(() => openCodePrompts(harness).length).toBe(1);
+		const providerReceipt = openCodePrompts(harness)[0];
+		const sent = JSON.parse(providerReceipt?.body ?? "{}") as {
+			model?: { providerID: string; modelID: string };
+			variant?: string;
+		};
+		const sessionId = decodeURIComponent(
+			new URL(page.url()).pathname.match(/\/s\/([^/]+)/)?.[1] ?? "",
+		);
+		const creates = observed.requests.filter(
+			(request) => request.tag === "CreateSession",
+		);
+		expect(creates).toHaveLength(1);
+		expect(creates[0]?.payload).toMatchObject({
+			instanceId,
+			model: {
+				providerId: shown.provider,
+				modelId: shown.model,
+				variant: shown.effort,
+				contextWindow: shown.contextWindow,
+			},
+		});
+		expect(shown.harness).toBe("opencode");
+		expect(sent.model).toEqual({
+			providerID: shown.provider,
+			modelID: shown.model,
+		});
+		expect(sent.variant ?? "").toBe(shown.effort);
+		const stored = readStoredState(harness, slug, sessionId);
+		expect(stored.pick).toMatchObject({
+			provider: instanceId,
+			model_provider: shown.provider,
+			model_id: shown.model,
+			variant: shown.effort,
+		});
+		return { shown, creates, sessionId, providerReceipt, sent, stored };
+	}
+
+	async function addNamedInstance(
+		setup: Awaited<ReturnType<typeof prepareDraft>>,
+		harness: ProcessHarness,
+	) {
+		const port = await new Promise<number>((done, fail) => {
+			const server = createServer();
+			server.once("error", fail);
+			server.listen(0, "127.0.0.1", () => {
+				const address = server.address();
+				if (!address || typeof address === "string") {
+					server.close(() => fail(new Error("No named OpenCode port")));
+					return;
+				}
+				server.close(() => done(address.port));
+			});
+		});
+		writeFileSync(
+			join(harness.configDir, "fake-opencode-named-model-catalog.json"),
+			JSON.stringify({
+				all: [
+					{
+						id: "fake",
+						name: "Named Provider",
+						models: {
+							"named-model": {
+								id: "named-model",
+								name: "Named Model",
+								limit: { context: 128000, output: 4096 },
+								variants: { high: {} },
+							},
+						},
+					},
+				],
+				default: { fake: "named-model" },
+				connected: ["fake"],
+			}),
+		);
+		const added = await Effect.runPromise(
+			setup.browser.rpc.AddInstance({
+				projectSlug: setup.slug,
+				name: "Borrow named instance",
+				driver: "opencode",
+				managed: true,
+				port,
+				env: { CONDUIT_TEST_OPENCODE_STATE_PREFIX: "named" },
+			}),
+		);
+		if (!added.addedInstanceId)
+			throw new Error("AddInstance omitted the named id");
+		return added.addedInstanceId;
+	}
+
+	test("9cn3-a: stopped OpenCode starts for a draft without binding and sends the displayed pick", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const setup = await prepareDraft(harness);
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-a",
+			bead: "conduit-test-9cn3",
+			initialInstance: setup.initialInstance,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			expect((await instance(setup.browser))?.status).toBe("stopped");
+			expect(
+				observed.requests.filter(
+					(request) => request.tag === "SubscribeDraftModels",
+				),
+			).toEqual([]);
+			const before = await unboundState(setup);
+			evidence["before"] = before;
+			await selectDraftHarness(page, picker, "opencode");
+			const running = await waitForHealthy(setup.browser);
+			evidence["running"] = running;
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			await openPickerRoot(page, picker);
+			await page.getByTestId("picker-row-model").click();
+			await expect(
+				page
+					.getByTestId("model-picker-list")
+					.locator(
+						`[data-model-id="${model.modelID}"][data-provider-id="${model.providerID}"]`,
+					),
+			).toBeVisible();
+			await closePicker(page);
+			const after = await unboundState(setup);
+			evidence["afterBorrow"] = after;
+			expect(after.sessions).toEqual([]);
+			expect(after.projectDefault).toEqual(before.projectDefault);
+			expect(
+				observed.requests.filter((request) =>
+					["CreateSession", "SwitchInstance"].includes(request.tag ?? ""),
+				),
+			).toEqual([]);
+			evidence["receipt"] = await sendShownPick(
+				page,
+				harness,
+				picker,
+				setup.slug,
+				"9cn3-a",
+				observed,
+			);
+		} finally {
+			evidence["finalInstance"] = await instance(setup.browser);
+			evidence["requests"] = observed.requests;
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	for (const phase of ["starting", "healthy"] as const) {
+		test.describe(`release while ${phase}`, () => {
+			test.use({
+				harnessOptions: {
+					managedOpenCode: true,
+					managedOpenCodeId: "opencode",
+					opencodeBorrowIdleTimeoutMs: borrowIdleTimeoutMs,
+					capabilityModels: claudeModels,
+					restartProof: true,
+				},
+			});
+			test(`9cn3-b-${phase}: switching to Claude releases the borrow and preserves its pick`, async ({
+				page,
+				harness,
+			}, testInfo) => {
+				const setup = await prepareDraft(harness);
+				const healthGate = join(harness.configDir, "fake-opencode-hold-health");
+				const evidence: Record<string, unknown> = {
+					case: `9cn3-b-${phase}`,
+					bead: "conduit-test-9cn3",
+					borrowIdleTimeoutMs,
+					initialInstance: setup.initialInstance,
+				};
+				try {
+					const picker = await openDraftPage(page, harness, setup.slug);
+					await expect(picker).toHaveAttribute("data-shown-model", "sonnet");
+					const claudeBefore = await readShown(picker);
+					evidence["claudeBefore"] = claudeBefore;
+					const pidsBeforeBorrow = harness.ownedOpenCodePids();
+					if (phase === "starting") writeFileSync(healthGate, "test-only");
+					await selectDraftHarness(page, picker, "opencode");
+					if (phase === "starting") {
+						await expect
+							.poll(async () => (await instance(setup.browser))?.status)
+							.toBe("starting");
+						await openPickerRoot(page, picker);
+						await page.getByTestId("picker-row-model").click();
+						await expect(page.getByTestId("model-picker-list")).toContainText(
+							/Loading|Starting/i,
+						);
+						await expect(
+							page.getByTestId("model-picker-list"),
+						).not.toContainText("No models available");
+						await expect(picker).not.toHaveAttribute(
+							"data-shown-model",
+							claudeBefore.model,
+						);
+						const app = new AppPage(page);
+						await app.input.fill("9cn3-b-starting");
+						await expect(app.sendBtn).toBeDisabled();
+						evidence["starting"] = {
+							instance: await instance(setup.browser),
+							shown: await readShown(picker),
+							modelList: await page
+								.getByTestId("model-picker-list")
+								.innerText(),
+							sendDisabled: await app.sendBtn.isDisabled(),
+						};
+						await closePicker(page);
+					} else {
+						evidence["running"] = await waitForHealthy(setup.browser);
+						await expect(picker).toHaveAttribute(
+							"data-shown-model",
+							model.modelID,
+						);
+					}
+					await selectDraftHarness(page, picker, "claude");
+					await expectShown(picker, claudeBefore);
+					rmSync(healthGate, { force: true });
+					const releasedAt = Date.now();
+					await expect
+						.poll(
+							() =>
+								harness
+									.ownedOpenCodePids()
+									.filter((pid) => !pidsBeforeBorrow.includes(pid)).length,
+						)
+						.toBeGreaterThan(0);
+					const ownedPids = harness
+						.ownedOpenCodePids()
+						.filter((pid) => !pidsBeforeBorrow.includes(pid));
+					evidence["ownedPids"] = ownedPids;
+					await expect
+						.poll(async () => (await instance(setup.browser))?.status, {
+							timeout: 20_000,
+						})
+						.toBe("stopped");
+					await expect.poll(() => ownedPids.filter(isProcessAlive)).toEqual([]);
+					await expectShown(picker, claudeBefore);
+					evidence["claudeAfter"] = await readShown(picker);
+					evidence["releaseToStoppedMs"] = Date.now() - releasedAt;
+					const unbound = await unboundState(setup);
+					evidence["unbound"] = unbound;
+					expect(unbound.sessions).toEqual([]);
+				} finally {
+					rmSync(healthGate, { force: true });
+					evidence["finalInstance"] = await instance(setup.browser);
+					await writeGuardArtifact(testInfo, evidence);
+				}
+			});
+		});
+	}
+
+	async function staysHealthy(
+		browser: ProcessBrowser,
+		pid: number | undefined,
+	) {
+		const samples: {
+			at: number;
+			status: string | undefined;
+			pid: number | undefined;
+		}[] = [];
+		const until = Date.now() + borrowIdleTimeoutMs * 2 + 250;
+		await expect
+			.poll(
+				async () => {
+					const running = await instance(browser);
+					samples.push({
+						at: Date.now(),
+						status: running?.status,
+						pid: running?.pid,
+					});
+					return Date.now() >= until;
+				},
+				{ intervals: [200], timeout: 10_000 },
+			)
+			.toBe(true);
+		expect(
+			samples.every(
+				(sample) => sample.status === "healthy" && sample.pid === pid,
+			),
+		).toBe(true);
+		expect(isProcessAlive(pid ?? 0)).toBe(true);
+		return samples;
+	}
+
+	test("9cn3-b-running: releasing a draft never stops an instance that was already running", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const setup = await prepareDraft(harness);
+		await setup.browser.startInstance("opencode");
+		const runningBeforeDraft = await waitForHealthy(setup.browser);
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-b-running",
+			bead: "conduit-test-9cn3",
+			borrowIdleTimeoutMs,
+			runningBeforeDraft,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			const claudeBefore = await readShown(picker);
+			await selectDraftHarness(page, picker, "opencode");
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			await selectDraftHarness(page, picker, "claude");
+			await expectShown(picker, claudeBefore);
+			evidence["samplesAfterRelease"] = await staysHealthy(
+				setup.browser,
+				runningBeforeDraft?.pid,
+			);
+			evidence["unbound"] = await unboundState(setup);
+		} finally {
+			evidence["finalInstance"] = await instance(setup.browser);
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test("9cn3-c: a real session turn promotes a borrowed instance before release", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const setup = await prepareDraft(harness);
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-c",
+			bead: "conduit-test-9cn3",
+			borrowIdleTimeoutMs,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			await selectDraftHarness(page, picker, "opencode");
+			const borrowed = await waitForHealthy(setup.browser);
+			evidence["borrowed"] = borrowed;
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			evidence["receipt"] = await sendShownPick(
+				page,
+				harness,
+				picker,
+				setup.slug,
+				"9cn3-c",
+				observed,
+			);
+			await new AppPage(page).goto(
+				`${harness.baseUrl}/new?p=${encodeURIComponent(setup.slug)}`,
+			);
+			await selectDraftHarness(page, picker, "claude");
+			await expect(picker).toHaveAttribute("data-shown-model", "sonnet");
+			evidence["samplesAfterTurnAndRelease"] = await staysHealthy(
+				setup.browser,
+				borrowed?.pid,
+			);
+		} finally {
+			evidence["finalInstance"] = await instance(setup.browser);
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test("9cn3-d: a stopped OpenCode project default starts and fills a new draft on page load", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const setup = await prepareDraft(harness, "opencode");
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-d",
+			bead: "conduit-test-9cn3",
+			initialInstance: setup.initialInstance,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug, "opencode");
+			evidence["running"] = await waitForHealthy(setup.browser);
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			await expect(picker).toHaveAttribute(
+				"data-shown-provider",
+				model.providerID,
+			);
+			const app = new AppPage(page);
+			await app.input.fill("9cn3-d");
+			await expect(app.sendBtn).toBeEnabled();
+			const unbound = await unboundState(setup);
+			expect(unbound.sessions).toEqual([]);
+			evidence["beforePickerOpened"] = {
+				shown: await readShown(picker),
+				sendEnabled: await app.sendBtn.isEnabled(),
+				unbound,
+			};
+			await openPickerRoot(page, picker);
+			await page.getByTestId("picker-row-model").click();
+			await expect(
+				page
+					.getByTestId("model-picker-list")
+					.locator(
+						`[data-model-id="${model.modelID}"][data-provider-id="${model.providerID}"]`,
+					),
+			).toBeVisible();
+			await closePicker(page);
+			evidence["receipt"] = await sendShownPick(
+				page,
+				harness,
+				picker,
+				setup.slug,
+				"9cn3-d",
+				observed,
+			);
+		} finally {
+			evidence["finalInstance"] = await instance(setup.browser);
+			evidence["requests"] = observed.requests;
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test.describe("default harness with a named instance", () => {
+		test.use({
+			harnessOptions: {
+				managedOpenCode: true,
+				opencodeBorrowIdleTimeoutMs: borrowIdleTimeoutMs,
+				capabilityModels: claudeModels,
+				restartProof: true,
+			},
+		});
+		test("9cn3-default-named-instance: a stopped named OpenCode default prefills on page load", async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const observed = await observeSessionRpc(page);
+			const setup = await prepareDraft(harness, "opencode", "managed-test");
+			const evidence: Record<string, unknown> = {
+				case: "9cn3-default-named-instance",
+				initialInstance: setup.initialInstance,
+			};
+			try {
+				const picker = await openDraftPage(
+					page,
+					harness,
+					setup.slug,
+					"opencode",
+				);
+				await expect(picker).toHaveAttribute(
+					"data-instance-id",
+					"managed-test",
+				);
+				evidence["running"] = await waitForHealthy(
+					setup.browser,
+					"managed-test",
+				);
+				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+				evidence["receipt"] = await sendShownPick(
+					page,
+					harness,
+					picker,
+					setup.slug,
+					"9cn3-default-named-instance",
+					observed,
+					"managed-test",
+				);
+			} finally {
+				evidence["finalInstance"] = await instance(
+					setup.browser,
+					"managed-test",
+				);
+				await writeGuardArtifact(testInfo, evidence);
+			}
+		});
+
+		for (const catalogState of ["refreshed", "missing"] as const) {
+			test(`9cn3-review-alias-${catalogState}: an alias-bound turn validates the named default catalog`, async ({
+				harness,
+			}, testInfo) => {
+				const caseId = `9cn3-review-alias-${catalogState}`;
+				const setup = await prepareDraft(harness, "claude", "managed-test");
+				const { sessionId } = await Effect.runPromise(
+					setup.browser.rpc.CreateSession({
+						projectSlug: setup.slug,
+						originId: caseId,
+						permissionMode: "ask",
+						instanceId: ProviderInstanceIdSchema.make("opencode"),
+						model: {
+							providerId: "fake",
+							modelId: "fake-model",
+							variant: "",
+							contextWindow: "",
+						},
+					}),
+				);
+				const rejectedModels = join(
+					harness.configDir,
+					"fake-opencode-reject-models",
+				);
+				const offered =
+					catalogState === "refreshed" ? "fresh-model" : "fake-model";
+				let browser = await harness.connect(sessionId, undefined, setup.slug);
+				const evidence: Record<string, unknown> = { case: caseId, sessionId };
+				try {
+					evidence["before"] = readStoredState(harness, setup.slug, sessionId);
+					expect(
+						readStoredState(harness, setup.slug, sessionId).pick?.provider,
+					).toBe("opencode");
+					if (catalogState === "refreshed") {
+						writeFileSync(
+							join(harness.configDir, "fake-opencode-model-catalog.json"),
+							JSON.stringify({
+								all: [
+									{
+										id: "fake",
+										name: "Refreshed default",
+										models: {
+											[offered]: {
+												id: offered,
+												name: offered,
+												limit: { context: 128000, output: 4096 },
+											},
+										},
+									},
+								],
+								default: { fake: offered },
+								connected: ["fake"],
+							}),
+						);
+						evidence["inventory"] = await Effect.runPromise(
+							Stream.runHead(
+								browser.rpc.SubscribeDraftModels({
+									projectSlug: setup.slug,
+									instanceId: "managed-test",
+								}),
+							),
+						);
+					} else {
+						writeFileSync(rejectedModels, "test-only");
+						await harness.terminate();
+						await harness.restart();
+						browser = await harness.connect(sessionId, undefined, setup.slug);
+					}
+					const beforePrompts = openCodePrompts(harness).length;
+					await Effect.runPromise(
+						browser.rpc.input.submit({
+							projectSlug: setup.slug,
+							sessionId,
+							originId: caseId,
+							inputId: `${caseId}-rejected`,
+							delivery: "queue",
+							text: `${caseId}-rejected`,
+						}),
+					);
+					await expect
+						.poll(() =>
+							readStoredState(harness, setup.slug, sessionId).turnErrors.some(
+								(event) => JSON.parse(event.data).code === "PICK_REJECTED",
+							),
+						)
+						.toBe(true);
+					evidence["rejected"] = readStoredState(
+						harness,
+						setup.slug,
+						sessionId,
+					);
+					expect(openCodePrompts(harness)).toHaveLength(beforePrompts);
+					rmSync(rejectedModels, { force: true });
+					evidence["offeredInventory"] = await Effect.runPromise(
+						Stream.runHead(
+							browser.rpc.SubscribeDraftModels({
+								projectSlug: setup.slug,
+								instanceId: "managed-test",
+							}),
+						),
+					);
+					await Effect.runPromise(
+						browser.rpc.SwitchModel({
+							projectSlug: setup.slug,
+							sessionId,
+							providerId: "fake",
+							modelId: offered,
+						}),
+					);
+					await Effect.runPromise(
+						browser.rpc.input.submit({
+							projectSlug: setup.slug,
+							sessionId,
+							originId: caseId,
+							inputId: `${caseId}-offered`,
+							delivery: "queue",
+							text: `${caseId}-offered`,
+						}),
+					);
+					await expect
+						.poll(() => openCodePrompts(harness).length)
+						.toBe(beforePrompts + 1);
+					const receipt = openCodePrompts(harness).at(-1);
+					const targetInstance = await instance(browser, "managed-test");
+					expect(receipt).toMatchObject({ pid: targetInstance?.pid });
+					evidence["targetInstance"] = targetInstance;
+					expect(JSON.parse(receipt?.body ?? "{}")).toMatchObject({
+						model: { providerID: "fake", modelID: offered },
+					});
+					evidence["offeredReceipt"] = receipt;
+					evidence["after"] = readStoredState(harness, setup.slug, sessionId);
+				} finally {
+					rmSync(rejectedModels, { force: true });
+					evidence["finalState"] = readStoredState(
+						harness,
+						setup.slug,
+						sessionId,
+					);
+					evidence["nativePrompts"] = openCodePrompts(harness);
+					await writeGuardArtifact(testInfo, evidence);
+				}
+			});
+		}
+	});
+
+	test("9cn3-review-bound-switches: named B changes model, effort and context while the default is stopped", async ({
+		harness,
+	}, testInfo) => {
+		const setup = await prepareDraft(harness);
+		const namedId = await addNamedInstance(setup, harness);
+		writeFileSync(
+			join(harness.configDir, "fake-opencode-named-model-catalog.json"),
+			JSON.stringify({
+				all: [
+					{
+						id: "fake",
+						name: "Named Provider",
+						models: Object.fromEntries(
+							["named-model", "named-next"].map((id) => [
+								id,
+								{
+									id,
+									name: id,
+									limit: { context: 1000000, output: 4096 },
+									variants: { low: {}, high: {} },
+									contextWindowOptions: [
+										{ value: "200k", label: "200k", isDefault: true },
+										{ value: "1m", label: "1M" },
+									],
+								},
+							]),
+						),
+					},
+				],
+				default: { fake: "named-model" },
+				connected: ["fake"],
+			}),
+		);
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-review-bound-switches",
+			namedId,
+		};
+		try {
+			const { sessionId } = await Effect.runPromise(
+				setup.browser.rpc.CreateSession({
+					projectSlug: setup.slug,
+					originId: "9cn3-review-bound-switches",
+					permissionMode: "ask",
+					instanceId: ProviderInstanceIdSchema.make(namedId),
+					model: {
+						providerId: "fake",
+						modelId: "named-model",
+						variant: "low",
+						contextWindow: "200k",
+					},
+				}),
+			);
+			const browser = await harness.connect(sessionId, undefined, setup.slug);
+			expect((await instance(browser))?.status).toBe("stopped");
+			evidence["model"] = await Effect.runPromise(
+				browser.rpc.SwitchModel({
+					projectSlug: setup.slug,
+					sessionId,
+					providerId: "fake",
+					modelId: "named-next",
+				}),
+			);
+			evidence["effort"] = await Effect.runPromise(
+				browser.rpc.SwitchVariant({
+					projectSlug: setup.slug,
+					sessionId,
+					variant: "high",
+				}),
+			);
+			evidence["context"] = await Effect.runPromise(
+				browser.rpc.SwitchContextWindow({
+					projectSlug: setup.slug,
+					sessionId,
+					contextWindow: "1m",
+				}),
+			);
+			const before = readStoredState(harness, setup.slug, sessionId);
+			expect(before.pick).toMatchObject({
+				provider: namedId,
+				model_id: "named-next",
+				model_provider: "fake",
+				variant: "high",
+				context_window: "1m",
+			});
+			evidence["beforeTurn"] = before;
+			const promptCount = openCodePrompts(harness).length;
+			await Effect.runPromise(
+				browser.rpc.input.submit({
+					projectSlug: setup.slug,
+					sessionId,
+					originId: "9cn3-review-bound-switches",
+					inputId: "9cn3-review-bound-switches",
+					delivery: "queue",
+					text: "9cn3-review-bound-switches",
+				}),
+			);
+			await expect
+				.poll(() => openCodePrompts(harness).length)
+				.toBe(promptCount + 1);
+			const receipt = openCodePrompts(harness).at(-1);
+			const targetInstance = await instance(browser, namedId);
+			expect(receipt).toMatchObject({ pid: targetInstance?.pid });
+			evidence["targetInstance"] = targetInstance;
+			expect(JSON.parse(receipt?.body ?? "{}")).toMatchObject({
+				model: { providerID: "fake", modelID: "named-next" },
+				variant: "high",
+			});
+			evidence["receipt"] = receipt;
+			evidence["afterTurn"] = readStoredState(harness, setup.slug, sessionId);
+			expect(evidence["afterTurn"]).toMatchObject({
+				pick: before.pick,
+				turnErrors: [],
+			});
+			expect((await instance(browser))?.status).toBe("stopped");
+		} finally {
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test.describe("cancelled promoted startup", () => {
+		test.use({
+			harnessOptions: {
+				managedOpenCode: true,
+				managedOpenCodeId: "opencode",
+				opencodeBorrowIdleTimeoutMs: 30_000,
+				capabilityModels: claudeModels,
+				restartProof: true,
+			},
+		});
+		test("9cn3-review-orphan-start: cancelling inventory and ordinary use settles under ordinary idle policy", async ({
+			harness,
+		}, testInfo) => {
+			const ordinaryIdleTimeoutMs = 1_500;
+			await harness.terminate();
+			await harness.restart({ opencodeIdleTimeoutMs: ordinaryIdleTimeoutMs });
+			const setup = await prepareDraft(harness);
+			const healthGate = join(harness.configDir, "fake-opencode-hold-health");
+			const evidence: Record<string, unknown> = {
+				case: "9cn3-review-orphan-start",
+				ordinaryIdleTimeoutMs,
+				borrowIdleTimeoutMs: 30_000,
+			};
+			writeFileSync(healthGate, "test-only");
+			const borrow = Effect.runFork(
+				Stream.runDrain(
+					setup.browser.rpc.SubscribeDraftModels({
+						projectSlug: setup.slug,
+						instanceId: "opencode",
+					}),
+				),
+			);
+			let ordinary: ReturnType<typeof Effect.runFork> | undefined;
+			try {
+				await expect
+					.poll(async () => (await instance(setup.browser))?.status)
+					.toBe("starting");
+				ordinary = Effect.runFork(
+					setup.browser.rpc.SetHarnessDefault({
+						projectSlug: setup.slug,
+						harness: "opencode",
+						providerId: "fake",
+						modelId: "fake-model",
+						effort: "",
+						contextWindow: "",
+					}),
+				);
+				// An ordered request on this same RPC client fences handler delivery;
+				// health stays held, so neither use can complete its shared start.
+				await setup.browser.getModels("opencode");
+				expect(Option.isNone(await Effect.runPromise(Fiber.poll(borrow)))).toBe(
+					true,
+				);
+				expect(
+					Option.isNone(await Effect.runPromise(Fiber.poll(ordinary))),
+				).toBe(true);
+				await Effect.runPromise(Fiber.interrupt(ordinary));
+				await Effect.runPromise(Fiber.interrupt(borrow));
+				await setup.browser.instances();
+				evidence["afterCancellation"] = await instance(setup.browser);
+				expect((await instance(setup.browser))?.status).toBe("starting");
+				rmSync(healthGate);
+				const healthy = await waitForHealthy(setup.browser);
+				evidence["healthy"] = healthy;
+				await expect
+					.poll(async () => (await instance(setup.browser))?.status, {
+						timeout: 15_000,
+					})
+					.toBe("stopped");
+				await expect.poll(() => isProcessAlive(healthy?.pid ?? 0)).toBe(false);
+				evidence["stopped"] = await instance(setup.browser);
+			} finally {
+				rmSync(healthGate, { force: true });
+				if (ordinary) await Effect.runPromise(Fiber.interrupt(ordinary));
+				await Effect.runPromise(Fiber.interrupt(borrow));
+				await writeGuardArtifact(testInfo, evidence);
+			}
+		});
+	});
+
+	test("9cn3-two-browsers: another browser holds the borrow until it disconnects", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const setup = await prepareDraft(harness);
+		const otherPage = await page.context().newPage();
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-two-browsers",
+			bead: "conduit-test-9cn3",
+			borrowIdleTimeoutMs,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			await selectDraftHarness(page, picker, "opencode");
+			const borrowed = await waitForHealthy(setup.browser);
+			evidence["borrowed"] = borrowed;
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			const otherPicker = await openDraftPage(otherPage, harness, setup.slug);
+			await selectDraftHarness(otherPage, otherPicker, "opencode");
+			await expect(otherPicker).toHaveAttribute(
+				"data-shown-model",
+				model.modelID,
+			);
+			await selectDraftHarness(page, picker, "claude");
+			evidence["samplesWithOtherBrowser"] = await staysHealthy(
+				setup.browser,
+				borrowed?.pid,
+			);
+			await otherPage.close();
+			await expect
+				.poll(async () => (await instance(setup.browser))?.status, {
+					timeout: 20_000,
+				})
+				.toBe("stopped");
+			await expect.poll(() => isProcessAlive(borrowed?.pid ?? 0)).toBe(false);
+			evidence["unbound"] = await unboundState(setup);
+		} finally {
+			if (!otherPage.isClosed()) await otherPage.close();
+			evidence["finalInstance"] = await instance(setup.browser);
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test("9cn3-named-instance: a draft borrows and releases the selected OpenCode instance id", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const setup = await prepareDraft(harness);
+		const namedId = await addNamedInstance(setup, harness);
+		expect(namedId).not.toBe("opencode");
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-named-instance",
+			bead: "conduit-test-9cn3",
+			namedId,
+			borrowIdleTimeoutMs,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			const claudeBefore = await readShown(picker);
+			await openPickerRoot(page, picker);
+			await page.getByTestId("picker-harness-opencode").click();
+			await page.getByTestId(`picker-account-${namedId}`).click();
+			await closePicker(page);
+			await expect(picker).toHaveAttribute("data-instance-id", namedId);
+			const borrowed = await waitForHealthy(setup.browser, namedId);
+			evidence["borrowed"] = borrowed;
+			await pickModel(page, picker, namedModel);
+			await expect(picker).toHaveAttribute(
+				"data-shown-model",
+				namedModel.modelID,
+			);
+			evidence["shown"] = await readShown(picker);
+			const unbound = await unboundState(setup);
+			evidence["unbound"] = unbound;
+			expect(unbound.sessions).toEqual([]);
+			await selectDraftHarness(page, picker, "claude");
+			await expectShown(picker, claudeBefore);
+			await expect
+				.poll(async () => (await instance(setup.browser, namedId))?.status, {
+					timeout: 20_000,
+				})
+				.toBe("stopped");
+			await expect.poll(() => isProcessAlive(borrowed?.pid ?? 0)).toBe(false);
+			await openPickerRoot(page, picker);
+			await page.getByTestId("picker-harness-opencode").click();
+			await page.getByTestId(`picker-account-${namedId}`).click();
+			await closePicker(page);
+			await waitForHealthy(setup.browser, namedId);
+			await pickModel(page, picker, namedModel);
+			evidence["receipt"] = await sendShownPick(
+				page,
+				harness,
+				picker,
+				setup.slug,
+				"9cn3-named-instance",
+				observed,
+				namedId,
+			);
+			await expect(picker).toHaveAttribute("data-instance-id", namedId);
+			await expect(picker).toHaveAttribute(
+				"data-shown-model",
+				namedModel.modelID,
+			);
+		} finally {
+			evidence["finalNamedInstance"] = await instance(setup.browser, namedId);
+			evidence["finalDefaultInstance"] = await instance(setup.browser);
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test("9cn3-catalog-isolation: another draft catalog does not reject a bound instance turn", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const observed = await observeSessionRpc(page);
+		const setup = await prepareDraft(harness);
+		const namedId = await addNamedInstance(setup, harness);
+		const otherPage = await page.context().newPage();
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-catalog-isolation",
+			namedId,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			await selectDraftHarness(page, picker, "opencode");
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			evidence["firstTurn"] = await sendShownPick(
+				page,
+				harness,
+				picker,
+				setup.slug,
+				"9cn3-isolation-before",
+				observed,
+			);
+			const otherPicker = await openDraftPage(otherPage, harness, setup.slug);
+			await openPickerRoot(otherPage, otherPicker);
+			await otherPage.getByTestId("picker-harness-opencode").click();
+			await otherPage.getByTestId(`picker-account-${namedId}`).click();
+			await closePicker(otherPage);
+			await waitForHealthy(setup.browser, namedId);
+			await pickModel(otherPage, otherPicker, namedModel);
+			evidence["otherDraft"] = await readShown(otherPicker);
+			await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+			await new AppPage(page).sendMessage("9cn3-isolation-after");
+			await expect.poll(() => openCodePrompts(harness).length).toBe(2);
+			const receipt = openCodePrompts(harness)[1];
+			const sent: unknown = JSON.parse(receipt?.body ?? "{}");
+			expect(sent).toMatchObject({ model });
+			evidence["secondTurn"] = receipt;
+		} finally {
+			await otherPage.close();
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	test("9cn3-reconnect-failure: a disconnected running instance ends loading with an error", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const setup = await prepareDraft(harness);
+		await setup.browser.startInstance("opencode");
+		const running = await waitForHealthy(setup.browser);
+		const blocked = join(harness.configDir, "fake-opencode-reject-events");
+		writeFileSync(blocked, "test-only");
+		await harness.closeOpenCodeStreams();
+		const evidence: Record<string, unknown> = {
+			case: "9cn3-reconnect-failure",
+			running,
+		};
+		try {
+			const picker = await openDraftPage(page, harness, setup.slug);
+			await selectDraftHarness(page, picker, "opencode");
+			const app = new AppPage(page);
+			await app.input.fill("9cn3-reconnect-failure");
+			await expect(
+				page.getByText(/OpenCode model discovery failed:/).first(),
+			).toBeVisible({ timeout: 20_000 });
+			await expect(picker).toContainText("Select model");
+			await expect(picker).toHaveAttribute("data-shown-model", "");
+			await expect(app.sendBtn).toBeDisabled();
+			evidence["afterFailure"] = await readShown(picker);
+			await selectDraftHarness(page, picker, "claude");
+			evidence["samples"] = await staysHealthy(setup.browser, running?.pid);
+		} finally {
+			rmSync(blocked, { force: true });
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
+	for (const resource of ["events", "models"] as const)
+		test(`9cn3-discovery-${resource}-failure: failed discovery ends loading and the picker retries`, async ({
+			page,
+			harness,
+		}, testInfo) => {
+			const setup = await prepareDraft(harness);
+			const blocked = join(
+				harness.configDir,
+				`fake-opencode-reject-${resource}`,
+			);
+			writeFileSync(blocked, "test-only");
+			const evidence: Record<string, unknown> = {
+				case: `9cn3-discovery-${resource}-failure`,
+			};
+			try {
+				const picker = await openDraftPage(page, harness, setup.slug);
+				await selectDraftHarness(page, picker, "opencode");
+				const app = new AppPage(page);
+				await app.input.fill("9cn3-discovery-failure");
+				await expect(app.sendBtn).toBeDisabled();
+				await expect(
+					page.getByText(/OpenCode model discovery failed:/).first(),
+				).toBeVisible({ timeout: 20_000 });
+				await expect(picker).toContainText("Select model");
+				await expect(picker).toHaveAttribute("data-shown-model", "");
+				await expect(app.sendBtn).toBeDisabled();
+				evidence["failed"] = {
+					shown: await readShown(picker),
+					instance: await instance(setup.browser),
+				};
+				await expect
+					.poll(async () => (await instance(setup.browser))?.status, {
+						timeout: 20_000,
+					})
+					.toBe("stopped");
+				evidence["releasedAfterFailure"] = await instance(setup.browser);
+				rmSync(blocked);
+				await openPickerRoot(page, picker);
+				await page.getByTestId("picker-row-model").click();
+				await expect(page.getByTestId("model-picker-list")).not.toContainText(
+					"No models available",
+				);
+				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
+				await expect(app.sendBtn).toBeEnabled();
+				evidence["retried"] = await readShown(picker);
+			} finally {
+				rmSync(blocked, { force: true });
+				await writeGuardArtifact(testInfo, evidence);
+			}
+		});
 });
 
 test.describe("runtime and stopped OpenCode picks", () => {

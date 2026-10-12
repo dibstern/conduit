@@ -16,8 +16,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Option, Stream } from "effect";
 import { afterAll, vi } from "vitest";
+import { loadDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type DaemonState,
@@ -67,7 +68,10 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
+	type OpenCodeModelService,
 	OpenCodeModelServiceLive,
+	OpenCodeModelServiceTag,
+	type OpenCodeProviderList,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	type PollerManagerShape,
@@ -509,6 +513,7 @@ export function makeOpenCodeInstancesStub(
 	return {
 		events: () => Stream.empty,
 		use,
+		borrow: use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
 		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
@@ -733,6 +738,28 @@ export function makeMockStatusPoller(
 	};
 }
 
+export const MOCK_OPENCODE_GPT4_CATALOG: OpenCodeProviderList = {
+	providers: [
+		{
+			id: "openai",
+			name: "OpenAI",
+			models: [{ id: "gpt-4", name: "GPT-4" }],
+		},
+	],
+	defaults: {},
+	connected: ["openai"],
+};
+
+export function makeMockOpenCodeModelService(
+	catalog: OpenCodeProviderList,
+): OpenCodeModelService {
+	return {
+		listProviders: vi.fn(() => Effect.succeed(catalog)),
+		cachedProviders: vi.fn(() => Effect.succeed(Option.some(catalog))),
+		persistDefaultModel: vi.fn(() => Effect.void),
+	};
+}
+
 /** Create a mock SessionTitleService for Effect-native handler tests. */
 export function makeMockAgentService(): AgentService {
 	return {
@@ -778,6 +805,7 @@ export function makeMockConfig(
  */
 export interface TestHandlerLayerOptions {
 	api?: OpenCodeAPI;
+	openCodeModelService?: OpenCodeModelService;
 	wsHandler?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
@@ -910,7 +938,17 @@ export function makeTestHandlerLayer(
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
 	const openCodeInstancesLayer = Layer.succeed(
 		OpenCodeInstancesTag,
-		makeOpenCodeInstancesStub({ opencode: api }),
+		makeOpenCodeInstancesStub({
+			opencode: api,
+			...Object.fromEntries(
+				(config.configDir
+					? (loadDaemonConfig(config.configDir)?.instances ?? [])
+					: []
+				)
+					.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+					.map((instance) => [instance.id, api]),
+			),
+		}),
 	);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -925,16 +963,18 @@ export function makeTestHandlerLayer(
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
-	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				openCodeApiLayer,
-				openCodeInstancesLayer,
-				configLayer,
-				loggerLayer,
-			),
-		),
-	);
+	const openCodeModelServiceLayer = opts?.openCodeModelService
+		? Layer.succeed(OpenCodeModelServiceTag, opts.openCodeModelService)
+		: OpenCodeModelServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						openCodeApiLayer,
+						openCodeInstancesLayer,
+						configLayer,
+						loggerLayer,
+					),
+				),
+			);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
@@ -1002,6 +1042,7 @@ export function makeTestHandlerLayer(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeApiLayer,
+				openCodeModelServiceLayer,
 				wsHandlerLayer,
 				loggerLayer,
 				configLayer,

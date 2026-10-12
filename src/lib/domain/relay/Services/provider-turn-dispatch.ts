@@ -491,11 +491,23 @@ const prepareEngineTurnInput = (
 			if (providers !== undefined)
 				catalog = catalogFromProviderList(providers.providers);
 		} else {
+			// A missing OpenCode catalog must never accept an unchecked pick.
+			catalog = [];
 			const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 			if (models._tag === "Some") {
-				const cached = yield* models.value.cachedProviders();
-				if (cached._tag === "Some")
-					catalog = cached.value.providers.flatMap((provider) =>
+				const cached = yield* models.value.cachedProviders(providerId);
+				const available =
+					cached._tag === "Some"
+						? Either.right(cached.value)
+						: yield* Effect.either(
+								models.value.listProviders({
+									instanceId: providerId,
+									startIfStopped: true,
+									requireFresh: true,
+								}),
+							);
+				if (Either.isRight(available))
+					catalog = available.right.providers.flatMap((provider) =>
 						(provider.models ?? []).map((model) => ({
 							...model,
 							providerId: provider.id || provider.name,

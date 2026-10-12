@@ -11,6 +11,7 @@ import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/
 import {
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -30,8 +31,10 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	MOCK_PROJECT_DIR,
 	makeMockAgentService,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	PassThroughSessionInbox,
@@ -71,6 +74,10 @@ describe("prompt processing timeouts through Effect state", () => {
 			Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(
+					OpenCodeModelServiceTag,
+					makeMockOpenCodeModelService(MOCK_OPENCODE_GPT4_CATALOG),
+				),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
 				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
