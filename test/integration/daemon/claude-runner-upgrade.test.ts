@@ -154,6 +154,32 @@ async function upgraded(
 	return replacement;
 }
 
+// A deferred upgrade cannot switch warm, so the next send restarts the idle
+// runner on the new build and resumes the same Claude session.
+async function restartedForSend(
+	harness: ProcessHarness,
+	sessionId: string,
+	oldPid: number,
+	prompt: string,
+) {
+	await vi.waitFor(() => expect(() => process.kill(oldPid, 0)).toThrow(), {
+		timeout: 10_000,
+	});
+	const enqueue = sdkProof(harness).find(
+		(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+	);
+	if (enqueue?.kind !== "enqueue")
+		throw new Error(`Missing enqueue for ${prompt}`);
+	const query = sdkProof(harness).find(
+		(mark) => mark.kind === "query" && mark.queryId === enqueue.queryId,
+	);
+	if (query?.kind !== "query") throw new Error(`Missing query for ${prompt}`);
+	expect(query.pid).not.toBe(oldPid);
+	expect(runnerFor(harness, sessionId, query.pid).buildId).toBe(NEW_BUILD);
+	expect(query.sessionId).toBe(queryFor(harness, oldPid).sessionId);
+	return query;
+}
+
 async function completed(
 	harness: ProcessHarness,
 	sessionId: string,
@@ -2245,7 +2271,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["replacement"] = replacement;
 	}, 40_000);
 
-	it("review regression: defers changed ordinary settings when descendant instructions would be displaced", async () => {
+	it("review regression: defers changed ordinary settings when descendant instructions would be displaced, then restarts at the next send", async () => {
 		const {
 			harness,
 			details,
@@ -2293,18 +2319,19 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 					mark.oldPid === old.pid,
 			),
 		).toBe(false);
-		const after = "review-old-runner-with-descendant-instructions";
+		const after = "review-restarted-runner-with-descendant-instructions";
 		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
 			responseChunks(after).join(""),
 		);
-		expect(
-			sdkProof(harness).find(
-				(mark) => mark.kind === "enqueue" && mark.prompt === after,
-			),
-		).toMatchObject({ queryId: oldQuery.queryId });
-		expect(
-			sdkProof(harness).filter((mark) => mark.kind === "query"),
-		).toHaveLength(1);
+		const restarted = await restartedForSend(
+			harness,
+			sessionId,
+			old.pid,
+			after,
+		);
+		expect(JSON.parse(restarted.effectiveSettingsJson)).toMatchObject({
+			autoCompactEnabled: true,
+		});
 		await completed(harness, sessionId, [before, after]);
 		expect(
 			browser.frames.filter(
@@ -2326,7 +2353,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["upgradeDeferred"] = true;
 	}, 40_000);
 
-	it("review regression: defers changed trust-sensitive file settings while the old runner serves", async () => {
+	it("review regression: defers changed trust-sensitive file settings, then restarts at the next send", async () => {
 		const {
 			harness,
 			details,
@@ -2344,7 +2371,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const before = "review-before-trust-settings-change";
 		await initial.send(sessionId, before);
 		const old = runnerFor(harness, sessionId);
-		const oldQuery = queryFor(harness, old.pid);
 		const changed = join(harness.projectDir, ".claude/settings.json");
 		writeFileSync(
 			changed,
@@ -2377,15 +2403,25 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
 		).toHaveLength(1);
-		const after = "review-old-runner-after-trust-change";
+		const after = "review-restarted-runner-after-trust-change";
 		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
 			responseChunks(after).join(""),
 		);
-		expect(
-			sdkProof(harness).find(
-				(mark) => mark.kind === "enqueue" && mark.prompt === after,
-			),
-		).toMatchObject({ queryId: oldQuery.queryId });
+		// Read natively, so the project file keeps its own trust tier.
+		const restarted = await restartedForSend(
+			harness,
+			sessionId,
+			old.pid,
+			after,
+		);
+		expect(JSON.parse(restarted.optionsJson)["settingSources"]).toEqual([
+			"user",
+			"project",
+			"local",
+		]);
+		expect(JSON.parse(restarted.effectiveSettingsJson)).toMatchObject({
+			permissions: { defaultMode: "bypassPermissions" },
+		});
 		await completed(harness, sessionId, [before, after]);
 		expect(
 			browser.frames.filter(
@@ -2403,7 +2439,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["upgradeDeferred"] = true;
 	}, 40_000);
 
-	it("review regression: defers changed ordinary settings when legacy MCP configuration would be displaced", async () => {
+	it("review regression: defers changed ordinary settings when legacy MCP configuration would be displaced, then restarts at the next send", async () => {
 		const {
 			harness,
 			details,
@@ -2451,18 +2487,19 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		expect(
 			sdkProof(harness).filter((mark) => mark.kind === "query"),
 		).toHaveLength(1);
-		const after = "review-old-runner-with-legacy-mcp";
+		const after = "review-restarted-runner-with-legacy-mcp";
 		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
 			responseChunks(after).join(""),
 		);
-		expect(
-			sdkProof(harness).find(
-				(mark) => mark.kind === "enqueue" && mark.prompt === after,
-			),
-		).toMatchObject({ queryId: oldQuery.queryId });
-		expect(
-			sdkProof(harness).filter((mark) => mark.kind === "query"),
-		).toHaveLength(1);
+		const restarted = await restartedForSend(
+			harness,
+			sessionId,
+			old.pid,
+			after,
+		);
+		expect(JSON.parse(restarted.effectiveSettingsJson)).toMatchObject({
+			autoCompactEnabled: true,
+		});
 		await completed(harness, sessionId, [before, after]);
 		expect(
 			browser.frames.filter(
