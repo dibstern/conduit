@@ -14,6 +14,28 @@ const states = {
 	limit: [100, 71],
 } as const;
 
+/** A real finger drag: CDP touch events, which the page also sees as pointer events. */
+async function touchDrag(page: Page, x: number, y: number, dy: number) {
+	const touch = await page.context().newCDPSession(page);
+	try {
+		await touch.send("Input.dispatchTouchEvent", {
+			type: "touchStart",
+			touchPoints: [{ x, y }],
+		});
+		for (let step = 1; step <= 12; step++)
+			await touch.send("Input.dispatchTouchEvent", {
+				type: "touchMove",
+				touchPoints: [{ x, y: y + (dy * step) / 12 }],
+			});
+		await touch.send("Input.dispatchTouchEvent", {
+			type: "touchEnd",
+			touchPoints: [],
+		});
+	} finally {
+		await touch.detach();
+	}
+}
+
 function reading(
 	accountId: string,
 	harness: UsageReading["harness"],
@@ -684,6 +706,45 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 					"data-testid",
 					`usage-sheet-row-${accountId}`,
 				);
+		},
+	},
+	{
+		name: "pull the phone usage dock up with a finger",
+		match: /^I drag the phone usage dock up by (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page
+				.getByTestId("usage-phone-dock")
+				.boundingBox();
+			if (!box) throw new Error("Missing phone usage dock");
+			await touchDrag(
+				world.page,
+				box.x + box.width / 2,
+				box.y + box.height / 2,
+				-Number(match[1]),
+			);
+		},
+	},
+	{
+		name: "pull the usage sheet down by its grab handle",
+		match: /^I drag the usage sheet down by (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page.getByTestId("usage-sheet").boundingBox();
+			if (!box) throw new Error("Missing usage sheet");
+			await touchDrag(
+				world.page,
+				box.x + box.width / 2,
+				box.y + 10,
+				Number(match[1]),
+			);
+		},
+	},
+	{
+		name: "assert whether the usage sheet is open",
+		match: /^the usage sheet is (open|closed)$/,
+		run: async ({ world, match }) => {
+			const dialog = world.page.getByRole("dialog", { name: "Usage" });
+			if (match[1] === "open") await expect(dialog).toBeVisible();
+			else await expect(world.page.getByTestId("usage-sheet")).toHaveCount(0);
 		},
 	},
 	{
