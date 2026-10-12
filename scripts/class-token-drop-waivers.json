@@ -425,5 +425,7 @@
 		"requires": "checked={state.formManaged}",
 		"reason": "The managed-server checkbox row becomes the existing SettingsRow switch, which owns its pointer cursor."
 	},
-	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: w-36": "conduit-test-cju0.10 removes the fixed-width inline rename input. The name is edited in the full Add/Edit form."
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: w-36": "conduit-test-cju0.10 removes the fixed-width inline rename input. The name is edited in the full Add/Edit form.",
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: font-medium,gap-x-2,gap-x-3,gap-y-1,min-h-[44px],text-text-secondary": "conduit-test-aoul matches Server's instance lists to the settings mockup in literal px (the 12px root renders rem utilities at 0.75x): uppercase muted list headers, regular-weight 12.5px names with muted 11px dirs and ports, 14px/3px detail grid. The 44px row height moved into Disclosure's row density.",
+	"src/lib/frontend/components/ui/Tabs.svelte :: font-medium,mb-[5px],mt-[4px]": "conduit-test-aoul matches the rail group label to the mockup's .rl: 12px/4px margins and weight 600, uppercase with 0.09em tracking."
 }

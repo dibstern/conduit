@@ -81,6 +81,8 @@
 		tight: "gap-1.5 px-3 py-2",
 		/** Settings' frame H list rows: 6px all round, at least 30px tall. */
 		list: "gap-2 p-[6px] min-h-[30px]",
+		/** Settings › Server instance rows, literal px from the mockup's `.ir`. */
+		row: "gap-[9px] px-[12px] py-[8px] min-h-[44px]",
 	} as const;
 </script>
 
@@ -120,8 +122,9 @@
 		 *                           ToolGenericCard, SkillItem)
 		 *   compact  gap-2   py-1   ToolGroupItem, a row nested inside a group
 		 *   tight    gap-1.5 py-2   ThinkingBlock's collapsed bar
-		 *   list     gap-2   p-[6px] Settings' instance and setup-scenario
-		 *                           rows (frame H), at least 30px tall
+		 *   list     gap-2   p-[6px] Settings' setup-scenario rows (frame H),
+		 *                           at least 30px tall
+		 *   row      gap-[9px] 8px/12px Settings › Server instance rows, 44px tall
 		 *
 		 * `tight` has MORE padding than `compact`; they vary on different axes.
 		 */

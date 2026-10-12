@@ -10,6 +10,10 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../contracts/claude-settings.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
+
+/** Failure code for a replacement that cannot reproduce the old runner's settings. */
+export const CLAUDE_SETTINGS_REPLAY_DEFERRED = "settings-replay-deferred";
+
 import { inheritedSettingsFingerprint } from "./claude-warmed-query.js";
 import type { Options } from "./types.js";
 
@@ -287,6 +291,7 @@ export async function replayClaudeRunnerFileSettings(
 		throw new ClaudeRuntimeError({
 			message:
 				"Changed Claude settings cannot be replayed without changing trust tiers or filesystem discovery; retaining the old runner",
+			code: CLAUDE_SETTINGS_REPLAY_DEFERRED,
 		});
 	return {
 		settingSources: [],

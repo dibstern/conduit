@@ -599,7 +599,7 @@ exec '${realGit}' "$@"
 	it.each([
 		"pending",
 		"consumed",
-	] as const)("retains the live runner after deferring an unsafe upgrade with %s move reconciliation", async (state) => {
+	] as const)("restarts the idle runner at the next send after deferring an unsafe upgrade with %s move reconciliation", async (state) => {
 		const { fixture, socket } = await start(`upgrade-${state}`, {
 			turns: [
 				"enter-worktree-turn",
@@ -643,14 +643,17 @@ exec '${realGit}' "$@"
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		const restored = await fixture.connect(sessionId);
 		await restored.send(sessionId, "Reply with pong after the daemon restart.");
-		expect(new Set(fixture.claudeOptions().map(({ pid }) => pid))).toEqual(
-			new Set([old.pid]),
-		);
+		await vi.waitFor(() => expect(() => process.kill(old.pid, 0)).toThrow(), {
+			timeout: 10_000,
+		});
+		const restarted = fixture.claudeOptions().at(-1);
+		expect(restarted?.pid).not.toBe(old.pid);
+		evidence["restartedOptions"] = restarted?.options;
 		expect(moves(fixture, sessionId)).toHaveLength(1);
 		expect(moves(fixture, sessionId)[0]?.worktrees).toEqual({
 			[extra]: realpathSync(entered),
 		});
-		evidence["upgrade"] = { deferred: true, retainedQuery: true };
+		evidence["upgrade"] = { deferred: true, restartedOnSend: true };
 	});
 
 	it("reuses the runner when a declared path is a symlink to a valid worktree", async () => {
