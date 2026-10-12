@@ -7,6 +7,7 @@ import {
 	noInstanceInitMessages,
 	singleInstanceInitMessages,
 } from "../fixtures/mockup-state.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
@@ -130,7 +131,7 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 					(instance) => instance.id === "personal",
 				),
 			}),
-			RenameInstance: (params) => ({
+			UpdateInstance: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
 				instances: instancesWith({
 					personal: "unhealthy",
@@ -187,9 +188,9 @@ async function pickDraftInstance(
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId(`picker-instance-${instanceId}`).click();
+	// Every fixture instance shares one harness, so the picker shows only account cards.
+	await openPickerRoot(page, picker);
+	await page.getByTestId(`picker-account-${instanceId}`).click();
 	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", instanceId);
 }
@@ -257,7 +258,7 @@ test.describe("Instance Store: Reactivity", () => {
 		await setupMultiInstance(page, baseURL);
 
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		await expect(instanceDot(page, "Personal")).toBeVisible();
 		await expect(instanceDot(page, "Work")).toBeVisible();
 	});
@@ -268,7 +269,7 @@ test.describe("Instance Store: Reactivity", () => {
 	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		const personalDot = instanceDot(page, "Personal");
 		const workDot = instanceDot(page, "Work");
 
@@ -287,7 +288,7 @@ test.describe("Instance Store: Reactivity", () => {
 		const control = await setupMultiInstance(page, baseURL);
 
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		const instanceList = page.locator("#instance-settings-list");
 		await expect(instanceList).toContainText("Personal");
 
@@ -308,7 +309,7 @@ test.describe("Status Color Mapping", () => {
 	test("each status maps to correct color", async ({ page, baseURL }) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		const workDot = instanceDot(page, "Work");
 
 		// unhealthy (initial) = red
@@ -355,7 +356,7 @@ test.describe("Instance Management Settings", () => {
 		await expect(instanceList).toContainText("4097");
 	});
 
-	test("instance expand shows start/stop/rename/remove buttons for managed instances", async ({
+	test("instance expand shows the matching lifecycle action, edit and remove", async ({
 		page,
 		baseURL,
 	}) => {
@@ -363,11 +364,11 @@ test.describe("Instance Management Settings", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 		await page.locator("#instance-settings-list").getByText("Personal").click();
-		await expect(page.getByText("Start")).toBeVisible();
-		await expect(page.getByText("Stop")).toBeVisible();
 		await expect(
-			page.locator("[data-testid='rename-instance-btn']"),
-		).toBeVisible();
+			page.getByRole("button", { name: "Start", exact: true }),
+		).toHaveCount(0);
+		await expect(page.getByText("Stop")).toBeVisible();
+		await expect(page.getByTestId("edit-instance-btn")).toBeVisible();
 		await expect(page.getByText("Remove")).toBeVisible();
 	});
 
@@ -376,7 +377,10 @@ test.describe("Instance Management Settings", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 		await page.locator("#instance-settings-list").getByText("Work").click();
-		await page.click("button:has-text('Start')");
+		await page
+			.locator("#instance-settings-list")
+			.getByRole("button", { name: "Start", exact: true })
+			.click();
 		const request = await control.rpc.waitForRequest(
 			(req) => req.tag === "StartInstance",
 		);
@@ -485,25 +489,21 @@ test.describe("Instance Management Settings", () => {
 		await control.rpc.waitForRequest((req) => req.tag === "ScanNow");
 	});
 
-	test("inline rename sends RenameInstance RPC", async ({ page, baseURL }) => {
+	test("editing the name sends UpdateInstance RPC", async ({
+		page,
+		baseURL,
+	}) => {
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 
-		// Expand instance and click Rename
 		await page.locator("#instance-settings-list").getByText("Work").click();
-		await page.locator("[data-testid='rename-instance-btn']").click();
-
-		// Fill new name and press Enter
-		const renameInput = page
-			.locator("#instance-settings-list input[type='text']")
-			.first();
-		await expect(renameInput).toBeVisible();
-		await renameInput.fill("Production");
-		await renameInput.press("Enter");
+		await page.getByTestId("edit-instance-btn").click();
+		await page.getByTestId("instance-form-name").fill("Production");
+		await page.getByTestId("instance-form-save").click();
 
 		const request = await control.rpc.waitForRequest(
-			(req) => req.tag === "RenameInstance",
+			(req) => req.tag === "UpdateInstance",
 		);
 		expect(request.payload).toMatchObject({
 			instanceId: "work",
@@ -520,7 +520,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(instanceDot(page, "Personal")).toHaveClass(/bg-red-500/);
 		await page.getByTestId("settings-close-btn").click();
@@ -538,7 +538,7 @@ test.describe("ConnectOverlay: Instance Actions", () => {
 		await page.clock.install();
 		const control = await setupMultiInstance(page, baseURL);
 		await openSettingsPanel(page);
-		await page.locator("#settings-panel").getByText("Instances").click();
+		await page.getByTestId("settings-tab-server").click();
 		pushInstances(control.rpc, { personal: "unhealthy" });
 		await expect(instanceDot(page, "Personal")).toHaveClass(/bg-red-500/);
 		await page.getByTestId("settings-close-btn").click();
@@ -729,15 +729,16 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 
-		// Should show "No OpenCode instances detected" message
-		await expect(
-			page.getByText("No OpenCode instances detected"),
-		).toBeVisible();
-
-		// Should show three scenario cards
-		await expect(page.getByText("Quick Start — Direct API Key")).toBeVisible();
-		await expect(page.getByText("Multi-Provider — Via CCS")).toBeVisible();
-		await expect(page.getByText("Custom Setup")).toBeVisible();
+		await expect(page.getByTestId("opencode-empty-state")).toBeVisible();
+		const guides = page.getByTestId("opencode-setup-guides");
+		await expect(guides.getByRole("button")).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+		await guides.getByRole("button").click();
+		await expect(guides.getByText("Direct key", { exact: true })).toBeVisible();
+		await expect(guides.getByText("CCS", { exact: true })).toBeVisible();
+		await expect(guides.getByText("Custom", { exact: true })).toBeVisible();
 	});
 
 	test("scenario cards expand to show copyable commands", async ({
@@ -748,11 +749,14 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 
-		// Click "Quick Start" to expand
-		await page.getByText("Quick Start — Direct API Key").click();
-
-		// Should show terminal commands
-		await expect(page.getByText("opencode serve --port 4098")).toBeVisible();
+		const guides = page.getByTestId("opencode-setup-guides");
+		await guides.getByRole("button").click();
+		await guides
+			.getByRole("button", { name: "Direct key", exact: true })
+			.click();
+		await expect(
+			guides.getByText("opencode serve --port 4098", { exact: true }),
+		).toBeVisible();
 		await expect(
 			page.getByText("It will appear here automatically.", { exact: true }),
 		).toBeVisible();
@@ -766,10 +770,7 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 
-		// Getting Started panel should be visible
-		await expect(
-			page.getByText("No OpenCode instances detected"),
-		).toBeVisible();
+		await expect(page.getByTestId("opencode-empty-state")).toBeVisible();
 
 		// Simulate auto-discovery: the daemon publishes a list with a discovered instance
 		control.rpc.setDaemonList("SubscribeInstances", {
@@ -786,10 +787,9 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 			],
 		});
 
-		// Getting Started should disappear
-		await expect(
-			page.getByText("No OpenCode instances detected"),
-		).not.toBeVisible({ timeout: 3_000 });
+		await expect(page.getByTestId("opencode-empty-state")).toHaveCount(0, {
+			timeout: 3_000,
+		});
 
 		// Instance list should appear
 		await expect(
@@ -805,7 +805,6 @@ test.describe("Auto-Discovery: Getting Started Panel", () => {
 		await openSettingsPanel(page);
 		await page.getByTestId("settings-tab-server").click();
 
-		// Click "Scan Now" link at bottom of Getting Started
 		const scanLink = page.locator("[data-testid='scan-now-link']");
 		await expect(scanLink).toBeVisible();
 		await scanLink.click();

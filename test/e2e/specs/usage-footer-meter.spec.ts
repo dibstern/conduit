@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema } from "effect";
 import { usageForecastTime } from "../../../src/lib/frontend/utils/continuation.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -177,9 +178,9 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 		const picker = page.locator(
 			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 		);
-		await picker.click();
-		await page.getByTestId("picker-row-harness").click();
-		await page.getByTestId(`picker-instance-${personal.id}`).click();
+		await openPickerRoot(page, picker);
+		await page.getByTestId("picker-harness-claude").click();
+		await page.getByTestId(`picker-account-${personal.id}`).click();
 		await page.keyboard.press("Escape");
 		await expect(picker).toHaveAttribute("data-instance-id", personal.id);
 		await expect(

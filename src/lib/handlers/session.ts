@@ -1,4 +1,4 @@
-import { Effect, Either, Ref } from "effect";
+import { Cause, Effect, Either, Ref } from "effect";
 import type { ProviderInstanceId } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -21,6 +21,11 @@ import {
 	clearSession as clearEffectOverrideSession,
 	OverridesStateTag,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import {
+	cleanupSessionWorktrees,
+	prepareSessionWorktreeDeletion,
+} from "../domain/relay/Services/session-worktree-deletion.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	messageRowsToHistory,
@@ -50,6 +55,7 @@ interface NewSessionPayload {
 
 interface DeleteSessionPayload {
 	readonly sessionId: string;
+	readonly removeWorktrees?: boolean;
 }
 
 interface ForkSessionPayload {
@@ -286,21 +292,62 @@ export const handleSwitchSession = (
 export const deleteSessionForClient = ({
 	clientId,
 	sessionId,
+	removeWorktrees,
 }: {
 	readonly clientId: string;
 	readonly sessionId: string;
+	readonly removeWorktrees?: boolean;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
-		const log = yield* LoggerTag;
+		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+		const deletion = Effect.gen(function* () {
+			const sessionManagerService = yield* SessionManagerServiceTag;
+			const log = yield* LoggerTag;
 
-		const id = sessionId;
-		if (!id) return;
+			const id = sessionId;
+			if (!id) return [];
+			const inspection = yield* prepareSessionWorktreeDeletion(id).pipe(
+				Effect.map((plan) => ({ plan, warnings: [] as string[] })),
+				Effect.catchAllCause((cause) =>
+					Effect.succeed({
+						plan: undefined,
+						warnings: [
+							`Worktrees kept because inspection failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+						],
+					}),
+				),
+			);
 
-		const didDelete = yield* sessionManagerService.deleteSession(id);
-		if (!didDelete) return;
+			const didDelete = yield* sessionManagerService.deleteSession(id);
+			if (!didDelete) return [];
 
-		log.info(`client=${clientId} Deleted: ${id}`);
+			log.info(`client=${clientId} Deleted: ${id}`);
+			const warnings = inspection.warnings;
+			if (
+				inspection.plan?.ownership.length &&
+				(removeWorktrees ?? inspection.plan.removeWorktrees)
+			) {
+				warnings.push(
+					...(yield* cleanupSessionWorktrees(id, inspection.plan).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.succeed([
+								`Worktree cleanup failed: ${Cause.pretty(cause).slice(0, 2_000)}`,
+							]),
+						),
+					)),
+				);
+			}
+			for (const warning of warnings)
+				log.warn("Session deleted with worktree cleanup warning", {
+					operation: "worktree.remove",
+					sessionId: id,
+					warning,
+				});
+			return warnings;
+		});
+		return yield* workspace._tag === "Some"
+			? workspace.value.withLaunch(deletion)
+			: deletion;
 	});
 
 export const handleDeleteSession = (
@@ -310,7 +357,10 @@ export const handleDeleteSession = (
 	deleteSessionForClient({
 		clientId,
 		sessionId: payload.sessionId,
-	});
+		...(payload.removeWorktrees === undefined
+			? {}
+			: { removeWorktrees: payload.removeWorktrees }),
+	}).pipe(Effect.asVoid);
 
 export const renameSessionForClient = ({
 	clientId,

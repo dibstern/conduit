@@ -2,8 +2,8 @@
   AccountSwitch — moves one Claude session to another account: a picker of the
   Claude accounts with each one's quota checked fresh on every open, then the
   handoff confirm, then ContinueSession on the chosen account. The usage-limit
-  strip's Switch account and the session bar's account pill each bring their
-  own trigger; only the session moves, never the project's binding.
+  strip's Switch account brings its own trigger; only the session moves, never
+  the project's binding.
 
   The account with the most quota left is pre-selected. Limited accounts and the
   session's own stay visible but can't be picked; an account whose quota can't
@@ -12,13 +12,10 @@
 -->
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import type { HandoffSummary, LimitRecovery, UsageReading } from "../../../contracts/limit-recovery.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { instanceState } from "../../stores/instance.svelte.js";
+	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { previewContinuationRpc, quotaForAccountsRpc } from "../../transport/ws-rpc-client.js";
-	import { showAccountSwitchRefusal, switchSessionAccount } from "../../utils/account-switch.js";
-	import { accountQuota, limitedQuota, quotaBlocksSwitch, quotaHeadroom, quotaReading } from "../../utils/continuation.js";
+	import { quotaBlocksSwitch, quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -47,81 +44,21 @@
 	} = $props();
 
 	const compact = $derived(sessionViewState.compact);
-	const accounts = $derived(instanceState.instances.filter((instance) => instance.driver === "claude"));
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
+	const accounts = $derived(claudeAccounts.configuredAccounts);
 
 	let pickerOpen = $state(false);
-	// undefined while the check runs; a failed check reads as unknown everywhere.
-	let quotas = $state<ReadonlyMap<string, UsageReading> | undefined>();
-	let target = $state<string | undefined>();
-	let preview = $state<HandoffSummary | undefined>();
-	let busy = $state(false);
-	// Only the latest open's or pick's answer counts.
-	let quotaTicket = 0;
-	let previewTicket = 0;
-
-	const quotaOf = (instanceId: string) => accountQuota(quotas, instanceId);
-	const pickable = (instanceId: string) => instanceId !== account && !quotaBlocksSwitch(quotaOf(instanceId));
-	const suggested = $derived.by(() => {
-		if (quotas === undefined) return undefined;
-		const candidates = accounts.filter((candidate) => pickable(candidate.id));
-		return candidates.reduce<(typeof candidates)[number] | undefined>(
-			(best, candidate) => (best === undefined || quotaHeadroom(quotaOf(candidate.id)) > quotaHeadroom(quotaOf(best.id)) ? candidate : best),
-			undefined,
-		)?.id;
-	});
-
-	async function checkQuotas(): Promise<void> {
-		const ticket = ++quotaTicket;
-		quotas = undefined;
-		try {
-			const checked = await quotaForAccountsRpc({ projectSlug, originId: getBrowserClientId() });
-			if (ticket === quotaTicket) quotas = new Map(checked.map((account) => [account.accountId, account]));
-		} catch {
-			if (ticket === quotaTicket) quotas = new Map();
-		}
-	}
-
-	// The confirm opens once the preview has the real message count.
-	async function pick(instanceId: string): Promise<void> {
-		const ticket = ++previewTicket;
-		target = instanceId;
-		preview = undefined;
-		try {
-			const summary = await previewContinuationRpc({ projectSlug, sessionId, instanceId, originId: getBrowserClientId() });
-			if (ticket === previewTicket) preview = summary;
-		} catch (error) {
-			if (ticket !== previewTicket) return;
-			target = undefined;
-			showAccountSwitchRefusal(instanceId, error);
-		}
-	}
-
-	function closeConfirm(): void {
-		previewTicket++;
-		target = undefined;
-		preview = undefined;
-	}
-
-	async function switchAccount(instanceId: string): Promise<void> {
-		busy = true;
-		try {
-			await switchSessionAccount({
-				projectSlug,
-				sessionId,
-				instanceId,
-				expectedInstanceId: account,
-			});
-			closeConfirm();
-		} finally {
-			busy = false;
-		}
-	}
+	// Two triggers can be mounted for one session; only the one picked hosts its dialog.
+	let presentedRequest = $state<number | undefined>();
+	const handoff = $derived(claudeAccounts.pendingHandoff?.requestId === presentedRequest ? claudeAccounts.pendingHandoff : undefined);
+	const loading = $derived(claudeAccounts.handoff.kind === "previewing" && claudeAccounts.handoff.requestId === presentedRequest);
+	const suggested = $derived(claudeAccounts.suggestedAccount(account));
 </script>
 
 <Menu
 	bind:open={pickerOpen}
 	onopenchange={(open) => {
-		if (open) void checkQuotas();
+		if (open) void claudeAccounts.refreshQuotas();
 	}}
 	presentation={compact ? "sheet" : "popover"}
 	{side}
@@ -131,20 +68,23 @@
 	data-testid="account-switch-picker"
 >
 	{#snippet trigger({ props })}
-		{@render switchTrigger({ props, loading: target !== undefined && preview === undefined })}
+		{@render switchTrigger({ props, loading })}
 	{/snippet}
 	<div class={compact ? "mt-[4px] mb-[6px] text-[13px] font-semibold text-text" : "my-[4px] font-mono text-[10px] text-text-dimmer"}>Continue this session on</div>
 	{#each accounts as option (option.id)}
 		{@const selected = option.id === suggested}
-		{@const quota = quotaOf(option.id)}
+		{@const quota = claudeAccounts.quotaOf(option.id)}
 		<MenuItem
 			density="compact"
-			disabled={!pickable(option.id)}
+			disabled={claudeAccounts.availabilityOf(option.id, account).kind !== "selectable"}
 			data-testid="account-switch-option"
 			data-account={option.id}
 			data-selected={selected}
 			class="rounded-[7px] {selected ? 'bg-border-chip' : ''}"
-			onselect={() => void pick(option.id)}
+			onselect={() => {
+				void claudeAccounts.beginSwitch(sessionId, option.id, account);
+				presentedRequest = claudeAccounts.handoff.kind === "previewing" ? claudeAccounts.handoff.requestId : undefined;
+			}}
 		>
 			<AccountDot instanceId={option.id} />
 			<span class="min-w-0 truncate {selected ? 'text-text' : 'text-text-secondary'}">{option.name}</span>
@@ -159,20 +99,20 @@
 	{/if}
 </Menu>
 
-{#if target !== undefined && preview !== undefined}
-	{@const chosen = target}
+{#if handoff}
+	{@const chosen = handoff.to}
 	<HandoffDialog
 		open
-		onclose={closeConfirm}
+		onclose={() => claudeAccounts.cancel()}
 		to={chosen}
-		summary={preview}
+		summary={handoff.summary}
 		confirm={{
 			from: account,
-			fromQuota: limit ? limitedQuota(limit) : quotaOf(account),
-			quota: quotaOf(chosen),
+			fromQuota: claudeAccounts.fromQuota({ from: account, limit }),
+			quota: claudeAccounts.quotaOf(chosen),
 			cutOff: limit?.cutOffMessageId !== undefined,
-			busy,
-			onconfirm: () => void switchAccount(chosen),
+			busy: claudeAccounts.switching,
+			onconfirm: () => void claudeAccounts.confirm({ sessionId, from: account }),
 		}}
 	/>
 {/if}

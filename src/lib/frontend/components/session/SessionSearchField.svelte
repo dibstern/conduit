@@ -1,11 +1,14 @@
 <!-- One row for both "which sessions" questions: a scope chip that narrows the -->
-<!-- list to a project, and the title search. Typing project:<slug> sets the    -->
-<!-- same chip. Both write ?p=<slug> in the URL (stores/session-scope.ts).      -->
+<!-- list to a repository or project, and the title search. project:<slug>    -->
+<!-- stays project-only. The URL holds the scope (stores/session-scope.ts).  -->
 
 <script lang="ts">
+	import { encodeGroupScope } from "../../../session-scope.js";
 	import { applyProjectList, confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
+	import { getProjectGroup } from "../../stores/project-state.svelte.js";
 	import {
 		getSessionScope,
+		getSessionScopeLabel,
 		setSessionScope,
 		takeScopeToken,
 	} from "../../stores/session-scope.js";
@@ -68,16 +71,18 @@
 	const suggesting = $derived(focused && !pickerOpen && scopeQuery !== null);
 
 	const scope = $derived(getSessionScope());
-	const scopeLabel = $derived(
-		scope === null ? "All projects" : projectTitle(scope),
-	);
-
-	function projectTitle(slug: string): string {
-		return (
-			projectState.projects.find((project) => project.slug === slug)?.title ||
-			slug
-		);
-	}
+	const scopeLabel = $derived(getSessionScopeLabel(scope));
+	const pickerGroups = $derived.by(() => {
+		const groups = new Map<string, { key: string; label: string; projects: ProjectInfo[] }>();
+		for (const project of projectState.projects) {
+			const group = getProjectGroup(project.slug);
+			const key = group?.key ?? project.slug;
+			const existing = groups.get(key);
+			if (existing) existing.projects.push(project);
+			else groups.set(key, { key, label: group?.label ?? (project.title || project.slug), projects: [project] });
+		}
+		return [...groups.values()];
+	});
 
 	// A finished project: token becomes the chip and leaves the text, so the
 	// two can never both be on screen saying different things.
@@ -248,12 +253,18 @@
 				onvaluechange={(next) => setSessionScope(next === ALL_PROJECTS ? null : next)}
 			>
 				<MenuRadioItem value={ALL_PROJECTS} class="min-h-[44px] md:min-h-0">All projects</MenuRadioItem>
-				{#each projectState.projects as project (project.slug)}
-					<ProjectScopeItem
-						{project}
-						onremove={(slug) => void removeProjects([slug])}
-						onedit={(target) => { setPickerOpen(false); editing = target; }}
-					/>
+				{#each pickerGroups as group (group.key)}
+					{#if group.projects.length > 1}
+						<MenuRadioItem value={encodeGroupScope(group.key)} class="min-h-[44px] md:min-h-0">{group.label}</MenuRadioItem>
+					{/if}
+					{#each group.projects as project (project.slug)}
+						<ProjectScopeItem
+							{project}
+							label={getSessionScopeLabel(project.slug)}
+							onremove={(slug) => void removeProjects([slug])}
+							onedit={(target) => { setPickerOpen(false); editing = target; }}
+						/>
+					{/each}
 				{/each}
 			</MenuRadioGroup>
 			{#if projectState.projects.length > 0 || onaddproject}<MenuSeparator />{/if}

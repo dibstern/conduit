@@ -84,19 +84,68 @@ export const claudeSettingsHandlers: StepHandler[] = [
 				providers: dualDriverProviders.map((provider) => ({
 					...provider,
 					models: provider.models.map((model) =>
-						model.id === "claude-sonnet-4"
-							? { ...model, name: "Claude Sonnet 4" }
+						model.id === "claude-sonnet-4-5"
+							? { ...model, name: "Claude Sonnet 4", variants: ["high"] }
 							: model,
 					),
 				})),
 				active: { model: "claude-sonnet-4", provider: "anthropic" },
 			});
 			requireRpcControl(world.page).setProjectSetting({
-				_tag: "defaultModel",
-				model: "claude-sonnet-4",
-				provider: "anthropic",
-				variant: "high",
+				_tag: "harnessDefaults",
+				claude: {
+					pick: {
+						providerId: "claude",
+						modelId: "claude-sonnet-4-5",
+						effort: "high",
+						contextWindow: "",
+					},
+					status: "ok",
+				},
+				opencode: { status: "missing" },
 			});
+			requireRpcControl(world.page).setHandler(
+				"SwitchModel",
+				({ projectSlug, providerId, modelId }) => ({
+					projectSlug,
+					provider: providerId,
+					model: modelId,
+					variant: "",
+					variants: [],
+				}),
+			);
+			requireRpcControl(world.page).setHandler(
+				"SetHarnessDefault",
+				({
+					projectSlug,
+					harness,
+					providerId,
+					modelId,
+					effort,
+					contextWindow,
+				}) => ({
+					projectSlug,
+					harness,
+					state: {
+						pick: { providerId, modelId, effort, contextWindow },
+						status: "ok",
+					},
+				}),
+			);
+		},
+	},
+	{
+		name: "open settings to models and agents section",
+		match: /^I open settings to the Models & agents section$/,
+		run: async ({ world }) => {
+			await world.page.evaluate(() =>
+				window.dispatchEvent(
+					new CustomEvent("settings:open", { detail: { section: "models" } }),
+				),
+			);
+			await world.page
+				.getByTestId("settings-harness-default-claude-model")
+				.waitFor({ state: "visible", timeout: 5_000 });
 		},
 	},
 	{
@@ -147,10 +196,10 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		match: /^the default model row shows Claude Sonnet 4$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByTestId("claude-setting-defaultModel-select")
+				.getByTestId("settings-harness-default-claude-model")
 				.waitFor({ state: "visible", timeout: 5_000 });
 			await world.page.waitForFunction(
-				`document.querySelector('[data-testid="claude-setting-defaultModel-select"]')?.selectedOptions[0]?.textContent?.trim() === "Claude Sonnet 4"`,
+				`document.querySelector('[data-testid="settings-harness-default-claude-model"]')?.selectedOptions[0]?.textContent?.trim() === "Claude Sonnet 4"`,
 				undefined,
 				{ timeout: 5_000 },
 			);
@@ -161,19 +210,20 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		match: /^I choose claude-opus-4-1 as the default model$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByTestId("claude-setting-defaultModel-select")
+				.getByTestId("settings-harness-default-claude-model")
 				.selectOption("claude/claude-opus-4-1");
 		},
 	},
 	{
-		name: "assert set default model rpc",
-		match: /^a SetDefaultModel RPC is sent for claude-opus-4-1$/,
+		name: "assert set harness default rpc",
+		match: /^a SetHarnessDefault RPC is sent for claude-opus-4-1$/,
 		run: async ({ world }) => {
 			await requireRpcControl(world.page).waitForRequest(
 				(request) =>
-					request.tag === "SetDefaultModel" &&
-					request.payload["model"] === "claude-opus-4-1" &&
-					request.payload["provider"] === "claude",
+					request.tag === "SetHarnessDefault" &&
+					request.payload["harness"] === "claude" &&
+					request.payload["modelId"] === "claude-opus-4-1" &&
+					request.payload["providerId"] === "claude",
 			);
 		},
 	},
@@ -201,10 +251,11 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		name: "assert default model thinking level",
 		match: /^the default model row shows Thinking level: high$/,
 		run: async ({ world }) => {
-			await world.page
-				.getByTestId("claude-setting-defaultModel-thinking")
-				.getByText("Thinking level: high", { exact: true })
-				.waitFor({ state: "visible", timeout: 5_000 });
+			await world.page.waitForFunction(
+				`document.querySelector('[data-testid="settings-harness-default-claude-effort"]')?.value === "high"`,
+				undefined,
+				{ timeout: 5_000 },
+			);
 		},
 	},
 	{

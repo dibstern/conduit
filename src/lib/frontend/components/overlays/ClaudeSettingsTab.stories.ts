@@ -53,6 +53,9 @@ function inheritedSettings(
 			},
 		});
 		await tick();
+		await expect(
+			within(canvasElement).queryByTestId("claude-setting-defaultModel-select"),
+		).toBeNull();
 		const row = within(canvasElement).getByTestId(
 			"claude-setting-alwaysThinkingEnabled",
 		);

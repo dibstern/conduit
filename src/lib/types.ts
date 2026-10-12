@@ -119,6 +119,11 @@ export interface StoredProject {
 	readonly title: string;
 	readonly lastUsed?: number;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
+	readonly setupScript?: string | undefined;
+	readonly sessionMode?:
+		| import("./contracts/project-file.js").SessionMode
+		| undefined;
+	readonly groupingMode?: import("./shared-types.js").GroupingMode | undefined;
 }
 
 export interface RecentProject {
@@ -188,6 +193,10 @@ export interface ProjectRelayConfig {
 			slug: string;
 			title: string;
 			folders: readonly [string, ...string[]];
+			setupScript?: string | undefined;
+			sessionMode?:
+				| import("./contracts/project-file.js").SessionMode
+				| undefined;
 		}>
 	>;
 	/** List sessions across every registered project without starting relays. */
@@ -200,7 +209,7 @@ export interface ProjectRelayConfig {
 	broadcastSessionListChanged?: () => Promise<void>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
 	publishGlobalSetting: (
-		tag: import("./contracts/ws-rpc.js").GlobalProjectSetting["_tag"],
+		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,
 	) => import("effect").Effect.Effect<void>;
 	/** Refresh the daemon's cached git context before publishing a turn-end list. */
 	refreshSessionGit?: () => Promise<void>;

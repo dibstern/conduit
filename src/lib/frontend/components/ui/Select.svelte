@@ -12,6 +12,8 @@
 	type SelectProps = {
 		value?: string | number | undefined;
 		size?: FieldSize | undefined;
+		/** Keep a 44px target on phones with the normal desktop field size. */
+		touchTarget?: boolean;
 		/** Standalone invalid flag; a wrapping <Field> also forces it. */
 		invalid?: boolean | undefined;
 		class?: string | undefined;
@@ -26,6 +28,7 @@
 	let {
 		value = $bindable(),
 		size = "md",
+		touchTarget = false,
 		invalid = false,
 		class: className,
 		children,
@@ -50,6 +53,7 @@
 			FIELD_BASE_CLASSES,
 			FIELD_CHROME_CLASSES.bordered,
 			CONTROL_SIZE_CLASSES[size],
+			touchTarget ? "max-md:min-h-[44px]" : "",
 			className,
 		]
 			.filter(Boolean)

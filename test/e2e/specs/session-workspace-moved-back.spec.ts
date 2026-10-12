@@ -4,6 +4,16 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
+// The words composer keeps the checkout in the footer on phones too.
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => {
+		localStorage.setItem(
+			"conduit-composer-preferences",
+			JSON.stringify({ controls: "words" }),
+		);
+	});
+});
+
 for (const viewport of [
 	{ width: 1440, height: 900 },
 	{ width: 390, height: 844 },
@@ -48,22 +58,16 @@ for (const viewport of [
 			responses: new Map(),
 		});
 		await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
-		const identity = page.getByTestId("session-bar-identity");
+		const identity = page.getByTestId("composer-checkout");
 		const notice = page.getByTestId("workspace-moved-back");
 		await expect(notice).toBeVisible();
-		if (viewport.width === 390) {
-			await expect(notice).toHaveAttribute("role", "img");
-			await expect(notice).toHaveAttribute(
-				"aria-label",
-				"moved back: worktree removed",
-			);
-			await expect(notice).toHaveText("");
-			await expect(identity).toHaveAccessibleName(
-				/moved back: worktree removed/,
-			);
-		} else {
-			await expect(notice).toHaveText("moved back: worktree removed");
-		}
+		await expect(notice).toHaveAttribute("role", "img");
+		await expect(notice).toHaveAttribute(
+			"aria-label",
+			"moved back: worktree removed",
+		);
+		await expect(notice).toHaveText("");
+		await expect(identity).toHaveAccessibleName(/moved back: worktree removed/);
 		await page.screenshot({
 			path: testInfo.outputPath("workspace-moved-back.png"),
 		});

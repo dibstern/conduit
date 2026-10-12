@@ -22,8 +22,14 @@ import {
 } from "../../../daemon/config-persistence.js";
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
+import { getLogLevel } from "../../../logger.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../relay/relay-settings.js";
 import {
 	getRestartAvailable,
+	isServerSupervised,
 	SERVER_BUILD_ID,
 } from "../../../server/build-update.js";
 import {
@@ -34,6 +40,7 @@ import {
 	wsRpcHandlers,
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
+import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
@@ -75,11 +82,17 @@ import {
 	type ProjectSaveLockTag,
 	projectInfos,
 	removeProjectFromEffectRegistry,
+	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
+import {
+	applyTailscaleServe,
+	isTailscaleServeAvailable,
+	type TailscaleCliTag,
+} from "./tailscale-serve-layer.js";
 
 export class DaemonWsRpcHandlersTag extends Context.Tag("DaemonWsRpcHandlers")<
 	DaemonWsRpcHandlersTag,
@@ -104,6 +117,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| DaemonHandleTag
 			| DaemonStateTag
 			| KeepAwakeTag
+			| TailscaleCliTag
 		>();
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
@@ -112,6 +126,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const usage = yield* Usage;
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Effect.makeSemaphore(1);
+		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
 		const auth = yield* AuthManagerTag;
 		const browserConnections = yield* BrowserRpcConnectionsTag;
 		const invalidateBrowsers = () => {
@@ -177,6 +192,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonHandleTag
 				| DaemonStateTag
 				| KeepAwakeTag
+				| TailscaleCliTag
 			>,
 		) =>
 			effect.pipe(
@@ -280,7 +296,21 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const { ok: _ok, ...status } = yield* handle.getStatus();
-						return status;
+						const config = yield* Ref.get(yield* DaemonConfigRefTag);
+						const tailscaleServeAvailable = yield* isTailscaleServeAvailable;
+						return {
+							...status,
+							tailscaleServeEnabled: config.tailscaleServeEnabled ?? false,
+							tailscaleServeAvailable,
+							// Each browser follows one status feed, even with no project.
+							// Counting feeds excludes CLI IPC and the second browser socket.
+							clientCount: Array.from(listSubscribers).filter(
+								({ list }) => list === "serverStatus",
+							).length,
+							version: getVersion(),
+							logLevel: getLogLevel(),
+							supervised: isServerSupervised(),
+						};
 					}),
 				),
 			SetPin: (request) =>
@@ -349,6 +379,14 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						yield* requestConfigSave;
 						return { ok: true as const, supported, active };
 					}).pipe(Effect.uninterruptible, keepAwakeLock.withPermits(1)),
+				),
+			SetTailscaleServe: (request) =>
+				run(
+					Effect.gen(function* () {
+						yield* applyTailscaleServe(request.enabled);
+						yield* requestConfigSave;
+						return { ok: true as const };
+					}).pipe(Effect.uninterruptible, tailscaleServeLock.withPermits(1)),
 				),
 			SetKeepAwakeCommand: (request) =>
 				run(
@@ -444,12 +482,23 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			ResolveSessionMode: ({ projectSlug }) =>
+				run(resolveSessionMode(projectSlug)),
 			SaveProject: (request) =>
 				Effect.gen(function* () {
 					const { kind, project, warnings } = yield* handle.saveProject({
 						folders: request.folders,
 						...(request.slug !== undefined && { slug: request.slug }),
 						...(request.title !== undefined && { title: request.title }),
+						...(request.setupScript !== undefined && {
+							setupScript: request.setupScript,
+						}),
+						...(request.sessionMode !== undefined && {
+							sessionMode: request.sessionMode,
+						}),
+						...(request.groupingMode !== undefined && {
+							groupingMode: request.groupingMode,
+						}),
 					});
 					// Saving without a slug adds a project; its first session goes there.
 					if (request.slug === undefined && kind !== "existing")
@@ -666,6 +715,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetDefaultGroupingMode: (_request) =>
+				run(
+					Effect.sync(() => ({
+						mode:
+							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
+					})),
+				),
+			SetDefaultGroupingMode: ({ mode }) =>
+				run(
+					Effect.gen(function* () {
+						yield* Effect.try(() =>
+							saveRelaySettings({ defaultGroupingMode: mode }, configDir),
+						);
+						yield* PubSub.publish(
+							bus,
+							DaemonEvent.GlobalSettingChanged({
+								originSlug: "",
+								tag: "defaultGroupingMode",
+							}),
+						);
+						yield* PubSub.publish(bus, DaemonEvent.ProjectsChanged());
+						return { mode };
+					}),
+				),
 			GetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>

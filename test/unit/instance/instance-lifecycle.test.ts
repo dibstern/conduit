@@ -39,20 +39,22 @@ describe("instance lifecycle integration", () => {
 			smartDefault: false,
 		});
 		const instances = daemon.getInstances();
-		expect(instances).toHaveLength(1);
-		const [instance] = instances;
+		expect(instances).toHaveLength(2);
+		const instance = instances.find(({ id }) => id === "opencode");
 		assert.exists(instance, "expected the default instance");
 		expect(instance.id).toBe("opencode");
 	});
 
-	it("daemon without opencodeUrl has no instances (smartDefault=false)", async () => {
+	it("daemon without opencodeUrl keeps only the Claude default (smartDefault=false)", async () => {
 		daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			smartDefault: false,
 		});
-		expect(daemon.getInstances()).toHaveLength(0);
+		expect(daemon.getInstances()).toEqual([
+			expect.objectContaining({ id: "claude", driver: "claude" }),
+		]);
 	});
 
 	it("persists instances in config via saveDaemonConfig", async () => {

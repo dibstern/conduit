@@ -37,6 +37,7 @@ import {
 	SessionRetriesTag,
 } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
+import { withSessionWorktreeStatus } from "./session-workspace.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
 
@@ -106,26 +107,30 @@ export const subscribeShell = (
 										} satisfies SidebarRead);
 									return list;
 								}),
-								Effect.map((list) => ({
-									...list,
-									rows: list.rows.map((row) => {
-										const compacting = compactingOf?.(row.item.id);
-										const retrying = retryingOf?.(row.item.id);
-										return {
-											...row,
-											item: {
-												...(config
-													? withCachedSessionGit(row.item, [
-															config.projectDir,
-															...(config.extraFolders ?? []),
-														])
-													: row.item),
-												...(compacting === undefined ? {} : { compacting }),
-												...(retrying === undefined ? {} : { retrying }),
-											},
-										};
-									}),
-								})),
+								Effect.flatMap((list) =>
+									Effect.forEach(list.rows, (row) =>
+										Effect.gen(function* () {
+											const compacting = compactingOf?.(row.item.id);
+											const retrying = retryingOf?.(row.item.id);
+											return {
+												...row,
+												item: {
+													...(config
+														? yield* withSessionWorktreeStatus(
+																withCachedSessionGit(row.item, [
+																	config.projectDir,
+																	...(config.extraFolders ?? []),
+																]),
+																config,
+															)
+														: row.item),
+													...(compacting === undefined ? {} : { compacting }),
+													...(retrying === undefined ? {} : { retrying }),
+												},
+											};
+										}),
+									).pipe(Effect.map((rows) => ({ ...list, rows }))),
+								),
 							),
 					// A descendant advance can change its root summary, and a
 					// deletion can end a family. The projectors move the root's

@@ -18,6 +18,7 @@ where a selector adopts the same panel-shaped language.
 Other radii are not conduit-owned tokens yet. Existing compact controls use
 Tailwind's `rounded-sm` and `rounded-md`; menus and dialogs commonly use
 `rounded-lg` or `rounded-xl`; pill-shaped status and choice controls use
-`rounded-full`; the composer uses `rounded-3xl`. This mix is the current convention
+`rounded-full`; the composer uses `rounded-[22px]` (`20px` on phones) with padding chosen so
+its 10px-cornered buttons sit concentric (outer radius minus padding and border). This mix is the current convention
 and an open design-system gap. Reuse the nearest established surface pattern rather
 than creating a new `--radius-*` value in a feature.

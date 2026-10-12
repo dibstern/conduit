@@ -63,6 +63,7 @@ import type {
 	ModelInfo,
 	ProviderAgentInfo,
 } from "../../src/lib/provider/types.js";
+import type { RelaySettings } from "../../src/lib/relay/relay-settings.js";
 import type { PtyInfo } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
@@ -162,6 +163,8 @@ export class ProcessHarness {
 	private logs = "";
 	private port = 0;
 	private disposed = false;
+	private supervisorStopped = false;
+	private respawning: Promise<void> | undefined;
 	private environment: NodeJS.ProcessEnv = {};
 	private defaultOpenCode: Server | undefined;
 	private defaultOpenCodeUrl = "http://127.0.0.1:0";
@@ -238,6 +241,8 @@ export class ProcessHarness {
 		capabilityAgents?: readonly ProviderAgentInfo[],
 		private continuationSweepIntervalMs?: number,
 		private readonly logLevel?: "warn",
+		relaySettings?: RelaySettings,
+		private readonly respawnOnExit = false,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -265,6 +270,11 @@ export class ProcessHarness {
 		]) {
 			mkdirSync(join(this.root, directory));
 		}
+		if (relaySettings)
+			writeFileSync(
+				join(this.configDir, "settings.jsonc"),
+				JSON.stringify(relaySettings, null, 2),
+			);
 		// macOS resolves the login Keychain under HOME, so an isolated HOME hides
 		// the Claude login. Link only the Keychains dir for real-SDK runs.
 		if (realSdk && process.platform === "darwin") {
@@ -473,10 +483,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
 			capabilityAgents?: readonly ProviderAgentInfo[];
+			relaySettings?: RelaySettings;
 			restartProof?: boolean;
 			continuationSweepIntervalMs?: number;
 			/** Enable warning diagnostics for provider lifecycle regressions. */
 			logLevel?: "warn";
+			/** Stand in for a login service: respawn exited daemons on the same port. */
+			respawnOnExit?: boolean;
 			holdRunnerAck?: boolean;
 			holdRunnerOutput?:
 				| "permission-request"
@@ -526,6 +539,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.capabilityAgents,
 			options.continuationSweepIntervalMs,
 			options.logLevel,
+			options.relaySettings,
+			options.respawnOnExit,
 		);
 	}
 
@@ -548,6 +563,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			startupTimeoutMs?: number;
 			/** A process fixture may need longer to load the test SDK in a runner. */
 			runnerStartupTimeoutMs?: number;
+			/** Keep a hanging worktree setup case short without changing the user setting. */
+			setupTimeoutMs?: number;
 			skipBrowserProbe?: boolean;
 			cliArgs?: string[];
 			/** Use service arguments verbatim, without appended port/host/TLS flags. */
@@ -559,6 +576,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 				Pick<
 					NodeJS.ProcessEnv,
 					| "CONDUIT_SERVICE"
+					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "XPC_SERVICE_NAME"
@@ -753,6 +771,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(options.setupTimeoutMs === undefined
+						? {}
+						: {
+								CONDUIT_WORKTREE_SETUP_TIMEOUT_MS: String(
+									options.setupTimeoutMs,
+								),
+							}),
 					...(options.runnerStartupTimeoutMs === undefined
 						? {}
 						: {
@@ -934,6 +959,16 @@ Object.assign(ClaudeDriver, { create: deps => {
 			child.once("exit", (exitCode, signal) => {
 				if (generation) Object.assign(generation, { exitCode, signal });
 				done();
+				if (generation && this.respawnOnExit && !this.supervisorStopped) {
+					this.child = undefined;
+					this.respawning = this.restart({
+						...options,
+						keepPort: true,
+						skipBrowserProbe: true,
+					}).catch((cause: unknown) => {
+						this.ownershipErrors.push(cause);
+					});
+				}
 			});
 			child.once("error", () => done());
 		});
@@ -1363,6 +1398,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	async shutdown(): Promise<void> {
+		this.supervisorStopped = true;
+		await this.respawning;
 		const child = this.child;
 		if (!child) return;
 		let rpcFailure: unknown;
@@ -1433,6 +1470,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	private async stop(signal: NodeJS.Signals, timeoutMs = 6000): Promise<void> {
+		this.supervisorStopped = true;
+		await this.respawning;
 		const child = this.child;
 		if (!child) return;
 		// Close clients before graceful disposal: RPC scopes can otherwise hold
@@ -1632,6 +1671,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	async dispose(): Promise<void> {
+		this.supervisorStopped = true;
+		await this.respawning;
 		if (this.disposed) {
 			this.assertNoRunners();
 			return;

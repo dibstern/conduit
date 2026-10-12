@@ -441,15 +441,20 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(app.sidebar).toBeVisible();
 	});
 
-	test("merged bar shows identity, status and Share", async ({
+	test("session header shows title, status and Share", async ({
 		page,
 		relayUrl,
 	}) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
-		// Project name always visible
-		await expect(app.projectName).toBeVisible();
+		await expect(page.getByTestId("session-bar-title")).toBeVisible();
+		await expect(app.checkout).toBeVisible();
+		await expect(
+			page
+				.getByTestId("session-bar")
+				.getByRole("button", { name: /^Checkout:/ }),
+		).toHaveCount(0);
 
 		// Status dot always visible
 		await expect(app.statusDot).toBeVisible();
@@ -514,7 +519,9 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const bar = page.getByTestId("session-bar");
 		await expect(bar).toBeVisible();
 		await expect(bar).toHaveAttribute("data-compact", "false");
-		await expect(bar.getByTestId("session-bar-identity")).toBeVisible();
+		await expect(bar.getByRole("button", { name: /^Checkout:/ })).toHaveCount(
+			0,
+		);
 		await expect(bar.locator("#status")).toBeVisible();
 		await expect(bar.getByTestId("session-bar-overflow")).toBeVisible();
 		await expect(bar.getByTestId("session-bar-title")).toHaveCount(0);

@@ -84,6 +84,7 @@ import {
 	type ClaudeCapabilitiesService,
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
+import { isInterruptedResult } from "./claude-event-translator.js";
 import {
 	ClaudeGoalTracker,
 	type ReadClaudeGoalStatus,
@@ -1494,18 +1495,26 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	private recordBackgroundTaskEffect(
 		transition: BackgroundTaskTransition,
 	): Effect.Effect<void> {
-		return this.emit({ type: "background-task", transition }).pipe(
-			Effect.orDie,
-			Effect.asVoid,
-		);
+		return Effect.gen(this, function* () {
+			const ctx = yield* getSession(this.stateRef, transition.sessionId);
+			if (ctx)
+				ctx.liveBackgroundTaskCount =
+					transition.kind === "snapshot" ? transition.tasks.length : 0;
+			yield* this.emit({ type: "background-task", transition }).pipe(
+				Effect.orDie,
+			);
+		});
 	}
 
-	/** The server places the message before this turn may produce output. */
+	/**
+	 * The server places the message before this turn may produce output. A
+	 * continuation places nothing: it resumes the cut-off message's turn.
+	 */
 	private placeUserMessageEffect(
 		input: SendTurnInput,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		const sinkId = this.sinkId(input.eventSink);
-		if (!sinkId) return Effect.void;
+		if (!sinkId || input.continuation) return Effect.void;
 		return this.emit({
 			type: "place-user-message",
 			sinkId,
@@ -2517,7 +2526,23 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					ctx.turnInFlight = true;
 					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 				}
-				if (message.type === "result") ctx.turnInFlight = false;
+				if (message.type === "result") {
+					const inputIds = message.user_message_uuids ?? [
+						message.user_message_uuid ?? ctx.currentTurnId,
+					];
+					ctx.interruptRequested =
+						ctx.interruptInputId !== undefined &&
+						inputIds.includes(ctx.interruptInputId);
+					if (isInterruptedResult(message, ctx.interruptRequested)) {
+						yield* this.completeTurnToolsEffect(ctx, false);
+						yield* this.cancelInteractionsEffect(
+							ctx,
+							"Turn interrupted",
+							false,
+						);
+					}
+					ctx.turnInFlight = false;
+				}
 				const translatedMessages = yield* interceptClaudeUsageLimit(
 					ctx,
 					message,
@@ -2542,17 +2567,27 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						ctx,
 						translatedResult ?? message,
 					);
+					if (ctx.interruptRequested) ctx.interruptInputId = undefined;
 					ctx.interruptRequested = false;
 				}
 			}
-			// The SDK may list a task before it starts, when its owner is not
-			// yet known: publish the live set again now that it is.
+			// Ownership or launcher input can arrive after the live snapshot,
+			// including through an agent's transcript feed. Final reads still
+			// persist history above, but cannot revive an ended or replaced stream.
 			if (
+				ctx.subagentTasks?.size &&
+				!ctx.stopped &&
+				(yield* isCurrentSession(this.stateRef, ctx)) &&
+				!(yield* isStreamEnded(this.stateRef, ctx.sessionId)) &&
 				decisions.some(
 					(decision) =>
-						decision.kind === "route" &&
-						decision.message.type === "system" &&
-						decision.message.subtype === "task_started",
+						decision.kind === "route-transcript" ||
+						(decision.kind === "route" &&
+							(decision.message.type === "assistant" ||
+								(decision.message.type === "stream_event" &&
+									decision.message.event.type === "content_block_stop") ||
+								(decision.message.type === "system" &&
+									decision.message.subtype === "task_started"))),
 				)
 			)
 				yield* translator.publishBackgroundTasks(ctx);
@@ -2612,8 +2647,6 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				ctx.eventSink = unplaced.eventSink;
 				yield* this.releaseSinkEffect(priorSink);
 			}
-			// A continuation places nothing: it resumes the cut-off message's turn.
-			if (unplaced.continuation) return;
 			// The stream outlives one input: a failed placement must not end it.
 			yield* this.placeUserMessageEffect(unplaced).pipe(
 				Effect.catchAll((error) =>
@@ -2779,34 +2812,57 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx) return;
 
-			// Stop with a steer pending stops only the running turn: the SDK
-			// reports the steer still queued and runs it as its own turn, so the
-			// query stays live and the stream settles both by id.
-			const waiters = [
-				...(yield* pendingTurnWaiters(this.stateRef, sessionId)).values(),
-			];
+			// Live tasks and pending steering inputs need the same query and prompt
+			// queue. Interrupt only the running turn; its SDK result settles it by id.
+			const waiters = yield* pendingTurnWaiters(this.stateRef, sessionId);
 			if (
 				!ctx.stopped &&
-				waiters.some((waiter) => waiter.started) &&
-				waiters.some((waiter) => !waiter.started)
+				((ctx.liveBackgroundTaskCount ?? 0) > 0 ||
+					[...waiters].some(
+						([inputId, waiter]) =>
+							!waiter.started &&
+							waiter.unplaced !== undefined &&
+							inputId !== ctx.currentTurnId,
+					))
 			) {
+				// A delayed Cancel can arrive after the result while tasks or a steer
+				// keep the query alive. It must not interrupt an idle query or the next input.
+				const inputId = ctx.currentTurnId;
+				if (!ctx.turnInFlight || !inputId || ctx.interruptInputId === inputId)
+					return;
 				log.info(`Interrupting running turn for session ${sessionId}`);
-				ctx.interruptRequested = true;
-				yield* this.cancelInteractionsEffect(ctx, "Turn interrupted", false);
+				ctx.interruptInputId = inputId;
 				yield* Effect.tryPromise({
 					try: () => ctx.query.interrupt(),
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
-				}).pipe(Effect.ignore);
+				}).pipe(
+					Effect.tapError(() =>
+						Effect.sync(() => {
+							if (ctx.interruptInputId === inputId)
+								ctx.interruptInputId = undefined;
+						}),
+					),
+				);
+				// Only an accepted interrupt may reject interactions. Keep this on
+				// the stream's ownership permit so a pending steer cannot lose its approvals.
+				yield* (ctx.messageOwnershipPermit ??=
+					Effect.unsafeMakeSemaphore(1)).withPermits(1)(
+					Effect.gen(this, function* () {
+						if (ctx.currentTurnId === inputId && ctx.turnInFlight)
+							yield* this.cancelInteractionsEffect(
+								ctx,
+								"Turn interrupted",
+								false,
+							);
+					}),
+				);
 				return;
 			}
 
 			log.info(`Interrupting turn for session ${sessionId}`);
 			yield* this.cleanupSessionEffect(ctx, "Turn interrupted", false);
-			// Stop means the whole session. interrupt() alone leaves the CLI alive
-			// for up to 10 minutes while Monitor tasks and agents are armed, and the
-			// next turn starts a new process anyway, so their results could never
-			// arrive. Closing kills them now; the stream end then clears liveness.
+			// With no live tasks or pending steer, retain the existing close path.
 			yield* Effect.try({
 				try: () => ctx.query.close(),
 				catch: (cause) =>
@@ -2824,6 +2880,27 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				)
 			)
 				yield* this.scheduleShutdownAfterTurnEffect(sessionId);
+		});
+	}
+
+	/** Complete turn-scoped tools without changing query or background-task ownership. */
+	private completeTurnToolsEffect(
+		ctx: ClaudeSessionContext,
+		recoverQuestions: boolean,
+	): Effect.Effect<void> {
+		return Effect.gen(function* () {
+			for (const [, tool] of ctx.inFlightTools) {
+				if (recoverQuestions && tool.toolName === "AskUserQuestion") continue;
+				const event = claudeRuntimeEvent("tool.completed", ctx.sessionId, {
+					messageId:
+						ctx.activeAssistantMessageId ?? ctx.lastAssistantUuid ?? "",
+					partId: tool.itemId,
+					result: null,
+					duration: 0,
+				});
+				if (ctx.eventSink) yield* ctx.eventSink.push(event).pipe(Effect.ignore);
+			}
+			ctx.inFlightTools.clear();
 		});
 	}
 
@@ -2878,19 +2955,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			const turnInFlight = ctx.turnInFlight === true;
 			const messageId = ctx.activeAssistantMessageId ?? "";
 
-			for (const [, tool] of ctx.inFlightTools) {
-				if (recoverQuestions && tool.toolName === "AskUserQuestion") continue;
-				const event = claudeRuntimeEvent("tool.completed", ctx.sessionId, {
-					messageId: ctx.lastAssistantUuid ?? "",
-					partId: tool.itemId,
-					result: null,
-					duration: 0,
-				});
-				if (ctx.eventSink) {
-					yield* ctx.eventSink.push(event).pipe(Effect.ignore);
-				}
-			}
-			ctx.inFlightTools.clear();
+			yield* this.completeTurnToolsEffect(ctx, recoverQuestions);
 
 			yield* this.cancelInteractionsEffect(ctx, reason, recoverQuestions);
 

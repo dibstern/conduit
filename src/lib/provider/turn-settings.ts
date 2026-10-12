@@ -1,4 +1,5 @@
 import { Data, Either } from "effect";
+import type { RelaySettings } from "../relay/relay-settings.js";
 import {
 	claudeApiModelId,
 	isSameModelIdentity,
@@ -25,6 +26,42 @@ export interface TurnPick {
 
 /** Catalog identity and offered choices; empty choices use model defaults. */
 export interface TurnSettings extends TurnPick {}
+
+/** Read-time seeding only. A foreign stored pick stays visible for rejection. */
+export function harnessDefaultPick(
+	harness: Harness,
+	settings: RelaySettings,
+	nativeDefaultModel?: string,
+): TurnPick | undefined {
+	const stored = settings.harnessDefaults?.[harness];
+	let model = stored && {
+		providerId: stored.providerId,
+		modelId: stored.modelId,
+	};
+	const parse = (value: string | undefined): ModelSelection | undefined => {
+		const separator = value?.indexOf("/") ?? -1;
+		return value && separator > 0
+			? {
+					providerId: value.slice(0, separator),
+					modelId: value.slice(separator + 1),
+				}
+			: undefined;
+	};
+	if (!model) {
+		const legacy = parse(settings.defaultModel);
+		if (legacy && harnessForModelProvider(legacy.providerId) === harness)
+			model = legacy;
+		else if (harness === "opencode") model = parse(nativeDefaultModel);
+	}
+	if (!model) return undefined;
+	return {
+		harness,
+		model,
+		effort:
+			settings.defaultVariants?.[`${model.providerId}/${model.modelId}`] ?? "",
+		contextWindow: stored?.contextWindow ?? "",
+	};
+}
 
 export class ModelNotInCatalog extends Data.TaggedError("ModelNotInCatalog")<{
 	readonly harness: Harness;

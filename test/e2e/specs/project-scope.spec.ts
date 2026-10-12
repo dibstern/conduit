@@ -7,6 +7,7 @@
 
 import { expect, test } from "@playwright/test";
 import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import {
 	mockWsRpc,
 	type RpcMockControl,
@@ -319,9 +320,8 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-opencode").click();
 	await page.keyboard.press("Escape");
 	const startChip = page.getByTestId("draft-start-chip");
 	const explanation = page.getByTestId("draft-provider-explanation");
@@ -336,7 +336,7 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	const input = page.locator("#input");
 	await input.fill("Read both folders");
 	await expect(
-		page.getByRole("button", { name: "Send message", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeDisabled();
 	await input.press("Enter");
 	await startChip.click();
@@ -351,15 +351,14 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 		path: testInfo.outputPath("unsupported-provider-start.png"),
 	});
 	await page.keyboard.press("Escape");
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-claude").click();
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-claude").click();
 	await page.keyboard.press("Escape");
 	await expect(startChip).toHaveText("Current folder");
 	await expect(startChip).not.toHaveAttribute("aria-describedby");
 	await expect(explanation).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Send message", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeEnabled();
 	await page.screenshot({
 		path: testInfo.outputPath("supported-provider-start.png"),
@@ -386,10 +385,14 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await expect(startChip).not.toHaveAttribute("aria-describedby");
 	await expect(explanation).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "Send message", exact: true }),
+		page.getByRole("button", { name: "Send", exact: true }),
 	).toBeEnabled();
 	await startChip.click();
-	await expect(startMenu).toContainText("New worktree soon");
+	await expect(
+		startMenu.getByRole("menuitem", {
+			name: "New worktree Not supported by This provider",
+		}),
+	).toHaveAttribute("aria-disabled", "true");
 	await page.keyboard.press("Escape");
 	await page.screenshot({
 		path: testInfo.outputPath("unknown-provider-start.png"),

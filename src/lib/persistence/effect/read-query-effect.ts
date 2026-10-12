@@ -1335,7 +1335,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						THEN COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)
 							+ COALESCE(tokens_cache_read, 0) + COALESCE(tokens_cache_write, 0)
 						ELSE 0 END), 0) AS cumulativeTokens
-				FROM messages WHERE session_id = ${sessionId}`;
+				FROM messages m WHERE m.session_id = ${sessionId}
+					AND NOT EXISTS (
+						SELECT 1 FROM message_parts p WHERE p.message_id = m.id
+							AND CASE WHEN json_valid(p.metadata)
+								THEN json_type(p.metadata, '$.setup') END = 'object'
+					)`;
 			const metadata = rows[0];
 			if (!metadata)
 				return yield* new ReadQueryEffectError({

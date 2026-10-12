@@ -14,8 +14,9 @@
 	import NotificationsSettingsTab from "./NotificationsSettingsTab.svelte";
 	import AppearanceSettingsTab from "./AppearanceSettingsTab.svelte";
 	import ComposerSettingsTab from "./ComposerSettingsTab.svelte";
+	import SessionsSettingsTab from "./SessionsSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
-	import InstancesSettingsTab from "./InstancesSettingsTab.svelte";
+	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
 	import type { SettingsSection } from "../layout/chrome-actions.js";
 	import { getCachedInstances, instanceStatusColor } from "../../stores/instance.svelte.js";
@@ -151,6 +152,7 @@
 						<NotificationsSettingsTab />
 						<AppearanceSettingsTab />
 						<ComposerSettingsTab />
+						<SessionsSettingsTab />
 						<DebugSettingsTab />
 					{:else if shown === "models"}
 						<VisibilitySettingsTab />
@@ -159,7 +161,7 @@
 					{:else if shown === "usage"}
 						<UsageSettingsTab />
 					{:else if shown === "server"}
-						<InstancesSettingsTab />
+						<ServerSettingsTab {onClose} onOpenUsage={() => openSection("usage")} />
 					{/if}
 				</div>
 			{/if}

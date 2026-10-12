@@ -14,6 +14,7 @@ import { switchContextWindowForSession } from "../../handlers/context-window.js"
 import {
 	getModelsResponse,
 	setDefaultModelForRelay,
+	setHarnessDefaultForRelay,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../handlers/model.js";
@@ -31,25 +32,29 @@ export const modelsHandlers = {
 				request.instanceId === undefined
 					? undefined
 					: ProviderInstanceIdSchema.make(request.instanceId);
-			const daemonConfig =
-				instanceId === undefined ? null : loadDaemonConfig(config.configDir);
-			const instanceDriver =
-				instanceId === undefined || daemonConfig === null
+			// A session's agents come from the instance it is bound to.
+			const sessionInstanceId =
+				request.sessionId === undefined
 					? undefined
-					: resolveInstanceDriver(daemonConfig, instanceId);
+					: yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
+							request.sessionId,
+						);
+			// An instance ID names an account, not a harness: "account-a" may be Claude.
+			const listedInstanceId = instanceId ?? sessionInstanceId;
+			const daemonConfig =
+				listedInstanceId === undefined
+					? null
+					: loadDaemonConfig(config.configDir);
+			const instanceDriver =
+				listedInstanceId === undefined || daemonConfig === null
+					? undefined
+					: resolveInstanceDriver(daemonConfig, listedInstanceId);
 			const result = yield* agentService.listAgents(
 				request.sessionId,
 				instanceId,
 				instanceDriver,
 			);
-			// A session's agents come from the instance it is bound to.
-			const resultInstanceId =
-				result.instanceId ??
-				(request.sessionId === undefined
-					? undefined
-					: yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
-							request.sessionId,
-						));
+			const resultInstanceId = result.instanceId ?? sessionInstanceId;
 			return {
 				projectSlug: request.projectSlug,
 				...(resultInstanceId === undefined
@@ -148,7 +153,26 @@ export const modelsHandlers = {
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
-						message: `SetDefaultModel failed: ${String(error)}`,
+						message: isPickRejection(error)
+							? error.message
+							: `SetDefaultModel failed: ${String(error)}`,
+					}),
+				),
+			),
+		),
+	SetHarnessDefault: (request) =>
+		setHarnessDefaultForRelay(request).pipe(
+			Effect.map((state) => ({
+				projectSlug: request.projectSlug,
+				harness: request.harness,
+				state,
+			})),
+			Effect.catchAll((error) =>
+				Effect.fail(
+					new WsRpcError({
+						message: isPickRejection(error)
+							? error.message
+							: `SetHarnessDefault failed: ${String(error)}`,
 					}),
 				),
 			),
@@ -201,6 +225,7 @@ export const modelsHandlers = {
 	| "SwitchContextWindow"
 	| "SwitchModel"
 	| "SetDefaultModel"
+	| "SetHarnessDefault"
 	| "SwitchVariant"
 	| "GetModels"
 >;

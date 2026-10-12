@@ -2,11 +2,14 @@ import { tick } from "svelte";
 import type { BackgroundTask } from "../../../shared-types.js";
 import { reveal } from "../../stores/reveal.svelte.js";
 import {
+	findSession,
 	rootBackgroundTasks,
 	sessionState,
 	switchToSession,
 } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { showToast } from "../../stores/ui.svelte.js";
+import { stopBackgroundTaskRpc } from "../../transport/ws-rpc-client.js";
 
 /** Whether the header's background-task pull-down is open. One per page, like goalDetails. */
 export const tasksPanel = $state({ open: false });
@@ -135,6 +138,34 @@ export function taskStopIds(
 		if (taskId === undefined || task.id === taskId) stop(task);
 	}
 	return ids;
+}
+
+/** Request one live subtree or all live tasks, children first, awaiting SDK row updates. */
+export async function stopBackgroundTasks(
+	sessionId: string | null,
+	projectSlug: string | null,
+	taskId?: string,
+): Promise<void> {
+	if (!sessionId || !projectSlug) return;
+	const ids = taskStopIds(
+		findSession(sessionId)?.backgroundTasks ?? [],
+		taskId,
+	);
+	let failed = false;
+	for (const id of ids) {
+		try {
+			await stopBackgroundTaskRpc({ projectSlug, sessionId, taskId: id });
+		} catch {
+			failed = true;
+		}
+	}
+	if (failed)
+		showToast(
+			taskId
+				? "Failed to stop background task"
+				: "Failed to stop background tasks",
+			{ variant: "error" },
+		);
 }
 
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */

@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 
-// The pill labels the main folder's basename; a long one stresses the phone bar.
+// The checkout labels the main folder's basename; a long one stresses the composer.
 const folderName = "conduit-project-with-a-long-name";
 const project: ProjectInfo = {
 	slug: "e2e-replay",
@@ -74,11 +74,20 @@ test.use({
 	projectDir: mkdtempSync(join(tmpdir(), "git-identity-")),
 });
 
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => {
+		localStorage.setItem(
+			"conduit-composer-preferences",
+			JSON.stringify({ controls: "words" }),
+		);
+	});
+});
+
 for (const viewport of [
 	{ width: 390, height: 844 },
 	{ width: 320, height: 640 },
 ]) {
-	test(`git identity fits the phone bar at ${viewport.width}px`, async ({
+	test(`checkout stays in the phone composer at ${viewport.width}px`, async ({
 		page,
 		relayUrl,
 	}) => {
@@ -90,26 +99,33 @@ for (const viewport of [
 		});
 		await gotoRelay(page, relayUrl);
 
-		const identity = page.getByTestId("session-bar-identity");
-		await expect(identity.locator('[data-part="project"]')).toHaveText(
+		const checkout = page.getByTestId("composer-checkout");
+		await expect(checkout.locator('[data-part="project"]')).toHaveText(
 			folderName,
 		);
-		await expect(identity).toContainText("feature/git");
+		await expect(checkout).toContainText("feature/git");
 		// A linked worktree shows its icon; the name lives in the checkout details.
 		await expect(
-			identity.locator('[data-part="worktree"][data-icon="worktree"] svg'),
+			checkout.locator('[data-part="worktree"][data-icon="worktree"] svg'),
 		).toBeVisible();
-		await expect(identity).not.toContainText("linked-17xt");
-		const back = page.getByTestId("session-bar-back");
-		const identityBox = await identity.boundingBox();
-		const backBox = await back.boundingBox();
-		expect(identityBox).not.toBeNull();
-		expect(backBox).not.toBeNull();
-		if (!identityBox || !backBox) return;
-		expect(identityBox.x).toBeGreaterThanOrEqual(backBox.x + backBox.width);
-		// The pill is a fixed-height segment, so check its labels stay on one line.
+		await expect(checkout).not.toContainText("linked-17xt");
+		await expect(
+			page
+				.getByTestId("session-bar")
+				.getByRole("button", { name: /^Checkout:/ }),
+		).toHaveCount(0);
+		const checkoutBox = await checkout.boundingBox();
+		const composerBox = await page.locator("#input-area").boundingBox();
+		expect(checkoutBox).not.toBeNull();
+		expect(composerBox).not.toBeNull();
+		if (!checkoutBox || !composerBox)
+			throw new Error("Composer checkout missing");
+		expect(checkoutBox.x).toBeGreaterThanOrEqual(composerBox.x);
+		expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
+			composerBox.x + composerBox.width,
+		);
 		for (const part of ["project", "branch"]) {
-			const height = await identity
+			const height = await checkout
 				.locator(`[data-part="${part}"]`)
 				.evaluate((element) => ({
 					actual: element.getBoundingClientRect().height,
@@ -117,17 +133,9 @@ for (const viewport of [
 				}));
 			expect(height.actual).toBeLessThanOrEqual(height.line + 1);
 		}
-		const branch = identity.locator('[title="Branch: feature/git"]');
+		const branch = checkout.locator('[title="Branch: feature/git"]');
 		await expect(branch).toBeVisible();
-		// Phones cap the pill at 150px; the long folder name gives up its room
-		// before the branch does.
-		expect(identityBox.width).toBeLessThanOrEqual(150);
-		const projectWidth = await identity
-			.locator('[data-part="project"]')
-			.evaluate((element) => element.clientWidth);
-		const branchWidth = await branch.evaluate((element) => element.clientWidth);
-		expect(branchWidth).toBeGreaterThan(projectWidth);
-		const dirty = identity.locator('[title="Uncommitted changes"]');
+		const dirty = checkout.locator('[title="Uncommitted changes"]');
 		await expect(dirty).toBeVisible();
 		await expect(dirty).toHaveText("Uncommitted changes");
 		await expect(dirty.locator(".sr-only")).toHaveText("Uncommitted changes");
@@ -141,10 +149,10 @@ test("a project without git shows only its folder name", async ({
 	await page.setViewportSize({ width: 390, height: 844 });
 	await supplyProject(page);
 	await gotoRelay(page, relayUrl);
-	const identity = page.getByTestId("session-bar-identity");
-	await expect(identity).toHaveText(folderName);
-	await expect(identity.locator('[data-icon="folder"] svg')).toBeVisible();
-	await expect(identity.locator('[title="Uncommitted changes"]')).toHaveCount(
+	const checkout = page.getByTestId("composer-checkout");
+	await expect(checkout).toHaveText(folderName);
+	await expect(checkout.locator('[data-icon="folder"] svg')).toBeVisible();
+	await expect(checkout.locator('[title="Uncommitted changes"]')).toHaveCount(
 		0,
 	);
 });

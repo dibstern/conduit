@@ -2,6 +2,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import { getScopeGroupKey } from "../../session-scope.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -15,10 +16,13 @@ import { applyInstanceListResponse } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
+	getCurrentSearchParams,
 	getCurrentSlug,
 	replaceRoute,
+	routerState,
+	SCOPE_PARAM,
 } from "./router.svelte.js";
-import { applyServerStatus, serverStatusFeed } from "./server-status.js";
+import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
 import { confirm } from "./ui.svelte.js";
 import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
@@ -38,7 +42,12 @@ export function applyProjectList(
 		!projects.some((p) => p.slug === attachedProjectState.slug)
 	) {
 		attachedProjectState.slug = null;
-		replaceRoute("/?");
+		// A repository scope survives removal of its attached checkout, including
+		// when the last member leaves and the group key becomes unknown.
+		const scope = getCurrentSearchParams().get(SCOPE_PARAM);
+		replaceRoute(
+			getScopeGroupKey(scope) === null ? "/?" : `/${routerState.search}`,
+		);
 	}
 }
 
@@ -85,6 +94,19 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.setupScript !== undefined
+			? { setupScript: project.setupScript }
+			: {}),
+		...(project.sessionMode !== undefined
+			? { sessionMode: project.sessionMode }
+			: {}),
+		...(project.groupingMode !== undefined
+			? { groupingMode: project.groupingMode }
+			: {}),
+		...(project.effectiveGroupingMode !== undefined
+			? { effectiveGroupingMode: project.effectiveGroupingMode }
+			: {}),
+		...(project.group !== undefined ? { group: project.group } : {}),
 		...(project.repositoryIdentities != null
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),
@@ -94,19 +116,18 @@ const toProjectInfoList = (
 			: {}),
 	}));
 
-let followedConnection: string | null = null;
+let following = false;
 let generation = 0;
 let fiber: RuntimeFiber<void, never> | null = null;
 
 /**
- * Follow the daemon-global project and instance lists over `connection`'s
- * socket pair. The lists are the same on every pair; the argument only picks
- * the pair this tab already holds, so following never opens a second one.
- * `null` stops following.
+ * Follow the daemon-global project, instance, usage and status lists over the
+ * tab's one socket pair. None is project-scoped, so a project switch must not
+ * re-follow: each new usage subscription re-reads every account's limits.
  */
-export function followDaemonLists(connection: string | null): void {
-	if (followedConnection === connection) return;
-	followedConnection = connection;
+export function followDaemonLists(on: boolean): void {
+	if (following === on) return;
+	following = on;
 	const currentGeneration = ++generation;
 	const old = fiber;
 	fiber = null;
@@ -124,50 +145,48 @@ export function followDaemonLists(connection: string | null): void {
 	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
 		.catch(() => undefined)
 		.then(async () => {
-			if (currentGeneration !== generation || connection === null) return;
+			if (currentGeneration !== generation || !on) return;
 			const runtime = await getRuntime();
 			if (currentGeneration !== generation) return;
 			const next = runtime.runFork(
 				Effect.flatMap(WsRpcClients, (clients) =>
-					Effect.flatMap(
-						clients.forProject(connection),
-						({ subscriptions, control }) =>
-							Effect.all(
-								[
-									follow(subscriptions.projects, (list) => {
-										applyProjectList(list);
-										projectState.newSessionProject =
-											list.newSessionProject ?? null;
-									}),
-									follow(subscriptions.instances, applyInstanceListResponse),
-									Stream.runForEach(
-										supervise(
-											Stream.suspend(subscriptions.usage),
-											() => undefined,
-										),
-										({ readings }) =>
-											Effect.gen(function* () {
-												if (currentGeneration !== generation) return;
-												applyUsageReadings(readings);
-												// Reload the shared order after reconnect and each snapshot.
-												yield* control.GetUsageLimitsSetting({}).pipe(
-													Effect.tap(({ usageLimits }) =>
-														Effect.sync(() => {
-															if (currentGeneration === generation)
-																applyUsageLimitsSetting(usageLimits);
-														}),
-													),
-													Effect.catchAll(() => Effect.void),
-												);
-											}),
+					Effect.flatMap(clients.forProject(""), ({ subscriptions, control }) =>
+						Effect.all(
+							[
+								follow(subscriptions.projects, (list) => {
+									applyProjectList(list);
+									projectState.newSessionProject =
+										list.newSessionProject ?? null;
+								}),
+								follow(subscriptions.instances, applyInstanceListResponse),
+								Stream.runForEach(
+									supervise(
+										Stream.suspend(subscriptions.usage),
+										() => undefined,
 									),
-									follow(
-										() => serverStatusFeed(subscriptions),
-										applyServerStatus,
-									),
-								],
-								{ concurrency: "unbounded", discard: true },
-							),
+									({ readings }) =>
+										Effect.gen(function* () {
+											if (currentGeneration !== generation) return;
+											applyUsageReadings(readings);
+											// Reload the shared order after reconnect and each snapshot.
+											yield* control.GetUsageLimitsSetting({}).pipe(
+												Effect.tap(({ usageLimits }) =>
+													Effect.sync(() => {
+														if (currentGeneration === generation)
+															applyUsageLimitsSetting(usageLimits);
+													}),
+												),
+												Effect.catchAll(() => Effect.void),
+											);
+										}),
+								),
+								follow(
+									() => serverStatusFeed(subscriptions),
+									applyServerStatus,
+								),
+							],
+							{ concurrency: "unbounded", discard: true },
+						),
 					),
 				),
 			);

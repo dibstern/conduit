@@ -1,12 +1,19 @@
 // Agents, models, providers, and commands.
 
-import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+import type { SessionMode } from "../../contracts/project-file.js";
+import type {
+	ProviderDriverKind,
+	ProviderSessionCapabilities,
+} from "../../contracts/provider-instance.js";
 
 import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
 	GetModelsResponse,
+	HarnessDefaultState,
+	ProjectSetting,
 	SetDefaultModelResponse,
+	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
 	SwitchContextWindowResponse,
 	SwitchModelResponse,
@@ -115,7 +122,7 @@ const providersFromGetModelsResponse = (
 
 export interface InstanceOption {
 	readonly id: string;
-	readonly driver: "claude" | "opencode";
+	readonly driver: ProviderDriverKind;
 	readonly label: string;
 	/** Non-default instance of a driver — disambiguated with an accent badge. */
 	readonly isCustom: boolean;
@@ -157,6 +164,10 @@ const serverDiscovery = $state({
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
+	harnessDefaults: {
+		claude: { status: "missing" },
+		opencode: { status: "missing" },
+	} as Record<"claude" | "opencode", HarnessDefaultState>,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -164,6 +175,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
+	defaultSessionMode: "local" as SessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -233,6 +245,11 @@ export const discoveryState = {
 	get defaultVariant(): string {
 		return serverDiscovery.defaultVariant;
 	},
+	get harnessDefaults(): Readonly<
+		Record<"claude" | "opencode", HarnessDefaultState>
+	> {
+		return serverDiscovery.harnessDefaults;
+	},
 	get availableVariants(): readonly string[] {
 		return serverDiscovery.availableVariants;
 	},
@@ -292,6 +309,9 @@ export const discoveryState = {
 		return (
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
+	},
+	get defaultSessionMode(): SessionMode {
+		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
 		return choice.hiddenModels ?? serverDiscovery.hiddenModels;
@@ -408,12 +428,12 @@ export function getAvailableInstances(): InstanceOption[] {
 		}
 	}
 	for (const inst of instanceState.instances) {
-		const driver: "claude" | "opencode" =
-			inst.driver === "claude" ? "claude" : "opencode";
+		const driver = inst.driver ?? "opencode";
 		const existing = byId.get(inst.id);
 		if (existing) {
 			byId.set(inst.id, {
 				...existing,
+				driver,
 				status: inst.status,
 				capabilities:
 					inst.capabilities ?? instanceState.providerCapabilities[driver],
@@ -766,6 +786,21 @@ export function handleDefaultModelInfo(msg: {
 	choice.defaultProviderId = null;
 }
 
+export function handleHarnessDefaults(
+	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
+): void {
+	serverDiscovery.harnessDefaults = {
+		claude: setting.claude,
+		opencode: setting.opencode,
+	};
+}
+
+export function applyHarnessDefaultSet(
+	response: SetHarnessDefaultResponse,
+): void {
+	serverDiscovery.harnessDefaults[response.harness] = response.state;
+}
+
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
 	const model = getActiveModel();
@@ -1087,6 +1122,10 @@ export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	choice.defaultPermissionMode = null;
 }
 
+export function applyDefaultSessionMode(mode: SessionMode): void {
+	serverDiscovery.defaultSessionMode = mode;
+}
+
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
 	serverDiscovery.agents = [];
@@ -1102,6 +1141,10 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
+	serverDiscovery.harnessDefaults = {
+		claude: { status: "missing" },
+		opencode: { status: "missing" },
+	};
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";

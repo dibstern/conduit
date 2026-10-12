@@ -5,11 +5,14 @@ import {
 	LimitRecoverySchema,
 	SessionResumeSchema,
 } from "./contracts/limit-recovery.js";
+import type { SessionMode } from "./contracts/project-file.js";
+import type { ProjectSetupState } from "./contracts/project-setup.js";
 import type {
 	ProviderDriverKind,
 	ProviderSessionCapabilities,
 } from "./contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "./contracts/session-workspace.js";
+import { WorkspaceMissingSchema } from "./contracts/worktree.js";
 
 export type {
 	SessionWorkspace,
@@ -233,6 +236,8 @@ export const BackgroundTaskSchema = Schema.Struct({
 	/** SDK task_type, e.g. local_bash, local_agent, monitor_mcp. */
 	type: Schema.String,
 	description: Schema.String,
+	/** The originating shell command, agent type or workflow name, when known. */
+	detail: Schema.optional(Schema.String),
 	/** Epoch ms when conduit first saw this task id; the SDK gives no start time. */
 	firstSeenAt: Schema.Number,
 	/** An agent's Child Session. */
@@ -252,8 +257,10 @@ export interface SessionGit {
 	ahead?: number;
 	behind?: number;
 	merged?: boolean;
+	/** Full branch head incorporated into the default branch. */
+	mergedHead?: string;
 	operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect";
-	/** Git Effective Folders in Project Folder order; non-git folders are omitted. */
+	/** Git and shared Effective Folders in Project Folder order. */
 	folders?: readonly SessionFolderGit[];
 }
 
@@ -265,6 +272,7 @@ const GitStatusSchema = Schema.Struct({
 	ahead: Schema.optionalWith(Schema.Number, { exact: true }),
 	behind: Schema.optionalWith(Schema.Number, { exact: true }),
 	merged: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	mergedHead: Schema.optionalWith(Schema.String, { exact: true }),
 	operation: Schema.optionalWith(
 		Schema.Literal("rebase", "merge", "cherry-pick", "revert", "bisect"),
 		{ exact: true },
@@ -274,6 +282,10 @@ const GitStatusSchema = Schema.Struct({
 export const SessionFolderGitSchema = Schema.Struct({
 	root: Schema.String,
 	label: Schema.String,
+	/** Derived from conduit workspace origin and an absent worktree mapping. */
+	shared: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** An unavailable recorded checkout has no healthy Git status fields. */
+	missing: Schema.optionalWith(Schema.Boolean, { exact: true }),
 	...GitStatusSchema.fields,
 });
 export type SessionFolderGit = typeof SessionFolderGitSchema.Type;
@@ -338,6 +350,9 @@ export const SessionInfoSchema = Schema.Struct({
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
 	workspace: Schema.optional(Schema.NullOr(SessionWorkspaceSchema)),
+	workspaceMissing: Schema.optional(WorkspaceMissingSchema),
+	/** Explicit Conduit launch ownership permits renaming its branches. */
+	canRenameBranch: Schema.optional(Schema.Boolean),
 	workspaceHint: Schema.optional(Schema.String),
 	workspaceMismatch: Schema.optional(
 		Schema.Struct({ actualPath: Schema.String }),
@@ -356,8 +371,8 @@ export interface DaemonSessionQueryOptions {
 	readonly roots?: boolean;
 	readonly search?: string;
 	readonly cursor?: DaemonSessionCursor;
-	/** Read one project only. Filtering the merged page instead would leave a
-	 *  scoped list with a handful of rows per page, and paging would stall. */
+	/** Read one project slug or an encoded repository group scope. Filter projects
+	 *  before merging their pages, so scoped search and paging remain complete. */
 	readonly scope?: string;
 	/** Skip one project. The browser already holds its own project's roots
 	 *  from the shell feed, so those rows would only be fetched and dropped. */
@@ -435,7 +450,9 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
-	type: PartType | "thinking" | "error";
+	type: PartType | "thinking" | "error" | "setup";
+	/** Daemon setup notice, carried by the normal durable transcript. */
+	setup?: ProjectSetupState;
 	/** Text content — matches OpenCode's TextPart schema (field is "text", not "content"). */
 	text?: string;
 	/** Server-pre-rendered HTML for assistant text parts (C3 optimization). */
@@ -525,12 +542,32 @@ export const RepositoryIdentitySchema = Schema.Struct({
 });
 export type RepositoryIdentity = typeof RepositoryIdentitySchema.Type;
 
+export const GroupingModeSchema = Schema.Literal(
+	"repository",
+	"repository+subfolder",
+	"off",
+);
+export type GroupingMode = typeof GroupingModeSchema.Type;
+
+export const ProjectGroupSchema = Schema.Struct({
+	key: Schema.String,
+	label: Schema.String,
+	needsProjectQualifier: Schema.Boolean,
+});
+export type ProjectGroup = typeof ProjectGroupSchema.Type;
+
 /** A project in the project list */
 export interface ProjectInfo {
 	slug: string;
 	title: string;
 	/** folders[0] is the main folder, where sessions run. */
 	folders: readonly [string, ...string[]];
+	setupScript?: string | undefined;
+	sessionMode?: SessionMode | undefined;
+	/** Unset inherits the daemon's global default. */
+	groupingMode?: GroupingMode | undefined;
+	effectiveGroupingMode?: GroupingMode;
+	group?: ProjectGroup;
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;

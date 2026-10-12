@@ -154,6 +154,9 @@ describe("MessageProjector", () => {
 			"turn.error",
 			"turn.interrupted",
 			"session.compaction",
+			"session.setup_started",
+			"session.setup_output",
+			"session.setup_finished",
 		]);
 	});
 

@@ -12,12 +12,15 @@ import type { ProjectSetting } from "../transport/ws-rpc.js";
 import { handleClaudeSettingsInfo } from "./claude-settings.svelte.js";
 import {
 	applyDefaultPermissionMode,
+	applyDefaultSessionMode,
 	discoveryState,
 	handleDefaultModelInfo,
+	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
 	hydrateModelSettings,
 } from "./discovery.svelte.js";
+import { projectState } from "./project-state.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
@@ -30,11 +33,21 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 					active: { model: setting.model, provider: setting.provider },
 				});
 			break;
+		case "harnessDefaults":
+			handleHarnessDefaults(setting);
+			break;
 		case "visibility":
 			handleVisibilityInfo(setting);
 			break;
 		case "defaultPermissionMode":
 			applyDefaultPermissionMode(setting.mode);
+			break;
+		case "defaultSessionMode":
+			applyDefaultSessionMode(setting.mode);
+			break;
+		case "defaultGroupingMode":
+			projectState.defaultGroupingMode = setting.mode;
+			projectState.defaultGroupingRevision++;
 			break;
 		case "claudeSettings":
 			handleClaudeSettingsInfo(setting);

@@ -270,7 +270,6 @@
 	const contextText = $derived(
 		[projectLabel, branch].filter((part) => part).join(" \u00B7 "),
 	);
-	const accessibleContext = $derived(shelfRow ? projectLabel : contextText);
 
 	// The server derives the tier in one place and the row only reads it. It is
 	// deliberately not re-derived from `processing`, the local phase or the
@@ -317,7 +316,7 @@
 		[
 			status.spoken,
 			displayTitle,
-			accessibleContext,
+			contextText,
 			timeText,
 			woken ? wokeText : "",
 		]
@@ -654,10 +653,10 @@
 		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-brand {titleClass}"
 		ondblclick={handleDblClick}
 	>
-		{#if shelfRow && projectLabel && !isRenaming}
-			<span class="inline-flex items-center gap-[6px] text-sm text-text-dimmer shrink-0">
-				<ProjectSquare label={projectLabel} accent={projectAccent} />
-				{projectLabel}
+		{#if shelfRow && contextText && !isRenaming}
+			<span class="inline-flex items-center gap-[6px] text-sm text-text-dimmer shrink-0 {branch ? 'max-w-[45%] min-w-0' : ''}">
+				{#if projectLabel}<ProjectSquare label={projectLabel} accent={projectAccent} />{/if}
+				<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
 			</span>
 		{/if}
 		{#if isRenaming}
@@ -732,7 +731,7 @@
 					{status.word}
 				</span>
 			{:else}
-				<span class="session-item-meta {isRenaming ? '' : 'md:group-hover:hidden md:group-focus-within:hidden'} {menuOpen && !isRenaming ? 'md:hidden' : ''}" title={settled && session.settledAutomatically ? "Settled automatically after it sat idle" : undefined}>{settled && session.settledAutomatically ? `Auto · ${timeText}` : timeText}</span>
+				<span class="session-item-meta {isRenaming ? '' : 'md:group-hover:hidden md:group-focus-within:hidden'} {menuOpen && !isRenaming ? 'md:hidden' : ''}" title={settled && session.settledAutomatically ? "Settled automatically" : undefined}>{settled && session.settledAutomatically ? `Auto · ${timeText}` : timeText}</span>
 			{/if}
 			{#if woken}
 				<span

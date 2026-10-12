@@ -530,28 +530,41 @@ export const sessionSkillsHandlers: StepHandler[] = [
 	{
 		name: "skills chip placement",
 		match:
-			/^the skills chip sits between (back|the title row) and the identity$/,
+			/^the skills chip sits between (back|the title row) and (the overflow menu|Settle)$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const before =
 				match[1] === "back"
 					? page.getByTestId("session-bar-back")
 					: page.locator("#session-bar-title-row");
-			const [left, chip, identity, bar] = await Promise.all([
-				before.boundingBox(),
-				page.getByTestId("session-skills-chip").boundingBox(),
-				page.getByTestId("session-bar-identity").boundingBox(),
-				page.getByTestId("session-bar").boundingBox(),
-			]);
-			if (!left || !chip || !identity || !bar)
+			const after = page.locator(
+				match[2] === "Settle"
+					? '[data-testid="session-bar-settle"]'
+					: '[data-testid="session-bar-island-overflow"], [data-testid="session-bar-overflow"]',
+			);
+			// The phone bar settles after the scroll, so measure once every control has a box.
+			const measure = () =>
+				Promise.all([
+					before.boundingBox(),
+					page.getByTestId("session-skills-chip").boundingBox(),
+					after.boundingBox(),
+					page.getByTestId("session-bar").boundingBox(),
+				]);
+			await expect
+				.poll(async () => (await measure()).every(Boolean), {
+					message: "session bar controls are not all rendered",
+				})
+				.toBe(true);
+			const [left, chip, right, bar] = await measure();
+			if (!left || !chip || !right || !bar)
 				throw new Error("session bar controls are not all rendered");
 			const centre = (box: { y: number; height: number }) =>
 				box.y + box.height / 2;
-			if (Math.abs(centre(chip) - centre(identity)) > 8)
-				throw new Error("skills chip is not on the identity's row");
-			if (!(left.x + left.width <= chip.x && chip.x + chip.width <= identity.x))
+			if (Math.abs(centre(chip) - centre(right)) > 8)
+				throw new Error("skills chip is not on the controls' row");
+			if (!(left.x + left.width <= chip.x && chip.x + chip.width <= right.x))
 				throw new Error(
-					`expected ${match[1]} < chip < identity, got x ${left.x}, ${chip.x}, ${identity.x}`,
+					`expected ${match[1]} < chip < ${match[2]}, got x ${left.x}, ${chip.x}, ${right.x}`,
 				);
 			if (chip.x + chip.width / 2 < bar.x + bar.width / 2)
 				throw new Error("skills chip is not in the right-hand group");

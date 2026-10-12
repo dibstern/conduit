@@ -2,7 +2,17 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: ["harness-*.spec.ts", "usage-footer-meter.spec.ts"],
+	testMatch: [
+		"harness-*.spec.ts",
+		"usage-footer-meter.spec.ts",
+		"settings-server-status.spec.ts",
+		"settings-server-logs.spec.ts",
+		"settings-pin.spec.ts",
+		"settings-opencode-instances.spec.ts",
+		"settings-default-claude-account.spec.ts",
+		"settings-power.spec.ts",
+		"settings-access.spec.ts",
+	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
 	retries: 1,

@@ -75,11 +75,16 @@ export const filesHandlers = {
 					const entries = yield* getFileTreeEntries(workspaceRoot);
 					const roots = labelProjectFolders(
 						effectiveFolders.map(({ root }) => root),
-					);
+					).map((folder, index) => ({
+						...folder,
+						...(effectiveFolders[index]?.shared ? { shared: true } : {}),
+					}));
 					return {
 						projectSlug: request.projectSlug,
 						entries,
-						...(roots.length > 1 ? { roots } : {}),
+						...(roots.length > 1 || roots.some((folder) => folder.shared)
+							? { roots }
+							: {}),
 					};
 				}),
 			),

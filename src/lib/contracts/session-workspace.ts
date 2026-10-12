@@ -38,6 +38,25 @@ export const WorktreeInfoSchema = Schema.Struct({
 });
 export type WorktreeInfo = typeof WorktreeInfoSchema.Type;
 
+/** Launch ownership with the latest Conduit branch name. `head` stays the launch base. */
+export const SessionWorktreeOwnershipSchema = Schema.Struct({
+	folder: Schema.String,
+	path: Schema.String,
+	branchName: Schema.String,
+	head: Schema.String,
+});
+export type SessionWorktreeOwnership =
+	typeof SessionWorktreeOwnershipSchema.Type;
+
+export const SessionWorktreeInspectionSchema = Schema.Struct({
+	folder: Schema.String,
+	path: Schema.String,
+	reasons: Schema.Array(Schema.String),
+	inUse: Schema.Boolean,
+});
+export type SessionWorktreeInspection =
+	typeof SessionWorktreeInspectionSchema.Type;
+
 export class WorkspaceMoveError extends Schema.TaggedError<WorkspaceMoveError>()(
 	"WorkspaceMoveError",
 	{

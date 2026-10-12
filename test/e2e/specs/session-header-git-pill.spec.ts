@@ -20,7 +20,7 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 	await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-async function openHeader(
+async function openCheckout(
 	page: Page,
 	relayBaseUrl: string,
 	options: {
@@ -39,6 +39,12 @@ async function openHeader(
 		viewActivity?: boolean;
 	},
 ) {
+	await page.addInitScript(() => {
+		localStorage.setItem(
+			"conduit-composer-preferences",
+			JSON.stringify({ controls: "words" }),
+		);
+	});
 	const directory = options.directory ?? "/workspace/conduit";
 	const instances = {
 		instances: [],
@@ -151,19 +157,24 @@ async function openHeader(
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 	await page.goto(`${relayBaseUrl}/s/header-session`);
-	const pill = page.getByTestId("session-bar-identity");
-	await expect(pill).toBeVisible();
+	const trigger = page.getByTestId("composer-checkout");
+	await expect(trigger).toBeVisible();
+	const bar = page.getByTestId("session-bar");
+	await expect(bar.getByRole("button", { name: /^Checkout:/ })).toHaveCount(0);
+	await expect(
+		bar.getByRole("button", { name: "Select instance" }),
+	).toHaveCount(0);
 	await expect(page.getByTestId("session-bar-title")).toHaveText(
 		"Session header",
 	);
-	return pill;
+	return trigger;
 }
 
 for (const mode of [
 	{ name: "desktop", viewport: { width: 1440, height: 900 }, hasTouch: false },
 	{ name: "phone", viewport: { width: 390, height: 844 }, hasTouch: true },
 ] as const) {
-	test.describe(`${mode.name} session header git pill`, () => {
+	test.describe(`${mode.name} composer checkout`, () => {
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
 
 		test("dirty checkout opens details and copies branch and primary folder", async ({
@@ -171,40 +182,31 @@ for (const mode of [
 			harness,
 		}, testInfo) => {
 			const directory = "/workspace/conduit/";
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory,
 				git: { branch: "main", dirty: true, ahead: 0, behind: 0 },
 			});
-			await expect(pill).toHaveAttribute("title", "conduit / main");
-			await expect(pill.locator('[data-part="project"]')).toHaveText("conduit");
-			await expect(pill.locator('[data-part="branch"]')).toHaveText("main");
-			await expect(pill).toContainText("/");
-			await expect(pill.locator('[data-part="dirty"]')).toBeVisible();
-			const dot = await pill.locator('[data-part="dirty"]').boundingBox();
+			await expect(trigger).toHaveAttribute("title", "conduit / main");
+			await expect(trigger.locator('[data-part="project"]')).toHaveText(
+				"conduit",
+			);
+			await expect(trigger.locator('[data-part="branch"]')).toHaveText("main");
+			await expect(trigger).toContainText("/");
+			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
+			const dot = await trigger.locator('[data-part="dirty"]').boundingBox();
 			expect(dot?.width).toBe(6);
 			expect(dot?.height).toBe(6);
 			// It badges the icon, so a truncating branch never pushes it out.
-			const bounds = await pill.boundingBox();
+			const bounds = await trigger.boundingBox();
 			expect(dot?.x).toBeGreaterThanOrEqual(bounds?.x ?? 0);
 			expect((dot?.x ?? 0) + 6).toBeLessThanOrEqual(
 				(bounds?.x ?? 0) + (bounds?.width ?? 0),
 			);
-			const group = page.locator(".session-bar-segments");
-			expect((await group.boundingBox())?.height).toBe(24);
-			await expect(group.locator(":scope > *")).toHaveCount(
-				mode.hasTouch ? 1 : 2,
-			);
 			await expect(page.getByTestId("session-skills-chip")).toHaveCount(0);
-			const borders = await group
-				.locator(":scope > *")
-				.evaluateAll((segments) =>
-					segments.map((segment) => getComputedStyle(segment).borderLeftWidth),
-				);
-			expect(borders).toEqual(mode.hasTouch ? ["0px"] : ["0px", "1px"]);
-			await capture(page, testInfo, `${mode.name}-dirty-header`);
-			if (mode.hasTouch) await pill.tap();
-			else await pill.click();
-			const details = page.getByRole("menu", { name: "Checkout" });
+			await capture(page, testInfo, `${mode.name}-dirty-composer`);
+			if (mode.hasTouch) await trigger.tap();
+			else await trigger.click();
+			const details = page.getByTestId("composer-checkout-menu");
 			await expect(details).toBeVisible();
 			await expect(details.getByText(directory, { exact: true })).toBeVisible();
 			await expect(
@@ -216,7 +218,7 @@ for (const mode of [
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
 				.toBe(directory);
-			await pill.click();
+			await trigger.click();
 			await details.getByRole("menuitem", { name: "Copy branch name" }).click();
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
@@ -227,18 +229,18 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "fix/draft-menus", worktree: "conduit-wt-draft" },
 			});
 			await expect(
-				pill.locator('[data-part="worktree"][data-icon="worktree"] svg'),
+				trigger.locator('[data-part="worktree"][data-icon="worktree"] svg'),
 			).toBeVisible();
-			await expect(pill).not.toContainText("conduit-wt-draft");
+			await expect(trigger).not.toContainText("conduit-wt-draft");
 			await capture(page, testInfo, `${mode.name}-linked-worktree`);
-			await pill.click();
+			await trigger.click();
 			await expect(
 				page
-					.getByRole("menu", { name: "Checkout" })
+					.getByTestId("composer-checkout-menu")
 					.getByText("conduit-wt-draft", { exact: true }),
 			).toBeVisible();
 		});
@@ -256,7 +258,7 @@ for (const mode of [
 				ahead: 0,
 				behind: 0,
 			};
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				provider: "claude",
 				supportsWorktree: true,
 				status: "busy",
@@ -322,30 +324,30 @@ for (const mode of [
 					.getByRole("button", { name: "Stop generating" })
 					.isVisible();
 				const folder = stage.directory.split("/").at(-1);
-				await expect(pill).toHaveAttribute(
+				await expect(trigger).toHaveAttribute(
 					"title",
 					`${folder} / ${stage.git.branch}`,
 				);
-				await expect(pill.locator('[data-part="project"]')).toHaveText(
+				await expect(trigger.locator('[data-part="project"]')).toHaveText(
 					folder ?? "",
 				);
-				await expect(pill.locator('[data-part="branch"]')).toHaveText(
+				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
 					stage.git.branch ?? "",
 				);
-				await expect(pill.locator("[data-icon]")).toHaveAttribute(
+				await expect(trigger.locator("[data-icon]")).toHaveAttribute(
 					"data-icon",
 					stage.git.worktree ? "worktree" : "branch",
 				);
-				await expect(pill.locator('[data-part="dirty"]')).toHaveCount(
+				await expect(trigger.locator('[data-part="dirty"]')).toHaveCount(
 					stage.git.dirty ? 1 : 0,
 				);
 				await capture(
 					page,
 					testInfo,
-					`${mode.name}-agent-${stage.name}-header`,
+					`${mode.name}-agent-${stage.name}-composer`,
 				);
-				await pill.click();
-				const details = page.getByRole("menu", { name: "Checkout" });
+				await trigger.click();
+				const details = page.getByTestId("composer-checkout-menu");
 				await expect(details).toBeVisible();
 				const checkout = await details
 					.locator("dl")
@@ -368,8 +370,8 @@ for (const mode of [
 					tool: stage.tool,
 					selectedSession: new URL(page.url()).pathname,
 					running,
-					label: await pill.getAttribute("title"),
-					icon: await pill.locator("[data-icon]").getAttribute("data-icon"),
+					label: await trigger.getAttribute("title"),
+					icon: await trigger.locator("[data-icon]").getAttribute("data-icon"),
 					checkout,
 				});
 				await capture(
@@ -390,13 +392,13 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory: "/workspace/ai-notes",
 			});
-			await expect(pill).toHaveText("ai-notes");
-			await expect(pill.locator('[data-icon="folder"] svg')).toBeVisible();
-			await expect(pill.locator('[data-part="branch"]')).toHaveCount(0);
-			await pill.click();
+			await expect(trigger).toHaveText("ai-notes");
+			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
+			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
+			await trigger.click();
 			await expect(
 				page.getByRole("menuitem", { name: "Copy branch name" }),
 			).toHaveCount(0);
@@ -411,7 +413,7 @@ for (const mode of [
 			const moved = "/workspace/conduit-one";
 			const other = "/workspace/conduit-two";
 			const moves: string[] = [];
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "main" },
 				sessionGit: {
 					branch: "feature/one",
@@ -430,10 +432,13 @@ for (const mode of [
 				],
 				onmove: (path) => moves.push(path),
 			});
-			await expect(pill).toHaveAttribute("title", "conduit-one / feature/one");
-			await expect(pill.locator('[data-icon="worktree"] svg')).toBeVisible();
-			await pill.click();
-			const details = page.getByRole("menu", { name: "Checkout" });
+			await expect(trigger).toHaveAttribute(
+				"title",
+				"conduit-one / feature/one",
+			);
+			await expect(trigger.locator('[data-icon="worktree"] svg')).toBeVisible();
+			await trigger.click();
+			const details = page.getByTestId("composer-checkout-menu");
 			await expect(details.getByText(moved, { exact: true })).toBeVisible();
 			await details
 				.getByRole("menuitem", { name: "Move to worktree…" })
@@ -455,12 +460,12 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const pill = await openHeader(page, harness.relayBaseUrl, {
+				const trigger = await openCheckout(page, harness.relayBaseUrl, {
 					provider: supportsWorktree === true ? "claude" : "opencode",
 					supportsWorktree,
 					git: { branch: "main" },
 				});
-				await pill.click();
+				await trigger.click();
 				await expect(
 					page.getByRole("menuitem", { name: "Move to worktree…" }),
 				).toHaveCount(supportsWorktree === false ? 0 : 1);
@@ -473,7 +478,7 @@ for (const mode of [
 		}, testInfo) => {
 			const directory = "/workspace/conduit-alias/packages/app";
 			const canonicalDirectory = "/real/conduit/packages/app";
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory,
 				canonicalDirectory,
 				git: { branch: "main" },
@@ -483,8 +488,8 @@ for (const mode of [
 					{ path: "/real/conduit-one", branch: "feature/one", main: false },
 				],
 			});
-			await pill.click();
-			const details = page.getByRole("menu", { name: "Checkout" });
+			await trigger.click();
+			const details = page.getByTestId("composer-checkout-menu");
 			await details
 				.getByRole("menuitem", { name: "Move to worktree…" })
 				.click();
@@ -501,12 +506,12 @@ for (const mode of [
 			harness,
 		}) => {
 			const path = "/workspace/removed";
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "main" },
 				worktrees: [{ path, branch: "feature/removed", main: false }],
 				moveError: new WorkspaceMoveError({ path, reason: "missing" }),
 			});
-			await pill.click();
+			await trigger.click();
 			await page.getByRole("menuitem", { name: "Move to worktree…" }).click();
 			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
 			await expect(
@@ -514,38 +519,33 @@ for (const mode of [
 					exact: true,
 				}),
 			).toBeVisible();
-			await expect(pill).toHaveAttribute("title", "conduit / main");
+			await expect(trigger).toHaveAttribute("title", "conduit / main");
 		});
 
-		test("long project names keep four letters plus the ellipsis and a visible branch", async ({
+		test("long project names and branches fit inside the composer", async ({
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory:
 					"/workspace/spm-architecture-deepening-with-a-very-long-project-name",
 				git: { branch: "docs/architecture-deepening-design", dirty: true },
 			});
-			const project = pill.locator('[data-part="project"]');
-			const geometry = await project.evaluate((element) => {
-				const probe = document.createElement("span");
-				probe.style.cssText = `position:absolute;width:5ch;font:${getComputedStyle(element).font}`;
-				element.append(probe);
-				const floor = probe.getBoundingClientRect().width;
-				probe.remove();
-				return {
-					width: element.getBoundingClientRect().width,
-					floor,
-					clipped: element.scrollWidth > element.clientWidth,
-				};
-			});
-			expect(geometry.width).toBeGreaterThanOrEqual(geometry.floor - 0.1);
-			expect(geometry.clipped).toBe(true);
-			const branch = pill.locator('[data-part="branch"]');
+			const project = trigger.locator('[data-part="project"]');
+			await expect(project).toBeVisible();
+			expect((await project.boundingBox())?.width).toBeGreaterThan(10);
+			const branch = trigger.locator('[data-part="branch"]');
 			await expect(branch).toBeVisible();
 			expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
-			expect((await pill.boundingBox())?.width).toBeLessThanOrEqual(
-				mode.hasTouch ? 150 : 240,
+			const checkoutBox = await trigger.boundingBox();
+			const composerBox = await page.locator("#input-area").boundingBox();
+			expect(checkoutBox).not.toBeNull();
+			expect(composerBox).not.toBeNull();
+			if (!checkoutBox || !composerBox)
+				throw new Error("Composer checkout missing");
+			expect(checkoutBox.x).toBeGreaterThanOrEqual(composerBox.x);
+			expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
+				composerBox.x + composerBox.width,
 			);
 			await capture(page, testInfo, `${mode.name}-long-names`);
 		});
@@ -554,12 +554,12 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { head: "a1b2c3d" },
 			});
-			await expect(pill).toHaveAttribute("title", "conduit / a1b2c3d");
-			await expect(pill.locator('[data-icon="commit"] svg')).toBeVisible();
-			await pill.click();
+			await expect(trigger).toHaveAttribute("title", "conduit / a1b2c3d");
+			await expect(trigger.locator('[data-icon="commit"] svg')).toBeVisible();
+			await trigger.click();
 			await expect(
 				page.getByText("Detached at a1b2c3d", { exact: true }),
 			).toBeVisible();
@@ -573,7 +573,7 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: {
 					branch: "feat/x",
 					ahead: 3,
@@ -581,14 +581,16 @@ for (const mode of [
 					operation: "rebase",
 				},
 			});
-			await expect(pill.getByText("rebasing", { exact: true })).toBeVisible();
-			if (mode.hasTouch) await expect(pill).not.toContainText("↑3");
-			else await expect(pill).toContainText("↑3 ↓1");
+			await expect(
+				trigger.getByText("rebasing", { exact: true }),
+			).toBeVisible();
+			if (mode.hasTouch) await expect(trigger).not.toContainText("↑3");
+			else await expect(trigger).toContainText("↑3 ↓1");
 			await capture(page, testInfo, `${mode.name}-checkout-marks`);
-			await pill.click();
+			await trigger.click();
 			await expect(
 				page
-					.getByRole("menu", { name: "Checkout" })
+					.getByTestId("composer-checkout-menu")
 					.getByText("↑3 ↓1", { exact: true }),
 			).toBeVisible();
 		});
@@ -597,18 +599,18 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "feat/x", merged: true },
 			});
-			await expect(pill.getByText("merged", { exact: true })).toBeVisible();
+			await expect(trigger.getByText("merged", { exact: true })).toBeVisible();
 			await capture(page, testInfo, `${mode.name}-merged`);
 		});
 
-		test("long operation and status marks stay inside the pill", async ({
+		test("long operation and status marks stay inside the checkout", async ({
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: {
 					branch: "main",
 					dirty: true,
@@ -619,15 +621,17 @@ for (const mode of [
 				},
 				skills: true,
 			});
-			await expect(pill.locator('[data-part="operation"]')).toHaveText(
+			await expect(trigger.locator('[data-part="operation"]')).toHaveText(
 				"cherry-picking",
 			);
 			// Phones show one status word, and the operation outranks merged.
 			if (mode.hasTouch)
-				await expect(pill.locator('[data-part="merged"]')).toHaveCount(0);
+				await expect(trigger.locator('[data-part="merged"]')).toHaveCount(0);
 			else
-				await expect(pill.locator('[data-part="merged"]')).toHaveText("merged");
-			const layout = await pill.evaluate((button) => {
+				await expect(trigger.locator('[data-part="merged"]')).toHaveText(
+					"merged",
+				);
+			const layout = await trigger.evaluate((button) => {
 				const box = button.getBoundingClientRect();
 				return {
 					branchWidth:
@@ -672,35 +676,36 @@ for (const mode of [
 			page,
 			harness,
 		}, testInfo) => {
-			const pill = await openHeader(page, harness.relayBaseUrl, {
+			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "main" },
 				sessionGit: { branch: "session-checkout", dirty: true },
 			});
-			await expect(pill).toHaveAttribute("title", "conduit / session-checkout");
-			await expect(pill.locator('[data-part="dirty"]')).toBeVisible();
+			await expect(trigger).toHaveAttribute(
+				"title",
+				"conduit / session-checkout",
+			);
+			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
 			await capture(page, testInfo, `${mode.name}-session-checkout`);
 		});
 
-		test("skills share the group without clipping their pulse", async ({
+		test("header skills and Settle keep their group without clipping the pulse", async ({
 			page,
 			harness,
 		}, testInfo) => {
-			await openHeader(page, harness.relayBaseUrl, {
+			await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "main" },
 				skills: true,
 			});
 			const group = page.locator(".session-bar-segments");
 			await expect(group.locator(":scope > *")).toHaveCount(
-				mode.hasTouch ? 2 : 3,
+				mode.hasTouch ? 1 : 2,
 			);
 			const borders = await group
 				.locator(":scope > *")
 				.evaluateAll((segments) =>
 					segments.map((segment) => getComputedStyle(segment).borderLeftWidth),
 				);
-			expect(borders).toEqual(
-				mode.hasTouch ? ["0px", "1px"] : ["0px", "1px", "1px"],
-			);
+			expect(borders).toEqual(mode.hasTouch ? ["0px"] : ["0px", "1px"]);
 			const pulse = page.getByTestId("session-skills-chip-pulse");
 			await expect(pulse).toBeVisible();
 			const clipping = await pulse.evaluate((element) => {
@@ -724,7 +729,7 @@ for (const mode of [
 				page,
 				harness,
 			}, testInfo) => {
-				await openHeader(page, harness.relayBaseUrl, {
+				await openCheckout(page, harness.relayBaseUrl, {
 					git: { branch: "main" },
 					viewActivity: true,
 				});

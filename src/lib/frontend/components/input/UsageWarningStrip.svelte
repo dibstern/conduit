@@ -12,7 +12,7 @@
 
 <script lang="ts">
 	import { clock } from "../../stores/clock.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
@@ -26,10 +26,11 @@
 	let { session, projectSlug }: { session: Immutable<SessionInfo> | undefined; projectSlug: string } = $props();
 
 	const key = $derived(session?.id ?? projectSlug);
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 	const accountId = $derived(composerAccountId(session));
-	const reading = $derived(usageState.readings.find((reading) => reading.accountId === accountId && reading.harness === "claude"));
-	const severalAccounts = $derived(instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== accountId));
-	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, getInstanceById(accountId ?? "")?.name ?? "Claude", severalAccounts, clock.now));
+	const reading = $derived(claudeAccounts.readingOf(accountId));
+	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
+	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), severalAccounts, clock.now));
 	const limited = $derived(session?.limitRecovery && !session.limitRecovery.switched);
 
 	// Claude's resets_at jitters between reads; only a jump of more than ten

@@ -15,6 +15,7 @@ function seed(
 	folders = 2,
 	supportsWorktree = true,
 	driver: "claude" | "opencode" = "opencode",
+	supportsNewWorktree = supportsWorktree,
 ) {
 	const previous = {
 		instances: instanceState.instances,
@@ -35,7 +36,13 @@ function seed(
 			restartCount: 0,
 			createdAt: 0,
 			...(supportsMultiFolder !== undefined
-				? { capabilities: { supportsMultiFolder, supportsWorktree } }
+				? {
+						capabilities: {
+							supportsMultiFolder,
+							supportsWorktree,
+							supportsNewWorktree,
+						},
+					}
 				: {}),
 		},
 	];
@@ -68,6 +75,7 @@ const meta = {
 	component: NewSessionContext,
 	tags: ["autodocs", "viewport-capture"],
 	parameters: { layout: "padded", a11y: { test: "error" } },
+	args: { sessionModeDefault: { mode: "local", source: "global" } },
 } satisfies Meta<typeof NewSessionContext>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -84,6 +92,13 @@ export const SingleFolder: Story = {
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
 			"New worktree Not supported by Folder provider",
 		);
+		const existing = canvas.getByRole("menuitem", {
+			name: /Existing worktree/,
+		});
+		await expect(existing).toHaveAttribute("aria-disabled", "true");
+		await expect(existing).toHaveTextContent(
+			"Not supported by Folder provider",
+		);
 	},
 };
 
@@ -97,7 +112,7 @@ export const MultiFolderSupported: Story = {
 		await expect(canvas.queryByTestId("draft-provider-explanation")).toBeNull();
 		await userEvent.click(startChip);
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
-			"New worktree soon",
+			"New worktree Requires a Git folder",
 		);
 		await expect(canvas.queryByText("Provider folder support")).toBeNull();
 	},
@@ -132,7 +147,7 @@ export const MultiFolderUnknown: Story = {
 		await expect(canvas.queryByTestId("draft-provider-explanation")).toBeNull();
 		await userEvent.click(startChip);
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
-			"New worktree soon",
+			"New worktree Not supported by Folder provider",
 		);
 	},
 };
@@ -162,7 +177,189 @@ export const NewWorktreeEnabled: Story = {
 
 export const NewWorktreeSelected: Story = {
 	beforeEach: () => seed(true, 1, true, "claude"),
-	args: { newWorktree: true },
+	args: { newWorktree: true, modeChosen: true },
+};
+
+export const DefaultedWorktree: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, true, "claude");
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			title: "Isolated by default",
+			git: { branch: "release/session-defaults" },
+		}));
+		return cleanup;
+	},
+	args: { sessionModeDefault: { mode: "worktree", source: "file" } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(
+			await canvas.findByTestId("draft-start-chip"),
+		).toHaveTextContent(/^New worktree$/);
+		await expect(
+			canvas.getByTestId("draft-base-branch-chip"),
+		).toHaveTextContent(/^from release\/session-defaults$/);
+		await expect(canvas.queryByTestId("draft-session-mode-warning")).toBeNull();
+	},
+};
+
+export const SessionModeWarning: Story = {
+	beforeEach: () => seed(true, 1, true, "claude"),
+	args: {
+		sessionModeDefault: {
+			mode: "local",
+			source: "global",
+			warning: "Invalid conduit.json: sessionMode must be local or worktree",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(
+			await canvas.findByTestId("draft-session-mode-warning"),
+		).toHaveTextContent("Invalid conduit.json");
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^main$/,
+		);
+	},
+};
+
+export const OpenCodeNewWorktreeEnabled: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, false, "opencode", true);
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			title: "OpenCode workspace",
+			git: { branch: "feature/opencode-workspace" },
+		}));
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		await expect(
+			canvas.getByRole("menuitem", { name: /^Existing worktree/ }),
+		).toHaveAttribute("aria-disabled", "true");
+		const choice = canvas.getByRole("menuitem", { name: /^New worktree$/ });
+		await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(choice);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^New worktree$/,
+		);
+		await expect(
+			canvas.getByTestId("draft-base-branch-chip"),
+		).toHaveTextContent(/^from feature\/opencode-workspace$/);
+	},
+};
+
+export const NewWorktreeUnsupportedProvider: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, false, "opencode");
+		instanceState.instances = instanceState.instances.map((instance) => ({
+			...instance,
+			name: "Local provider",
+		}));
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			title: "Local workspace",
+			git: { branch: "main" },
+		}));
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		for (const label of ["New worktree", "Existing worktree"]) {
+			const choice = canvas.getByRole("menuitem", {
+				name: new RegExp(`^${label}`),
+			});
+			await expect(choice).toHaveAttribute("aria-disabled", "true");
+			await expect(choice).toHaveTextContent(
+				`${label} Not supported by Local provider`,
+			);
+		}
+	},
+};
+
+export const BaseBranchDefault: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 1, true, "claude");
+		projectState.projects = projectState.projects.map((project) => ({
+			...project,
+			git: { branch: "feature/session-ui" },
+		}));
+		return cleanup;
+	},
+	args: { newWorktree: true, modeChosen: true },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(
+			canvas.getByTestId("draft-base-branch-chip"),
+		).toHaveTextContent(/^from feature\/session-ui$/);
+		await expect(canvas.queryByRole("menu")).toBeNull();
+	},
+};
+
+export const BaseBranchList: Story = {
+	beforeEach: () => seed(true, 1, true, "claude"),
+	args: {
+		newWorktree: true,
+		modeChosen: true,
+		loadBranches: async () => ({
+			current: "main",
+			branches: ["feature/session-ui", "main", "release"],
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByTestId("draft-base-branch-chip"));
+		await expect(
+			await canvas.findByRole("menuitemradio", { name: "main" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(
+			canvas.getByRole("menuitemradio", {
+				name: "feature/session-ui",
+			}),
+		).toHaveAttribute("aria-checked", "false");
+		await expect(
+			canvas.getByRole("menuitemradio", { name: "release" }),
+		).toBeVisible();
+	},
+};
+
+export const MultiFolderNewWorktree: Story = {
+	beforeEach: () => {
+		const cleanup = seed(true, 2, true, "claude");
+		projectState.projects = [
+			{
+				slug: "workspace",
+				title: "Workspace",
+				folders: ["/src/notes", "/src/app", "/src/api"],
+				git: {
+					folders: [
+						{ root: "/src/app", label: "app", branch: "main" },
+						{ root: "/src/api", label: "api", branch: "main" },
+					],
+				},
+			},
+		];
+		return cleanup;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^Current folder$/,
+		);
+		await userEvent.click(canvas.getByTestId("draft-start-chip"));
+		const choice = canvas.getByRole("menuitem", { name: /^New worktree$/ });
+		await expect(choice).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(choice);
+		await expect(canvas.getByTestId("draft-start-chip")).toHaveTextContent(
+			/^New worktree$/,
+		);
+		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
+			"from committed HEAD",
+		);
+	},
 };
 
 const existingWorktrees = [
@@ -207,19 +404,5 @@ export const ExistingWorktreeSelected: Story = {
 		await expect(canvas.getByTestId("new-session-context")).toHaveTextContent(
 			"existing worktree",
 		);
-	},
-};
-
-export const ExistingWorktreeUnsupported: Story = {
-	beforeEach: () => seed(false, 1, false),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement.ownerDocument.body);
-		await userEvent.click(canvas.getByTestId("draft-start-chip"));
-		await expect(
-			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
-		).toHaveAttribute("aria-disabled", "true");
-		await expect(
-			canvas.getByRole("menuitem", { name: /Existing worktree/ }),
-		).toHaveTextContent("Not supported by Folder provider");
 	},
 };

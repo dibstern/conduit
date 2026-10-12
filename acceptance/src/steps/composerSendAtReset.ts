@@ -314,10 +314,12 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 				await expect(world.page.getByTestId("menu-sheet-scrim")).toHaveCount(0);
 				await expect(menu).toHaveCSS("width", "250px");
 				expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(triggerBox.y);
-				expect(menuBox.x + menuBox.width).toBeCloseTo(
-					triggerBox.x + triggerBox.width,
-					0,
-				);
+				// The popover snaps to whole pixels; the trigger can sit on a half pixel.
+				expect(
+					Math.abs(
+						menuBox.x + menuBox.width - (triggerBox.x + triggerBox.width),
+					),
+				).toBeLessThanOrEqual(0.5);
 			}
 		},
 	},

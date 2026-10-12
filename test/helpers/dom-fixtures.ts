@@ -84,7 +84,6 @@ export const FULL_DOM_HTML = `
     <div id="app">
       <div id="session-bar" data-testid="session-bar" data-compact="false">
         <div id="session-bar-title-row"><h1 id="session-bar-title">Test Session</h1></div>
-        <div id="session-bar-meta"><span data-testid="session-bar-identity">Conduit</span></div>
         <button data-testid="session-bar-settle">Settle</button>
         <div id="session-bar-connection"><span id="status" role="status" title="Connecting"></span></div>
         <button id="session-bar-more" data-testid="session-bar-overflow" title="More actions">⋯</button>

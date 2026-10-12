@@ -277,6 +277,23 @@ function convertAssistantParts(
 				} satisfies SystemMessage);
 				break;
 			}
+			case "setup":
+				if (part.setup !== undefined) {
+					result.push({
+						type: "system",
+						uuid,
+						text: part.setup.message ?? "Setup script",
+						variant:
+							part.setup.status === "failed" ||
+							part.setup.status === "timed_out"
+								? "error"
+								: "info",
+						setup: part.setup,
+						setupOutput: part.text ?? "",
+						...(partCreatedAt != null && { createdAt: partCreatedAt }),
+					} satisfies SystemMessage);
+				}
+				break;
 			case "error":
 				// A turn that ended in error: the notice the live error event shows.
 				result.push({

@@ -97,6 +97,15 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 				title: project.title,
 				addedAt: project.lastUsed ?? Date.now(),
 				...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
+				...(project.setupScript !== undefined && {
+					setupScript: project.setupScript,
+				}),
+				...(project.sessionMode !== undefined && {
+					sessionMode: project.sessionMode,
+				}),
+				...(project.groupingMode !== undefined && {
+					groupingMode: project.groupingMode,
+				}),
 				...(sessionCount > 0 && { sessionCount }),
 			};
 		}),

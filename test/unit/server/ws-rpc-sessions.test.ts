@@ -150,6 +150,52 @@ describe("WsRpcServerLayer ListSessions", () => {
 	});
 
 	it.scoped(
+		"rejects a worktree base without a new worktree before creating a session",
+		() => {
+			const createSession = vi.fn(() =>
+				Effect.fail(
+					new SessionManagerError({
+						operation: "createSession",
+						cause: new Error("Must not create"),
+					}),
+				),
+			);
+			return Effect.gen(function* () {
+				const client = yield* rpcClient;
+				const result = yield* Effect.either(
+					client.CreateSession({
+						projectSlug: "project-a",
+						originId: "browser-tab-a",
+						worktreeBase: "main",
+					}),
+				);
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "WsRpcError",
+						message: expect.stringContaining(
+							"worktreeBase requires newWorktree",
+						),
+					},
+				});
+				expect(createSession).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.provide(
+					WsRpcServerLayer.pipe(
+						Layer.provideMerge(
+							makeTestHandlerLayer({
+								sessionManagerService: makeMockSessionManagerService({
+									createSession,
+								}),
+							}),
+						),
+					),
+				),
+			);
+		},
+	);
+
+	it.scoped(
 		"preserves an unavailable instance's cause in the CreateSession error without auth details",
 		() => {
 			const cause = Object.assign(

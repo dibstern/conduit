@@ -52,6 +52,15 @@ export const projectsHandlers = {
 				folders: request.folders,
 				...(request.slug !== undefined && { slug: request.slug }),
 				...(title !== undefined && { title }),
+				...(request.setupScript !== undefined && {
+					setupScript: request.setupScript,
+				}),
+				...(request.sessionMode !== undefined && {
+					sessionMode: request.sessionMode,
+				}),
+				...(request.groupingMode !== undefined && {
+					groupingMode: request.groupingMode,
+				}),
 			});
 			const current = yield* projectService.currentSlug();
 			return {

@@ -3,6 +3,9 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	type GroupingMode,
+	GroupingModeSchema,
+	ProjectGroupSchema,
 	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
@@ -10,7 +13,11 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError } from "./worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -29,11 +36,16 @@ import {
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
+import { type SessionMode, SessionModeSchema } from "./project-file.js";
 import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
-import { WorkspaceMoveError, WorktreeInfoSchema } from "./session-workspace.js";
+import {
+	SessionWorktreeInspectionSchema,
+	WorkspaceMoveError,
+	WorktreeInfoSchema,
+} from "./session-workspace.js";
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
@@ -225,6 +237,11 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	setupScript: Schema.optional(Schema.String),
+	sessionMode: Schema.optional(SessionModeSchema),
+	groupingMode: Schema.optional(GroupingModeSchema),
+	effectiveGroupingMode: Schema.optional(GroupingModeSchema),
+	group: Schema.optional(ProjectGroupSchema),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -463,10 +480,46 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const HarnessDefaultStateSchema = Schema.Struct({
+	pick: Schema.optional(
+		Schema.Struct({
+			providerId: Schema.String,
+			modelId: Schema.String,
+			effort: Schema.String,
+			contextWindow: Schema.String,
+		}),
+	),
+	status: Schema.Literal("ok", "missing", "invalid", "unverified"),
+	problem: Schema.optional(Schema.String),
+});
+export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
+
+export const SetHarnessDefaultResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	harness: Schema.Literal("claude", "opencode"),
+	state: HarnessDefaultStateSchema,
+});
+export type SetHarnessDefaultResponse =
+	typeof SetHarnessDefaultResponseSchema.Type;
+
 export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	mode: SessionPermissionModeSchema,
 });
+
+export const SetDefaultSessionModeResponseSchema = Schema.Struct({
+	mode: SessionModeSchema,
+});
+export type SetDefaultSessionModeResponse =
+	typeof SetDefaultSessionModeResponseSchema.Type;
+
+export const ResolveSessionModeResponseSchema = Schema.Struct({
+	mode: SessionModeSchema,
+	source: Schema.Literal("project", "file", "global"),
+	warning: Schema.optional(Schema.String),
+});
+export type ResolveSessionModeResponse =
+	typeof ResolveSessionModeResponseSchema.Type;
 
 export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -683,6 +736,10 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
+	readonly setupScript?: string | undefined;
+	readonly sessionMode?: SessionMode | null | undefined;
+	/** null clears an override; omission preserves it. */
+	readonly groupingMode?: GroupingMode | null | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -728,6 +785,9 @@ export const GetInstanceStatusResponseSchema = Schema.Struct({
 
 export const GetStatusResponseSchema = Schema.Struct({
 	uptime: Schema.Number,
+	version: Schema.String,
+	logLevel: RpcLogLevelSchema,
+	supervised: Schema.Boolean,
 	port: Schema.Number,
 	host: Schema.String,
 	tailscaleIP: Schema.optional(Schema.String),
@@ -738,6 +798,8 @@ export const GetStatusResponseSchema = Schema.Struct({
 	clientCount: Schema.Number,
 	pinEnabled: Schema.Boolean,
 	tlsEnabled: Schema.Boolean,
+	tailscaleServeEnabled: Schema.optional(Schema.Boolean),
+	tailscaleServeAvailable: Schema.optional(Schema.Boolean),
 	tailscaleServe: Schema.optional(
 		Schema.Union(
 			Schema.Struct({ url: Schema.String }),
@@ -812,6 +874,7 @@ export const GetFileTreeResponseSchema = Schema.Struct({
 				/** Stable Project Folder identity, independent of its mapped worktree. */
 				root: NonEmptyString,
 				label: NonEmptyString,
+				shared: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),
@@ -977,6 +1040,15 @@ export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeComman
 	},
 ) {}
 
+export class SetTailscaleServe extends Schema.TaggedRequest<SetTailscaleServe>()(
+	"SetTailscaleServe",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: { enabled: Schema.Boolean },
+	},
+) {}
+
 export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
 	payload: {},
 	failure: WsRpcError,
@@ -1059,6 +1131,9 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
+			setupScript: Schema.optional(Schema.String),
+			sessionMode: Schema.optional(Schema.NullOr(SessionModeSchema)),
+			groupingMode: Schema.optional(Schema.NullOr(GroupingModeSchema)),
 		},
 	},
 ) {}
@@ -1349,6 +1424,24 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 	},
 ) {}
 
+export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()(
+	"SetHarnessDefault",
+	{
+		failure: WsRpcError,
+		success: SetHarnessDefaultResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			harness: Schema.Literal("claude", "opencode"),
+			providerId: NonEmptyString,
+			modelId: NonEmptyString,
+			/** Omitted: the effort last saved for this model, if still offered. */
+			effort: Schema.optional(Schema.String),
+			contextWindow: Schema.String,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
 	"SetDefaultPermissionMode",
 	{
@@ -1359,6 +1452,45 @@ export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPer
 			mode: SessionPermissionModeSchema,
 			originId: Schema.optional(NonEmptyString),
 		},
+	},
+) {}
+
+export class SetDefaultSessionMode extends Schema.TaggedRequest<SetDefaultSessionMode>()(
+	"SetDefaultSessionMode",
+	{
+		failure: WsRpcError,
+		success: SetDefaultSessionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			mode: SessionModeSchema,
+		},
+	},
+) {}
+
+/** Resolve draft defaults without attaching or starting a project relay. */
+export class ResolveSessionMode extends Schema.TaggedRequest<ResolveSessionMode>()(
+	"ResolveSessionMode",
+	{
+		failure: WsRpcError,
+		success: ResolveSessionModeResponseSchema,
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+export class SetDefaultGroupingMode extends Schema.TaggedRequest<SetDefaultGroupingMode>()(
+	"SetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: { mode: GroupingModeSchema },
+	},
+) {}
+
+export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroupingMode>()(
+	"GetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: {},
 	},
 ) {}
 
@@ -1425,6 +1557,18 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 	},
 ) {}
 
+export class ListBranches extends Schema.TaggedRequest<ListBranches>()(
+	"ListBranches",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			current: Schema.optional(Schema.String),
+			branches: Schema.Array(Schema.String),
+		}),
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
 export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 	"ListWorktrees",
 	{
@@ -1450,6 +1594,49 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
+	},
+) {}
+
+export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSessionWorktrees>()(
+	"InspectSessionWorktrees",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
+			removeWorktrees: Schema.Boolean,
+		}),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranch>()(
+	"RenameSessionBranch",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
+		success: Schema.Struct({ ok: Schema.Literal(true) }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			branchName: Schema.String,
+		},
+	},
+) {}
+
+export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
+	"RecreateSessionWorktree",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSessionInMainFolder>()(
+	"ContinueSessionInMainFolder",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1839,6 +2026,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
+			// A project slug or encodeGroupScope's reserved /group/<key> value.
 			scope: Schema.optional(NonEmptyString),
 			exclude: Schema.optional(NonEmptyString),
 		},
@@ -1864,6 +2052,8 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
+			// Local base for the primary folder; requires newWorktree.
+			worktreeBase: Schema.optional(NonEmptyString),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.
@@ -1923,11 +2113,15 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 	"DeleteSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: Schema.Struct({
+			ok: Schema.Literal(true),
+			worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
+		}),
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
+			removeWorktrees: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}
@@ -2183,6 +2377,7 @@ export const WsRpcRequest = Schema.Union(
 	SetPin,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
+	SetTailscaleServe,
 	Shutdown,
 	SetAgent,
 	RestartWithConfig,
@@ -2199,15 +2394,25 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetHarnessDefault,
 	SetDefaultPermissionMode,
+	SetDefaultSessionMode,
+	ResolveSessionMode,
+	SetDefaultGroupingMode,
+	GetDefaultGroupingMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListBranches,
 	ListWorktrees,
+	InspectSessionWorktrees,
+	RenameSessionBranch,
 	MoveSessionWorkspace,
+	RecreateSessionWorktree,
+	ContinueSessionInMainFolder,
 	DismissWorkspaceHint,
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
@@ -2485,6 +2690,12 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("defaultPermissionMode", {
 		mode: SessionPermissionModeSchema,
 	}),
+	Schema.TaggedStruct("defaultSessionMode", {
+		mode: SessionModeSchema,
+	}),
+	Schema.TaggedStruct("defaultGroupingMode", {
+		mode: GroupingModeSchema,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -2503,6 +2714,10 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("providerModels", {
 		providers: Schema.Array(ProviderInfoSchema),
 	}),
+	Schema.TaggedStruct("harnessDefaults", {
+		claude: HarnessDefaultStateSchema,
+		opencode: HarnessDefaultStateSchema,
+	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */
@@ -2512,10 +2727,14 @@ export type GlobalProjectSetting = Extract<
 		readonly _tag:
 			| "defaultModel"
 			| "defaultPermissionMode"
+			| "defaultSessionMode"
+			| "defaultGroupingMode"
 			| "visibility"
 			| "claudeSettings";
 	}
 >;
+/** Global writes signal each relay to compute catalog-dependent facts locally. */
+export type GlobalSettingTag = GlobalProjectSetting["_tag"] | "harnessDefaults";
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
 
@@ -2593,6 +2812,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),
 	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
+	Rpc.fromTaggedRequest(SetTailscaleServe),
 	Rpc.fromTaggedRequest(Shutdown),
 	Rpc.fromTaggedRequest(SetAgent),
 	Rpc.fromTaggedRequest(RestartWithConfig),
@@ -2609,15 +2829,25 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetHarnessDefault),
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
+	Rpc.fromTaggedRequest(SetDefaultSessionMode),
+	Rpc.fromTaggedRequest(ResolveSessionMode),
+	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
+	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
 	Rpc.fromTaggedRequest(SetClaudeSettings),
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.fromTaggedRequest(InspectSessionWorktrees),
+	Rpc.fromTaggedRequest(RenameSessionBranch),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
+	Rpc.fromTaggedRequest(RecreateSessionWorktree),
+	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
 	Rpc.fromTaggedRequest(DismissWorkspaceHint),
 	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
 	Rpc.fromTaggedRequest(MarkSessionUnread),

@@ -120,8 +120,16 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 		Effect.provide(
 			WsRpcGroup.toLayer({
 				...daemonOnlyHandlers,
+				ListBranches: () => Effect.succeed({ branches: [] }),
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
+				InspectSessionWorktrees: () =>
+					Effect.succeed({ worktrees: [], removeWorktrees: true }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
+				RenameSessionBranch: () => Effect.succeed({ ok: true as const }),
+				RecreateSessionWorktree: () =>
+					Effect.succeed({ directory: "/worktree" }),
+				ContinueSessionInMainFolder: () =>
+					Effect.succeed({ directory: "/main" }),
 				DismissWorkspaceHint: () => Effect.succeed({ ok: true }),
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
@@ -406,11 +414,29 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						variant: "",
 						variants: [],
 					}),
+				SetHarnessDefault: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						harness: request.harness,
+						state: {
+							status: "ok" as const,
+							pick: {
+								providerId: request.providerId,
+								modelId: request.modelId,
+								effort: request.effort ?? "",
+								contextWindow: request.contextWindow,
+							},
+						},
+					}),
 				SetDefaultPermissionMode: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						mode: request.mode,
 					}),
+				SetDefaultSessionMode: (request) =>
+					Effect.succeed({ mode: request.mode }),
+				ResolveSessionMode: (_request) =>
+					Effect.succeed({ mode: "local" as const, source: "global" as const }),
 				SetHiddenEntries: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -877,6 +903,8 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("SwitchModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultPermissionMode")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetDefaultSessionMode")).toBe(true);
+		expect(WsRpcGroup.requests.has("ResolveSessionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);

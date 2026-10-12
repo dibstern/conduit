@@ -1,9 +1,14 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
-import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -36,6 +41,23 @@ type RpcHandler = (
 	params: Record<string, unknown>,
 	request: JsonRpcRequest | EffectRpcRequest,
 ) => unknown | Promise<unknown>;
+
+export const MOCK_SERVER_STATUS: GetStatusResponse = {
+	uptime: 273_600,
+	version: "0.42.1",
+	port: 2633,
+	host: "0.0.0.0",
+	clientCount: 2,
+	projectCount: 0,
+	sessionCount: 0,
+	pinEnabled: false,
+	tlsEnabled: false,
+	keepAwake: false,
+	keepAwakeCommand: null,
+	logLevel: "info",
+	supervised: true,
+	projects: [],
+};
 
 /** Daemon-global feeds whose latest value the mock replays to each subscriber. */
 type DaemonListTag =
@@ -669,7 +691,14 @@ async function handleMessage(
 			control.getResponseHandler(raw.tag) ??
 			handlers[raw.tag] ??
 			control.catalogHandler(raw.tag) ??
+			(raw.tag === "ResolveSessionMode"
+				? () => ({ mode: "local", source: "global" })
+				: undefined) ??
 			(raw.tag === "GetProjects" ? control.projectsHandler() : undefined) ??
+			(raw.tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
+			(raw.tag === "GetDefaultGroupingMode"
+				? () => ({ mode: "repository" })
+				: undefined) ??
 			(raw.tag === "GetUsageLimitsSetting"
 				? () => ({
 						usageLimits: { autoResume: false, autoSwitch: false, order: [] },
@@ -685,9 +714,11 @@ async function handleMessage(
 							})
 						: raw.tag === "ViewSession"
 							? () => ({ ok: true })
-							: raw.tag === "input.submit"
-								? ({ sessionId }) => ({ ok: true, sessionId })
-								: undefined);
+							: raw.tag === "InspectSessionWorktrees"
+								? () => ({ worktrees: [], removeWorktrees: false })
+								: raw.tag === "input.submit"
+									? ({ sessionId }) => ({ ok: true, sessionId })
+									: undefined);
 		if (!handler) return;
 		try {
 			const result = await handler(raw.payload ?? {}, raw);
@@ -713,7 +744,9 @@ async function handleMessage(
 			if (
 				error instanceof WsRpcError ||
 				error instanceof WorkspaceMoveError ||
-				error instanceof WorktreeCreationError
+				error instanceof WorktreeBranchRenameError ||
+				error instanceof WorktreeCreationError ||
+				error instanceof WorktreeRecoveryError
 			) {
 				sendJson(ws, {
 					_tag: "Exit",
@@ -729,14 +762,22 @@ async function handleMessage(
 											path: error.path,
 											reason: error.reason,
 										}
-									: error instanceof WorktreeCreationError
+									: error instanceof WorktreeBranchRenameError
 										? {
-												_tag: "WorktreeCreationError",
-												path: error.path,
+												_tag: error._tag,
+												folder: error.folder,
 												reason: error.reason,
 												message: error.message,
 											}
-										: { _tag: "WsRpcError", message: error.message },
+										: error instanceof WorktreeCreationError ||
+												error instanceof WorktreeRecoveryError
+											? {
+													_tag: error._tag,
+													path: error.path,
+													reason: error.reason,
+													message: error.message,
+												}
+											: { _tag: "WsRpcError", message: error.message },
 						},
 					},
 				});

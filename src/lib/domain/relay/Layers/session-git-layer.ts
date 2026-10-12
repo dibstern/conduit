@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
 import { type Context, Effect, Layer, Option, Schema } from "effect";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -14,6 +15,7 @@ import {
 import { type SessionGit, SessionGitSchema } from "../../../shared-types.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
+import { inspectSessionWorktree } from "../Services/session-workspace.js";
 
 /** One git refresh pass: folders read from disk, and how many moved. For load tests. */
 export interface SessionGitRefresh {
@@ -38,8 +40,16 @@ export const SessionGitLive = Layer.effect(
 		const decodeGit = Schema.decodeUnknownOption(
 			Schema.parseJson(SessionGitSchema),
 		);
-		let published = new Map<string, SessionGit | undefined>();
+		let published = new Map<
+			string,
+			{
+				git: SessionGit | undefined;
+				workspaceMissing: WorkspaceMissing | undefined;
+			}
+		>();
 		// A record that cannot be read or decoded counts as never published.
+		// Only git is recorded: a missing worktree is found again on the first
+		// refresh and stamps just its own sessions.
 		for (const row of yield* sql<{
 			directory: string;
 			git: string | null;
@@ -54,7 +64,10 @@ export const SessionGitLive = Layer.effect(
 			const git =
 				row.git === null ? Option.some(undefined) : decodeGit(row.git);
 			if (Option.isNone(git)) continue;
-			published.set(row.directory, git.value);
+			published.set(row.directory, {
+				git: git.value,
+				workspaceMissing: undefined,
+			});
 			daemonSessionGitCache.seed(row.directory, git.value);
 		}
 		let queued:
@@ -100,17 +113,33 @@ export const SessionGitLive = Layer.effect(
 											])
 										: [],
 								);
+								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
 									if (
 										!request.sessionIds.has(session.id) &&
-										!(request.all && session.settledAt == null)
+										!(
+											request.all &&
+											(session.settledAt == null ||
+												session.workspace?.origin === "conduit")
+										)
 									)
 										continue;
+									const workspaceDirectory = effectiveWorkingDirectory(
+										config.projectDir,
+										session.workspace,
+									);
+									if (session.workspace?.origin === "conduit") {
+										const state = yield* inspectSessionWorktree(
+											session,
+											config,
+										);
+										if (state)
+											for (const { path } of state.folders ?? [state])
+												missing.set(path, state);
+									}
 									for (const directory of [
-										effectiveWorkingDirectory(
-											config.projectDir,
-											session.workspace,
-										),
+										workspaceDirectory,
+										...Object.values(session.workspace?.worktrees ?? {}),
 										...effectiveSessionFolders(
 											projectFolders,
 											session.workspace,
@@ -126,17 +155,19 @@ export const SessionGitLive = Layer.effect(
 								const next = new Map(published);
 								let fromDisk = 0;
 								for (const [directory, force] of directories) {
+									const workspaceMissing = missing.get(directory);
 									const stale =
 										force || daemonSessionGitCache.isStale(directory);
 									if (stale) fromDisk++;
-									next.set(
-										directory,
-										stale
-											? yield* Effect.tryPromise(() =>
-													daemonSessionGitCache.refresh(directory),
-												)
-											: daemonSessionGitCache.peek(directory),
-									);
+									const git = stale
+										? yield* Effect.tryPromise(() =>
+												daemonSessionGitCache.refresh(directory),
+											)
+										: daemonSessionGitCache.peek(directory);
+									next.set(directory, {
+										git: workspaceMissing ? undefined : git,
+										workspaceMissing,
+									});
 								}
 								const changed = new Set(
 									[...directories.keys()].filter(
@@ -163,7 +194,7 @@ export const SessionGitLive = Layer.effect(
 									stamp((version) =>
 										Effect.gen(function* () {
 											for (const directory of changed) {
-												const git = next.get(directory);
+												const git = next.get(directory)?.git;
 												yield* sql`INSERT INTO session_git_published (directory, git) VALUES (${directory}, ${git === undefined ? null : JSON.stringify(git)}) ON CONFLICT (directory) DO UPDATE SET git = excluded.git`;
 											}
 											const rows = yield* sql<

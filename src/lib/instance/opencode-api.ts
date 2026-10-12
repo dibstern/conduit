@@ -256,7 +256,27 @@ class SessionNamespace {
 	async create(options?: {
 		title?: string;
 		parentID?: string;
+		id?: string;
 	}): Promise<SessionDetail> {
+		if (options?.id !== undefined) {
+			const id = options.id;
+			// v2 accepts the id reserved for a worktree launch. Read the legacy
+			// shape used by the existing event and history adapters afterwards.
+			return this.api.sdk(
+				"session.create",
+				decodeSessionDetailResponse,
+				async () => {
+					const created = await this.api._sdk.v2.session.create({ id });
+					if (created.error !== undefined) return created;
+					return options.title
+						? this.api._sdk.session.update({
+								sessionID: id,
+								title: options.title,
+							})
+						: this.api._sdk.session.get({ sessionID: id });
+				},
+			);
+		}
 		return this.api.sdk("session.create", decodeSessionDetailResponse, () =>
 			this.api._sdk.session.create(options),
 		);

@@ -7,7 +7,7 @@
 <script lang="ts">
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
@@ -25,13 +25,14 @@
 	}: { limitRecovery: LimitRecovery; sessionId: string; projectSlug: string } = $props();
 
 	let busy = $state(false);
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 
 	const account = $derived(
-		getInstanceById(limitRecovery.instanceId)?.name ?? limitRecovery.instanceId,
+		claudeAccounts.nameOf(limitRecovery.instanceId, limitRecovery.instanceId),
 	);
 	// Switch account needs another Claude account to go to.
 	const canSwitch = $derived(
-		instanceState.instances.some((instance) => instance.driver === "claude" && instance.id !== limitRecovery.instanceId),
+		claudeAccounts.hasAlternative(limitRecovery.instanceId),
 	);
 	const geometry = $derived(
 		sessionViewState.compact ? "h-[34px] flex-1 rounded-[10px] text-[12px]" : "h-[24px] rounded-[8px] text-[11px]",

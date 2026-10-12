@@ -1,5 +1,6 @@
 import { Effect, Fiber, Option, Schema, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import { ProjectSetupStateSchema } from "../../contracts/project-setup.js";
 import {
 	PartRemovalId,
 	type SessionDetailEnvelope,
@@ -61,6 +62,7 @@ const partTypes: ReadonlySet<string> = new Set([
 	"subtask",
 	"thinking",
 	"error",
+	"setup",
 ]);
 const isPartType = (type: string): type is HistoryMessagePart["type"] =>
 	partTypes.has(type);
@@ -88,6 +90,7 @@ function toHistoryPart(part: WirePart): HistoryMessagePart | undefined {
 		postTokens,
 		failed,
 		code,
+		setup,
 		...base
 	} = part;
 	const partTime = record(time);
@@ -127,6 +130,7 @@ function toHistoryPart(part: WirePart): HistoryMessagePart | undefined {
 		...(typeof postTokens === "number" ? { postTokens } : {}),
 		...(failed === true ? { failed } : {}),
 		...(typeof code === "string" ? { code } : {}),
+		...(Schema.is(ProjectSetupStateSchema)(setup) ? { setup } : {}),
 	};
 }
 

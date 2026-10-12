@@ -171,6 +171,7 @@ export interface ClaudeSubagentTaskContext {
 	readonly parentMessageId?: string;
 	readonly description?: string;
 	readonly subagentType?: string;
+	readonly workflowName?: string;
 	/** The task that started this one, for a task started inside an agent. */
 	readonly parentTaskId?: string;
 	/** Epoch ms when conduit first saw task_started: a running task's clock. */
@@ -240,8 +241,11 @@ export interface ClaudeSessionContext {
 	 *  know whether a turn is actually running. currentTurnId cannot answer
 	 *  that: it is set at submit and never cleared. */
 	turnInFlight?: boolean;
-	/** Stop interrupted the running turn but kept the query live for a
-	 *  pending steer; the turn's failed result is that interruption. */
+	/** Number of live tasks in the latest filtered SDK snapshot, including monitors. */
+	liveBackgroundTaskCount?: number;
+	/** Input whose Stop kept the query live for background tasks or a pending steer. */
+	interruptInputId?: string | undefined;
+	/** The terminal result covers the interrupted input. Set only while translating it. */
 	interruptRequested?: boolean;
 	/** Conduit's requested catalog/base model id for the current turn. */
 	currentModel: string | undefined;
