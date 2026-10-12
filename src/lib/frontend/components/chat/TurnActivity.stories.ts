@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { Utf8Bytes } from "../../../contracts/tool-wire.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
 import {
@@ -154,8 +155,7 @@ const truncatedMessages = [
 		status: "completed",
 		result:
 			" ✓ test/unit/utils/turns.test.ts (42 tests) 31ms\n ✓ test/unit/stores/chat.test.ts (118 tests) 204ms\n ✓ test/unit/persistence/projectors.test.ts (87 tests) 412ms",
-		isTruncated: true,
-		fullContentLength: 131_993,
+		preview: { resultBytes: Utf8Bytes.make(131_993) },
 	},
 	{
 		type: "assistant",
@@ -168,8 +168,11 @@ const truncatedMessages = [
 const [truncated = EMPTY_TURN] = segmentTurns(truncatedMessages, false);
 const [truncatedSegment = EMPTY_SEGMENT] = truncated.segments;
 
-/** A tool output the server cut short says how much is shown and offers the rest. */
-export const TruncatedOutput: Story = {
+/**
+ * Expanding a previewed output loads the rest at once. Stories have no project
+ * to load it from, so this shows the failure and its retry in the log row.
+ */
+export const PreviewedOutputRetry: Story = {
 	args: { turn: truncated, segment: truncatedSegment, final: true },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -181,7 +184,7 @@ export const TruncatedOutput: Story = {
 		await userEvent.click(subject);
 		subject.closest("button")?.blur();
 		await expect(
-			canvas.getByRole("button", { name: "Show full output" }),
+			await canvas.findByRole("button", { name: "Retry" }),
 		).toBeVisible();
 	},
 };

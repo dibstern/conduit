@@ -42,11 +42,10 @@ const detailEnvelopes = [
 		_tag: "snapshot",
 		rows: [
 			{
-				_tag: "transcriptMessage",
+				_tag: "message",
 				message: {
 					id: "message-1",
 					role: "assistant",
-					parts: [{ id: "part-1", type: "text", text: 'Hello "world"\n雪' }],
 					time: { created: 100, completed: 200 },
 					cost: 0.02,
 					tokens: { input: 10, output: 20 },
@@ -58,35 +57,25 @@ const detailEnvelopes = [
 					},
 				},
 			},
+			{
+				_tag: "part",
+				messageId: "message-1",
+				sortOrder: 0,
+				part: { id: "part-1", type: "text", text: 'Hello "world"\n雪' },
+			},
 		],
 		sequence: 40,
 	},
 	{ _tag: "synchronized" },
 	{
-		// The delta ni8.5 §7 makes detail emit: the whole projected message the
-		// version re-query returned, stamped with the read-model version it was
-		// read at — the same number a resume cursor resolves against.
+		// A live change carries only the rows that moved: here the message's
+		// completion and its new tool part, not the unchanged text part.
 		_tag: "upsert",
 		item: {
-			_tag: "transcriptMessage",
+			_tag: "message",
 			message: {
 				id: "message-1",
 				role: "assistant",
-				parts: [
-					{ id: "part-1", type: "text", text: 'Hello "world"\n雪' },
-					{
-						id: "part-2",
-						type: "tool",
-						text: "",
-						callID: "call-1",
-						tool: "Bash",
-						state: {
-							status: "completed",
-							input: { command: "pwd", nested: { flag: true } },
-							output: "/repo\n",
-						},
-					},
-				],
 				time: { created: 100, completed: 300 },
 			},
 		},
@@ -95,125 +84,28 @@ const detailEnvelopes = [
 	{
 		_tag: "upsert",
 		item: {
-			_tag: "event",
-			event: {
-				eventId: "event-1",
-				sessionId: "session-1",
-				type: "tool.started",
-				data: {
-					messageId: "message-1",
-					partId: "tool-1",
-					toolName: "Read",
-					callId: "call-1",
-					input: { tool: "Read", filePath: "a.ts", offset: 1, limit: 20 },
+			_tag: "part",
+			messageId: "message-1",
+			sortOrder: 1,
+			part: {
+				id: "part-2",
+				type: "tool",
+				text: "",
+				callID: "call-1",
+				tool: "Bash",
+				state: {
+					status: "completed",
+					input: {
+						_tag: "whole" as const,
+						value: { command: "pwd", nested: { flag: true } },
+					},
+					output: { _tag: "whole" as const, text: "/repo\n" },
 				},
-				metadata: { source: "provider", schemaVersion: 1 },
-				provider: "claude",
-				createdAt: 201,
-				sequence: 41,
-				projectId: "test-project",
-				streamVersion: 1,
-			},
-		},
-		sequence: 41,
-	},
-	{
-		_tag: "upsert",
-		item: {
-			_tag: "event",
-			event: {
-				eventId: "event-2",
-				sessionId: "session-1",
-				type: "tool.running",
-				data: {
-					messageId: "message-1",
-					partId: "tool-1",
-					callId: "call-1",
-					toolName: "Read",
-					input: { tool: "Read", filePath: "b.ts" },
-					metadata: { progress: 0.5 },
-				},
-				metadata: {},
-				provider: "claude",
-				createdAt: 202,
-				sequence: 42,
-				projectId: "test-project",
-				streamVersion: 2,
-			},
-		},
-		sequence: 42,
-	},
-	{
-		_tag: "upsert",
-		item: {
-			_tag: "event",
-			event: {
-				eventId: "event-3",
-				sessionId: "session-1",
-				type: "tool.completed",
-				data: {
-					messageId: "message-1",
-					partId: "tool-1",
-					result: { content: "done", lines: [1, 2] },
-					duration: 3,
-					input: { tool: "Read", filePath: "b.ts" },
-				},
-				metadata: {},
-				provider: "claude",
-				createdAt: 203,
-				sequence: 43,
-				projectId: "test-project",
-				streamVersion: 3,
-			},
-		},
-		sequence: 43,
-	},
-	{
-		_tag: "upsert",
-		item: {
-			_tag: "event",
-			event: {
-				eventId: "event-4",
-				sessionId: "session-1",
-				type: "session.forked",
-				data: {
-					sessionId: "session-1",
-					parentId: "parent-1",
-					forkPointEvent: "parent-event-1",
-					forkPointTimestamp: 90,
-				},
-				metadata: {},
-				provider: "claude",
-				createdAt: 204,
-				sequence: 44,
-				projectId: "test-project",
-				streamVersion: 4,
 			},
 		},
 		sequence: 44,
 	},
-	{
-		_tag: "upsert",
-		item: {
-			_tag: "event",
-			event: {
-				eventId: "event-5",
-				sessionId: "session-1",
-				type: "session.permission_mode_changed",
-				data: {
-					sessionId: "session-1",
-					mode: "dontAsk",
-				},
-				metadata: {},
-				provider: "claude",
-				createdAt: 205,
-				sequence: 45,
-				projectId: "test-project",
-				streamVersion: 5,
-			},
-		},
-		sequence: 45,
-	},
+	{ _tag: "remove", id: '["message-1","part-2"]', sequence: 45 },
 	{ _tag: "remove", id: "message-1", sequence: 46 },
 ] as const;
 
@@ -543,7 +435,7 @@ describe("RPC serialization over a per-connection SocketServer", () => {
 	});
 });
 
-it("SubscribeSessionDetail preserves transcript, model identity and stored tool and session events through JSON", async () => {
+it("SubscribeSessionDetail preserves message and part rows, model identity and part removals through JSON", async () => {
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
@@ -555,32 +447,20 @@ it("SubscribeSessionDetail preserves transcript, model identity and stored tool 
 						resumeFromSequence: 39,
 					}),
 				);
-				expect(
-					Array.from(result).flatMap((envelope) =>
-						envelope._tag === "upsert" && envelope.item._tag === "event"
-							? [envelope.item.event.type]
-							: [],
-					),
-				).toEqual([
-					"tool.started",
-					"tool.running",
-					"tool.completed",
-					"session.forked",
-					"session.permission_mode_changed",
-				]);
-				// The delta variant detail actually produces now: a whole message,
-				// with its tool part's open-ended `state` intact through JSON.
-				const upserted = Array.from(result).flatMap((envelope) =>
-					envelope._tag === "upsert" &&
-					envelope.item._tag === "transcriptMessage"
-						? [envelope.item.message]
+				// A tool part's open-ended `state` survives JSON intact.
+				const parts = Array.from(result).flatMap((envelope) =>
+					envelope._tag === "upsert" && envelope.item._tag === "part"
+						? [envelope.item.part]
 						: [],
 				);
-				expect(upserted.map((message) => message.id)).toEqual(["message-1"]);
-				expect(upserted[0]?.parts?.[1]?.state).toEqual({
+				expect(parts.map((part) => part.id)).toEqual(["part-2"]);
+				expect(parts[0]?.state).toEqual({
 					status: "completed",
-					input: { command: "pwd", nested: { flag: true } },
-					output: "/repo\n",
+					input: {
+						_tag: "whole",
+						value: { command: "pwd", nested: { flag: true } },
+					},
+					output: { _tag: "whole", text: "/repo\n" },
 				});
 				expect(Array.from(result)).toEqual(detailEnvelopes);
 				expect(serverFrames.map((frame) => JSON.parse(frame))).toContainEqual(

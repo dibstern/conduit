@@ -144,6 +144,7 @@ describe("Persistence Effect", () => {
 					"activities",
 					"command_receipts",
 					"events",
+					"message_part_tombstones",
 					"message_parts",
 					"message_tombstones",
 					"messages",
@@ -160,11 +161,13 @@ describe("Persistence Effect", () => {
 					"provider_state",
 					"read_model_counter",
 					"sent_alerts",
+					"session_git_published",
 					"session_goal_checks",
 					"session_providers",
 					"session_sidebar",
 					"session_sidebar_horizon",
 					"sessions",
+					"store_identity",
 					"tool_content",
 					"turns",
 				],
@@ -309,6 +312,9 @@ describe("Persistence Effect", () => {
 				{ migration_id: 48, name: "sessions_claude_worktree_state" },
 				{ migration_id: 49, name: "sessions_workspace_hint" },
 				{ migration_id: 50, name: "sessions_pending_rewind" },
+				{ migration_id: 51, name: "message_part_versions" },
+				{ migration_id: 52, name: "session_git_published" },
+				{ migration_id: 53, name: "store_identity" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

@@ -140,8 +140,9 @@ function makeReadQueryEffect(
 	pendingApprovalCounts: readonly PendingApprovalCountRow[] = [],
 ): ReadQueryEffect {
 	return {
-		getToolContent: vi.fn(() => Effect.succeed(undefined)),
+		readToolDetails: vi.fn(() => Effect.succeed([])),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+		getSessionFamilyRoot: () => Effect.succeed(undefined),
 		getSession: vi.fn((sessionId: string) =>
 			Effect.succeed(rows.find((row) => row.id === sessionId)),
 		),
@@ -206,6 +207,7 @@ function makeReadQueryEffect(
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 		readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 		readInboxState: () => Effect.succeed(undefined),
+		readStoreIdentity: () => Effect.succeed("store"),
 		readSessionTranscriptPage: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 		),

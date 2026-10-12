@@ -31,6 +31,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
+import { assembleDetailRows } from "../../helpers/detail-rows.js";
 
 class TestRpc extends Context.Tag("IntegrationTestBrowserRpc")<
 	TestRpc,
@@ -742,6 +743,7 @@ export class TestWsClient {
 			}
 		}
 		this.detailSubscriptionKey = key;
+		const assemble = assembleDetailRows();
 		await this.follow(
 			"session_detail",
 			(client) => client.SubscribeSessionDetail({ projectSlug, sessionId }),
@@ -753,15 +755,11 @@ export class TestWsClient {
 						: envelope._tag === "upsert"
 							? [envelope.item]
 							: [];
-				for (const item of items)
-					if (item._tag === "event")
-						this.receive({ ...item.event, type: item.event.type, sessionId });
-					else if (item._tag === "transcriptMessage")
-						this.receive({
-							...item.message,
-							type: "transcript_message",
-							sessionId,
-						});
+				for (const item of items) {
+					const message = assemble(item);
+					if (message)
+						this.receive({ ...message, type: "transcript_message", sessionId });
+				}
 			},
 		);
 	}

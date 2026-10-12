@@ -1,7 +1,8 @@
 <!-- Renders all non-question, non-subagent tool calls with expand/collapse, -->
-<!-- result preview, and truncation handling. -->
+<!-- result preview, and the full detail of a previewed tool. -->
 
 <script lang="ts">
+	import type { ComponentProps } from "svelte";
 	import type { ToolMessage } from "../../types.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
@@ -11,10 +12,12 @@
 	import Disclosure from "../ui/Disclosure.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
 	import Surface from "../ui/Surface.svelte";
-	import ToolOutputMore from "./ToolOutputMore.svelte";
+	import ToolFullDetail from "./ToolFullDetail.svelte";
 
-	let { message }: {
+	let { message, loadDetails }: {
 		message: ToolMessage;
+		/** Stands in for the server in stories. */
+		loadDetails?: ComponentProps<typeof ToolFullDetail>["load"];
 	} = $props();
 
 	let expanded = $state(false);
@@ -78,13 +81,12 @@
 	);
 
 	// For Bash/Shell tools, extract the raw command for display in expanded view
-	const bashCommand = $derived.by(() => {
-		if (message.name !== "Bash") return null;
-		const inp = message.input as Record<string, unknown> | null | undefined;
-		if (!inp) return null;
-		const cmd = inp['command'] as string | undefined;
-		return cmd ?? null;
-	});
+	function commandOf(tool: ToolMessage): string | null {
+		if (tool.name !== "Bash") return null;
+		const inp = tool.input as Record<string, unknown> | null | undefined;
+		return (inp?.["command"] as string | undefined) ?? null;
+	}
+	const bashCommand = $derived(commandOf(message));
 
 	// Description preview (prefer input subtitle, then first line of result, then status)
 	const descText = $derived.by(() => {
@@ -141,15 +143,18 @@
 	{/if}
 
 	{#if expanded && (message.result || bashCommand)}
-		<Surface
-			variant="inset"
-			padding="md"
-			radius="md"
-			class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
-		>
-			{#if bashCommand}<span class="text-text-muted">$ {bashCommand}</span>{#if message.result}{"\n\n"}{/if}{/if}{#if message.result}{message.result}{/if}
-		</Surface>
-
-		<ToolOutputMore {message} class="mx-2.5 mt-1 mb-1" />
+		<ToolFullDetail {message} {...loadDetails && { load: loadDetails }} class="mx-2.5 mt-1 mb-1">
+			{#snippet children(tool)}
+				{@const command = commandOf(tool)}
+				<Surface
+					variant="inset"
+					padding="md"
+					radius="md"
+					class="tool-result font-mono text-xs whitespace-pre-wrap break-all my-0.5 mx-2.5 text-text-secondary max-h-[200px] overflow-y-auto select-text {resultErrorClass}"
+				>
+					{#if command}<span class="text-text-muted">$ {command}</span>{#if tool.result}{"\n\n"}{/if}{/if}{#if tool.result}{tool.result}{/if}
+				</Surface>
+			{/snippet}
+		</ToolFullDetail>
 	{/if}
 </div>

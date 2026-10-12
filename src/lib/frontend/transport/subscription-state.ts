@@ -27,9 +27,9 @@
 //
 // **Snapshots and completed replays establish global coverage.** A snapshot
 // is read in one transaction, so every change at or below its sequence is in its
-// rows. Per-row records at or below that bound can be discarded, including
-// tombstones. Records newer than a delayed snapshot must survive it.
-// Commit-ordered delivery (ni8.5.13) makes synchronized another safe boundary:
+// rows. It replaces the state whole: its rows, no per-row records, its sequence
+// as the floor. A snapshot opens its stream, so nothing newer is held when it
+// lands; if the server went back, it wins anyway. Commit-ordered delivery (ni8.5.13) makes synchronized another safe boundary:
 // replay has filled any gaps through the highest version already held. Only
 // then can that version become the floor and replace the retained tombstones.
 
@@ -126,23 +126,17 @@ export const reduce = <T>(
 			return { ...state, versions, floor, settled: true };
 		}
 
-		case "snapshot": {
-			const sequence = change.sequence;
-			if (state.floor !== undefined && sequence <= state.floor) return state;
-			const rows = new Map(change.rows.map((item) => [identify(item), item]));
-			// A delayed snapshot covers only its own sequence. Keep newer live
-			// rows and tombstones, while replacing everything the snapshot covers.
-			const versions = new Map<string, number>();
-			for (const [id, version] of state.versions) {
-				if (version <= sequence) continue;
-				versions.set(id, version);
-				if (state.rows.has(id)) {
-					const item = state.rows.get(id);
-					if (item !== undefined) rows.set(id, item);
-				} else rows.delete(id);
-			}
-			return { rows, versions, floor: sequence, settled: state.settled };
-		}
+		// A snapshot is the whole set at its sequence, and replaces what we hold.
+		// It opens a subscription, so no live change can be newer than it, unless
+		// the server went back (a restored store); the server wins then too
+		// (conduit-test-y7eo.9).
+		case "snapshot":
+			return {
+				rows: new Map(change.rows.map((item) => [identify(item), item])),
+				versions: new Map(),
+				floor: change.sequence,
+				settled: state.settled,
+			};
 
 		case "upsert": {
 			const id = identify(change.item);

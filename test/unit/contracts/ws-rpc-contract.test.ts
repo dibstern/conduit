@@ -5,6 +5,10 @@ import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import {
+	PartVersion,
+	ToolCallId,
+} from "../../../src/lib/contracts/tool-wire.js";
+import {
 	AnswerQuestion,
 	CancelSession,
 	ClosePty,
@@ -24,7 +28,7 @@ import {
 	GetProjects,
 	GetSessionSkills,
 	GetSkillContent,
-	GetToolContent,
+	GetToolDetails,
 	InstanceListResponseSchema,
 	ListDaemonSessions,
 	ListPtys,
@@ -552,11 +556,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						path: request.path,
 						content: "file contents",
 					}),
-				GetToolContent: (request) =>
+				GetToolDetails: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
-						toolId: request.toolId,
-						content: "full output",
+						tools: request.toolIds.map((toolId) => ({
+							toolId,
+							version: PartVersion.make(1),
+							settled: true,
+							output: { _tag: "whole" as const, text: "full output" },
+						})),
 					}),
 				GetSkillContent: (request) =>
 					Effect.succeed({
@@ -912,7 +920,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetFileTree")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileList")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileContent")).toBe(true);
-		expect(WsRpcGroup.requests.has("GetToolContent")).toBe(true);
+		expect(WsRpcGroup.requests.has("GetToolDetails")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetSkillContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetSessionSkills")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(false);
@@ -1271,14 +1279,21 @@ describe("browser WebSocket RPC contract", () => {
 					content: "file contents",
 				});
 
-				const toolContent = yield* client.GetToolContent({
+				const toolDetails = yield* client.GetToolDetails({
 					projectSlug: "demo",
-					toolId: "tool-1",
+					sessionId: "session-1",
+					toolIds: [ToolCallId.make("tool-1")],
 				});
-				expect(toolContent).toEqual({
+				expect(toolDetails).toEqual({
 					projectSlug: "demo",
-					toolId: "tool-1",
-					content: "full output",
+					tools: [
+						{
+							toolId: "tool-1",
+							version: 1,
+							settled: true,
+							output: { _tag: "whole", text: "full output" },
+						},
+					],
 				});
 
 				const skillContent = yield* client.GetSkillContent({
@@ -1667,8 +1682,12 @@ describe("browser WebSocket RPC contract", () => {
 			new GetFileContent({ projectSlug: "demo", path: "README.md" })._tag,
 		).toBe("GetFileContent");
 		expect(
-			new GetToolContent({ projectSlug: "demo", toolId: "tool-1" })._tag,
-		).toBe("GetToolContent");
+			new GetToolDetails({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				toolIds: [ToolCallId.make("tool-1")],
+			})._tag,
+		).toBe("GetToolDetails");
 		expect(new GetModels({ projectSlug: "demo" })._tag).toBe("GetModels");
 		expect(
 			new GetSkillContent({ projectSlug: "demo", name: "review" })._tag,

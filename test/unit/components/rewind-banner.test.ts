@@ -13,6 +13,7 @@ import {
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import { detailRowsOf } from "../../helpers/detail-rows.js";
 
 interface RewindSessionInput {
 	readonly projectSlug: string;
@@ -79,20 +80,17 @@ describe("RewindBanner", () => {
 				hwm: null,
 				hasMore: false,
 				status: { _tag: "live" },
+				waiting: new Map(),
+				partOrder: new Map(),
 			},
 			{
 				_tag: "snapshot",
 				sequence: 1,
-				rows: [
-					{
-						_tag: "transcriptMessage",
-						message: {
-							id: "provider-1",
-							role: "user",
-							parts: [{ id: "part-1", type: "text", text: "Remove this" }],
-						},
-					},
-				],
+				rows: detailRowsOf({
+					id: "provider-1",
+					role: "user",
+					parts: [{ id: "part-1", type: "text", text: "Remove this" }],
+				}),
 			},
 		);
 		slot.messages = deriveTranscriptMessages(slot.transcript, []);
@@ -117,6 +115,8 @@ describe("RewindBanner", () => {
 				hwm: null,
 				hasMore: false,
 				status: { _tag: "live" },
+				waiting: new Map(),
+				partOrder: new Map(),
 			},
 			{ _tag: "snapshot", sequence: 1, rows: [] },
 		);

@@ -8,6 +8,7 @@ import type { FeedStatus } from "../transport/supervise.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
+	HistoryMessagePart,
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
@@ -54,6 +55,10 @@ export type SessionMessages = {
 		/** Why no draft can steer now, or null when one can. Undefined until the
 		 *  session's inbox arm arrives: a session that never held an input. */
 		steer?: InboxState["steer"] | undefined;
+		/** Parts that arrived before their message, by message id. */
+		waiting: ReadonlyMap<string, HistoryMessagePart[]>;
+		/** Each live part's place among its message's parts, by part id. */
+		partOrder: ReadonlyMap<string, number>;
 	} | null;
 	currentAssistantText: string;
 	loadLifecycle: LoadLifecycle;
@@ -540,38 +545,6 @@ function flushAndFinalizeAssistant(
 	_messages.currentAssistantText = "";
 	_activity.currentPartId = null;
 	return finalizedMessageId;
-}
-
-/** Replace a truncated tool result with the full content returned by RPC. */
-export function applyToolContentResponse(response: {
-	readonly projectSlug?: string;
-	readonly toolId: string;
-	readonly content: string;
-	readonly sessionId?: string;
-}): void {
-	const sessionId = response.sessionId ?? sessionState.currentId;
-	if (sessionId == null) return;
-	const messages = getOrCreateSessionSlot(sessionId).messages;
-	const currentMsgs = [...getMessages(messages)];
-	const found = findMessage(
-		currentMsgs,
-		"tool",
-		(m) => m.id === response.toolId,
-	);
-	if (!found) return;
-	setMessages(
-		messages,
-		currentMsgs.map((m, i) => {
-			if (i !== found.index) return m;
-			const updated: ToolMessage = {
-				...found.message,
-				result: response.content,
-				isTruncated: false,
-			};
-			delete updated.fullContentLength;
-			return updated;
-		}),
-	);
 }
 
 export function getMessages(messages?: SessionMessages): ChatMessage[] {

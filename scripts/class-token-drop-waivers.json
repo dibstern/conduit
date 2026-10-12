@@ -363,9 +363,9 @@
 	"src/lib/frontend/components/project/__fixtures__/DirectoryAutocompleteDemo.svelte :: border,border-border,flex,flex-col,gap-2,p-4,pt-40,px-2,py-1,rounded-md,text-[12px],text-text,w-80": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. Story fixture for the deleted directory autocomplete.",
 	"src/lib/frontend/components/project/__fixtures__/ProjectContextMenuHarness.svelte :: flex,h-40,items-start,justify-end,p-4,px-2,py-1,rounded-md,text-text-muted": "conduit-test-usg5.11 retires the old projects panel: the scope pill menu plus ProjectDialog is the only way to manage projects. Story fixture for the deleted project context menu.",
 	"src/lib/frontend/components/chat/ToolGenericCard.svelte :: gap-2,px-2,rounded": {
-		"movedTo": "src/lib/frontend/components/chat/ToolOutputMore.svelte",
-		"requires": "<ToolOutputMore",
-		"reason": "The \"Show full output\" row moved verbatim into ToolOutputMore, shared with ActivityRow."
+		"movedTo": "src/lib/frontend/components/chat/ToolFullDetail.svelte",
+		"requires": "<ToolFullDetail",
+		"reason": "The \"Show full output\" row moved into ToolOutputMore, shared with ActivityRow; conduit-test-y7eo.6 replaced that with ToolFullDetail's loading and retry row."
 	},
 	"src/lib/frontend/components/session/SessionSkillsChip.svelte :: text-text-dimmer": "conduit-test-r9h8: the session-skills hint moves from text-text-dimmer (#676e79, 3.24:1) to text-text-muted so the SessionBar 'With Skills' stories pass the axe AA colour-contrast check.",
 	"src/lib/frontend/components/chat/PlanMode.svelte :: leading-[1.7],md-content,plan-approval,plan-approve-btn,plan-banner,plan-banner-hint,plan-banner-icon,plan-banner-text,plan-card-body,plan-card-chevron,plan-card-copy,plan-card-header,plan-card-icon,plan-card-title,plan-card-toggle,plan-enter,plan-exit,plan-reject-btn,text-sm": "conduit-test-ni8.37 deletes the orphaned PlanMode component with its stories, baselines and plan-mode.css. ni8.10 removed its only mount and the plan_* arms never had a server producer; plan approval is rendered by PermissionCard.",
@@ -389,6 +389,15 @@
 		"reason": "conduit-test-eon2.9: AccountSwitch takes its trigger as a snippet so the session-bar account pill can share the picker and confirm. The strip's Switch account button, with its gap and phone centring, moved verbatim into UsageLimitStrip's trigger snippet."
 	},
 	"src/lib/frontend/components/input/AccountSwitch.svelte :: className,primary": "Not CSS classes: the removed `class` and `primary` props' expressions. The strip now renders its own Switch account trigger and chooses primary there.",
+	"src/lib/frontend/components/chat/ToolOutputMore.svelte :: flex,font-medium,gap-2,items-center,px-2,py-0.5,rounded,text-text-dimmer,text-xs": {
+		"movedTo": "src/lib/frontend/components/chat/ToolFullDetail.svelte",
+		"reason": "conduit-test-y7eo.6: expanding a previewed tool loads its full detail straight away, so the Show full output row became ToolFullDetail's loading and retry row with the same geometry."
+	},
+	"src/lib/frontend/components/chat/ToolOutputMore.svelte :: className,font-mono": "conduit-test-y7eo.6: className is the removed component's class prop expression (ToolFullDetail takes the same prop). font-mono wore the KB-more size label, which is gone: expanding loads the full detail with no extra button.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: part.isError": {
+		"renamedTo": "tool.isError",
+		"reason": "Not a class: the expanded result renders inside ToolFullDetail's snippet, whose argument is the full-detail tool."
+	},
 	"src/lib/frontend/components/chat/ActivityStrip.svelte :: segmentClass(part)": "Not a dropped class: conduit-test-i7fy.8 passes the turn's live launched tasks to the same expression, segmentClass(part, running), so a launching step keeps breathing while its background task runs.",
 	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: border-border-subtle,border-l-2,border-l-tool/35,border-t,depth,flex-col,gap-2,grid,list-none,min-w-0,mt-2,p-0,pl-2,py-1.5,text-text,truncate": {
 		"movedTo": "src/lib/frontend/components/session/BackgroundTaskList.svelte",

@@ -73,12 +73,12 @@ describe("Integration: Error Handling", () => {
 
 		await expect(
 			client.rpcCall((rpc) =>
-				rpc.GetToolContent({
+				rpc.GetSkillContent({
 					projectSlug: "integration-test",
-					toolId: "nonexistent-tool",
+					name: "nonexistent-skill",
 				}),
 			),
-		).rejects.toThrow("Full tool content not available");
+		).rejects.toThrow("Skill content not available");
 
 		const result = await client.getAgents();
 		expect(Array.isArray(result.agents)).toBe(true);
@@ -119,12 +119,12 @@ describe("Integration: Error Handling", () => {
 		]) {
 			await expect(
 				client.rpcCall((rpc) =>
-					rpc.GetToolContent({
+					rpc.GetSkillContent({
 						projectSlug: "integration-test",
-						toolId,
+						name: toolId,
 					}),
 				),
-			).rejects.toThrow("Full tool content not available");
+			).rejects.toThrow("Skill content not available");
 		}
 
 		// Now send a valid request and verify the server still works

@@ -120,8 +120,6 @@
 				return `${properties["name"] ?? "?"} id=${id(properties["id"])}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
 			case "tool_result":
 				return `${properties["is_error"] ? "ERR " : ""}${id(properties["id"])}${properties["messageId"] ? ` msg=${id(properties["messageId"])}` : ""}`;
-			case "tool_content":
-				return `id=${id(properties["toolId"])}`;
 
 			case "result":
 				return `sess=${id(properties["sessionId"])} cost=$${typeof properties["cost"] === "number" ? properties["cost"].toFixed(4) : "?"}`;

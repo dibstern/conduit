@@ -89,8 +89,8 @@ export {
 	type GetSkillContentResponse,
 	GetStatus,
 	type GetStatusResponse,
-	GetToolContent,
-	type GetToolContentResponse,
+	GetToolDetails,
+	type GetToolDetailsResponse,
 	type GoalDetails,
 	InspectSessionWorktrees,
 	type InstanceListResponse,
@@ -213,11 +213,14 @@ const subscribeSessionDetailWithPresence = (
 export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
-			subscribeShell(
-				request.resumeFromSequence === undefined
+			subscribeShell({
+				...(request.resumeFromSequence === undefined
 					? {}
-					: { resumeFromSequence: request.resumeFromSequence },
-			).pipe(
+					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+			}).pipe(
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
@@ -248,6 +251,12 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+				...(request.resumePoint === undefined
+					? {}
+					: { resumePoint: request.resumePoint }),
 			}).pipe(
 				(stream) =>
 					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
@@ -545,11 +554,14 @@ export const makeRoutedWsRpcServerLayer = <
 		...handlers,
 		SubscribeShell: (request) =>
 			routeStream(request.projectSlug, () =>
-				subscribeShell(
-					request.resumeFromSequence === undefined
+				subscribeShell({
+					...(request.resumeFromSequence === undefined
 						? {}
-						: { resumeFromSequence: request.resumeFromSequence },
-				),
+						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+				}),
 			),
 		SubscribeApprovals: (request) =>
 			routeStream(request.projectSlug, () =>
@@ -566,6 +578,12 @@ export const makeRoutedWsRpcServerLayer = <
 					...(request.resumeFromSequence === undefined
 						? {}
 						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+					...(request.resumePoint === undefined
+						? {}
+						: { resumePoint: request.resumePoint }),
 				});
 				return request.textSuffixes === true
 					? encodeSessionDetail(source)

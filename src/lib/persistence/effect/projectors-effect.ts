@@ -166,8 +166,8 @@ const stampSessions = (
 //
 // Returns the owning session rather than the event's own, because a subagent
 // message is stored against the subagent session and that is the row a
-// subscriber must re-query. Message parts carry no version of their own, so a
-// part write advances the message that owns it.
+// subscriber must re-query. A part write stamps the part itself and also
+// advances the message that owns it, whose updated_at moved with it.
 const stampMessage = (
 	messageIds: readonly string[],
 	version: number,
@@ -198,6 +198,12 @@ const stampMessage = (
 					SELECT id FROM sessions WHERE pending_rewind_message_id IN ${sql.in(messageIds)}
 				)
 				RETURNING session_id`;
+			// A message the moved cut restores comes back with its parts.
+			if (rows.length > 0)
+				yield* sql`UPDATE message_parts SET version = ${version}
+					WHERE message_id IN (
+						SELECT id FROM messages WHERE session_id IN ${sql.in(owners(rows))}
+					)`;
 			stamped.push(...owners(rows));
 		}
 		// A message row that vanished under its own event went with the session
@@ -358,17 +364,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// Like other daemon notices, this uses the transcript's existing
 				// part storage. Typed metadata distinguishes it from agent text.
 				yield* sql`INSERT INTO message_parts
-					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
 					VALUES (${`${messageId}-part`}, ${messageId}, 'text', '',
 						${encodeJson({ setup: { source: event.data.source, status: "running" } })},
-						0, ${event.createdAt}, ${event.createdAt})
+						0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 				return [messageId];
 			}
 			if (isEventType(event, "session.setup_output")) {
 				const messageId = `setup-${event.sessionId}`;
 				yield* sql`UPDATE message_parts SET text = text || ${event.data.output},
-					updated_at = ${event.createdAt} WHERE id = ${`${messageId}-part`}`;
+					updated_at = ${event.createdAt}, version = ${ctx.version} WHERE id = ${`${messageId}-part`}`;
 				return ids(
 					yield* sql<{ id: string }>`UPDATE messages
 					SET updated_at = ${event.createdAt} WHERE id = ${messageId} RETURNING id`,
@@ -380,7 +386,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 					metadata = json_set(metadata, '$.setup.status', ${event.data.status},
 						'$.setup.exitCode', ${event.data.exitCode ?? null},
 						'$.setup.message', ${event.data.message ?? null}),
-					updated_at = ${event.createdAt} WHERE id = ${`${messageId}-part`}`;
+					updated_at = ${event.createdAt}, version = ${ctx.version} WHERE id = ${`${messageId}-part`}`;
 				return ids(
 					yield* sql<{ id: string }>`UPDATE messages
 					SET updated_at = ${event.createdAt}, completed_at = ${event.createdAt}
@@ -391,6 +397,13 @@ export const makeMessageProjector = (): EffectProjector => ({
 				isEventType(event, "session.rewound") ||
 				isEventType(event, "session.rewind_undone")
 			) {
+				// A browser drops a hidden message's parts with it, so a message
+				// this restores needs its parts again, not only its header. The
+				// cut it replaced is already cleared, so every part moves.
+				yield* sql`UPDATE message_parts SET version = ${ctx.version}
+					WHERE message_id IN (
+						SELECT id FROM messages WHERE session_id = ${event.sessionId}
+					)`;
 				const rows = yield* sql<{ id: string }>`
 					SELECT id FROM messages WHERE session_id = ${event.sessionId}`;
 				return ids(rows);
@@ -400,7 +413,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				Effect.map(
 					sql<{
 						message_id: string;
-					}>`UPDATE message_parts SET status = 'completed'
+					}>`UPDATE message_parts SET status = 'completed', version = ${ctx.version}
 						WHERE message_id = ${messageId} AND type = 'thinking' AND status = 'running'
 						RETURNING message_id`,
 					(rows) => [...new Set(rows.map((row) => row.message_id))],
@@ -491,8 +504,18 @@ export const makeMessageProjector = (): EffectProjector => ({
 				RETURNING id`;
 				// A provider snapshot replaces provider parts, while Conduit's own
 				// compaction outcomes must survive reconciliation and reconnects.
-				yield* sql`DELETE FROM message_parts WHERE message_id = ${message.id}
-					AND NOT (type = 'compaction' AND rest_payload IS NULL)`;
+				const replaced = yield* sql<{ id: string }>`
+					DELETE FROM message_parts WHERE message_id = ${message.id}
+					AND NOT (type = 'compaction' AND rest_payload IS NULL) RETURNING id`;
+				const kept = new Set(message.parts.map((part) => part.id));
+				for (const { id } of replaced) {
+					if (kept.has(id)) continue;
+					yield* sql`INSERT INTO message_part_tombstones (session_id, message_id, part_id, version)
+						VALUES (${event.sessionId}, ${message.id}, ${id}, ${ctx.version})
+						ON CONFLICT (part_id) DO UPDATE SET
+						session_id = excluded.session_id, message_id = excluded.message_id,
+						version = excluded.version`;
+				}
 				for (const [index, part] of message.parts.entries()) {
 					const partTime = part["time"];
 					const time =
@@ -517,7 +540,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 					yield* sql`
 						INSERT INTO message_parts
 						(id, message_id, type, text, tool_name, call_id, input, result,
-						 status, sort_order, created_at, updated_at, metadata, rest_payload)
+						 status, sort_order, created_at, updated_at, metadata, rest_payload, version)
 						VALUES (${part.id}, ${message.id}, ${part.type},
 						 ${typeof part["text"] === "string" ? part["text"] : ""},
 						 ${typeof part["tool"] === "string" ? part["tool"] : null},
@@ -527,7 +550,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
-						 ${encodeJson(part)})`;
+						 ${encodeJson(part)}, ${ctx.version})`;
 				}
 				return written.map((row) => row.id);
 			}
@@ -537,6 +560,11 @@ export const makeMessageProjector = (): EffectProjector => ({
 					WHERE id = ${event.data.partId} AND message_id = ${event.data.messageId}
 					RETURNING id`;
 				if (removed.length === 0) return [];
+				yield* sql`INSERT INTO message_part_tombstones (session_id, message_id, part_id, version)
+					VALUES (${event.sessionId}, ${event.data.messageId}, ${event.data.partId}, ${ctx.version})
+					ON CONFLICT (part_id) DO UPDATE SET
+					session_id = excluded.session_id, message_id = excluded.message_id,
+					version = excluded.version`;
 				return ids(
 					yield* sql<{ id: string }>`UPDATE messages
 					SET text = COALESCE((SELECT group_concat(text, '') FROM (
@@ -604,13 +632,13 @@ export const makeMessageProjector = (): EffectProjector => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
 
 				yield* sql`
-					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)
+					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'text', ${event.data.text},
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt})
+						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO UPDATE SET
 						text = message_parts.text || excluded.text,
-						updated_at = excluded.updated_at`;
+						updated_at = excluded.updated_at, version = excluded.version`;
 
 				return ids(
 					yield* sql<{ id: string }>`
@@ -626,10 +654,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
 
 				yield* sql`
-					INSERT INTO message_parts (id, message_id, type, text, status, sort_order, created_at, updated_at)
+					INSERT INTO message_parts (id, message_id, type, text, status, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'thinking', '', 'running',
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt})
+						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 
 				return ids(
@@ -658,13 +686,13 @@ export const makeMessageProjector = (): EffectProjector => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
 
 				yield* sql`
-					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at)
+					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'thinking', ${event.data.text},
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt})
+						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO UPDATE SET
 						text = message_parts.text || excluded.text,
-						updated_at = excluded.updated_at`;
+						updated_at = excluded.updated_at, version = excluded.version`;
 
 				return ids(
 					yield* sql<{
@@ -676,7 +704,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 			if (isEventType(event, "thinking.end")) {
 				// The part's own span ends here, not at its last delta.
 				yield* sql`UPDATE message_parts
-					SET status = 'completed', updated_at = ${event.createdAt}
+					SET status = 'completed', updated_at = ${event.createdAt}, version = ${ctx.version}
 					WHERE id = ${event.data.partId} AND type = 'thinking'`;
 				return ids(
 					yield* sql<{
@@ -694,10 +722,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const inputJson = encodeJson(event.data.input);
 				yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at)
+					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'tool', ${event.data.toolName}, ${event.data.callId}, ${inputJson}, 'started',
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt})
+						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 
 				return ids(
@@ -727,7 +755,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 						END,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
-						updated_at = ${event.createdAt}
+						updated_at = ${event.createdAt},
+						version = ${ctx.version}
 					WHERE id = ${event.data.partId}`;
 				return ids(
 					yield* sql<{
@@ -748,7 +777,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt},
+					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}`;
 				return ids(
@@ -773,10 +802,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 				});
 				yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, metadata, sort_order, created_at, updated_at)
+					(id, message_id, type, metadata, sort_order, created_at, updated_at, version)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'file', ${metadata},
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt})
+						${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 
 				return ids(
@@ -825,10 +854,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
 					VALUES (${`turn-error-part-${event.sequence}`}, ${errorMessageId}, 'error', ${event.data.error},
 						${event.data.code === undefined ? null : encodeJson({ code: event.data.code })},
-						0, ${event.createdAt}, ${event.createdAt})
+						0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 				return [
 					errorMessageId,
@@ -891,10 +920,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 				if (ownerId) {
 					yield* sql`
 						INSERT INTO message_parts
-						(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at)
+						(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at, version)
 						VALUES (${partId}, ${ownerId}, 'compaction', ${event.data.detail}, ${metadata}, ${status},
 							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${ownerId}), 0),
-							${event.createdAt}, ${event.createdAt})
+							${event.createdAt}, ${event.createdAt}, ${ctx.version})
 						ON CONFLICT (id) DO NOTHING`;
 					return [ownerId];
 				}
@@ -906,8 +935,8 @@ export const makeMessageProjector = (): EffectProjector => ({
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at)
-					VALUES (${partId}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, ${status}, 0, ${event.createdAt}, ${event.createdAt})
+					(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at, version)
+					VALUES (${partId}, ${messageId}, 'compaction', ${event.data.detail}, ${metadata}, ${status}, 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 				return [messageId];
 			}
@@ -929,6 +958,10 @@ export const makeMessageProjector = (): EffectProjector => ({
 							const sql = yield* SqlClient.SqlClient;
 							for (const messageId of new Set(written)) {
 								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
+								// Likewise a part written now, a snapshot's kept parts included.
+								yield* sql`DELETE FROM message_part_tombstones WHERE part_id IN (
+									SELECT id FROM message_parts
+									WHERE message_id = ${messageId} AND version = ${ctx.version})`;
 							}
 							return yield* stampMessage(written, ctx.version);
 						}),

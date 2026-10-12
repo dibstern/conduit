@@ -1,0 +1,65 @@
+// Test clients assert on whole messages; the detail wire sends a message's
+// header and each of its parts as rows of their own.
+
+import type {
+	HistoryMessageSchema,
+	SessionDetailEnvelope,
+	SessionDetailItemSchema,
+} from "../../src/lib/contracts/ws-rpc.js";
+
+type DetailItem = typeof SessionDetailItemSchema.Type;
+type PartRow = Extract<DetailItem, { _tag: "part" }>;
+
+/** A whole message as the wire sends it: each part, then its header. */
+export const detailRowsOf = ({
+	parts = [],
+	...message
+}: typeof HistoryMessageSchema.Type): DetailItem[] => [
+	...parts.map((part, sortOrder) => ({
+		_tag: "part" as const,
+		messageId: message.id,
+		sortOrder,
+		part,
+	})),
+	{ _tag: "message", message },
+];
+
+/** A whole message's upserts, all at one sequence. */
+export const detailUpserts = (
+	message: typeof HistoryMessageSchema.Type,
+	sequence: number,
+): SessionDetailEnvelope[] =>
+	detailRowsOf(message).map((item) => ({ _tag: "upsert", item, sequence }));
+
+/**
+ * Fold one subscription's rows into whole messages. Each row yields the message
+ * it touched as it now stands, once that message's header has arrived.
+ */
+export const assembleDetailRows = () => {
+	const headers = new Map<string, typeof HistoryMessageSchema.Type>();
+	const parts = new Map<string, PartRow[]>();
+	return (item: DetailItem): typeof HistoryMessageSchema.Type | undefined => {
+		// Pending inputs, the inbox state and the rewind point are not messages.
+		if (item._tag !== "message" && item._tag !== "part") return undefined;
+		const messageId =
+			item._tag === "message" ? item.message.id : item.messageId;
+		if (item._tag === "message") headers.set(messageId, item.message);
+		else
+			parts.set(
+				messageId,
+				[
+					...(parts.get(messageId) ?? []).filter(
+						(row) => row.part.id !== item.part.id,
+					),
+					item,
+				].sort((a, b) => a.sortOrder - b.sortOrder),
+			);
+		const header = headers.get(messageId);
+		return (
+			header && {
+				...header,
+				parts: (parts.get(messageId) ?? []).map((row) => row.part),
+			}
+		);
+	};
+};

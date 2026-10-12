@@ -73,8 +73,9 @@ const makeReadQuery = (
 	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"],
 	provider: "claude" | "opencode" = "claude",
 ): ReadQueryEffect => ({
-	getToolContent: vi.fn(() => Effect.succeed(undefined)),
+	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+	getSessionFamilyRoot: () => Effect.succeed(undefined),
 	getSession: vi.fn(() => Effect.succeed(makeSessionRow(provider))),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
@@ -89,6 +90,7 @@ const makeReadQuery = (
 	),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
+	readStoreIdentity: () => Effect.succeed("store"),
 	readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),

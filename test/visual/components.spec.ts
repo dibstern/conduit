@@ -455,9 +455,12 @@ if (stories.length > 0) {
 		["overlays-confirmmodal--hidden", "all"],
 		["overlays-imagelightbox--hidden", "all"],
 		["overlays-qrmodal--hidden", "all"],
-		["overlays-notifsettings--closed", "all"],
 		["overlays-rewindbanner--inactive", "all"],
 		["overlays-connectoverlay--connected", "all"],
+		// The full App dials a real socket that Storybook cannot answer, so the
+		// frame races between "Connecting" and "Reconnecting" on each redial. It
+		// only ever shows ConnectOverlay, whose own stories capture both states.
+		["app--default", "all"],
 		// Settles to the cleared viewer; the back-to-tree contract is its play().
 		["file-fileviewer--back-to-file-tree", "all"],
 		// Behavior-only: clicks through to Done; its contract is the play().

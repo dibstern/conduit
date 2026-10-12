@@ -3,6 +3,7 @@
  * Reused across all story files to ensure consistency.
  */
 
+import { Utf8Bytes } from "../../contracts/tool-wire.js";
 import type {
 	AssistantMessage,
 	ProjectInfo,
@@ -518,7 +519,8 @@ export const mockToolSkillError: ToolMessage = {
 	isError: true,
 };
 
-export const mockToolTruncated: ToolMessage = {
+/** A Grep whose output the server sent as a preview of its first 2,000 characters. */
+export const mockToolPreview: ToolMessage = {
 	type: "tool",
 	uuid: "msg-tool-009",
 	id: "tool-009",
@@ -528,8 +530,7 @@ export const mockToolTruncated: ToolMessage = {
 	result:
 		"src/lib/frontend/components/chat/MessageList.svelte:118:// TODO: preserve scroll anchor\nsrc/lib/frontend/stores/chat.svelte.ts:442:// FIXME: remove compatibility path",
 	isError: false,
-	isTruncated: true,
-	fullContentLength: 24576,
+	preview: { resultBytes: Utf8Bytes.make(24_576) },
 };
 
 export const mockQuestionRunning: ToolMessage = {

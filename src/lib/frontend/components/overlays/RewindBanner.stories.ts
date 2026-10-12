@@ -49,6 +49,8 @@ function seed({
 				project: "story-project",
 				pending: [],
 				pendingRewindMessageId: "message-after-cut",
+				waiting: new Map(),
+				partOrder: new Map(),
 			}
 		: null;
 }

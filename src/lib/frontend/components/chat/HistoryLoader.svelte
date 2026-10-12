@@ -4,8 +4,7 @@
 
 <script lang="ts">
 	import { currentChat, sessionMessages } from "../../stores/chat.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
-	import { loadOlderTranscript } from "../../stores/transcript.svelte.js";
+	import { loadOlderTranscript, placedSessionId } from "../../stores/transcript.svelte.js";
 
 	let {
 		sentinelEl,
@@ -36,7 +35,7 @@
 	});
 
 	function loadMore() {
-		const id = sessionId ?? sessionState.currentId;
+		const id = sessionId ?? placedSessionId();
 		const chat = sessionId === undefined
 			? currentChat()
 			: sessionMessages.get(sessionId);
