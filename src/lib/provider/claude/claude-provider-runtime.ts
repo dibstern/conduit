@@ -1227,7 +1227,13 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					return;
 				case "stop-task": {
 					const ctx = yield* getSession(this.stateRef, command.sessionId);
-					if (!ctx || ctx.stopped) return;
+					if (!ctx || ctx.stopped)
+						return yield* Effect.fail(
+							new ClaudeBoundaryError({
+								operation: "stopTask",
+								cause: "Claude session is not running in this runner",
+							}),
+						);
 					yield* Effect.tryPromise({
 						try: () => ctx.query.stopTask(command.taskId),
 						catch: (cause) =>
@@ -1273,6 +1279,17 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					}));
 					yield* this.scheduleShutdownAfterTurnEffect(command.sessionId);
 					return;
+				}
+				default: {
+					// A newer daemon can send a command this build lacks; acknowledging
+					// it would report work that never happened.
+					const unknown: { readonly type: string } = command;
+					return yield* Effect.fail(
+						new ClaudeBoundaryError({
+							operation: "executeCommand",
+							cause: `Unsupported Claude runner command: ${unknown.type}`,
+						}),
+					);
 				}
 			}
 		});

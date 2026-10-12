@@ -64,6 +64,7 @@ interface RunnerChild {
 	child?: ChildProcess;
 	connection?: ClaudeRunnerSocket;
 	buildId?: string;
+	stopsTasks?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
 	readonly upgrade: ClaudeRunnerUpgrade;
@@ -531,6 +532,7 @@ export const makeProcessClaudeSessionRunner = (
 							});
 						yield* ensureAttached();
 						entry.buildId = hello.buildId;
+						entry.stopsTasks = hello.stopsTasks === true;
 						entry.upgrade.state = hello.upgradeState;
 						for (const binding of entry.candidate
 							? []
@@ -1481,6 +1483,13 @@ export const makeProcessClaudeSessionRunner = (
 							claudeRunnerFailure(
 								command.type,
 								"Claude runners are shutting down",
+							),
+						);
+					if (command.type === "stop-task" && !entry.stopsTasks)
+						return yield* Effect.fail(
+							claudeRunnerFailure(
+								command.type,
+								`Claude runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
 					const payload =

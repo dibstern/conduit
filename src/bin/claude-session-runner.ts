@@ -589,6 +589,7 @@ const main = Effect.gen(function* () {
 								pendingOutputs: spool.pendingOutputs,
 								completedCommands: [...completedCommands.values()],
 								upgradeState: upgradeState(),
+								stopsTasks: true,
 							});
 							initializing = false;
 						}),
