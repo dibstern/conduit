@@ -2,6 +2,7 @@ import type { Page, WebSocketRoute } from "@playwright/test";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import {
+	DEFAULT_WORKTREE_CLEANUP,
 	WorktreeBranchRenameError,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
@@ -699,6 +700,11 @@ async function handleMessage(
 			(raw.tag === "GetDefaultGroupingMode"
 				? () => ({ mode: "repository" })
 				: undefined) ??
+			(raw.tag === "GetWorktreeCleanupSetting"
+				? () => ({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP })
+				: raw.tag === "SetWorktreeCleanupSetting"
+					? ({ worktreeCleanup }) => ({ worktreeCleanup })
+					: undefined) ??
 			(raw.tag === "GetUsageLimitsSetting"
 				? () => ({
 						usageLimits: { autoResume: false, autoSwitch: false, order: [] },

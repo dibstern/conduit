@@ -445,6 +445,11 @@ export const WorktreeMissingOpen: Story = {
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
+			body.getByText(
+				"This worktree is missing. It will be recreated from its branch on your next message.",
+			),
+		).toBeVisible();
+		await expect(
 			body.getByRole("menuitem", { name: "Recreate worktree" }),
 		).toBeVisible();
 		await expect(
@@ -515,6 +520,9 @@ export const WorktreeMissingExtraFolder: Story = {
 		);
 		await userEvent.click(canvas.getByTestId("composer-checkout"));
 		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body.getByText(/^These worktrees are missing\./),
+		).toBeVisible();
 		await expect(
 			body.getByTestId("workspace-missing-folder"),
 		).toHaveTextContent("library");
