@@ -1,35 +1,44 @@
-import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { SqlClient } from "@effect/sql";
 import {
 	Cause,
 	Context,
-	Data,
-	Duration,
 	Effect,
 	HashSet,
 	Layer,
+	Match,
 	Ref,
 	Schema,
 } from "effect";
+import {
+	AUTO_TITLE_SOURCE,
+	isPlaceholderTitle,
+	type SessionTitleModel,
+} from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
 } from "../../../daemon/config-persistence.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { canonicalEvent } from "../../../persistence/events.js";
-import { makeClaudeSdkEnv } from "../../../provider/claude/claude-sdk-env.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import {
+	type ClaudeTitleQueryFactory,
+	makeClaudeTitleGenerator,
+} from "./claude-title-generator.js";
 import { ConfigTag, LoggerTag } from "./services.js";
+import { applySessionCommand } from "./session-command.js";
+import {
+	generationFailureReason,
+	SessionTitleGenerationFailure,
+	type TitleGenerator,
+} from "./title-generator.js";
 
-const TITLE_GENERATION_TIMEOUT = Duration.seconds(30);
-const AUTO_TITLE_SOURCE = "auto-title";
-const TITLE_SYSTEM_PROMPT =
-	"You write concise sidebar titles for coding-assistant sessions.";
+function resolveSessionTitleModel(): SessionTitleModel {
+	return { harness: "claude", model: "opus" };
+}
 
 export function sanitizeGeneratedTitle(raw: string): string | undefined {
 	const cleaned = raw
@@ -49,18 +58,7 @@ export function sanitizeGeneratedTitle(raw: string): string | undefined {
 		.join(" ")
 		.replace(/[.]+$/g, "")
 		.trim();
-	return isDefaultSessionTitle(title) ? undefined : title;
-}
-
-export function isDefaultSessionTitle(title: string | undefined): boolean {
-	const normalized = title?.trim().toLowerCase();
-	return (
-		!normalized ||
-		normalized === "claude session" ||
-		normalized === "untitled" ||
-		normalized === "new session" ||
-		normalized.startsWith("new session ")
-	);
+	return isPlaceholderTitle(title) ? undefined : title;
 }
 
 export function formatClaudeTitleFallback(now = new Date()): string {
@@ -84,21 +82,10 @@ export class SessionTitleServiceTag extends Context.Tag("SessionTitleService")<
 	SessionTitleService
 >() {}
 
-export type ClaudeTitleQueryFactory = (params: {
-	readonly prompt: string;
-	readonly options?: SDKOptions;
-}) => AsyncIterable<unknown>;
-
 interface SessionTitleServiceLiveOptions {
 	readonly queryFactory?: ClaudeTitleQueryFactory;
 	readonly now?: () => Date;
 }
-
-class SessionTitleGenerationFailure extends Data.TaggedError(
-	"SessionTitleGenerationFailure",
-)<{
-	readonly reason: string;
-}> {}
 
 function buildTitlePrompt(firstMessage: string): string {
 	return `Create a concise sidebar title for this coding-assistant session.
@@ -116,103 +103,13 @@ ${firstMessage}
 </message>`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function extractTextContent(content: unknown): string[] {
-	if (typeof content === "string") return [content];
-	if (!Array.isArray(content)) return [];
-
-	const texts: string[] = [];
-	for (const block of content) {
-		if (typeof block === "string") {
-			texts.push(block);
-			continue;
-		}
-		if (!isRecord(block)) continue;
-		const text = block["text"];
-		if (typeof text === "string") {
-			texts.push(text);
-		}
-	}
-	return texts;
-}
-
-function extractAssistantMessageText(
-	message: Record<string, unknown>,
-): string[] {
-	const sdkMessage = message["message"];
-	if (!isRecord(sdkMessage)) return [];
-	return extractTextContent(sdkMessage["content"]);
-}
-
-function extractStreamEventText(event: unknown): string | undefined {
-	if (!isRecord(event)) return undefined;
-	if (event["type"] === "content_block_delta") {
-		const delta = event["delta"];
-		if (!isRecord(delta)) return undefined;
-		const text = delta["text"];
-		return typeof text === "string" ? text : undefined;
-	}
-	if (event["type"] === "content_block_start") {
-		const contentBlock = event["content_block"];
-		if (!isRecord(contentBlock)) return undefined;
-		const text = contentBlock["text"];
-		return typeof text === "string" ? text : undefined;
-	}
-	return undefined;
-}
-
-async function collectGeneratedText(
-	query: AsyncIterable<unknown>,
-): Promise<string | undefined> {
-	const assistantTexts: string[] = [];
-	const partialTexts: string[] = [];
-	const resultTexts: string[] = [];
-
-	for await (const message of query) {
-		if (!isRecord(message)) continue;
-
-		switch (message["type"]) {
-			case "assistant":
-				assistantTexts.push(...extractAssistantMessageText(message));
-				break;
-			case "stream_event": {
-				const text = extractStreamEventText(message["event"]);
-				if (text) partialTexts.push(text);
-				break;
-			}
-			case "result": {
-				const result = message["result"];
-				if (typeof result === "string") resultTexts.push(result);
-				break;
-			}
-		}
-	}
-
-	const assistantText = assistantTexts.join("\n").trim();
-	if (assistantText) return assistantText;
-
-	const resultText = resultTexts.join("\n").trim();
-	if (resultText) return resultText;
-
-	const partialText = partialTexts.join("").trim();
-	return partialText || undefined;
-}
-
-function generationFailureReason(cause: unknown): string {
-	if (cause instanceof SessionTitleGenerationFailure) return cause.reason;
-	if (cause instanceof Error) return cause.message;
-	return String(cause);
-}
-
 export const makeSessionTitleServiceLive = (
 	options: SessionTitleServiceLiveOptions = {},
 ): Layer.Layer<
 	SessionTitleServiceTag,
 	never,
 	| LoggerTag
+	| OpenCodeAPITag
 	| ConfigTag
 	| ReadQueryEffectTag
 	| EventStoreEffectTag
@@ -224,14 +121,13 @@ export const makeSessionTitleServiceLive = (
 		Effect.gen(function* () {
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
+			const api = yield* OpenCodeAPITag;
 			const config = yield* ConfigTag;
 			const readQuery = yield* ReadQueryEffectTag;
 			const eventStore = yield* EventStoreEffectTag;
 			const projectionRunner = yield* ProjectionRunnerEffectTag;
 			const sql = yield* SqlClient.SqlClient;
 			const inFlight = yield* Ref.make(HashSet.empty<string>());
-			const queryFactory =
-				options.queryFactory ?? ((params) => sdkQuery(params));
 			const now = options.now ?? (() => new Date());
 			const primaryFolder = config.projectDir;
 			// Named instances (e.g. "personal-claude") store their instance id as the
@@ -253,66 +149,24 @@ export const makeSessionTitleServiceLive = (
 									Schema.parseJson(SessionWorkspaceSchema),
 								)(session.workspace);
 					const cwd = effectiveWorkingDirectory(primaryFolder, workspace);
-					const abortController = new AbortController();
-					const rawTitle = yield* Effect.tryPromise({
-						try: async () => {
-							const titleQuery = queryFactory({
-								prompt: buildTitlePrompt(firstMessage),
-								options: {
-									cwd,
-									// Skipping startup telemetry/update traffic saves ~0.5s.
-									env: {
-										...makeClaudeSdkEnv(),
-										CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-									},
-									model: "opus",
-									// Default thinking adds ~5s to a title call without improving it.
-									thinking: { type: "disabled" },
-									// The user's hooks, CLAUDE.md files and output style otherwise
-									// reach this prompt and leak into the title (e.g. a timestamp
-									// hook's context echoed as a prefix). Flag settings override
-									// them for this query only, keeping auth and env settings.
-									systemPrompt: TITLE_SYSTEM_PROMPT,
-									settings: {
-										disableAllHooks: true,
-										outputStyle: "default",
-										claudeMdExcludes: ["**"],
-									},
-									persistSession: false,
-									maxTurns: 1,
-									allowedTools: [],
-									tools: [],
-									abortController,
-									stderr: (data) =>
-										log.debug(`Claude title generation stderr: ${data}`),
-								},
-							});
-							return collectGeneratedText(titleQuery);
-						},
-						catch: (cause) =>
-							new SessionTitleGenerationFailure({
-								reason: generationFailureReason(cause),
-							}),
-					}).pipe(
-						Effect.timeoutFail({
-							duration: TITLE_GENERATION_TIMEOUT,
-							onTimeout: () =>
-								new SessionTitleGenerationFailure({
-									reason: "Timed out waiting for Claude title generation",
-								}),
-						}),
-						Effect.ensuring(
-							Effect.sync(() => {
-								if (!abortController.signal.aborted) abortController.abort();
+					const generator: TitleGenerator = Match.value(
+						resolveSessionTitleModel(),
+					).pipe(
+						Match.discriminator("harness")("claude", ({ model }) =>
+							makeClaudeTitleGenerator({
+								model,
+								log,
+								...(options.queryFactory === undefined
+									? {}
+									: { queryFactory: options.queryFactory }),
 							}),
 						),
+						Match.exhaustive,
 					);
-
-					if (!rawTitle) {
-						return yield* new SessionTitleGenerationFailure({
-							reason: "Claude returned no title text",
-						});
-					}
+					const rawTitle = yield* generator({
+						prompt: buildTitlePrompt(firstMessage),
+						cwd,
+					});
 
 					const title = sanitizeGeneratedTitle(rawTitle);
 					if (!title) {
@@ -340,7 +194,7 @@ export const makeSessionTitleServiceLive = (
 					const current = currentResult.right;
 					if (!current) return false;
 					if (!isClaudeSessionProvider(current.provider)) return false;
-					if (!isDefaultSessionTitle(current.title)) return false;
+					if (!isPlaceholderTitle(current.title)) return false;
 					const recovered = yield* projectionRunner.isRecovered();
 					if (!recovered) {
 						yield* projectionRunner
@@ -351,26 +205,18 @@ export const makeSessionTitleServiceLive = (
 							);
 					}
 
-					const createdAt = Date.now();
-					// The auto-title rename is a read-model change like any other, so it
-					// goes through the one seam that projects and announces together.
-					const commitAndSignal = yield* makeCommitAndSignal.pipe(
-						Effect.provideService(SqlClient.SqlClient, sql),
+					yield* applySessionCommand(
+						{ type: "session.renamed", data: { sessionId, title } },
+						{ source: AUTO_TITLE_SOURCE },
+					).pipe(
+						Effect.provideService(OpenCodeAPITag, api),
+						Effect.provideService(LoggerTag, log),
+						Effect.provideService(ConfigTag, config),
+						Effect.provideService(ReadQueryEffectTag, readQuery),
 						Effect.provideService(EventStoreEffectTag, eventStore),
 						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+						Effect.provideService(SqlClient.SqlClient, sql),
 					);
-					yield* commitAndSignal([
-						canonicalEvent(
-							"session.renamed",
-							sessionId,
-							{ sessionId, title },
-							{
-								provider: current.provider,
-								createdAt,
-								metadata: { source: AUTO_TITLE_SOURCE },
-							},
-						),
-					]);
 
 					const rows = yield* sql<{ title: string; provider: string }>`
 						SELECT title, provider FROM sessions WHERE id = ${sessionId}`;

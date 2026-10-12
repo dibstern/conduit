@@ -23,7 +23,7 @@ import {
 	type CallToolResult,
 	CallToolResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/session-title-service.js";
+import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/claude-title-generator.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,

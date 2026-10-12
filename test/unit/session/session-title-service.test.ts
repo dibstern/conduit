@@ -5,6 +5,9 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Context, Deferred, Effect, Exit, Layer, Scope } from "effect";
 import { expect, vi } from "vitest";
+import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -12,9 +15,7 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	type ClaudeTitleQueryFactory,
 	formatClaudeTitleFallback,
-	isDefaultSessionTitle,
 	makeSessionTitleServiceLive,
 	SessionTitleServiceTag,
 	sanitizeGeneratedTitle,
@@ -29,6 +30,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
+	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
 function makeWebSocketHandler() {
@@ -80,6 +82,7 @@ function makeTestLayer(input: {
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(
@@ -107,6 +110,7 @@ function makePersistenceTestLayer(input: {
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
+		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(
@@ -249,6 +253,7 @@ const makeManualRenameRaceLayer = (input: {
 		};
 		const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 		const deps = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 			Layer.succeed(WebSocketHandlerTag, ws),
 			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
@@ -306,10 +311,10 @@ describe("session title helpers", () => {
 	});
 
 	it("rejects default-equivalent titles", () => {
-		expect(isDefaultSessionTitle("Claude Session")).toBe(true);
-		expect(isDefaultSessionTitle("Untitled")).toBe(true);
-		expect(isDefaultSessionTitle("New session")).toBe(true);
-		expect(isDefaultSessionTitle("New session 3")).toBe(true);
+		expect(isPlaceholderTitle("Claude Session")).toBe(true);
+		expect(isPlaceholderTitle("Untitled")).toBe(true);
+		expect(isPlaceholderTitle("New session")).toBe(true);
+		expect(isPlaceholderTitle("New session 3")).toBe(true);
 		expect(sanitizeGeneratedTitle("Claude Session")).toBeUndefined();
 		expect(sanitizeGeneratedTitle("Untitled")).toBeUndefined();
 		expect(sanitizeGeneratedTitle("New session")).toBeUndefined();

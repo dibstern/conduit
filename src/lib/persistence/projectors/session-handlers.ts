@@ -38,6 +38,10 @@
 // Bead conduit-test-ni8.5.12.
 
 import {
+	AUTO_TITLE_SOURCE,
+	placeholderTitleSql,
+} from "../../contracts/session-title.js";
+import {
 	decodeClaudeWorktreeState,
 	projectClaudeWorktreeState,
 } from "../../session/claude-worktree-state.js";
@@ -213,7 +217,7 @@ function endTurn(
 }
 
 function isAutoTitleRename(event: StoredEvent): boolean {
-	return event.metadata.source === "auto-title";
+	return event.metadata.source === AUTO_TITLE_SOURCE;
 }
 
 // last_turn_error_at answers one durable question rather than mirroring the
@@ -309,14 +313,9 @@ export const sessionHandlers: {
 					     WHERE prior.session_id = ?
 					       AND prior.type = 'session.renamed'
 					       AND prior.sequence < ?
-					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
+					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> '${AUTO_TITLE_SOURCE}'
 					   )
-					   AND (
-					     title IS NULL
-					     OR TRIM(title) = ''
-					     OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
-					     OR LOWER(TRIM(title)) LIKE 'new session %'
-					   )`,
+					   AND ${placeholderTitleSql("title")}`,
 					params: [
 						event.data.title,
 						event.createdAt,
