@@ -70,6 +70,8 @@ export const SessionGitLive = Layer.effect(
 			});
 			daemonSessionGitCache.seed(row.directory, git.value);
 		}
+		// Settled-only folders still need one disk read after a restart.
+		const startupDirectories = new Set(published.keys());
 		let queued:
 			| {
 					all: boolean;
@@ -113,6 +115,9 @@ export const SessionGitLive = Layer.effect(
 											])
 										: [],
 								);
+								if (request.all)
+									for (const directory of startupDirectories)
+										directories.set(directory, true);
 								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
 									if (
@@ -184,7 +189,10 @@ export const SessionGitLive = Layer.effect(
 										read: fromDisk,
 										changed: changed.size,
 									} satisfies SessionGitRefresh);
-								if (changed.size === 0) continue;
+								if (changed.size === 0) {
+									if (request.all) startupDirectories.clear();
+									continue;
+								}
 								// Git lives in the cache, so version both the session and its sidebar
 								// row without changing recency or storing the branch. Recheck workspace
 								// membership in the transaction: a move may have landed during git IO.
@@ -236,6 +244,7 @@ export const SessionGitLive = Layer.effect(
 									await config.broadcastSessionListChanged?.();
 								});
 								published = next;
+								if (request.all) startupDirectories.clear();
 							}
 						}),
 					);

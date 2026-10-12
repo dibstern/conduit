@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import Database from "better-sqlite3";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,6 +10,7 @@ import {
 	MoveSessionWorkspace,
 	SaveProject,
 	SessionInfoSchema,
+	SetSessionSettled,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionGit } from "../../../src/lib/shared-types.js";
@@ -345,12 +347,13 @@ describe("Multi-folder git through the built daemon", () => {
 		};
 	}, 60_000);
 
-	it("reads the secondary effective worktree, keeps project branches separate and survives restart", async () => {
-		const { fixture, socket, secondary } = await start("workspace");
+	it("reads the secondary effective worktree and refreshes settled-only folders after restart", async () => {
+		const { fixture, socket, secondary, scratch } = await start("workspace");
 		const worktree = join(fixture.root, "api-worktree");
 		git(secondary, "worktree", "add", "-b", "feature/isolated", worktree);
 		writeFileSync(join(secondary, "tracked.txt"), "main checkout dirty\n");
 		const browser = await fixture.connect();
+		const unchangedId = await browser.createSession("Unchanged git folders");
 		const sessionId = await browser.createSession("Mapped git folders");
 		await sendRpcRequest(
 			socket,
@@ -362,6 +365,29 @@ describe("Multi-folder git through the built daemon", () => {
 		);
 		const list = () =>
 			sendRpcRequest(socket, new ListDaemonSessions({ scope: "process-test" }));
+		const readGitState = () => {
+			const db = new Database(
+				join(fixture.configDir, "projects", "process-test", "events.db"),
+				{ readonly: true, fileMustExist: true },
+			);
+			try {
+				const sessions = db
+					.prepare<[], { id: string; version: number; sidebarVersion: number }>(
+						`SELECT id, sessions.version, session_sidebar.version AS sidebarVersion
+						FROM sessions JOIN session_sidebar ON session_id = id ORDER BY id`,
+					)
+					.all();
+				const published = db
+					.prepare<[], { directory: string }>(
+						"SELECT directory FROM session_git_published",
+					)
+					.all()
+					.map(({ directory }) => directory);
+				return { sessions, published };
+			} finally {
+				db.close();
+			}
+		};
 		await vi.waitFor(
 			async () => {
 				const session = (await list()).sessions.find(
@@ -402,10 +428,81 @@ describe("Multi-folder git through the built daemon", () => {
 			},
 			{ timeout: 20_000 },
 		);
+		// Wait for every folder's initial publication before checking that an
+		// unchanged restart produces no stamps.
+		await vi.waitFor(
+			() =>
+				expect(readGitState().published).toEqual(
+					expect.arrayContaining([
+						fixture.projectDir,
+						secondary,
+						scratch,
+						worktree,
+					]),
+				),
+			{ timeout: 20_000 },
+		);
+		await sendRpcRequest(
+			socket,
+			new SetSessionSettled({
+				projectSlug: "process-test",
+				sessionId,
+				settled: true,
+			}),
+		);
+		const beforeRestart = (await list()).sessions;
+		const before = beforeRestart.find(({ id }) => id === sessionId);
+		const beforeVersions = readGitState().sessions;
+		const previousVersion = beforeVersions.find(({ id }) => id === sessionId);
+		expect(before?.settledAt).toBeGreaterThan(0);
+		evidence["beforeRestartVersions"] = beforeVersions;
 		await fixture.shutdown();
 		await fixture.restart();
 		const restored = (await list()).sessions.find(({ id }) => id === sessionId);
 		expect(normalizedGit(restored?.git)).toEqual(evidence["workspace"]);
+		evidence["afterRestartVersions"] = readGitState().sessions;
+		expect(readGitState().sessions.find(({ id }) => id === sessionId)).toEqual(
+			previousVersion,
+		);
+		const unchangedVersion = readGitState().sessions.find(
+			({ id }) => id === unchangedId,
+		);
 		evidence["afterRestart"] = normalizedGit(restored?.git);
-	});
+
+		await fixture.shutdown();
+		git(worktree, "branch", "-m", "feature/restarted");
+		await fixture.restart();
+		const fresh = await fixture.connect(sessionId);
+		await vi.waitFor(
+			async () => {
+				// Read the subscription before ListDaemonSessions, whose own Git read
+				// could otherwise mask a stale seeded cache without publishing a change.
+				expect(latestGit(fresh, "family", sessionId)?.branch).toBe(
+					"feature/restarted",
+				);
+				const sessions = (await list()).sessions;
+				const changed = sessions.find(({ id }) => id === sessionId);
+				expect(changed?.settledAt).toBe(before?.settledAt);
+				expect(changed?.git?.branch).toBe("feature/restarted");
+				expect(changed?.git?.folders?.[1]?.branch).toBe("feature/restarted");
+				const afterVersions = readGitState().sessions;
+				const changedVersion = afterVersions.find(({ id }) => id === sessionId);
+				expect(changedVersion?.version).toBeGreaterThan(
+					previousVersion?.version ?? 0,
+				);
+				expect(changedVersion?.sidebarVersion).toBeGreaterThan(
+					previousVersion?.sidebarVersion ?? 0,
+				);
+				expect(afterVersions.find(({ id }) => id === unchangedId)).toEqual(
+					unchangedVersion,
+				);
+				evidence["settledAfterBranchChange"] = {
+					git: normalizedGit(changed?.git),
+					versions: afterVersions,
+					settledAt: changed?.settledAt,
+				};
+			},
+			{ timeout: 20_000 },
+		);
+	}, 60_000);
 });
