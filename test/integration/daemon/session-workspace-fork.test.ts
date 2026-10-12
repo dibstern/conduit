@@ -211,6 +211,8 @@ describe("Forked session workspaces through the built daemon", () => {
 			worktrees: { [fixture.projectDir]: worktree },
 			origin: "existing",
 		});
+		// A Side Thread carries its first prompt; a plain fork is sent one below.
+		const sideInputId = randomUUID();
 		const fork = await sendRpcRequest(
 			socket,
 			sideThread
@@ -218,6 +220,8 @@ describe("Forked session workspaces through the built daemon", () => {
 						projectSlug: "process-test",
 						parentSessionId: parentId,
 						title: "Explain this code",
+						inputId: sideInputId,
+						text: "Reply with pong.",
 					})
 				: new ForkSession({
 						projectSlug: "process-test",
@@ -260,9 +264,18 @@ describe("Forked session workspaces through the built daemon", () => {
 		evidence["fork"] = child;
 		await browser.view(forkId);
 		if (provider === "claude") {
-			expect(
-				(await browser.send(forkId, "Reply with pong.")).chunks.join(""),
-			).toBe(responseChunks("Reply with pong.").join(""));
+			if (sideThread)
+				await browser.waitFor(
+					(message) =>
+						message["type"] === "session_row" &&
+						message["id"] === forkId &&
+						message["status"] === "idle" &&
+						message["lastTurnEndInputId"] === sideInputId,
+				);
+			else
+				expect(
+					(await browser.send(forkId, "Reply with pong.")).chunks.join(""),
+				).toBe(responseChunks("Reply with pong.").join(""));
 			const runnerPids = new Set(
 				fixture.marks.flatMap((mark) =>
 					mark.kind === "runner-started" && mark.sessionId === forkId
@@ -278,16 +291,17 @@ describe("Forked session workspaces through the built daemon", () => {
 				);
 			expect(queries[0]?.options["cwd"]).toBe(worktree);
 		} else {
-			await sendRpcRequest(
-				socket,
-				new SubmitInput({
-					projectSlug: "process-test",
-					sessionId: forkId,
-					inputId: randomUUID(),
-					text: "Reply with pong.",
-					delivery: "queue",
-				}),
-			);
+			if (!sideThread)
+				await sendRpcRequest(
+					socket,
+					new SubmitInput({
+						projectSlug: "process-test",
+						sessionId: forkId,
+						inputId: randomUUID(),
+						text: "Reply with pong.",
+						delivery: "queue",
+					}),
+				);
 			await vi.waitFor(() => {
 				const request = fixture
 					.opencodeRequests()
@@ -560,6 +574,155 @@ describe("Forked session workspaces through the built daemon", () => {
 		expect(firstInput).toBeDefined();
 		expect(move?.sequence).toBeLessThan(firstInput?.sequence ?? 0);
 	}, 60_000);
+
+	// A long parent made the fork outlast the browser's 10s ping, so the reply
+	// was lost while the server finished: the prompt, sent only after the reply,
+	// never went, and each retry made another empty Side Thread.
+	it("starts a Side Thread of a long session with its prompt, once, within the ping timeout", async () => {
+		const { fixture, socket } = await start(
+			"side-thread-long-parent",
+			"claude",
+		);
+		const browser = await fixture.connect();
+		const parentId = await browser.createSession("Long parent");
+		// Gives the parent the Claude transcript a fork resumes from.
+		await browser.send(parentId, "Reply with pong.");
+		await fixture.kill();
+		const db = new Database(fixture.projectStorePath());
+		try {
+			const head = db
+				.prepare(
+					"SELECT project_id, provider, MAX(stream_version) AS version FROM events WHERE session_id = ?",
+				)
+				.get(parentId) as {
+				project_id: string;
+				provider: string;
+				version: number;
+			};
+			const insert = db.prepare(
+				"INSERT INTO events (project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			);
+			let version = head.version;
+			const append = (type: string, data: Record<string, unknown>) =>
+				insert.run(
+					head.project_id,
+					`evt_${randomUUID()}`,
+					parentId,
+					++version,
+					type,
+					JSON.stringify(data),
+					"{}",
+					head.provider,
+					Date.now(),
+				);
+			// Shaped like the reported session: ~85 turns, ~18k events.
+			db.transaction(() => {
+				for (let turn = 0; turn < 85; turn++) {
+					const user = `user-${turn}`;
+					const assistant = `msg-${turn}`;
+					append("message.created", {
+						sessionId: parentId,
+						messageId: user,
+						role: "user",
+					});
+					append("text.delta", {
+						messageId: user,
+						partId: `${user}-0`,
+						text: `Question ${turn}`,
+					});
+					append("message.created", {
+						sessionId: parentId,
+						messageId: assistant,
+						role: "assistant",
+					});
+					for (let step = 0; step < 15; step++) {
+						const tool = `${assistant}-tool-${step}`;
+						append("thinking.start", {
+							messageId: assistant,
+							partId: `${tool}-thinking`,
+						});
+						append("thinking.end", {
+							messageId: assistant,
+							partId: `${tool}-thinking`,
+						});
+						append("tool.started", {
+							messageId: assistant,
+							partId: tool,
+							toolName: "Bash",
+							callId: tool,
+							input: { tool: "Bash", command: "x".repeat(600) },
+						});
+						append("tool.running", { messageId: assistant, partId: tool });
+						append("tool.running", { messageId: assistant, partId: tool });
+						append("tool.completed", {
+							messageId: assistant,
+							partId: tool,
+							result: "r".repeat(6000),
+							duration: 0,
+						});
+						for (let delta = 0; delta < 8; delta++)
+							append("text.delta", {
+								messageId: assistant,
+								partId: `${tool}-text`,
+								text: "word ".repeat(20),
+							});
+					}
+					append("turn.completed", {
+						messageId: assistant,
+						cost: 0,
+						tokens: { input: 1, output: 1 },
+						duration: 1,
+					});
+					append("session.status", { sessionId: parentId, status: "idle" });
+				}
+			})();
+			evidence["parentEvents"] = version + 1;
+		} finally {
+			db.close();
+		}
+		// Startup recovery projects the seeded history into the read model, which
+		// decides the messages a Claude fork keeps.
+		await fixture.restart({ startupTimeoutMs: 60_000 });
+		const request = new StartSideThread({
+			projectSlug: "process-test",
+			parentSessionId: parentId,
+			title: "What does this do?",
+			inputId: randomUUID(),
+			text: "What does this do?",
+		});
+		const started = performance.now();
+		const first = await sendRpcRequest(socket, request);
+		evidence["startSideThreadMs"] = Math.round(performance.now() - started);
+		forkId = first.sessionId;
+		expect(evidence["startSideThreadMs"]).toBeLessThan(10_000);
+		// A retry after a lost reply lands on the Side Thread the prompt reached.
+		expect((await sendRpcRequest(socket, request)).sessionId).toBe(forkId);
+		const sideThreads = (
+			await sendRpcRequest(
+				socket,
+				new ListDaemonSessions({
+					projectSlug: "process-test",
+					scope: "process-test",
+					roots: false,
+				}),
+			)
+		).sessions.filter(({ parentID }) => parentID === parentId);
+		expect(sideThreads.map(({ id }) => id)).toEqual([forkId]);
+		await vi.waitFor(
+			() =>
+				expect(
+					forkEvents(fixture, forkId ?? "")
+						.filter(({ type }) => type === "input.sent")
+						.map(({ data }) => data["inputId"]),
+				).toEqual([request.inputId]),
+			{ timeout: 10_000 },
+		);
+		expect(
+			forkEvents(fixture, forkId).filter(
+				({ type }) => type === "input.admitted",
+			),
+		).toHaveLength(1);
+	}, 120_000);
 
 	it.each([
 		false,

@@ -50,6 +50,7 @@ import {
 } from "../../git/worktrees.js";
 import {
 	rewindSessionToMessage,
+	sendMessageToSession,
 	undoSessionRewind,
 } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
@@ -699,6 +700,14 @@ export const sessionsHandlers = {
 		),
 	StartSideThread: (request) =>
 		Effect.gen(function* () {
+			// A retry after a lost reply: the input already reached its Side Thread.
+			const sql = yield* SqlClient.SqlClient;
+			const [reached] = yield* sql<{ session_id: string }>`
+				SELECT session_id FROM pending_inputs WHERE input_id = ${request.inputId}
+				UNION ALL
+				SELECT session_id FROM messages WHERE input_id = ${request.inputId}
+				LIMIT 1`;
+			if (reached) return { sessionId: reached.session_id };
 			const session = yield* forkSession(request.parentSessionId, {
 				side: { title: request.title },
 			});
@@ -706,6 +715,13 @@ export const sessionsHandlers = {
 			// thread's first turn must not read as activity on its parent.
 			const sessionManager = yield* SessionManagerServiceTag;
 			yield* sessionManager.refreshSessionLineage();
+			yield* sendMessageToSession({
+				clientId: request.originId ?? "rpc",
+				sessionId: session.id,
+				text: request.text,
+				commandId: request.inputId,
+				...(request.images ? { images: request.images } : {}),
+			}).pipe(Effect.catchAll(mapRpcFailure("StartSideThread")));
 			return { sessionId: session.id };
 		}).pipe(
 			Effect.catchTag("SessionCommandError", (error) =>

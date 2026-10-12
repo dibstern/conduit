@@ -669,110 +669,102 @@
 
 	let creatingSession = false;
 	let startingSideThread = false;
+	// A retry of the same draft reuses its input id, so a reply lost to a
+	// dropped socket returns the Side Thread it made instead of a second one.
+	let sideThreadAttempt: { draft: string; inputId: string } | undefined;
+
+	async function startSideThread(question: string | undefined): Promise<boolean> {
+		if (startingSideThread) return false;
+		const parentSessionId = sessionState.currentId;
+		const projectSlug = getCurrentSlug();
+		if (!parentSessionId || !projectSlug) {
+			showToast("Open a session to start a Side Thread", { variant: "error" });
+			return false;
+		}
+		// A bare command asks for the list rather than a new Side Thread.
+		if (!question) {
+			openSideThreads();
+			clearComposer();
+			return false;
+		}
+		const draftText = inputText;
+		const draftImages = pendingImages;
+		const draft = `${parentSessionId}\n${draftText}`;
+		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
+		const { inputId } = sideThreadAttempt;
+		startingSideThread = true;
+		try {
+			const images = draftImages.map((image) => image.dataUrl);
+			const { sessionId } = await startSideThreadRpc({
+				projectSlug,
+				parentSessionId,
+				title: question,
+				inputId,
+				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
+				...(images.length > 0 ? { images } : {}),
+				originId: getBrowserClientId(),
+			});
+			sideThreadAttempt = undefined;
+			if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
+				clearComposer();
+				switchToSession(sessionId, projectSlug);
+			}
+			return true;
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+			return false;
+		} finally {
+			startingSideThread = false;
+		}
+	}
+
+	/** The text with each @reference's file or directory contents attached. */
+	async function withReferences(text: string, projectSlug: string | null): Promise<string> {
+		const refs = parseAtReferences(text);
+		if (refs.length === 0) return text;
+		const attachments: FileAttachment[] = [];
+		for (const ref of refs) {
+			try {
+				if (ref.endsWith("/")) {
+					const content = await fetchDirectoryListing(ref, projectSlug);
+					attachments.push({ path: ref, type: "directory", content });
+				} else {
+					const result = await fetchFileContent(ref, projectSlug);
+					attachments.push(result.binary ? { path: ref, type: "binary" } : { path: ref, type: "file", content: result.content });
+				}
+			} catch {
+				// Skip files that fail to load
+			}
+		}
+		return buildAttachedMessage(text, attachments);
+	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		if (unsupportedDraftFolders || unplaced) return false;
 		let text = textOverride ?? inputText.trim();
-		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
-		const builtins = providerBuiltinNameSet;
 		if (!text) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
 			const command = conduitCommands.find((command) =>
 				[command.name, ...command.aliases].some((name) => name === match?.[1]),
 			);
-			if (command?.handler === "startSideThread") {
-				const question = match?.[2]?.trim();
-				if (startingSideThread) return false;
-				const parentSessionId = sessionState.currentId;
-				const projectSlug = getCurrentSlug();
-				if (!parentSessionId || !projectSlug) {
-					showToast("Open a session to start a Side Thread", { variant: "error" });
-					return false;
-				}
-				// A bare command asks for the list rather than a new Side Thread.
-				if (!question) {
-					openSideThreads();
-					clearComposer();
-					return false;
-				}
-				const draftText = inputText;
-				const draftImages = pendingImages;
-				const images = pendingImages.map((image) => image.dataUrl);
-				startingSideThread = true;
-				try {
-					const { sessionId } = await startSideThreadRpc({ projectSlug, parentSessionId, title: question });
-					sideThread = { sessionId, projectSlug, images };
-					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
-						inputText = "";
-						pendingImages = [];
-						inputDrafts.delete(parentSessionId);
-						if (inputSyncTimer) {
-							clearTimeout(inputSyncTimer);
-							inputSyncTimer = null;
-						}
-						void syncInputDraftRpc({ projectSlug, sessionId: parentSessionId, text: "", originId: getBrowserClientId() }).catch(() => undefined);
-						switchToSession(sessionId, projectSlug);
-						await tick();
-					}
-					text = question;
-				} catch (error) {
-					showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
-					return false;
-				} finally {
-					startingSideThread = false;
-				}
-			}
-			text = toProviderCommands(text, builtins);
+			if (command?.handler === "startSideThread") return startSideThread(match?.[2]?.trim());
+			text = toProviderCommands(text, providerBuiltinNameSet);
 		}
 
-		// Parse @references and fetch file contents
-		const refs = textOverride === undefined ? parseAtReferences(text) : [];
-		let messageText = text;
-
-		if (refs.length > 0) {
-			const attachments: FileAttachment[] = [];
-
-			for (const ref of refs) {
-				try {
-					if (ref.endsWith("/")) {
-						// Directory: fetch listing
-						const content = await fetchDirectoryListing(ref, sideThread?.projectSlug ?? getCurrentSlug());
-						attachments.push({ path: ref, type: "directory", content });
-					} else {
-						// File: fetch content
-						const result = await fetchFileContent(ref, sideThread?.projectSlug ?? getCurrentSlug());
-						if (result.binary) {
-							attachments.push({ path: ref, type: "binary" });
-						} else {
-							attachments.push({
-								path: ref,
-								type: "file",
-								content: result.content,
-							});
-						}
-					}
-				} catch {
-					// Skip files that fail to load
-				}
-			}
-
-			messageText = buildAttachedMessage(text, attachments);
-		}
+		const messageText = textOverride === undefined ? await withReferences(text, getCurrentSlug()) : text;
 
 		// Collect image data URLs from pending images
-		const imageUrls = sideThread
-			? (sideThread.images.length > 0 ? sideThread.images : undefined)
-			: textOverride === undefined && pendingImages.length > 0
+		const imageUrls = textOverride === undefined && pendingImages.length > 0
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
 		// Always send immediately: conduit queues a busy send in the session's
 		// tray, and the transcript shows the message once the adapter places it.
-		let sid = sideThread?.sessionId ?? sessionState.currentId;
+		let sid = sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
-		const projectSlug = sideThread?.projectSlug ?? (sid ? getCurrentSlug() : getDraftProject());
+		const projectSlug = sid ? getCurrentSlug() : getDraftProject();
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
 			return false;
@@ -874,7 +866,6 @@
 			}
 		}
 		if (textOverride !== undefined) return true;
-		if (sideThread && (sessionState.currentId !== sideThread.sessionId || inputText !== "" || pendingImages.length > 0)) return true;
 		clearComposer();
 		return true;
 	}

@@ -227,6 +227,10 @@ export interface StartSideThreadRpcInput {
 	readonly projectSlug: string;
 	readonly parentSessionId: string;
 	readonly title: string;
+	readonly inputId: string;
+	readonly text: string;
+	readonly images?: readonly string[];
+	readonly originId?: string;
 }
 
 export interface RespondPermissionRpcInput {

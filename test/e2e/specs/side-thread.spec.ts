@@ -1,6 +1,7 @@
 // Real relay and event store, with OpenCode REST/SSE replayed from the capture
 // and Claude SDK turns replayed from committed traces.
 
+import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { Socket } from "@effect/platform";
@@ -342,6 +343,8 @@ test.describe("OpenCode Side Threads", () => {
 						projectSlug,
 						parentSessionId: sideId,
 						title: "Nested question",
+						inputId: randomUUID(),
+						text: "Nested question",
 					}),
 				),
 			);
@@ -477,6 +480,8 @@ test.describe("OpenCode Side Threads", () => {
 					projectSlug,
 					parentSessionId: "missing-side-thread-parent",
 					title: question,
+					inputId: randomUUID(),
+					text: question,
 				}),
 			),
 		);

@@ -2145,6 +2145,9 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 	},
 ) {}
 
+/** Fork a Side Thread and submit its first input there, so a reply lost to a
+ *  dropped socket cannot lose the prompt. A retry with the same input id
+ *  returns the Side Thread that input already reached. */
 export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 	"StartSideThread",
 	{
@@ -2154,6 +2157,10 @@ export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 			projectSlug: NonEmptyString,
 			parentSessionId: NonEmptyString,
 			title: NonEmptyString,
+			inputId: NonEmptyString,
+			text: NonEmptyString,
+			images: Schema.optional(Schema.Array(Schema.String)),
+			originId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
