@@ -71,7 +71,7 @@ test("a just-added Claude account can run a session immediately", async ({
 		browser.rpc.CreateSession({
 			projectSlug: "process-test",
 			instanceId: Schema.decodeUnknownSync(
-				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+				Schema.String.pipe(Schema.brand("AccountId")),
 			)(addedInstanceId),
 			model: { modelId: "harness", providerId: "claude" },
 			originId: browser.originId,
@@ -211,7 +211,7 @@ for (const stale of [false, true]) {
 				browser.rpc.CreateSession({
 					projectSlug,
 					instanceId: Schema.decodeUnknownSync(
-						Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+						Schema.String.pipe(Schema.brand("AccountId")),
 					)(account1.id),
 					model: { modelId: "harness", providerId: "claude" },
 					originId: browser.originId,
@@ -687,7 +687,7 @@ for (const decision of [
 		);
 		if (!addedInstanceId) throw new Error("No retry account ID");
 		const instanceId = Schema.decodeUnknownSync(
-			Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			Schema.String.pipe(Schema.brand("AccountId")),
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "retry-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
@@ -1119,7 +1119,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			browser.rpc.CreateSession({
 				projectSlug,
 				instanceId: Schema.decodeUnknownSync(
-					Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+					Schema.String.pipe(Schema.brand("AccountId")),
 				)(source.id),
 				model: { modelId: "harness", providerId: "claude" },
 				originId: browser.originId,
@@ -1459,7 +1459,7 @@ for (const scenario of [
 		);
 		if (!addedInstanceId) throw new Error("No reset account ID");
 		const instanceId = Schema.decodeUnknownSync(
-			Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			Schema.String.pipe(Schema.brand("AccountId")),
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "reset-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
@@ -1843,7 +1843,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		);
 		if (!addedInstanceId) throw new Error("No auto-resume account ID");
 		const instanceId = Schema.decodeUnknownSync(
-			Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+			Schema.String.pipe(Schema.brand("AccountId")),
 		)(addedInstanceId);
 		const directory = mkdtempSync(join(harness.root, "auto-resume-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
@@ -2518,7 +2518,7 @@ for (const behavior of [
 			browser.rpc.CreateSession({
 				projectSlug,
 				instanceId: Schema.decodeUnknownSync(
-					Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+					Schema.String.pipe(Schema.brand("AccountId")),
 				)(source.id),
 				model: { modelId: "harness", providerId: "claude" },
 				originId: browser.originId,
@@ -3192,7 +3192,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 		browser.rpc.CreateSession({
 			projectSlug,
 			instanceId: Schema.decodeUnknownSync(
-				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+				Schema.String.pipe(Schema.brand("AccountId")),
 			)(source.id),
 			model: { modelId: "harness", providerId: "claude" },
 			originId: browser.originId,

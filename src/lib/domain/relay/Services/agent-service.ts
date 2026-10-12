@@ -1,9 +1,10 @@
 import { type Cause, Context, Effect, Layer, Option } from "effect";
 import {
+	type AccountId,
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
+	type KnownProviderDriverKind,
 	type ProviderDriverKind,
-	type ProviderInstanceId,
 } from "../../../contracts/provider-instance.js";
 import type { Agent } from "../../../instance/sdk-types.js";
 import { harnessForModelProvider } from "../../../provider/turn-settings.js";
@@ -31,7 +32,7 @@ export interface AgentProviderScope {
 }
 
 export interface AgentList {
-	readonly instanceId?: ProviderInstanceId;
+	readonly instanceId?: AccountId;
 	readonly providerScope: AgentProviderScope;
 	readonly agents: readonly WireAgent[];
 	readonly activeAgentId?: string;
@@ -98,7 +99,7 @@ export function toWireAgents(
 export interface AgentService {
 	listAgents(
 		activeSessionId: string | undefined,
-		instanceId?: ProviderInstanceId,
+		instanceId?: AccountId,
 		/** The listed instance's harness: `instanceId`'s, else the session's. */
 		instanceDriver?: ProviderDriverKind,
 	): Effect.Effect<AgentList, Cause.UnknownException>;
@@ -146,7 +147,7 @@ const scopedAgentList = (
 	providerScope: AgentProviderScope,
 	agents: readonly WireAgent[],
 	sessionId: string | undefined,
-	instanceId?: ProviderInstanceId,
+	instanceId?: AccountId,
 	clearMissing = instanceId === undefined,
 ) =>
 	Effect.map(withActiveAgent(agents, sessionId, clearMissing), (result) => ({
@@ -156,8 +157,8 @@ const scopedAgentList = (
 	}));
 
 const resolveBuiltInInstanceDriver = (
-	instanceId: ProviderInstanceId,
-): ProviderDriverKind => {
+	instanceId: AccountId,
+): KnownProviderDriverKind => {
 	if (instanceId === defaultInstanceIdForDriver("claude")) return "claude";
 	if (instanceId === defaultInstanceIdForDriver("opencode")) return "opencode";
 	return isKnownDriverKind(instanceId) ? instanceId : "opencode";

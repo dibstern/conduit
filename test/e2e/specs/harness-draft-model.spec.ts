@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { Effect } from "effect";
-import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import type {
 	ProcessBrowser,
 	ProcessHarness,
@@ -202,7 +202,7 @@ async function openPickedSession(
 				browser.rpc.CreateSession({
 					projectSlug,
 					originId: "session-setup",
-					instanceId: ProviderInstanceIdSchema.make("opencode"),
+					instanceId: AccountIdSchema.make("opencode"),
 					model: { modelId: picked.modelID, providerId: picked.providerID },
 				}),
 			);
@@ -277,7 +277,7 @@ test("an OpenCode model runs at the effort conduit shows for it", async ({
 				browser.rpc.CreateSession({
 					projectSlug,
 					originId: "effort-setup",
-					instanceId: ProviderInstanceIdSchema.make("opencode"),
+					instanceId: AccountIdSchema.make("opencode"),
 					model: { modelId: picked.modelID, providerId: picked.providerID },
 				}),
 			);

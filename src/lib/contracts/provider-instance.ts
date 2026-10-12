@@ -53,15 +53,13 @@ export const PROVIDER_SESSION_CAPABILITIES = {
 	ProviderSessionCapabilities
 >;
 
-export const ProviderInstanceIdSchema = Schema.String.pipe(
-	Schema.brand("ProviderInstanceId"),
-);
-export type ProviderInstanceId = typeof ProviderInstanceIdSchema.Type;
+export const AccountIdSchema = Schema.String.pipe(Schema.brand("AccountId"));
+export type AccountId = typeof AccountIdSchema.Type;
 
 export function defaultInstanceIdForDriver(
 	kind: ProviderDriverKind,
-): ProviderInstanceId {
-	return ProviderInstanceIdSchema.make(kind);
+): AccountId {
+	return AccountIdSchema.make(kind);
 }
 
 /**
@@ -106,7 +104,7 @@ export const ProviderInstanceStatusSchema = Schema.Literal(
 export type ProviderInstanceStatus = typeof ProviderInstanceStatusSchema.Type;
 
 export const ProviderInstanceSchema = Schema.Struct({
-	id: ProviderInstanceIdSchema,
+	id: AccountIdSchema,
 	name: Schema.String,
 	driver: ProviderDriverKindSchema,
 	available: Schema.Boolean,
@@ -120,7 +118,7 @@ export const ProviderInstanceSchema = Schema.Struct({
 export type ProviderInstance = typeof ProviderInstanceSchema.Type;
 
 const CurrentInstanceModelSelectionSchema = Schema.Struct({
-	instanceId: ProviderInstanceIdSchema,
+	instanceId: AccountIdSchema,
 	model: Schema.String,
 });
 

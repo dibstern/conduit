@@ -1,10 +1,10 @@
 import { type Cause, Data, Effect, Either, FiberHandle, Ref } from "effect";
 import {
+	type AccountId,
+	AccountIdSchema,
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
-	type ProviderDriverKind,
-	type ProviderInstanceId,
-	ProviderInstanceIdSchema,
+	type KnownProviderDriverKind,
 } from "../contracts/provider-instance.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import {
@@ -78,8 +78,8 @@ const saveRelaySettingsEffect = (
 	});
 
 const resolveBuiltInInstanceDriver = (
-	instanceId: ProviderInstanceId,
-): ProviderDriverKind => {
+	instanceId: AccountId,
+): KnownProviderDriverKind => {
 	if (instanceId === defaultInstanceIdForDriver("claude")) return "claude";
 	if (instanceId === defaultInstanceIdForDriver("opencode")) return "opencode";
 	return isKnownDriverKind(instanceId) ? instanceId : "opencode";
@@ -346,7 +346,7 @@ export const getModelsResponse = (
 		const instanceId =
 			input.instanceId === undefined
 				? undefined
-				: ProviderInstanceIdSchema.make(input.instanceId);
+				: AccountIdSchema.make(input.instanceId);
 		const daemonConfig =
 			instanceId === undefined ? null : loadDaemonConfig(config.configDir);
 		const instanceDriver =
@@ -478,7 +478,7 @@ export const getModelsResponse = (
 		const modelDriver = harnessForModelProvider(
 			fallbackModel?.providerID ?? "",
 		);
-		const selectedDriver: ProviderDriverKind = activeDriver ?? modelDriver;
+		const selectedDriver: KnownProviderDriverKind = activeDriver ?? modelDriver;
 		// A model runs only on its own harness. A session or instance on the
 		// other harness runs that harness's own default, so it has no model here.
 		const selectedModelMatchesInstance = [instanceDriver, activeDriver].every(

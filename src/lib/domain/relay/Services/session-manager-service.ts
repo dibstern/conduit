@@ -12,9 +12,9 @@ import {
 	Ref,
 } from "effect";
 import {
+	type AccountId,
 	isKnownDriverKind,
-	type ProviderDriverKind,
-	type ProviderInstanceId,
+	type KnownProviderDriverKind,
 } from "../../../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
@@ -47,6 +47,7 @@ import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
+import { assertNever } from "../../../utils.js";
 import {
 	DaemonEventBusTag,
 	publishSessionCreated,
@@ -152,7 +153,7 @@ export type ListSessionsOptions = {
 };
 
 export interface CreateSessionOptions {
-	readonly instanceId?: ProviderInstanceId;
+	readonly instanceId?: AccountId;
 	readonly providerId?: string;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
@@ -258,7 +259,7 @@ const getConfiguredLocalSessionProvider = () =>
 
 const createLocalSession = (
 	title?: string,
-	selectedInstanceId?: ProviderInstanceId,
+	selectedInstanceId?: AccountId,
 	reservedSessionId?: string,
 ) =>
 	Effect.gen(function* () {
@@ -616,7 +617,7 @@ export interface SessionManagerService {
 	): Effect.Effect<SessionDetail, SessionManagerError>;
 	establishOpenCodeSession(
 		session: SessionDetail,
-		providerInstanceId: ProviderInstanceId,
+		providerInstanceId: AccountId,
 	): Effect.Effect<void, SessionManagerError>;
 	deleteSession(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
 	renameSession(
@@ -712,8 +713,8 @@ const makeServiceCreateSession = ({
 					engine.bindSession(session.id, providerId);
 				});
 			const resolveSelectedDriver = (
-				instanceId: ProviderInstanceId,
-			): Effect.Effect<ProviderDriverKind, SessionManagerError> =>
+				instanceId: AccountId,
+			): Effect.Effect<KnownProviderDriverKind, SessionManagerError> =>
 				Effect.gen(function* () {
 					const daemonConfig = loadDaemonConfig(configDir);
 					if (daemonConfig !== null) {
@@ -727,7 +728,7 @@ const makeServiceCreateSession = ({
 						cause: `Cannot resolve provider instance without daemon config: ${instanceId}`,
 					});
 				});
-			const createViaOpenCode = (instanceId?: ProviderInstanceId) =>
+			const createViaOpenCode = (instanceId?: AccountId) =>
 				Effect.either(
 					Effect.gen(function* () {
 						// A session bound to an OpenCode instance is created on
@@ -770,7 +771,7 @@ const makeServiceCreateSession = ({
 						);
 					}).pipe(Effect.scoped),
 				);
-			const createViaLocal = (instanceId?: ProviderInstanceId) =>
+			const createViaLocal = (instanceId?: AccountId) =>
 				Effect.either(
 					createLocalSession(title, instanceId, options?.sessionId).pipe(
 						Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -783,35 +784,35 @@ const makeServiceCreateSession = ({
 			const selectedInstanceId = options?.instanceId;
 			if (selectedInstanceId !== undefined) {
 				const selectedDriver = yield* resolveSelectedDriver(selectedInstanceId);
-				if (selectedDriver === CLAUDE_PROVIDER_ID) {
-					const localResult = yield* createViaLocal(selectedInstanceId);
-					if (localResult._tag === "Right") {
-						yield* bindSessionProvider(localResult.right, selectedInstanceId);
-						return localResult.right;
+				switch (selectedDriver) {
+					case "claude": {
+						const localResult = yield* createViaLocal(selectedInstanceId);
+						if (localResult._tag === "Right") {
+							yield* bindSessionProvider(localResult.right, selectedInstanceId);
+							return localResult.right;
+						}
+						return yield* new SessionManagerError({
+							operation: "createSession",
+							cause: localResult.left,
+						});
 					}
-					return yield* new SessionManagerError({
-						operation: "createSession",
-						cause: localResult.left,
-					});
-				}
-				if (selectedDriver === "opencode") {
-					const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
-					if (openCodeResult._tag === "Right") {
-						yield* bindSessionProvider(
-							openCodeResult.right,
-							selectedInstanceId,
-						);
-						return openCodeResult.right;
+					case "opencode": {
+						const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
+						if (openCodeResult._tag === "Right") {
+							yield* bindSessionProvider(
+								openCodeResult.right,
+								selectedInstanceId,
+							);
+							return openCodeResult.right;
+						}
+						return yield* new SessionManagerError({
+							operation: "createSession",
+							cause: openCodeResult.left,
+						});
 					}
-					return yield* new SessionManagerError({
-						operation: "createSession",
-						cause: openCodeResult.left,
-					});
+					default:
+						return assertNever(selectedDriver);
 				}
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: `Unsupported provider driver for instance ${selectedInstanceId}: ${selectedDriver}`,
-				});
 			}
 
 			const requestedProvider = options?.providerId?.trim();
@@ -947,7 +948,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			});
 		const establishOpenCodeSession = (
 			session: SessionDetail,
-			providerInstanceId: ProviderInstanceId,
+			providerInstanceId: AccountId,
 		): Effect.Effect<void, SessionManagerError> =>
 			Effect.gen(function* () {
 				// `write` rather than the plain form: the seed and the verification

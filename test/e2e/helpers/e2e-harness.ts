@@ -13,8 +13,8 @@ import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import {
+	AccountIdSchema,
 	defaultInstanceIdForDriver,
-	ProviderInstanceIdSchema,
 } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -177,7 +177,7 @@ export async function createSession(
 						? { instanceId: defaultInstanceIdForDriver("opencode") }
 						: instanceId === undefined
 							? {}
-							: { instanceId: ProviderInstanceIdSchema.make(instanceId) }),
+							: { instanceId: AccountIdSchema.make(instanceId) }),
 				});
 			}),
 		).pipe(

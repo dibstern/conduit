@@ -2,8 +2,8 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
+	AccountIdSchema,
 	defaultInstanceIdForDriver,
-	ProviderInstanceIdSchema,
 } from "../../../src/lib/contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -156,7 +156,7 @@ describe("AgentService instance scoping", () => {
 		() =>
 			Effect.gen(function* () {
 				const service = yield* AgentServiceTag;
-				const instanceId = ProviderInstanceIdSchema.make("claude-work");
+				const instanceId = AccountIdSchema.make("claude-work");
 				const result = yield* service.listAgents(
 					"session-1",
 					instanceId,
@@ -216,7 +216,7 @@ describe("AgentService instance scoping", () => {
 			const service = yield* AgentServiceTag;
 			const result = yield* service.listAgents(
 				undefined,
-				ProviderInstanceIdSchema.make("future-instance"),
+				AccountIdSchema.make("future-instance"),
 				"future-driver",
 			);
 
@@ -240,7 +240,7 @@ describe("AgentService instance scoping", () => {
 			const service = yield* AgentServiceTag;
 			const result = yield* service.listAgents(
 				undefined,
-				ProviderInstanceIdSchema.make("unknown-instance"),
+				AccountIdSchema.make("unknown-instance"),
 			);
 
 			expect(result).toEqual({

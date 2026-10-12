@@ -140,7 +140,9 @@ describe("Integration: named OpenCode instance routing", () => {
 			originId: client.getClientId(),
 		});
 		const [delta, done] = await Promise.all([namedDelta, namedDone]);
-		expect(delta.text).toBeTruthy();
+		expect(
+			delta.parts?.find((part) => part.type === "text")?.text,
+		).toBeTruthy();
 		expect(done.status).toBe("idle");
 		expect(done.attention).not.toBe("error");
 		expect(promptCount(namedMock)).toBe(namedPromptsBeforeNamedTurn + 1);

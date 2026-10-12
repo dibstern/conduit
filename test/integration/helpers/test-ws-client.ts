@@ -14,7 +14,7 @@ import {
 	Stream,
 } from "effect";
 import WebSocket from "ws";
-import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type GetAgentsResponse,
 	type GetCommandsResponse,
@@ -235,7 +235,7 @@ export class TestWsClient {
 				...(title != null ? { title } : {}),
 				...(opts.providerId ? { providerId: opts.providerId } : {}),
 				...(opts.instanceId
-					? { instanceId: ProviderInstanceIdSchema.make(opts.instanceId) }
+					? { instanceId: AccountIdSchema.make(opts.instanceId) }
 					: {}),
 			}),
 		);

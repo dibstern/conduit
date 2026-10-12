@@ -1,5 +1,5 @@
 import { Cause, Effect, Either, Ref } from "effect";
-import type { ProviderInstanceId } from "../contracts/provider-instance.js";
+import type { AccountId } from "../contracts/provider-instance.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
@@ -49,7 +49,7 @@ interface ViewSessionPayload {
 
 interface NewSessionPayload {
 	readonly title?: string;
-	readonly instanceId?: ProviderInstanceId;
+	readonly instanceId?: AccountId;
 	readonly providerId?: string;
 }
 
@@ -140,7 +140,7 @@ export const createSessionForClient = <E = never>({
 }: {
 	readonly clientId: string;
 	readonly title?: string;
-	readonly instanceId?: ProviderInstanceId;
+	readonly instanceId?: AccountId;
 	readonly providerId?: string;
 	readonly sessionId?: string;
 	readonly model?: {

@@ -12,7 +12,7 @@ import {
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	ContinueSessionInMainFolder,
 	CreateSession,
@@ -297,7 +297,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 			projectSlug: "process-test",
 			originId: "cwd-test",
 			title: "Workspace probe",
-			instanceId: ProviderInstanceIdSchema.make("managed-test"),
+			instanceId: AccountIdSchema.make("managed-test"),
 			providerId: "opencode",
 			...(createsWorktree ? { newWorktree: true } : { worktreePath: existing }),
 		});
@@ -323,7 +323,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 						projectSlug: "process-test",
 						originId: "cwd-test",
 						title: "Cross-repository probe",
-						instanceId: ProviderInstanceIdSchema.make("managed-test"),
+						instanceId: AccountIdSchema.make("managed-test"),
 						providerId: "opencode",
 					}),
 				);

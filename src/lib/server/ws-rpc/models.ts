@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
@@ -31,7 +31,7 @@ export const modelsHandlers = {
 			const instanceId =
 				request.instanceId === undefined
 					? undefined
-					: ProviderInstanceIdSchema.make(request.instanceId);
+					: AccountIdSchema.make(request.instanceId);
 			// A session's agents come from the instance it is bound to.
 			const sessionInstanceId =
 				request.sessionId === undefined

@@ -2052,7 +2052,7 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			originId: NonEmptyString,
 			title: Schema.optional(Schema.String),
 			instanceId: Schema.optional(
-				Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+				Schema.String.pipe(Schema.brand("AccountId")),
 			),
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),

@@ -19,7 +19,7 @@ import {
 	TestClock,
 } from "effect";
 import { assert, expect, vi } from "vitest";
-import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type DaemonConfig,
 	resolveInstanceDriver,
@@ -733,7 +733,7 @@ describe("SessionManagerService", () => {
 				};
 				yield* service.establishOpenCodeSession(
 					child,
-					ProviderInstanceIdSchema.make("opencode"),
+					AccountIdSchema.make("opencode"),
 				);
 				yield* persist.persistUserMessage(child.id, "Claude turn on fork");
 
@@ -823,7 +823,7 @@ describe("SessionManagerService", () => {
 							version: "1.0.0",
 							time: { created: 10, updated: 10 },
 						},
-						ProviderInstanceIdSchema.make("opencode"),
+						AccountIdSchema.make("opencode"),
 					),
 				);
 				const sql = yield* SqlClient.SqlClient;
@@ -891,7 +891,7 @@ describe("SessionManagerService", () => {
 							version: "1.0.0",
 							time: { created: 10, updated: 10 },
 						},
-						ProviderInstanceIdSchema.make("opencode"),
+						AccountIdSchema.make("opencode"),
 					),
 				);
 				const sessions = yield* sql<{ readonly id: string }>`
@@ -1009,8 +1009,8 @@ describe("SessionManagerService", () => {
 					Layer.succeed(OrchestrationEngineTag, engine),
 				),
 			);
-			const claudeInstanceId = ProviderInstanceIdSchema.make("claude");
-			const openCodeInstanceId = ProviderInstanceIdSchema.make("opencode");
+			const claudeInstanceId = AccountIdSchema.make("claude");
+			const openCodeInstanceId = AccountIdSchema.make("opencode");
 
 			return Effect.gen(function* () {
 				yield* Effect.tryPromise(() => saveDaemonConfig(daemonConfig, tmpDir));
@@ -1048,7 +1048,7 @@ describe("SessionManagerService", () => {
 							instanceId: binding.provider,
 							driver: resolveInstanceDriver(
 								daemonConfig,
-								ProviderInstanceIdSchema.make(binding.provider),
+								AccountIdSchema.make(binding.provider),
 							),
 							status: binding.status,
 						},
@@ -1126,7 +1126,7 @@ describe("SessionManagerService", () => {
 				);
 				const service = yield* SessionManagerServiceTag;
 				const session = yield* service.createSession("Named", {
-					instanceId: ProviderInstanceIdSchema.make("work-oc"),
+					instanceId: AccountIdSchema.make("work-oc"),
 				});
 				const bindings = yield* Effect.sync(() => {
 					const db = openFixtureDb(dbFile);
@@ -2156,7 +2156,7 @@ describe("SessionManagerService", () => {
 						version: "1.0.0",
 						time: { created: 1, updated: 1 },
 					},
-					ProviderInstanceIdSchema.make("opencode"),
+					AccountIdSchema.make("opencode"),
 				);
 				yield* service.establishOpenCodeSession(
 					{
@@ -2167,7 +2167,7 @@ describe("SessionManagerService", () => {
 						version: "1.0.0",
 						time: { created: 2, updated: 2 },
 					},
-					ProviderInstanceIdSchema.make("opencode"),
+					AccountIdSchema.make("opencode"),
 				);
 				yield* service.listSessions();
 				expect(snapshot.getSnapshot().sessionCount).toBe(2);

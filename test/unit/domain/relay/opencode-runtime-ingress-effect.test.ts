@@ -14,7 +14,7 @@ import {
 	Stream,
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ProviderInstanceIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
 	type OpenCodeInstanceEvent,
@@ -144,7 +144,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 								version: "test",
 								time: { created: 0, updated: 0 },
 							},
-							ProviderInstanceIdSchema.make(row.provider),
+							AccountIdSchema.make(row.provider),
 						);
 						yield* send(
 							row.provider,

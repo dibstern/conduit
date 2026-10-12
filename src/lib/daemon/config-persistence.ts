@@ -15,13 +15,13 @@ import { SessionModeSchema } from "../contracts/project-file.js";
 import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
 
 import {
+	type AccountId,
+	AccountIdSchema,
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
+	type KnownProviderDriverKind,
 	KnownProviderDriverKindSchema,
 	migrateLegacyDefaultOpencodeInstanceId,
-	type ProviderDriverKind,
-	type ProviderInstanceId,
-	ProviderInstanceIdSchema,
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
@@ -233,8 +233,8 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 };
 
 export interface ResolvedProviderInstance {
-	id: ProviderInstanceId;
-	driver: ProviderDriverKind;
+	id: AccountId;
+	driver: KnownProviderDriverKind;
 	configDir?: string;
 }
 
@@ -247,7 +247,7 @@ export function resolveConfiguredInstances(
 				? (instance.configDir ?? config.claudeConfigDir)
 				: instance.configDir;
 		return {
-			id: ProviderInstanceIdSchema.make(instance.id),
+			id: AccountIdSchema.make(instance.id),
 			driver: instance.driver ?? "opencode",
 			...(configDir === undefined ? {} : { configDir }),
 		};
@@ -276,7 +276,7 @@ export function resolveConfiguredInstances(
 export function resolveInstanceDriver(
 	config: DaemonConfig,
 	instanceId: string,
-): ProviderDriverKind {
+): KnownProviderDriverKind {
 	const configuredInstance = resolveConfiguredInstances(config).find(
 		({ id }) => id === instanceId,
 	);
@@ -292,7 +292,7 @@ export function resolveInstanceDriver(
 export function resolveProviderRoutingDriver(
 	config: DaemonConfig | null,
 	instanceId: string,
-): ProviderDriverKind | undefined {
+): KnownProviderDriverKind | undefined {
 	const configuredInstance = config
 		? resolveConfiguredInstances(config).find(({ id }) => id === instanceId)
 		: undefined;

@@ -2,7 +2,7 @@ import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import type { SessionMode } from "../../contracts/project-file.js";
-import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
+import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
 import {
@@ -799,7 +799,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 			originId: input.originId,
 			...(input.title != null ? { title: input.title } : {}),
 			...(input.instanceId != null
-				? { instanceId: ProviderInstanceIdSchema.make(input.instanceId) }
+				? { instanceId: AccountIdSchema.make(input.instanceId) }
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
 			...(input.model != null ? { model: input.model } : {}),

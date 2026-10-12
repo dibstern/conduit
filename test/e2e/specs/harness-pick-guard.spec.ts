@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { Effect, type Either } from "effect";
-import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -711,7 +711,7 @@ test.describe("server pick rejections", () => {
 						browser.rpc.CreateSession({
 							projectSlug: slug,
 							originId: `${caseId}-setup`,
-							instanceId: ProviderInstanceIdSchema.make(driver),
+							instanceId: AccountIdSchema.make(driver),
 							model: {
 								providerId: model.providerID,
 								modelId: model.modelID,
@@ -742,7 +742,7 @@ test.describe("server pick rejections", () => {
 				const createRequest = {
 					projectSlug: slug,
 					originId: caseId,
-					instanceId: ProviderInstanceIdSchema.make(driver),
+					instanceId: AccountIdSchema.make(driver),
 					model: {
 						providerId: model.providerID,
 						modelId: model.modelID,

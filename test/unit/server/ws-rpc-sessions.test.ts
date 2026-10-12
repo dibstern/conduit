@@ -7,7 +7,7 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { ProviderInstanceIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -121,7 +121,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const result = yield* client.CreateSession({
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
-				instanceId: ProviderInstanceIdSchema.make("opencode"),
+				instanceId: AccountIdSchema.make("opencode"),
 				providerId: "opencode",
 			});
 
@@ -225,7 +225,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					client.CreateSession({
 						projectSlug: "project-a",
 						originId: "browser-tab-a",
-						instanceId: ProviderInstanceIdSchema.make("work-oc"),
+						instanceId: AccountIdSchema.make("work-oc"),
 						providerId: "opencode",
 					}),
 				);

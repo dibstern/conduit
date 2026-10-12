@@ -35,9 +35,9 @@ import {
 import type { Request } from "effect/Request";
 import WebSocket from "ws";
 import {
+	AccountIdSchema,
 	defaultInstanceIdForDriver,
 	type ProviderDriverKind,
-	ProviderInstanceIdSchema,
 } from "../../src/lib/contracts/provider-instance.js";
 import {
 	GetInstances,
@@ -2251,9 +2251,7 @@ export class ProcessBrowser {
 			this.rpc.CreateSession({
 				projectSlug: this.projectSlug,
 				providerId,
-				...(instanceId
-					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
-					: {}),
+				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
 				...(title !== undefined ? { title } : {}),
 				originId: this.originId,
 			}),

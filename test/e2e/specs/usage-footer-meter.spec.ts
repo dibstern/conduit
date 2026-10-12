@@ -272,7 +272,7 @@ test.describe("send at an account's reset", () => {
 			browser.rpc.CreateSession({
 				projectSlug,
 				instanceId: Schema.decodeUnknownSync(
-					Schema.String.pipe(Schema.brand("ProviderInstanceId")),
+					Schema.String.pipe(Schema.brand("AccountId")),
 				)(addedInstanceId),
 				model: { modelId: "harness", providerId: "claude" },
 				originId: browser.originId,
