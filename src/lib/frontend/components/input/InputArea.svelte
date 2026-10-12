@@ -67,7 +67,9 @@
 	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { placedSessionId } from "../../stores/transcript.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { connectionState } from "../../transport/connection-status.svelte.js";
+	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
@@ -226,6 +228,15 @@
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === (accountId ?? getEffectiveInstanceId())));
+	// The settings row appears in one go. Until the daemon answers, models load
+	// and a session link resolves, each control would fill in on its own and
+	// guess (an empty store reads as OpenCode). "" is the undialled state, which
+	// only Storybook stays in.
+	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
+	const routeSessionId = $derived(getCurrentSessionId());
+	const settingsPending = $derived(
+		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+	);
 	const composerDriver = $derived(composerInstance?.driver ?? (currentSession ? getSessionInstanceId(currentSession.id) : getEffectiveInstanceId()));
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
@@ -1151,6 +1162,13 @@
 	}
 </script>
 
+{#snippet settingsStatus()}
+	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-brand whitespace-nowrap">
+		<span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+		{offline && discoveryState.modelsLoaded ? "Reconnecting to daemon" : "Connecting"}
+	</div>
+{/snippet}
+
 <!-- File Menu (above input when "@" is typed) -->
 {#if fileMenuVisible}
 	<div id="file-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
@@ -1229,7 +1247,7 @@
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-		{#if !sessionState.currentId && sessionViewState.compact}
+		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 
@@ -1405,8 +1423,11 @@
 					</div>
 				{/snippet}
 				{#snippet controls()}
-					{#if composerPreferences.controls === "icons"}
+					{#if composerPreferences.controls === "icons" && settingsPending}
+						{@render settingsStatus()}
+					{:else if composerPreferences.controls === "icons"}
 						<div
+							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
 							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
 							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
@@ -1450,7 +1471,7 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
-					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && currentSession && composerDirectory}
+					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
 						{@const session = currentSession}
 						{#key session.id}
 							<GitIdentity
@@ -1581,14 +1602,17 @@
 				data-testid="composer-words-row"
 				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
-				<div data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
+				{#if settingsPending}
+					{@render settingsStatus()}
+				{:else}
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
 					<InstanceModelPicker variant="words" />
 					{#if composerDriver !== "opencode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				<div data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
 						{#if composerDirectory}
@@ -1615,6 +1639,7 @@
 						{/if}
 					{/if}
 				</div>
+				{/if}
 			</div>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
@@ -1625,7 +1650,7 @@
 				{/each}
 			</div>
 		{/if}
-		{#if !sessionState.currentId && !sessionViewState.compact}
+		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 	</div>

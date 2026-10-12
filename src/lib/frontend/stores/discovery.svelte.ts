@@ -161,6 +161,8 @@ const serverDiscovery = $state({
 	sessionInstanceIds: {} as Record<string, string>,
 	commands: [] as CommandInfo[],
 	commandsFetched: false,
+	/** The project's model catalog has answered at least once. */
+	modelsLoaded: false,
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
@@ -241,6 +243,9 @@ export const discoveryState = {
 	},
 	get commandsFetched(): boolean {
 		return serverDiscovery.commandsFetched;
+	},
+	get modelsLoaded(): boolean {
+		return serverDiscovery.modelsLoaded;
 	},
 	get defaultVariant(): string {
 		return serverDiscovery.defaultVariant;
@@ -676,6 +681,7 @@ export function handleModelList({
 	readonly providers: GetModelsResponse["providers"];
 }): void {
 	serverDiscovery.providers = providersFromGetModelsResponse(providers);
+	serverDiscovery.modelsLoaded = true;
 	if (serverDiscovery.providers.some((provider) => provider.id === "claude")) {
 		for (const provider of serverDiscovery.providers)
 			if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
@@ -1138,6 +1144,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.sessionInstanceIds = {};
 	serverDiscovery.commands = [];
 	serverDiscovery.commandsFetched = false;
+	serverDiscovery.modelsLoaded = false;
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
