@@ -178,7 +178,7 @@ function instanceDot(page: Page, name: string) {
 	return page
 		.locator("#instance-settings-list")
 		.locator("button", { hasText: name })
-		.locator(".w-2.h-2.rounded-full");
+		.getByTestId("instance-status-dot");
 }
 
 async function pickDraftInstance(
@@ -700,7 +700,7 @@ test.describe("Settings: Instance Status Updates", () => {
 		const instanceList = page.locator("#instance-settings-list");
 		const workRow = instanceList.locator("button", { hasText: "Work" });
 		await expect(workRow).toBeVisible();
-		const workDot = workRow.locator(".w-2.h-2.rounded-full");
+		const workDot = workRow.getByTestId("instance-status-dot");
 		await expect(workDot).toHaveClass(/bg-red-500/);
 
 		// Work becomes "starting" (yellow)

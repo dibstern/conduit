@@ -110,6 +110,17 @@ export const SEGMENTED_VARIANTS = {
 		selected: "border-accent text-text bg-accent/10",
 		unselected: "border-border text-text-muted hover:text-text",
 	},
+	/**
+	 * The settings mockup's joined segment (`.seg`): one outlined capsule split
+	 * by hairlines, the selected part tinted pink. Inherits its font size from
+	 * the heading it sits in. Only Server's instance Type picker wears it so far.
+	 */
+	joined: {
+		list: "inline-flex shrink-0 overflow-hidden rounded-[7px] border border-border",
+		item: "px-[9px] py-[4px] font-medium border-l border-border first:border-l-0 max-md:min-h-[44px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
+		selected: "bg-accent-bg text-accent",
+		unselected: "text-text-secondary hover:text-text",
+	},
 	/** Full-width session view band, with literal 44px phone targets. */
 	switcher: {
 		list: "flex w-full min-w-0 gap-1 rounded-lg bg-bg-alt p-0.5",

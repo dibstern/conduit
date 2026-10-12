@@ -9,7 +9,7 @@
   same colour in both themes, like a project square.
 -->
 <script module lang="ts">
-	const SIZE_CLASSES = { 6: "size-[6px]", 7: "size-[7px]", 8: "size-[8px]" } as const;
+	const SIZE_CLASSES = { 6: "size-[6px]", 7: "size-[7px]", 8: "size-[8px]", 9: "size-[9px]" } as const;
 </script>
 
 <script lang="ts">
