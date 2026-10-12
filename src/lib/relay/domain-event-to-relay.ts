@@ -126,6 +126,7 @@ export function translateDomainEventToRelay(
 		case "input.admitted":
 		case "input.sent":
 		case "input.cancelled":
+		case "input.interrupt_requested":
 			return silent(
 				"persistence-only; browsers read pending inputs from the detail stream",
 			);

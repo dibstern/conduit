@@ -67,6 +67,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"input.admitted",
 	"input.sent",
 	"input.cancelled",
+	"input.interrupt_requested",
 	"session.created",
 	"session.renamed",
 	"session.rewound",
@@ -291,7 +292,7 @@ export const STEER_BLOCKERS = [
 	"model_differs",
 	"agent_differs",
 	"variant_differs",
-	"slash_command",
+	"slash_command", // Historical RPC refusal; retained to decode older servers' replies.
 ] as const;
 export type SteerBlocker = (typeof STEER_BLOCKERS)[number];
 
@@ -323,6 +324,11 @@ export interface InputSentPayload {
 }
 
 export interface InputCancelledPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
+export interface InputInterruptRequestedPayload {
 	readonly sessionId: string;
 	readonly inputId: string;
 }
@@ -622,6 +628,7 @@ export interface EventPayloadMap {
 	"input.admitted": InputAdmittedPayload;
 	"input.sent": InputSentPayload;
 	"input.cancelled": InputCancelledPayload;
+	"input.interrupt_requested": InputInterruptRequestedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
 	"session.rewound": { readonly messageId: string };
@@ -1014,6 +1021,11 @@ const InputCancelledPayloadSchema = Schema.Struct({
 	inputId: Schema.String,
 });
 
+const InputInterruptRequestedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+});
+
 const SessionCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	title: Schema.String,
@@ -1335,6 +1347,10 @@ const InputCancelledEventSchema = eventEnvelope(
 	"input.cancelled",
 	InputCancelledPayloadSchema,
 );
+const InputInterruptRequestedEventSchema = eventEnvelope(
+	"input.interrupt_requested",
+	InputInterruptRequestedPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -1511,6 +1527,7 @@ export const CanonicalEventSchema = Schema.Union(
 	InputAdmittedEventSchema,
 	InputSentEventSchema,
 	InputCancelledEventSchema,
+	InputInterruptRequestedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
 	eventEnvelope("session.rewound", Schema.Struct({ messageId: Schema.String })),

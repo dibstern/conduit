@@ -105,6 +105,7 @@ describe("Schema Migration", () => {
 					unique: true,
 				},
 				{ name: "idx_events_type", table: "events", unique: false },
+				{ name: "idx_events_unstamped", table: "events", unique: false },
 				{
 					name: "idx_message_part_tombstones_session_version",
 					table: "message_part_tombstones",

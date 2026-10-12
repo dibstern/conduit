@@ -513,7 +513,7 @@
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
-		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to steer`
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${inputText.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
 		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
 		: sendButtonLabel,
 	);
@@ -994,7 +994,7 @@
 			switch (action) {
 				case "pause": handleStop(); break;
 				case "resume": void sendMessage("Continue."); break;
-				case "clear": void sendMessage("/goal clear"); break;
+				case "clear": void sendMessage("/goal clear", "steer"); break;
 				case "edit": handleAttachSetGoal(condition); break;
 				case "new": handleAttachSetGoal(); break;
 			}

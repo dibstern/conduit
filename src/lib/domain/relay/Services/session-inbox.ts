@@ -4,6 +4,7 @@
 // from read models on every call, serialises per session and commits the
 // decision. No queue state lives in memory, so a restart has nothing to rebuild.
 
+import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import {
@@ -20,6 +21,7 @@ import {
 	type InputAdmittedPayload,
 	type InputCancelledPayload,
 	type InputDelivery,
+	type InputInterruptRequestedPayload,
 	type InputRequest,
 	InputRequestSchema,
 	type InputSentPayload,
@@ -78,6 +80,8 @@ export interface InboxView {
 	readonly provider: string | undefined;
 	/** Queued inputs, oldest first. */
 	readonly queued: readonly InboxInput[];
+	/** Oldest queued command whose interrupt request is still awaiting handoff. */
+	readonly interruptRequested?: InboxInput | undefined;
 	/** An input was handed off as a steer and has not started yet. */
 	readonly steering: boolean;
 	/** A turn is open, a handoff is in flight, or a prompt waits on the user. */
@@ -119,7 +123,11 @@ export type InboxCommand =
 export type InboxEvent =
 	| { readonly type: "input.admitted"; readonly data: InputAdmittedPayload }
 	| { readonly type: "input.sent"; readonly data: InputSentPayload }
-	| { readonly type: "input.cancelled"; readonly data: InputCancelledPayload };
+	| { readonly type: "input.cancelled"; readonly data: InputCancelledPayload }
+	| {
+			readonly type: "input.interrupt_requested";
+			readonly data: InputInterruptRequestedPayload;
+	  };
 
 export type InboxDecision =
 	| {
@@ -129,6 +137,8 @@ export type InboxDecision =
 			readonly handoff?: InboxInput;
 			/** The handoff joins the running turn. */
 			readonly steer?: true;
+			/** Interrupt after committing the events and releasing the session permit. */
+			readonly interrupt?: true;
 	  }
 	| {
 			readonly _tag: "Rejected";
@@ -154,7 +164,8 @@ function steerBlocker(
 ): SteerBlocker | undefined {
 	if (!view.providerSteers) return "no_steering";
 	if (view.promptOpen) return "prompt_open";
-	if (request.text.trimStart().startsWith("/")) return "slash_command";
+	// Commands start a new turn, so the running turn's options do not constrain them.
+	if (request.text.trimStart().startsWith("/")) return undefined;
 	const { running } = view;
 	if (!running) return undefined;
 	// A turn sent without a model runs on the default Conduit infers for it,
@@ -181,6 +192,18 @@ const steer = (
 ): InboxDecision => {
 	const reason = steerBlocker(view, input.request);
 	if (reason) return { _tag: "Rejected", reason };
+	if (input.request.text.trimStart().startsWith("/"))
+		return {
+			_tag: "Accepted",
+			events: [
+				...events,
+				{
+					type: "input.interrupt_requested",
+					data: { sessionId, inputId: input.inputId },
+				},
+			],
+			interrupt: true,
+		};
 	return {
 		_tag: "Accepted",
 		events: [
@@ -224,8 +247,13 @@ export function decideInbox(
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
 			if (!idle) return { _tag: "Accepted", events: [admitted] };
-			// An idle session hands off at once. An unpaused queue still goes first.
-			const next = paused ? undefined : view.queued[0];
+			// An interrupt's command precedes the queue and bypasses its Stop pause.
+			const next =
+				view.interruptRequested && !view.limited
+					? view.interruptRequested
+					: paused
+						? undefined
+						: view.queued[0];
 			const handoff = next ?? { inputId, request };
 			return {
 				_tag: "Accepted",
@@ -257,8 +285,16 @@ export function decideInbox(
 			};
 		}
 		case "Drain": {
-			const next = view.queued[0];
-			if (!idle || paused || !next) return { _tag: "Accepted", events: [] };
+			const next = view.interruptRequested ?? view.queued[0];
+			if (
+				!idle ||
+				!next ||
+				view.limited ||
+				view.usageResetsAt !== undefined ||
+				view.scheduled ||
+				(paused && !view.interruptRequested)
+			)
+				return { _tag: "Accepted", events: [] };
 			return {
 				_tag: "Accepted",
 				events: [sent(sessionId, next.inputId)],
@@ -315,7 +351,7 @@ export interface SessionInbox {
 		target: SessionInboxTarget,
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** Hand a queued input off now: a steer on a busy session, else the next
-	 *  turn. The only way to restart a paused queue. */
+	 *  turn. Commands interrupt first and run next, including after Stop. */
 	readonly sendNow: (
 		target: SessionInboxTarget,
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
@@ -389,6 +425,7 @@ export const SessionInboxLive = Layer.scoped(
 					open_prompts: number;
 					last_turn: string | null;
 					stopped: number;
+					interrupt_requested: string | null;
 					running: string | null;
 					in_flight: number;
 				}>`SELECT
@@ -419,6 +456,13 @@ export const SessionInboxLive = Layer.scoped(
 							AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
 								WHERE session_id = ${sessionId}
 								AND type IN ('turn.interrupted', 'turn.error')), 0)) AS stopped,
+					(SELECT pending.input_id FROM pending_inputs pending
+						WHERE pending.session_id = ${sessionId} AND pending.state = 'queued'
+						AND EXISTS (SELECT 1 FROM events
+							WHERE events.session_id = pending.session_id
+							AND events.type = 'input.interrupt_requested'
+							AND json_extract(events.data, '$.inputId') = pending.input_id)
+						ORDER BY pending.admitted_at, pending.rowid LIMIT 1) AS interrupt_requested,
 					(SELECT pending.request FROM provider_command_outbox outbox
 						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 						WHERE outbox.session_id = ${sessionId}
@@ -463,6 +507,9 @@ export const SessionInboxLive = Layer.scoped(
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,
+					interruptRequested: queued.find(
+						(input) => input.inputId === facts?.interrupt_requested,
+					),
 					steering: rows.some((row) => row.state === "steering"),
 					busy:
 						facts?.status === "busy" ||
@@ -559,6 +606,30 @@ export const SessionInboxLive = Layer.scoped(
 				);
 			});
 
+		const interrupt = (
+			target: Pick<SessionInboxTarget, "clientId" | "sessionId">,
+			decision: InboxDecision,
+		) =>
+			decision._tag === "Accepted" && decision.interrupt
+				? providerTurnService
+						.interruptTurn({
+							clientId: target.clientId,
+							sessionId: target.sessionId,
+							// The input id is reserved for its later send_turn receipt.
+							commandId: randomUUID(),
+						})
+						.pipe(
+							Effect.provideService(OverridesStateTag, overrides),
+							Effect.catchAllCause((cause) =>
+								Effect.sync(() =>
+									log.warn(
+										`session=${target.sessionId} inbox interrupt failed; command remains queued: ${cause}`,
+									),
+								),
+							),
+						)
+				: Effect.void;
+
 		const act =
 			(command: "Cancel" | "SendNow") => (target: SessionInboxTarget) =>
 				serialised(target.sessionId)(
@@ -571,10 +642,16 @@ export const SessionInboxLive = Layer.scoped(
 						yield* commit(target.sessionId, decision, {
 							clientId: target.clientId,
 						});
-						return decision._tag === "Rejected"
-							? decision.reason
-							: ("accepted" as const);
+						return decision;
 					}),
+				).pipe(
+					// A turn end triggers a drain that needs the released permit.
+					Effect.tap((decision) => interrupt(target, decision)),
+					Effect.map((decision) =>
+						decision._tag === "Rejected"
+							? decision.reason
+							: ("accepted" as const),
+					),
 				);
 
 		const scheduleReset = (sessionId: string, view: InboxView) =>
@@ -679,17 +756,26 @@ export const SessionInboxLive = Layer.scoped(
 							request: input.request,
 						});
 						// Submit is only refused as a steer: a known id is accepted.
-						if (decision._tag === "Rejected")
-							return decision.reason === "already_started"
-								? { handedOff: false }
-								: { refused: decision.reason };
+						if (decision._tag === "Rejected") return decision;
 						// A queued input handed off ahead of this one has no requesting client.
 						const own = decision.handoff?.inputId === input.inputId;
 						yield* commit(input.sessionId, decision, own ? input : DRAINED);
 						if (!decision.handoff && decision.events.length > 0)
 							yield* scheduleReset(input.sessionId, view);
-						return { handedOff: own };
+						return decision;
 					}),
+				).pipe(
+					Effect.tap((decision) => interrupt(input, decision)),
+					Effect.map((decision) =>
+						decision._tag === "Rejected" &&
+						decision.reason !== "already_started"
+							? { refused: decision.reason }
+							: {
+									handedOff:
+										decision._tag === "Accepted" &&
+										decision.handoff?.inputId === input.inputId,
+								},
+					),
 				),
 		} satisfies SessionInbox;
 	}),
