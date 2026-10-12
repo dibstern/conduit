@@ -69,10 +69,10 @@
 		/** The five chat cards (ToolGroupCard, ToolGenericCard, SkillItem, ToolGroupItem, ThinkingBlock). */
 		card: `text-xs text-text-dimmer ${HOVER_FILL_CLASSES.surface}`,
 		/** SettingsPanel's setup-scenario headers: a titled section you open. */
-		section: `text-sm font-medium text-text ${HOVER_FILL_CLASSES["overlay-soft"]}`,
+		section: "text-sm font-medium text-text",
 		/** SettingsPanel's instance rows: colour is inherited, because the row's
 		 *  own children (name, badges, port) each carry their own. */
-		row: `text-sm ${HOVER_FILL_CLASSES["overlay-soft"]}`,
+		row: "text-sm",
 	} as const;
 
 	const DENSITY_CLASSES = {
@@ -83,6 +83,8 @@
 		list: "gap-2 p-[6px] min-h-[30px]",
 		/** Settings › Server instance rows, literal px from the mockup's `.ir`. */
 		row: "gap-[9px] px-[12px] py-[8px] min-h-[44px]",
+		/** SettingsGroup's collapsible header, literal px from the mockup's `.gh`. */
+		group: "gap-[8px] px-[12px] py-[8px] min-h-[38px]",
 	} as const;
 </script>
 

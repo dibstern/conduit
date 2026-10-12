@@ -18,7 +18,7 @@
 		 * How the field is painted. `bare` drops the border, background,
 		 * placeholder colour and focus ring, for fields whose affordance is the
 		 * bordered row AROUND them. Pair it with `size="content"`: a chromeless
-		 * field that still forces `h-9` has only half opted out.
+		 * field that still forces a height has only half opted out.
 		 */
 		chrome?: FieldChrome;
 		/** Standalone invalid flag; a wrapping <Field> also forces it. */
