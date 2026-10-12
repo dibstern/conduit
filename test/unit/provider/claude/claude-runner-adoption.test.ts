@@ -267,6 +267,42 @@ describe("Claude runner adoption", () => {
 		});
 	});
 
+	it("refuses stop-task for a runner whose hello predates it, since that runner acknowledges unknown commands", async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1000)"],
+			{ stdio: "ignore" },
+		);
+		children.push(child);
+		const fixture = await runnerSocket({ rejections: 0, child });
+		const result = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeProcessClaudeSessionRunner(
+						{ workspaceRoot: fixture.workspaceRoot },
+						() => Effect.succeed({}),
+					);
+					yield* runner.recoverEffect;
+					return yield* Effect.either(
+						runner.executeEffect({
+							type: "stop-task",
+							sessionId: "adoption-session",
+							taskId: "background-task",
+						}),
+					);
+				}),
+			),
+		);
+		expect(Either.isLeft(result)).toBe(true);
+		expect(
+			fixture.commands.some(
+				(message) =>
+					message.type === "command" && message.command.type === "stop-task",
+			),
+		).toBe(false);
+		observations.push({ case: "legacy stop-task", refused: true });
+	});
+
 	it("fails within bounded backoff without deleting or signalling a live unverified runner", async () => {
 		const fixture = await runnerSocket({
 			rejections: Number.POSITIVE_INFINITY,

@@ -150,9 +150,11 @@ hooks) can be replayed with file sources disabled in a settings-only workspace.
 Their object/array merging retains Conduit's original flag overrides. Managed,
 unknown or trust-sensitive settings, once hooks, repositories/worktrees,
 unreadable files, global configuration files, and filesystem customization or
-instruction assets prevent this fallback. The old runner keeps serving and the upgrade is deferred; security
+instruction assets prevent this fallback. The upgrade is deferred; security
 settings are never promoted to the flag tier or filesystem discovery silently
-removed. This conservative limitation remains until the SDK supports replaying
+removed. The old runner keeps serving while busy, including background work.
+The next send to it while idle drains it through end-session, like a folder
+change, and starts a runner on the current build that reads the files natively. This conservative limitation remains until the SDK supports replaying
 the original source tiers. After the switch there is no old runner to keep, so
 an upgraded runner that must recreate its query after such a change reads the
 files natively, as a runner that was never upgraded does.

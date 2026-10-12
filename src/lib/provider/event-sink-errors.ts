@@ -38,6 +38,7 @@ export class ClaudeBoundaryError extends Data.TaggedError(
 
 export class ClaudeRuntimeError extends Data.TaggedError("ClaudeRuntimeError")<{
 	readonly message: string;
+	readonly code?: string;
 }> {}
 
 /** Match the CLI's stale-resume diagnostic, including SDK stderr tails. */

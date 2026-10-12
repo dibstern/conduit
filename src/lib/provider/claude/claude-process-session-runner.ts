@@ -28,6 +28,7 @@ import {
 	runnerPidAlive,
 	runnerPidMatchesRegistration,
 } from "./claude-runner-registry.js";
+import { CLAUDE_SETTINGS_REPLAY_DEFERRED } from "./claude-runner-settings.js";
 import {
 	failClaudeRunnerTurn,
 	observeClaudeRunnerTurn,
@@ -64,6 +65,7 @@ interface RunnerChild {
 	child?: ChildProcess;
 	connection?: ClaudeRunnerSocket;
 	buildId?: string;
+	stopsTasks?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
 	readonly upgrade: ClaudeRunnerUpgrade;
@@ -531,6 +533,7 @@ export const makeProcessClaudeSessionRunner = (
 							});
 						yield* ensureAttached();
 						entry.buildId = hello.buildId;
+						entry.stopsTasks = hello.stopsTasks === true;
 						entry.upgrade.state = hello.upgradeState;
 						for (const binding of entry.candidate
 							? []
@@ -932,8 +935,11 @@ export const makeProcessClaudeSessionRunner = (
 					Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
 				),
 			failed: (sessionId, old, cause) => {
+				const failure = claudeRunnerFailure("upgrade runner", cause);
+				if (failure.code === CLAUDE_SETTINGS_REPLAY_DEFERRED)
+					old.upgrade.settingsDeferred = true;
 				log.warn(
-					`Claude runner upgrade deferred for session ${sessionId}: ${claudeRunnerFailure("upgrade runner", cause).message}`,
+					`Claude runner upgrade deferred for session ${sessionId}: ${failure.message}`,
 				);
 				upgradeMark(sessionId, old, "failed");
 			},
@@ -1339,8 +1345,16 @@ export const makeProcessClaudeSessionRunner = (
 											(extraFoldersChanged && !canReconcileExtraFolders));
 									if (foldersChanged && command.type === "pre-warm")
 										return { entry: undefined, draining: false };
+									// Only an idle runner restarts. Background tasks can keep one
+									// busy for hours, and it can still serve the send meanwhile.
+									const upgradeByRestart =
+										command.type === "send-turn" &&
+										existing.upgrade.settingsDeferred === true &&
+										!existing.recovering &&
+										existing.commandsInFlight === 0 &&
+										existing.upgrade.state?.quiescent === true;
 									if (
-										foldersChanged &&
+										(foldersChanged || upgradeByRestart) &&
 										!existing.failure &&
 										!existing.stopping &&
 										!existing.idleExiting &&
@@ -1487,6 +1501,13 @@ export const makeProcessClaudeSessionRunner = (
 							claudeRunnerFailure(
 								command.type,
 								"Claude runners are shutting down",
+							),
+						);
+					if (command.type === "stop-task" && !entry.stopsTasks)
+						return yield* Effect.fail(
+							claudeRunnerFailure(
+								command.type,
+								`Claude runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
 					const payload =
