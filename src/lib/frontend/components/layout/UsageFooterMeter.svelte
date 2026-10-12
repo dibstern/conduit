@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
+	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
@@ -33,6 +34,15 @@
 	const folded = $derived(accounts.filter((reading) => !docked.includes(reading)));
 	const single = $derived(accounts.length === 1 ? accounts.find((reading) => reading.windows.some((window) => window.kind in windowLabels)) : undefined);
 	let sheetOpen = $state(false);
+	// The dock's grab handle promises a pull: dragging it up past the slop opens the sheet.
+	const PULL_OPEN_PX = 16;
+	let pullStartY: number | undefined;
+
+	function pullDock(event: PointerEvent) {
+		if (pullStartY === undefined || pullStartY - event.clientY < PULL_OPEN_PX) return;
+		pullStartY = undefined;
+		sheetOpen = true;
+	}
 
 	function groupsOf(rows: readonly UsageReading[]) {
 		return harnesses.flatMap((harness) => {
@@ -139,7 +149,16 @@
 				aria-label="Show usage for every account"
 				aria-haspopup="dialog"
 				onclick={() => { sheetOpen = true; }}
-				class="flex w-full flex-col text-left"
+				onpointerdown={(event: PointerEvent) => {
+					if (!event.isPrimary) return;
+					pullStartY = event.clientY;
+					// A mouse keeps reporting once it leaves the dock; a finger is captured already.
+					if (event.currentTarget instanceof Element) event.currentTarget.setPointerCapture(event.pointerId);
+				}}
+				onpointermove={pullDock}
+				onpointerup={() => { pullStartY = undefined; }}
+				onpointercancel={() => { pullStartY = undefined; }}
+				class="flex w-full touch-none flex-col text-left"
 			>
 				<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>
 				{@render meter(docked, "usage-footer", "phone")}
@@ -156,14 +175,16 @@
 		{/if}
 	</div>
 	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" labelledBy="{id}-title" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
-		<Surface variant="raised" radius="none" elevation="modal" data-testid="usage-sheet" class="w-full rounded-t-[18px] px-[8px] pt-[8px] pb-[calc(24px+env(safe-area-inset-bottom))] text-[11.5px]">
-			<div aria-hidden="true" class="mx-auto mb-[8px] h-[4px] w-[36px] rounded-full bg-border-chip"></div>
-			<div class="mx-[8px] mt-[2px] mb-[6px] flex items-baseline gap-[8px]">
-				<h2 id="{id}-title" class="flex-1 text-[14px] font-semibold text-text">Usage</h2>
-				<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Settings ›</TextButton>
-			</div>
-			{@render meter(accounts, "usage-sheet", "sheet")}
-		</Surface>
+		<div use:dragToDismiss={{ ondismiss: () => { sheetOpen = false; } }}>
+			<Surface variant="raised" radius="none" elevation="modal" data-testid="usage-sheet" class="w-full rounded-t-[18px] px-[8px] pt-[8px] pb-[calc(24px+env(safe-area-inset-bottom))] text-[11.5px]">
+				<div aria-hidden="true" class="mx-auto mb-[8px] h-[4px] w-[36px] rounded-full bg-border-chip"></div>
+				<div class="mx-[8px] mt-[2px] mb-[6px] flex items-baseline gap-[8px]">
+					<h2 id="{id}-title" class="flex-1 text-[14px] font-semibold text-text">Usage</h2>
+					<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Settings ›</TextButton>
+				</div>
+				{@render meter(accounts, "usage-sheet", "sheet")}
+			</Surface>
+		</div>
 	</Dialog>
 {:else if single}
 	<TextButton tone="inherit" data-testid="usage-footer-meter" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="shrink-0 border-t border-border-subtle p-[10px] text-left text-[10.5px]">
