@@ -142,6 +142,12 @@ export interface ResumeLedger {
 	base: ResumeBase | undefined;
 	/** The server's name for the base, when its snapshot carried one. */
 	point: ResumePoint | undefined;
+	/**
+	 * The newest sequence delivered, where a subscription opened again
+	 * resumes. Its rows may have been cut short, which the checksum catches;
+	 * what the checksum does not cover, the server re-sends on every resume.
+	 */
+	cursor: number | undefined;
 	readonly rows: Map<string, number>;
 	/** The part rows seen under each message, which go when it goes. */
 	readonly parts: Map<string, Set<string>>;
@@ -150,6 +156,7 @@ export interface ResumeLedger {
 export const makeResumeLedger = (): ResumeLedger => ({
 	base: undefined,
 	point: undefined,
+	cursor: undefined,
 	rows: new Map(),
 	parts: new Map(),
 });
@@ -157,6 +164,7 @@ export const makeResumeLedger = (): ResumeLedger => ({
 const clearLedger = (ledger: ResumeLedger) => {
 	ledger.base = undefined;
 	ledger.point = undefined;
+	ledger.cursor = undefined;
 	ledger.rows.clear();
 	ledger.parts.clear();
 };
@@ -391,7 +399,7 @@ const unsubscribed = Effect.map(
  * sequence the consumer provably completed.
  *
  * `issue` is called with the sequence to resume from — `undefined` on the first
- * attempt unless `from` is given, and again on a drop that completed nothing, so
+ * attempt unless `from` is given or the `ledger` kept one, and again on a drop that completed nothing, so
  * a subscription that never got a snapshot still asks for one. With a `ledger`
  * it is also given the base a resume is checked against, and the server's
  * point for it when there is one.
@@ -416,13 +424,16 @@ export const resumeStream = <A extends object>(
 ): Stream.Stream<A, WsRpcError> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
+			const ledger = options.ledger;
 			const cursor = yield* Ref.make<Cursor>({
-				closed: options.from,
+				closed: options.from ?? ledger?.cursor,
 				open: undefined,
 				seen: nothingSeen,
 			});
 			const failures = yield* Ref.make(0);
-			const ledger = options.ledger;
+			const keep = (at: Cursor) => {
+				if (ledger !== undefined) ledger.cursor = at.open ?? at.closed;
+			};
 
 			const attempt = (): Stream.Stream<A, WsRpcError> =>
 				Stream.unwrap(
@@ -435,11 +446,12 @@ export const resumeStream = <A extends object>(
 					Stream.filterEffect((envelope) =>
 						Effect.gen(function* () {
 							yield* Ref.set(failures, 0);
-							const deliver = yield* Ref.modify(cursor, (from) => {
+							const step = yield* Ref.modify(cursor, (from) => {
 								const step = advance(from, envelope);
-								return [step.deliver, step.cursor];
+								return [step, step.cursor];
 							});
-							if (!deliver || ledger === undefined) return deliver;
+							keep(step.cursor);
+							if (!step.deliver || ledger === undefined) return step.deliver;
 							const tag = tagOf(envelope);
 							const drop = globalThis.__conduitDropChange;
 							if (
@@ -532,7 +544,9 @@ export const resumeStream = <A extends object>(
 
 			const saved = options.saved;
 			if (saved === undefined || ledger === undefined) return attempt();
-			yield* Ref.update(cursor, (from) => advance(from, saved).cursor);
+			keep(
+				yield* Ref.updateAndGet(cursor, (from) => advance(from, saved).cursor),
+			);
 			yield* Effect.orDie(record(ledger, saved));
 			return Stream.concat(Stream.make(saved), attempt());
 		}),

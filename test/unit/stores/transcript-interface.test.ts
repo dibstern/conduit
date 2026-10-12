@@ -207,7 +207,7 @@ describe("transcript feed interface", () => {
 		);
 	});
 
-	it("shows cached rows immediately and replays the held HWM on reconnect", async () => {
+	it("shows cached rows immediately and resumes from the held HWM on reconnect", async () => {
 		viewTranscript("project", "A");
 		await settled(() => requestFor(wire.requests, "A") !== undefined);
 		const first = requestFor(wire.requests, "A");
@@ -225,9 +225,10 @@ describe("transcript feed interface", () => {
 		expect(transcriptStatus("A")._tag).toBe("cold");
 		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
 		const resumed = requestFor(wire.requests, "A", 1);
-		// Replaying the held sequence also recovers a pending rewind point
-		// projected at that watermark during the reconnect.
-		expect(resumed?.payload).toHaveProperty("resumeFromSequence", 8);
+		// It resumes from the newest sequence delivered, not a replay of it:
+		// the server re-sends what the checksum does not cover, like a pending
+		// rewind point, on every resume (conduit-test-k7pp).
+		expect(resumed?.payload).toHaveProperty("resumeFromSequence", 9);
 		if (!resumed) throw new Error("missing resumed request");
 		await wire.emit(resumed, { _tag: "synchronized" });
 		await settled(() => transcriptStatus("A")._tag === "live");
