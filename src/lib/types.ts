@@ -1,5 +1,6 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
+import type { Tracer } from "effect/Tracer";
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type {
@@ -181,6 +182,8 @@ export interface ProjectRelayConfig {
 	sessionTitle?: string;
 	/** Logger instance — defaults to a console-backed root logger */
 	log?: Logger;
+	/** Ambient daemon tracer borrowed by the relay ManagedRuntime. */
+	tracer?: Tracer;
 	/**
 	 * Enables per-directory scoping via x-opencode-directory header.
 	 * WebSocket upgrades are always owned by the caller, which attaches sockets
