@@ -14,7 +14,7 @@
 // Resume is a rebase for the same reason as the shell: the query can only
 // report rows that still exist.
 
-import { Effect, Option, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { withCachedSessionGit } from "../../../git/session-git.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
@@ -30,16 +30,14 @@ export const subscribeSessionFamily = (options: {
 }): Stream.Stream<
 	Envelope<SessionInfo>,
 	ShellSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag
+	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag | ConfigTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const backgroundOf = yield* BackgroundLivenessTag;
-			const config = Option.getOrUndefined(
-				yield* Effect.serviceOption(ConfigTag),
-			);
+			const config = yield* ConfigTag;
 			let anchor = options.sessionId;
 			const held = new Set<string>();
 			return stream<SessionInfo, ShellSubscriptionError>({
@@ -55,15 +53,13 @@ export const subscribeSessionFamily = (options: {
 										Effect.gen(function* () {
 											return {
 												...row,
-												item: config
-													? yield* withSessionWorktreeStatus(
-															withCachedSessionGit(row.item, [
-																config.projectDir,
-																...(config.extraFolders ?? []),
-															]),
-															config,
-														)
-													: row.item,
+												item: yield* withSessionWorktreeStatus(
+													withCachedSessionGit(
+														{ ...row.item, projectSlug: config.slug },
+														[config.projectDir, ...(config.extraFolders ?? [])],
+													),
+													config,
+												),
 											};
 										}),
 									).pipe(Effect.map((rows) => ({ ...list, rows }))),

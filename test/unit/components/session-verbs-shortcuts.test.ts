@@ -27,7 +27,12 @@ function press(
 	})?.testId;
 }
 
-const open: SessionInfo = { id: "s1", title: "Open", status: "idle" };
+const open: SessionInfo = {
+	projectSlug: "test-project",
+	id: "s1",
+	title: "Open",
+	status: "idle",
+};
 
 describe("session verb shortcuts", () => {
 	it("runs each plain key's verb, following its current toggle state", () => {

@@ -73,15 +73,27 @@ beforeEach(() => {
 		{ slug: "current-project", title: "Current", folders: ["/current"] },
 	];
 	seedRootSessions([
-		{ id: "idle", title: "Idle work", attention: "idle" },
-		{ id: "approval", title: "Approval", attention: "needs-approval" },
 		{
+			projectSlug: "current-project",
+			id: "idle",
+			title: "Idle work",
+			attention: "idle",
+		},
+		{
+			projectSlug: "current-project",
+			id: "approval",
+			title: "Approval",
+			attention: "needs-approval",
+		},
+		{
+			projectSlug: "current-project",
 			id: "pin",
 			title: "Pinned work",
 			attention: "needs-approval",
 			pinnedAt: 1,
 		},
 		{
+			projectSlug: "current-project",
 			id: "settled",
 			title: "Finished work",
 			attention: "done-unread",
@@ -104,6 +116,7 @@ afterEach(() => {
 
 function addSnoozedRow(until: number | null = Date.now() + 3_600_000) {
 	const row = {
+		projectSlug: "current-project",
 		id: "sleeping",
 		title: "Sleeping work",
 		attention: "idle" as const,
@@ -211,6 +224,7 @@ describe("session triage list", () => {
 			sessionState.now = now;
 			seedRootSessions([
 				{
+					projectSlug: "current-project",
 					id: "wake",
 					title: "Wake soon",
 					attention: "idle",
@@ -227,6 +241,7 @@ describe("session triage list", () => {
 			expect(vi.getTimerCount()).toBe(1);
 			seedRootSessions([
 				{
+					projectSlug: "current-project",
 					id: "wake",
 					title: "Wake soon",
 					attention: "idle",
@@ -298,7 +313,9 @@ describe("session triage list", () => {
 	});
 
 	it("omits empty shelves", () => {
-		seedRootSessions([{ id: "idle", title: "Idle work" }]);
+		seedRootSessions([
+			{ projectSlug: "current-project", id: "idle", title: "Idle work" },
+		]);
 		render(SessionList);
 		expect(screen.queryByText("Pinned")).toBeNull();
 		expect(screen.queryByTestId("settled-shelf-toggle")).toBeNull();
@@ -364,7 +381,9 @@ describe("session triage list", () => {
 
 	it("does not reannounce the search summary when a result settles", async () => {
 		sessionState.searchQuery = "Idle";
-		seedSearchResults([{ id: "idle", title: "Idle work" }]);
+		seedSearchResults([
+			{ projectSlug: "current-project", id: "idle", title: "Idle work" },
+		]);
 		render(SessionList);
 		const live = screen
 			.getByTestId("session-search-summary")
@@ -378,7 +397,12 @@ describe("session triage list", () => {
 			subtree: true,
 		});
 		seedRootSessions([
-			{ id: "idle", title: "Idle work", settledAt: Date.now() },
+			{
+				projectSlug: "current-project",
+				id: "idle",
+				title: "Idle work",
+				settledAt: Date.now(),
+			},
 		]);
 		await tick();
 		expect(live.textContent).toBe("1 match");
@@ -608,8 +632,19 @@ describe("sidebar pick", () => {
 
 	beforeEach(() => {
 		seedRootSessions([
-			{ id: "unread", title: "unread", unread: true, lastTurnEndVersion: 7 },
-			{ id: "read", title: "read", lastTurnEndVersion: 3 },
+			{
+				projectSlug: "current-project",
+				id: "unread",
+				title: "unread",
+				unread: true,
+				lastTurnEndVersion: 7,
+			},
+			{
+				projectSlug: "current-project",
+				id: "read",
+				title: "read",
+				lastTurnEndVersion: 3,
+			},
 		]);
 	});
 

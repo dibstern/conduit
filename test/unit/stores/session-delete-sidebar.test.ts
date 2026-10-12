@@ -38,6 +38,10 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import {
+	attachedProjectState,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
 	clearSessionState,
 	getFilteredSessions,
 	sessionState,
@@ -45,12 +49,14 @@ import {
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 const VICTIM = {
+	projectSlug: "project-a",
 	id: "victim",
 	title: "Doomed Session",
 	status: "idle",
 	updatedAt: Date.now(),
 } satisfies SessionInfo;
 const KEEPER = {
+	projectSlug: "project-a",
 	id: "keeper",
 	title: "Survivor",
 	status: "idle",
@@ -59,6 +65,8 @@ const KEEPER = {
 
 beforeEach(() => {
 	clearSessionState();
+	attachedProjectState.slug = "project-a";
+	routerState.search = "";
 	sessionState.currentId = "keeper";
 	seedSessions([VICTIM, KEEPER]);
 });
@@ -88,6 +96,7 @@ describe("deleted sessions leave the sidebar", () => {
 
 	it("keeps family rows until the family feed removes them", () => {
 		const child = {
+			projectSlug: "project-a",
 			id: "child",
 			title: "Child",
 			status: "idle",
@@ -107,6 +116,7 @@ describe("deleted sessions leave the sidebar", () => {
 
 	it("removes a deleted subagent when the family feed removes it", () => {
 		const child = {
+			projectSlug: "project-a",
 			id: "child",
 			title: "Child",
 			status: "idle",

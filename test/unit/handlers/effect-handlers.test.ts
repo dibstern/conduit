@@ -1458,6 +1458,7 @@ describe("handleForkSession", () => {
 			const serviceListSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "ses-parent",
 						title: "Parent Session",
 						status: "idle" as const,
@@ -1465,6 +1466,7 @@ describe("handleForkSession", () => {
 						messageCount: 1,
 					},
 					{
+						projectSlug: "test-project",
 						id: "ses-child",
 						title: "Forked Session",
 						status: "idle" as const,
@@ -2504,6 +2506,7 @@ describe("handleDeleteSession", () => {
 			const listSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "remaining-session",
 						title: "Remaining Session",
 						status: "idle" as const,
@@ -3365,6 +3368,7 @@ describe("handleMessage", () => {
 			const listSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "session-1",
 						title: "Untitled",
 						status: "idle" as const,
@@ -3430,6 +3434,7 @@ describe("handleMessage", () => {
 		const listSessions = vi.fn(() =>
 			Effect.succeed([
 				{
+					projectSlug: "test-project",
 					id: "session-1",
 					title: "User named this",
 					status: "idle" as const,

@@ -46,6 +46,9 @@ import {
 import { type SidebarRow, SidebarRowSchema } from "../sidebar-row.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
 
+// The relay or daemon supplies project ownership when reading this database.
+type SessionProjection = Omit<SessionInfo, "projectSlug">;
+
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
 	Schema.parseJson(SessionGoalChangedPayloadSchema),
@@ -128,7 +131,7 @@ export const sessionRowsToSessionInfoList = (
 			sessionId: string,
 		) => SessionBackground | undefined;
 	} = {},
-): Array<SessionInfo & { readonly updatedAt: number }> => {
+): Array<SessionProjection & { readonly updatedAt: number }> => {
 	const subtree = new Map<
 		string,
 		{
@@ -324,7 +327,7 @@ const sidebarItem = (
 	row: SidebarRow,
 	backgroundOf?: (sessionId: string) => SessionBackground | undefined,
 	busyMembers?: ReadonlySet<string>,
-): SessionInfo => {
+): SessionProjection => {
 	const work = new Set(row.members.map((id) => backgroundOf?.(id)?.work));
 	const background = backgroundOf?.(row.session.id);
 	const backgroundChildren = new Set(
@@ -440,7 +443,7 @@ export interface ReadQueryEffect {
 		statuses?: Readonly<Record<string, { type: string }>>;
 		backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 	}) => Effect.Effect<
-		readonly (SessionInfo & { readonly updatedAt: number })[],
+		readonly (SessionProjection & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -537,7 +540,7 @@ export interface ReadQueryEffect {
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
-				readonly item: SessionInfo;
+				readonly item: SessionProjection;
 				readonly version: number;
 			}[];
 			readonly version: number;
@@ -1456,7 +1459,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
-				readonly item: SessionInfo;
+				readonly item: SessionProjection;
 				readonly version: number;
 			}[];
 			readonly version: number;

@@ -124,8 +124,8 @@
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
 	const accountProjectSlug = $derived(
 		sessionState.currentId
-			? findSession(sessionState.currentId)?.projectSlug ?? getCurrentSlug() ?? ""
-			: getDraftProject() ?? getCurrentSlug() ?? "",
+			? findSession(sessionState.currentId)?.projectSlug ?? ""
+			: getDraftProject() ?? "",
 	);
 	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
 	const switchingTo = $derived(selectedDriver === "claude" && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);

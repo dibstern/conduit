@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
           "title": "New session - 2026-03-27T04:07:47.404Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
           "title": "New session - 2026-03-27T04:07:47.404Z",
           "status": "idle",
@@ -496,6 +498,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
               "status": "idle",
@@ -509,6 +512,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
               "status": "idle",
@@ -522,6 +526,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
               "status": "idle",
@@ -535,6 +540,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
               "status": "idle",
@@ -548,6 +554,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
               "status": "busy",
@@ -567,6 +574,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "New session - 2026-03-27T04:07:47.404Z",
               "status": "busy",
@@ -581,6 +589,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -595,6 +604,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -644,6 +654,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -662,6 +673,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -675,6 +687,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -688,6 +701,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -723,6 +737,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -736,6 +751,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -749,6 +765,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -762,6 +779,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -775,6 +793,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -794,6 +813,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -843,6 +863,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -861,6 +882,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -874,6 +896,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -887,6 +910,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -922,6 +946,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -935,6 +960,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -948,6 +974,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -961,6 +988,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -974,6 +1002,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -993,6 +1022,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1042,6 +1072,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1060,6 +1091,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1073,6 +1105,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1086,6 +1119,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1121,6 +1155,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1134,6 +1169,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1147,6 +1183,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1160,6 +1197,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1173,6 +1211,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1192,6 +1231,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1241,6 +1281,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1259,6 +1300,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1272,6 +1314,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1285,6 +1328,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1320,6 +1364,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1333,6 +1378,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1346,6 +1392,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1359,6 +1406,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1372,6 +1420,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1391,6 +1440,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1440,6 +1490,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1458,6 +1509,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1471,6 +1523,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1484,6 +1537,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1519,6 +1573,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1532,6 +1587,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1545,6 +1601,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1558,6 +1615,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1571,6 +1629,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1590,6 +1649,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1639,6 +1699,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1657,6 +1718,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1670,6 +1732,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1683,6 +1746,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1718,6 +1782,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1731,6 +1796,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1744,6 +1810,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1757,6 +1824,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1770,6 +1838,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1789,6 +1858,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1838,6 +1908,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1856,6 +1927,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1869,6 +1941,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1882,6 +1955,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1917,6 +1991,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1930,6 +2005,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1943,6 +2019,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1956,6 +2033,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -1969,6 +2047,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -1988,6 +2067,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2037,6 +2117,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2055,6 +2136,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2068,6 +2150,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2081,6 +2164,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2116,6 +2200,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2129,6 +2214,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2142,6 +2228,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2155,6 +2242,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2168,6 +2256,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2187,6 +2276,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2236,6 +2326,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2254,6 +2345,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2267,6 +2359,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2280,6 +2373,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2315,6 +2409,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2328,6 +2423,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2341,6 +2437,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2354,6 +2451,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2367,6 +2465,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2386,6 +2485,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2435,6 +2535,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2453,6 +2554,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2466,6 +2568,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2479,6 +2582,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2514,6 +2618,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2527,6 +2632,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2540,6 +2646,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2553,6 +2660,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2566,6 +2674,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2585,6 +2694,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2634,6 +2744,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2652,6 +2763,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2665,6 +2777,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2678,6 +2791,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2713,6 +2827,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2726,6 +2841,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2739,6 +2855,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2752,6 +2869,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2765,6 +2883,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2784,6 +2903,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2833,6 +2953,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2851,6 +2972,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2864,6 +2986,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2877,6 +3000,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2912,6 +3036,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2925,6 +3050,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2938,6 +3064,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2951,6 +3078,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -2964,6 +3092,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -2983,6 +3112,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3032,6 +3162,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3050,6 +3181,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3063,6 +3195,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3076,6 +3209,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3111,6 +3245,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3124,6 +3259,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3137,6 +3273,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3150,6 +3287,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3163,6 +3301,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3182,6 +3321,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3231,6 +3371,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3249,6 +3390,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3262,6 +3404,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3275,6 +3418,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3310,6 +3454,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3323,6 +3468,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3336,6 +3482,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3349,6 +3496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3362,6 +3510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3381,6 +3530,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3430,6 +3580,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3448,6 +3599,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3461,6 +3613,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3474,6 +3627,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3509,6 +3663,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3522,6 +3677,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3535,6 +3691,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3548,6 +3705,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3561,6 +3719,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3580,6 +3739,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3629,6 +3789,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3647,6 +3808,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3660,6 +3822,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3673,6 +3836,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3708,6 +3872,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3721,6 +3886,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3734,6 +3900,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3747,6 +3914,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3760,6 +3928,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3779,6 +3948,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3828,6 +3998,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3846,6 +4017,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3859,6 +4031,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3872,6 +4045,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3907,6 +4081,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3920,6 +4095,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3933,6 +4109,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3946,6 +4123,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -3959,6 +4137,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -3978,6 +4157,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4027,6 +4207,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4045,6 +4226,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4058,6 +4240,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4071,6 +4254,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4106,6 +4290,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4119,6 +4304,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4132,6 +4318,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4145,6 +4332,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4158,6 +4346,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4177,6 +4366,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4226,6 +4416,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4244,6 +4435,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4257,6 +4449,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4270,6 +4463,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4305,6 +4499,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4318,6 +4513,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4331,6 +4527,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4344,6 +4541,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4357,6 +4555,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4376,6 +4575,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4425,6 +4625,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4443,6 +4644,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4456,6 +4658,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4469,6 +4672,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4504,6 +4708,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4517,6 +4722,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4530,6 +4736,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4543,6 +4750,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4556,6 +4764,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4575,6 +4784,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4624,6 +4834,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4642,6 +4853,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4655,6 +4867,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4668,6 +4881,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4703,6 +4917,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4716,6 +4931,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4729,6 +4945,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4742,6 +4959,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4755,6 +4973,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4774,6 +4993,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4823,6 +5043,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4841,6 +5062,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4854,6 +5076,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4867,6 +5090,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4902,6 +5126,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4915,6 +5140,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4928,6 +5154,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4941,6 +5168,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -4954,6 +5182,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -4973,6 +5202,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5022,6 +5252,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5040,6 +5271,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5053,6 +5285,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5066,6 +5299,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5101,6 +5335,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5114,6 +5349,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5127,6 +5363,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5140,6 +5377,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5153,6 +5391,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5172,6 +5411,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5221,6 +5461,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5239,6 +5480,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5252,6 +5494,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5265,6 +5508,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5300,6 +5544,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5313,6 +5558,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5326,6 +5572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5339,6 +5586,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5352,6 +5600,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5371,6 +5620,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5420,6 +5670,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5438,6 +5689,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5451,6 +5703,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5464,6 +5717,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5499,6 +5753,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5512,6 +5767,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5525,6 +5781,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5538,6 +5795,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5551,6 +5809,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5570,6 +5829,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "busy",
@@ -5619,6 +5879,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5637,6 +5898,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5650,6 +5912,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",
@@ -5663,6 +5926,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d285f033ffe5mQ14cwpZs2tIJ",
               "title": "Counting exercise",
               "status": "idle",

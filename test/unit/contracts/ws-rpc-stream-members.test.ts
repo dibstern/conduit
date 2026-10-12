@@ -144,7 +144,12 @@ describe("subscription RPC contracts", () => {
 		expect(RpcSchema.isStreamSchema(member.successSchema)).toBe(true);
 		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
-		const session = { id: "session-1", title: "Session", status: "idle" };
+		const session = {
+			id: "session-1",
+			title: "Session",
+			status: "idle",
+			projectSlug: "project",
+		};
 		for (const envelope of [
 			{ _tag: "snapshot", rows: [session], sequence: 42 },
 			{ _tag: "synchronized" },

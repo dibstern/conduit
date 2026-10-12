@@ -5,7 +5,10 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
-import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -16,6 +19,7 @@ import {
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 // The family source reads the sessions projection for one family (a root and
 // every descendant), so what is under test is a contract with the store: the
@@ -39,6 +43,7 @@ const makeFamilyTestLayer = () => {
 		),
 		SessionEventBusLive,
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
 		cleanup,
 	);
 };
@@ -132,6 +137,11 @@ describe("subscribeSessionFamily", () => {
 					"child",
 					"grandchild",
 					"root",
+				]);
+				expect(snapshot.rows.map((row) => row.projectSlug)).toEqual([
+					"test-project",
+					"test-project",
+					"test-project",
 				]);
 				expect(
 					snapshot.rows.find((row) => row.id === "grandchild")?.parentID,

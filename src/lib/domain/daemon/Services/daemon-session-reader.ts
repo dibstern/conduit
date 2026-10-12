@@ -138,7 +138,11 @@ const readProjectSessions = (
 		});
 		return yield* Effect.forEach(sessions, (session) =>
 			withSessionWorktreeStatus(
-				withCachedSessionGit(session, project.folders, gitCache),
+				withCachedSessionGit(
+					{ ...session, projectSlug },
+					project.folders,
+					gitCache,
+				),
 				{
 					projectDir: projectDirectory,
 					slug: projectSlug,

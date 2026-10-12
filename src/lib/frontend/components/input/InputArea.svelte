@@ -215,10 +215,10 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
+		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
 	});
-	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
@@ -560,7 +560,7 @@
 
 	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return Promise.resolve();
 		return syncInputDraftRpc({
 			projectSlug,
@@ -682,7 +682,7 @@
 				const question = match?.[2]?.trim();
 				if (startingSideThread) return false;
 				const parentSessionId = sessionState.currentId;
-				const projectSlug = getCurrentSlug();
+				const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
 				if (!parentSessionId || !projectSlug) {
 					showToast("Open a session to start a Side Thread", { variant: "error" });
 					return false;
@@ -734,11 +734,11 @@
 				try {
 					if (ref.endsWith("/")) {
 						// Directory: fetch listing
-						const content = await fetchDirectoryListing(ref, sideThread?.projectSlug ?? getCurrentSlug());
+						const content = await fetchDirectoryListing(ref, sideThread?.projectSlug ?? composerProjectSlug);
 						attachments.push({ path: ref, type: "directory", content });
 					} else {
 						// File: fetch content
-						const result = await fetchFileContent(ref, sideThread?.projectSlug ?? getCurrentSlug());
+						const result = await fetchFileContent(ref, sideThread?.projectSlug ?? composerProjectSlug);
 						if (result.binary) {
 							attachments.push({ path: ref, type: "binary" });
 						} else {
@@ -769,7 +769,7 @@
 		let sid = sideThread?.sessionId ?? sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
-		const projectSlug = sideThread?.projectSlug ?? (sid ? getCurrentSlug() : getDraftProject());
+		const projectSlug = sideThread?.projectSlug ?? (sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject());
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
 			return false;
@@ -906,7 +906,7 @@
 		const offer = taskStopToast;
 		if (!offer) return;
 		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId && getCurrentSlug() === offer.projectSlug;
+		const active = sessionState.currentId === offer.sessionId && currentSession?.projectSlug === offer.projectSlug;
 		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
 		untrack(() => {
 			if (!active || count === 0 || !toast) {
@@ -922,7 +922,7 @@
 
 	function handleStop() {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
 		const instanceId = currentSession?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId];
 		const driver = getInstanceById(instanceId ?? "")?.driver ?? discoveryState.sessionProviderIds[sessionId];
@@ -935,14 +935,14 @@
 			// An interrupt can end a turn the row never reported busy for, so
 			// nothing else would end it. A still-busy row ends it on idle.
 			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || getCurrentSlug() !== projectSlug) return;
+			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || currentSession?.projectSlug !== projectSlug) return;
 			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
 			if (count === 0) return;
 			if (taskStopToast) dismissToast(taskStopToast.id);
 			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
 				duration: 6000,
 				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
+					if (sessionState.currentId === sessionId && currentSession?.projectSlug === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
 				} },
 			});
 			taskStopToast = { id, sessionId, projectSlug };
@@ -1266,7 +1266,7 @@
 		{/if}
 
 		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
-			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
+			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 
 		<PendingInputTray
@@ -1363,7 +1363,7 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
-								onfocus={() => requestSessionPreWarm(getCurrentSlug(), sessionState.currentId)}
+								onfocus={() => requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId)}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}

@@ -346,6 +346,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						ptys: [
 							{
+								projectSlug: "demo",
 								id: "pty-1",
 								title: "Shell",
 								command: "zsh",
@@ -624,6 +625,7 @@ describe("browser WebSocket RPC contract", () => {
 	);
 	it("round-trips durable settled and pinned timestamps", () => {
 		const session = {
+			projectSlug: "demo",
 			id: "s1",
 			title: "Triage",
 			status: "idle" as const,
@@ -1085,6 +1087,7 @@ describe("browser WebSocket RPC contract", () => {
 					projectSlug: "demo",
 					ptys: [
 						{
+							projectSlug: "demo",
 							id: "pty-1",
 							title: "Shell",
 							command: "zsh",

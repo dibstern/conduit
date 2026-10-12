@@ -10,6 +10,7 @@ import type { SessionInfo } from "../types.js";
  */
 export function toSessionInfoList(
 	sessions: SessionDetail[],
+	projectSlug: string,
 	statuses?: Record<string, SessionStatus>,
 	lastMessageAt?: ReadonlyMap<string, number>,
 ): SessionInfo[] {
@@ -25,6 +26,7 @@ export function toSessionInfoList(
 
 			return {
 				id: s.id,
+				projectSlug,
 				title: s.title ?? "Untitled",
 				status: status === "busy" || status === "retry" ? status : "idle",
 				updatedAt: displayTime,

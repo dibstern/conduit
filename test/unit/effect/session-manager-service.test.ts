@@ -2246,7 +2246,7 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions({
+			const sessions = yield* listSessions("test-project", {
 				statuses: {
 					"child-1": { type: "busy" } as SessionStatus,
 				},
@@ -2300,14 +2300,15 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions();
+			const sessions = yield* listSessions("test-project");
 
 			expect(readQuery.listSessionInfos).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
-			// The read hands back the projected session type as-is.
+			// The relay adds ownership to the projected session.
 			expect(sessions).toEqual([
 				{
 					id: "forked-1",
+					projectSlug: "test-project",
 					title: "Forked",
 					status: "idle",
 					createdAt: 100,
@@ -2648,7 +2649,7 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions();
+			const sessions = yield* listSessions("test-project");
 
 			expect(sessions[0]?.pendingQuestionCount).toBe(1);
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
@@ -2669,7 +2670,7 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* listSessions({ roots: true });
+			yield* listSessions("test-project", { roots: true });
 			const stateRef = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(stateRef);
 

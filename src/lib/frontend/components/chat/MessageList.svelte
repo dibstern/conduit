@@ -17,7 +17,6 @@
 	} from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { dismissCutOffRpc } from "../../transport/ws-rpc-client.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
@@ -334,7 +333,7 @@
 	// The tag leaves when the server clears the cut-off; nothing is hidden locally.
 	function dismissCutOff(): void {
 		const sessionId = activeSession?.id;
-		const projectSlug = activeSession?.projectSlug ?? getCurrentSlug();
+		const projectSlug = activeSession?.projectSlug;
 		if (!sessionId || !projectSlug) return;
 		dismissCutOffRpc({ projectSlug, sessionId, originId: getBrowserClientId() })
 			.catch(() => showToast("Couldn't dismiss the cut-off", { variant: "error" }));
@@ -528,7 +527,7 @@
 	{#snippet resumed(key: string)}
 		{#each resumeDividers.get(key) ?? [] as resume, i (i)}
 			{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
-				<ContinuationDivider {resume} sessionId={activeSession.id} projectSlug={activeSession.projectSlug ?? getCurrentSlug() ?? ""} />
+				<ContinuationDivider {resume} sessionId={activeSession.id} projectSlug={activeSession.projectSlug} />
 			{:else}
 				<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
 					↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
