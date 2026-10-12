@@ -6,7 +6,7 @@
 
 import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
-import { makeInstanceManagerStateLive } from "../../daemon/Services/instance-manager-service.js";
+import { makeOpenCodeRuntimeStateLive } from "../../daemon/Services/instance-manager-service.js";
 import { AlertsLive } from "../Services/alerts.js";
 import type { ClaudeTitleQueryFactory } from "../Services/claude-title-generator.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
@@ -88,7 +88,7 @@ export const makeRelayStateLive = (
 		// PTY state
 		PtyManagerStateLive,
 		// Instance management state
-		makeInstanceManagerStateLive(),
+		makeOpenCodeRuntimeStateLive(),
 		// Rate limiter (scoped — cleanup fiber runs every 60s)
 		RateLimiterLive({
 			maxRequests: options.testSendLimit ?? 5,

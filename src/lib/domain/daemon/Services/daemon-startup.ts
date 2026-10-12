@@ -25,17 +25,9 @@ class InstanceRehydrationFailed extends Data.TaggedError(
 	readonly cause: unknown;
 }> {}
 
-const isTaggedInstanceLimitExceeded = (cause: unknown): boolean =>
-	typeof cause === "object" &&
-	cause !== null &&
-	"_tag" in cause &&
-	(cause as { _tag: string })._tag === "InstanceLimitExceeded";
-
 const expectedInstanceManagerErrorTags = new Set([
-	"InstanceAlreadyExists",
-	"InstanceLimitExceeded",
+	"AccountChangeRejected",
 	"InstanceNotFound",
-	"InvalidInstanceUrl",
 ]);
 
 const isTaggedExpectedInstanceManagerError = (cause: unknown): boolean =>
@@ -47,7 +39,6 @@ const isTaggedExpectedInstanceManagerError = (cause: unknown): boolean =>
 
 const isExpectedLegacyInstanceManagerError = (cause: unknown): boolean => {
 	if (cause instanceof OpenCodeConnectionError) return true;
-	if (isTaggedInstanceLimitExceeded(cause)) return true;
 	return isTaggedExpectedInstanceManagerError(cause);
 };
 
@@ -87,7 +78,7 @@ export const rehydrateInstances: Effect.Effect<
 						...(inst.driver != null && { driver: inst.driver }),
 						...(inst.configDir != null && { configDir: inst.configDir }),
 					};
-					mgmt.addInstance(inst.id, config);
+					mgmt.addInstance({ id: inst.id, ...config });
 				},
 				catch: (cause) =>
 					new InstanceRehydrationFailed({

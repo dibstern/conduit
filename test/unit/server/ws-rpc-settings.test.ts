@@ -31,6 +31,7 @@ import {
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { settingsHandlers } from "../../../src/lib/server/ws-rpc/settings.js";
 
 describe("settings RPC config persistence", () => {
@@ -47,7 +48,9 @@ describe("settings RPC config persistence", () => {
 			const state = Layer.mergeAll(
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 				makeProjectRegistryLive(),
-				makeInstanceManagerStateLive(),
+				makeInstanceManagerStateLive(undefined, [], {
+					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+				}),
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					projectDir: configDir,

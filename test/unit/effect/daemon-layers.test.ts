@@ -25,6 +25,7 @@ import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/dae
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 const fixtureDirs: string[] = [];
 afterEach(() => {
@@ -224,15 +225,23 @@ describe("DaemonHandleTag", () => {
 				]),
 				relayCacheStub,
 				Layer.succeed(DaemonLifecycleContextTag, lifecycleContext),
-				makeInstanceManagerStateLive(undefined, [
+				makeInstanceManagerStateLive(
+					undefined,
+					[
+						{
+							id: "default",
+							name: "Default",
+							port: 4096,
+							managed: false,
+							url: "http://127.0.0.1:4096",
+						},
+					],
 					{
-						id: "default",
-						name: "Default",
-						port: 4096,
-						managed: false,
-						url: "http://127.0.0.1:4096",
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
 					},
-				]),
+				),
 			);
 			const layer = DaemonHandleLive.pipe(Layer.provideMerge(handleDeps));
 

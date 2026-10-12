@@ -33,13 +33,12 @@ const makeInstanceMgmt = (
 	const instances = [...initial];
 	return {
 		getInstances: vi.fn(() => [...instances]),
-		addInstance: vi.fn((id, config) => {
+		addInstance: vi.fn((input) => {
 			const instance = makeInstance({
-				id,
-				name: config.name,
-				port: config.port,
-				managed: config.managed,
-				...(config.env !== undefined ? { env: config.env } : {}),
+				...input,
+				id: "allocated-account",
+				port: input.port ?? 4096,
+				managed: input.managed ?? true,
 			});
 			instances.push(instance);
 			return instance;
@@ -87,30 +86,32 @@ const makeConfigLayer = (instanceMgmt: InstanceManagementDeps) =>
 	);
 
 describe("InstanceManagementServiceLive", () => {
-	it.effect("adds a uniquely named managed instance and persists", () => {
-		const instanceMgmt = makeInstanceMgmt([
-			makeInstance({ id: "test-instance", name: "Existing" }),
-		]);
+	it.effect("delegates account allocation and raw input, then persists", () => {
+		const instanceMgmt = makeInstanceMgmt();
 
 		return Effect.gen(function* () {
 			const service = yield* InstanceManagementServiceTag;
-			const instances = yield* service.add({ name: "Test Instance" });
+			const instances = yield* service.add({
+				name: "  Test Instance  ",
+				port: 4096,
+				managed: true,
+			});
 
-			expect(instanceMgmt.addInstance).toHaveBeenCalledWith("test-instance-2", {
-				name: "Test Instance",
-				port: 0,
+			expect(instanceMgmt.addInstance).toHaveBeenCalledWith({
+				name: "  Test Instance  ",
+				port: 4096,
 				managed: true,
 			});
 			expect(instanceMgmt.persistConfig).toHaveBeenCalledOnce();
 			expect(instances).toEqual(
 				expect.arrayContaining([
-					expect.objectContaining({ id: "test-instance-2" }),
+					expect.objectContaining({ id: "allocated-account" }),
 				]),
 			);
 		}).pipe(Effect.provide(makeLayer(instanceMgmt)));
 	});
 
-	it.effect("treats configured URLs as unmanaged external instances", () => {
+	it.effect("forwards configured URLs and persists", () => {
 		const instanceMgmt = makeInstanceMgmt();
 
 		return Effect.gen(function* () {
@@ -120,12 +121,11 @@ describe("InstanceManagementServiceLive", () => {
 				url: "https://opencode.example.test",
 			});
 
-			expect(instanceMgmt.addInstance).toHaveBeenCalledWith("remote", {
+			expect(instanceMgmt.addInstance).toHaveBeenCalledWith({
 				name: "Remote",
-				port: 0,
-				managed: false,
 				url: "https://opencode.example.test",
 			});
+			expect(instanceMgmt.persistConfig).toHaveBeenCalledOnce();
 		}).pipe(Effect.provide(makeLayer(instanceMgmt)));
 	});
 
@@ -150,7 +150,7 @@ describe("InstanceManagementServiceLive", () => {
 		}).pipe(Effect.provide(makeLayer(instanceMgmt)));
 	});
 
-	it.effect("trims rename input and persists", () => {
+	it.effect("forwards rename input and persists", () => {
 		const instanceMgmt = makeInstanceMgmt([makeInstance()]);
 
 		return Effect.gen(function* () {
@@ -158,12 +158,12 @@ describe("InstanceManagementServiceLive", () => {
 			const instances = yield* service.rename("instance-1", "  Renamed  ");
 
 			expect(instanceMgmt.updateInstance).toHaveBeenCalledWith("instance-1", {
-				name: "Renamed",
+				name: "  Renamed  ",
 			});
 			expect(instanceMgmt.persistConfig).toHaveBeenCalledOnce();
 			expect(instances).toEqual(
 				expect.arrayContaining([
-					expect.objectContaining({ id: "instance-1", name: "Renamed" }),
+					expect.objectContaining({ id: "instance-1", name: "  Renamed  " }),
 				]),
 			);
 		}).pipe(Effect.provide(makeLayer(instanceMgmt)));
@@ -176,19 +176,19 @@ describe("InstanceManagementServiceLive", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* InstanceManagementServiceTag;
-				const instances = yield* service.add({ name: "Config Instance" });
+				const instances = yield* service.add({
+					name: "Config Instance",
+					port: 4096,
+				});
 
-				expect(instanceMgmt.addInstance).toHaveBeenCalledWith(
-					"config-instance",
-					{
-						name: "Config Instance",
-						port: 0,
-						managed: true,
-					},
-				);
+				expect(instanceMgmt.addInstance).toHaveBeenCalledWith({
+					name: "Config Instance",
+					port: 4096,
+				});
+				expect(instanceMgmt.persistConfig).toHaveBeenCalledOnce();
 				expect(instances).toEqual(
 					expect.arrayContaining([
-						expect.objectContaining({ id: "config-instance" }),
+						expect.objectContaining({ id: "allocated-account" }),
 					]),
 				);
 			}).pipe(Effect.provide(makeConfigLayer(instanceMgmt)));

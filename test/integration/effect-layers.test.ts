@@ -1,3 +1,4 @@
+import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
 // Verifies that all Effect-native state modules compose into a single Layer
 // and key services work end-to-end.
 
@@ -56,7 +57,9 @@ const composedLayer = Layer.mergeAll(
 	makeSessionManagerStateLive(),
 	makePollerStateLive(),
 	makePollerManagerStateLive(),
-	makeInstanceManagerStateLive(),
+	makeInstanceManagerStateLive(undefined, [], {
+		launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+	}),
 	makeRelayCacheLive((slug) =>
 		Effect.succeed({
 			slug,

@@ -147,11 +147,20 @@ describe("daemon RPC handlers", () => {
 				});
 				yield* client.StartInstance({ instanceId: "test-claude" });
 				yield* client.StopInstance({ instanceId: "test-claude" });
-				yield* client.RemoveInstance({ instanceId: "test-claude" });
+				const protectedDefault = yield* Effect.either(
+					client.RemoveInstance({ instanceId: "test-claude" }),
+				);
+				expect(protectedDefault).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "AccountChangeRejected",
+						reason: "The default account can't be removed",
+					},
+				});
 				expect(
 					(yield* client.RemoveInstance({ instanceId: "test-claude-2" }))
 						.instances,
-				).toEqual([]);
+				).toEqual([expect.objectContaining({ id: "test-claude" })]);
 				expect(resolve).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(makeDaemonRpcTestLayer()));
 		},
@@ -252,7 +261,7 @@ describe("daemon RPC handlers", () => {
 							expect.objectContaining({ slug: "a", title: "Renamed" }),
 						);
 						expect(instanceLists.at(-1)).toContainEqual(
-							expect.objectContaining({ id: "claude" }),
+							expect.objectContaining({ id: "claude-2" }),
 						);
 					}),
 				);

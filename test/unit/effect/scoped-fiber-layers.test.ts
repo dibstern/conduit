@@ -1,3 +1,4 @@
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 // Tests for WebSocketRoutingLive and SessionPrefetchLive.
 // Covers session prefetch, missing directories, and scoped fiber lifecycle.
 
@@ -97,6 +98,7 @@ const makeInstancesLayer = (
 				managed: false,
 				driver: "opencode",
 			})),
+			{ launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude") },
 		),
 		Layer.succeed(OpenCodeInstancesTag, {
 			...stub,

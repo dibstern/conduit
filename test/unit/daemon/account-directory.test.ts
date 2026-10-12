@@ -119,6 +119,8 @@ describe("account directory reads", () => {
 
 	it("rejects unknown ids and defaults of drivers with no accounts, naming the ref", () => {
 		const empty: AccountsState = {
+			launchLogin: launch,
+			maxAccounts: 5,
 			accounts: [],
 			defaults: { claude: Option.none() },
 			deleted: [],

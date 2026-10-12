@@ -11,6 +11,7 @@ import type { FolderIssue } from "../../../project-folders.js";
 import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
+import { AccountDirectory } from "./account-directory.js";
 import { ConfigPersistenceTag } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
@@ -83,6 +84,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| RelayCacheTag
 	| DaemonLifecycleContextTag
 	| InstanceManagerStateTag
+	| AccountDirectory
 	| DaemonStateTag
 	| KeepAwakeTag
 > = Layer.effect(
@@ -96,6 +98,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const relayCache = yield* RelayCacheTag;
 		const lifecycleContext = yield* DaemonLifecycleContextTag;
 		const instanceState = yield* InstanceManagerStateTag;
+		const accounts = yield* AccountDirectory;
 		const daemonState = yield* DaemonStateTag;
 		const keepAwake = yield* KeepAwakeTag;
 
@@ -145,6 +148,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const getInstances = () =>
 			getEffectInstances.pipe(
 				Effect.provideService(InstanceManagerStateTag, instanceState),
+				Effect.provideService(AccountDirectory, accounts),
 				Effect.map((instances) => Array.from(instances)),
 				Effect.withSpan("daemonHandle.getInstances"),
 			);

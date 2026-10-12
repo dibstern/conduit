@@ -10,8 +10,11 @@ import {
 	makeInstanceManagerStateLive,
 	removeInstance,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
-const testLayer = makeInstanceManagerStateLive().pipe(
+const testLayer = makeInstanceManagerStateLive(undefined, [], {
+	launchLogin: sdkDefaultClaudeConfigDir("/isolated-home/.claude"),
+}).pipe(
 	Layer.provideMerge(
 		Layer.merge(ConfigPersistenceNoopLive, DaemonEventBusLive),
 	),
@@ -100,11 +103,12 @@ describe("InstanceManager Effect", () => {
 					});
 				}
 			}).pipe(
-				Effect.catchTag("InstanceLimitExceeded", (e) =>
-					Effect.succeed(`caught: max=${e.max}`),
-				),
+				Effect.catchTag("AccountChangeRejected", (e) => Effect.succeed(e)),
 			);
-			expect(result).toBe("caught: max=5");
+			expect(result).toMatchObject({
+				_tag: "AccountChangeRejected",
+				reason: expect.stringMatching(/max instances reached \(5\)/i),
+			});
 		}).pipe(Effect.provide(Layer.fresh(testLayer))),
 	);
 });

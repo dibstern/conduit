@@ -1,7 +1,12 @@
 import { Effect } from "effect";
+import { AccountChangeRejected } from "../../contracts/account.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
-import { InstanceManagementServiceTag } from "../../domain/relay/Services/instance-management-service.js";
+import {
+	InstanceManagementServiceError,
+	InstanceManagementServiceTag,
+} from "../../domain/relay/Services/instance-management-service.js";
 import { ScanServiceTag } from "../../domain/relay/Services/scan-service.js";
+import { formatErrorDetail } from "../../errors.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const CCS_DEFAULT_PORT = 8317;
@@ -21,6 +26,16 @@ const instanceServiceOrFail = (operation: string) =>
 		}
 		return serviceOption.value;
 	});
+
+const accountMutationFailure = (id: string) => (error: unknown) => {
+	const cause =
+		error instanceof InstanceManagementServiceError ? error.cause : error;
+	return Effect.fail(
+		cause instanceof AccountChangeRejected
+			? cause
+			: new AccountChangeRejected({ id, reason: formatErrorDetail(cause) }),
+	);
+};
 
 export const instancesHandlers = {
 	StartInstance: (request) =>
@@ -49,35 +64,24 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("RemoveInstance"))),
+		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
 	RenameInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("RenameInstance");
-			const name = request.name.trim();
-			if (!name) {
-				return yield* Effect.fail(
-					new WsRpcError({
-						message: "RenameInstance failed: name is required",
-					}),
-				);
-			}
-			const instances = yield* instanceService.rename(request.instanceId, name);
+			const instances = yield* instanceService.rename(
+				request.instanceId,
+				request.name,
+			);
 			return {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("RenameInstance"))),
+		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
 	AddInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("AddInstance");
-			const name = request.name.trim();
-			if (!name) {
-				return yield* Effect.fail(
-					new WsRpcError({ message: "AddInstance failed: name is required" }),
-				);
-			}
 			const instances = yield* instanceService.add({
-				name,
+				name: request.name,
 				...(request.driver !== undefined && { driver: request.driver }),
 				...(request.managed !== undefined && { managed: request.managed }),
 				...(request.port !== undefined && { port: request.port }),
@@ -91,11 +95,12 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("AddInstance"))),
+		}).pipe(Effect.catchAll(accountMutationFailure(request.name))),
 	UpdateInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("UpdateInstance");
 			const instances = yield* instanceService.update(request.instanceId, {
+				...(request.driver !== undefined && { driver: request.driver }),
 				...(request.name !== undefined && { name: request.name }),
 				...(request.port !== undefined && { port: request.port }),
 				...(request.env !== undefined && { env: { ...request.env } }),
@@ -107,7 +112,7 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("UpdateInstance"))),
+		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
 	ScanNow: (request) =>
 		Effect.gen(function* () {
 			const scanService = yield* ScanServiceTag;

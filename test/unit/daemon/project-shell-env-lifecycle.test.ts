@@ -25,6 +25,7 @@ import {
 	remove,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 let home: string | undefined;
 let configDir: string | undefined;
@@ -78,7 +79,9 @@ describe("daemon project shell env lifecycle", () => {
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
 			DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
-			makeInstanceManagerStateLive(),
+			makeInstanceManagerStateLive(undefined, [], {
+				launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+			}),
 			Layer.succeed(RelayCacheTag, {
 				get: () => Effect.die("A relay must not start during env resolution"),
 				peek: () => Effect.succeed(Option.none()),

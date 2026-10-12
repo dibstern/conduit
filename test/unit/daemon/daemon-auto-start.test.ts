@@ -1,3 +1,4 @@
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 // Tests: smart default (probe-and-convert) on first start.
 // Startup seeds the default instance without probing. Its first start probes
 // the default URL, reuses a reachable OpenCode, and only otherwise converts to
@@ -132,11 +133,12 @@ describe("smart default", () => {
 				ManagedOpenCodeLifecycleLive(tmpDir).pipe(
 					Layer.provideMerge(
 						Layer.mergeAll(
-							makeInstanceManagerStateLive(
-								undefined,
-								initialInstances,
-								options,
-							),
+							makeInstanceManagerStateLive(undefined, initialInstances, {
+								...options,
+								launchLogin: sdkDefaultClaudeConfigDir(
+									"/isolated-test-home/.claude",
+								),
+							}),
 							DaemonEventBusLive,
 							ConfigPersistenceNoopLive,
 							Layer.succeed(InstanceHealthCheckTag, {

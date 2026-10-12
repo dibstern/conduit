@@ -12,6 +12,7 @@ import {
 	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../daemon/config-persistence.js";
+import { AccountDirectory } from "../Services/account-directory.js";
 import {
 	type ConfigPersistence,
 	ConfigPersistenceTag,
@@ -53,6 +54,12 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 	const runtime = yield* Ref.get(configRef);
 	const projects = yield* allProjects;
 	const instances = yield* getPersistedInstanceConfigs;
+	const directory = yield* AccountDirectory;
+	const claude = yield* directory.defaultFor("claude");
+	const claudeConfigDir =
+		claude._tag === "Some" && claude.value.driver === "claude"
+			? claude.value.configuredFolder
+			: undefined;
 
 	return {
 		pid: process.pid,
@@ -78,8 +85,8 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		...(runtime.keepAwakeArgs !== undefined && {
 			keepAwakeArgs: runtime.keepAwakeArgs,
 		}),
-		...(runtime.claudeConfigDir !== undefined && {
-			claudeConfigDir: runtime.claudeConfigDir,
+		...(claudeConfigDir !== undefined && {
+			claudeConfigDir,
 		}),
 		...(runtime.newSessionProject !== undefined && {
 			newSessionProject: runtime.newSessionProject,
@@ -119,11 +126,13 @@ export const ConfigSnapshotFromEffectStateLive = Layer.effect(
 		const configRef = yield* DaemonConfigRefTag;
 		const projectRegistry = yield* ProjectRegistryTag;
 		const instanceState = yield* InstanceManagerStateTag;
+		const directory = yield* AccountDirectory;
 		return {
 			build: buildDaemonConfigSnapshot.pipe(
 				Effect.provideService(DaemonConfigRefTag, configRef),
 				Effect.provideService(ProjectRegistryTag, projectRegistry),
 				Effect.provideService(InstanceManagerStateTag, instanceState),
+				Effect.provideService(AccountDirectory, directory),
 			),
 		} satisfies ConfigSnapshot;
 	}),
@@ -137,54 +146,6 @@ export class ConfigWriterTag extends Context.Tag("ConfigWriter")<
 	ConfigWriterTag,
 	ConfigWriter
 >() {}
-
-type PersistedInstanceConfig = NonNullable<DaemonConfig["instances"]>[number];
-
-const mergePersistedInstanceConfigs = (
-	runtimeInstances: ReadonlyArray<PersistedInstanceConfig>,
-	persistedInstances: ReadonlyArray<PersistedInstanceConfig>,
-): PersistedInstanceConfig[] => {
-	const persistedById = new Map(
-		persistedInstances.map((instance) => [instance.id, instance]),
-	);
-	const runtimeById = new Map(
-		runtimeInstances.map((instance) => [instance.id, instance]),
-	);
-
-	const mergeInstance = (runtimeInstance: PersistedInstanceConfig) => {
-		const persistedInstance = persistedById.get(runtimeInstance.id);
-		// Process identity belongs to the current snapshot. Never resurrect a
-		// PID cleared after failed recovery or explicit shutdown.
-		const {
-			pid: _pid,
-			version: _version,
-			processIdentity: _processIdentity,
-			...metadata
-		} = persistedInstance ?? {};
-		return {
-			...metadata,
-			...runtimeInstance,
-			driver: runtimeInstance.driver ?? persistedInstance?.driver ?? "opencode",
-			...(runtimeInstance.configDir !== undefined
-				? { configDir: runtimeInstance.configDir }
-				: persistedInstance?.configDir !== undefined
-					? { configDir: persistedInstance.configDir }
-					: {}),
-		};
-	};
-
-	return [
-		...persistedInstances.flatMap((persistedInstance) => {
-			const runtimeInstance = runtimeById.get(persistedInstance.id);
-			return runtimeInstance === undefined
-				? []
-				: [mergeInstance(runtimeInstance)];
-		}),
-		...runtimeInstances
-			.filter((instance) => !persistedById.has(instance.id))
-			.map(mergeInstance),
-	];
-};
 
 export const makeConfigWriterLive = (configDir: string) =>
 	Layer.succeed(ConfigWriterTag, {
@@ -202,10 +163,6 @@ export const makeConfigWriterLive = (configDir: string) =>
 							// This legacy setting has no runtime Ref; retain its
 							// saved value when writing the live runtime snapshot.
 							debug: persisted?.debug ?? config.debug,
-							instances: mergePersistedInstanceConfigs(
-								config.instances ?? [],
-								persisted?.instances ?? [],
-							),
 						},
 						configDir,
 					);

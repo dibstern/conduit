@@ -12,7 +12,6 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
-import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -26,15 +25,13 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	DaemonSessionQueryResult,
 	OpenCodeInstance,
 	ProjectInfo,
 } from "../../../src/lib/shared-types.js";
-import {
-	makeMockAccountDirectory,
-	makeOpenCodeInstancesStub,
-} from "../../helpers/mock-factories.js";
+import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 
@@ -43,7 +40,6 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 }));
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
-	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
 	Layer.succeed(PortScannerTag, {
@@ -83,7 +79,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						ConfigPersistenceNoopLive,
 						DaemonEventBusLive,
 						makeProjectRegistryLive(),
-						makeInstanceManagerStateLive(),
+						makeInstanceManagerStateLive(undefined, [], {
+							launchLogin: sdkDefaultClaudeConfigDir(
+								"/isolated-test-home/.claude",
+							),
+						}),
 						NoopAuxiliaryDaemonServices,
 					),
 				),
@@ -166,7 +166,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 									url: "http://localhost:4096",
 								},
 							],
-							{ defaultOpencodeUrl: "http://localhost:4096" },
+							{
+								...{ defaultOpencodeUrl: "http://localhost:4096" },
+								launchLogin: sdkDefaultClaudeConfigDir(
+									"/isolated-test-home/.claude",
+								),
+							},
 						),
 						NoopAuxiliaryDaemonServices,
 					),
@@ -278,7 +283,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		const layer = RelayFactoryLive(join(dir, "config")).pipe(
 			Layer.provide(
 				Layer.mergeAll(
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					InstanceHealthCheckLive,
 					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
@@ -291,7 +295,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							folders: [projectDir],
 						},
 					]),
-					makeInstanceManagerStateLive(),
+					makeInstanceManagerStateLive(undefined, [], {
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
+					}),
 					NoopAuxiliaryDaemonServices,
 				),
 			),
@@ -319,7 +327,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 			const added = yield* Effect.tryPromise({
 				try: () =>
 					Promise.resolve(
-						config?.addInstance?.("remote", {
+						config?.addInstance?.({
 							name: "Remote",
 							port: 4321,
 							managed: false,
@@ -420,13 +428,16 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							folders: [projectDir],
 						},
 					]),
-					makeInstanceManagerStateLive(),
+					makeInstanceManagerStateLive(undefined, [], {
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
+					}),
 					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					Layer.succeed(PortScannerTag, {
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),
 					}),
-					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					Layer.succeed(PushManagerTag, {
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,
@@ -514,7 +525,11 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							folders: [projectDir],
 						},
 					]),
-					makeInstanceManagerStateLive(),
+					makeInstanceManagerStateLive(undefined, [], {
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
+					}),
 					NoopAuxiliaryDaemonServices,
 				),
 			),
@@ -600,7 +615,12 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 							url: "http://localhost:4321",
 						},
 					],
-					{ defaultOpencodeUrl: "http://localhost:4096" },
+					{
+						...{ defaultOpencodeUrl: "http://localhost:4096" },
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
+					},
 				),
 				NoopAuxiliaryDaemonServices,
 			);

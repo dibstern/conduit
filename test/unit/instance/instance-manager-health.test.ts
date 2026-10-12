@@ -34,6 +34,7 @@ import {
 	startHealthPoller,
 	stopHealthPoller,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 const testConfig = {
 	maxInstances: 10,
@@ -43,7 +44,9 @@ const testConfig = {
 };
 
 const testLayer = Layer.mergeAll(
-	makeInstanceManagerStateLive(testConfig),
+	makeInstanceManagerStateLive(testConfig, [], {
+		launchLogin: sdkDefaultClaudeConfigDir("/isolated-home/.claude"),
+	}),
 	DaemonEventBusLive,
 	ConfigPersistenceNoopLive,
 	InstanceHealthCheckLive,

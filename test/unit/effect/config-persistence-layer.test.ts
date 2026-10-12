@@ -23,6 +23,7 @@ import {
 	ConfigSnapshotTag,
 	ConfigWriterTag,
 } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	DaemonConfigRefLive,
 	DaemonConfigRefTag,
@@ -37,6 +38,7 @@ import {
 	addWithoutRelay,
 	makeProjectRegistryLive,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 describe("ConfigPersistenceLive", () => {
 	const defaults: DaemonRuntimeConfig = {
@@ -54,7 +56,9 @@ describe("ConfigPersistenceLive", () => {
 		persistedSessionCounts: new Map(),
 	};
 
-	const makeTestLayer = () => {
+	const makeTestLayer = (
+		instances: readonly import("../../../src/lib/domain/daemon/Services/daemon-state.js").DaemonInstanceConfig[] = [],
+	) => {
 		const writes: DaemonConfig[] = [];
 		const writerLayer = Layer.succeed(ConfigWriterTag, {
 			write: (config: DaemonConfig) =>
@@ -66,7 +70,9 @@ describe("ConfigPersistenceLive", () => {
 			DaemonConfigRefLive(defaults),
 			writerLayer,
 			makeProjectRegistryLive(),
-			makeInstanceManagerStateLive(),
+			makeInstanceManagerStateLive(undefined, instances, {
+				launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+			}),
 		);
 		const deps = ConfigSnapshotFromEffectStateLive.pipe(
 			Layer.provideMerge(stateDeps),
@@ -105,26 +111,33 @@ describe("ConfigPersistenceLive", () => {
 
 	it.scoped("persists claudeConfigDir when set, omits it when unset", () =>
 		Effect.gen(function* () {
-			const { layer, writes } = makeTestLayer();
+			const { layer, writes } = makeTestLayer([
+				{
+					id: "claude",
+					name: "Claude",
+					driver: "claude",
+					port: 0,
+					managed: false,
+				},
+			]);
 			const scope = yield* Scope.make();
 			const ctx = yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 			const persistence = Context.get(ctx, ConfigPersistenceTag);
-			const configRef = Context.get(ctx, DaemonConfigRefTag);
+			const directory = Context.get(ctx, AccountDirectory);
 
 			yield* persistence.requestSave;
 			yield* persistence.flush;
-			yield* Ref.update(configRef, (c) => ({
-				...c,
-				claudeConfigDir: "/home/user/.ccs/instances/personal",
-			}));
+			yield* directory.apply({
+				_tag: "Update",
+				id: "claude",
+				updates: { configDir: "/isolated/claude-personal" },
+			});
 			yield* persistence.requestSave;
 			yield* Scope.close(scope, Exit.void);
 
 			expect(writes.length).toBe(2);
 			expect("claudeConfigDir" in (writes[0] ?? {})).toBe(false);
-			expect(writes[1]?.claudeConfigDir).toBe(
-				"/home/user/.ccs/instances/personal",
-			);
+			expect(writes[1]?.claudeConfigDir).toBe("/isolated/claude-personal");
 		}),
 	);
 
@@ -189,7 +202,11 @@ describe("ConfigPersistenceLive", () => {
 				const stateDeps = Layer.mergeAll(
 					DaemonConfigRefLive(defaults),
 					makeProjectRegistryLive(),
-					makeInstanceManagerStateLive(),
+					makeInstanceManagerStateLive(undefined, [], {
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
+					}),
 					Layer.succeed(ConfigWriterTag, {
 						// Like a filesystem Promise, the operation can finish even if
 						// the waiting fiber has been interrupted.
@@ -271,7 +288,11 @@ describe("ConfigPersistenceLive", () => {
 					}),
 					DaemonEventBusLive,
 					makeProjectRegistryLive(),
-					makeInstanceManagerStateLive(),
+					makeInstanceManagerStateLive(undefined, [], {
+						launchLogin: sdkDefaultClaudeConfigDir(
+							"/isolated-test-home/.claude",
+						),
+					}),
 					ConfigPersistenceNoopLive,
 				);
 
@@ -363,7 +384,9 @@ describe("ConfigPersistenceLive", () => {
 				DaemonConfigRefLive(defaults),
 				failingWriterLayer,
 				makeProjectRegistryLive(),
-				makeInstanceManagerStateLive(),
+				makeInstanceManagerStateLive(undefined, [], {
+					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+				}),
 			);
 			const deps = ConfigSnapshotFromEffectStateLive.pipe(
 				Layer.provideMerge(stateDeps),

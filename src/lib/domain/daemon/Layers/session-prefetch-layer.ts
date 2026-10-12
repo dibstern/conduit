@@ -19,6 +19,7 @@
 
 import { existsSync } from "node:fs";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import type { AccountDirectory } from "../Services/account-directory.js";
 import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
@@ -28,17 +29,14 @@ import {
 	type InstanceManagerStateTag,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
-import {
-	openCodeInstanceFor,
-	ProjectRegistryTag,
-} from "../Services/project-registry-service.js";
+import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 
 /**
  * Effect program that prefetches session counts for all registered projects
  * that don't already have persisted counts.
  *
  * For each project:
- * 1. Take a client for the first OpenCode instance if it is already running
+ * 1. Find the first OpenCode instance that is already running
  * 2. List the project's sessions
  * 3. Update the persistedSessionCounts map in DaemonConfigRefTag
  *
@@ -50,6 +48,7 @@ export const prefetchSessionCounts: Effect.Effect<
 	| DaemonConfigRefTag
 	| OpenCodeInstancesTag
 	| ProjectRegistryTag
+	| AccountDirectory
 	| InstanceManagerStateTag
 > = Effect.gen(function* () {
 	const configRef = yield* DaemonConfigRefTag;
@@ -58,8 +57,10 @@ export const prefetchSessionCounts: Effect.Effect<
 
 	const config = yield* Ref.get(configRef);
 	const registryState = yield* Ref.get(registryRef);
-	const openCode = openCodeInstanceFor(yield* getInstances);
-	if (openCode === undefined) return 0;
+	const openCodeInstances = (yield* getInstances).filter(
+		(instance) => instance.driver !== "claude",
+	);
+	if (openCodeInstances.length === 0) return 0;
 
 	let fetched = 0;
 
@@ -69,21 +70,23 @@ export const prefetchSessionCounts: Effect.Effect<
 		if (config.persistedSessionCounts.has(slug)) continue;
 
 		// Best-effort count, only from an instance that is already running.
-		const count = yield* instances
-			.ifRunning(openCode.id, entry.project.folders[0])
-			.pipe(
-				Effect.flatMap(
-					Option.match({
-						onNone: () => Effect.succeed(null),
-						onSome: (client) =>
-							Effect.tryPromise(() =>
-								client.session.list({ limit: 10000 }),
-							).pipe(Effect.map((sessions) => sessions.length)),
-					}),
-				),
-				Effect.scoped,
-				Effect.catchAll(() => Effect.succeed(null)),
-			);
+		const count = yield* Effect.gen(function* () {
+			// Directory order can put a stopped default before an adopted backend.
+			for (const instance of openCodeInstances) {
+				const client = yield* instances.ifRunning(
+					instance.id,
+					entry.project.folders[0],
+				);
+				if (Option.isNone(client)) continue;
+				return yield* Effect.tryPromise(() =>
+					client.value.session.list({ limit: 10000 }),
+				).pipe(Effect.map((sessions) => sessions.length));
+			}
+			return null;
+		}).pipe(
+			Effect.scoped,
+			Effect.catchAll(() => Effect.succeed(null)),
+		);
 
 		if (count !== null && count > 0) {
 			yield* commitDaemonRuntimeConfig((c) => ({
@@ -131,6 +134,7 @@ export const SessionPrefetchLive: Layer.Layer<
 	| DaemonConfigRefTag
 	| OpenCodeInstancesTag
 	| ProjectRegistryTag
+	| AccountDirectory
 	| InstanceManagerStateTag
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {

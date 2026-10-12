@@ -105,7 +105,7 @@ describe("WsRpcServerLayer instance management", () => {
 		);
 	});
 
-	it.effect("renames an instance after trimming the display name", () => {
+	it.effect("delegates the rename to the account directory", () => {
 		const wsHandler = makeMockWebSocketHandler();
 		const updateInstance = vi.fn(() => instance);
 		const persistConfig = vi.fn();
@@ -120,7 +120,7 @@ describe("WsRpcServerLayer instance management", () => {
 			});
 
 			expect(updateInstance).toHaveBeenCalledWith("inst-1", {
-				name: "Primary",
+				name: "  Primary  ",
 			});
 			expect(persistConfig).toHaveBeenCalled();
 			expect(response.instances).toEqual([instance]);
@@ -151,7 +151,6 @@ describe("WsRpcServerLayer instance management", () => {
 			});
 
 			expect(addInstance).toHaveBeenCalledWith(
-				"staging-oc",
 				expect.objectContaining({
 					name: "Staging OC",
 					driver: "opencode",
@@ -188,7 +187,6 @@ describe("WsRpcServerLayer instance management", () => {
 
 			// Claude instances persist driver + configDir with no server url.
 			expect(addInstance).toHaveBeenCalledWith(
-				"work-claude",
 				expect.objectContaining({
 					name: "Work Claude",
 					driver: "claude",

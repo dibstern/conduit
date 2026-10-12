@@ -1194,25 +1194,41 @@ export async function stopInstanceRpc(
 export async function removeInstanceRpc(
 	input: InstanceMutationRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callRemoveInstance(input));
+	const result = await runTransportEffect(
+		Effect.either(callRemoveInstance(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function renameInstanceRpc(
 	input: RenameInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callRenameInstance(input));
+	const result = await runTransportEffect(
+		Effect.either(callRenameInstance(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function addInstanceRpc(
 	input: AddInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callAddInstance(input));
+	const result = await runTransportEffect(
+		Effect.either(callAddInstance(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function updateInstanceRpc(
 	input: UpdateInstanceRpcInput,
 ): Promise<InstanceListResponse> {
-	return await runTransportEffect(callUpdateInstance(input));
+	const result = await runTransportEffect(
+		Effect.either(callUpdateInstance(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function scanNowRpc(

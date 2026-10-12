@@ -19,24 +19,17 @@ import {
 	Option,
 	Ref,
 	Schedule,
-	Schema,
 	Scope,
 } from "effect";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
+import { AccountChangeRejected } from "../../../contracts/account.js";
 import {
 	isKnownDriverKind,
-	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
-import {
-	InstanceRemovalRejected,
-	InstanceUpdateRejected,
-	instanceAlreadyExists,
-	instanceLimitExceeded,
-	instanceNotFound,
-	invalidInstanceUrl,
-} from "../../../instance/instance-errors.js";
+import type { AccountChange } from "../../../daemon/account-directory.js";
+import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
 	availableOpenCodePort,
 	canReuseManagedOpenCode,
@@ -52,19 +45,15 @@ import {
 	stopManagedOpenCode,
 	waitForOpenCodeHealth,
 } from "../../../instance/managed-opencode-process.js";
-import type {
-	InstanceConfig,
-	OpenCodeInstance,
-} from "../../../shared-types.js";
+import {
+	type ClaudeConfigDir,
+	captureClaudeLaunchLogin,
+} from "../../../provider/claude/claude-sdk-env.js";
+import type { OpenCodeInstance } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
-import { AccountDirectory } from "./account-directory.js";
+import { AccountDirectory, AccountDirectoryLive } from "./account-directory.js";
 
-export {
-	InstanceAlreadyExists,
-	InstanceLimitExceeded,
-	InstanceNotFound,
-	InvalidInstanceUrl,
-} from "../../../instance/instance-errors.js";
+export { InstanceNotFound } from "../../../instance/instance-errors.js";
 
 import {
 	ConfigPersistenceTag,
@@ -88,9 +77,10 @@ import {
 	type SmartDefaultInstanceOptions,
 } from "./opencode-smart-default.js";
 
-export interface AddInstanceInput extends InstanceConfig {
-	id: string;
-}
+export type AddInstanceInput = Omit<
+	Extract<AccountChange, { _tag: "Add" }>,
+	"_tag"
+>;
 
 export interface InstanceManagerConfig {
 	maxInstances: number;
@@ -98,10 +88,6 @@ export interface InstanceManagerConfig {
 	maxRestartsPerWindow: number;
 	restartWindowMs: number;
 }
-
-type InstanceReservationFailure =
-	| { readonly _tag: "duplicate"; readonly id: string }
-	| { readonly _tag: "limit"; readonly max: number };
 
 const DEFAULT_CONFIG: InstanceManagerConfig = {
 	maxInstances: 5,
@@ -143,7 +129,9 @@ export interface InstanceManagerState {
 }
 
 export interface InstanceManagerStateOptions
-	extends SmartDefaultInstanceOptions {}
+	extends SmartDefaultInstanceOptions {
+	readonly launchLogin?: ClaudeConfigDir;
+}
 
 export const emptyInstanceManagerState = (
 	config?: Partial<InstanceManagerConfig>,
@@ -163,40 +151,42 @@ const buildInstanceManagerState = (
 	const now = Date.now();
 	return {
 		instances: HashMap.fromIterable(
-			initialInstances.map((instance) => {
-				const driver = instance.driver ?? "opencode";
-				const opencodeInstance: OpenCodeInstance = {
-					id: instance.id,
-					name: instance.name,
-					port: driver === "claude" ? 0 : instance.port,
-					managed: driver === "claude" ? false : instance.managed,
-					driver,
-					// Nothing runs at startup; re-adoption marks survivors healthy.
-					status: driver === "claude" ? "healthy" : "stopped",
-					restartCount: 0,
-					createdAt: now,
-					...(instance.env !== undefined
-						? {
-								env:
-									driver === "opencode" && instance.managed
-										? publicManagedOpenCodeEnv(instance.env)
-										: instance.env,
-							}
-						: {}),
-					...(driver === "opencode" &&
-					instance.managed &&
-					instance.pid !== undefined
-						? { pid: instance.pid, version: instance.version }
-						: {}),
-					...(instance.configDir !== undefined
-						? { configDir: instance.configDir }
-						: {}),
-					...(driver === "opencode" && instance.url !== undefined
-						? { url: instance.url }
-						: {}),
-				};
-				return [instance.id, opencodeInstance] as const;
-			}),
+			initialInstances
+				.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+				.map((instance) => {
+					const driver = instance.driver ?? "opencode";
+					const opencodeInstance: OpenCodeInstance = {
+						id: instance.id,
+						name: instance.name,
+						port: instance.port,
+						managed: instance.managed,
+						driver,
+						// Nothing runs at startup; re-adoption marks survivors healthy.
+						status: "stopped",
+						restartCount: 0,
+						createdAt: now,
+						...(instance.env !== undefined
+							? {
+									env:
+										driver === "opencode" && instance.managed
+											? publicManagedOpenCodeEnv(instance.env)
+											: instance.env,
+								}
+							: {}),
+						...(driver === "opencode" &&
+						instance.managed &&
+						instance.pid !== undefined
+							? { pid: instance.pid, version: instance.version }
+							: {}),
+						...(instance.configDir !== undefined
+							? { configDir: instance.configDir }
+							: {}),
+						...(driver === "opencode" && instance.url !== undefined
+							? { url: instance.url }
+							: {}),
+					};
+					return [instance.id, opencodeInstance] as const;
+				}),
 		),
 		externalUrls: HashMap.fromIterable(
 			initialInstances.flatMap((instance) =>
@@ -259,6 +249,21 @@ const buildInitialInstanceManagerState = (
 		: state;
 };
 
+const initialInstanceConfigs = (
+	instances: ReadonlyArray<DaemonInstanceConfig>,
+	options: InstanceManagerStateOptions | undefined,
+) => {
+	const url =
+		options?.defaultOpencodeUrl ??
+		(options?.smartDefault
+			? (options.smartDefaultUrl ?? DEFAULT_OPENCODE_URL)
+			: undefined);
+	return url === undefined ||
+		instances.some((instance) => instance.id === MANAGED_OPENCODE_ACCOUNT_ID)
+		? instances
+		: [defaultInstanceForUrl(url), ...instances];
+};
+
 /** Tag for the mutable InstanceManagerState Ref in the Effect Context. */
 export class InstanceManagerStateTag extends Context.Tag(
 	"InstanceManagerState",
@@ -282,6 +287,24 @@ export function makeInstanceManagerStateLive(
 	config?: Partial<InstanceManagerConfig>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 	options?: InstanceManagerStateOptions,
+): Layer.Layer<InstanceManagerStateTag | PollerFibersTag | AccountDirectory> {
+	const seeded = initialInstanceConfigs(initialInstances, options);
+	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
+		Layer.merge(
+			AccountDirectoryLive(
+				options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
+				seeded,
+				config?.maxInstances ?? DEFAULT_CONFIG.maxInstances,
+			),
+		),
+	);
+}
+
+/** Relays need runtime state without replacing the daemon's account directory. */
+export function makeOpenCodeRuntimeStateLive(
+	config?: Partial<InstanceManagerConfig>,
+	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
+	options?: InstanceManagerStateOptions,
 ): Layer.Layer<InstanceManagerStateTag | PollerFibersTag> {
 	return Layer.effect(
 		InstanceManagerStateTag,
@@ -295,189 +318,196 @@ export function makeInstanceManagerStateFromDaemonStateLive(
 	config?: Partial<InstanceManagerConfig>,
 	options?: InstanceManagerStateOptions,
 ): Layer.Layer<
-	InstanceManagerStateTag | PollerFibersTag,
+	InstanceManagerStateTag | PollerFibersTag | AccountDirectory,
 	never,
 	DaemonStateTag
 > {
-	return Layer.effect(
-		InstanceManagerStateTag,
+	return Layer.unwrapEffect(
 		Effect.gen(function* () {
 			const state = yield* Ref.get(yield* DaemonStateTag);
-			return yield* Ref.make(
-				buildInitialInstanceManagerState(config, state.instances, options),
-			);
+			return makeInstanceManagerStateLive(config, state.instances, options);
 		}),
-	).pipe(Layer.merge(Layer.scoped(PollerFibersTag, FiberMap.make<string>())));
+	);
 }
 
 const pollerKey = (id: string) => `poller:${id}`;
 const restartKey = (id: string) => `restart:${id}`;
 
-/**
- * Add an instance. Uses atomic Ref.modify to check capacity AND reserve
- * the slot in one step — two concurrent addInstance calls cannot both
- * pass the capacity check. Then starts a health poll fiber via FiberMap.run.
- */
-export const addInstance = (input: AddInstanceInput) =>
+/** Commit account metadata, then reconcile the OpenCode runtime for that change. */
+export const applyAccountChange = (change: AccountChange) =>
 	Effect.gen(function* () {
-		const ref = yield* InstanceManagerStateTag;
-		const fiberMap = yield* PollerFibersTag;
-		const driver = yield* Schema.decodeUnknown(KnownProviderDriverKindSchema)(
-			input.driver ?? "opencode",
-		);
-
-		const inputExternalUrl = input.url;
-		if (driver === "opencode" && inputExternalUrl !== undefined) {
-			yield* Effect.try({
-				try: () => new URL(inputExternalUrl),
-				catch: (cause) => invalidInstanceUrl(input.id, inputExternalUrl, cause),
-			});
-		}
-
-		const now = yield* Clock.currentTimeMillis;
-		const instance: OpenCodeInstance = {
-			id: input.id,
-			name: input.name,
-			port: driver === "claude" ? 0 : input.port,
-			managed: driver === "claude" ? false : input.managed,
-			driver,
-			status: driver === "claude" ? "healthy" : "starting",
-			restartCount: 0,
-			createdAt: now,
-			// Only include optional env when defined (exactOptionalPropertyTypes)
-			...(input.env !== undefined
-				? {
-						env:
-							driver === "opencode" && input.managed
-								? publicManagedOpenCodeEnv(input.env)
-								: input.env,
-					}
-				: {}),
-			...(input.configDir !== undefined ? { configDir: input.configDir } : {}),
-			...(driver === "opencode" && inputExternalUrl !== undefined
-				? { url: inputExternalUrl }
-				: {}),
-		};
-
-		// Atomic capacity check + slot reservation via Ref.modify.
-		// Returns Either-style: the modify function returns a tuple [returnValue, newState].
-		// We return the error (or undefined) as the "return value" and either the
-		// updated state or the original state as the "new state".
-		const reservationFailure = yield* Ref.modify(
-			ref,
-			(
-				state,
-			): readonly [
-				InstanceReservationFailure | undefined,
-				InstanceManagerState,
-			] => {
-				if (HashMap.has(state.instances, input.id)) {
-					return [{ _tag: "duplicate", id: input.id }, state];
-				}
-				const currentSize = HashMap.size(state.instances);
-				if (currentSize >= state.config.maxInstances) {
-					// Over capacity — return error marker, leave state unchanged
-					return [{ _tag: "limit", max: state.config.maxInstances }, state];
-				}
-				// Under capacity — reserve the slot atomically
-				const newInstances = HashMap.set(state.instances, input.id, instance);
-				const newExternalUrls =
-					driver === "opencode" && inputExternalUrl !== undefined
-						? HashMap.set(state.externalUrls, input.id, inputExternalUrl)
-						: state.externalUrls;
-				return [
-					undefined,
-					{
+		const directory = yield* AccountDirectory;
+		const committed = yield* directory.apply(change, [], (committed) =>
+			Effect.gen(function* () {
+				const account =
+					change._tag === "Add"
+						? committed.accounts.at(-1)
+						: committed.accounts.find((item) => item.id === change.id);
+				const id = account?.id ?? change.id ?? "";
+				const ref = yield* InstanceManagerStateTag;
+				const fibers = yield* PollerFibersTag;
+				const before = yield* Ref.get(ref);
+				const previous = HashMap.get(before.instances, id);
+				const record = HashMap.get(
+					before.managedProcesses ?? HashMap.empty(),
+					id,
+				);
+				if (account?.driver !== "opencode") {
+					if (Option.isSome(record))
+						yield* stopRecordedManagedOpenCode(record.value);
+					yield* Ref.update(ref, (state) => ({
 						...state,
-						instances: newInstances,
-						externalUrls: newExternalUrls,
-						...(driver === "opencode" && input.managed
-							? {
-									managedProcesses: HashMap.set(
-										state.managedProcesses ?? HashMap.empty(),
-										input.id,
-										{
-											port: input.port,
-											...(input.env !== undefined ? { env: input.env } : {}),
-										},
-									),
-								}
-							: {}),
-					},
-				];
-			},
+						instances: HashMap.remove(state.instances, id),
+						externalUrls: HashMap.remove(state.externalUrls, id),
+						restartTimestamps: HashMap.remove(state.restartTimestamps, id),
+						managedProcesses: HashMap.remove(
+							state.managedProcesses ?? HashMap.empty(),
+							id,
+						),
+					}));
+					yield* FiberMap.remove(fibers, pollerKey(id));
+					yield* FiberMap.remove(fibers, restartKey(id));
+				} else {
+					const now = yield* Clock.currentTimeMillis;
+					const prior = Option.getOrUndefined(previous);
+					const {
+						configDir: _folder,
+						env: _env,
+						url: _url,
+						...runtime
+					} = prior ?? {};
+					const managed = prior?.managed ?? account.managed ?? false;
+					const port =
+						(change._tag === "Update" ? change.updates.port : undefined) ??
+						prior?.port ??
+						account.port ??
+						0;
+					const url = managed
+						? undefined
+						: (Option.getOrUndefined(HashMap.get(before.externalUrls, id)) ??
+							account.url);
+					const instance: OpenCodeInstance = {
+						...runtime,
+						id: account.id,
+						name: account.name,
+						driver: "opencode",
+						port,
+						managed,
+						status: prior?.status ?? "starting",
+						restartCount: prior?.restartCount ?? 0,
+						createdAt: prior?.createdAt ?? now,
+						...(account.configuredFolder === undefined
+							? {}
+							: { configDir: account.configuredFolder }),
+						...(url === undefined ? {} : { url }),
+						...(account.env === undefined
+							? {}
+							: {
+									env: managed
+										? publicManagedOpenCodeEnv(account.env)
+										: { ...account.env },
+								}),
+					};
+					yield* Ref.update(ref, (state) => ({
+						...state,
+						instances: HashMap.set(state.instances, id, instance),
+						externalUrls:
+							url === undefined
+								? HashMap.remove(state.externalUrls, id)
+								: HashMap.set(state.externalUrls, id, url),
+						managedProcesses: !managed
+							? (state.managedProcesses ?? HashMap.empty())
+							: HashMap.set(state.managedProcesses ?? HashMap.empty(), id, {
+									...(Option.isSome(record) ? record.value : {}),
+									port,
+									...(account.env === undefined
+										? {}
+										: {
+												env: {
+													...account.env,
+													...(Option.isSome(record) &&
+													record.value.env?.["OPENCODE_SERVER_PASSWORD"] !==
+														undefined &&
+													account.env["OPENCODE_SERVER_PASSWORD"] === undefined
+														? {
+																OPENCODE_SERVER_PASSWORD:
+																	record.value.env["OPENCODE_SERVER_PASSWORD"],
+																OPENCODE_SERVER_USERNAME:
+																	record.value.env[
+																		"OPENCODE_SERVER_USERNAME"
+																	] ?? "opencode",
+															}
+														: {}),
+												},
+											}),
+								}),
+					}));
+					if (Option.isNone(previous))
+						yield* FiberMap.run(
+							fibers,
+							pollerKey(id),
+							Effect.never.pipe(Effect.interruptible),
+						);
+				}
+				if (
+					change._tag === "Update" &&
+					change.updates.configDir !== undefined &&
+					account?.driver === "claude" &&
+					Option.contains(committed.defaults.claude, account.id)
+				) {
+					const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+					if (Option.isSome(config))
+						yield* commitDaemonRuntimeConfig((current) => ({
+							...current,
+							claudeConfigDir: account.configuredFolder,
+						})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
+				}
+				if (change._tag === "Remove") yield* publishProviderInstanceRemoved(id);
+				else if (change._tag === "Update")
+					yield* publishInstanceStatusChanged(id);
+				yield* requestConfigSave;
+			}),
 		);
-
-		if (reservationFailure !== undefined) {
-			if (reservationFailure._tag === "duplicate") {
-				return yield* instanceAlreadyExists(reservationFailure.id);
-			}
-			return yield* instanceLimitExceeded(reservationFailure.max);
-		}
-
-		// Start health poll fiber — FiberMap auto-interrupts if one already exists for this key
-		if (driver === "opencode") {
-			yield* FiberMap.run(
-				fiberMap,
-				pollerKey(input.id),
-				Effect.never.pipe(Effect.interruptible),
-			);
-		}
-
-		yield* requestConfigSave;
-
-		return instance;
-	}).pipe(
-		Effect.annotateLogs("instanceId", input.id),
-		Effect.withSpan("instance.add", { attributes: { instanceId: input.id } }),
-	);
-
-/**
- * Remove an instance. Clears from state and interrupts its health poll fiber.
- */
-export const removeInstance = (instanceId: string) =>
-	Effect.gen(function* () {
-		const directory = yield* Effect.serviceOption(AccountDirectory);
-		const defaultClaude = Option.isSome(directory)
-			? yield* directory.value.defaultFor("claude")
-			: Option.none();
-		if (Option.isSome(defaultClaude) && instanceId === defaultClaude.value.id) {
-			return yield* new InstanceRemovalRejected({
-				id: instanceId,
-				message: "The default account can't be removed",
-			});
-		}
-		const ref = yield* InstanceManagerStateTag;
-		const fiberMap = yield* PollerFibersTag;
-		const processRecord = HashMap.get(
-			(yield* Ref.get(ref)).managedProcesses ?? HashMap.empty(),
-			instanceId,
-		);
-		if (Option.isSome(processRecord))
-			yield* stopRecordedManagedOpenCode(processRecord.value);
-
-		yield* Ref.update(ref, (state) => ({
-			...state,
-			instances: HashMap.remove(state.instances, instanceId),
-			externalUrls: HashMap.remove(state.externalUrls, instanceId),
-			restartTimestamps: HashMap.remove(state.restartTimestamps, instanceId),
-			managedProcesses: HashMap.remove(
-				state.managedProcesses ?? HashMap.empty(),
-				instanceId,
-			),
-		}));
-
-		yield* FiberMap.remove(fiberMap, pollerKey(instanceId));
-		yield* FiberMap.remove(fiberMap, restartKey(instanceId));
-		yield* publishProviderInstanceRemoved(instanceId);
-		yield* requestConfigSave;
+		return change._tag === "Add"
+			? committed.accounts.at(-1)
+			: committed.accounts.find((account) => account.id === change.id);
 	}).pipe(
 		withManagedOpenCodeLock,
-		Effect.annotateLogs("instanceId", instanceId),
-		Effect.withSpan("instance.remove", {
-			attributes: { instanceId },
-		}),
+		Effect.mapError((error) =>
+			error instanceof AccountChangeRejected
+				? error
+				: new AccountChangeRejected({
+						id: change.id ?? "",
+						reason: error instanceof Error ? error.message : String(error),
+					}),
+		),
+		Effect.withSpan("account.apply"),
 	);
+
+export const addInstance = (input: AddInstanceInput) =>
+	applyAccountChange({ ...input, _tag: "Add" }).pipe(
+		Effect.flatMap((account) =>
+			account === undefined
+				? Effect.fail(
+						new AccountChangeRejected({
+							id: input.id ?? "",
+							reason: "Account allocation failed",
+						}),
+					)
+				: getInstance(account.id).pipe(
+						Effect.mapError(
+							(error) =>
+								new AccountChangeRejected({
+									id: account.id,
+									reason: error.message ?? `Instance "${account.id}" not found`,
+								}),
+						),
+					),
+		),
+	);
+
+export const removeInstance = (instanceId: string) =>
+	applyAccountChange({ _tag: "Remove", id: instanceId }).pipe(Effect.asVoid);
 
 // Capabilities describe the adapter, not persisted instance configuration.
 function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
@@ -490,49 +520,61 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	};
 }
 
-/** Get a single instance by ID, or fail with InstanceNotFound. */
-export const getInstance = (instanceId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* InstanceManagerStateTag;
-		const state = yield* Ref.get(ref);
-		const instance = HashMap.get(state.instances, instanceId);
-
-		if (instance._tag === "None") {
-			return yield* instanceNotFound(instanceId);
-		}
-		return instanceInfo(instance.value);
-	}).pipe(
-		Effect.annotateLogs("instanceId", instanceId),
-		Effect.withSpan("instance.get", { attributes: { instanceId } }),
-	);
-
-/**
- * Get all instances as a readonly array.
- */
+/** Publish account metadata together with its OpenCode runtime status. */
 export const getInstances = Effect.gen(function* () {
-	const ref = yield* InstanceManagerStateTag;
-	const state = yield* Ref.get(ref);
-	const directory = yield* Effect.serviceOption(AccountDirectory);
-	const accounts = Option.isSome(directory)
-		? yield* directory.value.list
-		: undefined;
-	return Array.from(HashMap.values(state.instances), (instance) => ({
-		...instanceInfo(instance),
-		...(accounts === undefined
-			? {}
-			: {
-					isDefault: accounts.some(
-						(account) => account.id === instance.id && account.isDefault,
-					),
-					usageEligible: accounts.some(
-						(account) =>
-							account.id === instance.id &&
-							account.driver === "claude" &&
-							account.usageEligible,
-					),
-				}),
-	}));
+	const directory = yield* AccountDirectory;
+	const accounts = yield* directory.list;
+	const state = yield* Ref.get(yield* InstanceManagerStateTag);
+	return accounts.map((account): OpenCodeInstance => {
+		const runtime = Option.getOrUndefined(
+			HashMap.get(state.instances, account.id),
+		);
+		return instanceInfo({
+			...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
+			id: account.id,
+			name: account.name,
+			driver: account.driver,
+			port:
+				account.driver === "opencode"
+					? (runtime?.port ?? account.port ?? 0)
+					: 0,
+			managed:
+				account.driver === "opencode" &&
+				(runtime?.managed ?? account.managed ?? false),
+			...(account.configuredFolder === undefined
+				? {}
+				: { configDir: account.configuredFolder }),
+			...(runtime?.url !== undefined
+				? { url: runtime.url }
+				: account.driver === "opencode" && account.url !== undefined
+					? { url: account.url }
+					: {}),
+			...(account.env === undefined
+				? {}
+				: {
+						env:
+							account.driver === "opencode" &&
+							(runtime?.managed ?? account.managed)
+								? publicManagedOpenCodeEnv(account.env)
+								: { ...account.env },
+					}),
+			isDefault: account.isDefault,
+			usageEligible: account.driver === "claude" && account.usageEligible,
+		});
+	});
 }).pipe(Effect.withSpan("instance.getAll"));
+
+/** Get a live account's read model; status reads never apply routing fallbacks. */
+export const getInstance = (instanceId: string) =>
+	getInstances.pipe(
+		Effect.flatMap((instances) => {
+			const instance = instances.find((item) => item.id === instanceId);
+			return instance === undefined
+				? Effect.fail(instanceNotFound(instanceId))
+				: Effect.succeed(instance);
+		}),
+		Effect.withSpan("instance.get"),
+	);
 
 export const getManagedOpenCodeProcessEnv = (instanceId: string) =>
 	Effect.gen(function* () {
@@ -544,57 +586,54 @@ export const getManagedOpenCodeProcessEnv = (instanceId: string) =>
 		return Option.isSome(record) ? record.value.env : undefined;
 	});
 
-/**
- * Get all instance records in daemon.json shape, including unmanaged external
- * URLs tracked separately for lifecycle lookup.
- */
+/** Accounts own configuration; OpenCode contributes only process recovery data. */
 export const getPersistedInstanceConfigs = Effect.gen(function* () {
-	const ref = yield* InstanceManagerStateTag;
-	const state = yield* Ref.get(ref);
-	const configs: DaemonInstanceConfig[] = [];
-	for (const inst of HashMap.values(state.instances)) {
-		const driver = yield* Schema.decodeUnknown(KnownProviderDriverKindSchema)(
-			inst.driver ?? "opencode",
+	const directory = yield* AccountDirectory;
+	const accounts = yield* directory.list;
+	const state = yield* Ref.get(yield* InstanceManagerStateTag);
+	return accounts.map((account): DaemonInstanceConfig => {
+		const runtime = Option.getOrUndefined(
+			HashMap.get(state.instances, account.id),
 		);
-		const externalUrl = HashMap.get(state.externalUrls, inst.id);
-		const privateRecord = HashMap.get(
-			state.managedProcesses ?? HashMap.empty(),
-			inst.id,
+		const record = Option.getOrUndefined(
+			HashMap.get(state.managedProcesses ?? HashMap.empty(), account.id),
 		);
-		const record =
-			inst.managed && inst.driver !== "claude" && Option.isSome(privateRecord)
-				? privateRecord.value
-				: undefined;
-		const pid = record?.pid ?? inst.pid;
-		configs.push({
-			id: inst.id,
-			name: inst.name,
-			port: inst.port,
-			managed: inst.managed,
-			...(inst.managed && inst.driver !== "claude" && pid !== undefined
+		const managed =
+			account.driver === "opencode" &&
+			(runtime?.managed ?? account.managed ?? false);
+		const pid = record?.pid ?? runtime?.pid;
+		const env = managed ? (record?.env ?? account.env) : account.env;
+		return {
+			id: account.id,
+			name: account.name,
+			driver: account.driver,
+			port:
+				account.driver === "opencode"
+					? (runtime?.port ?? account.port ?? 0)
+					: 0,
+			managed,
+			...(managed && pid !== undefined
 				? {
 						pid,
-						...(record?.processIdentity !== undefined
-							? { processIdentity: record.processIdentity }
-							: {}),
-						...(inst.version !== undefined ? { version: inst.version } : {}),
+						...(runtime?.version === undefined
+							? {}
+							: { version: runtime.version }),
 					}
 				: {}),
-			driver,
-			...((record?.env ?? inst.env) !== undefined
-				? { env: record?.env ?? inst.env }
-				: {}),
-			...(inst.pid === undefined && record?.processIdentity !== undefined
+			...(managed && record?.processIdentity !== undefined
 				? { processIdentity: record.processIdentity }
 				: {}),
-			...(Option.isSome(externalUrl) ? { url: externalUrl.value } : {}),
-			// The legacy default folder is still persisted in the server-wide field.
-			...(inst.id !== "claude" && inst.configDir !== undefined
-				? { configDir: inst.configDir }
+			...(env === undefined ? {} : { env: { ...env } }),
+			...(!managed && Option.isSome(HashMap.get(state.externalUrls, account.id))
+				? {
+						url: Option.getOrThrow(HashMap.get(state.externalUrls, account.id)),
+					}
 				: {}),
-		});
-	}
-	return configs;
+			...(account.configuredFolder === undefined
+				? {}
+				: { configDir: account.configuredFolder }),
+		};
+	});
 }).pipe(Effect.withSpan("instance.getPersistedConfigs"));
 
 /** Verify process health, including immediately after a managed stream loss. */
@@ -1364,150 +1403,29 @@ export const stopInstance = (instanceId: string) =>
 		Effect.withSpan("instance.stop"),
 	);
 
-/**
- * Update an instance with partial field merge.
- */
+/** Account edits use the directory; runtime-only status remains with OpenCode. */
 export const updateInstance = (
 	instanceId: string,
-	updates: Partial<
-		Pick<
-			OpenCodeInstance,
-			"name" | "port" | "env" | "managed" | "status" | "driver" | "configDir"
-		>
-	>,
+	updates: Extract<AccountChange, { _tag: "Update" }>["updates"] & {
+		readonly status?: OpenCodeInstance["status"] | undefined;
+	},
 ) =>
 	Effect.gen(function* () {
-		const stateRef = yield* InstanceManagerStateTag;
-		if (updates.driver !== undefined) {
-			yield* Schema.decodeUnknown(KnownProviderDriverKindSchema)(
-				updates.driver,
-			);
-		}
-		const directory = yield* Effect.serviceOption(AccountDirectory);
-		const defaultClaude = Option.isSome(directory)
-			? yield* directory.value.defaultFor("claude")
-			: Option.none();
-		const isDefaultClaude =
-			Option.isSome(defaultClaude) && instanceId === defaultClaude.value.id;
-		if (
-			isDefaultClaude &&
-			updates.driver !== undefined &&
-			updates.driver !== "claude"
-		) {
-			return yield* new InstanceUpdateRejected({
-				id: instanceId,
-				message: "The default Claude account's type can't be changed",
-			});
-		}
-		if (isDefaultClaude && updates.configDir !== undefined) {
-			const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
-			if (Option.isNone(configRef)) {
-				return yield* new InstanceUpdateRejected({
-					id: instanceId,
-					message:
-						"Default Claude folder editing requires daemon configuration",
-				});
-			}
-			yield* commitDaemonRuntimeConfig((config) => ({
-				...config,
-				claudeConfigDir: updates.configDir?.trim() || undefined,
-			})).pipe(Effect.provideService(DaemonConfigRefTag, configRef.value));
-		}
-		if (updates.driver === "claude") {
-			const record = HashMap.get(
-				(yield* Ref.get(stateRef)).managedProcesses ?? HashMap.empty(),
-				instanceId,
-			);
-			if (Option.isSome(record))
-				yield* stopRecordedManagedOpenCode(record.value);
-			yield* cancelInstanceFibers(instanceId);
-		}
-		yield* Ref.update(stateRef, (s) => ({
-			...s,
-			instances: HashMap.modify(s.instances, instanceId, (inst) => {
-				const updated = {
-					...inst,
-					...updates,
-					...(inst.managed &&
-					inst.driver !== "claude" &&
-					updates.env !== undefined
-						? { env: publicManagedOpenCodeEnv(updates.env) }
-						: {}),
-				};
-				if (isDefaultClaude) {
-					const { configDir: _configDir, ...metadata } = updated;
-					const configDir =
-						updates.configDir === undefined
-							? inst.configDir
-							: updates.configDir.trim() || undefined;
-					return {
-						...metadata,
-						...(configDir !== undefined ? { configDir } : {}),
-					};
-				}
-				if (updates.driver !== "claude") return updated;
-				const {
-					url: _url,
-					pid: _pid,
-					version: _version,
-					env,
-					...claudeInstance
-				} = updated;
-				const {
-					OPENCODE_SERVER_PASSWORD: _password,
-					OPENCODE_SERVER_USERNAME: _username,
-					...claudeEnv
-				} = env ?? {};
-				return {
-					...claudeInstance,
-					...(env !== undefined ? { env: claudeEnv } : {}),
-					managed: false,
-					port: 0,
-					status: "healthy" as const,
-				};
-			}),
-			externalUrls:
-				updates.driver === "claude"
-					? HashMap.remove(s.externalUrls, instanceId)
-					: s.externalUrls,
-			restartTimestamps:
-				updates.driver === "claude"
-					? HashMap.remove(s.restartTimestamps, instanceId)
-					: s.restartTimestamps,
-			managedProcesses:
-				updates.driver === "claude"
-					? HashMap.remove(s.managedProcesses ?? HashMap.empty(), instanceId)
-					: updates.env !== undefined
-						? HashMap.modify(
-								s.managedProcesses ?? HashMap.empty(),
-								instanceId,
-								(record) => ({
-									...record,
-									env: {
-										...updates.env,
-										...(record.env?.["OPENCODE_SERVER_PASSWORD"] !==
-											undefined &&
-										updates.env?.["OPENCODE_SERVER_PASSWORD"] === undefined
-											? {
-													OPENCODE_SERVER_PASSWORD:
-														record.env["OPENCODE_SERVER_PASSWORD"],
-													OPENCODE_SERVER_USERNAME:
-														record.env["OPENCODE_SERVER_USERNAME"] ??
-														"opencode",
-												}
-											: {}),
-									},
-								}),
-							)
-						: (s.managedProcesses ?? HashMap.empty()),
-		}));
-		yield* publishInstanceStatusChanged(instanceId);
-		yield* requestConfigSave;
-	}).pipe(
-		withManagedOpenCodeLock,
-		Effect.annotateLogs("instanceId", instanceId),
-		Effect.withSpan("instance.update"),
-	);
+		const { status, ...metadata } = updates;
+		yield* applyAccountChange({
+			_tag: "Update",
+			id: instanceId,
+			updates: metadata,
+		});
+		if (status !== undefined)
+			yield* Ref.update(yield* InstanceManagerStateTag, (state) => ({
+				...state,
+				instances: HashMap.modify(state.instances, instanceId, (instance) => ({
+					...instance,
+					status,
+				})),
+			}));
+	});
 
 /** Persist instance mutations before their RPC acknowledgement. */
 export const persistConfig = Effect.gen(function* () {

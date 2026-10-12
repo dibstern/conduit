@@ -1,3 +1,4 @@
+import type { AddAccountInput } from "./contracts/account.js";
 // Canonical type definitions for conduit, derived from ticket specs.
 
 import type { Tracer } from "effect/Tracer";
@@ -233,8 +234,7 @@ export interface ProjectRelayConfig {
 	>;
 	/** Add a new instance. Returns the created instance. */
 	addInstance?: (
-		id: string,
-		config: import("./shared-types.js").InstanceConfig,
+		input: AddAccountInput,
 	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Remove an instance by ID. */
 	removeInstance?: (id: string) => MaybePromise<void>;

@@ -12,6 +12,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 vi.mock(
 	"../../../src/lib/instance/managed-opencode-process.js",
@@ -79,26 +80,30 @@ it.each([
 		}),
 	);
 	const dependencies = Layer.mergeAll(
-		makeInstanceManagerStateLive(undefined, [
-			{
-				id: "opencode",
-				name: "Removal probe",
-				port: 4310,
-				managed: true,
-				pid: 1234,
-			},
-			...(survivingInstance
-				? [
-						{
-							id: "secondary",
-							name: "Surviving managed instance",
-							port: 4320,
-							managed: true,
-							pid: 1235,
-						},
-					]
-				: []),
-		]),
+		makeInstanceManagerStateLive(
+			undefined,
+			[
+				{
+					id: "opencode",
+					name: "Removal probe",
+					port: 4310,
+					managed: true,
+					pid: 1234,
+				},
+				...(survivingInstance
+					? [
+							{
+								id: "secondary",
+								name: "Surviving managed instance",
+								port: 4320,
+								managed: true,
+								pid: 1235,
+							},
+						]
+					: []),
+			],
+			{ launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude") },
+		),
 		DaemonEventBusLive,
 		ConfigPersistenceNoopLive,
 		Layer.succeed(InstanceHealthCheckTag, {

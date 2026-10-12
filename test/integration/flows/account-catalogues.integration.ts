@@ -11,16 +11,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type AccountDirectory,
-	AccountDirectoryLive,
-} from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import type { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	type DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addInstance,
 	makeInstanceManagerStateLive,
@@ -136,21 +134,24 @@ describe("Integration: account catalogues", () => {
 			join(login, "commands", "default-only.md"),
 			"Default command\n",
 		);
-		const registry = makeInstanceManagerStateLive({}, [
-			{
-				id: "claude",
-				name: "Default",
-				driver: "claude",
-				configDir: login,
-				port: 0,
-				managed: false,
-			},
-		]);
+		const registry = makeInstanceManagerStateLive(
+			{},
+			[
+				{
+					id: "claude",
+					name: "Default",
+					driver: "claude",
+					configDir: login,
+					port: 0,
+					managed: false,
+				},
+			],
+			{ launchLogin: configuredClaudeConfigDir(login) },
+		);
 		const runtime = ManagedRuntime.make(
 			Layer.mergeAll(
-				AccountDirectoryLive(configuredClaudeConfigDir(login)).pipe(
-					Layer.provideMerge(registry),
-				),
+				registry,
+				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 				Layer.succeed(ConfigPersistenceTag, {
 					requestSave: Effect.void,
@@ -176,7 +177,6 @@ describe("Integration: account catalogues", () => {
 				name: "Personal",
 				driver: "claude",
 				configDir: accountFolder,
-				port: 0,
 				managed: false,
 			}),
 		);

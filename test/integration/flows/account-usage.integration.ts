@@ -13,7 +13,6 @@ import { Effect, Layer, ManagedRuntime, Option, Stream } from "effect";
 import { expect, it } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { UsageLive } from "../../../src/lib/domain/daemon/Layers/usage-layer.js";
-import { AccountDirectoryLive } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { makeDaemonStateLive } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
 import {
@@ -37,43 +36,45 @@ it("filters usage by directory eligibility on the server and in both browser lis
 	const launchEnvs: Array<
 		Readonly<Record<string, string | undefined>> | undefined
 	> = [];
-	const registry = makeInstanceManagerStateLive({}, [
-		{
-			id: "claude",
-			name: "Default",
-			driver: "claude",
-			port: 0,
-			managed: false,
-		},
-		{
-			id: "personal",
-			name: "Personal",
-			driver: "claude",
-			configDir: personal,
-			port: 0,
-			managed: false,
-		},
-		{
-			id: "api-key",
-			name: "API key",
-			driver: "claude",
-			env: { ANTHROPIC_API_KEY: "fixture-key" },
-			port: 0,
-			managed: false,
-		},
-		{
-			id: "auth-token",
-			name: "Token",
-			driver: "claude",
-			env: { ANTHROPIC_AUTH_TOKEN: "fixture-token" },
-			port: 0,
-			managed: false,
-		},
-	]);
+	const registry = makeInstanceManagerStateLive(
+		{},
+		[
+			{
+				id: "claude",
+				name: "Default",
+				driver: "claude",
+				port: 0,
+				managed: false,
+			},
+			{
+				id: "personal",
+				name: "Personal",
+				driver: "claude",
+				configDir: personal,
+				port: 0,
+				managed: false,
+			},
+			{
+				id: "api-key",
+				name: "API key",
+				driver: "claude",
+				env: { ANTHROPIC_API_KEY: "fixture-key" },
+				port: 0,
+				managed: false,
+			},
+			{
+				id: "auth-token",
+				name: "Token",
+				driver: "claude",
+				env: { ANTHROPIC_AUTH_TOKEN: "fixture-token" },
+				port: 0,
+				managed: false,
+			},
+		],
+		{ launchLogin: sdkDefaultClaudeConfigDir(join(root, "home", ".claude")) },
+	);
 	const dependencies = Layer.mergeAll(
-		AccountDirectoryLive(
-			sdkDefaultClaudeConfigDir(join(root, "home", ".claude")),
-		).pipe(Layer.provideMerge(registry)),
+		registry,
 		makeDaemonStateLive({ configDir: root }),
 		DaemonEventBusLive,
 		ConfigPersistenceNoopLive,

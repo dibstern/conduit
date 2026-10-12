@@ -35,6 +35,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import {
@@ -95,7 +96,9 @@ describe("RelayFactoryTag", () => {
 		ConfigPersistenceNoopLive,
 		DaemonEventBusLive,
 		makeProjectRegistryLive(),
-		makeInstanceManagerStateLive(),
+		makeInstanceManagerStateLive(undefined, [], {
+			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+		}),
 		Layer.succeed(PortScannerTag, {
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),

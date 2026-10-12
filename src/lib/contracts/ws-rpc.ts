@@ -13,6 +13,7 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
+import { AccountChangeRejected } from "./account.js";
 import {
 	WorktreeBranchRenameError,
 	WorktreeCreationError,
@@ -1187,7 +1188,10 @@ export class StopInstance extends Schema.TaggedRequest<StopInstance>()(
 export class RemoveInstance extends Schema.TaggedRequest<RemoveInstance>()(
 	"RemoveInstance",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountChangeRejected),
+		),
 		success: InstanceListResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
@@ -1199,7 +1203,10 @@ export class RemoveInstance extends Schema.TaggedRequest<RemoveInstance>()(
 export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
 	"RenameInstance",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountChangeRejected),
+		),
 		success: InstanceListResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
@@ -1212,7 +1219,10 @@ export class RenameInstance extends Schema.TaggedRequest<RenameInstance>()(
 export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
 	"AddInstance",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountChangeRejected),
+		),
 		success: InstanceListResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
@@ -1232,7 +1242,10 @@ export class AddInstance extends Schema.TaggedRequest<AddInstance>()(
 export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 	"UpdateInstance",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountChangeRejected),
+		),
 		success: InstanceListResponseSchema,
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),

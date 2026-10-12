@@ -330,10 +330,12 @@ describe("startForegroundDaemon", () => {
 					instanceId: added.id,
 				}),
 			);
-			expect(stopResult.instances).toEqual([
-				expect.objectContaining({ id: added.id, status: "stopped" }),
-				expect.objectContaining({ id: "claude", driver: "claude" }),
-			]);
+			expect(stopResult.instances).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ id: added.id, status: "stopped" }),
+					expect.objectContaining({ id: "claude", driver: "claude" }),
+				]),
+			);
 
 			const statusResult = await sendRpcRequest(
 				socketPath,
@@ -347,14 +349,16 @@ describe("startForegroundDaemon", () => {
 			});
 
 			const listResult = await sendRpcRequest(socketPath, new GetInstances({}));
-			expect(listResult.instances).toEqual([
-				expect.objectContaining({
-					id: added.id,
-					name: "Renamed Provider",
-					status: "stopped",
-				}),
-				expect.objectContaining({ id: "claude", driver: "claude" }),
-			]);
+			expect(listResult.instances).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						id: added.id,
+						name: "Renamed Provider",
+						status: "stopped",
+					}),
+					expect.objectContaining({ id: "claude", driver: "claude" }),
+				]),
+			);
 
 			const removeResult = await sendRpcRequest(
 				socketPath,

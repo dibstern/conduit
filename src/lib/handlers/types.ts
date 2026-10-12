@@ -1,3 +1,4 @@
+import type { AddAccountInput } from "../contracts/account.js";
 // Shared types used by all handler modules.
 
 import type {
@@ -9,7 +10,7 @@ import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
 import type { PtyManager } from "../relay/pty-manager.js";
-import type { InstanceConfig, OpenCodeInstance } from "../shared-types.js";
+import type { OpenCodeInstance } from "../shared-types.js";
 import type { ProjectRelayConfig } from "../types.js";
 
 /** Instance management capability group — only available in daemon mode. */
@@ -18,8 +19,7 @@ export interface InstanceManagementDeps {
 		| ReadonlyArray<Readonly<OpenCodeInstance>>
 		| PromiseLike<ReadonlyArray<Readonly<OpenCodeInstance>>>;
 	addInstance: (
-		id: string,
-		config: InstanceConfig,
+		input: AddAccountInput,
 	) => OpenCodeInstance | PromiseLike<OpenCodeInstance>;
 	removeInstance: (id: string) => void | PromiseLike<void>;
 	startInstance: (id: string) => Promise<void>;

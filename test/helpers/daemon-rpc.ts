@@ -5,6 +5,7 @@ import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-laye
 import { OpenCodeInstancesLive } from "../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { PortScannerTag } from "../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import { TailscaleCliTag } from "../../src/lib/domain/daemon/Layers/tailscale-serve-layer.js";
+import type { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigPersistenceNoopLive,
 	type ConfigPersistenceTag,
@@ -19,13 +20,20 @@ import { DaemonHandleLive } from "../../src/lib/domain/daemon/Services/daemon-ha
 import { DaemonLifecycleContextLive } from "../../src/lib/domain/daemon/Services/daemon-lifecycle-context.js";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
+	type DaemonInstanceConfig,
 	type DaemonState,
 	type DaemonStateTag,
 	makeDaemonStateLive,
 } from "../../src/lib/domain/daemon/Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../../src/lib/domain/daemon/Services/instance-health-service.js";
-import { makeInstanceManagerStateLive } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
-import { makeProjectRegistryLive } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	type InstanceManagerStateTag,
+	makeInstanceManagerStateLive,
+} from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import {
+	makeProjectRegistryLive,
+	type ProjectRegistryTag,
+} from "../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	makeRelayCacheLive,
 	type RelayFactory,
@@ -35,6 +43,10 @@ import {
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
 import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
+import {
+	type ClaudeConfigDir,
+	configuredClaudeConfigDir,
+} from "../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	BrowserRpcConnectionsLive,
 	RpcCaller,
@@ -47,11 +59,17 @@ export const makeDaemonRpcTestLayer = (
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
+		instances?: ReadonlyArray<DaemonInstanceConfig>;
+		launchLogin?: ClaudeConfigDir;
 		tailscaleCli?: Layer.Layer<TailscaleCliTag>;
 		persistence?: Layer.Layer<
 			ConfigPersistenceTag,
 			never,
-			DaemonStateTag | DaemonConfigRefTag
+			| DaemonStateTag
+			| DaemonConfigRefTag
+			| AccountDirectory
+			| ProjectRegistryTag
+			| InstanceManagerStateTag
 		>;
 	} = {},
 ) => {
@@ -93,7 +111,11 @@ export const makeDaemonRpcTestLayer = (
 				};
 			}),
 		),
-		makeInstanceManagerStateLive(),
+		makeInstanceManagerStateLive(undefined, options.instances ?? [], {
+			launchLogin:
+				options.launchLogin ??
+				configuredClaudeConfigDir("/tmp/daemon-rpc-fixture/claude"),
+		}),
 		Layer.scoped(
 			Usage,
 			makeUsage({ accounts: Effect.succeed([]), readers: {} }),

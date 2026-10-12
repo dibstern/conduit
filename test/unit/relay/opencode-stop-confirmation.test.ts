@@ -13,6 +13,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 vi.mock(
 	"../../../src/lib/instance/managed-opencode-process.js",
@@ -33,20 +34,26 @@ describe("managed OpenCode stop confirmation", () => {
 	it("does not publish termination proof for an unregistered default alias", async () => {
 		vi.mocked(stopManagedOpenCode).mockResolvedValue(false);
 		const dependencies = Layer.mergeAll(
-			makeInstanceManagerStateLive(undefined, [
-				{
-					id: "named-opencode",
-					name: "Named OpenCode",
-					port: 4310,
-					managed: true,
-					pid: 1234,
-					processIdentity: {
-						supervisorPid: 1233,
-						controlPort: 4311,
-						token: "a".repeat(64),
+			makeInstanceManagerStateLive(
+				undefined,
+				[
+					{
+						id: "named-opencode",
+						name: "Named OpenCode",
+						port: 4310,
+						managed: true,
+						pid: 1234,
+						processIdentity: {
+							supervisorPid: 1233,
+							controlPort: 4311,
+							token: "a".repeat(64),
+						},
 					},
+				],
+				{
+					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 				},
-			]),
+			),
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
 			Layer.succeed(InstanceHealthCheckTag, {
@@ -81,15 +88,21 @@ describe("managed OpenCode stop confirmation", () => {
 	it("does not publish termination proof for an unverified live legacy PID", async () => {
 		vi.mocked(stopManagedOpenCode).mockResolvedValue(false);
 		const dependencies = Layer.mergeAll(
-			makeInstanceManagerStateLive(undefined, [
+			makeInstanceManagerStateLive(
+				undefined,
+				[
+					{
+						id: "opencode",
+						name: "Legacy OpenCode",
+						port: 4310,
+						managed: true,
+						pid: 1234,
+					},
+				],
 				{
-					id: "opencode",
-					name: "Legacy OpenCode",
-					port: 4310,
-					managed: true,
-					pid: 1234,
+					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 				},
-			]),
+			),
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
 			Layer.succeed(InstanceHealthCheckTag, {
@@ -134,20 +147,26 @@ describe("managed OpenCode stop confirmation", () => {
 	}) => {
 		vi.mocked(stopManagedOpenCode).mockResolvedValue(terminated);
 		const dependencies = Layer.mergeAll(
-			makeInstanceManagerStateLive({ maxRestartsPerWindow: 0 }, [
-				{
-					id: "opencode",
-					name: "Exhausted OpenCode",
-					port: 4310,
-					managed: true,
-					pid: 1234,
-					processIdentity: {
-						supervisorPid: 1233,
-						controlPort: 4311,
-						token: "a".repeat(64),
+			makeInstanceManagerStateLive(
+				{ maxRestartsPerWindow: 0 },
+				[
+					{
+						id: "opencode",
+						name: "Exhausted OpenCode",
+						port: 4310,
+						managed: true,
+						pid: 1234,
+						processIdentity: {
+							supervisorPid: 1233,
+							controlPort: 4311,
+							token: "a".repeat(64),
+						},
 					},
+				],
+				{
+					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 				},
-			]),
+			),
 			DaemonEventBusLive,
 			ConfigPersistenceNoopLive,
 			Layer.succeed(InstanceHealthCheckTag, {

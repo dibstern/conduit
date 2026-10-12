@@ -1,9 +1,7 @@
 import { Context, Data, Effect, Layer } from "effect";
+import type { AddAccountInput } from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
-import type {
-	InstanceConfig,
-	OpenCodeInstance,
-} from "../../../shared-types.js";
+import type { OpenCodeInstance } from "../../../shared-types.js";
 import type { ProjectRelayConfig } from "../../../types.js";
 import { InstanceMgmtTag } from "../../daemon/Services/management-service.js";
 import { ConfigTag } from "./services.js";
@@ -24,15 +22,7 @@ export class InstanceManagementServiceError extends Data.TaggedError(
 	readonly cause: unknown;
 }> {}
 
-export interface AddInstanceInput {
-	readonly name: string;
-	readonly url?: string | undefined;
-	readonly port?: number | undefined;
-	readonly managed?: boolean | undefined;
-	readonly env?: Record<string, string> | undefined;
-	readonly driver?: ProviderDriverKind | undefined;
-	readonly configDir?: string | undefined;
-}
+export type AddInstanceInput = AddAccountInput;
 
 export interface UpdateInstanceInput {
 	readonly name?: string | undefined;
@@ -91,25 +81,6 @@ export class InstanceManagementServiceTag extends Context.Tag(
 	"InstanceManagementService",
 )<InstanceManagementServiceTag, InstanceManagementService>() {}
 
-export const makeInstanceId = (
-	name: string,
-	instances: ReadonlyArray<{ readonly id: string }>,
-) => {
-	const baseId =
-		name
-			.toLowerCase()
-			.replace(/[^a-z0-9-]/g, "-")
-			.replace(/-+/g, "-")
-			.replace(/^-|-$/g, "") || "instance";
-	let id = baseId;
-	let counter = 2;
-	while (instances.some((instance) => instance.id === id)) {
-		id = `${baseId}-${counter}`;
-		counter++;
-	}
-	return id;
-};
-
 const toError =
 	(operation: InstanceOperation) =>
 	(cause: unknown): InstanceManagementServiceError =>
@@ -159,21 +130,8 @@ const makeInstanceManagementService = (
 		list,
 		add: (input) =>
 			Effect.gen(function* () {
-				const id = makeInstanceId(input.name, yield* list());
-				const hasUrl = typeof input.url === "string" && input.url.length > 0;
-				const managed =
-					typeof input.managed === "boolean" ? input.managed : !hasUrl;
-				const config: InstanceConfig = {
-					name: input.name,
-					port: typeof input.port === "number" ? input.port : 0,
-					managed,
-					...(input.env != null && { env: input.env }),
-					...(hasUrl && input.url != null && { url: input.url }),
-					...(input.driver != null && { driver: input.driver }),
-					...(input.configDir != null && { configDir: input.configDir }),
-				};
 				yield* Effect.tryPromise({
-					try: () => Promise.resolve(instanceMgmt.addInstance(id, config)),
+					try: () => Promise.resolve(instanceMgmt.addInstance(input)),
 					catch: toError("add"),
 				});
 				return yield* withPersistedList("add");
@@ -230,7 +188,7 @@ const makeInstanceManagementService = (
 					try: () =>
 						Promise.resolve(
 							instanceMgmt.updateInstance(instanceId, {
-								name: name.trim(),
+								name,
 							}),
 						),
 					catch: toError("rename"),

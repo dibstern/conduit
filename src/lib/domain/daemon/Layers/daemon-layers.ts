@@ -61,7 +61,6 @@ import {
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
 import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
-import { AccountDirectoryLive } from "../Services/account-directory.js";
 import {
 	commitDaemonRuntimeConfig,
 	type DaemonConfigMirror,
@@ -775,6 +774,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		? makeProjectRegistryFromDaemonStateLive
 		: makeProjectRegistryLive();
 	const instanceManagerOptions = {
+		launchLogin,
 		...(options.defaultOpencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.defaultOpencodeUrl,
 		}),
@@ -811,11 +811,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(Layer.provideMerge(withConfigPersistence));
 
 	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
-		Layer.provideMerge(
-			AccountDirectoryLive(launchLogin).pipe(
-				Layer.provideMerge(withManagedOpenCodeServers),
-			),
-		),
+		Layer.provideMerge(withManagedOpenCodeServers),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(

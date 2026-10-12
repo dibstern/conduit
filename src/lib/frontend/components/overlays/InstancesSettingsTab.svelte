@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { AccountChangeRejected } from "../../../contracts/account.js";
 	import { onDestroy } from "svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
@@ -84,8 +85,8 @@
 			void removeInstanceRpc({ instanceId })
 				.then(applyInstanceListResponse)
 				.then(refreshServerStatus)
-				.catch(() =>
-					showToast("Failed to remove instance", { variant: "warn" }),
+				.catch((error: unknown) =>
+					showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to remove instance", { variant: "warn" }),
 				);
 		}
 	}
@@ -177,7 +178,7 @@
 						instanceId: editingInstanceId,
 						name,
 						...(isClaude
-							? { ...(editingDefaultClaude ? { configDir: configDir ?? "" } : configDir !== undefined ? { configDir } : {}) }
+							? { configDir: configDir ?? "" }
 							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
 					})
 				: addInstanceRpc({
@@ -203,10 +204,10 @@
 				state.formSaving = false;
 				if (openForm === submittedForm) closeInstanceForm();
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
 				state.formSaving = false;
 				showToast(
-					`Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`,
+					error instanceof AccountChangeRejected ? error.reason : `Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`,
 					{ variant: "warn" },
 				);
 			});

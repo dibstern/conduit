@@ -23,6 +23,7 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 describe("Self-constructing service layers", () => {
 	const testLayer = Layer.mergeAll(
@@ -32,7 +33,9 @@ describe("Self-constructing service layers", () => {
 		makePollerStateLive(),
 		makePollerPubSubLive(),
 		makeSessionManagerStateLive(),
-		makeInstanceManagerStateLive(),
+		makeInstanceManagerStateLive(undefined, [], {
+			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+		}),
 		PtyManagerStateLive,
 	);
 

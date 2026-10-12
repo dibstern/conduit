@@ -28,7 +28,7 @@ import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/ope
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import {
 	AccountDirectory,
-	makeAccountDirectory,
+	AccountDirectoryStateLive,
 } from "../domain/daemon/Services/account-directory.js";
 import type { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import {
@@ -332,11 +332,7 @@ export function createProjectRelayLayers({
 					return ConfigPersistenceLive.pipe(
 						Layer.provideMerge(snapshot),
 						Layer.provide(makeConfigWriterLive(configDir)),
-						Layer.provideMerge(
-							Layer.sync(AccountDirectory, () =>
-								makeAccountDirectory(Effect.succeed(accounts)),
-							),
-						),
+						Layer.provideMerge(AccountDirectoryStateLive(accounts)),
 					);
 				}),
 			);

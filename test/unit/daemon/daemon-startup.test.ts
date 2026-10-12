@@ -4,15 +4,17 @@ import { InstanceMgmtTag } from "../../../src/lib/domain/daemon/Services/managem
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";
+import {
+	AccountChangeRejected,
+	type AddAccountInput,
+} from "../../../src/lib/contracts/account.js";
 import { rehydrateInstances } from "../../../src/lib/domain/daemon/Services/daemon-startup.js";
 import {
 	type DaemonInstanceConfig,
 	makeDaemonStateLive,
 } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-
 import { OpenCodeConnectionError } from "../../../src/lib/errors.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
-import { invalidInstanceUrl } from "../../../src/lib/instance/instance-errors.js";
 
 function makeMockInstanceMgmt(
 	overrides?: Partial<{
@@ -93,12 +95,14 @@ describe("daemon startup effects", () => {
 				);
 
 				expect(addInstance).toHaveBeenCalledTimes(2);
-				expect(addInstance).toHaveBeenCalledWith("inst-1", {
+				expect(addInstance).toHaveBeenCalledWith({
+					id: "inst-1",
 					name: "Instance 1",
 					port: 4001,
 					managed: true,
 				});
-				expect(addInstance).toHaveBeenCalledWith("inst-2", {
+				expect(addInstance).toHaveBeenCalledWith({
+					id: "inst-2",
 					name: "Instance 2",
 					port: 4002,
 					managed: false,
@@ -126,23 +130,25 @@ describe("daemon startup effects", () => {
 					},
 				];
 
-				const addInstance = vi.fn().mockImplementation((id: string) => {
-					if (id === "inst-bad") {
-						throw new OpenCodeConnectionError({
-							message: "DB corrupt",
-							cause: "DB corrupt",
-						});
-					}
-					return {
-						id,
-						name: "Good Instance",
-						port: 4002,
-						managed: true,
-						status: "stopped",
-						restartCount: 0,
-						createdAt: Date.now(),
-					};
-				});
+				const addInstance = vi
+					.fn()
+					.mockImplementation(({ id }: AddAccountInput) => {
+						if (id === "inst-bad") {
+							throw new OpenCodeConnectionError({
+								message: "DB corrupt",
+								cause: "DB corrupt",
+							});
+						}
+						return {
+							id,
+							name: "Good Instance",
+							port: 4002,
+							managed: true,
+							status: "stopped",
+							restartCount: 0,
+							createdAt: Date.now(),
+						};
+					});
 
 				const mockMgmt = makeMockInstanceMgmt({ addInstance });
 
@@ -179,20 +185,25 @@ describe("daemon startup effects", () => {
 					},
 				];
 
-				const addInstance = vi.fn().mockImplementation((id: string) => {
-					if (id === "inst-bad-url") {
-						throw invalidInstanceUrl("inst-bad-url", "not-a-url");
-					}
-					return {
-						id,
-						name: "Good Instance",
-						port: 4002,
-						managed: true,
-						status: "stopped",
-						restartCount: 0,
-						createdAt: Date.now(),
-					};
-				});
+				const addInstance = vi
+					.fn()
+					.mockImplementation(({ id }: AddAccountInput) => {
+						if (id === "inst-bad-url") {
+							throw new AccountChangeRejected({
+								id: "inst-bad-url",
+								reason: "Invalid URL",
+							});
+						}
+						return {
+							id,
+							name: "Good Instance",
+							port: 4002,
+							managed: true,
+							status: "stopped",
+							restartCount: 0,
+							createdAt: Date.now(),
+						};
+					});
 
 				const mockMgmt = makeMockInstanceMgmt({ addInstance });
 				const exit = yield* Effect.exit(

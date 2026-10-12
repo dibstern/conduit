@@ -24,6 +24,12 @@ export const OpenCodeAccountSchema = Schema.Struct({
 	id: Schema.suspend(() => AccountIdSchema),
 	name: Schema.String,
 	url: Schema.optional(Schema.String),
+	port: Schema.optional(Schema.Number),
+	managed: Schema.optional(Schema.Boolean),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	configuredFolder: Schema.optional(Schema.String),
 });
 export type OpenCodeAccount = typeof OpenCodeAccountSchema.Type;
 
@@ -33,6 +39,100 @@ export const AccountSchema = Schema.Union(
 );
 export type Account = typeof AccountSchema.Type;
 export type AccountListItem = Account & { readonly isDefault: boolean };
+
+export class AccountChangeRejected extends Schema.TaggedError<AccountChangeRejected>()(
+	"AccountChangeRejected",
+	{ id: Schema.String, reason: Schema.String },
+) {
+	get message(): string {
+		return this.reason;
+	}
+}
+
+const addFields = {
+	name: Schema.String.pipe(Schema.minLength(1)),
+	env: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.String }),
+	),
+	configDir: Schema.optional(Schema.String),
+};
+const validPort = Schema.Number.pipe(
+	Schema.int(),
+	Schema.between(1, 65535),
+).annotations({
+	message: () => "InstanceAdd requires a valid 'port' (1-65535)",
+});
+
+/** Driver-specific add rules are decoded by the directory, inside its commit. */
+export const AccountAddInputSchema = Schema.Union(
+	Schema.Struct({
+		...addFields,
+		driver: Schema.Literal("claude"),
+		managed: Schema.optional(
+			Schema.Literal(false).annotations({
+				message: () => "InstanceAdd: Claude instances must not be managed",
+			}),
+		),
+		port: Schema.optional(
+			Schema.Never.annotations({
+				message: () => "InstanceAdd: Claude instances must not include 'port'",
+			}),
+		),
+		url: Schema.optional(
+			Schema.Never.annotations({
+				message: () => "InstanceAdd: Claude instances must not include 'url'",
+			}),
+		),
+	}),
+	Schema.Struct({
+		...addFields,
+		driver: Schema.Literal("opencode"),
+		managed: Schema.optional(Schema.Boolean),
+		port: Schema.optional(validPort),
+		url: Schema.optional(
+			Schema.String.pipe(
+				Schema.filter(
+					(url) => {
+						try {
+							new URL(url);
+							return true;
+						} catch {
+							return false;
+						}
+					},
+					{
+						message: () =>
+							"InstanceAdd: 'url' must be a valid URL (e.g. http://host:4096)",
+					},
+				),
+			),
+		),
+	}).pipe(
+		Schema.filter(
+			(input) =>
+				!(input.managed ?? input.url === undefined) || input.port !== undefined,
+			{
+				message: () =>
+					"InstanceAdd requires a valid 'port' (1-65535) for managed instances",
+			},
+		),
+		Schema.filter(
+			(input) =>
+				!(input.managed ?? input.url === undefined) || input.url === undefined,
+			{
+				message: () =>
+					"InstanceAdd: 'url' is only valid for unmanaged instances (managed: false)",
+			},
+		),
+		Schema.filter(
+			(input) => input.url !== undefined || input.port !== undefined,
+			{
+				message: () =>
+					"InstanceAdd: unmanaged instances require either a 'url' or a valid 'port'",
+			},
+		),
+	),
+);
 
 // Keep decoding independent of the directory and its current default pointer.
 export const AccountRefSchema = Schema.Union(
@@ -82,3 +182,33 @@ export function accountRefFromSelection(selection: {
 				: "opencode",
 	};
 }
+
+export type AccountChange =
+	| {
+			readonly _tag: "Add";
+			readonly id?: string | undefined;
+			readonly name: string;
+			readonly driver?: string | undefined;
+			readonly managed?: boolean | undefined;
+			readonly port?: number | undefined;
+			readonly url?: string | undefined;
+			readonly env?: Readonly<Record<string, string>> | undefined;
+			readonly configDir?: string | undefined;
+	  }
+	| {
+			readonly _tag: "Update";
+			readonly id: string;
+			readonly updates: {
+				readonly name?: string | undefined;
+				readonly driver?: string | undefined;
+				readonly port?: number | undefined;
+				readonly env?: Readonly<Record<string, string>> | undefined;
+				readonly configDir?: string | undefined;
+			};
+	  }
+	| { readonly _tag: "Remove"; readonly id: string };
+
+export type AddAccountInput = Omit<
+	Extract<AccountChange, { _tag: "Add" }>,
+	"_tag"
+>;

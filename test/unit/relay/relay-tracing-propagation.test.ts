@@ -30,6 +30,7 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import {
 	makeMockAccountDirectory,
@@ -66,7 +67,9 @@ describe("relay tracing propagation", () => {
 				ConfigPersistenceNoopLive,
 				DaemonEventBusLive,
 				makeProjectRegistryLive(),
-				makeInstanceManagerStateLive(),
+				makeInstanceManagerStateLive(undefined, [], {
+					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+				}),
 				Layer.succeed(PortScannerTag, {
 					getKnownPorts: () => Effect.succeed(new Set<number>()),
 					scanNow: () =>

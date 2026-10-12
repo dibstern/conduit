@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Queue } from "effect";
+import { Effect, HashMap, Layer, Queue, Ref } from "effect";
 import { expect } from "vitest";
 import {
 	ConfigPersistenceNoopLive,
@@ -20,15 +20,20 @@ import {
 	getInstance,
 	getInstanceUrl,
 	getPersistedInstanceConfigs,
+	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 	persistConfig,
 	startInstance,
 	stopInstance,
 	updateInstance,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
+const launchLogin = sdkDefaultClaudeConfigDir("/isolated-home/.claude");
 // Shared test layer: InstanceManagerState + PollerFibers + DaemonEventBus
-const testLayer = makeInstanceManagerStateLive().pipe(
+const testLayer = makeInstanceManagerStateLive(undefined, [], {
+	launchLogin,
+}).pipe(
 	Layer.provideMerge(DaemonEventBusLive),
 	Layer.provideMerge(ConfigPersistenceNoopLive),
 	Layer.provideMerge(InstanceHealthCheckLive),
@@ -74,7 +79,7 @@ describe("InstanceManager — missing methods", () => {
 						port: 5000,
 						managed: true,
 					}).pipe(
-						Effect.catchTag("InstanceAlreadyExists", (e) =>
+						Effect.catchTag("AccountChangeRejected", (e) =>
 							Effect.succeed(`duplicate: ${e.id}`),
 						),
 					);
@@ -112,16 +117,20 @@ describe("InstanceManager — missing methods", () => {
 			() => {
 				let healthChecks = 0;
 				const claudeLayer = Layer.mergeAll(
-					makeInstanceManagerStateLive(undefined, [
-						{
-							id: "work-claude",
-							name: "Work Claude",
-							port: 0,
-							managed: true,
-							driver: "claude",
-							configDir: "/profiles/work",
-						},
-					]),
+					makeInstanceManagerStateLive(
+						undefined,
+						[
+							{
+								id: "work-claude",
+								name: "Work Claude",
+								port: 0,
+								managed: true,
+								driver: "claude",
+								configDir: "/profiles/work",
+							},
+						],
+						{ launchLogin },
+					),
 					DaemonEventBusLive,
 					ConfigPersistenceNoopLive,
 					Layer.succeed(InstanceHealthCheckTag, {
@@ -214,32 +223,36 @@ describe("InstanceManager — missing methods", () => {
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 
-		it.scoped("converts OpenCode state to a config-only Claude instance", () =>
-			Effect.gen(function* () {
-				yield* addInstance({
-					id: "convert-me",
-					name: "Convert Me",
-					port: 4096,
-					managed: false,
-					url: "https://opencode.example.test",
-				});
+		it.scoped(
+			"moves converted Claude accounts out of OpenCode runtime state",
+			() =>
+				Effect.gen(function* () {
+					yield* addInstance({
+						id: "convert-me",
+						name: "Convert Me",
+						port: 4096,
+						managed: false,
+						url: "https://opencode.example.test",
+					});
 
-				yield* updateInstance("convert-me", {
-					driver: "claude",
-					configDir: "/profiles/work",
-				});
+					yield* updateInstance("convert-me", {
+						driver: "claude",
+						configDir: "/profiles/work",
+					});
 
-				const instance = yield* getInstance("convert-me");
-				expect(instance).toMatchObject({
-					driver: "claude",
-					configDir: "/profiles/work",
-					managed: false,
-					port: 0,
-					status: "healthy",
-				});
-				expect(instance.url).toBeUndefined();
-				expect(yield* getInstanceUrl("convert-me")).toBeNull();
-			}).pipe(Effect.provide(Layer.fresh(testLayer))),
+					const instance = yield* getInstance("convert-me");
+					expect(instance).toMatchObject({
+						driver: "claude",
+						configDir: "/profiles/work",
+						managed: false,
+						port: 0,
+						status: "healthy",
+					});
+					expect(instance.url).toBeUndefined();
+					expect(yield* getInstanceUrl("convert-me")).toBeNull();
+					const runtime = yield* Ref.get(yield* InstanceManagerStateTag);
+					expect(HashMap.has(runtime.instances, "convert-me")).toBe(false);
+				}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 	});
 
@@ -252,7 +265,9 @@ describe("InstanceManager — missing methods", () => {
 				}),
 				flush: Effect.void,
 			});
-			const layer = makeInstanceManagerStateLive().pipe(
+			const layer = makeInstanceManagerStateLive(undefined, [], {
+				launchLogin,
+			}).pipe(
 				Layer.provideMerge(DaemonEventBusLive),
 				Layer.provideMerge(trackingPersistence),
 			);
@@ -343,7 +358,6 @@ describe("InstanceManager — missing methods", () => {
 				yield* addInstance({
 					id: "work-claude",
 					name: "Work Claude",
-					port: 0,
 					managed: false,
 					driver: "claude",
 					configDir: "/profiles/work",

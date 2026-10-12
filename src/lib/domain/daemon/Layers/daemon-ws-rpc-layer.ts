@@ -9,6 +9,7 @@ import {
 	Stream,
 } from "effect";
 import { hashPin } from "../../../auth.js";
+import { AccountChangeRejected } from "../../../contracts/account.js";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 import {
@@ -42,9 +43,9 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
-import { makeInstanceId } from "../../relay/Services/instance-management-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
+import type { AccountDirectory } from "../Services/account-directory.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
@@ -110,6 +111,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| DaemonEventBusTag
 			| ConfigPersistenceTag
 			| RelayCacheTag
+			| AccountDirectory
 			| InstanceManagerStateTag
 			| PollerFibersTag
 			| InstanceHealthCheckTag
@@ -185,6 +187,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| DaemonEventBusTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
+				| AccountDirectory
 				| InstanceManagerStateTag
 				| PollerFibersTag
 				| InstanceHealthCheckTag
@@ -202,6 +205,30 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						? error
 						: new WsRpcError({
 								message: formatErrorDetail(error),
+							}),
+				),
+			);
+
+		const mutate = <A, E>(
+			id: string,
+			effect: Effect.Effect<
+				A,
+				E,
+				| AccountDirectory
+				| InstanceManagerStateTag
+				| PollerFibersTag
+				| ConfigPersistenceTag
+				| DaemonEventBusTag
+			>,
+		) =>
+			effect.pipe(
+				Effect.provide(context),
+				Effect.mapError((error) =>
+					error instanceof AccountChangeRejected
+						? error
+						: new AccountChangeRejected({
+								id,
+								reason: formatErrorDetail(error),
 							}),
 				),
 			);
@@ -232,7 +259,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			read: Effect.Effect<
 				A,
 				E,
-				InstanceManagerStateTag | ProjectRegistryTag | DaemonConfigRefTag
+				| AccountDirectory
+				| InstanceManagerStateTag
+				| ProjectRegistryTag
+				| DaemonConfigRefTag
 			>,
 		) =>
 			Stream.unwrapScoped(
@@ -564,8 +594,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			StopInstance: (request) =>
 				run(
 					Effect.gen(function* () {
-						yield* getInstance(request.instanceId);
-						yield* openCodeInstances.stop(request.instanceId);
+						const instance = yield* getInstance(request.instanceId);
+						if (instance.driver !== "claude")
+							yield* openCodeInstances.stop(request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
@@ -573,9 +604,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					}),
 				),
 			RemoveInstance: (request) =>
-				run(
+				mutate(
+					request.instanceId,
 					Effect.gen(function* () {
-						yield* getInstance(request.instanceId);
 						yield* removeInstance(request.instanceId);
 						yield* persistConfig;
 						return {
@@ -585,15 +616,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					}),
 				),
 			RenameInstance: (request) =>
-				run(
+				mutate(
+					request.instanceId,
 					Effect.gen(function* () {
-						const name = request.name.trim();
-						if (!name)
-							return yield* new WsRpcError({
-								message: "RenameInstance failed: name is required",
-							});
-						yield* getInstance(request.instanceId);
-						yield* updateInstance(request.instanceId, { name });
+						yield* updateInstance(request.instanceId, { name: request.name });
 						yield* persistConfig;
 						return {
 							projectSlug: request.projectSlug,
@@ -602,108 +628,23 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					}),
 				),
 			AddInstance: (request) =>
-				run(
+				mutate(
+					request.name,
 					Effect.gen(function* () {
-						const name = request.name.trim();
-						if (!name)
-							return yield* new WsRpcError({
-								message: "AddInstance failed: name is required",
-							});
-						const driver = request.driver ?? "opencode";
-						const url = request.url;
-						const managed =
-							request.managed ?? (driver !== "claude" && url === undefined);
-						if (driver === "claude") {
-							if (managed)
-								return yield* new WsRpcError({
-									message: "InstanceAdd: Claude instances must not be managed",
-								});
-							if (request.port !== undefined)
-								return yield* new WsRpcError({
-									message:
-										"InstanceAdd: Claude instances must not include 'port'",
-								});
-							if (url !== undefined)
-								return yield* new WsRpcError({
-									message:
-										"InstanceAdd: Claude instances must not include 'url'",
-								});
-						} else {
-							const validPort =
-								request.port !== undefined &&
-								Number.isInteger(request.port) &&
-								request.port >= 1 &&
-								request.port <= 65535;
-							if (request.port !== undefined && !validPort)
-								return yield* new WsRpcError({
-									message: "InstanceAdd requires a valid 'port' (1-65535)",
-								});
-							if (managed) {
-								if (!validPort)
-									return yield* new WsRpcError({
-										message:
-											"InstanceAdd requires a valid 'port' (1-65535) for managed instances",
-									});
-								if (url !== undefined)
-									return yield* new WsRpcError({
-										message:
-											"InstanceAdd: 'url' is only valid for unmanaged instances (managed: false)",
-									});
-							} else if (url === undefined && !validPort) {
-								return yield* new WsRpcError({
-									message:
-										"InstanceAdd: unmanaged instances require either a 'url' or a valid 'port'",
-								});
-							}
-							if (url !== undefined) {
-								yield* Effect.try({
-									try: () => new URL(url),
-									catch: () =>
-										new WsRpcError({
-											message:
-												"InstanceAdd: 'url' must be a valid URL (e.g. http://host:4096)",
-										}),
-								});
-							}
-						}
-						const id = makeInstanceId(name, Array.from(yield* getInstances));
-						yield* addInstance({
-							id,
-							name,
-							port: request.port ?? 0,
-							managed,
-							...(url !== undefined ? { url } : {}),
-							...(request.env !== undefined ? { env: { ...request.env } } : {}),
-							...(request.driver !== undefined
-								? { driver: request.driver }
-								: {}),
-							...(request.configDir !== undefined
-								? { configDir: request.configDir }
-								: {}),
-						});
+						const instance = yield* addInstance(request);
 						yield* persistConfig;
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
-							addedInstanceId: id,
+							addedInstanceId: instance.id,
 						};
 					}),
 				),
 			UpdateInstance: (request) =>
-				run(
+				mutate(
+					request.instanceId,
 					Effect.gen(function* () {
-						yield* getInstance(request.instanceId);
-						yield* updateInstance(request.instanceId, {
-							...(request.driver !== undefined
-								? { driver: request.driver }
-								: {}),
-							...(request.name !== undefined ? { name: request.name } : {}),
-							...(request.port !== undefined ? { port: request.port } : {}),
-							...(request.env !== undefined ? { env: { ...request.env } } : {}),
-							...(request.configDir !== undefined
-								? { configDir: request.configDir }
-								: {}),
-						});
+						yield* updateInstance(request.instanceId, request);
 						yield* persistConfig;
 						return {
 							projectSlug: request.projectSlug,

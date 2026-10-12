@@ -33,6 +33,7 @@ import {
 	makePollerStateLive,
 	PollerStateTag,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 describe("Full Layer composition", () => {
 	const composedLayer = Layer.mergeAll(
@@ -40,7 +41,9 @@ describe("Full Layer composition", () => {
 		makeSessionManagerStateLive(),
 		makePollerStateLive(),
 		makePollerManagerStateLive(),
-		makeInstanceManagerStateLive(),
+		makeInstanceManagerStateLive(undefined, [], {
+			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+		}),
 		makeRelayCacheLive((slug) =>
 			Effect.succeed({
 				slug,

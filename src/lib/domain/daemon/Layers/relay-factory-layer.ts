@@ -1,3 +1,4 @@
+import type { AddAccountInput } from "../../../contracts/account.js";
 // Effect-native factory for creating ProjectRelay instances.
 //
 // RelayFactoryTag — service that creates relays given a StoredProject + URL.
@@ -30,10 +31,7 @@ import {
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
-import type {
-	InstanceConfig,
-	OpenCodeInstance,
-} from "../../../shared-types.js";
+import type { OpenCodeInstance } from "../../../shared-types.js";
 import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -232,6 +230,7 @@ export const RelayFactoryLive = (
 				effect: Effect.Effect<
 					A,
 					E,
+					| AccountDirectory
 					| InstanceManagerStateTag
 					| PollerFibersTag
 					| InstanceHealthCheckTag
@@ -241,14 +240,15 @@ export const RelayFactoryLive = (
 			) =>
 				effect.pipe(
 					Effect.provideService(InstanceManagerStateTag, instanceState),
+					Effect.provideService(AccountDirectory, accounts),
 					Effect.provideService(PollerFibersTag, pollerFibers),
 					Effect.provideService(InstanceHealthCheckTag, healthCheck),
 					Effect.provideService(DaemonEventBusTag, eventBus),
 					Effect.provideService(ConfigPersistenceTag, configPersistence),
 				);
 
-			const addInstance = (id: string, config: InstanceConfig) =>
-				runCallback(provideInstanceDeps(addEffectInstance({ id, ...config })));
+			const addInstance = (input: AddAccountInput) =>
+				runCallback(provideInstanceDeps(addEffectInstance(input)));
 
 			const removeInstance = (id: string) =>
 				runCallback(provideInstanceDeps(removeEffectInstance(id)));
@@ -296,6 +296,7 @@ export const RelayFactoryLive = (
 									return Effect.succeed(instance as OpenCodeInstance);
 								}),
 								Effect.provideService(InstanceManagerStateTag, instanceState),
+								Effect.provideService(AccountDirectory, accounts),
 							),
 						),
 					),
@@ -368,6 +369,7 @@ export const RelayFactoryLive = (
 						const instances = Array.from(
 							yield* getEffectInstances.pipe(
 								Effect.provideService(InstanceManagerStateTag, instanceState),
+								Effect.provideService(AccountDirectory, accounts),
 							),
 						);
 						const selectedInstance = openCodeInstanceFor(instances);

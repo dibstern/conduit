@@ -132,7 +132,10 @@ import {
 	ReadQueryEffectTag,
 } from "../../src/lib/persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../src/lib/persistence/events.js";
-import { configuredClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "../../src/lib/provider/claude/claude-sdk-env.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import {
@@ -798,6 +801,8 @@ export function makeMockAccountDirectory(
 	return makeAccountDirectory(
 		Effect.succeed({
 			accounts,
+			launchLogin: configuredClaudeConfigDir("/isolated-test-login"),
+			maxAccounts: 5,
 			defaults: {
 				claude: Option.fromNullable(
 					accounts.find((account) => account.driver === "claude")?.id,
@@ -1150,7 +1155,9 @@ export function makeTestDaemonStateLayer(
 		makeSessionManagerStateLive(opts?.sessionManagerState),
 		makePollerStateLive(),
 		makePollerManagerStateLive(),
-		makeInstanceManagerStateLive(opts?.instanceManagerConfig),
+		makeInstanceManagerStateLive(opts?.instanceManagerConfig, [], {
+			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
+		}),
 		makeSessionRegistryStateLive(),
 		RateLimiterLive(
 			opts?.rateLimiter ?? { maxRequests: 100, windowMs: 60_000 },

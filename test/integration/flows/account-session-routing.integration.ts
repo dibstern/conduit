@@ -21,16 +21,14 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
-import {
-	type AccountDirectory,
-	AccountDirectoryLive,
-} from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import type { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
 	type DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addInstance,
 	makeInstanceManagerStateLive,
@@ -183,21 +181,24 @@ describe("Integration: account session routing", () => {
 		const addedLogin = join(root, "fresh-login");
 		mkdirSync(addedLogin);
 		writeFileSync(join(addedLogin, "conduit-test-record-forks"), "");
-		const registry = makeInstanceManagerStateLive({}, [
-			{
-				id: "claude",
-				name: "Default Claude",
-				driver: "claude",
-				configDir: login,
-				port: 0,
-				managed: false,
-			},
-		]);
+		const registry = makeInstanceManagerStateLive(
+			{},
+			[
+				{
+					id: "claude",
+					name: "Default Claude",
+					driver: "claude",
+					configDir: login,
+					port: 0,
+					managed: false,
+				},
+			],
+			{ launchLogin: configuredClaudeConfigDir(login) },
+		);
 		const runtime = ManagedRuntime.make(
 			Layer.mergeAll(
-				AccountDirectoryLive(configuredClaudeConfigDir(login)).pipe(
-					Layer.provideMerge(registry),
-				),
+				registry,
+				DaemonEventBusLive,
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
 				Layer.succeed(ConfigPersistenceTag, {
 					requestSave: Effect.void,
@@ -240,7 +241,6 @@ describe("Integration: account session routing", () => {
 				name: "Fresh Claude",
 				driver: "claude",
 				configDir: addedLogin,
-				port: 0,
 				managed: false,
 			}),
 		);
