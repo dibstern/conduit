@@ -120,10 +120,10 @@ export const sideThreadsHandlers: StepHandler[] = [
 		name: "assert Side Thread message",
 		match: /^the Side Thread receives the sent text (.+)$/,
 		run: async ({ world, match }) => {
+			// The first prompt rides on the start, so a lost reply cannot lose it.
 			await requireRpcControl(world.page).waitForRequest(
 				(candidate) =>
-					candidate.tag === "input.submit" &&
-					candidate.payload["sessionId"] === NEW_SIDE_THREAD &&
+					candidate.tag === "StartSideThread" &&
 					candidate.payload["text"] === match[1],
 			);
 		},

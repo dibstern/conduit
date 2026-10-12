@@ -388,7 +388,7 @@ export const createOpenCodeSession = (
 export const forkOpenCodeSession = (
 	parentSessionId: string,
 	messageId?: string,
-	side?: { title: string },
+	side?: { title: string; inputId: string },
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -500,7 +500,13 @@ export const forkOpenCodeSession = (
 				title,
 				provider: parent?.provider ?? "opencode",
 				parentId: parentSessionId,
-				...(side ? { sideThread: true, permissionMode: "ask" as const } : {}),
+				...(side
+					? {
+							sideThread: true,
+							permissionMode: "ask" as const,
+							startInputId: side.inputId,
+						}
+					: {}),
 				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
 				providerSessionId: session.id,
 			},
@@ -528,7 +534,7 @@ export const forkOpenCodeSession = (
 /** Route forks by the persisted parent provider, before contacting a runtime. */
 const forkSessionInWorkspace = (
 	parentSessionId: string,
-	options?: { messageId?: string; side?: { title: string } },
+	options?: { messageId?: string; side?: { title: string; inputId: string } },
 ) =>
 	Effect.gen(function* () {
 		const readOption = yield* Effect.serviceOption(ReadQueryEffectTag);
@@ -790,7 +796,11 @@ const forkSessionInWorkspace = (
 								: {}),
 							parentId: parentSessionId,
 							...(side
-								? { sideThread: true, permissionMode: "ask" as const }
+								? {
+										sideThread: true,
+										permissionMode: "ask" as const,
+										startInputId: side.inputId,
+									}
 								: {}),
 							forkPointEvent,
 							forkPointTimestamp: forkPointMessage.created_at,
@@ -864,7 +874,7 @@ const forkSessionInWorkspace = (
 /** A fork's first launch cannot read its row before workspace inheritance. */
 export const forkSession = (
 	parentSessionId: string,
-	options?: { messageId?: string; side?: { title: string } },
+	options?: { messageId?: string; side?: { title: string; inputId: string } },
 ) =>
 	Effect.gen(function* () {
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);

@@ -2,6 +2,7 @@
 // still shows Plan and OpenCode still holds the read-only session rules.
 // Spawns its own ephemeral OpenCode, so no live instance or password is needed.
 
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -87,15 +88,40 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 					projectSlug,
 					parentSessionId: parent.sessionId,
 					title: "What is in this project?",
-				});
-				// Side Threads start in Ask; Plan proves a chosen mode is persisted
-				// rather than re-derived from the default.
-				yield* client.SwitchPermissionMode({
-					projectSlug,
-					sessionId: side.sessionId,
-					mode: "plan",
+					inputId: randomUUID(),
+					text: "What is in this project?",
 				});
 				return side.sessionId;
+			}),
+		);
+		const sideMessages = async () => {
+			const response = await fetch(
+				`${opencode.url}/session/${sideId}/message?directory=${encodeURIComponent(projectDir)}`,
+			);
+			return (await response.json()) as Array<{
+				info: { role: string; agent?: string; time: { completed?: number } };
+			}>;
+		};
+		// The first prompt rides on the start; let its turn finish so the
+		// restart below does not interrupt it.
+		await expect
+			.poll(
+				async () =>
+					(await sideMessages()).some(
+						(message) =>
+							message.info.role === "assistant" &&
+							message.info.time.completed !== undefined,
+					),
+				{ timeout: 60_000 },
+			)
+			.toBe(true);
+		// Side Threads start in Ask; Plan proves a chosen mode is persisted
+		// rather than re-derived from the default.
+		await rpc(daemon, (client) =>
+			client.SwitchPermissionMode({
+				projectSlug,
+				sessionId: sideId,
+				mode: "plan",
 			}),
 		);
 
@@ -117,20 +143,13 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		);
 
 		await app.sendMessage("List the files here.");
-		const agents = async () => {
-			const response = await fetch(
-				`${opencode.url}/session/${sideId}/message?directory=${encodeURIComponent(projectDir)}`,
-			);
-			const messages = (await response.json()) as Array<{
-				info: { role: string; agent?: string };
-			}>;
-			return messages
+		const agents = async () =>
+			(await sideMessages())
 				.filter((message) => message.info.role === "user")
 				.map((message) => message.info.agent);
-		};
 		// Side Threads keep the chosen agent in Plan; the session rules below
 		// are what make it read-only.
-		await expect.poll(agents, { timeout: 30_000 }).toEqual(["build"]);
+		await expect.poll(agents, { timeout: 30_000 }).toEqual(["build", "build"]);
 		const session = (await (
 			await fetch(
 				`${opencode.url}/session/${sideId}?directory=${encodeURIComponent(projectDir)}`,

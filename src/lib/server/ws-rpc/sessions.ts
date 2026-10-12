@@ -50,6 +50,7 @@ import {
 } from "../../git/worktrees.js";
 import {
 	rewindSessionToMessage,
+	sendMessageToSession,
 	undoSessionRewind,
 } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
@@ -74,6 +75,8 @@ import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.j
 import { isPickRejection } from "../../provider/turn-settings.js";
 import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+
+const sideThreadStarts = Effect.unsafeMakeSemaphore(1);
 
 export const sessionsHandlers = {
 	ListBranches: (_request) =>
@@ -699,14 +702,35 @@ export const sessionsHandlers = {
 		),
 	StartSideThread: (request) =>
 		Effect.gen(function* () {
-			const session = yield* forkSession(request.parentSessionId, {
-				side: { title: request.title },
-			});
-			// Refresh now rather than on the next projection burst: the side
-			// thread's first turn must not read as activity on its parent.
-			const sessionManager = yield* SessionManagerServiceTag;
-			yield* sessionManager.refreshSessionLineage();
-			return { sessionId: session.id };
+			// A retry (lost reply, crash before admission) resumes the thread its
+			// input already started; serialized so a concurrent duplicate cannot
+			// fork a second one.
+			const sql = yield* SqlClient.SqlClient;
+			const sessionId = yield* Effect.gen(function* () {
+				const [started] = yield* sql<{ session_id: string }>`
+					SELECT session_id FROM events
+					WHERE type = 'session.created'
+						AND json_extract(data, '$.startInputId') = ${request.inputId}
+					LIMIT 1`;
+				if (started) return started.session_id;
+				const session = yield* forkSession(request.parentSessionId, {
+					side: { title: request.title, inputId: request.inputId },
+				});
+				// Refresh now rather than on the next projection burst: the side
+				// thread's first turn must not read as activity on its parent.
+				const sessionManager = yield* SessionManagerServiceTag;
+				yield* sessionManager.refreshSessionLineage();
+				return session.id;
+			}).pipe(sideThreadStarts.withPermits(1));
+			// Idempotent per input id, so a retry re-admits only a lost prompt.
+			yield* sendMessageToSession({
+				clientId: request.originId ?? "rpc",
+				sessionId,
+				text: request.text,
+				commandId: request.inputId,
+				...(request.images ? { images: request.images } : {}),
+			}).pipe(Effect.catchAll(mapRpcFailure("StartSideThread")));
+			return { sessionId };
 		}).pipe(
 			Effect.catchTag("SessionCommandError", (error) =>
 				Effect.fail(
