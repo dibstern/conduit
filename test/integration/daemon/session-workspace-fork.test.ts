@@ -691,12 +691,48 @@ describe("Forked session workspaces through the built daemon", () => {
 			text: "What does this do?",
 		});
 		const started = performance.now();
-		const first = await sendRpcRequest(socket, request);
+		// Two identical starts in flight at once, as from two tabs.
+		const [first, duplicate] = await Promise.all([
+			sendRpcRequest(socket, request),
+			sendRpcRequest(socket, request),
+		]);
 		evidence["startSideThreadMs"] = Math.round(performance.now() - started);
 		forkId = first.sessionId;
 		expect(evidence["startSideThreadMs"]).toBeLessThan(10_000);
+		expect(duplicate.sessionId).toBe(forkId);
 		// A retry after a lost reply lands on the Side Thread the prompt reached.
 		expect((await sendRpcRequest(socket, request)).sessionId).toBe(forkId);
+
+		// The daemon dies the moment the second Side Thread exists, so its
+		// prompt may not be admitted yet; the retry must resume that thread.
+		const crashed = new StartSideThread({
+			...request,
+			inputId: randomUUID(),
+		});
+		void sendRpcRequest(socket, crashed).catch(() => undefined);
+		const readStarted = new Database(fixture.projectStorePath(), {
+			readonly: true,
+		});
+		const crashedId = await vi.waitFor(
+			() => {
+				const row = readStarted
+					.prepare(
+						"SELECT session_id FROM events WHERE type = 'session.created' AND json_extract(data, '$.startInputId') = ?",
+					)
+					.get(crashed.inputId) as { session_id: string } | undefined;
+				if (!row) throw new Error("Side Thread not forked yet");
+				return row.session_id;
+			},
+			{ timeout: 10_000, interval: 5 },
+		);
+		readStarted.close();
+		await fixture.kill();
+		evidence["crashedBeforeAdmission"] = !forkEvents(fixture, crashedId).some(
+			({ type }) => type === "input.admitted",
+		);
+		await fixture.restart({ startupTimeoutMs: 60_000 });
+		expect((await sendRpcRequest(socket, crashed)).sessionId).toBe(crashedId);
+
 		const sideThreads = (
 			await sendRpcRequest(
 				socket,
@@ -707,22 +743,29 @@ describe("Forked session workspaces through the built daemon", () => {
 				}),
 			)
 		).sessions.filter(({ parentID }) => parentID === parentId);
-		expect(sideThreads.map(({ id }) => id)).toEqual([forkId]);
-		await vi.waitFor(
-			() =>
-				expect(
-					forkEvents(fixture, forkId ?? "")
-						.filter(({ type }) => type === "input.sent")
-						.map(({ data }) => data["inputId"]),
-				).toEqual([request.inputId]),
-			{ timeout: 10_000 },
+		expect(sideThreads.map(({ id }) => id).sort()).toEqual(
+			[forkId, crashedId].sort(),
 		);
-		expect(
-			forkEvents(fixture, forkId).filter(
-				({ type }) => type === "input.admitted",
-			),
-		).toHaveLength(1);
-	}, 120_000);
+		for (const [sessionId, inputId] of [
+			[first.sessionId, request.inputId],
+			[crashedId, crashed.inputId],
+		] as const) {
+			await vi.waitFor(
+				() =>
+					expect(
+						forkEvents(fixture, sessionId)
+							.filter(({ type }) => type === "input.sent")
+							.map(({ data }) => data["inputId"]),
+					).toEqual([inputId]),
+				{ timeout: 10_000 },
+			);
+			expect(
+				forkEvents(fixture, sessionId).filter(
+					({ type }) => type === "input.admitted",
+				),
+			).toHaveLength(1);
+		}
+	}, 180_000);
 
 	it.each([
 		false,

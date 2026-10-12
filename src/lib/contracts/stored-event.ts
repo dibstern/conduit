@@ -1039,6 +1039,8 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
 	sideThread: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** The input a Side Thread was started with, so a retried start finds it. */
+	startInputId: Schema.optionalWith(Schema.String, { exact: true }),
 	permissionMode: Schema.optionalWith(
 		Schema.Literal(...SESSION_PERMISSION_MODES),
 		{
