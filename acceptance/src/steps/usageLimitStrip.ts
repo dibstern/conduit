@@ -58,6 +58,7 @@ export function setClaudeAccounts(
 			restartCount: 0,
 			createdAt: 1,
 			driver: "claude",
+			usageEligible: true,
 		})),
 	});
 }

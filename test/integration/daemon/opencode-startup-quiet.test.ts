@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure cases: daemon or relay startup or browser attach spawning or probing
@@ -17,7 +17,7 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // spawning a second process next to the survivor, and a survivor's pending
 // prompts and busy sessions staying invisible until someone uses OpenCode.
 describe("Managed OpenCode starts on first use", () => {
-	const instanceId = defaultInstanceIdForDriver("opencode");
+	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 	let harness: ProcessHarness | undefined;
 	let scenario = "setup";
 	let evidence: Record<string, unknown> = {};

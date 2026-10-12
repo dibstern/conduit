@@ -1,6 +1,6 @@
 import { Data, Effect } from "effect";
 import { DEFAULT_OPENCODE_PORT } from "../../../constants.js";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import {
 	findFreePort,
 	isOpencodeInstalled,
@@ -14,8 +14,7 @@ import type { DaemonInstanceConfig } from "./daemon-state.js";
  * non-Claude provider to this id, so the daemon must seed the default OpenCode
  * server under the same id or the OpenCode harness is unpickable/duplicated.
  */
-const DEFAULT_OPENCODE_INSTANCE_ID: string =
-	defaultInstanceIdForDriver("opencode");
+const DEFAULT_OPENCODE_INSTANCE_ID: string = MANAGED_OPENCODE_ACCOUNT_ID;
 
 export class OpenCodeUnavailableError extends Data.TaggedError(
 	"OpenCodeUnavailableError",

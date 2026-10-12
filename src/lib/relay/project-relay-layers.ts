@@ -10,7 +10,7 @@ import {
 	Ref,
 	Stream,
 } from "effect";
-import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { accountsStateFromConfig } from "../daemon/account-directory.js";
 import {
 	type DaemonConfigLoadError,
@@ -19,8 +19,6 @@ import {
 	getConfigDir,
 	loadDaemonConfig,
 	loadDaemonConfigResult,
-	resolveClaudeInstanceConfigDir,
-	resolveConfiguredInstances,
 } from "../daemon/config-persistence.js";
 import {
 	ConfigPersistenceLive,
@@ -91,6 +89,7 @@ import {
 	OpenCodeModelServiceLive,
 	type OpenCodeModelServiceTag,
 	OpenCodeSettingsServiceLive,
+	type OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
 	SessionCompactionsTag,
 	SessionRetriesTag,
@@ -154,7 +153,7 @@ const relayOpenCodeInstances = (
 	config: ProjectRelayConfig,
 	persistedInstanceIds: readonly string[],
 ): OpenCodeInstances => {
-	const defaultId = defaultInstanceIdForDriver("opencode");
+	const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
 	const selectedId = config.openCodeInstanceId ?? defaultId;
 	const target = (instanceId: string) =>
 		instanceId === defaultId ? selectedId : instanceId;
@@ -195,6 +194,9 @@ export type RelayRuntimeServices =
 	| ConfigTag
 	| LoggerTag
 	| OpenCodeAPITag
+	| OpenCodeSettingsServiceTag
+	| OrchestrationEngineTag
+	| SessionWorkspaceTag
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| SessionSetupTag
@@ -336,36 +338,34 @@ export function createProjectRelayLayers({
 		? Layer.sync(Usage, () => sharedUsage)
 		: Layer.scoped(
 				Usage,
-				makeUsage({
-					accounts: Effect.sync(() => {
-						const saved = loadDaemonConfig(config.configDir);
-						return saved
-							? resolveConfiguredInstances(saved)
-									.filter((instance) => instance.driver === "claude")
-									.map((instance) => {
-										const configDir =
-											instance.id === defaultInstanceIdForDriver("claude")
-												? resolveClaudeInstanceConfigDir(saved, instance.id)
-												: (instance.configDir ?? saved.claudeConfigDir);
-										return {
-											id: instance.id,
-											harness: "claude" as const,
-											...(configDir === undefined ? {} : { configDir }),
-										};
-									})
-							: [{ id: "claude", harness: "claude" as const }];
+				Effect.flatMap(AccountDirectory, (directory) =>
+					makeUsage({
+						accounts: Effect.map(directory.list, (accounts) =>
+							accounts.flatMap((account) =>
+								account.driver === "claude" && account.usageEligible
+									? [
+											{
+												id: account.id,
+												harness: "claude" as const,
+												folder: account.folder,
+												...(account.env ? { env: account.env } : {}),
+											},
+										]
+									: [],
+							),
+						),
+						readers: {
+							claude: makeClaudeUsageReader({
+								queryFactory: claudeSdk.query,
+								cwd: config.projectDir,
+								...(config.shellEnv
+									? { shellEnv: config.shellEnv(config.projectDir) }
+									: {}),
+							}),
+						},
 					}),
-					readers: {
-						claude: makeClaudeUsageReader({
-							queryFactory: claudeSdk.query,
-							cwd: config.projectDir,
-							...(config.shellEnv
-								? { shellEnv: config.shellEnv(config.projectDir) }
-								: {}),
-						}),
-					},
-				}),
-			);
+				),
+			).pipe(Layer.provide(daemonConfigLayer));
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.

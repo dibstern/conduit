@@ -1,9 +1,13 @@
 import { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import {
+	accountsStateFromConfig,
+	resolve,
+} from "../../daemon/account-directory.js";
+import {
+	defaultDaemonConfig,
 	loadDaemonConfig,
 	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
 } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
@@ -22,6 +26,7 @@ import {
 	claudeRunnerSinkId,
 	normalizeClaudeSessionTurn,
 } from "./claude-runner-protocol.js";
+import { captureClaudeLaunchLogin } from "./claude-sdk-env.js";
 import type {
 	ClaudeSessionFailure,
 	ClaudeSessionTurn,
@@ -74,11 +79,17 @@ export const recoverClaudeRunnerCommands = (
 ) =>
 	Effect.gen(function* () {
 		const config = loadDaemonConfig(deps.daemonConfigDir);
+		const accounts = accountsStateFromConfig(
+			config ?? defaultDaemonConfig(),
+			captureClaudeLaunchLogin(process.env),
+		);
 		const rows = yield* runningClaudeCommands(sql, sessionId);
 		return rows
-			.filter(
-				(row) =>
-					resolveProviderRoutingDriver(config, row.provider_id) === "claude",
+			.filter((row) =>
+				Either.match(resolve(accounts, { _tag: "Id", id: row.provider_id }), {
+					onLeft: () => false,
+					onRight: (account) => account.driver === "claude",
+				}),
 			)
 			.map((row) => {
 				const input = {
@@ -233,8 +244,17 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 ) =>
 	Effect.gen(function* () {
 		const config = loadDaemonConfig(daemonConfigDir);
+		const accounts = accountsStateFromConfig(
+			config ?? defaultDaemonConfig(),
+			captureClaudeLaunchLogin(process.env),
+		);
 		for (const row of yield* runningClaudeCommands(sql)) {
-			if (resolveProviderRoutingDriver(config, row.provider_id) !== "claude")
+			if (
+				!Either.match(resolve(accounts, { _tag: "Id", id: row.provider_id }), {
+					onLeft: () => false,
+					onRight: (account) => account.driver === "claude",
+				})
+			)
 				continue;
 			// Candidates and retiring runners also own their session's admissions.
 			if (claimedSessions.has(row.session_id)) continue;

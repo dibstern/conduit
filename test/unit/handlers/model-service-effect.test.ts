@@ -16,6 +16,10 @@ import {
 	Supervisor,
 } from "effect";
 import { expect, vi } from "vitest";
+import {
+	AccountDirectory,
+	AccountDirectoryFromConfigLive,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -48,6 +52,7 @@ import {
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -56,6 +61,7 @@ import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
 import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockSessionManagerService,
@@ -65,7 +71,7 @@ import {
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory, makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
@@ -611,6 +617,7 @@ describe("model handlers with Effect-native model service", () => {
 			instances: [{ id: "work-claude", name: "Work Claude", port: 0, managed: false, driver: "claude" }],
 		}));
 		const deps = Layer.mergeAll(
+			AccountDirectoryFromConfigLive(configDir, configuredClaudeConfigDir(join(configDir, "login"))),
 			Layer.succeed(OpenCodeAPITag, api),
 			Layer.succeed(OpenCodeInstancesTag, instances),
 			Layer.succeed(ConfigTag, config),

@@ -817,6 +817,7 @@ export type InstanceStatus = "starting" | "healthy" | "unhealthy" | "stopped";
 export interface OpenCodeInstance {
 	/** Published directory default marker; runtime records need not store it. */
 	isDefault?: boolean;
+	usageEligible?: boolean;
 	id: string;
 	name: string;
 	port: number;

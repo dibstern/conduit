@@ -6,7 +6,7 @@
 // For inline/structural types a Shape interface is defined here.
 
 import { type Cause, Context, Effect, Layer, Option } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 
 import type {
 	HandlerDeps,
@@ -159,7 +159,7 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const instances = yield* OpenCodeInstancesTag;
-		const instanceId = defaultInstanceIdForDriver("opencode");
+		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 		return {
 			list: (
 				path: string,
@@ -221,7 +221,7 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
-		const instanceId = defaultInstanceIdForDriver("opencode");
+		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 		let catalog: OpenCodeProviderList | undefined;
 		const refresh = (opencode: OpenCodeAPI) =>
 			Effect.gen(function* () {
@@ -286,7 +286,7 @@ export const OpenCodeSettingsServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const instances = yield* OpenCodeInstancesTag;
-		const instanceId = defaultInstanceIdForDriver("opencode");
+		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 		return {
 			listCommands: ({ startIfStopped = true } = {}) =>
 				Effect.gen(function* () {

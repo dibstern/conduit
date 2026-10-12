@@ -342,6 +342,7 @@ export interface ProviderInstance {
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(
 		workspaceRoot?: string,
+		account?: Account,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { Cause, Deferred, Effect, Exit, Layer, Option } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { PtyManager } from "../../../relay/pty-manager.js";
 import { connectPtyUpstream } from "../../../relay/pty-upstream.js";
@@ -70,7 +70,7 @@ export const makeConnectPtyUpstreamLive = (
 					const closed = yield* Deferred.make<void>();
 					yield* Effect.gen(function* () {
 						const client = yield* instances.useIfRunning(
-							defaultInstanceIdForDriver("opencode"),
+							MANAGED_OPENCODE_ACCOUNT_ID,
 						);
 						if (Option.isNone(client)) return;
 						yield* Effect.tryPromise({

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 function ledger(harness: ProcessHarness, sessionId: string) {
@@ -53,7 +53,7 @@ describe("an unanswered OpenCode user message", () => {
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession(
 			"Unanswered",
-			defaultInstanceIdForDriver("opencode"),
+			MANAGED_OPENCODE_ACCOUNT_ID,
 			"opencode",
 		);
 

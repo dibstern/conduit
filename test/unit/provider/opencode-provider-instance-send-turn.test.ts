@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AccountIdSchema,
-	defaultInstanceIdForDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
@@ -627,8 +627,7 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		instance = new OpenCodeProviderInstance({
 			client,
 			clientForSession: () => Effect.succeed(freshClient),
-			instanceIdForSession: () =>
-				Effect.succeed(defaultInstanceIdForDriver("opencode")),
+			instanceIdForSession: () => Effect.succeed(MANAGED_OPENCODE_ACCOUNT_ID),
 		});
 
 		const result = await Effect.runPromise(

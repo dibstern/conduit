@@ -7,7 +7,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
-import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
@@ -369,7 +369,7 @@ const resolveOpenCodeQuestionTarget = (sessionId: string) =>
 		const instanceId =
 			yield* engine.value.getProviderForSessionEffect(sessionId);
 		const client = yield* instances.value.use(
-			instanceId ?? defaultInstanceIdForDriver("opencode"),
+			instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID,
 		);
 		const session = yield* Effect.tryPromise(() =>
 			client.session.get(sessionId),

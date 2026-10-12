@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -77,7 +77,7 @@ const binary = realOpenCode();
 // the other, and an idle stop leaving the binary, its proxy, the supervisor or
 // any descendant behind, or the stream open. No prompt is ever sent.
 describe("Managed real OpenCode lifecycle", () => {
-	const instanceId = defaultInstanceIdForDriver("opencode");
+	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 	// Long enough for steps 1-3 to finish under load before the idle stop.
 	const graceMs = 12_000;
 	let harness: ProcessHarness | undefined;

@@ -5,30 +5,27 @@
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { Data, Effect, Either, Schema } from "effect";
-import { UsageLimitsSettingSchema } from "../contracts/limit-recovery.js";
+import {
+	AccountUnroutable,
+	UsageLimitsSettingSchema,
+} from "../contracts/limit-recovery.js";
 import { ManagedOpenCodeProcessIdentitySchema } from "../contracts/managed-opencode.js";
 import { SessionModeSchema } from "../contracts/project-file.js";
 
 import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
 
 import {
-	type AccountId,
-	AccountIdSchema,
-	defaultInstanceIdForDriver,
-	isKnownDriverKind,
-	type KnownProviderDriverKind,
 	KnownProviderDriverKindSchema,
+	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
 	type ClaudeLaunchConfig,
-	configuredClaudeConfigDir,
-	sdkDefaultClaudeConfigDir,
+	captureClaudeLaunchLogin,
 } from "../provider/claude/claude-sdk-env.js";
 import {
 	GroupingModeSchema,
@@ -36,6 +33,10 @@ import {
 } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
+import {
+	accountsStateFromConfig,
+	resolve as resolveAccount,
+} from "./account-directory.js";
 import {
 	addRecent,
 	deserializeRecent,
@@ -238,76 +239,6 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 	};
 };
 
-export interface ResolvedProviderInstance {
-	id: AccountId;
-	driver: KnownProviderDriverKind;
-	configDir?: string;
-}
-
-export function resolveConfiguredInstances(
-	config: DaemonConfig,
-): ReadonlyArray<ResolvedProviderInstance> {
-	const explicitInstances = (config.instances ?? []).map((instance) => {
-		const configDir =
-			instance.id === defaultInstanceIdForDriver("claude")
-				? (instance.configDir ?? config.claudeConfigDir)
-				: instance.configDir;
-		return {
-			id: AccountIdSchema.make(instance.id),
-			driver: instance.driver ?? "opencode",
-			...(configDir === undefined ? {} : { configDir }),
-		};
-	});
-	const explicitIds = new Set(explicitInstances.map(({ id }) => id));
-	const defaults: ReadonlyArray<ResolvedProviderInstance> = [
-		{
-			id: defaultInstanceIdForDriver("opencode"),
-			driver: "opencode",
-		},
-		{
-			id: defaultInstanceIdForDriver("claude"),
-			driver: "claude",
-			...(config.claudeConfigDir === undefined
-				? {}
-				: { configDir: config.claudeConfigDir }),
-		},
-	];
-
-	return [
-		...explicitInstances,
-		...defaults.filter(({ id }) => !explicitIds.has(id)),
-	];
-}
-
-export function resolveInstanceDriver(
-	config: DaemonConfig,
-	instanceId: string,
-): KnownProviderDriverKind {
-	const configuredInstance = resolveConfiguredInstances(config).find(
-		({ id }) => id === instanceId,
-	);
-	if (configuredInstance !== undefined) {
-		return configuredInstance.driver;
-	}
-	if (isKnownDriverKind(instanceId)) {
-		return instanceId;
-	}
-	return "opencode";
-}
-
-export function resolveProviderRoutingDriver(
-	config: DaemonConfig | null,
-	instanceId: string,
-): KnownProviderDriverKind | undefined {
-	const configuredInstance = config
-		? resolveConfiguredInstances(config).find(({ id }) => id === instanceId)
-		: undefined;
-	if (configuredInstance !== undefined) {
-		return configuredInstance.driver;
-	}
-	return isKnownDriverKind(instanceId) ? instanceId : undefined;
-}
-
 /**
  * Resolve the server base URL for a NAMED opencode-driver instance.
  * Returns undefined for the default "opencode" id (callers fall back to the
@@ -319,7 +250,7 @@ export function resolveOpenCodeInstanceUrl(
 	config: DaemonConfig | null,
 	instanceId: string,
 ): string | undefined {
-	if (instanceId === defaultInstanceIdForDriver("opencode")) {
+	if (instanceId === MANAGED_OPENCODE_ACCOUNT_ID) {
 		return undefined;
 	}
 	const configuredInstance = config
@@ -337,47 +268,37 @@ export function resolveOpenCodeInstanceUrl(
 	return configuredInstance.url;
 }
 
-export function resolveClaudeInstanceConfigDir(
-	config: DaemonConfig | null,
-	instanceId: string,
-): string | undefined {
-	const configuredInstance = config
-		? resolveConfiguredInstances(config).find(({ id }) => id === instanceId)
-		: undefined;
-	if (
-		configuredInstance?.driver !== "claude" ||
-		configuredInstance.configDir === undefined
-	)
-		return undefined;
-	// The default account uses the environment resolved at boot. Reading its
-	// saved folder here would apply a pending edit to the very next turn.
-	return instanceId === defaultInstanceIdForDriver("claude")
-		? process.env["CLAUDE_CONFIG_DIR"]
-		: configuredInstance.configDir;
-}
-
-/** Explicit launch folder until the account directory owns this resolution. */
+/** Legacy runner/probe boundary; all account rules belong to the directory. */
 export function resolveClaudeLaunchConfig(
 	config: DaemonConfig | null,
-	instanceId: string = defaultInstanceIdForDriver("claude"),
+	instanceId?: string,
 	baseEnv: Readonly<Record<string, string | undefined>> = process.env,
 ): ClaudeLaunchConfig {
-	const configured = resolveClaudeInstanceConfigDir(config, instanceId);
-	const configDir = configured ?? baseEnv["CLAUDE_CONFIG_DIR"];
+	const account = resolveAccount(
+		accountsStateFromConfig(
+			config ?? defaultDaemonConfig(),
+			captureClaudeLaunchLogin(baseEnv),
+		),
+		instanceId === undefined
+			? { _tag: "DriverDefault", driver: "claude" }
+			: { _tag: "Id", id: instanceId },
+	);
+	if (Either.isLeft(account)) throw account.left;
+	if (account.right.driver !== "claude")
+		throw new AccountUnroutable({ ref: { _tag: "Id", id: account.right.id } });
 	return {
-		folderSource: configured === undefined ? "implicitDefault" : "account",
-		configDir:
-			configDir === undefined
-				? sdkDefaultClaudeConfigDir(
-						join(baseEnv["HOME"] ?? homedir(), ".claude"),
-					)
-				: configuredClaudeConfigDir(configDir),
+		folderSource:
+			account.right.configuredFolder === undefined
+				? "implicitDefault"
+				: "account",
+		configDir: account.right.folder,
 	};
 }
 
 /** Keep legacy explicit default folders in the daemon's single stored home. */
 function normalizeDefaultClaudeConfig(config: DaemonConfig): DaemonConfig {
-	const defaultId = defaultInstanceIdForDriver("claude");
+	// This is the historical record normalized until the config migration retires it.
+	const defaultId = "claude";
 	const explicit = config.instances?.find(({ id }) => id === defaultId);
 	if (explicit?.configDir === undefined) return config;
 	return {
@@ -434,7 +355,7 @@ export function getConfigDir(): string {
  *
  * Pre-driver-model installs stored the sole OpenCode server as instance id
  * `"default"`; the driver+instance model canonicalizes the default OpenCode
- * instance as `defaultInstanceIdForDriver("opencode") === "opencode"`. A
+ * instance as `MANAGED_OPENCODE_ACCOUNT_ID === "opencode"`. A
  * lingering `"default"` id desyncs the config from
  * the composer rail, which keys OpenCode providers to `"opencode"` — leaving
  * the OpenCode harness unpickable and duplicated. Rewriting the id to the

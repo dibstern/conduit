@@ -1,7 +1,7 @@
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure cases: reading the native default starts or probes a stopped instance,
@@ -36,7 +36,7 @@ describe("OpenCode project model catalog", () => {
 
 	it("selects the project-config default once OpenCode runs and never starts it for discovery", async () => {
 		evidence = { ticket: "conduit-test-rqbc.6", at: new Date().toISOString() };
-		const instanceId = defaultInstanceIdForDriver("opencode");
+		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 		const fixture = ProcessHarness.create({
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,

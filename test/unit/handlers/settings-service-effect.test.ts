@@ -2,6 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { GetProjects } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ConfigTag,
@@ -13,6 +14,7 @@ import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/sess
 import { getCommandsForSession } from "../../../src/lib/handlers/settings.js";
 import { projectsHandlers } from "../../../src/lib/server/ws-rpc/projects.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 } from "../../helpers/mock-factories.js";
@@ -30,6 +32,7 @@ describe("settings reads with Effect-native settings service", () => {
 			};
 
 			const layer = Layer.mergeAll(
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				Layer.succeed(OpenCodeSettingsServiceTag, settingsService),
 				Layer.succeed(OrchestrationEngineTag, withDispatchEffect({})),
 				Layer.succeed(LoggerTag, makeMockLogger()),

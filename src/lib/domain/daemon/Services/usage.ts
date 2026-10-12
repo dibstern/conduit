@@ -288,6 +288,11 @@ export const makeUsage = (options: {
 				);
 				// Publish the latest completed reads, including a newer overlapping
 				// refresh, so a slow batch cannot replace a fresh account reading.
+				// Recheck eligibility after reads: account edits can happen in flight.
+				const liveIds = new Set(
+					(yield* options.accounts).map((account) => account.id),
+				);
+				for (const id of latest.keys()) if (!liveIds.has(id)) latest.delete(id);
 				yield* SubscriptionRef.set(current, [...latest.values()]);
 				if (historyStore)
 					yield* historySaveLock.withPermits(1)(
@@ -309,7 +314,9 @@ export const makeUsage = (options: {
 							);
 						}),
 					);
-				return readings;
+				return accountIds === undefined
+					? readings.filter((reading) => liveIds.has(reading.accountId))
+					: readings;
 			});
 		const readings = Stream.unwrapScoped(
 			Effect.gen(function* () {

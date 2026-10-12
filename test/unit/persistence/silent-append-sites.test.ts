@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Chunk, Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
@@ -165,7 +165,7 @@ it("establishOpenCodeSession advances the version of the session it seeds", asyn
 								version: "1",
 								time: { created: 1, updated: 1 },
 							},
-							defaultInstanceIdForDriver("opencode"),
+							MANAGED_OPENCODE_ACCOUNT_ID,
 						),
 					);
 					expect(yield* versionOf("established")).toBeGreaterThan(0);

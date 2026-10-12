@@ -11,14 +11,19 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	Option,
 	PubSub,
 	Ref,
 	Runtime,
 	Stream,
 } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import {
+	accountsStateFromConfig,
+	defaultFor,
+} from "../../../daemon/account-directory.js";
 import {
 	type DaemonConfig,
+	defaultDaemonConfig,
 	migrateDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import {
@@ -720,7 +725,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(
 		Layer.tap((context) =>
 			Ref.update(Context.get(context, DaemonStateTag), (current) => {
-				const defaultId = defaultInstanceIdForDriver("claude");
+				const defaultId = defaultFor(
+					accountsStateFromConfig(
+						options.persistedConfig ?? defaultDaemonConfig(),
+						launchLogin,
+					),
+					"claude",
+				).pipe(Option.getOrThrow).id;
 				const existing = current.instances.find(({ id }) => id === defaultId);
 				const defaultClaude = {
 					...(existing ?? {

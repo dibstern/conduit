@@ -769,6 +769,9 @@ export function makeMockConfig(
 		httpServer: {} as ProjectRelayConfig["httpServer"],
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
+		configDir:
+			process.env["CONDUIT_CONFIG_DIR"] ??
+			join(tmpdir(), "conduit-test-config"),
 		slug: "test-project",
 		publishGlobalSetting: () => Effect.void,
 		...overrides,

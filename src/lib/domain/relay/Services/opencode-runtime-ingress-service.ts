@@ -1,7 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Cause, Context, Effect, type Fiber, FiberId } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type { Message } from "../../../instance/sdk-types.js";
@@ -202,7 +202,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.retryingOf = opts.retryingOf;
 		this.log = opts.log;
 		this.selectedInstanceId =
-			opts.selectedInstanceId ?? defaultInstanceIdForDriver("opencode");
+			opts.selectedInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
 		this.sessionCreationGate =
 			opts.sessionCreationGate ?? Effect.unsafeMakeSemaphore(1);
 		this.fetchSessionMessages = opts.fetchSessionMessages;
@@ -840,7 +840,7 @@ export class EffectOpenCodeRuntimeIngress
 			Effect.gen(this, function* () {
 				if (this.stopped || !isCurrent()) return;
 				const sql = yield* SqlClient.SqlClient;
-				const defaultId = defaultInstanceIdForDriver("opencode");
+				const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
 				const instanceIds =
 					providerInstanceId === defaultId ||
 					providerInstanceId === this.selectedInstanceId

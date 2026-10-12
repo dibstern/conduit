@@ -38,13 +38,14 @@ import {
 	TestClock,
 } from "effect";
 import { expect } from "vitest";
+import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import {
 	UsageReadingSchema,
 	UsageWindowSchema,
 } from "../../../../src/lib/contracts/limit-recovery.js";
 import { UsageLive } from "../../../../src/lib/domain/daemon/Layers/usage-layer.js";
+import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { makeDaemonStateLive } from "../../../../src/lib/domain/daemon/Services/daemon-state.js";
-import { makeInstanceManagerStateLive } from "../../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
 	forecastUsage,
 	makeUsage,
@@ -52,10 +53,12 @@ import {
 	type UsageHistorySnapshot,
 	UsageHistorySnapshotSchema,
 } from "../../../../src/lib/domain/daemon/Services/usage.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	UsageRead,
 	UsageReader,
 } from "../../../../src/lib/provider/usage-reader.js";
+import { makeMockAccountDirectory } from "../../../helpers/mock-factories.js";
 
 it.scoped("does not sample with no subscribers", () =>
 	Effect.gen(function* () {
@@ -1085,15 +1088,18 @@ it.scoped(
 				Layer.provide(
 					Layer.merge(
 						makeDaemonStateLive({ configDir }),
-						makeInstanceManagerStateLive({}, [
-							{
-								id: "account-1",
-								name: "Personal",
-								driver: "claude",
-								managed: false,
-								port: 0,
-							},
-						]),
+						Layer.succeed(
+							AccountDirectory,
+							makeMockAccountDirectory([
+								{
+									id: AccountIdSchema.make("account-1"),
+									name: "Personal",
+									driver: "claude",
+									folder: configuredClaudeConfigDir(join(configDir, "login")),
+									usageEligible: true,
+								},
+							]),
+						),
 					),
 				),
 			);
@@ -1179,15 +1185,20 @@ it.scoped(
 							Layer.provide(
 								Layer.merge(
 									makeDaemonStateLive({ configDir }),
-									makeInstanceManagerStateLive({}, [
-										{
-											id: "account-1",
-											name: "Personal",
-											driver: "claude",
-											managed: false,
-											port: 0,
-										},
-									]),
+									Layer.succeed(
+										AccountDirectory,
+										makeMockAccountDirectory([
+											{
+												id: AccountIdSchema.make("account-1"),
+												name: "Personal",
+												driver: "claude",
+												folder: configuredClaudeConfigDir(
+													join(configDir, "login"),
+												),
+												usageEligible: true,
+											},
+										]),
+									),
 								),
 							),
 						),

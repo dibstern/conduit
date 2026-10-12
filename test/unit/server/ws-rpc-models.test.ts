@@ -34,6 +34,7 @@ import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
@@ -686,6 +687,32 @@ describe("WsRpcServerLayer GetModels", () => {
 							makeTestHandlerLayer({
 								api,
 								orchestrationEngine,
+								accountDirectory: makeMockAccountDirectory([
+									{
+										id: AccountIdSchema.make("opencode"),
+										name: "OpenCode",
+										driver: "opencode",
+									},
+									{
+										id: AccountIdSchema.make("claude"),
+										name: "Claude",
+										driver: "claude",
+										folder: configuredClaudeConfigDir(join(configDir, "login")),
+										usageEligible: true,
+									},
+									{
+										id: AccountIdSchema.make("claude-work"),
+										name: "Work",
+										driver: "claude",
+										folder: configuredClaudeConfigDir(join(configDir, "work")),
+										usageEligible: true,
+									},
+									{
+										id: AccountIdSchema.make("opencode-work"),
+										name: "OpenCode work",
+										driver: "opencode",
+									},
+								]),
 								config: makeMockConfig({ configDir }),
 							}),
 						),
@@ -780,6 +807,32 @@ describe("WsRpcServerLayer GetModels", () => {
 							makeTestHandlerLayer({
 								api,
 								orchestrationEngine,
+								accountDirectory: makeMockAccountDirectory([
+									{
+										id: AccountIdSchema.make("opencode"),
+										name: "OpenCode",
+										driver: "opencode",
+									},
+									{
+										id: AccountIdSchema.make("claude"),
+										name: "Claude",
+										driver: "claude",
+										folder: configuredClaudeConfigDir(join(configDir, "login")),
+										usageEligible: true,
+									},
+									{
+										id: AccountIdSchema.make("claude-work"),
+										name: "Work",
+										driver: "claude",
+										folder: configuredClaudeConfigDir(join(configDir, "work")),
+										usageEligible: true,
+									},
+									{
+										id: AccountIdSchema.make("opencode-work"),
+										name: "OpenCode work",
+										driver: "opencode",
+									},
+								]),
 								config: makeMockConfig({ configDir }),
 							}),
 						),

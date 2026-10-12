@@ -743,7 +743,7 @@ export class OrchestrationEngine {
 				command.account,
 			);
 			return yield* instance
-				.discoverEffect(command.workspaceRoot)
+				.discoverEffect(command.workspaceRoot, command.account)
 				.pipe(
 					Effect.tapError((error) =>
 						Effect.sync(() =>

@@ -118,6 +118,9 @@ export function applyInstanceListResponse(
 		...(instance.isDefault !== undefined
 			? { isDefault: instance.isDefault }
 			: {}),
+		...(instance.usageEligible !== undefined
+			? { usageEligible: instance.usageEligible }
+			: {}),
 		...(instance.capabilities != null
 			? { capabilities: instance.capabilities }
 			: {}),

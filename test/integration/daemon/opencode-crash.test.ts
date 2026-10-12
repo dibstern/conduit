@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure cases: a crash mid-turn leaving the session stranded, needing a
 // second user action, or never telling the browser; a crash while idle
 // respawning OpenCode or warning about an outage nobody is waiting on.
 describe("Managed OpenCode crash handling", () => {
-	const instanceId = defaultInstanceIdForDriver("opencode");
+	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 	// Two health poll intervals (5s) plus the restart backoff's first delay (1s).
 	const pastRestartMs = 2 * 5_000 + 1_000 + 1_000;
 	let harness: ProcessHarness | undefined;

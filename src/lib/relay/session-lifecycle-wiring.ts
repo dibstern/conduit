@@ -2,7 +2,7 @@
 // Subscribes to DaemonEventBus session lifecycle events.
 
 import { Data, Effect, FiberMap, Layer, Option, Ref, Stream } from "effect";
-import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { DaemonEventBusTag } from "../domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
@@ -128,7 +128,7 @@ export const makeSessionLifecycleWiringLive = (
 										// Lifecycle history reads are background work, including
 										// the events published when a Claude session is created.
 										const client = yield* instances.ifRunning(
-											defaultInstanceIdForDriver("opencode"),
+											MANAGED_OPENCODE_ACCOUNT_ID,
 										);
 										if (Option.isNone(client)) return;
 										yield* handleSessionCreated(event.sessionId, {

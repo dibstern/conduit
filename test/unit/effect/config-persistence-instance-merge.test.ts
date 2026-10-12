@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach } from "vitest";
+import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
 import {
 	type DaemonConfig,
 	loadDaemonConfig,
 	migrateLegacyInstanceIds,
-	resolveConfiguredInstances,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	ConfigPersistenceLive,
@@ -16,6 +16,10 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	DaemonConfigRefLive,
 	type DaemonRuntimeConfig,
@@ -30,6 +34,7 @@ import {
 	updateInstance,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 let tempDir: string;
 
@@ -78,7 +83,19 @@ const makePersistenceLayer = (
 		makeInstanceManagerStateLive(undefined, initialInstances),
 	);
 	const snapshot = ConfigSnapshotFromEffectStateLive.pipe(
-		Layer.provideMerge(state),
+		Layer.provideMerge(
+			Layer.succeed(
+				AccountDirectory,
+				makeAccountDirectory(
+					Effect.succeed(
+						accountsStateFromConfig(
+							{ ...baseConfig, instances: [...initialInstances] },
+							configuredClaudeConfigDir(join(tempDir, "login")),
+						),
+					),
+				),
+			).pipe(Layer.provideMerge(state)),
+		),
 	);
 	return ConfigPersistenceLive.pipe(Layer.provideMerge(snapshot));
 };
@@ -152,20 +169,6 @@ describe("config persistence instance merge", () => {
 						driver: "claude",
 						configDir: "/persisted/claude",
 					},
-				]);
-				expect(resolveConfiguredInstances(saved)).toEqual([
-					{
-						id: "personal",
-						driver: "opencode",
-						configDir: "/persisted/opencode",
-					},
-					{
-						id: "work-claude",
-						driver: "claude",
-						configDir: "/persisted/claude",
-					},
-					{ id: "opencode", driver: "opencode" },
-					{ id: "claude", driver: "claude" },
 				]);
 			}).pipe(
 				Effect.provide(
@@ -424,14 +427,7 @@ describe("config persistence instance merge", () => {
 
 			const saved = readConfig();
 			expect(saved.instances).toEqual([]);
-			expect(resolveConfiguredInstances(saved)).toEqual([
-				{ id: "opencode", driver: "opencode" },
-				{
-					id: "claude",
-					driver: "claude",
-					configDir: "/default/claude",
-				},
-			]);
+			expect(saved.claudeConfigDir).toBe("/default/claude");
 		}).pipe(
 			Effect.provide(
 				Layer.fresh(

@@ -1,6 +1,5 @@
 import { Schema } from "effect";
-import type { AccountId } from "./account.js";
-import { AccountIdSchema } from "./account.js";
+import { AccountIdSchema, MANAGED_OPENCODE_ACCOUNT_ID } from "./account.js";
 import { AgentInfoSchema, ModelInfoSchema } from "./ws-rpc.js";
 
 export type { AccountId } from "./account.js";
@@ -58,15 +57,9 @@ export const PROVIDER_SESSION_CAPABILITIES = {
 	ProviderSessionCapabilities
 >;
 
-export function defaultInstanceIdForDriver(
-	kind: ProviderDriverKind,
-): AccountId {
-	return AccountIdSchema.make(kind);
-}
-
 /**
  * Rewrite a pre-driver-model legacy default OpenCode instance id (`"default"`)
- * to the canonical `defaultInstanceIdForDriver("opencode")` in an instance
+ * to `MANAGED_OPENCODE_ACCOUNT_ID` in an instance
  * list. The composer rail keys every
  * OpenCode provider to the canonical id, so a lingering `"default"` leaves the
  * OpenCode harness unpickable (and re-seeding would duplicate it).
@@ -78,7 +71,7 @@ export function defaultInstanceIdForDriver(
 export function migrateLegacyDefaultOpencodeInstanceId<
 	I extends { readonly id: string; readonly driver?: ProviderDriverKind },
 >(instances: ReadonlyArray<I>): I[] | null {
-	const canonical: string = defaultInstanceIdForDriver("opencode");
+	const canonical: string = MANAGED_OPENCODE_ACCOUNT_ID;
 	const legacyId = "default";
 	const legacy = instances.find(
 		(instance) =>

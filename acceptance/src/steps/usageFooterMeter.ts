@@ -92,6 +92,7 @@ function setAccounts(
 			id,
 			name,
 			driver,
+			usageEligible: driver === "claude" && id !== "api-key",
 			port: 0,
 			managed: false,
 			status: "healthy",

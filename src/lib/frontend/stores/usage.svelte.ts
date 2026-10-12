@@ -35,7 +35,7 @@ export function composerAccountId(
 		: getEffectiveInstanceId();
 }
 
-/** Include every Claude account so changing the switch order keeps them all. */
+/** Include eligible Claude accounts even before their first usage reading. */
 export function orderedSettingsUsageAccounts(): UsageReading[] {
 	const order = usageState.limits.order;
 	const rank = (id: string) => {
@@ -43,7 +43,9 @@ export function orderedSettingsUsageAccounts(): UsageReading[] {
 		return index === -1 ? order.length : index;
 	};
 	return instanceState.instances
-		.filter((instance) => instance.driver === "claude")
+		.filter(
+			(instance) => instance.driver === "claude" && instance.usageEligible,
+		)
 		.sort((a, b) => rank(a.id) - rank(b.id))
 		.map(
 			(instance) =>
@@ -95,11 +97,7 @@ export function orderedUsageAccounts(): UsageReading[] {
 		.filter((reading) => {
 			const instance = getInstanceById(reading.accountId);
 			if (!instance) return false;
-			return (
-				reading.harness !== "claude" ||
-				(!instance.env?.["ANTHROPIC_API_KEY"] &&
-					!instance.env?.["ANTHROPIC_AUTH_TOKEN"])
-			);
+			return reading.harness !== "claude" || instance.usageEligible === true;
 		})
 		.sort(
 			(a, b) =>

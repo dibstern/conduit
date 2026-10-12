@@ -1,4 +1,6 @@
 import { Effect } from "effect";
+import type { Account } from "../contracts/account.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -19,102 +21,94 @@ const OPENCODE_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
 export const normalizeProjectTitle = (title: string): string =>
 	title.trim().slice(0, MAX_PROJECT_TITLE_LENGTH);
 
-export const getCommandsForSession = (activeSessionId: string | undefined) =>
+const listSessionCommands = (
+	activeSessionId: string | undefined,
+	tolerateClaudeFailure = true,
+) =>
 	Effect.gen(function* () {
 		const engine = yield* OrchestrationEngineTag;
-		const activeProviderId = activeSessionId
+		const directory = yield* AccountDirectory;
+		const boundId = activeSessionId
 			? yield* engine.getProviderForSessionEffect(activeSessionId)
 			: undefined;
-
-		const listClaudeCommands = () =>
+		const account = yield* directory.resolve(
+			boundId === undefined
+				? { _tag: "DriverDefault", driver: "opencode" }
+				: { _tag: "Id", id: boundId },
+		);
+		const listClaudeCommands = (claude: Account) =>
 			Effect.gen(function* () {
-				const primaryFolder = (yield* ConfigTag).projectDir;
 				const workspaceRoot = activeSessionId
 					? yield* (yield* SessionWorkspaceTag).get(activeSessionId)
-					: primaryFolder;
-				const result = yield* Effect.either(
-					engine.dispatchEffect({
+					: (yield* ConfigTag).projectDir;
+				return yield* engine
+					.dispatchEffect({
 						type: "discover",
 						providerId: "claude",
+						account: claude,
 						workspaceRoot,
-					}),
-				);
-				if (result._tag === "Left") {
-					const log = yield* LoggerTag;
-					log.warn(
-						`Failed to discover Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+					})
+					.pipe(
+						Effect.map((capabilities) => capabilities.commands),
+						Effect.catchAll((error) =>
+							tolerateClaudeFailure
+								? Effect.gen(function* () {
+										(yield* LoggerTag).warn(
+											`Failed to discover Claude commands: ${error instanceof Error ? error.message : error}`,
+										);
+										return [];
+									})
+								: Effect.fail(error),
+						),
 					);
-					return [];
-				}
-				return result.right.commands.map((command) => ({
-					name: command.name,
-					...(command.description ? { description: command.description } : {}),
-					...(command.args ? { args: command.args } : {}),
-					...(command.source === "builtin" ? { builtin: true } : {}),
-				}));
 			});
-
-		if (activeProviderId === "claude") {
-			return yield* listClaudeCommands();
-		}
-
-		const settingsService = yield* OpenCodeSettingsServiceTag;
-		const openCodeResult = yield* Effect.either(
-			settingsService.listCommands({ startIfStopped: false }),
+		if (account.driver === "claude") return yield* listClaudeCommands(account);
+		const result = yield* Effect.either(
+			(yield* OpenCodeSettingsServiceTag).listCommands({
+				startIfStopped: !tolerateClaudeFailure,
+			}),
 		);
-		if (openCodeResult._tag === "Right") {
-			return openCodeResult.right.map((command) => ({
+		if (result._tag === "Right") return result.right;
+		if (boundId !== undefined) return yield* Effect.fail(result.left);
+		(yield* LoggerTag).warn(
+			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.left instanceof Error ? result.left.message : result.left}`,
+		);
+		return yield* listClaudeCommands(
+			yield* directory.resolve({ _tag: "DriverDefault", driver: "claude" }),
+		);
+	});
+
+export const getCommandsForSession = (activeSessionId: string | undefined) =>
+	listSessionCommands(activeSessionId).pipe(
+		Effect.map((commands) =>
+			commands.map((command) => ({
 				name: command.name,
 				...(command.description ? { description: command.description } : {}),
-				...(command.source === "command" &&
-				OPENCODE_BUILTIN_COMMANDS.has(command.name)
+				...("args" in command && command.args ? { args: command.args } : {}),
+				...(command.source === "builtin" ||
+				(command.source === "command" &&
+					OPENCODE_BUILTIN_COMMANDS.has(command.name))
 					? { builtin: true }
 					: {}),
-			}));
-		}
-
-		if (activeProviderId !== "opencode") {
-			const log = yield* LoggerTag;
-			log.warn(
-				`Failed to discover OpenCode commands; falling back to Claude commands: ${
-					openCodeResult.left instanceof Error
-						? openCodeResult.left.message
-						: openCodeResult.left
-				}`,
-			);
-			return yield* listClaudeCommands();
-		}
-
-		return yield* Effect.fail(openCodeResult.left);
-	});
+			})),
+		),
+	);
 
 export const getSkillNamesForSession = (sessionId: string) =>
-	Effect.gen(function* () {
-		const engine = yield* OrchestrationEngineTag;
-		const providerId = yield* engine.getProviderForSessionEffect(sessionId);
-		const commands =
-			providerId === "claude"
-				? yield* Effect.gen(function* () {
-						const workspaceRoot = yield* (yield* SessionWorkspaceTag).get(
-							sessionId,
-						);
-						return (yield* engine.dispatchEffect({
-							type: "discover",
-							providerId: "claude",
-							workspaceRoot,
-						})).commands;
-					})
-				: yield* (yield* OpenCodeSettingsServiceTag).listCommands();
-		return new Set(
-			commands
-				.filter(
-					(command) =>
-						!command.name.startsWith("anthropic-skills:") &&
-						(command.source === "user-skill" ||
-							command.source === "project-skill" ||
-							command.source === "plugin-skill" ||
-							command.source === "skill"),
-				)
-				.map((command) => command.name),
-		);
-	});
+	listSessionCommands(sessionId, false).pipe(
+		Effect.map(
+			(commands) =>
+				new Set(
+					commands
+						.filter(
+							(command) =>
+								!command.name.startsWith("anthropic-skills:") &&
+								(command.source === "user-skill" ||
+									command.source === "project-skill" ||
+									command.source === "plugin-skill" ||
+									command.source === "skill"),
+						)
+						.map((command) => command.name),
+				),
+		),
+	);

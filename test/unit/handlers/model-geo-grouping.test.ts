@@ -1,3 +1,5 @@
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // OpenCode's amazon-bedrock catalog lists each model once per inference-profile
 // scope (bare id, us., eu., apac., global.). groupGeoRoutingModels collapses
 // them into one entry with routingOptions (value = full model id), defaulting
@@ -37,6 +39,7 @@ const bedrockModel = (id: string, name: string) => ({
 
 layer(
 	Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(ConfigTag, makeMockConfig()),
 		ProjectSettingsLive,

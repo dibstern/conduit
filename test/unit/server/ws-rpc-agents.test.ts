@@ -5,11 +5,14 @@ import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { saveDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { setAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
@@ -155,6 +158,27 @@ describe("WsRpcServerLayer GetAgents", () => {
 							makeTestHandlerLayer({
 								api,
 								orchestrationEngine,
+								accountDirectory: makeMockAccountDirectory([
+									{
+										id: AccountIdSchema.make("claude"),
+										name: "Claude",
+										driver: "claude",
+										folder: configuredClaudeConfigDir(join(configDir, "login")),
+										usageEligible: true,
+									},
+									{
+										id: AccountIdSchema.make("claude-work"),
+										name: "Work",
+										driver: "claude",
+										folder: configuredClaudeConfigDir(join(configDir, "work")),
+										usageEligible: true,
+									},
+									{
+										id: AccountIdSchema.make("opencode-work"),
+										name: "OpenCode work",
+										driver: "opencode",
+									},
+								]),
 								config: makeMockConfig({ configDir }),
 							}),
 						),

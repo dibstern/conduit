@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	type ProcessBrowser,
@@ -11,7 +11,7 @@ import {
 // Failure cases: external deletion never reaches the sidebar; an upstream
 // failure lets late status/content or a restart recreate a locally deleted row.
 describe("OpenCode session deletion", () => {
-	const instanceId = defaultInstanceIdForDriver("opencode");
+	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 	let harness: ProcessHarness | undefined;
 	let browser: ProcessBrowser | undefined;
 	let scenario = "setup";

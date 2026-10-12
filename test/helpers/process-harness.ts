@@ -36,7 +36,7 @@ import type { Request } from "effect/Request";
 import WebSocket from "ws";
 import {
 	AccountIdSchema,
-	defaultInstanceIdForDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
 	type ProviderDriverKind,
 } from "../../src/lib/contracts/provider-instance.js";
 import {
@@ -677,7 +677,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					...config,
 					instances: [
 						{
-							id: defaultInstanceIdForDriver("opencode"),
+							id: MANAGED_OPENCODE_ACCOUNT_ID,
 							name: "External test",
 							port: address.port,
 							managed: false,
@@ -1152,7 +1152,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 
 	async emitOpenCodeEvent(
 		envelope: unknown,
-		instanceId: string = defaultInstanceIdForDriver("opencode"),
+		instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 	): Promise<void> {
 		await this.openCodeTestCommand("emit-event", envelope, instanceId);
 	}
@@ -1168,7 +1168,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		directory: string,
 		sessionID: string,
 		status: { type: "busy" | "idle" | "retry"; [key: string]: unknown },
-		instanceId: string = defaultInstanceIdForDriver("opencode"),
+		instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 	): Promise<void> {
 		await this.openCodeTestCommand(
 			"set-status",
@@ -1210,7 +1210,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		kind: "permission" | "question",
 		directory: string,
 		item: { id: string; sessionID: string; [key: string]: unknown },
-		instanceId: string = defaultInstanceIdForDriver("opencode"),
+		instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 	): Promise<void> {
 		await this.openCodeTestCommand(
 			`add-${kind}`,
@@ -1240,7 +1240,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 	private async openCodeTestCommand(
 		command: string,
 		body: unknown,
-		instanceId: string = defaultInstanceIdForDriver("opencode"),
+		instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 	): Promise<void> {
 		const instance = loadDaemonConfig(this.configDir)?.instances?.find(
 			({ id }) => id === instanceId,

@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { Logger } from "../../../logger.js";
 import type {
@@ -114,7 +114,7 @@ export const SSEStreamLive: Layer.Layer<
 		const scope = yield* Effect.scope;
 		const gate = yield* Effect.makeSemaphore(1);
 		// The relay view tags the selected instance with the default id.
-		const selectedId = defaultInstanceIdForDriver("opencode");
+		const selectedId = MANAGED_OPENCODE_ACCOUNT_ID;
 		const main = makeChannel(log);
 		const others = new Map<string, ReturnType<typeof makeChannel>>();
 		let wirer:

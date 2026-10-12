@@ -2,6 +2,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { GetAgents } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceLive } from "../../../src/lib/domain/relay/Services/agent-service.js";
@@ -29,6 +30,7 @@ import {
 	makeHandlerOpenCodeAPI,
 } from "../../helpers/handler-fakes.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
@@ -64,6 +66,7 @@ function agentHandlerLayer({
 	const overridesLayer = makeOverridesStateLive();
 	const logLayer = Layer.succeed(LoggerTag, log);
 	const deps = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		apiLayer,
 		Layer.succeed(
 			OpenCodeInstancesTag,
@@ -316,6 +319,10 @@ describe("GetAgents active provider", () => {
 					expect(engine.dispatchEffect).toHaveBeenCalledWith({
 						type: "discover",
 						providerId: "claude",
+						account: expect.objectContaining({
+							driver: "claude",
+							id: "claude",
+						}),
 					});
 					expect(reply).toEqual({
 						providerScope: { id: "claude", name: "Claude" },
@@ -364,6 +371,7 @@ describe("GetAgents active provider", () => {
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					account: expect.objectContaining({ driver: "claude", id: "claude" }),
 				});
 				expect(reply).toEqual({
 					providerScope: { id: "claude", name: "Claude" },

@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect, HashMap, Layer, Option, Ref, Schema } from "effect";
+import { Effect, Layer, Option, Ref, Schema } from "effect";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import {
 	type ClaudeUsageReaderOptions,
 	makeClaudeUsageReader,
 } from "../../../provider/claude/claude-usage-probe.js";
+import { AccountDirectory } from "../Services/account-directory.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
-import { InstanceManagerStateTag } from "../Services/instance-manager-service.js";
 import {
 	makeUsage,
 	Usage,
@@ -23,8 +23,7 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 		Usage,
 		Effect.gen(function* () {
 			const state = yield* DaemonStateTag;
-			// Live accounts: DaemonState only holds the instances read at startup.
-			const accounts = yield* InstanceManagerStateTag;
+			const directory = yield* AccountDirectory;
 			const config = yield* Effect.serviceOption(DaemonConfigRefTag);
 			const sdk = options.queryFactory
 				? undefined
@@ -71,28 +70,20 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 							Effect.map((current) => current.usageLimits?.order ?? []),
 						)
 					: Effect.succeed([]),
-				accounts: Effect.gen(function* () {
-					const { instances } = yield* Ref.get(accounts);
-					const fallback = Option.isSome(config)
-						? (yield* Ref.get(config.value)).claudeConfigDir
-						: undefined;
-					return Array.from(HashMap.values(instances))
-						.filter(
-							(instance) =>
-								instance.driver === "claude" &&
-								!instance.env?.["ANTHROPIC_API_KEY"] &&
-								!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
-						)
-						.map((instance) => {
-							const configDir = instance.configDir ?? fallback;
-							return {
-								id: instance.id,
-								harness: "claude" as const,
-								...(configDir === undefined ? {} : { configDir }),
-								...(instance.env ? { env: instance.env } : {}),
-							};
-						});
-				}),
+				accounts: Effect.map(directory.list, (accounts) =>
+					accounts.flatMap((account) =>
+						account.driver === "claude" && account.usageEligible
+							? [
+									{
+										id: account.id,
+										harness: "claude" as const,
+										folder: account.folder,
+										...(account.env ? { env: account.env } : {}),
+									},
+								]
+							: [],
+					),
+				),
 				readers: {
 					claude: makeClaudeUsageReader({
 						...options,

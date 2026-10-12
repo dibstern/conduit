@@ -12,15 +12,19 @@ import {
 	HashMap,
 	Layer,
 	ManagedRuntime,
+	Option,
 	Ref,
 } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import {
+	accountsStateFromConfig,
+	defaultFor,
+} from "../../../daemon/account-directory.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
-	resolveConfiguredInstances,
 } from "../../../daemon/config-persistence.js";
 import type {
 	DaemonOptions,
@@ -32,7 +36,10 @@ import { formatErrorDetail } from "../../../errors.js";
 import { setLogFormat, setLogLevel } from "../../../logger.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
-import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
+import {
+	type ClaudeConfigDir,
+	captureClaudeLaunchLogin,
+} from "../../../provider/claude/claude-sdk-env.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -117,18 +124,29 @@ const persistedSessionCounts = (config: DaemonConfig | null) =>
 const buildInitialRuntimeConfig = (
 	options: DaemonOptions,
 	persisted: DaemonConfig | null,
+	launchLogin: ClaudeConfigDir,
 ) => {
 	const pinHash = options.pinHash ?? persisted?.pinHash ?? undefined;
 	const keepAwakeCommand =
 		options.keepAwakeCommand ?? persisted?.keepAwakeCommand ?? undefined;
 	const keepAwakeArgs =
 		options.keepAwakeArgs ?? persisted?.keepAwakeArgs ?? undefined;
-	const claudeConfigDir = resolveConfiguredInstances({
-		...(persisted ?? defaultDaemonConfig()),
-		...(options.claudeConfigDir !== undefined && {
-			claudeConfigDir: options.claudeConfigDir,
-		}),
-	}).find(({ id }) => id === defaultInstanceIdForDriver("claude"))?.configDir;
+	const defaultClaude = defaultFor(
+		accountsStateFromConfig(
+			{
+				...(persisted ?? defaultDaemonConfig()),
+				...(options.claudeConfigDir !== undefined && {
+					claudeConfigDir: options.claudeConfigDir,
+				}),
+			},
+			launchLogin,
+		),
+		"claude",
+	);
+	const claudeConfigDir =
+		Option.isSome(defaultClaude) && defaultClaude.value.driver === "claude"
+			? defaultClaude.value.configuredFolder
+			: undefined;
 
 	const tailscaleServeEnabled =
 		options.tailscaleServe ?? persisted?.tailscaleServe ?? false;
@@ -223,7 +241,11 @@ export async function startForegroundDaemon(
 		throw loaded.left;
 	}
 	const persisted = Either.getOrNull(loaded);
-	const initialConfig = buildInitialRuntimeConfig(options, persisted);
+	const initialConfig = buildInitialRuntimeConfig(
+		options,
+		persisted,
+		launchLogin,
+	);
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	// Check before acquiring runtime resources or replacing a stale RPC socket.
 	await new Promise<void>((ready, fail) => {
@@ -492,7 +514,7 @@ export async function startForegroundDaemon(
 				// Persisted default bindings route to the project's selected instance,
 				// even when only named instances are registered.
 				if (openCodeInstanceIds.length > 0)
-					openCodeInstanceIds.push(defaultInstanceIdForDriver("opencode"));
+					openCodeInstanceIds.push(MANAGED_OPENCODE_ACCOUNT_ID);
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>

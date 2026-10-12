@@ -12,7 +12,7 @@ import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -234,7 +234,7 @@ it("failed establishment validation rolls back the seed, event and projections",
 							version: "1",
 							time: { created: 1, updated: 1 },
 						},
-						defaultInstanceIdForDriver("opencode"),
+						MANAGED_OPENCODE_ACCOUNT_ID,
 					),
 				);
 				expect(result._tag).toBe("Left");

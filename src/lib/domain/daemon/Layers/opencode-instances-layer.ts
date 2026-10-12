@@ -14,7 +14,7 @@ import {
 	Schema,
 	Stream,
 } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
@@ -894,7 +894,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				// neither opens a stream nor keeps one open.
 				events: (
 					directories: readonly string[] | (() => readonly string[]),
-					instanceId: string = defaultInstanceIdForDriver("opencode"),
+					instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 				) =>
 					Stream.asyncScoped<OpenCodeInstanceEvent>(
 						(emit) =>
@@ -1025,9 +1025,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 			// instance carries that id.
 			const instance =
 				instances.find(({ id }) => id === instanceId) ??
-				(instanceId === defaultInstanceIdForDriver("opencode")
-					? instances[0]
-					: undefined);
+				(instanceId === MANAGED_OPENCODE_ACCOUNT_ID ? instances[0] : undefined);
 			const url = instance ? yield* getInstanceUrl(instance.id) : null;
 			if (!instance || !url) return undefined;
 			const auth = openCodeAuth(
@@ -1118,7 +1116,7 @@ export const makeStandaloneOpenCodeInstancesLive = (
 	makeOpenCodeInstancesLive(
 		(instanceId) =>
 			Effect.sync(() => {
-				if (instanceId === defaultInstanceIdForDriver("opencode"))
+				if (instanceId === MANAGED_OPENCODE_ACCOUNT_ID)
 					return config.opencodeUrl === undefined
 						? undefined
 						: {

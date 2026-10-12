@@ -4,6 +4,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -20,6 +21,7 @@ import {
 	makeHandlerOpenCodeAPI,
 } from "../../helpers/handler-fakes.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
@@ -27,6 +29,7 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 
 function openCodeSettingsLayer(client: OpenCodeAPI) {
 	const apiLayer = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(OpenCodeAPITag, client),
 		Layer.succeed(
 			OpenCodeInstancesTag,
@@ -95,6 +98,7 @@ describe("getCommandsForSession active provider", () => {
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					account: expect.objectContaining({ driver: "claude", id: "claude" }),
 					workspaceRoot: "/session-worktree",
 				});
 				expect(client.app.commands).not.toHaveBeenCalled();
@@ -197,6 +201,10 @@ describe("getCommandsForSession active provider", () => {
 					expect(engine.dispatchEffect).toHaveBeenCalledWith({
 						type: "discover",
 						providerId: "claude",
+						account: expect.objectContaining({
+							driver: "claude",
+							id: "claude",
+						}),
 						workspaceRoot: "/primary-folder",
 					});
 					expect(commands).toEqual([

@@ -5,7 +5,7 @@ import { RpcTest } from "@effect/rpc";
 import Database from "better-sqlite3";
 import { Effect, HashMap, Ref, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type OpenCodeInstance,
 	WsRpcGroup,
@@ -28,7 +28,7 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // exhaustion leaves Settings unhealthy, and managed stop strands busy rows or
 // keeps a viewed session's fallback poller warning against a stopped client.
 describe("managed OpenCode connection health reaches daemon clients", () => {
-	const instanceId = defaultInstanceIdForDriver("opencode");
+	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 	let harness: ProcessHarness | undefined;
 	let scenario = "setup";
 	let evidence: Record<string, unknown> = {};

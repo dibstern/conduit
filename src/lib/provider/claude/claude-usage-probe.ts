@@ -1,9 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Effect } from "effect";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
 import type { UsageRead, UsageReader } from "../usage-reader.js";
 import {
 	type ClaudeConfigDir,
@@ -61,10 +57,18 @@ export const makeClaudeUsageReader = (
 		Effect.suspend(() => {
 			let stderr = "";
 			const baseEnv = { ...(options.shellEnv ?? process.env), ...account.env };
-			const launch =
-				account.configDir === undefined
-					? resolveClaudeLaunchConfig(loadDaemonConfig(), account.id, baseEnv)
-					: { configDir: configuredClaudeConfigDir(account.configDir) };
+			const folder =
+				account.folder ??
+				(account.configDir === undefined
+					? undefined
+					: configuredClaudeConfigDir(account.configDir));
+			if (folder === undefined)
+				return Effect.fail(
+					new Error(`Claude usage account ${account.id} requires a folder`),
+				);
+			const launch = {
+				configDir: folder,
+			};
 			return Effect.acquireUseRelease(
 				makeClaudeEmptyQuery(
 					options.queryFactory ?? query,

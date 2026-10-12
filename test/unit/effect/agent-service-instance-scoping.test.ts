@@ -3,8 +3,9 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import {
 	AccountIdSchema,
-	defaultInstanceIdForDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -20,6 +21,7 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
+	makeMockAccountDirectory,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
@@ -63,6 +65,7 @@ const makeLayer = ({
 	readonly engine?: OrchestrationEngine;
 } = {}) => {
 	const baseDependencies = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(OpenCodeAPITag, api),
 		Layer.succeed(
 			OpenCodeInstancesTag,
@@ -97,10 +100,10 @@ describe("AgentService instance scoping", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* AgentServiceTag;
-				const result = yield* service.listAgents(
-					"session-1",
-					defaultInstanceIdForDriver("opencode"),
-				);
+				const result = yield* service.listAgents("session-1", {
+					_tag: "Id",
+					id: MANAGED_OPENCODE_ACCOUNT_ID,
+				});
 
 				expect(result).toEqual({
 					instanceId: "opencode",
@@ -130,10 +133,10 @@ describe("AgentService instance scoping", () => {
 
 			return Effect.gen(function* () {
 				const service = yield* AgentServiceTag;
-				const result = yield* service.listAgents(
-					"session-1",
-					defaultInstanceIdForDriver("claude"),
-				);
+				const result = yield* service.listAgents("session-1", {
+					_tag: "Id",
+					id: AccountIdSchema.make("claude"),
+				});
 
 				expect(result).toEqual({
 					instanceId: "claude",
@@ -146,6 +149,7 @@ describe("AgentService instance scoping", () => {
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					account: expect.objectContaining({ driver: "claude", id: "claude" }),
 				});
 			}).pipe(Effect.provide(makeLayer({ api, engine })));
 		},
@@ -156,15 +160,14 @@ describe("AgentService instance scoping", () => {
 		() =>
 			Effect.gen(function* () {
 				const service = yield* AgentServiceTag;
-				const instanceId = AccountIdSchema.make("claude-work");
-				const result = yield* service.listAgents(
-					"session-1",
-					instanceId,
-					"claude",
-				);
+				const instanceId = AccountIdSchema.make("claude");
+				const result = yield* service.listAgents("session-1", {
+					_tag: "Id",
+					id: instanceId,
+				});
 
 				expect(result).toEqual({
-					instanceId: "claude-work",
+					instanceId: "claude",
 					providerScope: { id: "claude", name: "Claude" },
 					agents: [],
 				});
@@ -180,10 +183,10 @@ describe("AgentService instance scoping", () => {
 				agentId: "build",
 			});
 
-			yield* service.listAgents(
-				"session-1",
-				defaultInstanceIdForDriver("claude"),
-			);
+			yield* service.listAgents("session-1", {
+				_tag: "Id",
+				id: AccountIdSchema.make("claude"),
+			});
 
 			expect(yield* service.getActiveAgent("session-1")).toBe("build");
 		}).pipe(Effect.provide(makeLayer())),
@@ -195,10 +198,10 @@ describe("AgentService instance scoping", () => {
 
 		return Effect.gen(function* () {
 			const service = yield* AgentServiceTag;
-			const result = yield* service.listAgents(
-				"session-1",
-				defaultInstanceIdForDriver("opencode"),
-			);
+			const result = yield* service.listAgents("session-1", {
+				_tag: "Id",
+				id: MANAGED_OPENCODE_ACCOUNT_ID,
+			});
 
 			expect(result).toEqual({
 				instanceId: "opencode",
@@ -208,46 +211,20 @@ describe("AgentService instance scoping", () => {
 		}).pipe(Effect.provide(makeLayer({ api })));
 	});
 
-	it.effect("fails closed for a configured unknown driver", () => {
+	it.effect("rejects unknown accounts without provider fallback", () => {
 		const api = makeMockOpenCodeAPI();
 		const engine = makeEngine();
-
 		return Effect.gen(function* () {
 			const service = yield* AgentServiceTag;
-			const result = yield* service.listAgents(
-				undefined,
-				AccountIdSchema.make("future-instance"),
-				"future-driver",
-			);
-
-			expect(result).toEqual({
-				instanceId: "future-instance",
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [],
-			});
+			for (const id of ["future-instance", "unknown-instance"]) {
+				const result = yield* Effect.either(
+					service.listAgents(undefined, { _tag: "Id", id }),
+				);
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") expect(result.left.message).toContain(id);
+			}
 			expect(api.app.agents).not.toHaveBeenCalled();
 			expect(engine.dispatchEffect).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(makeLayer({ api, engine })));
-	});
-
-	it.effect("treats an unknown unconfigured instance as OpenCode", () => {
-		const api = makeMockOpenCodeAPI();
-		vi.mocked(api.app.agents).mockResolvedValue([
-			{ id: "build", name: "build", mode: "primary" },
-		]);
-
-		return Effect.gen(function* () {
-			const service = yield* AgentServiceTag;
-			const result = yield* service.listAgents(
-				undefined,
-				AccountIdSchema.make("unknown-instance"),
-			);
-
-			expect(result).toEqual({
-				instanceId: "unknown-instance",
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [{ id: "build", name: "build" }],
-			});
-		}).pipe(Effect.provide(makeLayer({ api })));
 	});
 });

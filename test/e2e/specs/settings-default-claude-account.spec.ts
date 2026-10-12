@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetInstances,
 	GetStatus,
@@ -15,7 +15,7 @@ import {
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
-const defaultId = defaultInstanceIdForDriver("claude");
+const defaultId = AccountIdSchema.make("claude");
 const artifacts = resolve("test-results/settings-default-claude-account");
 const test = base.extend<{
 	harness: ProcessHarness;

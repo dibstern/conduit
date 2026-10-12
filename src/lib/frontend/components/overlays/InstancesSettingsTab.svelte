@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
-	import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
@@ -20,11 +19,9 @@
 	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
-	const defaultClaudeId = defaultInstanceIdForDriver("claude");
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
 	const instanceFormMode = $derived(openForm === "instance-add" ? "add" : openForm?.startsWith("instance-edit:") ? "edit" : null);
 	const editingInstanceId = $derived(instanceFormMode === "edit" ? openForm?.slice("instance-edit:".length) : null);
-	const editingDefaultClaude = $derived(editingInstanceId === defaultClaudeId);
 
 	let state = $state({
 		expandedInstanceId: null as string | null,
@@ -59,6 +56,7 @@
 		testId: `instance-form-driver-${driver}`,
 	}));
 	const instances = $derived(getCachedInstances());
+	const editingDefaultClaude = $derived(editingInstanceId != null && instances.some((instance) => instance.id === editingInstanceId && instance.driver === "claude" && instance.isDefault));
 	const claudeAccounts = $derived(instances.filter((inst) => instanceDriver(inst) === "claude"));
 	const opencodeInstances = $derived(instances.filter((inst) => instanceDriver(inst) === "opencode"));
 	const scanInFlight = $derived(isScanInFlight());
@@ -344,7 +342,7 @@
 						<div class="flex-1 min-w-0">
 							<div class="flex items-center gap-[6px] text-[12.5px] text-text">
 								<span class="truncate">{inst.name}</span>
-								{#if inst.id === defaultClaudeId}<Badge variant="quiet" size="xs" shape="pill">default</Badge>{/if}
+								{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill">default</Badge>{/if}
 							</div>
 							<div class="font-mono text-[11px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
 						</div>
@@ -356,15 +354,15 @@
 								<dt class="text-text-muted">Config dir</dt>
 								<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 								<dt class="text-text-muted">Used by</dt>
-								<dd class="text-text">{inst.id === defaultClaudeId ? "New sessions, unless a project picks another account" : "Sessions you move to it, and auto-switch"}</dd>
-								{#if inst.id === defaultClaudeId}
+								<dd class="text-text">{inst.isDefault ? "New sessions, unless a project picks another account" : "Sessions you move to it, and auto-switch"}</dd>
+								{#if inst.isDefault}
 									<dt class="text-text-muted">Change</dt>
 									<dd class="text-text">Applies after restart</dd>
 								{/if}
 							</dl>
 							<div class="flex flex-wrap items-center gap-2">
 								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
-								{#if inst.id === defaultClaudeId}
+								{#if inst.isDefault}
 									<span class="text-xs text-text-muted">The default account can't be removed</span>
 								{:else}
 									<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>

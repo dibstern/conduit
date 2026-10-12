@@ -11,8 +11,8 @@
  * - Discovery reads the live model list through ClaudeCapabilitiesService. The
  *   service owns the 5-minute TTL/in-flight cache; the probe spawns a throwaway
  *   SDK query, reads initializationResult(), and aborts before any API call.
- *   Nothing persists to disk. Commands and skills are enumerated from ~/.claude/
- *   and <workspace>/.claude/.
+ *   Nothing persists to disk. Commands and skills are enumerated from the
+ *   resolved account folder and <workspace>/.claude/.
  * - Shutdown is graceful: close every session's prompt queue, call the
  *   runtime's close(), then clear the session map.
  */
@@ -39,6 +39,7 @@ import {
 	Ref,
 	type Scope,
 } from "effect";
+import type { Account } from "../../contracts/account.js";
 import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
@@ -563,10 +564,15 @@ export class ClaudeProviderRuntime {
 
 	discoverEffect(
 		workspaceRoot?: string,
+		account?: Account,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return discoverCapabilitiesEffect(
 			workspaceRoot ?? this.deps.workspaceRoot,
 			this.deps.capabilitiesService,
+			account?.driver === "claude"
+				? account.folder
+				: resolveClaudeLaunchConfig(loadDaemonConfig(this.deps.daemonConfigDir))
+						.configDir,
 		).pipe(
 			Effect.mapError(
 				(cause: ClaudeAdapterError) =>
@@ -772,7 +778,7 @@ export class ClaudeProviderRuntime {
 			if (!model) {
 				// Discovery is shared with sends; cancellation only stops this waiter.
 				const discovery = yield* Effect.forkIn(
-					this.discoverEffect(input.workspaceRoot),
+					this.discoverEffect(input.workspaceRoot, account),
 					this.providerScope,
 				);
 				const { models } = yield* Fiber.join(discovery);
@@ -1707,12 +1713,18 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 
 	discoverEffect(
 		workspaceRoot?: string,
+		account?: Account,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
 			discoverCapabilitiesEffect(
 				workspaceRoot ?? this.deps.workspaceRoot,
 				this.deps.capabilitiesService,
+				account?.driver === "claude"
+					? account.folder
+					: resolveClaudeLaunchConfig(
+							loadDaemonConfig(this.deps.daemonConfigDir),
+						).configDir,
 			),
 		);
 	}

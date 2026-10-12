@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -343,6 +343,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 					id: "claude",
 					name: "Personal Claude",
 					driver: "claude",
+					isDefault: true,
+					usageEligible: true,
 					configDir: "~/.claude",
 					port: 0,
 					managed: false,
@@ -482,6 +484,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				restartCount: 0,
 				createdAt: 1,
 				driver: driverName,
+				usageEligible: driverName === "claude",
 				...(driverName === "claude" ? { configDir: "/profiles/seed" } : {}),
 			};
 			// Seed BOTH the mock RPC store (so edit/remove RPCs stay consistent)
@@ -520,7 +523,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "seed the default Claude account",
 		match: /^the default Claude account is named (.+) with folder (.+)$/,
 		run: async ({ world, match }) => {
-			const id = defaultInstanceIdForDriver("claude");
+			const id = AccountIdSchema.make("claude");
 			const list = [
 				...(mockInstances.get(world.page) ?? []).filter(
 					(instance) => instance["id"] !== id,
@@ -530,6 +533,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 					name: match[1] ?? "",
 					configDir: match[2] ?? "",
 					driver: "claude",
+					isDefault: true,
+					usageEligible: true,
 					port: 0,
 					managed: false,
 					status: "healthy",
@@ -548,7 +553,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^I edit the default Claude account$/,
 		run: async ({ world }) => {
 			const row = world.page.getByTestId(
-				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+				`instance-row-${AccountIdSchema.make("claude")}`,
 			);
 			await row.getByRole("button").first().click();
 			await row.getByTestId("edit-instance-btn").click();
@@ -578,7 +583,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^the default Claude account cannot be removed$/,
 		run: async ({ world }) => {
 			const row = world.page.getByTestId(
-				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+				`instance-row-${AccountIdSchema.make("claude")}`,
 			);
 			await expect(row.getByTestId("remove-instance-btn")).toHaveCount(0);
 			await expect(row).toContainText("The default account can't be removed");
@@ -602,7 +607,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 			/^the default Claude account shows folder (.+) with Applies after restart$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId(
-				`instance-row-${defaultInstanceIdForDriver("claude")}`,
+				`instance-row-${AccountIdSchema.make("claude")}`,
 			);
 			await row.getByRole("button").first().click();
 			await expect(row).toContainText(match[1] ?? "");
@@ -618,7 +623,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "UpdateInstance",
 			);
 			expect(request.payload).toMatchObject({
-				instanceId: defaultInstanceIdForDriver("claude"),
+				instanceId: AccountIdSchema.make("claude"),
 				name: match[1] ?? "",
 				configDir: match[2] === "empty" ? "" : (match[2] ?? ""),
 			});

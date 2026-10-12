@@ -1,17 +1,11 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-	defaultInstanceIdForDriver,
 	isKnownDriverKind,
 	ProviderInstanceSchema,
 } from "../../../src/lib/contracts/provider-instance.js";
 
 describe("provider-instance contracts", () => {
-	it("defaultInstanceIdForDriver is the identity mapping for known drivers", () => {
-		expect(defaultInstanceIdForDriver("claude")).toBe("claude");
-		expect(defaultInstanceIdForDriver("opencode")).toBe("opencode");
-	});
-
 	it("isKnownDriverKind distinguishes the closed known set from unknown strings", () => {
 		expect(isKnownDriverKind("claude")).toBe(true);
 		expect(isKnownDriverKind("opencode")).toBe(true);

@@ -268,6 +268,7 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 	isDefault: Schema.optional(Schema.Boolean),
+	usageEligible: Schema.optional(Schema.Boolean),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),

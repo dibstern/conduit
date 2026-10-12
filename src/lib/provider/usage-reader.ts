@@ -1,10 +1,12 @@
 import type { Effect } from "effect";
+import type { ClaudeConfigDir } from "../contracts/claude-config-dir.js";
 import type { UsageReading } from "../contracts/limit-recovery.js";
 
 export interface UsageAccount {
 	readonly id: string;
 	readonly harness: UsageReading["harness"];
 	readonly configDir?: string;
+	readonly folder?: ClaudeConfigDir;
 	readonly env?: Readonly<Record<string, string>>;
 }
 

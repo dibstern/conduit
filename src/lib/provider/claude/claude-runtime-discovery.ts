@@ -1,5 +1,4 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { createLogger } from "../../logger.js";
@@ -14,6 +13,7 @@ import {
 } from "./claude-api-model-id.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import type { ClaudeCapabilitiesService } from "./claude-capabilities-service.js";
+import type { ClaudeConfigDir } from "./claude-sdk-env.js";
 import type { ClaudeSessionContext } from "./types.js";
 
 const log = createLogger("claude-provider-runtime");
@@ -136,9 +136,10 @@ function enumerateSkills(
 export function discoverCapabilitiesEffect(
 	workspaceRoot: string,
 	capabilitiesService: ClaudeCapabilitiesService | undefined,
+	folder: ClaudeConfigDir,
 ): Effect.Effect<ProviderCapabilities> {
 	return Effect.gen(function* () {
-		const userBase = join(homedir(), ".claude");
+		const userBase = folder.path;
 		const projectBase = join(workspaceRoot, ".claude");
 
 		const fsCommands: CommandInfo[] = [

@@ -1,17 +1,16 @@
-import { type Cause, Data, Effect, Either, FiberHandle, Ref } from "effect";
 import {
-	type AccountId,
-	AccountIdSchema,
-	defaultInstanceIdForDriver,
-	isKnownDriverKind,
-	type KnownProviderDriverKind,
-} from "../contracts/provider-instance.js";
+	type Cause,
+	Data,
+	Effect,
+	Either,
+	FiberHandle,
+	Option,
+	Ref,
+} from "effect";
+import type { AccountUnroutable } from "../contracts/limit-recovery.js";
+import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
-import {
-	loadDaemonConfig,
-	resolveInstanceDriver,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	ProjectSettingsTag,
 	publishGlobalProjectSetting,
@@ -76,14 +75,6 @@ const saveRelaySettingsEffect = (
 		try: () => saveRelaySettings(settings, configDir),
 		catch: (cause) => new RelaySettingsSaveError({ cause }),
 	});
-
-const resolveBuiltInInstanceDriver = (
-	instanceId: AccountId,
-): KnownProviderDriverKind => {
-	if (instanceId === defaultInstanceIdForDriver("claude")) return "claude";
-	if (instanceId === defaultInstanceIdForDriver("opencode")) return "opencode";
-	return isKnownDriverKind(instanceId) ? instanceId : "opencode";
-};
 
 /** Helper: resolve session from WebSocketHandler context. */
 const resolveSessionFromContext = (clientId: string) =>
@@ -328,7 +319,7 @@ export const getModelsResponse = (
 	} = {},
 ): Effect.Effect<
 	GetModelsResponse,
-	Cause.UnknownException,
+	Cause.UnknownException | AccountUnroutable,
 	| LoggerTag
 	| ConfigTag
 	| OpenCodeModelServiceTag
@@ -337,28 +328,51 @@ export const getModelsResponse = (
 	| OverridesStateTag
 	| WebSocketHandlerTag
 	| ProjectSettingsTag
+	| AccountDirectory
 > =>
 	Effect.gen(function* () {
 		const modelService = yield* OpenCodeModelServiceTag;
 		const log = yield* LoggerTag;
 		const engine = yield* OrchestrationEngineTag;
-		const config = yield* ConfigTag;
-		const instanceId =
-			input.instanceId === undefined
+		const directory = yield* AccountDirectory;
+		const activeId =
+			input.sessionId ??
+			(input.clientId
+				? yield* resolveSessionFromContext(input.clientId)
+				: undefined);
+		const activeProviderId = activeId
+			? yield* engine.getProviderForSessionEffect(activeId)
+			: undefined;
+		const listedId = input.instanceId ?? activeProviderId;
+		const account =
+			listedId === undefined
 				? undefined
-				: AccountIdSchema.make(input.instanceId);
-		const daemonConfig =
-			instanceId === undefined ? null : loadDaemonConfig(config.configDir);
+				: yield* directory.resolve({ _tag: "Id", id: listedId });
+		const instanceId = input.instanceId === undefined ? undefined : account?.id;
 		const instanceDriver =
-			instanceId === undefined
+			input.instanceId === undefined ? undefined : account?.driver;
+		const activeDriver =
+			activeProviderId === undefined
 				? undefined
-				: daemonConfig === null
-					? resolveBuiltInInstanceDriver(instanceId)
-					: resolveInstanceDriver(daemonConfig, instanceId);
+				: input.instanceId === undefined ||
+						input.instanceId === activeProviderId
+					? account?.driver
+					: (yield* directory.resolve({ _tag: "Id", id: activeProviderId }))
+							.driver;
+		const claudeAccount =
+			instanceDriver === "opencode"
+				? undefined
+				: account?.driver === "claude"
+					? account
+					: Option.getOrUndefined(yield* directory.defaultFor("claude"));
 		const { modelDiscovery } = yield* ProjectSettingsTag;
-		if (instanceDriver === undefined || instanceDriver === "claude")
+		if (claudeAccount !== undefined)
 			yield* engine
-				.dispatchEffect({ type: "discover", providerId: "claude" })
+				.dispatchEffect({
+					type: "discover",
+					providerId: "claude",
+					account: claudeAccount,
+				})
 				.pipe(
 					Effect.flatMap((capabilities) =>
 						publishClaudeModels(capabilities.models),
@@ -375,11 +389,6 @@ export const getModelsResponse = (
 						FiberHandle.run(modelDiscovery, effect, { onlyIfMissing: true }),
 				);
 
-		const activeId =
-			input.sessionId ??
-			(input.clientId
-				? yield* resolveSessionFromContext(input.clientId)
-				: undefined);
 		const providers: ProviderInfo[] = [];
 		if (instanceDriver === undefined || instanceDriver === "opencode") {
 			const openCodeProviderResult = yield* Effect.either(
@@ -458,18 +467,6 @@ export const getModelsResponse = (
 			);
 		}
 
-		const activeProviderId = activeId
-			? yield* engine.getProviderForSessionEffect(activeId)
-			: undefined;
-		const activeDriver = activeProviderId
-			? resolveProviderRoutingDriver(
-					daemonConfig ??
-						(isKnownDriverKind(activeProviderId) || !config.configDir
-							? null
-							: loadDaemonConfig(config.configDir)),
-					activeProviderId,
-				)
-			: undefined;
 		// OpenCode owns its native turn default; only its catalog inherits it.
 		const fallbackModel = activeId
 			? ((yield* getModel(activeId)) ??

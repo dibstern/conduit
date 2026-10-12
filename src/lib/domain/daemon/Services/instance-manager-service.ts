@@ -24,9 +24,9 @@ import {
 } from "effect";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
-	defaultInstanceIdForDriver,
 	isKnownDriverKind,
 	KnownProviderDriverKindSchema,
+	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import {
@@ -244,7 +244,7 @@ const buildInitialInstanceManagerState = (
 		: undefined;
 	const defaultUrl = options?.defaultOpencodeUrl ?? smartDefaultUrl;
 	const existingDefault = initialInstances.find(
-		(instance) => instance.id === defaultInstanceIdForDriver("opencode"),
+		(instance) => instance.id === MANAGED_OPENCODE_ACCOUNT_ID,
 	);
 	const state = buildInstanceManagerState(
 		config,
@@ -254,7 +254,7 @@ const buildInitialInstanceManagerState = (
 	);
 	return smartDefaultUrl !== undefined &&
 		(existingDefault?.driver ?? "opencode") === "opencode" &&
-		HashMap.has(state.instances, defaultInstanceIdForDriver("opencode"))
+		HashMap.has(state.instances, MANAGED_OPENCODE_ACCOUNT_ID)
 		? { ...state, smartDefaultUrl }
 		: state;
 };
@@ -437,7 +437,11 @@ export const addInstance = (input: AddInstanceInput) =>
  */
 export const removeInstance = (instanceId: string) =>
 	Effect.gen(function* () {
-		if (instanceId === defaultInstanceIdForDriver("claude")) {
+		const directory = yield* Effect.serviceOption(AccountDirectory);
+		const defaultClaude = Option.isSome(directory)
+			? yield* directory.value.defaultFor("claude")
+			: Option.none();
+		if (Option.isSome(defaultClaude) && instanceId === defaultClaude.value.id) {
 			return yield* new InstanceRemovalRejected({
 				id: instanceId,
 				message: "The default account can't be removed",
@@ -520,6 +524,12 @@ export const getInstances = Effect.gen(function* () {
 					isDefault: accounts.some(
 						(account) => account.id === instance.id && account.isDefault,
 					),
+					usageEligible: accounts.some(
+						(account) =>
+							account.id === instance.id &&
+							account.driver === "claude" &&
+							account.usageEligible,
+					),
 				}),
 	}));
 }).pipe(Effect.withSpan("instance.getAll"));
@@ -578,8 +588,8 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 				? { processIdentity: record.processIdentity }
 				: {}),
 			...(Option.isSome(externalUrl) ? { url: externalUrl.value } : {}),
-			...(inst.id !== defaultInstanceIdForDriver("claude") &&
-			inst.configDir !== undefined
+			// The legacy default folder is still persisted in the server-wide field.
+			...(inst.id !== "claude" && inst.configDir !== undefined
 				? { configDir: inst.configDir }
 				: {}),
 		});
@@ -1241,7 +1251,7 @@ export const startInstance = (instanceId: string) =>
 		const { smartDefaultUrl } = state;
 		if (
 			smartDefaultUrl !== undefined &&
-			instanceId === defaultInstanceIdForDriver("opencode") &&
+			instanceId === MANAGED_OPENCODE_ACCOUNT_ID &&
 			Option.isSome(instance)
 		) {
 			const current = instance.value;
@@ -1373,7 +1383,12 @@ export const updateInstance = (
 				updates.driver,
 			);
 		}
-		const isDefaultClaude = instanceId === defaultInstanceIdForDriver("claude");
+		const directory = yield* Effect.serviceOption(AccountDirectory);
+		const defaultClaude = Option.isSome(directory)
+			? yield* directory.value.defaultFor("claude")
+			: Option.none();
+		const isDefaultClaude =
+			Option.isSome(defaultClaude) && instanceId === defaultClaude.value.id;
 		if (
 			isDefaultClaude &&
 			updates.driver !== undefined &&

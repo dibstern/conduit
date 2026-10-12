@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { Account } from "../../contracts/account.js";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ProviderInstanceFailure } from "../errors.js";
@@ -32,8 +33,9 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 	discoverEffect(
 		workspaceRoot?: string,
+		account?: Account,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return this.runtime.discoverEffect(workspaceRoot);
+		return this.runtime.discoverEffect(workspaceRoot, account);
 	}
 
 	sendTurnEffect(

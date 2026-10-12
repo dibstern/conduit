@@ -1,15 +1,7 @@
 import { Effect } from "effect";
-import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
-import {
-	loadDaemonConfig,
-	resolveInstanceDriver,
-} from "../../daemon/config-persistence.js";
 import { AgentServiceTag } from "../../domain/relay/Services/agent-service.js";
-import {
-	ConfigTag,
-	OrchestrationEngineTag,
-} from "../../domain/relay/Services/services.js";
+import { ConfigTag } from "../../domain/relay/Services/services.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
 import {
 	getModelsResponse,
@@ -28,38 +20,17 @@ export const modelsHandlers = {
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const agentService = yield* AgentServiceTag;
-			const instanceId =
-				request.instanceId === undefined
-					? undefined
-					: AccountIdSchema.make(request.instanceId);
-			// A session's agents come from the instance it is bound to.
-			const sessionInstanceId =
-				request.sessionId === undefined
-					? undefined
-					: yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
-							request.sessionId,
-						);
-			// An instance ID names an account, not a harness: "account-a" may be Claude.
-			const listedInstanceId = instanceId ?? sessionInstanceId;
-			const daemonConfig =
-				listedInstanceId === undefined
-					? null
-					: loadDaemonConfig(config.configDir);
-			const instanceDriver =
-				listedInstanceId === undefined || daemonConfig === null
-					? undefined
-					: resolveInstanceDriver(daemonConfig, listedInstanceId);
 			const result = yield* agentService.listAgents(
 				request.sessionId,
-				instanceId,
-				instanceDriver,
+				request.instanceId === undefined
+					? undefined
+					: { _tag: "Id", id: request.instanceId },
 			);
-			const resultInstanceId = result.instanceId ?? sessionInstanceId;
 			return {
 				projectSlug: request.projectSlug,
-				...(resultInstanceId === undefined
+				...(result.instanceId === undefined
 					? {}
-					: { instanceId: resultInstanceId }),
+					: { instanceId: result.instanceId }),
 				providerScope: result.providerScope,
 				agents: result.agents,
 				...(result.activeAgentId != null

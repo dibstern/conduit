@@ -14,7 +14,7 @@ import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import {
 	AccountIdSchema,
-	defaultInstanceIdForDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -174,7 +174,7 @@ export async function createSession(
 					// Naming the instance routes creation through OpenCode Instances
 					// `use`, which opens the event stream replayed turns arrive on.
 					...(providerId === "opencode"
-						? { instanceId: defaultInstanceIdForDriver("opencode") }
+						? { instanceId: MANAGED_OPENCODE_ACCOUNT_ID }
 						: instanceId === undefined
 							? {}
 							: { instanceId: AccountIdSchema.make(instanceId) }),

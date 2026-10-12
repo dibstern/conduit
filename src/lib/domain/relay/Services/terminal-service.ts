@@ -9,7 +9,7 @@ import {
 	Queue,
 	Schedule,
 } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
@@ -240,7 +240,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 	OpenCodeTerminalServiceTag,
 	Effect.gen(function* () {
 		const instances = yield* OpenCodeInstancesTag;
-		const openCodeId = defaultInstanceIdForDriver("opencode");
+		const openCodeId = MANAGED_OPENCODE_ACCOUNT_ID;
 		const callOpenCodePty = (
 			operation: TerminalOperation,
 			ptyId: string,

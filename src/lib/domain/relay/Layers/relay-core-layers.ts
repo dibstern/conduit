@@ -1,5 +1,5 @@
 import { Effect, Layer, Option } from "effect";
-import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import {
 	createSdkClient,
@@ -37,7 +37,7 @@ const makeOpenCodeAPI = (startsInstance: boolean) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const instances = yield* OpenCodeInstancesTag;
-		const instanceId = defaultInstanceIdForDriver("opencode");
+		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 		// The endpoint the last request resolved, for synchronous readers.
 		let current: OpenCodeEndpointAuth = {
 			baseUrl: config.opencodeUrl ?? "",

@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Exit, Option, Runtime } from "effect";
-import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
@@ -383,7 +383,7 @@ function startSseConsumers(
 			) => api.permission.reply(sessionId, permissionId, response),
 			statusPoller,
 			slug: config.slug,
-			providerInstanceId: defaultInstanceIdForDriver("opencode"),
+			providerInstanceId: MANAGED_OPENCODE_ACCOUNT_ID,
 			onDoneProcessed: monitoring.recordDoneDelivered,
 			onPtysChanged: terminal.onOpenCodePtysChanged,
 			opencodeRuntimeIngress,

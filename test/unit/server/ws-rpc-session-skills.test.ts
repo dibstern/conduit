@@ -69,6 +69,7 @@ const runTest = <E>(
 				expect(command).toEqual({
 					type: "discover",
 					providerId: "claude",
+					account: expect.objectContaining({ driver: "claude", id: "claude" }),
 					workspaceRoot: MOCK_PROJECT_DIR,
 				});
 				return options.discoveryFails

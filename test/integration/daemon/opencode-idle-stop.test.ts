@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure cases: an idle OpenCode never stopping, or stopping while a session
@@ -13,7 +13,7 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // event letting it stop, or a missed idle event keeping it up forever; a busy
 // survivor spawning twice across a restart, or outliving `conduit stop`.
 describe("Managed OpenCode stops when idle", () => {
-	const instanceId = defaultInstanceIdForDriver("opencode");
+	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 	const graceMs = 3_000;
 	// Two grace periods, which is also more than two status poll intervals.
 	const pastGraceMs = 2 * graceMs + 1_000;
