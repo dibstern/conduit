@@ -149,10 +149,17 @@ export function findCatalogModel(
 	);
 }
 
+/** An unavailable catalog preserves a complete pick; a known catalog validates it. */
 export function resolveTurnSettings(
 	pick: TurnPick,
-	catalog: readonly ModelInfo[],
+	catalog: readonly ModelInfo[] | undefined,
 ): Either.Either<TurnSettings, PickRejection> {
+	if (harnessForModelProvider(pick.model.providerId) !== pick.harness) {
+		return Either.left(
+			new ModelNotInCatalog({ harness: pick.harness, ...pick.model }),
+		);
+	}
+	if (catalog === undefined) return Either.right(pick);
 	const model = findCatalogModel(pick.harness, pick.model, catalog);
 	if (!model) {
 		return Either.left(

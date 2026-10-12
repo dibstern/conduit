@@ -12,16 +12,14 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import {
-	applyContextWindowSwitched,
 	applyGetAgentsResponse,
-	applyModelSwitched,
-	applyVariantSwitched,
 	chooseContextWindow,
 	chooseModel,
 	choosePermissionMode,
 	chooseVariant,
 	discoveryState,
 	followDraftModelPick,
+	followSessionPickChange,
 	getActiveContextWindowOptions,
 	getActiveModelVariants,
 	getEffectiveInstanceId,
@@ -123,12 +121,16 @@ export const effort: ComposerSetting<string> = {
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (!projectSlug || !sessionId) return;
+		const apply = followSessionPickChange(sessionId, undo);
 		switchSetting(
 			"effort",
 			undo,
 			() =>
-				switchVariantRpc({ projectSlug, sessionId, variant }).then(
-					applyVariantSwitched,
+				switchVariantRpc({ projectSlug, sessionId, variant }).then((response) =>
+					apply({
+						variant: response.variant,
+						variants: [...response.variants],
+					}),
 				),
 			`Couldn't switch thinking level to "${variant || "default"}"`,
 		);
@@ -190,6 +192,13 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 	},
 	get current() {
 		const options = contextWindow.options;
+		if (sessionState.currentId) {
+			const value = discoveryState.currentContextWindow;
+			return (
+				options.find((option) => option.value === value) ??
+				(value ? { value, label: value } : null)
+			);
+		}
 		const selectedValue =
 			discoveryState.currentContextWindow ||
 			(options.find((option) => option.isDefault)?.value ??
@@ -211,6 +220,7 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (!projectSlug || !sessionId) return;
+		const apply = followSessionPickChange(sessionId, undo);
 		switchSetting(
 			"contextWindow",
 			undo,
@@ -219,7 +229,14 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 					projectSlug,
 					sessionId,
 					contextWindow: contextWindowValue,
-				}).then(applyContextWindowSwitched),
+				}).then((response) =>
+					apply({
+						contextWindow: response.contextWindow,
+						contextWindowOptions: response.options.map((option) => ({
+							...option,
+						})),
+					}),
+				),
 			`Couldn't switch context window to "${value?.label ?? "default"}"`,
 		);
 	},
@@ -264,6 +281,7 @@ export const model: ComposerSetting<ComposerModel> = {
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (!projectSlug) return;
+		const apply = sessionId ? followSessionPickChange(sessionId, undo) : null;
 		switchSetting(
 			"model",
 			undo,
@@ -271,7 +289,21 @@ export const model: ComposerSetting<ComposerModel> = {
 				sessionId
 					? switchModelRpc({ projectSlug, sessionId, ...value }).then(
 							(response) => {
-								applyModelSwitched(response);
+								apply?.({
+									modelId: response.model,
+									providerId: response.provider,
+									variant: response.variant,
+									variants: [...response.variants],
+									...(response.contextWindow
+										? {
+												contextWindow: response.contextWindow.contextWindow,
+												contextWindowOptions:
+													response.contextWindow.options.map((option) => ({
+														...option,
+													})),
+											}
+										: {}),
+								});
 								void getAgentsRpc({ projectSlug, sessionId })
 									.then((response) =>
 										applyGetAgentsResponse(response, sessionId),

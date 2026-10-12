@@ -20,7 +20,6 @@ import {
 	handleModelInfo,
 	handleModelList,
 	handlePermissionModeInfo,
-	handleVariantInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
@@ -102,12 +101,16 @@ describe("project-settings dispatch", () => {
 		chooseModel({ modelId: "draft-choice", providerId: "openai" });
 		chooseVariant("high");
 		sessionState.currentId = "session-1";
-		applyGetModelsResponse({
-			projectSlug: "project-a",
-			providers: [],
-			active: { model: "session-model", provider: "openai" },
-			variant: { variant: "low", variants: ["low"] },
-		});
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				providers: [],
+				instanceId: "opencode",
+				active: { model: "session-model", provider: "openai" },
+				variant: { variant: "low", variants: ["low"] },
+			},
+			"session-1",
+		);
 		expect(discoveryState.currentModelId).toBe("session-model");
 		expect(discoveryState.currentVariant).toBe("low");
 		expect(discoveryState.hasModelChoice).toBe(false);
@@ -227,10 +230,16 @@ describe("project-settings dispatch", () => {
 
 	it("applies a defaultModel fact without changing the session variant", () => {
 		sessionState.currentId = "current-session";
-		handleVariantInfo({
-			variant: "low",
-			variants: ["low", "high"],
-		});
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				providers: [],
+				instanceId: "opencode",
+				active: { model: "session-model", provider: "anthropic" },
+				variant: { variant: "low", variants: ["low", "high"] },
+			},
+			"current-session",
+		);
 
 		applyProjectSetting({
 			_tag: "defaultModel",

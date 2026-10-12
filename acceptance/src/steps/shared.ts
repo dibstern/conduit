@@ -79,12 +79,20 @@ export async function serveModelCatalog(
 	response: Omit<GetModelsResponse, "projectSlug">,
 ): Promise<void> {
 	const rpc = requireRpcControl(page);
-	rpc.setResponse("GetModels", {
-		projectSlug: "myapp",
-		...response,
-		providers: response.providers.filter(
-			(provider) => provider.id !== "claude",
-		),
+	const previous =
+		rpc.getResponseHandler("GetModels") ?? rpc.catalogHandler("GetModels");
+	rpc.setHandler("GetModels", async (payload, request) => {
+		const binding = payload["sessionId"]
+			? await previous?.(payload, request)
+			: undefined;
+		return {
+			projectSlug: "myapp",
+			...(typeof binding === "object" && binding !== null ? binding : {}),
+			...response,
+			providers: response.providers.filter(
+				(provider) => provider.id !== "claude",
+			),
+		};
 	});
 	rpc.setProjectSetting({
 		_tag: "providerModels",

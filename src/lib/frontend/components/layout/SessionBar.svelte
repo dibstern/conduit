@@ -19,7 +19,7 @@
 
 <script lang="ts">
 	import { isProcessing } from "../../stores/chat.svelte.js";
-	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getAvailableInstances, getSessionDriver, getSessionInstanceId } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
@@ -205,11 +205,11 @@
 	});
 
 	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
-	const sessionInstanceId = $derived(session ? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] : undefined);
+	const sessionInstanceId = $derived(session ? getSessionInstanceId(session.id) : undefined);
 	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
 	const supportsTaskStop = $derived((
 		sessionInstance?.capabilities?.supportsTaskStop
-			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsTaskStop
+			?? instanceState.providerCapabilities[session ? getSessionDriver(session.id) ?? "" : ""]?.supportsTaskStop
 	) === true);
 
 	const attentionCount = $derived(

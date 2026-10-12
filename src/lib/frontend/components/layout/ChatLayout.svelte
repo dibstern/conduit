@@ -57,7 +57,7 @@
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { viewTranscript } from "../../stores/transcript.svelte.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -414,12 +414,13 @@
 					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
+			const applyModels = followModelsRead(routeSessionId ?? undefined);
 			void getModelsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyGetModelsResponse(response);
+					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyModels(response);
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({

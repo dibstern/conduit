@@ -3,8 +3,8 @@
 <script lang="ts">
 	import { connectionState, getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { discoveryState, getEffectiveInstanceId, getSessionInstanceId } from "../../stores/discovery.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import {
 		applyInstanceListResponse,
 		getInstanceById,
@@ -34,8 +34,10 @@
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
 	let cachedProviderId = $state<string | null>(null);
+	let cachedSessionId = $state<string | null>(null);
+	const sameSession = $derived(cachedSessionId === sessionState.currentId);
 	const instanceId = $derived(sessionState.currentId
-		? findSession(sessionState.currentId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionState.currentId]
+		? getSessionInstanceId(sessionState.currentId)
 		: getEffectiveInstanceId());
 	const currentInstance = $derived(instanceId
 		? getInstanceById(instanceId) ?? getCachedInstanceById(instanceId)
@@ -43,6 +45,7 @@
 
 	const instanceName = $derived.by(() => {
 		if (currentInstance?.name) return currentInstance.name;
+		if (!sameSession) return "";
 		if (instanceId === "claude" && cachedInstanceId === null) return "Claude";
 		return cachedInstanceName;
 	});
@@ -66,6 +69,7 @@
 	// Instance" buttons even after clearInstanceState() empties the store.
 	$effect(() => {
 		if (currentInstance) {
+			cachedSessionId = sessionState.currentId;
 			cachedInstanceId = currentInstance.id;
 			cachedInstanceStatus = currentInstance.status;
 			cachedProviderId = currentInstance.driver ?? "opencode";
@@ -79,7 +83,7 @@
 	// Show instance action buttons when overlay is visible, instance was unhealthy/stopped,
 	// and there are multiple instances
 	const showInstanceActions = $derived(
-		cachedProviderId !== "claude" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
+		sameSession && cachedProviderId !== "claude" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
 	);
 
@@ -92,7 +96,7 @@
 			connectionState.statusText === "" ||
 			!connectionState.statusText
 		) {
-			return `Connecting to ${instanceName} server...`;
+			return instanceName ? `Connecting to ${instanceName} server...` : "Connecting...";
 		}
 		if (connectionState.statusText === "Disconnected") {
 			return "Reconnecting...";
@@ -121,7 +125,7 @@
 	const isHidden = $derived(connected && displayNone);
 
 	function handleStartInstance() {
-		if (cachedInstanceId) {
+		if (sameSession && cachedInstanceId) {
 			void startInstanceRpc({
 				instanceId: cachedInstanceId,
 			})

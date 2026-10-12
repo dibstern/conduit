@@ -25,6 +25,7 @@
 		discoveryState,
 		getAvailableInstances,
 		getEffectiveInstanceId,
+		getSessionInstanceId,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -124,7 +125,7 @@
 	const claudeInstanceId = $derived.by(() => {
 		const availableInstances = getAvailableInstances();
 		const selectedId = sessionId
-			? findSession(sessionId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId]
+			? getSessionInstanceId(sessionId)
 			: getEffectiveInstanceId();
 		if (selectedId) {
 			const assigned =
@@ -133,6 +134,7 @@
 				) ?? getCachedInstanceById(selectedId);
 			if (assigned?.driver === "claude") return assigned.id;
 		}
+		if (sessionId) return undefined;
 		return availableInstances.find((instance) => instance.driver === "claude")
 			?.id;
 	});

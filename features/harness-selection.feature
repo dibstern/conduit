@@ -27,6 +27,27 @@ Examples:
   | Claude   |
   | OpenCode |
 
+Scenario Outline: the stored session pick remains visible without a catalog
+  Given the <harness> session has a stored pick without a catalog
+  And the harness logo is viewed in the <tier> tier
+  And the composer uses <controls> controls
+  When I open the model picker
+  Then the session picker shows <model> from <provider> with high effort and <window> context without offered choices
+  And the <tier> <controls> composer shows its stored effort without offered choices
+
+Examples:
+  | harness  | tier   | controls | model                 | provider | window |
+  | Claude   | wide   | icons    | sonnet                | claude   | 200k   |
+  | Claude   | narrow | icons    | sonnet                | claude   | 200k   |
+  | Claude   | phone  | icons    | sonnet                | claude   | 200k   |
+  | Claude   | wide   | words    | sonnet                | claude   | 200k   |
+  | Claude   | phone  | words    | sonnet                | claude   | 200k   |
+  | OpenCode | wide   | icons    | nemotron-3-super-free | opencode | none   |
+  | OpenCode | narrow | icons    | nemotron-3-super-free | opencode | none   |
+  | OpenCode | phone  | icons    | nemotron-3-super-free | opencode | none   |
+  | OpenCode | wide   | words    | nemotron-3-super-free | opencode | none   |
+  | OpenCode | phone  | words    | nemotron-3-super-free | opencode | none   |
+
 Scenario Outline: C2 Harness tabs are locked once a session exists
   Given a session already exists on the <harness> harness
   And the harness logo is viewed in the <tier> tier
@@ -45,6 +66,17 @@ Examples:
   | Claude   | phone | composer-picker-harness-c2-claude   | 98        |
   | OpenCode | wide  | composer-picker-harness-c2-opencode | 98        |
   | OpenCode | phone | composer-picker-harness-c2-opencode | 98        |
+
+Scenario Outline: the composer waits for the session's stored pick
+  When I open the <harness> session before its stored pick replies
+  Then the session composer shows a neutral loading state
+  When the session's stored pick replies
+  Then the harness trigger shows the <harness> instance icon
+
+Examples:
+  | harness  |
+  | Claude   |
+  | OpenCode |
 
 Scenario: C2 a named instance of a future driver locks the correct Harness tab
   Given the configured Harness choices are Claude, OpenCode, Codex

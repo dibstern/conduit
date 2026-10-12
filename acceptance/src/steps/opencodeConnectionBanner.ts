@@ -68,22 +68,60 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "view a provider session",
 		match:
-			/^I view the (Claude|OpenCode) session( using the OpenCode default model| on instance (\S+))?( with rejected agent discovery)?$/,
+			/^I view the (Claude|OpenCode) session( with an OpenCode project default| on instance (\S+))?( with rejected agent discovery)?$/,
 		run: async ({ world, match }) => {
 			const name = match[1] ?? "";
 			const sessionId = `sess-banner-${name.toLowerCase()}`;
 			const claude = name === "Claude";
-			const claudeModel = claude && !match[2];
 			const rpc = requireRpcControl(world.page);
+			const configured = rpc.initialDaemonList("SubscribeInstances")[0] as
+				| { instances: readonly Record<string, unknown>[] }
+				| undefined;
+			if (
+				match[3] &&
+				!configured?.instances.some((instance) => instance["id"] === match[3])
+			) {
+				const base = {
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: PINNED_CLOCK_MS,
+				};
+				rpc.setDaemonList("SubscribeInstances", {
+					instances: [
+						...(configured?.instances ?? [
+							{ ...base, id: "opencode", name: "OpenCode", driver: "opencode" },
+						]),
+						{
+							...base,
+							id: match[3],
+							name: match[3],
+							driver: claude ? "claude" : "opencode",
+						},
+					],
+				});
+			}
+			if (match[2] === " with an OpenCode project default") {
+				rpc.setProjectSetting({
+					_tag: "defaultModel",
+					model: "claude-sonnet-4",
+					provider: "anthropic",
+					variant: "",
+				});
+			}
 			rpc.setResponse("GetModels", {
 				projectSlug: "myapp",
+				instanceId: match[3] ?? (claude ? "claude" : "opencode"),
 				providers: dualDriverProviders.filter(
 					(provider) => provider.id !== "claude",
 				),
 				active: {
-					model: claudeModel ? "claude-opus-4-1" : "claude-sonnet-4",
-					provider: claudeModel ? "claude" : "anthropic",
+					model: claude ? "claude-opus-4-1" : "claude-sonnet-4",
+					provider: claude ? "claude" : "anthropic",
 				},
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
 			});
 			const agents = {
 				projectSlug: "myapp",

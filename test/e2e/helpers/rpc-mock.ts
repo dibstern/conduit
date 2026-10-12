@@ -86,6 +86,7 @@ export interface RpcMockOptions {
 
 /** Mock-only catalog served by GetModels/GetAgents/GetCommands when a spec has no handler. */
 export interface MockCatalog {
+	instanceId?: string;
 	providers?: readonly unknown[];
 	agents?: ReadonlyArray<{
 		providerScope: { id: string; name: string };
@@ -117,6 +118,7 @@ export class RpcMockControl {
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
 	private readonly responseHandlers = new Map<string, RpcHandler>();
+	initialHandlers: Record<string, RpcHandler> = {};
 	private readonly streams = new Map<
 		string,
 		{ ws: WebSocketRoute; id: string }
@@ -143,14 +145,27 @@ export class RpcMockControl {
 	}
 
 	getResponseHandler(tag: string): RpcHandler | undefined {
-		return this.responseHandlers.get(tag);
+		return this.responseHandlers.get(tag) ?? this.initialHandlers[tag];
 	}
 
 	catalogHandler(tag: string): RpcHandler | undefined {
 		const { providers, agents, commands, ...modelState } = this.catalog;
 		const projectSlug = this.projectSlug;
 		if (tag === "GetModels" && (providers || Object.keys(modelState).length))
-			return () => ({ projectSlug, providers: providers ?? [], ...modelState });
+			return ({ sessionId }) => ({
+				projectSlug,
+				providers: providers ?? [],
+				...modelState,
+				...(sessionId && modelState.instanceId === undefined
+					? {
+							instanceId:
+								(modelState.active as { provider?: string } | undefined)
+									?.provider === "claude"
+									? "claude"
+									: "opencode",
+						}
+					: {}),
+			});
 		if (tag === "GetCommands" && commands)
 			return () => ({ projectSlug, commands });
 		if (tag === "GetAgents" && agents?.length)
@@ -828,6 +843,7 @@ export async function mockWsRpc(
 ): Promise<RpcMockControl> {
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
+	control.initialHandlers = options.handlers;
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {

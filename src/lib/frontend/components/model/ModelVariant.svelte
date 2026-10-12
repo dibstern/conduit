@@ -10,6 +10,7 @@
 	import { effort } from "../../stores/composer-settings.svelte.js";
 	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 
 	let { onOpen, variant = "icons", children }: {
 		onOpen?: (() => void) | undefined;
@@ -21,6 +22,7 @@
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
+	const showEffort = $derived(variants.length > 0 || (!!sessionState.currentId && !!currentVariant));
 	const filled = $derived(currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
 
 	const knownLevels = [
@@ -57,12 +59,13 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#snippet effortRow()}
-	{#if variants.length > 0}
+	{#if showEffort}
 		<Button
 			variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
 			class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
 			ariaLabel={`Effort: ${levelName}. Open effort options`}
 			loading={effort.pending}
+			disabled={variants.length === 0}
 			aria-haspopup="dialog"
 			data-testid="composer-more-effort"
 			onclick={() => openPicker("effort")}
@@ -76,7 +79,7 @@
 
 {#if variant === "row"}
 	{#if children}{@render children(effortRow)}{:else}{@render effortRow()}{/if}
-{:else if variants.length > 0 && variant === "words"}
+{:else if showEffort && variant === "words"}
 		<Button
 			variant="ghost"
 			size="content"
@@ -85,6 +88,7 @@
 			class="shrink-0 text-[11.5px] font-normal font-brand"
 			ariaLabel={`Effort: ${levelName}. Open effort options`}
 			loading={effort.pending}
+			disabled={variants.length === 0}
 			aria-haspopup="dialog"
 			aria-expanded={composerPickerState.request !== null}
 			aria-controls={composerPickerState.request ? "model-picker" : undefined}
@@ -94,7 +98,7 @@
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
 		><span class="border-b border-dotted border-border-chip">{currentVariant ? microLabel.toLowerCase() : microLabel}</span></Button>
-{:else if variants.length > 0 && variant === "control"}
+{:else if showEffort && variant === "control"}
 	<Button
 		variant="ghost"
 		size="content"
@@ -103,6 +107,7 @@
 		class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7"
 		ariaLabel={`Effort: ${levelName}. Open effort options`}
 		loading={effort.pending}
+		disabled={variants.length === 0}
 		aria-haspopup="dialog"
 		aria-expanded={composerPickerState.request !== null}
 		aria-controls={composerPickerState.request ? "model-picker" : undefined}
@@ -114,9 +119,9 @@
 		}}
 	>
 		<EffortMeter levels={variants.length} {filled} />
-		{#if sessionViewState.composerTier === "wide"}<span data-testid="composer-effort-label">{levelName}</span>{/if}
+		{#if sessionViewState.composerTier === "wide" || variants.length === 0}<span data-testid="composer-effort-label">{levelName}</span>{/if}
 	</Button>
-{:else if variants.length > 0}
+{:else if showEffort}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
@@ -140,6 +145,7 @@
 					tone="var(--color-text-secondary)"
 					accessibleName="Effort {levelName}. Tap or Ctrl+T to cycle; hold or Shift+F10 for options"
 					pending={effort.pending}
+					disabled={variants.length === 0}
 					pulseKey={currentVariant}
 					onTap={() => effort.cycle()}
 					onHold={openMenu}
@@ -157,6 +163,7 @@
 					label={levelName}
 					accessibleName="Effort {levelName}"
 					pending={effort.pending}
+					disabled={variants.length === 0}
 					onTap={openMenu}
 					data-testid="variant-badge"
 					title="Effort {levelName}. Ctrl+T to cycle"
@@ -169,7 +176,7 @@
 		<MenuRadioGroup value={currentVariant}>
 			<MenuRadioItem
 				value=""
-				disabled={effort.pending}
+				disabled={effort.pending || variants.length === 0}
 				data-testid="variant-option-default"
 				onselect={() => { effort.select(null); open = false; }}
 			>

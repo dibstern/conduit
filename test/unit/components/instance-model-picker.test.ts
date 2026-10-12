@@ -3,6 +3,7 @@ import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
+	applyGetModelsResponse,
 	clearDiscoveryState,
 	discoveryState,
 	handleDefaultModelInfo,
@@ -115,6 +116,17 @@ describe("InstanceModelPicker", () => {
 		});
 		handleModelList({ providers: [CLAUDE_PROVIDER] });
 		sessionState.currentId = "session-1";
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				instanceId: "claude",
+				providers: [CLAUDE_PROVIDER],
+				active: { model: "claude-sonnet-4-7", provider: "claude" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
+			},
+			"session-1",
+		);
 	});
 
 	afterEach(() => {
@@ -178,19 +190,32 @@ describe("InstanceModelPicker", () => {
 				},
 			],
 		});
+		if (sessionId)
+			applyGetModelsResponse(
+				{
+					projectSlug: "project-a",
+					instanceId: "claude",
+					providers: discoveryState.providers,
+					active: { model: "claude-sonnet-4-7", provider: "claude" },
+					variant: { variant: "", variants: [] },
+					contextWindow: {
+						contextWindow: "1m",
+						options: [{ value: "1m", label: "1M" }],
+					},
+				},
+				sessionId,
+			);
 		const { getByTestId } = render(InstanceModelPicker);
 		await fireEvent.click(getByTestId("composer-harness-trigger"));
 		expect(getByTestId("picker-row-context").textContent).toContain("1M");
 	});
 
-	// Turns persist the API form of the model ("opus[1m]"), and reopening a
-	// session restores that string, while the SDK catalog may advertise only
-	// the bare alias ("opus"). The trigger fell back to the raw id and the
-	// phone tag sliced it to "opu".
+	// GetModels resolves a persisted API-form model to its catalog identity and
+	// explicit context window before the composer displays it.
 	it.each([
 		[390, "Opus"],
 		[1024, "Opus"],
-	])("labels a restored 1M-window model by its catalog entry at width %i", async (width, expected) => {
+	])("labels a resolved 1M-window GetModels pick by its catalog entry at width %i", async (width, expected) => {
 		sessionViewState.compact = width <= 767;
 		handleModelList({
 			providers: [
@@ -200,10 +225,20 @@ describe("InstanceModelPicker", () => {
 				},
 			],
 		});
-		handleModelInfo({
-			model: "opus[1m]",
-			provider: "claude",
-		});
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				instanceId: "claude",
+				providers: discoveryState.providers,
+				active: { model: "opus", provider: "claude" },
+				variant: { variant: "", variants: [] },
+				contextWindow: {
+					contextWindow: "1m",
+					options: [{ value: "1m", label: "1M" }],
+				},
+			},
+			"session-1",
+		);
 		const { getByTestId } = render(InstanceModelPicker);
 		await tick();
 		const label = getByTestId("model-picker-trigger")

@@ -56,8 +56,8 @@ Scenario: An outage without a viewed session shows no warning
   When the mock relay reports OpenCode failed
   Then the OpenCode connection banner is not visible
 
-Scenario: A Claude session using the OpenCode default model shows no warning
-  When I view the Claude session using the OpenCode default model
+Scenario: A Claude session with an OpenCode project default shows no warning
+  When I view the Claude session with an OpenCode project default
   And the mock relay reports OpenCode reconnecting
   Then the OpenCode connection banner is not visible
   When the mock relay reports OpenCode failed

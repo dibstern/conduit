@@ -7,9 +7,9 @@
 <script module lang="ts">
 	import type { BannerConfig } from "../../types.js";
 	import { uiState } from "../../stores/ui.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getSessionDriver, getSessionInstanceId } from "../../stores/discovery.svelte.js";
 	import { getCachedInstances, instanceState } from "../../stores/instance.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 
@@ -33,6 +33,7 @@
 		const instances = instanceState.instances;
 		if (instances.length === 0) return false;
 		if (!instances.every((i) => i.status === "unhealthy")) return false;
+		if (sessionState.currentId) return getSessionDriver(sessionState.currentId) === "opencode";
 
 		const currentProviderId = discoveryState.currentProviderId;
 		if (currentProviderId) return currentProviderId !== "claude";
@@ -49,16 +50,9 @@
 	export function appBanners(): BannerConfig[] {
 		const banners = instanceWarningShown() ? [INSTANCE_WARNING, ...uiState.banners] : [...uiState.banners];
 		const sessionId = sessionState.currentId;
-		const session = sessionId ? findSession(sessionId) : undefined;
-		// Discovery can fail during an outage; the latest persisted resume still
-		// identifies this session's instance and its configured provider driver.
-		const instanceId = session?.resumes?.at(-1)?.instanceId
-			?? (sessionId ? discoveryState.sessionInstanceIds[sessionId] : undefined);
+		const instanceId = sessionId ? getSessionInstanceId(sessionId) : undefined;
 		const instances = getCachedInstances();
-		const instance = instances.find((candidate) => candidate.id === instanceId);
-		const providerId = instance ? instance.driver ?? "opencode"
-			: instanceId === "claude" || instanceId === "opencode" ? instanceId
-			: sessionId ? discoveryState.sessionProviderIds[sessionId] : undefined;
+		const providerId = sessionId ? getSessionDriver(sessionId) : undefined;
 		// The relay publishes its selected instance's status under the default
 		// alias, including when it implicitly selects the first OpenCode instance.
 		const defaultInstance = instances.find((candidate) => candidate.driver !== "claude");

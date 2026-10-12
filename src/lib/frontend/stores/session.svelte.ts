@@ -50,9 +50,9 @@ import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
-	applyGetModelsResponse,
 	clearDraftSelection,
 	flushPendingPermissionMode,
+	followModelsRead,
 	followSessionModelSettings,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
@@ -1104,6 +1104,7 @@ export function switchToSession(
 			.catch(() => undefined);
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
+		const applyModels = followModelsRead(sessionId);
 		void getModelsRpc({ projectSlug: slug, sessionId })
 			.then((response) => {
 				if (
@@ -1111,7 +1112,7 @@ export function switchToSession(
 					clientSession.currentId === sessionId &&
 					getCurrentSlug() === slug
 				)
-					applyGetModelsResponse(response);
+					applyModels(response);
 			})
 			.catch(() => undefined);
 	}
@@ -1131,6 +1132,7 @@ export async function reloadProviderSession(
 		commandId: crypto.randomUUID(),
 	});
 	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
+	const applyModels = followModelsRead(sessionId);
 	const [commands, models] = await Promise.all([
 		getCommandsRpc({ projectSlug, sessionId }),
 		getModelsRpc({ projectSlug, sessionId }),
@@ -1139,7 +1141,7 @@ export async function reloadProviderSession(
 		return;
 	if (JSON.stringify(findSession(sessionId)?.workspace ?? null) === workspace)
 		applyGetCommandsResponse(commands);
-	applyGetModelsResponse(models);
+	applyModels(models);
 }
 
 /** Clear all session state (for project switch). */

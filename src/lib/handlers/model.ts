@@ -44,6 +44,7 @@ import {
 	type ModelOverride,
 	OverridesStateTag,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { storedSessionPick } from "../domain/relay/Services/session-pick.js";
 
 export { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 
@@ -362,8 +363,8 @@ export const getModelsResponse = (
 		}
 
 		const activeProviderId = activeId
-			? (stored?.provider ??
-				(yield* engine.getProviderForSessionEffect(activeId)))
+			? ((yield* engine.getProviderForSessionEffect(activeId)) ??
+				stored?.provider)
 			: undefined;
 		const activeDriver = activeProviderId
 			? resolveProviderRoutingDriver(
@@ -388,8 +389,13 @@ export const getModelsResponse = (
 		);
 		const selectedModel =
 			activeId || selectedModelMatchesInstance ? fallbackModel : undefined;
-		const claudeCatalog = (yield* Ref.get((yield* ProjectSettingsTag).live))
+		let claudeCatalog = (yield* Ref.get((yield* ProjectSettingsTag).live))
 			.providerModels;
+		if (activeId && selectedDriver === "claude" && !claudeCatalog) {
+			yield* FiberHandle.awaitEmpty(modelDiscovery);
+			claudeCatalog = (yield* Ref.get((yield* ProjectSettingsTag).live))
+				.providerModels;
+		}
 		const catalog = catalogFromProviderList(
 			selectedDriver === "claude"
 				? (claudeCatalog?.providers ?? [])
@@ -411,32 +417,45 @@ export const getModelsResponse = (
 		const currentContextWindow = activeId
 			? (stored?.context_window ?? "")
 			: yield* getDefaultContextWindow();
-		const normalized =
-			!activeId && selectedModel
-				? resolveTurnSettings(
-						{
-							harness: harnessForModelProvider(selectedDriver),
-							model: {
-								providerId: selectedModel.providerID,
-								modelId: selectedModel.modelID,
-							},
-							effort: "",
-							contextWindow: currentContextWindow,
-						},
-						catalog,
-					)
+		const sessionCatalog =
+			activeId &&
+			(catalog.length > 0 ||
+				(selectedDriver === "claude"
+					? claudeCatalog !== undefined
+					: (yield* modelService.cachedProviders())._tag === "Some"))
+				? catalog
 				: undefined;
+		const pick = activeId
+			? storedSessionPick(stored, harnessForModelProvider(selectedDriver))
+			: selectedModel
+				? {
+						harness: harnessForModelProvider(selectedDriver),
+						model: {
+							providerId: selectedModel.providerID,
+							modelId: selectedModel.modelID,
+						},
+						effort: "",
+						contextWindow: currentContextWindow,
+					}
+				: undefined;
+		const normalized = pick
+			? resolveTurnSettings(pick, activeId ? sessionCatalog : catalog)
+			: undefined;
 		const activeModel =
 			normalized && Either.isRight(normalized)
 				? {
 						providerID: normalized.right.model.providerId,
 						modelID: normalized.right.model.modelId,
 					}
-				: selectedModel;
+				: activeId
+					? undefined
+					: selectedModel;
 
 		// Send variant_info for the current model so clients get refreshed state
 		const currentVariant = activeId
-			? (stored?.variant ?? "")
+			? normalized && Either.isRight(normalized)
+				? normalized.right.effort
+				: ""
 			: yield* getDefaultVariant();
 		const variantList = [...options.efforts];
 		let modelExecution: GetModelsResponse["modelExecution"];
@@ -471,7 +490,9 @@ export const getModelsResponse = (
 
 		return {
 			projectSlug: input.projectSlug ?? "",
-			...(instanceId === undefined ? {} : { instanceId }),
+			...((activeProviderId ?? instanceId) === undefined
+				? {}
+				: { instanceId: activeProviderId ?? instanceId }),
 			providers,
 			...(activeModel
 				? {
@@ -483,14 +504,16 @@ export const getModelsResponse = (
 				: {}),
 			variant: {
 				// An effort belongs to its model, so no model means no effort.
-				variant: selectedModel ? currentVariant : "",
+				variant: activeModel ? currentVariant : "",
 				variants: variantList,
 			},
 			contextWindow: {
 				contextWindow:
 					normalized && Either.isRight(normalized)
 						? normalized.right.contextWindow
-						: currentContextWindow,
+						: activeId
+							? ""
+							: currentContextWindow,
 				options: cloneContextWindowOptions(options.contextWindows) ?? [],
 			},
 			// No session yet: the mode a new session would start in.
@@ -566,6 +589,12 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 		};
 		const { variant: validVariant, variants: availableVariants } =
 			yield* savedVariantFor(model, catalog);
+		const catalogModel = findCatalogModel(
+			harness,
+			resolved.right.model,
+			catalog,
+		);
+		let selectedContextWindow: string | undefined;
 		if (sessionId) {
 			const currentContext = (yield* (yield* ReadQueryEffectTag).getSession(
 				sessionId,
@@ -577,6 +606,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			const contextWindow = Either.isRight(contextPick)
 				? contextPick.right.contextWindow
 				: "";
+			selectedContextWindow = contextWindow;
 			yield* selectSessionModel(sessionId, model);
 			if (contextWindow !== currentContext) {
 				yield* selectSessionContextWindow(sessionId, contextWindow);
@@ -603,6 +633,19 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 			provider: model.providerID,
 			variant: validVariant,
 			variants: availableVariants,
+			...(selectedContextWindow === undefined
+				? {}
+				: {
+						contextWindow: {
+							contextWindow: selectedContextWindow,
+							options:
+								cloneContextWindowOptions(
+									catalogModel
+										? offeredOptions(catalogModel).contextWindows
+										: [],
+								) ?? [],
+						},
+					}),
 		};
 	});
 

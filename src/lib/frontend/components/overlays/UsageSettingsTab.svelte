@@ -2,10 +2,9 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
-	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { getEffectiveInstanceId, getSessionInstanceId } from "../../stores/discovery.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
@@ -28,10 +27,11 @@
 	const several = $derived(accounts.length > 1);
 	const single = $derived(accounts[0]);
 	const sessionId = $derived(getCurrentSessionId());
-	const session = $derived(sessionId ? sessionState.sessions.get(sessionId) : undefined);
-	const sessionAccountId = $derived(session?.resumes?.at(-1)?.instanceId ?? (sessionId ? discoveryState.sessionInstanceIds[sessionId] : undefined));
-	const forecastAccount = $derived(accounts.find((account) => account.accountId === (sessionId ? sessionAccountId : getEffectiveInstanceId())) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
-		!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
+	const sessionAccountId = $derived(sessionId ? getSessionInstanceId(sessionId) : undefined);
+	const forecastAccount = $derived(sessionId
+		? accounts.find((account) => account.accountId === sessionAccountId)
+		: accounts.find((account) => account.accountId === getEffectiveInstanceId()) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
+			!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
 	let expandedAccounts = $state<string[]>([]);
 	let setting = $state<UsageLimitsSetting | null>(null);
 	let confirmed: UsageLimitsSetting | null = null;

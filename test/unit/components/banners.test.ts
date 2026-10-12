@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Banners from "../../../src/lib/frontend/components/overlays/Banners.svelte";
 import {
 	applyGetAgentsResponse,
+	applyGetModelsResponse,
 	clearDiscoveryState,
 	handleModelInfo,
 	handleModelList,
@@ -108,7 +109,7 @@ describe("Banners", () => {
 	it.each([
 		["reconnecting", "Reconnecting to OpenCode…"],
 		["failed", "OpenCode failed to start"],
-	] as const)("shows %s for a persisted named instance without discovery", async (status, text) => {
+	] as const)("shows %s for a GetModels-bound named instance without catalog discovery", async (status, text) => {
 		applyInstanceListResponse({
 			instances: [
 				{
@@ -128,6 +129,17 @@ describe("Banners", () => {
 			},
 		]);
 		sessionState.currentId = "session-work";
+		applyGetModelsResponse(
+			{
+				projectSlug: "work",
+				instanceId: "work-oc",
+				providers: [],
+				active: { model: "gpt-4.1", provider: "openai" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
+			},
+			"session-work",
+		);
 		uiState.opencodeConnections = { "work-oc": status, opencode: "failed" };
 
 		await renderBanners();
@@ -160,6 +172,17 @@ describe("Banners", () => {
 			},
 		]);
 		sessionState.currentId = "session-work";
+		applyGetModelsResponse(
+			{
+				projectSlug: "work",
+				instanceId: "work-oc",
+				providers: [],
+				active: { model: "gpt-4.1", provider: "openai" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
+			},
+			"session-work",
+		);
 		uiState.opencodeConnections = { opencode: "reconnecting" };
 
 		await renderBanners();
@@ -167,7 +190,7 @@ describe("Banners", () => {
 		expect(screen.getByText("Reconnecting to OpenCode…")).toBeTruthy();
 	});
 
-	it("uses the latest persisted Claude resume instead of stale OpenCode discovery", async () => {
+	it("uses the GetModels Claude binding despite stale OpenCode agents and resume metadata", async () => {
 		applyInstanceListResponse({
 			instances: [
 				{ ...unhealthyInstance, id: "work-claude", driver: "claude" },
@@ -177,10 +200,7 @@ describe("Banners", () => {
 			{
 				id: "session-work",
 				title: "Work session",
-				resumes: [
-					{ at: 1, instanceId: "opencode", reason: "user" },
-					{ at: 2, instanceId: "work-claude", reason: "auto-switch" },
-				],
+				resumes: [{ at: 1, instanceId: "opencode", reason: "user" }],
 			},
 		]);
 		sessionState.currentId = "session-work";
@@ -189,6 +209,17 @@ describe("Banners", () => {
 				projectSlug: "work",
 				providerScope: { id: "opencode", name: "OpenCode" },
 				agents: [],
+			},
+			"session-work",
+		);
+		applyGetModelsResponse(
+			{
+				projectSlug: "work",
+				instanceId: "work-claude",
+				providers: [],
+				active: { model: "sonnet", provider: "claude" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
 			},
 			"session-work",
 		);
@@ -201,14 +232,27 @@ describe("Banners", () => {
 		).toBeNull();
 	});
 
-	it("keeps discovery as a fallback for a session without resume metadata", async () => {
+	it("uses the session GetModels binding without resume metadata", async () => {
+		applyInstanceListResponse({
+			instances: [
+				{
+					...unhealthyInstance,
+					id: "healthy-oc",
+					driver: "opencode",
+					status: "healthy",
+				},
+				{ ...unhealthyInstance, id: "work-oc", driver: "opencode" },
+			],
+		});
 		sessionState.currentId = "session-work";
-		applyGetAgentsResponse(
+		applyGetModelsResponse(
 			{
 				projectSlug: "work",
 				instanceId: "work-oc",
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [],
+				providers: [],
+				active: { model: "gpt-4.1", provider: "openai" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
 			},
 			"session-work",
 		);

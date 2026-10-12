@@ -376,6 +376,7 @@ export const SwitchModelResponseSchema = Schema.Struct({
 	provider: Schema.String,
 	variant: Schema.String,
 	variants: Schema.Array(Schema.String),
+	contextWindow: Schema.optional(ContextWindowInfoSchema),
 });
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;

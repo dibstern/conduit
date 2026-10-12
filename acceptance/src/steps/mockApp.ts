@@ -40,6 +40,10 @@ const heldAgentLookups = new WeakMap<
 	Page,
 	{ promise: Promise<void>; resolve: () => void }
 >();
+const heldModelLookups = new WeakMap<
+	Page,
+	{ promise: Promise<void>; resolve: () => void }
+>();
 
 // The detail mock sends the last 50 messages first. Turn 3 needs two older pages.
 const skillNavigationMessages = Array.from(
@@ -230,6 +234,9 @@ export const mockAppHandlers: StepHandler[] = [
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Instance binding requires a session");
 			const instanceId = instanceSlug(match[1] ?? "");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				resumes: [{ at: PINNED_CLOCK_MS, instanceId, reason: "user" }],
+			});
 			requireRpcControl(world.page).setResponse("GetAgents", {
 				projectSlug: "myapp",
 				instanceId,
@@ -307,6 +314,17 @@ export const mockAppHandlers: StepHandler[] = [
 				agents: [],
 			});
 			const sessionId = "sess-bound-codex";
+			const getModels =
+				rpc.getResponseHandler("GetModels") ?? rpc.catalogHandler("GetModels");
+			rpc.setHandler("GetModels", async (payload, request) => {
+				const response = await getModels?.(payload, request);
+				return {
+					...(typeof response === "object" && response !== null
+						? response
+						: {}),
+					...(payload["sessionId"] === sessionId ? { instanceId } : {}),
+				};
+			});
 			rpc.upsertShellRow({
 				id: sessionId,
 				title: "Codex session",
@@ -319,6 +337,152 @@ export const mockAppHandlers: StepHandler[] = [
 					request.tag === "GetAgents" &&
 					request.payload["sessionId"] === sessionId,
 			);
+		},
+	},
+	{
+		name: "open a session before its stored pick replies",
+		match:
+			/^I open the (Claude|OpenCode) session before its stored pick replies$/,
+		run: async ({ world, match }) => {
+			let resolve = () => {};
+			const promise = new Promise<void>((settle) => {
+				resolve = settle;
+			});
+			heldModelLookups.set(world.page, { promise, resolve });
+			const sessionId =
+				match[1] === "Claude" ? "sess-bound-claude" : "sess-bound-opencode";
+			requireRpcControl(world.page).upsertShellRow({
+				id: sessionId,
+				title: `${match[1]} session`,
+				status: "idle",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, sessionId);
+		},
+	},
+	{
+		name: "open a stored session pick without catalog offers",
+		match:
+			/^the (Claude|OpenCode) session has a stored pick without a catalog$/,
+		run: async ({ world, match }) => {
+			const claude = match[1] === "Claude";
+			const instanceId = claude ? "claude" : "opencode";
+			const sessionId = `sess-bound-${instanceId}`;
+			const rpc = requireRpcControl(world.page);
+			const previous = rpc.getResponseHandler("GetModels");
+			rpc.setHandler("GetModels", (payload, request) =>
+				payload["sessionId"] !== sessionId
+					? previous?.(payload, request)
+					: {
+							projectSlug: "myapp",
+							instanceId,
+							providers: [],
+							active: {
+								model: claude ? "sonnet" : "nemotron-3-super-free",
+								provider: instanceId,
+							},
+							variant: { variant: "high", variants: [] },
+							contextWindow: {
+								contextWindow: claude ? "200k" : "",
+								options: [],
+							},
+						},
+			);
+			rpc.upsertShellRow({
+				id: sessionId,
+				title: `${match[1]} offline session`,
+				status: "idle",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, sessionId);
+			await expect(
+				world.page.getByTestId("model-picker-trigger").first(),
+			).toHaveAttribute("data-instance-id", instanceId);
+		},
+	},
+	{
+		name: "assert the session pick with no offered choices",
+		match:
+			/^the session picker shows (\S+) from (\S+) with high effort and (\S+) context without offered choices$/,
+		run: async ({ world, match }) => {
+			const trigger = world.page
+				.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				)
+				.first();
+			await expect(trigger).toHaveAttribute("data-shown-model", match[1] ?? "");
+			await expect(trigger).toHaveAttribute(
+				"data-shown-provider",
+				match[2] ?? "",
+			);
+			await expect(trigger).toHaveAttribute("data-shown-effort", "high");
+			await expect(trigger).toHaveAttribute(
+				"data-shown-context-window",
+				match[3] === "none" ? "" : (match[3] ?? ""),
+			);
+			const effortRow = world.page.getByTestId("picker-row-effort");
+			await expect(effortRow).toContainText("high");
+			await expect(effortRow).toHaveAttribute("aria-disabled", "true");
+			await expect(effortRow.getByRole("radio")).toHaveCount(0);
+			if (match[3] !== "none") {
+				await expect(
+					world.page.getByTestId("picker-row-context"),
+				).toContainText(match[3] ?? "");
+			}
+		},
+	},
+	{
+		name: "assert stored effort without offered choices in each composer tier",
+		match:
+			/^the (wide|narrow|phone) (icons|words) composer shows its stored effort without offered choices$/,
+		run: async ({ world, match }) => {
+			if (match[1] === "phone" && match[2] === "icons") {
+				await expect(world.page.getByTestId("picker-row-effort")).toContainText(
+					/high/i,
+				);
+				return;
+			}
+			const control = world.page
+				.getByTestId(
+					match[2] === "words" ? "composer-word-effort" : "variant-badge",
+				)
+				.first();
+			await expect(control).toBeVisible();
+			await expect(control).toBeDisabled();
+			await expect(control).toContainText(/high/i);
+		},
+	},
+	{
+		name: "assert neutral session loading",
+		match: /^the session composer shows a neutral loading state$/,
+		run: async ({ world }) => {
+			const trigger = world.page
+				.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				)
+				.first();
+			for (const field of [
+				"harness",
+				"provider",
+				"model",
+				"effort",
+				"context-window",
+			]) {
+				await expect(trigger).toHaveAttribute(`data-shown-${field}`, "");
+			}
+			await expect(
+				world.page.locator('#input-area [data-testid="harness-logo"]'),
+			).toHaveCount(0);
+			await expect(trigger).toBeDisabled();
+		},
+	},
+	{
+		name: "release stored session pick",
+		match: /^the session's stored pick replies$/,
+		run: ({ world }) => {
+			const held = heldModelLookups.get(world.page);
+			if (!held) throw new Error("No stored session pick is held");
+			held.resolve();
 		},
 	},
 	{
@@ -371,16 +535,40 @@ export const mockAppHandlers: StepHandler[] = [
 			const page = world.page;
 			mockInstances.set(page, []);
 			mockClaudeSettings.set(page, { autoCompactEnabled: true });
+			const sessionVariants = new Map<string, string>();
 			/** Instance bound by the composer's CreateSession — session-scoped
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
-			const sessionInstance = (payload: Record<string, unknown>) =>
-				payload["sessionId"] === "sess-first-send"
-					? createdSessionInstance
-					: payload["sessionId"] === "sess-bound-claude"
-						? "claude"
-						: undefined;
+			const sessionInstance = (payload: Record<string, unknown>) => {
+				const row = rpcControls
+					.get(page)
+					?.shellRows?.find(
+						(candidate) =>
+							(candidate as { id?: string }).id === payload["sessionId"],
+					) as { resumes?: readonly { instanceId: string }[] } | undefined;
+				return (
+					row?.resumes?.at(-1)?.instanceId ??
+					(payload["sessionId"] === "sess-first-send"
+						? createdSessionInstance
+						: [
+									"sess-bound-claude",
+									"sess-claude-settings",
+									"sess-side-new",
+									"sess-side-reply",
+									"sess-side-unread",
+									"sess-side-idle",
+								].includes(String(payload["sessionId"]))
+							? "claude"
+							: payload["sessionId"] === "sess-bound-opencode" ||
+									payload["sessionId"] === "sess-mockup-001" ||
+									payload["sessionId"] === "sess-subagent"
+								? "opencode"
+								: modelExecutionMockup && payload["sessionId"]
+									? "claude"
+									: undefined)
+				);
+			};
 			const rpcControl = await mockWsRpc(world.page, {
 				handlers: {
 					CreatePty: async () => ({ ok: true }),
@@ -538,6 +726,10 @@ export const mockAppHandlers: StepHandler[] = [
 								message: "Effort switch rejected by the provider",
 							});
 						}
+						sessionVariants.set(
+							String(payload["sessionId"]),
+							String(payload["variant"] ?? ""),
+						);
 						return {
 							projectSlug: "myapp",
 							variant: payload["variant"],
@@ -553,33 +745,58 @@ export const mockAppHandlers: StepHandler[] = [
 					},
 					// Like the server, answer for the session's own harness: opening a
 					// session fetches models, and a late reply must not rebind it.
-					GetModels: async (payload) => ({
-						projectSlug: "myapp",
-						providers: providers.filter((provider) => provider.id !== "claude"),
-						active: modelExecutionMockup
-							? { model: "opus[1m]", provider: "claude" }
-							: sessionInstance(payload) === "claude"
-								? { model: "claude-sonnet-4-5", provider: "claude" }
-								: { model: "claude-sonnet-4", provider: "anthropic" },
-						...(modelExecutionMockup
-							? { modelExecution: modelExecutionMockup.modelExecution }
-							: {}),
-						...(effortOptions.has(page)
-							? {
-									variant: {
-										variant: "",
-										variants: effortOptions.get(page) ?? [],
-									},
-								}
-							: {}),
-					}),
+					GetModels: async (payload) => {
+						if (payload["sessionId"]) await heldModelLookups.get(page)?.promise;
+						const instanceId = sessionInstance(payload);
+						const claude =
+							instanceId === "claude" ||
+							mockInstances
+								.get(page)
+								?.some(
+									(instance) =>
+										instance["id"] === instanceId &&
+										instance["driver"] === "claude",
+								);
+						return {
+							projectSlug: "myapp",
+							...(instanceId ? { instanceId } : {}),
+							providers: providers.filter(
+								(provider) => provider.id !== "claude",
+							),
+							active: modelExecutionMockup
+								? { model: "opus[1m]", provider: "claude" }
+								: claude
+									? { model: "claude-sonnet-4-5", provider: "claude" }
+									: { model: "claude-sonnet-4", provider: "anthropic" },
+							...(modelExecutionMockup
+								? { modelExecution: modelExecutionMockup.modelExecution }
+								: {}),
+							variant: {
+								variant:
+									sessionVariants.get(String(payload["sessionId"])) ?? "",
+								variants: effortOptions.get(page) ?? [],
+							},
+							contextWindow: {
+								contextWindow: modelExecutionMockup ? "1m" : "",
+								options: [],
+							},
+						};
+					},
 					GetAgents: async (payload) => {
 						await heldAgentLookups.get(world.page)?.promise;
 						const instanceId =
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]
 								: sessionInstance(payload);
-						const claude = instanceId === "claude";
+						const claude =
+							instanceId === "claude" ||
+							mockInstances
+								.get(page)
+								?.some(
+									(instance) =>
+										instance["id"] === instanceId &&
+										instance["driver"] === "claude",
+								);
 						return {
 							projectSlug: "myapp",
 							...(instanceId != null ? { instanceId } : {}),

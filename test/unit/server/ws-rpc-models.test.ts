@@ -736,7 +736,7 @@ describe("WsRpcServerLayer GetModels", () => {
 	);
 
 	it.effect(
-		"omits active model metadata from a differently scoped instance",
+		"reports the session binding when a different catalog instance is requested",
 		() => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-rpc-models-active-scope-"),
@@ -772,7 +772,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					instanceId: "opencode",
 				});
 
-				expect(result.instanceId).toBe("opencode");
+				expect(result.instanceId).toBe("claude");
 				expect(result.active).toBeUndefined();
 				expect(api.session.get).not.toHaveBeenCalled();
 				expect(orchestrationEngine.dispatch).not.toHaveBeenCalled();

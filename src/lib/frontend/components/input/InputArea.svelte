@@ -54,6 +54,7 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getSessionInstanceId,
+		getSessionDriver,
 		getModelDisplayName,
 		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
@@ -121,7 +122,7 @@
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
-	const sessionModeContext = $derived(`${draftContext}:${getEffectiveInstanceId()}`);
+	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
 		draftContext;
 		draftWorktree = null;
@@ -225,9 +226,10 @@
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
-	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === (accountId ?? getEffectiveInstanceId())));
-	const composerDriver = $derived(composerInstance?.driver ?? (currentSession ? getSessionInstanceId(currentSession.id) : getEffectiveInstanceId()));
-	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver]?.supportsWorktree);
+	const composerInstanceId = $derived(sessionState.currentId ? getSessionInstanceId(sessionState.currentId) : getEffectiveInstanceId());
+	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === composerInstanceId));
+	const composerDriver = $derived(sessionState.currentId ? getSessionDriver(sessionState.currentId) : composerInstance?.driver ?? getEffectiveInstanceId());
+	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
@@ -270,7 +272,7 @@
 			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message Claude… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-			discoveryState.currentProviderId === "opencode" ? "Ask OpenCode…" : "Ask Claude…",
+			composerDriver === "opencode" ? "Ask OpenCode…" : composerDriver === "claude" ? "Ask Claude…" : "Message…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -926,8 +928,8 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
-		const instanceId = currentSession?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId];
-		const driver = getInstanceById(instanceId ?? "")?.driver ?? discoveryState.sessionProviderIds[sessionId];
+		const instanceId = getSessionInstanceId(sessionId);
+		const driver = getSessionDriver(sessionId);
 		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
 		void cancelSessionRpc({
 			projectSlug,

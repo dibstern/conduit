@@ -1,5 +1,6 @@
 // Agents, models, providers, and commands.
 
+import { untrack } from "svelte";
 import type { SessionMode } from "../../contracts/project-file.js";
 import type {
 	ProviderDriverKind,
@@ -19,6 +20,7 @@ import type {
 	SwitchModelResponse,
 	SwitchVariantResponse,
 } from "../transport/ws-rpc.js";
+import { getModelsRpc } from "../transport/ws-rpc-client.js";
 import type {
 	AgentInfo,
 	AgentProviderScope,
@@ -33,7 +35,8 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
-import { findSession, sessionState } from "./session.svelte.js";
+import { getCurrentSlug } from "./router.svelte.js";
+import { sessionState } from "./session.svelte.js";
 
 export const conduitCommands = [
 	{
@@ -155,10 +158,6 @@ const serverDiscovery = $state({
 	providers: [] as ProviderInfo[],
 	currentModelId: "" as string,
 	currentProviderId: "" as string,
-	/** Retain session-scoped metadata so a switch never uses the previous provider. */
-	sessionProviderIds: {} as Record<string, string>,
-	/** The provider instance each session is bound to. */
-	sessionInstanceIds: {} as Record<string, string>,
 	commands: [] as CommandInfo[],
 	commandsFetched: false,
 	defaultModelId: "" as string,
@@ -212,6 +211,141 @@ const clientDiscovery = $state({
 	pendingPermissionMode: null as SessionPermissionMode | null,
 });
 
+interface SessionPick {
+	instanceId: string;
+	modelId: string;
+	providerId: string;
+	variant: string;
+	contextWindow: string;
+	variants: readonly string[];
+	contextWindowOptions: readonly ContextWindowOption[];
+	modelExecution: GetModelsResponse["modelExecution"] | null;
+}
+
+// A session has no pick here until its own GetModels reply arrives. Its
+// confirmed value and pending clicks live together, never in draft state.
+const sessionPicks = $state<
+	Record<
+		string,
+		{
+			pick: SessionPick | undefined;
+			choice: {
+				[Field in keyof SessionPick]?: {
+					value: SessionPick[Field];
+					clickId: symbol;
+				};
+			};
+			readSeq: number;
+			appliedReadSeq: number;
+			ackedAtReadSeq: Partial<Record<keyof SessionPick, number>>;
+		}
+	>
+>({});
+let discoveryGeneration = 0;
+
+function sessionPickState(sessionId: string) {
+	return (sessionPicks[sessionId] ??= {
+		pick: undefined,
+		choice: {},
+		readSeq: 0,
+		appliedReadSeq: 0,
+		ackedAtReadSeq: {},
+	});
+}
+
+export function getSessionPick(
+	sessionId: string,
+): Immutable<SessionPick> | undefined {
+	const state = sessionPicks[sessionId];
+	if (!state?.pick) return undefined;
+	const pick = { ...state.pick };
+	for (const field of Object.keys(state.choice) as (keyof SessionPick)[]) {
+		const selected = state.choice[field];
+		if (selected) Object.assign(pick, { [field]: selected.value });
+	}
+	return pick;
+}
+
+export function getSessionDriver(
+	sessionId: string,
+): ProviderDriverKind | undefined {
+	const instanceId = getSessionPick(sessionId)?.instanceId;
+	return (
+		instanceState.instances.find((instance) => instance.id === instanceId)
+			?.driver ??
+		(instanceId === "claude" || instanceId === "opencode"
+			? instanceId
+			: undefined)
+	);
+}
+
+/** Order reads at dispatch independently of clicks and their acknowledgements. */
+export function followModelsRead(
+	sessionId?: string,
+): (response: GetModelsResponse) => void {
+	const generation = discoveryGeneration;
+	const readSeq = untrack(() =>
+		sessionId ? ++sessionPickState(sessionId).readSeq : undefined,
+	);
+	return (response) => {
+		if (generation !== discoveryGeneration) return;
+		applyGetModelsResponse(response, sessionId, readSeq);
+	};
+}
+
+/** Confirm replies beneath newer clicks; acknowledge only the owned overlay. */
+export function followSessionPickChange(
+	sessionId: string,
+	click: UndoChoice,
+): (patch: Partial<SessionPick>) => void {
+	const state = sessionPicks[sessionId];
+	const clickId = click.clickId;
+	return (patch) => {
+		if (!state?.pick || !clickId || sessionPicks[sessionId] !== state) return;
+		for (const field of Object.keys(patch) as (keyof SessionPick)[]) {
+			Object.assign(state.pick, { [field]: patch[field] });
+			state.ackedAtReadSeq[field] = state.readSeq;
+		}
+		for (const field of Object.keys(state.choice) as (keyof SessionPick)[]) {
+			if (state.choice[field]?.clickId === clickId) delete state.choice[field];
+		}
+	};
+}
+
+function refreshSessionPick(projectSlug: string, sessionId: string): void {
+	const apply = followModelsRead(sessionId);
+	void getModelsRpc({ projectSlug, sessionId })
+		.then(apply)
+		.catch(() => undefined);
+}
+
+function chooseSessionPick(
+	sessionId: string,
+	patch: Partial<SessionPick>,
+): UndoChoice {
+	const state = sessionPicks[sessionId];
+	if (!state?.pick) return () => {};
+	const projectSlug = getCurrentSlug();
+	const clickId = Symbol();
+	const fields = Object.keys(patch) as (keyof SessionPick)[];
+	for (const field of fields) {
+		Object.assign(state.choice, {
+			[field]: { value: patch[field], clickId },
+		});
+	}
+	return Object.assign(
+		() => {
+			if (sessionPicks[sessionId] !== state) return;
+			for (const field of fields) {
+				if (state.choice[field]?.clickId === clickId)
+					delete state.choice[field];
+			}
+			if (projectSlug) refreshSessionPick(projectSlug, sessionId);
+		},
+		{ clickId },
+	);
+}
+
 /** Read view over both halves. Server-owned fields have no setter: write them
  *  by applying a wire message or an RPC response. Fields the user can pick
  *  ahead of the server read through `choice` first — see the `choose*`
@@ -230,12 +364,6 @@ export const discoveryState = {
 	get providers(): readonly Immutable<ProviderInfo>[] {
 		return serverDiscovery.providers;
 	},
-	get sessionProviderIds(): Readonly<Record<string, string>> {
-		return serverDiscovery.sessionProviderIds;
-	},
-	get sessionInstanceIds(): Readonly<Record<string, string>> {
-		return serverDiscovery.sessionInstanceIds;
-	},
 	get commands(): readonly Immutable<CommandInfo>[] {
 		return serverDiscovery.commands;
 	},
@@ -251,12 +379,18 @@ export const discoveryState = {
 		return serverDiscovery.harnessDefaults;
 	},
 	get availableVariants(): readonly string[] {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.variants ?? [];
 		return serverDiscovery.availableVariants;
 	},
 	get availableContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.contextWindowOptions ?? [];
 		return serverDiscovery.availableContextWindowOptions;
 	},
 	get modelExecution(): Immutable<GetModelsResponse["modelExecution"]> | null {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.modelExecution ?? null;
 		return serverDiscovery.modelExecution;
 	},
 
@@ -265,35 +399,38 @@ export const discoveryState = {
 		return choice.instanceId !== null;
 	},
 	get hasModelChoice(): boolean {
+		if (sessionState.currentId) return false;
 		return choice.modelId !== null || choice.variant !== null;
 	},
 	get currentModelId(): string {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.modelId ?? "";
 		return (
 			choice.modelId ??
-			(sessionState.currentId
-				? serverDiscovery.currentModelId
-				: discoveryState.defaultModelId || serverDiscovery.currentModelId)
+			(discoveryState.defaultModelId || serverDiscovery.currentModelId)
 		);
 	},
 	get currentProviderId(): string {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.providerId ?? "";
 		return (
 			choice.providerId ??
-			(sessionState.currentId
-				? serverDiscovery.currentProviderId
-				: discoveryState.defaultProviderId || serverDiscovery.currentProviderId)
+			(discoveryState.defaultProviderId || serverDiscovery.currentProviderId)
 		);
 	},
 	get currentVariant(): string {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.variant ?? "";
 		return (
 			choice.variant ??
-			(!sessionState.currentId &&
-			choice.modelId === null &&
-			discoveryState.defaultModelId
+			(choice.modelId === null && discoveryState.defaultModelId
 				? serverDiscovery.defaultVariant
 				: serverDiscovery.currentVariant)
 		);
 	},
 	get currentContextWindow(): string {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.contextWindow ?? "";
 		return choice.contextWindow ?? serverDiscovery.currentContextWindow;
 	},
 	get permissionMode(): SessionPermissionMode {
@@ -464,15 +601,15 @@ export function getAvailableInstances(): InstanceOption[] {
 export function getProviderGroupsForInstance(
 	instanceId: string,
 ): readonly Immutable<ProviderGroup>[] {
-	const claude =
-		instanceId === "claude" ||
-		instanceState.instances.some(
-			(instance) => instance.id === instanceId && instance.driver === "claude",
-		);
+	const driver = instanceState.instances.find(
+		(instance) => instance.id === instanceId,
+	)?.driver;
+	const claude = instanceId === "claude" || driver === "claude";
 	return getVisibleProviderGroups().filter((g) =>
 		g.provider.id === "claude"
 			? claude
-			: (g.provider.instanceId ?? "opencode") === instanceId,
+			: (g.provider.instanceId ?? "opencode") === instanceId ||
+				(driver === "opencode" && g.provider.instanceId === undefined),
 	);
 }
 
@@ -493,20 +630,9 @@ export function getEffectiveInstanceId(): string {
 	return available[0]?.id ?? derived;
 }
 
-/** The instance a session's picker is locked to. Only built-in instances'
- *  catalogues are fetched, so a custom instance shows its driver's. Until
- *  GetAgents reports the binding, the session's own model names its harness,
- *  since a model runs only on its own. One left on the default has none, so
- *  assume the composer's aim, which is where a new session runs. */
+/** Only the session's GetModels reply supplies its bound instance. */
 export function getSessionInstanceId(sessionId: string): string {
-	const bound = getAvailableInstances().find(
-		(instance) => instance.id === serverDiscovery.sessionInstanceIds[sessionId],
-	);
-	if (bound) return bound.driver;
-	const provider = findSession(sessionId)?.model?.provider;
-	return provider
-		? instanceIdForProviderId(provider)
-		: getEffectiveInstanceId();
+	return getSessionPick(sessionId)?.instanceId ?? "";
 }
 
 /** Pick this draft's instance and re-aim its model if it belongs to another harness. */
@@ -646,7 +772,7 @@ export function handleAgentList({
 
 export function applyGetAgentsResponse(
 	response: GetAgentsResponse,
-	sessionId?: string,
+	_sessionId?: string,
 ): void {
 	handleAgentList({
 		providerScope: response.providerScope,
@@ -660,11 +786,6 @@ export function applyGetAgentsResponse(
 			? { activeAgentId: response.activeAgentId }
 			: {}),
 	});
-	if (sessionId) {
-		serverDiscovery.sessionProviderIds[sessionId] = response.providerScope.id;
-		if (response.instanceId !== undefined)
-			serverDiscovery.sessionInstanceIds[sessionId] = response.instanceId;
-	}
 	if (response.hiddenAgents) {
 		serverDiscovery.hiddenAgents = [...response.hiddenAgents];
 	}
@@ -682,9 +803,42 @@ export function handleModelList({
 	}
 }
 
-export function applyGetModelsResponse(response: GetModelsResponse): void {
+export function applyGetModelsResponse(
+	response: GetModelsResponse,
+	sessionId?: string,
+	readSeq?: number,
+): void {
+	if (sessionId) {
+		const state = sessionPickState(sessionId);
+		const seq = readSeq ?? ++state.readSeq;
+		if (seq <= state.appliedReadSeq) return;
+		state.appliedReadSeq = seq;
+		const pick: SessionPick = {
+			instanceId: response.instanceId ?? "",
+			modelId: response.active?.model ?? "",
+			providerId: response.active?.provider ?? "",
+			variant: response.variant?.variant ?? "",
+			contextWindow: response.contextWindow?.contextWindow ?? "",
+			variants: [...(response.variant?.variants ?? [])],
+			contextWindowOptions:
+				cloneContextWindowOptions(response.contextWindow?.options) ?? [],
+			modelExecution: response.modelExecution
+				? { ...response.modelExecution }
+				: null,
+		};
+		if (!state.pick) state.pick = pick;
+		else {
+			for (const field of Object.keys(pick) as (keyof SessionPick)[]) {
+				if (seq > (state.ackedAtReadSeq[field] ?? 0)) {
+					Object.assign(state.pick, { [field]: pick[field] });
+				}
+			}
+		}
+		// Cache off-screen picks without hydrating the open composer's shared state.
+		if (sessionState.currentId !== sessionId) return;
+	}
 	// Scoped reads describe one instance, not the project's catalog.
-	if (response.instanceId === undefined)
+	if (sessionId || response.instanceId === undefined)
 		handleModelList({
 			providers: [
 				...response.providers,
@@ -697,10 +851,12 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 				),
 			],
 		});
-	hydrateModelSettings(response);
-	serverDiscovery.modelExecution = response.modelExecution
-		? { ...response.modelExecution }
-		: null;
+	if (!sessionId) {
+		hydrateModelSettings(response);
+		serverDiscovery.modelExecution = response.modelExecution
+			? { ...response.modelExecution }
+			: null;
+	}
 	if (response.permissionMode) {
 		handlePermissionModeInfo({ mode: response.permissionMode });
 	}
@@ -713,7 +869,7 @@ export function applyGetModelsResponse(response: GetModelsResponse): void {
 export function hydrateModelSettings(
 	response: Pick<GetModelsResponse, "active" | "variant" | "contextWindow">,
 ): void {
-	if (!sessionState.currentId && discoveryState.hasModelChoice) return;
+	if (sessionState.currentId || discoveryState.hasModelChoice) return;
 	if (response.active) {
 		handleModelInfo(response.active);
 	} else {
@@ -803,6 +959,7 @@ export function applyHarnessDefaultSet(
 
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
+	if (sessionState.currentId) return discoveryState.availableVariants;
 	const model = getActiveModel();
 	return discoveryState.currentProviderId === "claude"
 		? (model?.variants ?? [])
@@ -814,6 +971,8 @@ export function getActiveModelVariants(): readonly string[] {
  *  supporting model is picked, without waiting for a server round-trip; fall
  *  back to the last server-provided list otherwise. */
 export function getActiveContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
+	if (sessionState.currentId)
+		return discoveryState.availableContextWindowOptions;
 	const modelOptions = getActiveModel()?.contextWindowOptions;
 	if (discoveryState.currentProviderId === "claude") return modelOptions ?? [];
 	if (modelOptions && modelOptions.length > 0) return modelOptions;
@@ -840,43 +999,27 @@ export function handleContextWindowInfo(msg: {
 
 type SessionModelSettings = Pick<
 	SessionInfo,
-	"model" | "variant" | "contextWindow"
+	"model" | "variant" | "contextWindow" | "resumes"
 >;
 
-/**
- * The viewed session's model, effort and context window follow its row, so a
- * change made in another tab, or by the relay, lands in this tab's pickers.
- * Only a change between two rows counts: the first sight of a row is GetModels'
- * job, which resolves defaults the row leaves blank.
- */
+/** Rows invalidate a read; they never hydrate a session's displayed pick. */
 export function followSessionModelSettings(
 	row: SessionModelSettings,
 	previous: SessionModelSettings | undefined,
 ): void {
 	if (!previous) return;
 	if (
-		row.model &&
-		(row.model.model !== previous.model?.model ||
-			row.model.provider !== previous.model?.provider)
-	) {
-		handleModelInfo(row.model);
-		// The row carries no catalog, so take the new model's own lists.
-		const catalogModel = getActiveModel(row.model.model, row.model.provider);
-		serverDiscovery.availableVariants = [...(catalogModel?.variants ?? [])];
-		serverDiscovery.availableContextWindowOptions =
-			cloneContextWindowOptions(catalogModel?.contextWindowOptions) ?? [];
-	}
-	if (row.variant !== undefined && row.variant !== previous.variant) {
-		serverDiscovery.currentVariant = row.variant;
-		choice.variant = null;
-	}
-	if (
-		row.contextWindow !== undefined &&
-		row.contextWindow !== previous.contextWindow
-	) {
-		serverDiscovery.currentContextWindow = row.contextWindow;
-		choice.contextWindow = null;
-	}
+		row.model?.model === previous.model?.model &&
+		row.model?.provider === previous.model?.provider &&
+		row.variant === previous.variant &&
+		row.contextWindow === previous.contextWindow &&
+		row.resumes?.at(-1)?.instanceId === previous.resumes?.at(-1)?.instanceId
+	)
+		return;
+	const projectSlug = getCurrentSlug();
+	const sessionId = sessionState.currentId;
+	if (!projectSlug || !sessionId) return;
+	refreshSessionPick(projectSlug, sessionId);
 }
 
 export function handlePermissionModeInfo(msg: {
@@ -930,7 +1073,7 @@ export function flushPendingPermissionMode(
 // server's value was never overwritten, so there is nothing to restore.
 
 /** Drops the click it came from, unless a later one has taken the field over. */
-type UndoChoice = () => void;
+type UndoChoice = (() => void) & { readonly clickId?: symbol };
 
 type ChoiceField = keyof typeof choice;
 
@@ -973,6 +1116,25 @@ export function chooseModel(model: {
 	modelId: string;
 	providerId: string;
 }): UndoChoice {
+	if (sessionState.currentId) {
+		const current = getSessionPick(sessionState.currentId);
+		const catalog = getActiveModel(model.modelId, model.providerId);
+		const variants = catalog?.variants ?? [];
+		const options = catalog?.contextWindowOptions ?? [];
+		return chooseSessionPick(sessionState.currentId, {
+			...model,
+			variants,
+			contextWindowOptions: options,
+			variant: variants.includes(current?.variant ?? "")
+				? (current?.variant ?? "")
+				: "",
+			contextWindow: options.some(
+				(option) => option.value === current?.contextWindow,
+			)
+				? (current?.contextWindow ?? "")
+				: "",
+		});
+	}
 	return undoAll([
 		propose("modelId", model.modelId),
 		propose("providerId", model.providerId),
@@ -1028,6 +1190,8 @@ export function getChosenModel(instanceId: string):
 }
 
 export function chooseVariant(variant: string): UndoChoice {
+	if (sessionState.currentId)
+		return chooseSessionPick(sessionState.currentId, { variant });
 	if (!sessionState.currentId && choice.modelId === null) {
 		return undoAll([
 			chooseModel({
@@ -1041,6 +1205,8 @@ export function chooseVariant(variant: string): UndoChoice {
 }
 
 export function chooseContextWindow(contextWindow: string): UndoChoice {
+	if (sessionState.currentId)
+		return chooseSessionPick(sessionState.currentId, { contextWindow });
 	return propose("contextWindow", contextWindow);
 }
 
@@ -1128,14 +1294,14 @@ export function applyDefaultSessionMode(mode: SessionMode): void {
 
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
+	discoveryGeneration++;
+	for (const id of Object.keys(sessionPicks)) delete sessionPicks[id];
 	serverDiscovery.agents = [];
 	serverDiscovery.agentProviderScope = null;
 	serverDiscovery.activeAgentId = null;
 	serverDiscovery.providers = [];
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
-	serverDiscovery.sessionProviderIds = {};
-	serverDiscovery.sessionInstanceIds = {};
 	serverDiscovery.commands = [];
 	serverDiscovery.commandsFetched = false;
 	serverDiscovery.defaultModelId = "";
