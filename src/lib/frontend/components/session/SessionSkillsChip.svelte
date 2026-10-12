@@ -13,6 +13,7 @@
 		sessionSkillsState,
 		type SessionSkillRow,
 	} from "../../stores/session-skills.svelte.js";
+	import { placedSessionId } from "../../stores/transcript.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import SkillDoc from "../chat/SkillDoc.svelte";
@@ -36,13 +37,13 @@
 		timer: ReturnType<typeof setTimeout>;
 	} | null = null;
 
+	const sessionId = $derived(placedSessionId());
 	$effect(() => {
-		const sessionId = sessionState.currentId;
 		if (sessionId) void loadSessionSkills(sessionId);
 	});
 
 	const rows = $derived(
-		sessionSkillsState.sessionId === sessionState.currentId
+		sessionId !== null && sessionSkillsState.sessionId === sessionId
 			? sessionSkillRows(sessionSkillsState.loads)
 			: [],
 	);

@@ -38,6 +38,11 @@
 // Bead conduit-test-ni8.5.12.
 
 import {
+	AUTO_TITLE_SOURCE,
+	isPlaceholderTitle,
+	placeholderTitleSql,
+} from "../../contracts/session-title.js";
+import {
 	decodeClaudeWorktreeState,
 	projectClaudeWorktreeState,
 } from "../../session/claude-worktree-state.js";
@@ -91,6 +96,9 @@ SELECT id FROM subtree`;
 type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
+	| "session.rewound"
+	| "session.rewind_undone"
+	| "session.rewind_committed"
 	| "session.workspace_changed"
 	| "session.workspace_hint_changed"
 	| "session.workspace_started"
@@ -210,7 +218,7 @@ function endTurn(
 }
 
 function isAutoTitleRename(event: StoredEvent): boolean {
-	return event.metadata.source === "auto-title";
+	return event.metadata.source === AUTO_TITLE_SOURCE;
 }
 
 // last_turn_error_at answers one durable question rather than mirroring the
@@ -224,6 +232,24 @@ export const sessionHandlers: {
 		event: StoredEvent & { type: K; data: EventPayloadMap[K] },
 	) => readonly SessionStatement[];
 } = {
+	"session.rewound": (event) => [
+		{
+			sql: "UPDATE sessions SET pending_rewind_message_id = ?, updated_at = ? WHERE id = ?",
+			params: [event.data.messageId, event.createdAt, event.sessionId],
+		},
+	],
+	"session.rewind_undone": (event) => [
+		{
+			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",
+			params: [event.createdAt, event.sessionId],
+		},
+	],
+	"session.rewind_committed": (event) => [
+		{
+			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",
+			params: [event.createdAt, event.sessionId],
+		},
+	],
 	"session.created": (event) => {
 		// Use INSERT ... ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
 		// to preserve user/auto-renamed titles plus nullable columns
@@ -288,14 +314,10 @@ export const sessionHandlers: {
 					     WHERE prior.session_id = ?
 					       AND prior.type = 'session.renamed'
 					       AND prior.sequence < ?
-					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> 'auto-title'
+					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> '${AUTO_TITLE_SOURCE}'
+					       AND NOT ${placeholderTitleSql("json_extract(prior.data, '$.title')")}
 					   )
-					   AND (
-					     title IS NULL
-					     OR TRIM(title) = ''
-					     OR LOWER(TRIM(title)) IN ('claude session', 'untitled', 'new session')
-					     OR LOWER(TRIM(title)) LIKE 'new session %'
-					   )`,
+					   AND ${placeholderTitleSql("title")}`,
 					params: [
 						event.data.title,
 						event.createdAt,
@@ -306,9 +328,13 @@ export const sessionHandlers: {
 				},
 			];
 		}
+		// A placeholder (e.g. OpenCode echoing "Untitled") never replaces a real title.
+		const keepRealTitle = isPlaceholderTitle(event.data.title)
+			? ` AND ${placeholderTitleSql("title")}`
+			: "";
 		return [
 			{
-				sql: "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+				sql: `UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?${keepRealTitle}`,
 				params: [event.data.title, event.createdAt, event.data.sessionId],
 			},
 		];

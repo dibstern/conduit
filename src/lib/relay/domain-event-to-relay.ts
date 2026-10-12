@@ -126,6 +126,7 @@ export function translateDomainEventToRelay(
 		case "input.admitted":
 		case "input.sent":
 		case "input.cancelled":
+		case "input.interrupt_requested":
 			return silent(
 				"persistence-only; browsers read pending inputs from the detail stream",
 			);
@@ -176,6 +177,11 @@ export function translateDomainEventToRelay(
 		case "session.auto_settle_set":
 		case "session.unsnoozed":
 			return silent("persistence-only event; no UI surface in relay");
+
+		case "session.rewound":
+		case "session.rewind_undone":
+		case "session.rewind_committed":
+			return silent("delivered as the session detail rewind point");
 
 		case "session.goal_changed":
 			return silent("delivered as the shell row's goalState");

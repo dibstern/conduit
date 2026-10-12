@@ -404,6 +404,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			listSessions: vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "project-a",
 						id: "session-1",
 						title: "Original Session",
 						status: "idle" as const,
@@ -533,7 +534,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 				setForkEntry,
 				listSessions: vi.fn(() =>
 					Effect.succeed([
-						{ id: "ses-parent", title: "Parent", status: "idle" as const },
+						{
+							projectSlug: "project-a",
+							id: "ses-parent",
+							title: "Parent",
+							status: "idle" as const,
+						},
 					]),
 				),
 			});

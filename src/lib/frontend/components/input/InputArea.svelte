@@ -66,8 +66,11 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
 	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { placedSessionId } from "../../stores/transcript.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { connectionState } from "../../transport/connection-status.svelte.js";
+	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
@@ -216,10 +219,10 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
+		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
 	});
-	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
@@ -229,6 +232,15 @@
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === composerInstanceId));
 	const composerDriver = $derived(sessionState.currentId ? getSessionDriver(sessionState.currentId) : composerInstance?.driver ?? getEffectiveInstanceId());
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
+	// The settings row appears in one go. Until the daemon answers, models load
+	// and a session link resolves, each control would fill in on its own and
+	// guess (an empty store reads as OpenCode). "" is the undialled state, which
+	// only Storybook stays in.
+	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
+	const routeSessionId = $derived(getCurrentSessionId());
+	const settingsPending = $derived(
+		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+	);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
@@ -490,7 +502,9 @@
 		!sessionState.currentId && (draftProject?.folders.length ?? 0) > 1 &&
 		getAvailableInstances().find((instance) => instance.id === getEffectiveInstanceId())?.capabilities?.supportsMultiFolder === false,
 	);
-	const canSend = $derived(!unsupportedDraftFolders && (sessionState.currentId !== null || getDraftPick() !== undefined) && (inputText.trim().length > 0 || pendingImages.length > 0));
+	// A session drawn from its saved page takes sends once the server places it.
+	const unplaced = $derived(placedSessionId() !== sessionState.currentId);
+	const canSend = $derived(!unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined) && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -512,7 +526,7 @@
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
-		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to steer`
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${inputText.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
 		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
 		: sendButtonLabel,
 	);
@@ -562,7 +576,7 @@
 
 	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return Promise.resolve();
 		return syncInputDraftRpc({
 			projectSlug,
@@ -668,111 +682,103 @@
 
 	let creatingSession = false;
 	let startingSideThread = false;
+	// A retry of the same draft reuses its input id, so a reply lost to a
+	// dropped socket returns the Side Thread it made instead of a second one.
+	let sideThreadAttempt: { draft: string; inputId: string } | undefined;
+
+	async function startSideThread(question: string | undefined): Promise<boolean> {
+		if (startingSideThread) return false;
+		const parentSessionId = sessionState.currentId;
+		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
+		if (!parentSessionId || !projectSlug) {
+			showToast("Open a session to start a Side Thread", { variant: "error" });
+			return false;
+		}
+		// A bare command asks for the list rather than a new Side Thread.
+		if (!question) {
+			openSideThreads();
+			clearComposer();
+			return false;
+		}
+		const draftText = inputText;
+		const draftImages = pendingImages;
+		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
+		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
+		const { inputId } = sideThreadAttempt;
+		startingSideThread = true;
+		try {
+			const images = draftImages.map((image) => image.dataUrl);
+			const { sessionId } = await startSideThreadRpc({
+				projectSlug,
+				parentSessionId,
+				title: question,
+				inputId,
+				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
+				...(images.length > 0 ? { images } : {}),
+				originId: getBrowserClientId(),
+			});
+			sideThreadAttempt = undefined;
+			if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
+				clearComposer();
+				switchToSession(sessionId, projectSlug);
+			}
+			return true;
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+			return false;
+		} finally {
+			startingSideThread = false;
+		}
+	}
+
+	/** The text with each @reference's file or directory contents attached. */
+	async function withReferences(text: string, projectSlug: string | null): Promise<string> {
+		const refs = parseAtReferences(text);
+		if (refs.length === 0) return text;
+		const attachments: FileAttachment[] = [];
+		for (const ref of refs) {
+			try {
+				if (ref.endsWith("/")) {
+					const content = await fetchDirectoryListing(ref, projectSlug);
+					attachments.push({ path: ref, type: "directory", content });
+				} else {
+					const result = await fetchFileContent(ref, projectSlug);
+					attachments.push(result.binary ? { path: ref, type: "binary" } : { path: ref, type: "file", content: result.content });
+				}
+			} catch {
+				// Skip files that fail to load
+			}
+		}
+		return buildAttachedMessage(text, attachments);
+	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (unsupportedDraftFolders) return false;
+		if (unsupportedDraftFolders || unplaced) return false;
 		if (!sessionState.currentId && !getDraftPick()) return false;
 		let text = textOverride ?? inputText.trim();
-		let sideThread: { sessionId: string; projectSlug: string; images: string[] } | undefined;
-		const builtins = providerBuiltinNameSet;
 		if (!text) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
 			const command = conduitCommands.find((command) =>
 				[command.name, ...command.aliases].some((name) => name === match?.[1]),
 			);
-			if (command?.handler === "startSideThread") {
-				const question = match?.[2]?.trim();
-				if (startingSideThread) return false;
-				const parentSessionId = sessionState.currentId;
-				const projectSlug = getCurrentSlug();
-				if (!parentSessionId || !projectSlug) {
-					showToast("Open a session to start a Side Thread", { variant: "error" });
-					return false;
-				}
-				// A bare command asks for the list rather than a new Side Thread.
-				if (!question) {
-					openSideThreads();
-					clearComposer();
-					return false;
-				}
-				const draftText = inputText;
-				const draftImages = pendingImages;
-				const images = pendingImages.map((image) => image.dataUrl);
-				startingSideThread = true;
-				try {
-					const { sessionId } = await startSideThreadRpc({ projectSlug, parentSessionId, title: question });
-					sideThread = { sessionId, projectSlug, images };
-					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
-						inputText = "";
-						pendingImages = [];
-						inputDrafts.delete(parentSessionId);
-						if (inputSyncTimer) {
-							clearTimeout(inputSyncTimer);
-							inputSyncTimer = null;
-						}
-						void syncInputDraftRpc({ projectSlug, sessionId: parentSessionId, text: "", originId: getBrowserClientId() }).catch(() => undefined);
-						switchToSession(sessionId, projectSlug);
-						await tick();
-					}
-					text = question;
-				} catch (error) {
-					showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
-					return false;
-				} finally {
-					startingSideThread = false;
-				}
-			}
-			text = toProviderCommands(text, builtins);
+			if (command?.handler === "startSideThread") return startSideThread(match?.[2]?.trim());
+			text = toProviderCommands(text, providerBuiltinNameSet);
 		}
 
-		// Parse @references and fetch file contents
-		const refs = textOverride === undefined ? parseAtReferences(text) : [];
-		let messageText = text;
-
-		if (refs.length > 0) {
-			const attachments: FileAttachment[] = [];
-
-			for (const ref of refs) {
-				try {
-					if (ref.endsWith("/")) {
-						// Directory: fetch listing
-						const content = await fetchDirectoryListing(ref, sideThread?.projectSlug ?? getCurrentSlug());
-						attachments.push({ path: ref, type: "directory", content });
-					} else {
-						// File: fetch content
-						const result = await fetchFileContent(ref, sideThread?.projectSlug ?? getCurrentSlug());
-						if (result.binary) {
-							attachments.push({ path: ref, type: "binary" });
-						} else {
-							attachments.push({
-								path: ref,
-								type: "file",
-								content: result.content,
-							});
-						}
-					}
-				} catch {
-					// Skip files that fail to load
-				}
-			}
-
-			messageText = buildAttachedMessage(text, attachments);
-		}
+		const messageText = textOverride === undefined ? await withReferences(text, composerProjectSlug) : text;
 
 		// Collect image data URLs from pending images
-		const imageUrls = sideThread
-			? (sideThread.images.length > 0 ? sideThread.images : undefined)
-			: textOverride === undefined && pendingImages.length > 0
+		const imageUrls = textOverride === undefined && pendingImages.length > 0
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
 		// Always send immediately: conduit queues a busy send in the session's
 		// tray, and the transcript shows the message once the adapter places it.
-		let sid = sideThread?.sessionId ?? sessionState.currentId;
+		let sid = sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
-		const projectSlug = sideThread?.projectSlug ?? (sid ? getCurrentSlug() : getDraftProject());
+		const projectSlug = sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject();
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
 			return false;
@@ -875,7 +881,6 @@
 			}
 		}
 		if (textOverride !== undefined) return true;
-		if (sideThread && (sessionState.currentId !== sideThread.sessionId || inputText !== "" || pendingImages.length > 0)) return true;
 		clearComposer();
 		return true;
 	}
@@ -910,7 +915,7 @@
 		const offer = taskStopToast;
 		if (!offer) return;
 		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId && getCurrentSlug() === offer.projectSlug;
+		const active = sessionState.currentId === offer.sessionId && currentSession?.projectSlug === offer.projectSlug;
 		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
 		untrack(() => {
 			if (!active || count === 0 || !toast) {
@@ -926,7 +931,7 @@
 
 	function handleStop() {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
 		const instanceId = getSessionInstanceId(sessionId);
 		const driver = getSessionDriver(sessionId);
@@ -939,14 +944,14 @@
 			// An interrupt can end a turn the row never reported busy for, so
 			// nothing else would end it. A still-busy row ends it on idle.
 			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || getCurrentSlug() !== projectSlug) return;
+			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || currentSession?.projectSlug !== projectSlug) return;
 			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
 			if (count === 0) return;
 			if (taskStopToast) dismissToast(taskStopToast.id);
 			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
 				duration: 6000,
 				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
+					if (sessionState.currentId === sessionId && currentSession?.projectSlug === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
 				} },
 			});
 			taskStopToast = { id, sessionId, projectSlug };
@@ -995,7 +1000,7 @@
 			switch (action) {
 				case "pause": handleStop(); break;
 				case "resume": void sendMessage("Continue."); break;
-				case "clear": void sendMessage("/goal clear"); break;
+				case "clear": void sendMessage("/goal clear", "steer"); break;
 				case "edit": handleAttachSetGoal(condition); break;
 				case "new": handleAttachSetGoal(); break;
 			}
@@ -1152,6 +1157,13 @@
 	}
 </script>
 
+{#snippet settingsStatus()}
+	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-brand whitespace-nowrap">
+		<span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+		{offline && discoveryState.modelsLoaded ? "Reconnecting to daemon" : "Connecting"}
+	</div>
+{/snippet}
+
 <!-- File Menu (above input when "@" is typed) -->
 {#if fileMenuVisible}
 	<div id="file-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
@@ -1230,7 +1242,7 @@
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-		{#if !sessionState.currentId && sessionViewState.compact}
+		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 
@@ -1265,14 +1277,12 @@
 			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
 				<Icon name="panels-top-left" size={14} class="shrink-0 text-status-amber" />
 				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Context {Math.round(currentChat().contextPercent)}% full.</b> Older turns compact soon.</span>
-				{#if discoveryState.currentProviderId === "claude"}
-					<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
-				{/if}
+				<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
 			</div>
 		{/if}
 
 		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
-			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
+			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 
 		<PendingInputTray
@@ -1369,7 +1379,7 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
-								onfocus={() => requestSessionPreWarm(getCurrentSlug(), sessionState.currentId)}
+								onfocus={() => requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId)}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}
@@ -1408,8 +1418,11 @@
 					</div>
 				{/snippet}
 				{#snippet controls()}
-					{#if composerPreferences.controls === "icons"}
+					{#if composerPreferences.controls === "icons" && settingsPending}
+						{@render settingsStatus()}
+					{:else if composerPreferences.controls === "icons"}
 						<div
+							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
 							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
 							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
@@ -1453,7 +1466,7 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
-					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && currentSession && composerDirectory}
+					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
 						{@const session = currentSession}
 						{#key session.id}
 							<GitIdentity
@@ -1584,14 +1597,17 @@
 				data-testid="composer-words-row"
 				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
-				<div data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
+				{#if settingsPending}
+					{@render settingsStatus()}
+				{:else}
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
 					<InstanceModelPicker variant="words" />
 					{#if composerDriver !== "opencode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				<div data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
 						{#if composerDirectory}
@@ -1618,6 +1634,7 @@
 						{/if}
 					{/if}
 				</div>
+				{/if}
 			</div>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
@@ -1628,7 +1645,7 @@
 				{/each}
 			</div>
 		{/if}
-		{#if !sessionState.currentId && !sessionViewState.compact}
+		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 	</div>

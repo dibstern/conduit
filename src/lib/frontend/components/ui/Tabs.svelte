@@ -100,7 +100,7 @@
 	>
 		{#each options as option (option.value)}
 			{#if option.groupLabel}
-				<div aria-hidden="true" data-testid="tabs-group-label" class="mt-[4px] mb-[5px] px-[8px] text-[10px] font-medium leading-[15px] text-text-dimmer">{option.groupLabel}</div>
+				<div aria-hidden="true" data-testid="tabs-group-label" class="mt-[12px] mb-[4px] px-[8px] text-[10px] font-semibold uppercase tracking-[0.09em] leading-[15px] text-text-dimmer">{option.groupLabel}</div>
 			{/if}
 			<Tabs.Trigger
 				value={option.value}

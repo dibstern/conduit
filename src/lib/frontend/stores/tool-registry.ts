@@ -17,11 +17,6 @@ export type HistoryToolSeed = Pick<
 		Pick<ToolMessage, "result" | "isError" | "input" | "metadata" | "messageId">
 	>;
 
-export interface TruncationExtras {
-	isTruncated?: boolean;
-	fullContentLength?: number;
-}
-
 export type ToolTransitionResult =
 	| { action: "create"; tool: ToolMessage }
 	| { action: "update"; uuid: string; tool: ToolMessage }
@@ -49,12 +44,7 @@ export interface ToolRegistry {
 		id: string,
 		metadata: Record<string, unknown>,
 	): ToolTransitionResult;
-	complete(
-		id: string,
-		content: string,
-		isError: boolean,
-		extras?: TruncationExtras,
-	): ToolTransitionResult;
+	complete(id: string, content: string, isError: boolean): ToolTransitionResult;
 	finalizeAll(messages: readonly ChatMessage[]): FinalizationResult;
 	clear(): void;
 	remove(id: string): void;
@@ -199,7 +189,6 @@ export function createToolRegistry(
 		id: string,
 		content: string,
 		isError: boolean,
-		extras?: TruncationExtras,
 	): ToolTransitionResult {
 		const tracked = entries.get(id);
 		if (!tracked) {
@@ -238,7 +227,6 @@ export function createToolRegistry(
 			status: targetStatus,
 			result: content,
 			isError,
-			...extras,
 		};
 		return { action: "update", uuid: tracked.uuid, tool: tracked.tool };
 	}

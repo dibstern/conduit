@@ -1,5 +1,4 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
-import { getCurrentSlug } from "../../stores/router.svelte.js";
 import { isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
@@ -26,7 +25,7 @@ export async function runBulkChange(
 	const pinned = !unpinSelected;
 	const skipped = selectedCount - eligible.length;
 	const input = eligible.map((session) => ({
-		projectSlug: session.projectSlug ?? getCurrentSlug() ?? "",
+		projectSlug: session.projectSlug,
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 	}));
@@ -85,7 +84,7 @@ export async function runBulkSnooze(
 ): Promise<void> {
 	const skipped = selectedCount - eligible.length;
 	const input = eligible.map((session) => ({
-		projectSlug: session.projectSlug ?? getCurrentSlug() ?? "",
+		projectSlug: session.projectSlug,
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 		wasSnoozed: isSessionSnoozed(session, now),

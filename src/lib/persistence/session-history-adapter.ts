@@ -4,14 +4,15 @@
 
 import { Option, Schema } from "effect";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
+import { Utf8Bytes } from "../contracts/tool-wire.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
-import { truncateContent } from "../relay/truncate-content.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
 	ToolStatus,
 } from "../shared-types.js";
 import type { MessagePartRow, MessageWithParts } from "./read-model-types.js";
+import { projectTool } from "./tool-wire-projection.js";
 
 function snapshotRowToHistory(
 	row: MessageWithParts,
@@ -40,17 +41,56 @@ function snapshotRowToHistory(
 		) {
 			throw new TypeError(`Invalid snapshot part for ${row.id}`);
 		}
+		const state =
+			"state" in part && typeof part.state === "object" && part.state !== null
+				? part.state
+				: undefined;
+		const metadata =
+			state && "metadata" in state && typeof state.metadata === "object"
+				? browserMetadata(state.metadata ?? undefined)
+				: undefined;
 		return {
 			...part,
 			id: part.id,
 			type: part.type as HistoryMessagePart["type"],
+			...(state === undefined
+				? {}
+				: {
+						state: {
+							...state,
+							metadata,
+							...projectTool({
+								name:
+									"tool" in part && typeof part.tool === "string"
+										? part.tool
+										: undefined,
+								input:
+									"input" in state && state.input !== undefined
+										? JSON.stringify(state.input)
+										: undefined,
+								output:
+									"output" in state && typeof state.output === "string"
+										? state.output
+										: undefined,
+							}),
+						},
+					}),
 		};
 	});
+	// The snapshot owns provider parts; canonical outcomes live alongside it.
+	parts.push(
+		...row.parts
+			.filter((part) => part.type === "compaction" && part.rest_payload == null)
+			.map(partRowToHistoryPart),
+	);
 	return {
 		...parsed,
 		id: parsed.id,
 		role: parsed.role,
 		parts,
+		...(row.context_tokens != null
+			? { contextTokens: row.context_tokens }
+			: {}),
 		...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 		...(row.turnCost !== undefined ? { turnCost: row.turnCost } : {}),
 		...(row.input_id ? { inputId: row.input_id } : {}),
@@ -67,12 +107,56 @@ export interface HistoryResult {
 	total?: number;
 }
 
-const KNOWN_TOOL_STATUSES = new Set<string>([
-	"pending",
-	"running",
-	"completed",
-	"error",
+/** Stored tool statuses as the browser knows them. The projector stores a tool
+ *  that has only been announced as "started": not yet running, so pending. */
+const TOOL_STATUSES = new Map<string, ToolStatus>([
+	["started", "pending"],
+	["pending", "pending"],
+	["running", "running"],
+	["completed", "completed"],
+	["error", "error"],
 ]);
+
+/** The tool metadata the browser reads: a subagent's session, a settled
+ *  status, and a launching row's task, outcome, step, times and usage.
+ *  Everything else stays on the server — an OpenCode edit's metadata alone
+ *  holds the whole file twice over. */
+const BROWSER_METADATA_KEYS = new Set([
+	"status",
+	"childSessionId",
+	"sessionId",
+	"providerTaskId",
+	"backgrounded",
+	"outcome",
+	"currentStep",
+	"activeToolName",
+	"lastToolName",
+	"taskStartedAt",
+	"endTime",
+	"pausedAt",
+	"pausedMs",
+	"taskDurationMs",
+	"taskTotalTokens",
+	"totalTokens",
+	"taskToolUses",
+	"toolUses",
+]);
+
+function browserMetadata(
+	metadata: object | undefined,
+): Record<string, string | number | boolean> | undefined {
+	if (metadata === undefined) return undefined;
+	const kept = Object.fromEntries(
+		Object.entries(metadata).filter(
+			(entry): entry is [string, string | number | boolean] =>
+				BROWSER_METADATA_KEYS.has(entry[0]) &&
+				(typeof entry[1] === "string" ||
+					typeof entry[1] === "number" ||
+					typeof entry[1] === "boolean"),
+		),
+	);
+	return Object.keys(kept).length > 0 ? kept : undefined;
+}
 
 function parseObjectJson(value: string): Record<string, unknown> | undefined {
 	try {
@@ -96,10 +180,7 @@ export function toolOutputText(result: string): string {
 	}
 }
 
-function partRowToHistoryPart(
-	row: MessagePartRow,
-	previewToolOutput: boolean,
-): HistoryMessagePart {
+function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	if (row.type === "text" && row.metadata != null) {
 		const value = parseObjectJson(row.metadata)?.["setup"];
 		if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -174,38 +255,21 @@ function partRowToHistoryPart(
 		row.result != null ||
 		row.metadata != null
 	) {
-		const stateObj: {
-			status?: ToolStatus;
-			input?: unknown;
-			output?: string;
-			isTruncated?: boolean;
-			fullContentLength?: number;
-			metadata?: Record<string, unknown>;
-			[key: string]: unknown;
-		} = {};
-		if (row.status != null && KNOWN_TOOL_STATUSES.has(row.status)) {
-			stateObj["status"] = row.status as ToolStatus;
-		}
-		if (row.input != null) {
-			try {
-				stateObj["input"] = JSON.parse(row.input as string);
-			} catch {
-				stateObj["input"] = row.input;
-			}
-		}
-		if (row.result != null) {
-			const output = toolOutputText(row.result);
-			const preview = previewToolOutput ? truncateContent(output) : undefined;
-			stateObj["output"] = preview?.content ?? output;
-			if (preview?.fullContentLength !== undefined) {
-				stateObj["isTruncated"] = true;
-				stateObj["fullContentLength"] = preview.fullContentLength;
-			}
-		}
-		if (row.metadata != null) {
-			const metadata = parseObjectJson(row.metadata);
-			if (metadata) stateObj["metadata"] = metadata;
-		}
+		const stateObj: NonNullable<HistoryMessagePart["state"]> = {
+			...projectTool({
+				name: row.tool_name,
+				input: row.input,
+				output: row.result == null ? undefined : toolOutputText(row.result),
+				outputBytes: row.result_bytes,
+			}),
+		};
+		const status =
+			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
+		if (status) stateObj["status"] = status;
+		const metadata = browserMetadata(
+			row.metadata == null ? undefined : parseObjectJson(row.metadata),
+		);
+		if (metadata) stateObj["metadata"] = metadata;
 		if (Object.keys(stateObj).length > 0) {
 			state = stateObj;
 		}
@@ -231,13 +295,12 @@ function partRowToHistoryPart(
  * Uses all ascending rows from the read model to detect exact `hasMore`, then
  * keeps the newest `pageSize` rows while preserving ascending display order.
  *
- * `toolOutputPreview` cuts long tool output the way the live stream does, for
- * readers that can fetch the rest through GetToolContent. A busy session
- * otherwise ships megabytes of output it mostly never shows.
+ * Tool parts go through the tool wire projection: long fields travel as
+ * previews the browser expands through GetToolDetails.
  */
 export function messageRowsToHistory(
 	rows: MessageWithParts[],
-	opts: { pageSize: number; toolOutputPreview?: boolean },
+	opts: { pageSize: number },
 ): HistoryResult {
 	// The read query returns oldest-to-newest; keep the tail for REST parity.
 	const hasMore = rows.length > opts.pageSize;
@@ -256,9 +319,7 @@ export function messageRowsToHistory(
 							completed: row.completed_at,
 						},
 					};
-		const parts = row.parts.map((part) =>
-			partRowToHistoryPart(part, opts.toolOutputPreview === true),
-		);
+		const parts = row.parts.map(partRowToHistoryPart);
 
 		return {
 			id: row.id,
@@ -325,4 +386,30 @@ export function messageRowsToHistory(
 	});
 
 	return { messages, hasMore };
+}
+
+/** The most messages a detail page holds; rewind restores this visible page. */
+export const PAGE_MESSAGES = 50;
+/** The most a transcript page may weigh on the wire, as one encoded frame. */
+export const PAGE_FRAME_BUDGET = Utf8Bytes.make(256 * 1024);
+
+// What a frame holds besides its rows: the RPC wrapper and the page's
+// sequence, cursor and paging flags.
+const FRAME_ENVELOPE_BYTES = 1_024;
+
+/**
+ * The newest of `rows` that fit one frame of `budget`, oldest first. A row is
+ * weighed whole, as its JSON, so a page never splits a message; the newest row
+ * stays however large it is, so a page always holds one whole message.
+ */
+export function newestRowsWithin<T>(
+	rows: readonly T[],
+	budget: Utf8Bytes,
+): readonly T[] {
+	let bytes = FRAME_ENVELOPE_BYTES;
+	for (let index = rows.length - 1; index >= 0; index--) {
+		bytes += Buffer.byteLength(JSON.stringify(rows[index]), "utf8") + 1;
+		if (bytes > budget && index < rows.length - 1) return rows.slice(index + 1);
+	}
+	return rows;
 }

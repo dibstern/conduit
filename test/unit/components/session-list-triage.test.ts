@@ -73,15 +73,27 @@ beforeEach(() => {
 		{ slug: "current-project", title: "Current", folders: ["/current"] },
 	];
 	seedRootSessions([
-		{ id: "idle", title: "Idle work", attention: "idle" },
-		{ id: "approval", title: "Approval", attention: "needs-approval" },
 		{
+			projectSlug: "current-project",
+			id: "idle",
+			title: "Idle work",
+			attention: "idle",
+		},
+		{
+			projectSlug: "current-project",
+			id: "approval",
+			title: "Approval",
+			attention: "needs-approval",
+		},
+		{
+			projectSlug: "current-project",
 			id: "pin",
 			title: "Pinned work",
 			attention: "needs-approval",
 			pinnedAt: 1,
 		},
 		{
+			projectSlug: "current-project",
 			id: "settled",
 			title: "Finished work",
 			attention: "done-unread",
@@ -104,6 +116,7 @@ afterEach(() => {
 
 function addSnoozedRow(until: number | null = Date.now() + 3_600_000) {
 	const row = {
+		projectSlug: "current-project",
 		id: "sleeping",
 		title: "Sleeping work",
 		attention: "idle" as const,
@@ -211,6 +224,7 @@ describe("session triage list", () => {
 			sessionState.now = now;
 			seedRootSessions([
 				{
+					projectSlug: "current-project",
 					id: "wake",
 					title: "Wake soon",
 					attention: "idle",
@@ -227,6 +241,7 @@ describe("session triage list", () => {
 			expect(vi.getTimerCount()).toBe(1);
 			seedRootSessions([
 				{
+					projectSlug: "current-project",
 					id: "wake",
 					title: "Wake soon",
 					attention: "idle",
@@ -298,7 +313,9 @@ describe("session triage list", () => {
 	});
 
 	it("omits empty shelves", () => {
-		seedRootSessions([{ id: "idle", title: "Idle work" }]);
+		seedRootSessions([
+			{ projectSlug: "current-project", id: "idle", title: "Idle work" },
+		]);
 		render(SessionList);
 		expect(screen.queryByText("Pinned")).toBeNull();
 		expect(screen.queryByTestId("settled-shelf-toggle")).toBeNull();
@@ -307,15 +324,16 @@ describe("session triage list", () => {
 	it.each([
 		"settle",
 		"pin",
-	] as const)("calls %s with the row project and offers Undo", async (verb) => {
+	] as const)("calls %s with the row project and offers Undo", async (command) => {
 		render(SessionList);
 		render(Toast);
 		const row = screen.getByText("Idle work").closest("a");
 		if (!row) throw new Error("Missing row");
 		await fireEvent.contextMenu(row);
-		await fireEvent.click(await screen.findByTestId(`session-ctx-${verb}`));
-		const rpc = verb === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
-		const key = verb === "settle" ? "settled" : "pinned";
+		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
+		const rpc =
+			command === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
+		const key = command === "settle" ? "settled" : "pinned";
 		await waitFor(() =>
 			expect(rpc).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -327,7 +345,7 @@ describe("session triage list", () => {
 		);
 		expect(screen.getAllByRole("status")).toHaveLength(1);
 		expect(screen.getByRole("status").textContent).toContain(
-			verb === "settle"
+			command === "settle"
 				? "Moved “Idle work” to Settled"
 				: "Pinned “Idle work” to the top",
 		);
@@ -344,8 +362,9 @@ describe("session triage list", () => {
 	it.each([
 		"settle",
 		"pin",
-	] as const)("reports a failed %s without a success toast", async (verb) => {
-		const rpc = verb === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
+	] as const)("reports a failed %s without a success toast", async (command) => {
+		const rpc =
+			command === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
 		vi.mocked(rpc).mockRejectedValueOnce(new Error("offline"));
 		render(SessionList);
 		render(Toast);
@@ -355,16 +374,18 @@ describe("session triage list", () => {
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);
-		await fireEvent.click(await screen.findByTestId(`session-ctx-${verb}`));
+		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
 		expect((await screen.findByRole("alert")).textContent).toContain(
-			`Couldn't ${verb} session`,
+			`Couldn't ${command} session`,
 		);
 		expect(screen.queryByRole("status")).toBeNull();
 	});
 
 	it("does not reannounce the search summary when a result settles", async () => {
 		sessionState.searchQuery = "Idle";
-		seedSearchResults([{ id: "idle", title: "Idle work" }]);
+		seedSearchResults([
+			{ projectSlug: "current-project", id: "idle", title: "Idle work" },
+		]);
 		render(SessionList);
 		const live = screen
 			.getByTestId("session-search-summary")
@@ -378,7 +399,12 @@ describe("session triage list", () => {
 			subtree: true,
 		});
 		seedRootSessions([
-			{ id: "idle", title: "Idle work", settledAt: Date.now() },
+			{
+				projectSlug: "current-project",
+				id: "idle",
+				title: "Idle work",
+				settledAt: Date.now(),
+			},
 		]);
 		await tick();
 		expect(live.textContent).toBe("1 match");
@@ -389,23 +415,23 @@ describe("session triage list", () => {
 	it.each([
 		"unsettle",
 		"unpin",
-	] as const)("%s sends false without a toast", async (verb) => {
+	] as const)("%s sends false without a toast", async (command) => {
 		uiState.settledShelfOpen = true;
 		render(SessionList);
-		const title = verb === "unsettle" ? "Finished work" : "Pinned work";
+		const title = command === "unsettle" ? "Finished work" : "Pinned work";
 		const row = screen.getByText(title).closest("a");
 		if (!row) throw new Error("Missing row");
 		await fireEvent.mouseOver(row);
 		await fireEvent.click(
 			screen.getByRole("button", { name: `More options for ${title}` }),
 		);
-		await fireEvent.click(await screen.findByTestId(`session-ctx-${verb}`));
+		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
 		const rpc =
-			verb === "unsettle" ? setSessionSettledRpc : setSessionPinnedRpc;
+			command === "unsettle" ? setSessionSettledRpc : setSessionPinnedRpc;
 		await waitFor(() =>
 			expect(rpc).toHaveBeenCalledWith(
 				expect.objectContaining(
-					verb === "unsettle" ? { settled: false } : { pinned: false },
+					command === "unsettle" ? { settled: false } : { pinned: false },
 				),
 			),
 		);
@@ -608,8 +634,19 @@ describe("sidebar pick", () => {
 
 	beforeEach(() => {
 		seedRootSessions([
-			{ id: "unread", title: "unread", unread: true, lastTurnEndVersion: 7 },
-			{ id: "read", title: "read", lastTurnEndVersion: 3 },
+			{
+				projectSlug: "current-project",
+				id: "unread",
+				title: "unread",
+				unread: true,
+				lastTurnEndVersion: 7,
+			},
+			{
+				projectSlug: "current-project",
+				id: "read",
+				title: "read",
+				lastTurnEndVersion: 3,
+			},
 		]);
 	});
 

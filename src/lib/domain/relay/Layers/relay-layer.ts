@@ -8,6 +8,7 @@ import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeInstanceManagerStateLive } from "../../daemon/Services/instance-manager-service.js";
 import { AlertsLive } from "../Services/alerts.js";
+import type { ClaudeTitleQueryFactory } from "../Services/claude-title-generator.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
@@ -23,10 +24,7 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../Services/session-status-poller.js";
-import {
-	type ClaudeTitleQueryFactory,
-	makeSessionTitleServiceLive,
-} from "../Services/session-title-service.js";
+import { makeSessionTitleServiceLive } from "../Services/session-title-service.js";
 import { RateLimiterLive } from "./rate-limiter-layer.js";
 
 const sessionManagerDepsLive = Layer.mergeAll(

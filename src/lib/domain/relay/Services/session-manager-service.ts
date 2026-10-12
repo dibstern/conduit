@@ -45,6 +45,7 @@ import {
 	isPickRejection,
 	ModelNotInCatalog,
 	type PickRejection,
+	PickRequired,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
@@ -716,6 +717,7 @@ const makeServiceCreateSession = ({
 			const source = options?.sourceSessionId
 				? yield* readQuery.getSession(options.sourceSessionId)
 				: undefined;
+			if (options?.sourceSessionId && !source) return yield* new PickRequired();
 			const pick =
 				options?.pick ??
 				(yield* loadServerSessionPick(harness, instanceId, source));

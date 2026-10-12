@@ -13,6 +13,7 @@ import {
 	Schema,
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { MissingWorktreeError } from "../../../contracts/worktree.js";
 import {
@@ -207,14 +208,6 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 		return yield* resolveSessionFolders(session);
 	});
 
-const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
-	push: () => Effect.void,
-	requestPermission: () => Effect.succeed({ decision: "once" as const }),
-	requestQuestion: () => Effect.succeed({}),
-	resolvePermission: () => Effect.void,
-	resolveQuestion: () => Effect.void,
-};
-
 export class ProviderTurnDispatchFibersTag extends Context.Tag(
 	"ProviderTurnDispatchFibers",
 )<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>() {}
@@ -317,7 +310,6 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
-		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
@@ -468,6 +460,10 @@ const prepareEngineTurnInput = (
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
+		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
+			yield* clearProcessingTimeout(resolvedInput.sessionId);
+			return undefined;
+		}
 		const harness = isClaudeDriver(driver) ? "claude" : "opencode";
 		const pick = storedSessionPick(sessionRow, harness);
 		if (!pick) {
@@ -548,14 +544,16 @@ const prepareEngineTurnInput = (
 			if (stream._tag === "Some")
 				yield* stream.value.includeDirectory(folders.workspaceRoot);
 		}
-		const isFirstClaudeMessage =
-			isClaudeDriver(driver) && priorHistoryMetadata?.messageCount === 0;
 		const inputId = resolvedInput.commandId;
-		if (isFirstClaudeMessage && !resolvedInput.continuation) {
+		if (
+			sessionRow &&
+			!resolvedInput.continuation &&
+			isPlaceholderTitle(sessionRow.title)
+		) {
 			const titleService = yield* SessionTitleServiceTag;
-			yield* titleService.startForFirstClaudeMessage({
+			yield* titleService.titleFromMessage({
 				sessionId: resolvedInput.sessionId,
-				firstMessage: resolvedInput.text,
+				message: resolvedInput.text,
 			});
 		}
 

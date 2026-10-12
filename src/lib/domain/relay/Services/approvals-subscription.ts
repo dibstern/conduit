@@ -15,7 +15,9 @@
 // the pending set is a handful of rows, and a session delete cascades its
 // approvals away without leaving a version to find. That one case comes off the
 // advance (`removedSessionIds`), mapped back to approval ids through the
-// approvals this subscription has announced.
+// approvals this subscription has announced. Those are tracked from the
+// envelopes it is sent, so the read stays pure and every device shares one
+// window read (y7eo.15).
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
@@ -94,6 +96,10 @@ const toApproval = (row: PendingApprovalRow): Approval | undefined => {
 	);
 };
 
+/** The id a `remove` names an approval by: its pending_approvals row id. */
+const approvalId = (approval: Approval): string =>
+	approval._tag === "permission" ? approval.requestId : approval.toolId;
+
 /**
  * Subscribe to the project's pending approvals: the pending set, a
  * `synchronized` boundary, then upserts as approvals are raised and removes as
@@ -118,22 +124,18 @@ export const subscribeApprovals = (
 				bus,
 				source: {
 					name: "approvals",
+					shareReads: true,
 					read: (range) =>
 						Effect.map(readQuery.readPendingApprovals(range), (answer) => {
-							if (range === undefined) announced.clear();
 							const rows = [];
 							const removed = [];
 							for (const row of answer.rows) {
 								const item =
 									row.status === "pending" ? toApproval(row) : undefined;
-								if (item === undefined) {
-									announced.delete(row.id);
-									if (range !== undefined)
-										removed.push({ id: row.id, version: row.version });
-									continue;
-								}
-								announced.set(row.id, row.session_id);
-								rows.push({ item, version: row.version });
+								if (item !== undefined)
+									rows.push({ item, version: row.version });
+								else if (range !== undefined)
+									removed.push({ id: row.id, version: row.version });
 							}
 							return { rows, removed, version: answer.version };
 						}),
@@ -152,6 +154,19 @@ export const subscribeApprovals = (
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: options.resumeFromSequence }),
-			});
+			}).pipe(
+				// Pulled in order, so `route` sees every envelope sent before it.
+				Stream.tap((envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "snapshot") {
+							announced.clear();
+							for (const item of envelope.rows)
+								announced.set(approvalId(item), item.sessionId);
+						} else if (envelope._tag === "upsert")
+							announced.set(approvalId(envelope.item), envelope.item.sessionId);
+						else if (envelope._tag === "remove") announced.delete(envelope.id);
+					}),
+				),
+			);
 		}),
 	);

@@ -3,6 +3,7 @@
  * Reused across all story files to ensure consistency.
  */
 
+import { Utf8Bytes } from "../../contracts/tool-wire.js";
 import type {
 	AssistantMessage,
 	ProjectInfo,
@@ -24,6 +25,7 @@ export const mockProject: ProjectInfo = {
 };
 
 export const mockSession: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000001",
 	title: "Test Session",
 	createdAt: Date.parse("2026-02-24T10:00:00Z"),
@@ -33,6 +35,7 @@ export const mockSession: SessionInfo = {
 };
 
 export const mockSessionProcessing: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000004",
 	title: "Running CI pipeline checks",
 	createdAt: Date.parse("2026-02-25T08:00:00Z"),
@@ -46,6 +49,7 @@ export const mockSessionProcessing: SessionInfo = {
 };
 
 export const mockSessionLongTitle: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000005",
 	title:
 		"Investigate memory leak in production WebSocket connection handler that causes OOM after 48 hours",
@@ -56,6 +60,7 @@ export const mockSessionLongTitle: SessionInfo = {
 };
 
 export const mockSessionNeedsApproval: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000020",
 	title: "Approve database migration",
 	createdAt: "2026-02-25T10:00:00Z",
@@ -67,6 +72,7 @@ export const mockSessionNeedsApproval: SessionInfo = {
 };
 
 export const mockSessionNeedsReply: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000021",
 	title: "Clarify deployment target",
 	createdAt: "2026-02-25T10:10:00Z",
@@ -78,6 +84,7 @@ export const mockSessionNeedsReply: SessionInfo = {
 };
 
 export const mockSessionFailed: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000022",
 	title: "Repair failed release",
 	createdAt: "2026-02-25T10:20:00Z",
@@ -89,6 +96,7 @@ export const mockSessionFailed: SessionInfo = {
 };
 
 export const mockSessionDoneUnread: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000023",
 	title: "Review completed refactor",
 	createdAt: "2026-02-25T10:30:00Z",
@@ -100,6 +108,7 @@ export const mockSessionDoneUnread: SessionInfo = {
 };
 
 export const mockSessionIdle: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000024",
 	title: "Plan documentation cleanup",
 	createdAt: "2026-02-25T10:40:00Z",
@@ -111,6 +120,7 @@ export const mockSessionIdle: SessionInfo = {
 };
 
 export const mockSubagentSession: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000006",
 	title: "Inspect the Storybook coverage gaps",
 	createdAt: "2026-02-25T09:00:00Z",
@@ -122,6 +132,7 @@ export const mockSubagentSession: SessionInfo = {
 };
 
 export const mockForkSession: SessionInfo = {
+	projectSlug: "conduit",
 	id: "sess_01JTEST000000000000000007",
 	title: "Try the alternative migration approach",
 	createdAt: "2026-02-25T09:10:00Z",
@@ -136,6 +147,7 @@ export const mockForkSession: SessionInfo = {
 export const mockSessions: SessionInfo[] = [
 	mockSession,
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000002",
 		title: "Debug authentication flow",
 		createdAt: Date.parse("2026-02-24T09:00:00Z"),
@@ -144,6 +156,7 @@ export const mockSessions: SessionInfo[] = [
 		status: "idle",
 	},
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000003",
 		title: "Refactor database queries",
 		createdAt: Date.parse("2026-02-23T14:00:00Z"),
@@ -156,6 +169,7 @@ export const mockSessions: SessionInfo[] = [
 /** Sessions spanning all three date groups (today, yesterday, older). */
 export const mockSessionsAllGroups: SessionInfo[] = [
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000010",
 		title: "Fix WebSocket reconnection",
 		createdAt: Date.parse("2026-02-25T10:00:00Z"),
@@ -165,6 +179,7 @@ export const mockSessionsAllGroups: SessionInfo[] = [
 	},
 	mockSessionProcessing,
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000011",
 		title: "Add dark mode support",
 		createdAt: Date.parse("2026-02-24T14:00:00Z"),
@@ -173,6 +188,7 @@ export const mockSessionsAllGroups: SessionInfo[] = [
 		status: "idle",
 	},
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000012",
 		title: "Review PR #42",
 		createdAt: Date.parse("2026-02-24T09:00:00Z"),
@@ -181,6 +197,7 @@ export const mockSessionsAllGroups: SessionInfo[] = [
 		status: "idle",
 	},
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000013",
 		title: "Set up CI pipeline",
 		createdAt: Date.parse("2026-02-20T10:00:00Z"),
@@ -189,6 +206,7 @@ export const mockSessionsAllGroups: SessionInfo[] = [
 		status: "idle",
 	},
 	{
+		projectSlug: "conduit",
 		id: "sess_01JTEST000000000000000014",
 		title: "Initial project scaffolding",
 		createdAt: Date.parse("2026-02-18T08:00:00Z"),
@@ -501,7 +519,8 @@ export const mockToolSkillError: ToolMessage = {
 	isError: true,
 };
 
-export const mockToolTruncated: ToolMessage = {
+/** A Grep whose output the server sent as a preview of its first 2,000 characters. */
+export const mockToolPreview: ToolMessage = {
 	type: "tool",
 	uuid: "msg-tool-009",
 	id: "tool-009",
@@ -511,8 +530,7 @@ export const mockToolTruncated: ToolMessage = {
 	result:
 		"src/lib/frontend/components/chat/MessageList.svelte:118:// TODO: preserve scroll anchor\nsrc/lib/frontend/stores/chat.svelte.ts:442:// FIXME: remove compatibility path",
 	isError: false,
-	isTruncated: true,
-	fullContentLength: 24576,
+	preview: { resultBytes: Utf8Bytes.make(24_576) },
 };
 
 export const mockQuestionRunning: ToolMessage = {

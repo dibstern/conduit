@@ -21,6 +21,7 @@ import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import type { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -57,6 +58,7 @@ import {
 	canonicalEvent,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import { assembleDetailRows } from "../../helpers/detail-rows.js";
 
 // A fresh temp-file persistence stack + the real SessionEventBus per test. The
 // detail subscription reads the projected transcript and nothing else, so the
@@ -201,6 +203,27 @@ const readModelVersion = Effect.gen(function* () {
 	return rows[0]?.value ?? 0;
 });
 
+// These tests count and order transcript messages. Ignore only the rewind
+// metadata row so it cannot consume a message pull or the reconnect boundary;
+// the pending-state tests cover its delivery, and the wire tests retain it.
+const subscribeMessages = (
+	options: Parameters<typeof subscribeSessionDetail>[0],
+) =>
+	subscribeSessionDetail(options).pipe(
+		Stream.filter(
+			(envelope) =>
+				envelope._tag !== "upsert" || envelope.item._tag !== "rewind",
+		),
+		Stream.map((envelope) =>
+			envelope._tag === "snapshot"
+				? {
+						...envelope,
+						rows: envelope.rows.filter((row) => row._tag !== "rewind"),
+					}
+				: envelope,
+		),
+	);
+
 // Drain the subscription into a queue so the test pulls envelopes one at a time.
 // The opening envelopes prove the advance subscription is already acquired — the
 // orchestrator acquires it before reading the base — so a commit landing after
@@ -211,9 +234,8 @@ const openDetail = (options: {
 }) =>
 	Effect.gen(function* () {
 		const q = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
-		const fiber = yield* Stream.runForEach(
-			subscribeSessionDetail(options),
-			(env) => Queue.offer(q, env),
+		const fiber = yield* Stream.runForEach(subscribeMessages(options), (env) =>
+			Queue.offer(q, env),
 		).pipe(Effect.forkScoped);
 		return { q, fiber };
 	});
@@ -221,21 +243,48 @@ const openDetail = (options: {
 const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 	Effect.forEach(Array.from({ length: n }), () => Queue.take(q));
 
-/** The delta this source produces: a whole projected transcript message. */
-const expectMessage = (envelope: Envelope<SessionDetailItem> | undefined) => {
-	if (
-		envelope?._tag !== "upsert" ||
-		envelope.item._tag !== "transcriptMessage"
-	) {
-		throw new Error(
-			`expected a transcript-message upsert, got ${JSON.stringify(envelope)}`,
-		);
-	}
-	return envelope.item.message;
+type Row = Envelope<SessionDetailItem> | SessionDetailItem | undefined;
+const itemOf = (
+	row: Row,
+): Extract<SessionDetailItem, { _tag: "message" | "part" }> => {
+	const item = row?._tag === "upsert" ? row.item : row;
+	if (item?._tag !== "message" && item?._tag !== "part")
+		throw new Error(`expected a transcript row, got ${JSON.stringify(row)}`);
+	return item;
 };
 
-const textOf = (message: { readonly [key: string]: unknown }): string =>
-	String(message["text"] ?? "");
+/** What each row names: a message by its id, a part as `message/part`. */
+const namesOf = (rows: readonly Row[]) =>
+	rows.map((row) => {
+		const item = itemOf(row);
+		return item._tag === "message"
+			? item.message.id
+			: `${item.messageId}/${item.part.id}`;
+	});
+
+/** The messages these rows build, as far as the rows go, in header order. */
+const messagesOf = (rows: readonly Row[]) => {
+	const assemble = assembleDetailRows();
+	const messages = new Map<string, typeof HistoryMessageSchema.Type>();
+	for (const row of rows) {
+		const message = assemble(itemOf(row));
+		if (message) messages.set(message.id, message);
+	}
+	return [...messages.values()];
+};
+
+/** The one message these rows build: its header and the parts that moved. */
+const expectMessage = (rows: readonly Row[]) => {
+	const [message, ...others] = messagesOf(rows);
+	if (!message || others.length > 0)
+		throw new Error(`expected one message, got ${JSON.stringify(rows)}`);
+	return message;
+};
+
+const textOf = (message: typeof HistoryMessageSchema.Type): string =>
+	(message.parts ?? [])
+		.flatMap((part) => (part.type === "text" ? [part.text ?? ""] : []))
+		.join("");
 
 const SID = "session-detail";
 
@@ -277,7 +326,7 @@ describe("subscribeSessionDetail", () => {
 				expect(snapshot.rows).toHaveLength(50);
 				expect(
 					snapshot.rows.map((row) =>
-						row._tag === "transcriptMessage" ? row.message.id : "event",
+						row._tag === "message" ? row.message.id : "part",
 					),
 				).toEqual(
 					Array.from(
@@ -310,20 +359,18 @@ describe("subscribeSessionDetail", () => {
 			// The base carries the read-model version it was read at — the same
 			// number a live delta or a resume will speak in.
 			expect(snapshot.sequence).toBe(yield* readModelVersion);
-			expect(snapshot.rows).toHaveLength(1);
+			expect(namesOf(snapshot.rows)).toEqual(["m1/m1-0", "m1"]);
 			expect(snapshot.hasMore).toBe(false);
 			expect(snapshot.cursor).toBe("m1");
-			const [row] = snapshot.rows;
-			if (row?._tag !== "transcriptMessage")
-				throw new Error("expected message");
-			expect(row.message.id).toBe("m1");
-			expect(row.message.role).toBe("assistant");
-			expect(textOf(row.message)).toBe("Hello world");
+			const message = expectMessage(snapshot.rows);
+			expect(message.id).toBe("m1");
+			expect(message.role).toBe("assistant");
+			expect(textOf(message)).toBe("Hello world");
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
 	it.scoped(
-		"a live commit re-queries: the whole current message, parts included",
+		"a live commit sends the message and only the parts that moved",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -336,16 +383,17 @@ describe("subscribeSessionDetail", () => {
 				const { q } = yield* openDetail({ sessionId: SID });
 				yield* takeN(q, 2);
 
-				// A part write carries no version of its own, so it advances the
-				// message that owns it and the whole message comes back — which is
-				// why the delta is a projected message, not the event that caused it.
+				// Each part carries its own version, so a commit sends the parts it
+				// wrote and the message they advanced, never the parts it did not.
 				yield* commit([
 					textDelta(SID, "m1", "m1-0", " world"),
 					toolStarted(SID, "m1", "tool-1"),
 					toolCompleted(SID, "m1", "tool-1"),
 				]);
 
-				const message = expectMessage(yield* Queue.take(q));
+				const rows = yield* takeN(q, 3);
+				expect(namesOf(rows)).toEqual(["m1/m1-0", "m1/tool-1", "m1"]);
+				const message = expectMessage(rows);
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
 				expect(message.parts?.map((part) => part.type)).toEqual([
@@ -353,6 +401,13 @@ describe("subscribeSessionDetail", () => {
 					"tool",
 				]);
 				expect(message.parts?.[1]?.state?.["status"]).toBe("completed");
+				expect(yield* Queue.size(q)).toBe(0);
+
+				// Text streaming on: the finished tool part stays where it is.
+				yield* commit([textDelta(SID, "m1", "m1-0", "!")]);
+				const streamed = yield* takeN(q, 2);
+				expect(namesOf(streamed)).toEqual(["m1/m1-0", "m1"]);
+				expect(textOf(expectMessage(streamed))).toBe("Hello world!");
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
@@ -369,14 +424,16 @@ describe("subscribeSessionDetail", () => {
 			const [snapshot] = yield* takeN(q, 2);
 			if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
 
+			// Each commit moves the message and its part, at one version.
 			yield* commit([textDelta(SID, "m1", "m1-0", "one")]);
-			const first = yield* Queue.take(q);
+			const [first, firstPart] = yield* takeN(q, 2);
 			yield* commit([textDelta(SID, "m1", "m1-0", "two")]);
-			const second = yield* Queue.take(q);
-
-			if (first._tag !== "upsert" || second._tag !== "upsert") {
+			const [second, secondPart] = yield* takeN(q, 2);
+			if (first?._tag !== "upsert" || second?._tag !== "upsert") {
 				throw new Error("expected upserts");
 			}
+			expect(firstPart).toMatchObject({ sequence: first.sequence });
+			expect(secondPart).toMatchObject({ sequence: second.sequence });
 			// Monotone, and the last one is exactly where the read model now is:
 			// change notification, resume point and high-water mark are one number.
 			expect(first.sequence).toBeGreaterThan(snapshot.sequence);
@@ -442,7 +499,7 @@ describe("subscribeSessionDetail", () => {
 					}),
 				]);
 
-				const message = expectMessage(yield* Queue.take(q));
+				const message = expectMessage(yield* takeN(q, 3));
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hi");
 				expect(message.parts?.map((part) => part.type)).toContain("tool");
@@ -470,13 +527,20 @@ describe("subscribeSessionDetail", () => {
 				const { q } = yield* openDetail({ sessionId: SID });
 				const [snapshot] = yield* takeN(q, 2);
 				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
-				expect(snapshot.rows).toHaveLength(2);
+				expect(namesOf(snapshot.rows)).toEqual([
+					"m0/m0-0",
+					"m0",
+					"m1/m1-0",
+					"m1",
+				]);
 
 				yield* commit([textDelta(SID, "m1", "m1-0", " world")]);
 
-				// One envelope, for the one message that moved: m0 is untouched, so
-				// its version is below the floor and the query does not return it.
-				const message = expectMessage(yield* Queue.take(q));
+				// Rows for the one message that moved: m0 is untouched, so its
+				// version is below the floor and the query does not return it.
+				const rows = yield* takeN(q, 2);
+				expect(namesOf(rows)).toEqual(["m1/m1-0", "m1"]);
+				const message = expectMessage(rows);
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
 				expect(yield* Queue.size(q)).toBe(0);
@@ -509,15 +573,13 @@ describe("subscribeSessionDetail", () => {
 				resumeFromSequence: cursor,
 			});
 
-			// Timing writes also refresh the prompt the client already holds.
-			const [first, prompt, second] = yield* takeN(q, 3);
+			// Timing writes also refresh the prompt the client already holds, but
+			// not its text part.
+			const replay = yield* takeN(q, 5);
 			const boundary = yield* Queue.take(q);
 			expect(boundary).toEqual({ _tag: "synchronized" });
-			expect([
-				expectMessage(first).id,
-				expectMessage(prompt).id,
-				expectMessage(second).id,
-			]).toEqual(["m1", "m0", "m2"]);
+			expect(namesOf(replay)).toEqual(["m1/m1-0", "m1", "m0", "m2/m2-0", "m2"]);
+			const [, first, , , second] = replay;
 			// Each replayed message carries the version of the commit that wrote
 			// it, not the counter the replay happened to read. That is what lets a
 			// client recognise a row it already holds as the SAME envelope rather
@@ -533,7 +595,7 @@ describe("subscribeSessionDetail", () => {
 
 			// And live continues from there.
 			yield* commit([textDelta(SID, "m2", "m2-0", "!")]);
-			expect(textOf(expectMessage(yield* Queue.take(q)))).toBe("also missed!");
+			expect(textOf(expectMessage(yield* takeN(q, 2)))).toBe("also missed!");
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
@@ -586,6 +648,66 @@ describe("subscribeSessionDetail", () => {
 		}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 
+	it.scoped(
+		"a deleted part is removed live and on resume, and the browser drops it",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated(SID),
+					messageCreated(SID, "m1", "assistant"),
+					textDelta(SID, "m1", "m1-0", "Hello"),
+					toolStarted(SID, "m1", "tool-1"),
+				]);
+				const cursor = yield* readModelVersion;
+				const { q } = yield* openDetail({ sessionId: SID });
+				const opening = yield* takeN(q, 2);
+
+				yield* commit([
+					canonicalEvent("message.part.removed", SID, {
+						messageId: "m1",
+						partId: "tool-1",
+					}),
+				]);
+				const version = yield* readModelVersion;
+				// A part is named by its message and its own id; the removal sorts
+				// before the message row it moved.
+				const removed = yield* takeN(q, 2);
+				expect(removed).toEqual([
+					{ _tag: "remove", id: '["m1","tool-1"]', sequence: version },
+					expect.objectContaining({
+						_tag: "upsert",
+						item: expect.objectContaining({ _tag: "message" }),
+						sequence: version,
+					}),
+				]);
+				const held = [...opening, ...removed].reduce<TranscriptEntry>(
+					applyTranscriptEnvelope,
+					{
+						project: "project",
+						rows: [],
+						hwm: null,
+						hasMore: false,
+						status: { _tag: "live" },
+						pending: [],
+						waiting: new Map(),
+						partOrder: new Map(),
+					},
+				);
+				expect(held.rows[0]?.parts?.map((part) => part.id)).toEqual(["m1-0"]);
+
+				// A client that missed it hears of the deletion from the tombstone.
+				const resumed = yield* openDetail({
+					sessionId: SID,
+					resumeFromSequence: cursor,
+				});
+				expect(yield* takeN(resumed.q, 3)).toEqual([
+					...removed,
+					{ _tag: "synchronized" },
+				]);
+			}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
 	for (const separateBatches of [false, true]) {
 		it.scoped(
 			`real client resumes without repeating messages after ${separateBatches ? "multiple projection batches in one commit" : "an unrelated commit"}`,
@@ -602,7 +724,7 @@ describe("subscribeSessionDetail", () => {
 					const output = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
 					const client = resumeStream((resumeFromSequence) => {
 						requests.push(resumeFromSequence);
-						const source = subscribeSessionDetail({
+						const source = subscribeMessages({
 							sessionId: SID,
 							...(resumeFromSequence === undefined
 								? {}
@@ -672,7 +794,7 @@ describe("subscribeSessionDetail", () => {
 						if (envelope._tag === "synchronized") break;
 						if (envelope._tag !== "upsert") throw new Error("expected upsert");
 						delivered.push({
-							id: expectMessage(envelope).id,
+							id: expectMessage([envelope]).id,
 							sequence: envelope.sequence,
 						});
 					}
@@ -741,7 +863,7 @@ describe("subscribeSessionDetail", () => {
 			yield* commit([textDelta("session-b", "b1", "b1-0", "other")]);
 			yield* commit([textDelta("session-a", "a1", "a1-0", "mine")]);
 
-			const message = expectMessage(yield* Queue.take(q));
+			const message = expectMessage(yield* takeN(q, 2));
 			expect(message.id).toBe("a1");
 			expect(textOf(message)).toBe("mine");
 			expect(yield* Queue.size(q)).toBe(0);
@@ -759,7 +881,7 @@ describe("subscribeSessionDetail", () => {
 			const scope = yield* Scope.make();
 			const q = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
 			const fiber = yield* Stream.runForEach(
-				subscribeSessionDetail({ sessionId: SID }),
+				subscribeMessages({ sessionId: SID }),
 				(env) => Queue.offer(q, env),
 			).pipe(Effect.forkIn(scope));
 
@@ -786,7 +908,7 @@ describe("subscribeSessionDetail", () => {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				yield* persist.persistUserMessage(SID, "hello from user");
 
-				const message = expectMessage(yield* Queue.take(q));
+				const message = expectMessage(yield* takeN(q, 2));
 				expect(message.role).toBe("user");
 				expect(textOf(message)).toBe("hello from user");
 
@@ -825,10 +947,11 @@ describe("subscribeSessionDetail", () => {
 					textDelta(SID, "m-sentinel", "m-sentinel-0", "SENTINEL"),
 				]);
 
-				const [first, second] = yield* takeN(q, 2);
-				// Both rows, in transcript order (created_at, then id), from one query.
+				// Both messages, each with its part, from one query.
 				expect(
-					[textOf(expectMessage(first)), textOf(expectMessage(second))].sort(),
+					messagesOf(yield* takeN(q, 4))
+						.map(textOf)
+						.sort(),
 				).toEqual(["SENTINEL", "silent"]);
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeDetailTestLayer())),
@@ -968,6 +1091,8 @@ describe("transcript states carried by the detail feed alone", () => {
 				hasMore: false,
 				status: { _tag: "live" },
 				pending: [],
+				waiting: new Map(),
+				partOrder: new Map(),
 			}),
 			[],
 		);
@@ -994,8 +1119,9 @@ describe("transcript states carried by the detail feed alone", () => {
 				yield* commit([
 					ev("thinking.end", { messageId: "m1", partId: "t1" }, endedAt),
 				]);
-				const ended = yield* Queue.take(q);
-				expect(chatOf([...opening, ended])).toMatchObject([
+				// The message and the thinking part it moved.
+				const ended = yield* takeN(q, 2);
+				expect(chatOf([...opening, ...ended])).toMatchObject([
 					{ type: "thinking", done: true, duration: endedAt - startedAt },
 				]);
 			}).pipe(Effect.provide(makeDetailTestLayer())),
@@ -1037,8 +1163,8 @@ describe("transcript states carried by the detail feed alone", () => {
 					input: { tool: "Bash", command: "ls" },
 				}),
 			]);
-			const running = yield* Queue.take(q);
-			expect(chatOf([...opening, running])).toMatchObject([
+			const running = yield* takeN(q, 2);
+			expect(chatOf([...opening, ...running])).toMatchObject([
 				{ type: "tool", input: { command: "ls" } },
 			]);
 
@@ -1051,8 +1177,8 @@ describe("transcript states carried by the detail feed alone", () => {
 					input: { tool: "Bash", command: "ls -la" },
 				}),
 			]);
-			const completed = yield* Queue.take(q);
-			expect(chatOf([...opening, running, completed])).toMatchObject([
+			const completed = yield* takeN(q, 2);
+			expect(chatOf([...opening, ...running, ...completed])).toMatchObject([
 				{ type: "tool", input: { command: "ls -la" } },
 			]);
 		}).pipe(Effect.provide(makeDetailTestLayer())),
@@ -1076,7 +1202,14 @@ describe("transcript states carried by the detail feed alone", () => {
 					code: "provider_error",
 				}),
 			]);
-			const live = [...opening, ...(yield* takeN(q, 2))];
+			// The turn's message moved, and the error is a message with its part.
+			const errored = yield* takeN(q, 3);
+			expect(namesOf(errored)).toEqual([
+				"m1",
+				"turn-error-4/turn-error-part-4",
+				"turn-error-4",
+			]);
+			const live = [...opening, ...errored];
 			const expected = [
 				{ type: "tool", name: "Bash" },
 				{

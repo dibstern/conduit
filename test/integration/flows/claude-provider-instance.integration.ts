@@ -276,15 +276,18 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		expect(firstTextDeltaIdx).toBeLessThan(firstToolStartIdx);
 		expect(firstToolStartIdx).toBeLessThan(turnCompletedIdx);
 
-		// Nothing may report idle mid-turn: the lease is released once, after
-		// the turn terminates. Both activity indicators read this status.
+		// A send to an idle session reports busy before anything else, so
+		// SDK-local work is never shown idle (conduit-test-6t7n). Nothing may
+		// report idle mid-turn: the lease is released once, after the turn
+		// terminates. Both activity indicators read this status.
 		const statuses = pushCalls
 			.map((c, i) => ({ i, event: c[0] }))
 			.filter(({ event }) => event.type === "session.status");
 		expect(
 			statuses.map(({ event }) => (event.data as { status?: unknown }).status),
-		).toEqual(["idle"]);
-		expect(statuses[0]?.i).toBeGreaterThan(turnCompletedIdx);
+		).toEqual(["busy", "idle"]);
+		expect(statuses[0]?.i).toBe(0);
+		expect(statuses[1]?.i).toBeGreaterThan(turnCompletedIdx);
 	});
 
 	it("permission flow: tool_use → canUseTool → requestPermission → allow → tool_result → result", async () => {

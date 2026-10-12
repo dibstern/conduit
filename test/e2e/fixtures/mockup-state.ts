@@ -36,6 +36,7 @@ export const initMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-001",
 				title: "Fix model selector UI",
 				status: "idle",
@@ -43,6 +44,7 @@ export const initMessages: MockMessage[] = [
 				messageCount: 4,
 			},
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-002",
 				title: "Add dark mode support",
 				status: "idle",
@@ -50,6 +52,7 @@ export const initMessages: MockMessage[] = [
 				messageCount: 8,
 			},
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-003",
 				title: "Refactor WebSocket handler",
 				status: "idle",
@@ -57,6 +60,7 @@ export const initMessages: MockMessage[] = [
 				messageCount: 12,
 			},
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-004",
 				title: "Implement file browser panel",
 				status: "idle",
@@ -64,6 +68,7 @@ export const initMessages: MockMessage[] = [
 				messageCount: 6,
 			},
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-005",
 				title: "Add notification system",
 				status: "idle",
@@ -71,6 +76,7 @@ export const initMessages: MockMessage[] = [
 				messageCount: 3,
 			},
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-006",
 				title: "Set up project structure",
 				status: "idle",
@@ -78,6 +84,7 @@ export const initMessages: MockMessage[] = [
 				messageCount: 10,
 			},
 			{
+				projectSlug: "myapp",
 				id: "sess-mockup-007",
 				title: "Initial relay architecture",
 				status: "idle",
@@ -607,6 +614,7 @@ export const noInstanceInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-ni-001",
 				title: "Test session",
 				status: "idle",
@@ -639,6 +647,7 @@ export const multiInstanceInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-mi-001",
 				title: "Test session",
 				status: "idle",
@@ -671,6 +680,7 @@ export const singleInstanceInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-si-001",
 				title: "Test session",
 				status: "idle",
@@ -741,6 +751,7 @@ export const variantInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-var-001",
 				title: "Test session",
 				status: "idle",
@@ -785,6 +796,7 @@ export const noVariantInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-novar-001",
 				title: "Test session",
 				status: "idle",
@@ -857,6 +869,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-context-001",
 				title: "Test session",
 				status: "idle",
@@ -904,6 +917,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 		roots: true,
 		sessions: [
 			{
+				projectSlug: "myapp",
 				id: "sess-context-none-001",
 				title: "Test session",
 				status: "idle",

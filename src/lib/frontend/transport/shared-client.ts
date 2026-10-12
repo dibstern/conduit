@@ -29,11 +29,12 @@ import {
 	Schedule,
 	Scope,
 } from "effect";
+import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import {
 	markControlSocketOpen,
 	trackControlSocket,
 } from "./connection-status.svelte.js";
-import { resumeStream } from "./resume.js";
+import { makeResumeLedger, type ResumeLedger, resumeStream } from "./resume.js";
 import { decodeSessionDetail } from "./session-detail-wire.js";
 import { WsRpcGroup } from "./ws-rpc.js";
 
@@ -75,12 +76,14 @@ const makeSubscriptions = (
 		} = {},
 	) =>
 		resumeStream(
-			(resumeFromSequence) =>
+			(resumeFromSequence, resumeBase) =>
 				sockets.control.SubscribeShell({
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+					...(resumeBase === undefined ? {} : { resumeBase }),
 				}),
 			{
+				ledger: makeResumeLedger(),
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { from: options.resumeFromSequence }),
@@ -103,18 +106,29 @@ const makeSubscriptions = (
 	sessionDetail: (options: {
 		readonly sessionId: string;
 		readonly resumeFromSequence?: number;
+		/** What the view resumed from has applied; the caller keeps it with
+		 *  the view, so a resume from its high-water mark is checked too. */
+		readonly ledger?: ResumeLedger;
+		/** A snapshot saved by an earlier page load, delivered first. */
+		readonly saved?: SessionDetailEnvelope | undefined;
 	}) =>
 		resumeStream(
-			(resumeFromSequence) =>
+			(resumeFromSequence, resumeBase, resumePoint) =>
 				sockets.stream
 					.SubscribeSessionDetail({
 						projectSlug,
 						sessionId: options.sessionId,
 						textSuffixes: true,
 						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
+						...(resumeBase === undefined ? {} : { resumeBase }),
+						...(resumePoint === undefined ? {} : { resumePoint }),
 					})
 					.pipe(decodeSessionDetail),
-			{ from: options.resumeFromSequence },
+			{
+				from: options.resumeFromSequence,
+				ledger: options.ledger ?? makeResumeLedger(),
+				saved: options.saved,
+			},
 		),
 	/** One session's todo list. Low-rate, so it rides the control socket. */
 	todos: (options: { readonly sessionId: string }) =>

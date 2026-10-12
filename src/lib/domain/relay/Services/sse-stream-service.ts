@@ -1,7 +1,8 @@
-import { Context, Effect, Fiber, Layer, Stream } from "effect";
+import { SqlClient } from "@effect/sql";
+import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
+import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { Logger } from "../../../logger.js";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type {
 	SSEStreamCallbacks,
 	SSEStreamPort,
@@ -104,7 +105,7 @@ export const SSEStreamLive: Layer.Layer<
 	Effect.gen(function* () {
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
-		const read = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const directories = new Set([
 			config.projectDir,
 			...(config.extraFolders ?? []),
@@ -176,8 +177,9 @@ export const SSEStreamLive: Layer.Layer<
 				gate.withPermits(1)(
 					Effect.gen(function* () {
 						if (fiber) return;
-						if (read._tag === "Some") {
-							const sessions = yield* read.value.listSessionInfos().pipe(
+						if (sql._tag === "Some") {
+							const rows = yield* sql.value<{ workspace: string }>`
+								SELECT workspace FROM sessions WHERE workspace IS NOT NULL`.pipe(
 								Effect.catchAll((error) => {
 									log?.warn(
 										"Failed to read OpenCode workspace directories",
@@ -186,11 +188,16 @@ export const SSEStreamLive: Layer.Layer<
 									return Effect.succeed([]);
 								}),
 							);
-							for (const session of sessions)
+							for (const row of rows) {
+								const workspace = yield* Schema.decodeUnknown(
+									Schema.parseJson(SessionWorkspaceSchema),
+								)(row.workspace).pipe(Effect.option);
+								if (workspace._tag === "None") continue;
 								for (const directory of Object.values(
-									session.workspace?.worktrees ?? {},
+									workspace.value.worktrees ?? {},
 								))
 									directories.add(directory);
+							}
 						}
 						fiber = yield* Effect.forkIn(
 							Stream.runForEach(

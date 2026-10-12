@@ -86,6 +86,7 @@
 		<ol aria-label="Queued messages" class="flex flex-col gap-1">
 			{#each inputs as input (input.inputId)}
 				{@const images = input.request.images?.length ?? 0}
+				{@const command = input.request.text.trimStart().startsWith("/")}
 				<li data-testid="pending-input-row" data-input-id={input.inputId} class="flex items-center gap-2">
 					<span class="flex-1 min-w-0">
 						<span data-testid="pending-input-text" class="block truncate">{extractDisplayText(input.request.text)}</span>
@@ -111,8 +112,8 @@
 									class="shrink-0"
 									disabled={steer === "prompt_open"}
 									onclick={() => act(sendInputNowRpc, input)}
-								>Steer</TextButton>{/snippet}
-								{steer === "prompt_open" ? "Answer the open prompt before steering" : "Send it into the running turn"}
+								>{command ? "Run now" : "Steer"}</TextButton>{/snippet}
+								{steer === "prompt_open" ? "Answer the open prompt before steering" : command ? "Stop the running turn and run this next" : "Send it into the running turn"}
 							</Tooltip>
 						{/if}
 						<TextButton data-testid="pending-input-edit" class="shrink-0" onclick={() => edit(input)}>Edit</TextButton>

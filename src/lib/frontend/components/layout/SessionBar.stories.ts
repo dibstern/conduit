@@ -56,6 +56,7 @@ type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 function seedSessions(rows: readonly Row[]): void {
 	const sessions: SessionInfo[] = rows.map((row) => ({
 		status: "idle",
+		projectSlug: "conduit",
 		...row,
 	}));
 	applySessionChange({
@@ -1314,7 +1315,7 @@ export const DesktopBackgroundTasks: Story = {
 			...[
 				"session-bar-title",
 				"session-skills-chip",
-				"session-bar-island-overflow",
+				"session-bar-overflow",
 			].map((id) => canvas.getByTestId(id)),
 		])
 			expect(

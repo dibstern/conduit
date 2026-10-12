@@ -11,6 +11,7 @@ import {
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { forkSession } from "../../../../src/lib/domain/relay/Services/session-command.js";
 import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
@@ -231,6 +232,137 @@ it.each([
 							supportsFork: true,
 							supportsRevert: false,
 							commands: [],
+						}),
+					),
+				}),
+			),
+			Effect.provideService(
+				ConfigTag,
+				makeMockConfig({
+					projectDir: "/project",
+					configDir: "/unused-config",
+					claudeSdk: {
+						...claudeSdk,
+						fork: { readTranscript, forkSession: forkNative },
+					},
+				}),
+			),
+			Effect.provideService(LoggerTag, makeMockLogger()),
+			Effect.provide(makeOverridesStateLive()),
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+});
+
+// A fork must use the kept branch even while the native transcript still has
+// its discarded tail. Exercise canonical events, SQLite projection, the fork
+// command and the child's real turn planner without opening a relay socket.
+it.each([
+	"pending",
+	"committed",
+] as const)("forks only kept Claude history after a %s rewind", async (phase) => {
+	const readTranscript = vi.fn(async (sdkId: string) =>
+		[
+			{ id: "first", role: "user" as const },
+			{ id: "before", role: "assistant" as const },
+			{ id: "uncovered", role: "user" as const },
+			{ id: "later", role: "assistant" as const },
+		].map(({ id, role }) => ({
+			type: role,
+			uuid: `${id}-native`,
+			session_id: sdkId,
+			message: { id, role, content: [{ type: "text", text: id }] },
+			parent_tool_use_id: null,
+			parent_agent_id: null,
+		})),
+	);
+	const forkNative = vi.fn(async () => ({ sessionId: "rewind-child-sdk" }));
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const state = yield* ProviderStateEffectTag;
+			const read = yield* ReadQueryEffectTag;
+			yield* commit([
+				canonicalEvent("session.created", "parent", {
+					sessionId: "parent",
+					title: "Parent",
+					provider: "claude",
+				}),
+				...sessionPickEvents("parent", {
+					harness: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
+					effort: "high",
+					contextWindow: "200k",
+				}),
+				...message("first", "user", "Kept request"),
+				...message("before", "assistant", "Kept response"),
+				...message("uncovered", "user", "Discarded request"),
+				...message("later", "assistant", "Discarded response"),
+			]);
+			yield* state.saveUpdates("parent", [
+				{
+					key: "nativeThread:claude",
+					value: JSON.stringify({
+						resumeSessionId: "source-sdk",
+						configDir: "/source",
+						firstSequence: 0,
+						deliveredThrough: 0,
+					}),
+				},
+			]);
+			yield* commit([
+				canonicalEvent("session.rewound", "parent", {
+					messageId: "uncovered",
+				}),
+			]);
+			if (phase === "committed")
+				yield* commit([
+					canonicalEvent("message.removed", "parent", {
+						messageId: "uncovered",
+					}),
+					canonicalEvent("message.removed", "parent", {
+						messageId: "later",
+					}),
+					canonicalEvent("session.rewind_committed", "parent", {
+						messageId: "uncovered",
+					}),
+				]);
+			expect(
+				(yield* read.getSessionMessagesWithParts("parent")).map(
+					(row) => row.id,
+				),
+			).toEqual(["first", "before"]);
+			const rejected = yield* Effect.either(
+				forkSession("parent", { messageId: "uncovered" }),
+			);
+			expect(rejected._tag).toBe("Left");
+			const child = yield* forkSession("parent");
+			const history = yield* read.getSessionMessagesWithParts(child.id);
+			expect
+				.soft(history.map((row) => row.text))
+				.toEqual(["Kept request", "Kept response"]);
+			expect.soft(forkNative).not.toHaveBeenCalled();
+			const prepare = yield* makePrepareTurn();
+			const prepared = yield* prepare(child.id, "claude", "Continue child");
+			expect.soft(prepared.resumeSessionId).toBeUndefined();
+			expect.soft(prepared.prompt).toContain("Kept request");
+			expect.soft(prepared.prompt).toContain("Kept response");
+			expect.soft(prepared.prompt).not.toContain("Discarded");
+		}).pipe(
+			Effect.provideService(
+				OrchestrationEngineTag,
+				withDispatchEffect({
+					dispatchEffect: vi.fn(() =>
+						Effect.succeed({
+							models: [
+								{
+									id: "sonnet",
+									name: "Sonnet",
+									providerId: "claude",
+									variants: { high: {} },
+									contextWindowOptions: [{ value: "200k", label: "200k" }],
+								},
+							],
 						}),
 					),
 				}),

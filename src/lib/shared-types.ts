@@ -20,6 +20,7 @@ export type {
 } from "./contracts/session-workspace.js";
 
 import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
+import type { ToolInput, ToolText } from "./contracts/tool-wire.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
 import type { PartType, ToolStatus } from "./instance/sdk-types.js";
@@ -301,7 +302,7 @@ export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
 	status: SessionStatusSchema,
-	projectSlug: Schema.optional(Schema.String),
+	projectSlug: Schema.String,
 	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
 	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
 	messageCount: Schema.optional(Schema.Number),
@@ -462,11 +463,9 @@ export interface HistoryMessagePart {
 	 */
 	state?: {
 		status?: ToolStatus;
-		input?: unknown;
-		output?: string;
-		/** `output` is a preview; GetToolContent serves the full text. */
-		isTruncated?: boolean;
-		fullContentLength?: number;
+		/** Whole, or a preview GetToolDetails serves in full. */
+		input?: ToolInput;
+		output?: ToolText;
 		error?: string;
 		[key: string]: unknown;
 	};
@@ -640,8 +639,6 @@ const ToolResultSchema = Schema.Struct({
 	id: Schema.String,
 	content: Schema.String,
 	is_error: Schema.Boolean,
-	isTruncated: Schema.optional(Schema.Boolean),
-	fullContentLength: Schema.optional(Schema.Number),
 	messageId: Schema.optional(Schema.String),
 });
 
@@ -721,7 +718,7 @@ const UserMessageSchema = Schema.Struct({
 
 /** Bump on wire-contract changes. The build ID covers behavioural changes
  *  with the same wire shape. Absence marks a daemon older than the handshake. */
-export const WS_PROTOCOL_VERSION = 5;
+export const WS_PROTOCOL_VERSION = 7;
 
 // -- Combined RelayMessage schema union --
 

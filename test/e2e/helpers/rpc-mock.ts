@@ -213,12 +213,24 @@ export class RpcMockControl {
 		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
 	}
 
+	/** The relay stamps its own project on every session row it streams. */
+	owned(rows: readonly unknown[]): readonly unknown[] {
+		return rows.map((row) => ({
+			projectSlug: this.projectSlug,
+			...(row as object),
+		}));
+	}
+
 	setShellRows(rows: readonly unknown[]): void {
 		this.shellRows = rows;
 		this.shellSequence++;
 		if (this.streams.has("SubscribeShell")) {
 			this.sendChunk("SubscribeShell", [
-				{ _tag: "snapshot", sequence: this.shellSequence, rows },
+				{
+					_tag: "snapshot",
+					sequence: this.shellSequence,
+					rows: this.owned(rows),
+				},
 				{ _tag: "synchronized" },
 			]);
 		}
@@ -239,7 +251,7 @@ export class RpcMockControl {
 					{
 						_tag: "snapshot",
 						sequence: this.familySequence,
-						rows: this.familyRows,
+						rows: this.owned(this.familyRows),
 					},
 					{ _tag: "synchronized" },
 				];
@@ -268,7 +280,11 @@ export class RpcMockControl {
 		this.shellSequence++;
 		if (this.streams.has("SubscribeShell"))
 			this.sendChunk("SubscribeShell", [
-				{ _tag: "upsert", item: row, sequence: this.shellSequence },
+				{
+					_tag: "upsert",
+					item: this.owned([row])[0],
+					sequence: this.shellSequence,
+				},
 			]);
 	}
 
@@ -366,7 +382,7 @@ export class RpcMockControl {
 					{
 						_tag: "snapshot",
 						sequence: this.shellSequence,
-						rows: this.shellRows,
+						rows: this.owned(this.shellRows),
 					},
 					{ _tag: "synchronized" },
 				];

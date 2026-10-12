@@ -67,8 +67,12 @@ export const CANONICAL_EVENT_TYPES = [
 	"input.admitted",
 	"input.sent",
 	"input.cancelled",
+	"input.interrupt_requested",
 	"session.created",
 	"session.renamed",
+	"session.rewound",
+	"session.rewind_undone",
+	"session.rewind_committed",
 	"session.workspace_changed",
 	"session.workspace_hint_changed",
 	"session.workspace_started",
@@ -141,6 +145,7 @@ export interface MessageSnapshotPayload {
 		readonly sessionID: string;
 		readonly role: string;
 		readonly parentID?: string;
+		readonly summary?: boolean;
 		readonly time?: { readonly created?: number; readonly completed?: number };
 		readonly cost?: number;
 		readonly tokens?: {
@@ -287,7 +292,7 @@ export const STEER_BLOCKERS = [
 	"model_differs",
 	"agent_differs",
 	"variant_differs",
-	"slash_command",
+	"slash_command", // Historical RPC refusal; retained to decode older servers' replies.
 ] as const;
 export type SteerBlocker = (typeof STEER_BLOCKERS)[number];
 
@@ -318,6 +323,11 @@ export interface InputSentPayload {
 }
 
 export interface InputCancelledPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+}
+
+export interface InputInterruptRequestedPayload {
 	readonly sessionId: string;
 	readonly inputId: string;
 }
@@ -617,8 +627,15 @@ export interface EventPayloadMap {
 	"input.admitted": InputAdmittedPayload;
 	"input.sent": InputSentPayload;
 	"input.cancelled": InputCancelledPayload;
+	"input.interrupt_requested": InputInterruptRequestedPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.rewound": {
+		readonly messageId: string;
+		readonly previousMessageId?: string | null;
+	};
+	"session.rewind_undone": { readonly previousMessageId?: string | null };
+	"session.rewind_committed": { readonly messageId: string };
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
 	"session.workspace_hint_changed": SessionWorkspaceHintChangedPayload;
 	"session.workspace_started": SessionWorkspaceStartedPayload;
@@ -1005,6 +1022,11 @@ const InputCancelledPayloadSchema = Schema.Struct({
 	inputId: Schema.String,
 });
 
+const InputInterruptRequestedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+});
+
 const SessionCreatedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	title: Schema.String,
@@ -1015,6 +1037,8 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
 	sideThread: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** The input a Side Thread was started with, so a retried start finds it. */
+	startInputId: Schema.optionalWith(Schema.String, { exact: true }),
 	permissionMode: Schema.optionalWith(
 		Schema.Literal(...SESSION_PERMISSION_MODES),
 		{
@@ -1326,6 +1350,10 @@ const InputCancelledEventSchema = eventEnvelope(
 	"input.cancelled",
 	InputCancelledPayloadSchema,
 );
+const InputInterruptRequestedEventSchema = eventEnvelope(
+	"input.interrupt_requested",
+	InputInterruptRequestedPayloadSchema,
+);
 const SessionCreatedEventSchema = eventEnvelope(
 	"session.created",
 	SessionCreatedPayloadSchema,
@@ -1502,8 +1530,26 @@ export const CanonicalEventSchema = Schema.Union(
 	InputAdmittedEventSchema,
 	InputSentEventSchema,
 	InputCancelledEventSchema,
+	InputInterruptRequestedEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	eventEnvelope(
+		"session.rewound",
+		Schema.Struct({
+			messageId: Schema.String,
+			previousMessageId: Schema.optional(Schema.NullOr(Schema.String)),
+		}),
+	),
+	eventEnvelope(
+		"session.rewind_undone",
+		Schema.Struct({
+			previousMessageId: Schema.optional(Schema.NullOr(Schema.String)),
+		}),
+	),
+	eventEnvelope(
+		"session.rewind_committed",
+		Schema.Struct({ messageId: Schema.String }),
+	),
 	SessionWorkspaceChangedEventSchema,
 	SessionWorkspaceHintChangedEventSchema,
 	SessionWorkspaceStartedEventSchema,

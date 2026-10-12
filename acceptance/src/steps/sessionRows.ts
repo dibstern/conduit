@@ -14,6 +14,8 @@ import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
+const OPENCODE_ROW_ID = "row-opencode";
+
 export const sessionRowsHandlers: StepHandler[] = [
 	{
 		name: "seed worktree and Local session rows",
@@ -149,6 +151,52 @@ export const sessionRowsHandlers: StepHandler[] = [
 				nextCursor: null,
 			}));
 			rpc.setShellRows(rows.filter((row) => row.projectSlug === "myapp"));
+		},
+	},
+	{
+		name: "seed an OpenCode session row",
+		match: /^the sidebar has an OpenCode session titled "([^"]+)"$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setShellRows([
+				{
+					id: OPENCODE_ROW_ID,
+					title: match[1] ?? "",
+					status: "idle",
+					projectSlug: "myapp",
+					updatedAt: PINNED_CLOCK_MS - 60_000,
+					// A non-Claude model provider is what marks the row as OpenCode.
+					model: { model: "gpt-5.1", provider: "openai" },
+				} satisfies SessionInfo,
+			]);
+		},
+	},
+	{
+		// session.renamed has no relay message: committing it re-projects the
+		// session, and the shell stream upserts the row with its new title.
+		name: "rename the OpenCode session from the server",
+		match: /^the server renames the OpenCode session to "([^"]+)"$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const row = rpc.shellRows?.find(
+				(candidate) => (candidate as SessionInfo).id === OPENCODE_ROW_ID,
+			);
+			if (!row) throw new Error("The OpenCode session row was not seeded");
+			rpc.upsertShellRow({
+				...(row as SessionInfo),
+				title: match[1] ?? "",
+			});
+		},
+	},
+	{
+		name: "OpenCode session row title",
+		match: /^the OpenCode session row shows the title "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			const title = world.page
+				.locator(`#session-list [data-session-id="${OPENCODE_ROW_ID}"]`)
+				.locator(".session-title-inner");
+			await expect(title).toHaveText(match[1] ?? "");
+			// Let a rename's one-shot gleam end so the baseline holds the settled row.
+			await expect(title).not.toHaveClass(/session-title-gleam/);
 		},
 	},
 	{

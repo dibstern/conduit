@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	applyProjectList,
+	getDraftProject,
 	projectState,
 } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
+import { setSessionScope } from "../../../src/lib/frontend/stores/session-scope.js";
+import { encodeGroupScope } from "../../../src/lib/session-scope.js";
 
 const pushState = vi.fn();
 const replaceState = vi.fn();
@@ -29,6 +32,56 @@ beforeEach(() => {
 	routerState.path = "/s/session-a";
 	routerState.search = "?p=project-a";
 	projectState.projects = [projectA, projectB];
+	projectState.newSessionProject = null;
+});
+
+describe("draft project selection", () => {
+	beforeEach(() => {
+		routerState.search = "";
+		projectState.projects = [
+			{ ...projectA, slug: "conduit" },
+			{ ...projectB, slug: "dotfiles" },
+		];
+		projectState.newSessionProject = "conduit";
+	});
+
+	it("prefers the sidebar project scope over the remembered project", () => {
+		setSessionScope("dotfiles");
+		expect(getDraftProject()).toBe("dotfiles");
+	});
+
+	it("prefers an explicit draft project over the sidebar scope", () => {
+		routerState.search = "?project=conduit";
+		setSessionScope("dotfiles");
+		expect(getDraftProject()).toBe("conduit");
+	});
+
+	it("does not treat a group scope as a project slug", () => {
+		setSessionScope(encodeGroupScope("dotfiles"));
+		expect(getDraftProject()).toBe("conduit");
+	});
+
+	it("does not choose a scoped project whose folder is missing", () => {
+		projectState.projects = [
+			{ ...projectA, slug: "conduit" },
+			{ ...projectB, slug: "dotfiles", missing: true },
+		];
+		setSessionScope("dotfiles");
+		expect(getDraftProject()).toBe("conduit");
+	});
+
+	it("uses the remembered project when the scope is unregistered", () => {
+		setSessionScope("unknown");
+		expect(getDraftProject()).toBe("conduit");
+	});
+
+	it("uses the first available project when the remembered project is missing", () => {
+		projectState.projects = [
+			{ ...projectA, slug: "conduit", missing: true },
+			{ ...projectB, slug: "dotfiles" },
+		];
+		expect(getDraftProject()).toBe("dotfiles");
+	});
 });
 
 afterEach(() => {

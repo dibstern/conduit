@@ -18,6 +18,7 @@ import { Chunk, Effect, Layer, Stream } from "effect";
 import { expect, it } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
@@ -345,6 +346,7 @@ it("the auto-title rename advances the version of the session it renames", async
 				queryFactory: () => assistantTitle("Investigate The OAuth Loop"),
 			}),
 			Layer.mergeAll(
+				Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 				bus,
 				makePersistenceEffectLayer(
 					dbPath,
@@ -368,9 +370,9 @@ it("the auto-title rename advances the version of the session it renames", async
 
 					const titles = yield* SessionTitleServiceTag;
 					const announced = yield* announcedDuring(
-						titles.startForFirstClaudeMessage({
+						titles.titleFromMessage({
 							sessionId: "titled",
-							firstMessage: "OAuth keeps redirecting after callback.",
+							message: "OAuth keeps redirecting after callback.",
 						}),
 					);
 

@@ -186,7 +186,8 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
 		if (driver === undefined) return input.sessionId;
 		if (isClaudeDriver(driver)) {
-			yield* resolvePendingClaudeQuestions(input);
+			if (input.delivery !== "steer")
+				yield* resolvePendingClaudeQuestions(input);
 			return input.sessionId;
 		}
 		return yield* materializeOpenCodeSession(

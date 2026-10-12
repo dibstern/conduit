@@ -23,6 +23,7 @@ const row = (
 		>
 	> = {},
 ): SessionInfo => ({
+	projectSlug: "project-a",
 	id,
 	title: id,
 	status: "idle",

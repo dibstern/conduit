@@ -8,8 +8,8 @@
 	import Menu from "../ui/Menu.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
-	import SessionVerbItems from "./SessionVerbItems.svelte";
-	import { getSessionVerbs, type SessionVerb, type SessionVerbHost } from "./session-verbs.js";
+	import SessionCommandItems from "./SessionCommandItems.svelte";
+	import { getSessionCommands, type SessionCommand, type SessionCommandHost } from "./session-commands.js";
 
 	let {
 		session,
@@ -29,13 +29,13 @@
 		projectAccent?: number;
 		branch?: string | undefined;
 		presentation?: "menu" | "sheet";
-		host: SessionVerbHost;
+		host: SessionCommandHost;
 		now?: number;
 		onclose: () => void;
-		/** Non-session actions appended after a divider, drawn as verb rows. */
-		extras?: readonly SessionVerb[];
+		/** Non-session actions appended after a divider, drawn as command rows. */
+		extras?: readonly SessionCommand[];
 	} = $props();
-	// Captured once: dialogs opened from a verb call focusTarget after this menu
+	// Captured once: dialogs opened from a command call focusTarget after this menu
 	// unmounts, when its props may already be gone.
 	const opener = untrack(() => anchor);
 	const targetId = untrack(() => session.id);
@@ -51,8 +51,8 @@
 			return formatSnoozeTime(session.snoozedUntil ?? null, now);
 		return formatTimeAgo(session.updatedAt);
 	});
-	const verbs = $derived([
-		...getSessionVerbs(session, now, host, presentation === "sheet" ? "sheet" : "center"),
+	const commands = $derived([
+		...getSessionCommands(session, now, host, presentation === "sheet" ? "sheet" : "center"),
 		...(extras.length > 0 ? [{ divider: true } as const, ...extras] : []),
 	]);
 	function focusTarget(): HTMLElement | null {
@@ -72,7 +72,7 @@
 		if (!selected) returnFocus();
 	});
 
-	function select(action: SessionVerb["run"]) {
+	function select(action: SessionCommand["run"]) {
 		selected = true;
 		action(focusTarget);
 		onclose();
@@ -122,5 +122,5 @@
 	>
 		{#snippet trigger()}{/snippet}
 		{@render header(presentation === "sheet")}
-		<SessionVerbItems {verbs} {presentation} onselect={select} />
+		<SessionCommandItems {commands} {presentation} onselect={select} />
 	</Menu>

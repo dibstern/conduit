@@ -1,7 +1,6 @@
 import type { Attachment } from "svelte/attachments";
 import { on } from "svelte/events";
 import { getBrowserClientId } from "../stores/client-identity.js";
-import { getCurrentSlug } from "../stores/router.svelte.js";
 import { findSession } from "../stores/session.svelte.js";
 import { showToast } from "../stores/ui.svelte.js";
 import { markSessionSeenRpc } from "../transport/ws-rpc-client.js";
@@ -77,7 +76,7 @@ export function touch(
 		},
 		source,
 	);
-	const projectSlug = session.projectSlug ?? getCurrentSlug();
+	const projectSlug = session.projectSlug;
 	if (!report || !projectSlug) return;
 	reported.set(session.id, report.upTo);
 	send(session.id, projectSlug, report.upTo);

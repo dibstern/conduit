@@ -43,13 +43,6 @@ type SegmentedRecipe = {
 };
 
 export const SEGMENTED_VARIANTS = {
-	/** Compact settings values, with literal 44px phone options. */
-	compact: {
-		list: "inline-flex overflow-hidden rounded-[8px] border border-border text-[10.5px]",
-		item: "px-[7px] py-[2px] max-md:min-h-[44px] max-md:min-w-[36px] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
-		selected: "bg-border-chip text-text",
-		unselected: "text-text-muted hover:text-text",
-	},
 	/** P2 effort choices, with a neutral selected fill in both themes. */
 	picker: {
 		list: "flex flex-1 min-w-0 gap-[3px]",
@@ -109,6 +102,18 @@ export const SEGMENTED_VARIANTS = {
 		item: "flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer",
 		selected: "border-accent text-text bg-accent/10",
 		unselected: "border-border text-text-muted hover:text-text",
+	},
+	/**
+	 * The settings mockup's joined segment (`.seg`): one outlined capsule split
+	 * by hairlines, the selected part tinted pink. Inherits its font size from
+	 * its container. Settings wears it everywhere: Server's instance Type, Composer,
+	 * and Usage's warning and forecast switches.
+	 */
+	joined: {
+		list: "inline-flex shrink-0 overflow-hidden rounded-[7px] border border-border",
+		item: "px-[9px] py-[4px] font-medium border-l border-border first:border-l-0 max-md:min-h-[44px] max-md:min-w-[36px] cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50 disabled:cursor-not-allowed",
+		selected: "bg-accent-bg text-accent",
+		unselected: "text-text-secondary hover:text-text",
 	},
 	/** Full-width session view band, with literal 44px phone targets. */
 	switcher: {

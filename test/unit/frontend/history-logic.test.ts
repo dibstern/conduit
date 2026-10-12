@@ -299,8 +299,8 @@ describe("historyToChatMessages — tool status mapping", () => {
 						state: {
 							status: "running",
 							input: {
-								description: "do stuff",
-								subagent_type: "general",
+								_tag: "whole",
+								value: { description: "do stuff", subagent_type: "general" },
 							},
 						},
 					},
@@ -327,8 +327,8 @@ describe("historyToChatMessages — tool status mapping", () => {
 						state: {
 							status: "running",
 							input: {
-								description: "do stuff",
-								subagent_type: "general",
+								_tag: "whole",
+								value: { description: "do stuff", subagent_type: "general" },
 							},
 						},
 					},
@@ -355,8 +355,8 @@ describe("historyToChatMessages — tool status mapping", () => {
 						state: {
 							status: "running",
 							input: {
-								description: "do stuff",
-								subagent_type: "general",
+								_tag: "whole",
+								value: { description: "do stuff", subagent_type: "general" },
 							},
 							metadata: { status: "completed" },
 						},
@@ -403,7 +403,10 @@ describe("historyToChatMessages — tool status mapping", () => {
 						type: "tool",
 						callID: "toolu_789",
 						tool: "task",
-						state: { status: "completed", output: "done" },
+						state: {
+							status: "completed",
+							output: { _tag: "whole", text: "done" },
+						},
 					},
 				],
 			},
@@ -492,7 +495,7 @@ describe("historyToChatMessages — messageId propagation", () => {
 						type: "tool",
 						callID: "toolu_1",
 						tool: "read",
-						state: { status: "completed", input: {} },
+						state: { status: "completed", input: { _tag: "whole", value: {} } },
 					},
 					{ id: "p2", type: "text", text: "part two" },
 					{ id: "p3", type: "text", text: "" },
@@ -564,7 +567,10 @@ describe("historyToChatMessages — createdAt propagation", () => {
 						type: "tool",
 						callID: "toolu_1",
 						tool: "read",
-						state: { status: "completed", output: "file contents" },
+						state: {
+							status: "completed",
+							output: { _tag: "whole", text: "file contents" },
+						},
 					},
 				],
 				time: { created: 4000 },

@@ -1,5 +1,6 @@
 import type { SqlClient } from "@effect/sql";
 import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
+import type { InputDelivery } from "../../../contracts/stored-event.js";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -64,6 +65,8 @@ export interface ProviderTurnServicePrepareInput {
 	readonly commandId: string;
 	readonly sessionId: string;
 	readonly model?: ProviderTurnServiceSendInput["model"];
+	/** Steers leave open questions for the inbox to refuse. */
+	readonly delivery?: InputDelivery;
 }
 
 export interface ProviderTurnServiceInterruptInput {

@@ -156,9 +156,12 @@ export const SessionSetupLive = Layer.scoped(
 					const gate = gates.get(sessionId);
 					return gate ? Deferred.await(gate) : Effect.void;
 				}),
+			// The setup projector writes parts as setup-${sessionId}-part, so a
+			// primary-key range avoids parsing every part's metadata at startup.
 			recover: sql<{ session_id: string }>`SELECT m.session_id
 				FROM messages m JOIN message_parts p ON p.message_id = m.id
-				WHERE CASE WHEN json_valid(p.metadata)
+				WHERE p.id >= 'setup-' AND p.id < 'setup.'
+					AND CASE WHEN json_valid(p.metadata)
 					THEN json_extract(p.metadata, '$.setup.status') END = 'running'`.pipe(
 				Effect.mapError(
 					(cause) =>

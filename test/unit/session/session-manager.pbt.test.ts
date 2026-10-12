@@ -131,7 +131,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						if (unique.length === 0) return;
 
 						const client = createMockClient(unique);
-						const mgr = new SessionManager({ client });
+						const mgr = new SessionManager({
+							projectSlug: "test-project",
+							client,
+						});
 
 						const id = await mgr.initialize();
 
@@ -173,7 +176,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			];
 			const client = createMockClient(sessions);
 
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 			const id = await mgr.initialize();
 
 			// ses_old has time.updated=5000 > ses_new time.updated=2000
@@ -182,7 +185,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 		it("property: with no sessions, creates one", async () => {
 			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const id = await mgr.initialize("Test");
 			expect(id).toBeTruthy();
@@ -224,7 +227,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			return origGetMessages(...args);
 		};
 
-		const mgr = new SessionManager({ client });
+		const mgr = new SessionManager({ projectSlug: "test-project", client });
 		const id = await mgr.initialize();
 
 		// getMessages should NOT have been called during initialize
@@ -244,7 +247,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			await fc.assert(
 				fc.asyncProperty(arbSessionTitle, async (title) => {
 					const client = createMockClient([]);
-					const mgr = new SessionManager({ client });
+					const mgr = new SessionManager({
+						projectSlug: "test-project",
+						client,
+					});
 
 					const session = await mgr.createSession(title);
 
@@ -261,14 +267,14 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				{ id: "ses_old", title: "old", time: { created: 1000, updated: 1000 } },
 				{ id: "ses_new", title: "new", time: { created: 2000, updated: 2000 } },
 			]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 			const defaultId = await mgr.getDefaultSessionId();
 			expect(defaultId).toBe("ses_new");
 		});
 
 		it("creates a new session when none exist", async () => {
 			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 			const defaultId = await mgr.getDefaultSessionId();
 			expect(defaultId).toBeTruthy();
 			// Verify session was actually created
@@ -281,7 +287,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 
 		it("emits session_lifecycle when creating a new session", async () => {
 			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const events: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => events.push(ev));
@@ -299,7 +305,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const client = createMockClient([
 				{ id: "ses_1", title: "One", time: { created: 1000, updated: 1000 } },
 			]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const events: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => events.push(ev));
@@ -320,7 +326,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						if (unique.length < 2) return;
 
 						const client = createMockClient(unique);
-						const mgr = new SessionManager({ client });
+						const mgr = new SessionManager({
+							projectSlug: "test-project",
+							client,
+						});
 
 						const list = await mgr.listSessions();
 
@@ -351,7 +360,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			];
 			const client = createMockClient(sessions);
 
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 			// Seed lastMessageAt via initialize (uses time.updated)
 			await mgr.initialize();
 
@@ -375,7 +384,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						if (unique.length === 0) return;
 
 						const client = createMockClient(unique);
-						const mgr = new SessionManager({ client });
+						const mgr = new SessionManager({
+							projectSlug: "test-project",
+							client,
+						});
 
 						const list = await mgr.listSessions();
 						for (const s of list) {
@@ -399,7 +411,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				{ id: "ses_c", title: "C", time: { created: 2000, updated: 2000 } },
 			];
 			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const lifecycleEvents: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => lifecycleEvents.push(ev));
@@ -421,7 +433,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				{ id: "ses_x", title: "X", time: { created: 1000, updated: 2000 } },
 			];
 			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const lifecycleEvents: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => lifecycleEvents.push(ev));
@@ -444,7 +456,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				},
 			];
 			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const lifecycleEvents: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => lifecycleEvents.push(ev));
@@ -470,7 +482,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						},
 					];
 					const client = createMockClient(sessions);
-					const mgr = new SessionManager({ client });
+					const mgr = new SessionManager({
+						projectSlug: "test-project",
+						client,
+					});
 
 					await mgr.renameSession("ses_r", newTitle);
 
@@ -506,7 +521,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				},
 			];
 			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const results = await mgr.searchSessions("auth");
 
@@ -526,7 +541,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				},
 			];
 			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const upper = await mgr.searchSessions("MY PROJECT");
 			const lower = await mgr.searchSessions("my project");
@@ -543,7 +558,10 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						if (unique.length === 0) return;
 
 						const client = createMockClient(unique);
-						const mgr = new SessionManager({ client });
+						const mgr = new SessionManager({
+							projectSlug: "test-project",
+							client,
+						});
 
 						const all = await mgr.searchSessions("");
 						expect(all.length).toBe(unique.length);
@@ -573,7 +591,11 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				sessionID: "ses_h",
 			})) as Message[];
 			client._messages.set("ses_h", msgs);
-			const mgr = new SessionManager({ client, historyPageSize: 50 });
+			const mgr = new SessionManager({
+				projectSlug: "test-project",
+				client,
+				historyPageSize: 50,
+			});
 			const page = await mgr.loadHistory("ses_h");
 			expect(page.messages.map((message) => message.id)).toEqual(
 				Array.from({ length: 50 }, (_, i) => `msg_${i + 70}`),
@@ -602,6 +624,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 						client._messages.set("ses_p", msgs);
 
 						const mgr = new SessionManager({
+							projectSlug: "test-project",
 							client,
 							historyPageSize: pageSize,
 						});
@@ -622,7 +645,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	describe("P9: Session lifecycle integration", () => {
 		it("create → rename → delete lifecycle", async () => {
 			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			// Create two sessions
 			const s1 = await mgr.createSession("First");
@@ -655,7 +678,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	describe("P10: Silent option for createSession and deleteSession", () => {
 		it("createSession with { silent: true } still emits session_lifecycle", async () => {
 			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const sessionChangedEvents: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => sessionChangedEvents.push(ev));
@@ -676,7 +699,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 				{ id: "ses_b", title: "B", time: { created: 2000, updated: 3000 } },
 			];
 			const client = createMockClient(sessions);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 
 			const sessionChangedEvents: { type: string; sessionId: string }[] = [];
 			mgr.on("session_lifecycle", (ev) => sessionChangedEvents.push(ev));
@@ -695,7 +718,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 	describe("session_lifecycle event", () => {
 		it("emits { type: 'created' } on createSession", async () => {
 			const client = createMockClient([]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 			const events: Array<{ type: string; sessionId: string }> = [];
 			mgr.on("session_lifecycle", (ev) => events.push(ev));
 			await mgr.createSession("test");
@@ -709,7 +732,7 @@ describe("Ticket 2.3 — Session Manager PBT", () => {
 			const client = createMockClient([
 				{ id: "ses_1", title: "a", time: { created: 1, updated: 1 } },
 			]);
-			const mgr = new SessionManager({ client });
+			const mgr = new SessionManager({ projectSlug: "test-project", client });
 			await mgr.initialize();
 			const events: Array<{ type: string; sessionId: string }> = [];
 			mgr.on("session_lifecycle", (ev) => events.push(ev));

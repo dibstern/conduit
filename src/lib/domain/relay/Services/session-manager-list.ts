@@ -79,7 +79,10 @@ export const incrementLastKnownSessionCount = () =>
  * Fetch the session list from the API.
  * Caches the child-to-parent map in state for subagent status propagation.
  */
-export const listSessions = (options?: ListSessionsOptions) =>
+export const listSessions = (
+	projectSlug: string,
+	options?: ListSessionsOptions,
+) =>
 	Effect.gen(function* () {
 		const stateRef = yield* SessionManagerStateTag;
 		const readQuery = yield* ReadQueryEffectTag;
@@ -110,7 +113,7 @@ export const listSessions = (options?: ListSessionsOptions) =>
 			lastKnownSessionCount: lineage.count,
 		}));
 		yield* updateRelaySessionCountSnapshot(lineage.count);
-		return [...sessions];
+		return sessions.map((session) => ({ ...session, projectSlug }));
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
 		Effect.withSpan("session.listSessions"),
@@ -166,7 +169,7 @@ export const makeSessionListOperations = ({
 	const serviceListSessions = (options?: ListSessionsOptions) =>
 		Effect.gen(function* () {
 			const statuses = yield* currentStatuses(options?.statuses);
-			const base = listSessions({
+			const base = listSessions(projectSlug, {
 				...options,
 				statuses,
 				...(backgroundOf && { backgroundOf }),

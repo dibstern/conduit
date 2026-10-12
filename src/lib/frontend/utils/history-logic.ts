@@ -1,6 +1,7 @@
 // Pure functions with no DOM or framework dependencies.
 // Extracted for unit testing without a browser environment.
 
+import { SUBAGENT_TOOL_NAMES } from "../../contracts/tool-wire.js";
 import {
 	endsOpenCodeTurn,
 	mapToolName,
@@ -19,7 +20,6 @@ import type {
 	UserMessage,
 } from "../types.js";
 import { extractDisplayText, generateUuid } from "./format.js";
-import { SUBAGENT_TOOL_NAMES } from "./subagent-tools.js";
 import { createToolMessage } from "./tool-message-factory.js";
 
 // Re-export types for convenience
@@ -212,16 +212,26 @@ function convertAssistantParts(
 			case "tool": {
 				const state = part.state;
 				const isError = state?.status === "error";
+				const inputValue = state?.input?.value;
 				const toolInput =
-					state?.input != null &&
-					typeof state.input === "object" &&
-					!Array.isArray(state.input)
-						? (state.input as Record<string, unknown>)
+					inputValue != null &&
+					typeof inputValue === "object" &&
+					!Array.isArray(inputValue)
+						? (inputValue as Record<string, unknown>)
 						: undefined;
 				const rawToolName = part.tool ?? "unknown";
 				const toolResult = isError
 					? (state?.error ?? "Unknown error")
-					: (state?.output ?? undefined);
+					: state?.output?.text;
+				const preview = {
+					...(state?.input?._tag === "preview" && {
+						inputCuts: state.input.cuts,
+					}),
+					...(!isError &&
+						state?.output?._tag === "preview" && {
+							resultBytes: state.output.fullBytes,
+						}),
+				};
 				const toolMetadata =
 					state != null &&
 					typeof state === "object" &&
@@ -237,12 +247,7 @@ function convertAssistantParts(
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
 						...(toolResult != null && { result: toolResult }),
-						...(state?.isTruncated === true && {
-							isTruncated: true,
-							...(state.fullContentLength != null && {
-								fullContentLength: state.fullContentLength,
-							}),
-						}),
+						...(Object.keys(preview).length > 0 && { preview }),
 						isError,
 						...(toolInput !== undefined && { input: toolInput }),
 						...(toolMetadata !== undefined && { metadata: toolMetadata }),

@@ -149,6 +149,11 @@ import {
 	decodeProviderMessage,
 	validateUserMessage,
 } from "./claude-sdk-validation.js";
+import {
+	type ClaudeSessionForkSdk,
+	defaultClaudeSessionForkSdk,
+	resolveRewindUpToUuid,
+} from "./claude-session-fork.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -210,6 +215,7 @@ export interface ClaudeProviderInstanceDeps {
 		options?: SDKOptions;
 	}) => Query;
 	readonly subagentSdk?: ClaudeSubagentSdk;
+	readonly sessionForkSdk?: ClaudeSessionForkSdk;
 	readonly ensureClaudeSubagentSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
@@ -228,6 +234,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "claudeSettingsOverrides"
 	| "queryFactory"
 	| "subagentSdk"
+	| "sessionForkSdk"
 	| "subagentPollTimeoutMs"
 	| "capabilitiesService"
 	| "readGoalStatus"
@@ -294,6 +301,7 @@ export const makeClaudeProviderRuntime = (
 					: {}),
 				...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 				...(deps.subagentSdk ? { subagentSdk: deps.subagentSdk } : {}),
+				...(deps.sessionForkSdk ? { sessionForkSdk: deps.sessionForkSdk } : {}),
 				...(deps.subagentPollTimeoutMs !== undefined
 					? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
 					: {}),
@@ -1228,7 +1236,13 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					return;
 				case "stop-task": {
 					const ctx = yield* getSession(this.stateRef, command.sessionId);
-					if (!ctx || ctx.stopped) return;
+					if (!ctx || ctx.stopped)
+						return yield* Effect.fail(
+							new ClaudeBoundaryError({
+								operation: "stopTask",
+								cause: "Claude session is not running in this runner",
+							}),
+						);
 					yield* Effect.tryPromise({
 						try: () => ctx.query.stopTask(command.taskId),
 						catch: (cause) =>
@@ -1274,6 +1288,17 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					}));
 					yield* this.scheduleShutdownAfterTurnEffect(command.sessionId);
 					return;
+				}
+				default: {
+					// A newer daemon can send a command this build lacks; acknowledging
+					// it would report work that never happened.
+					const unknown: { readonly type: string } = command;
+					return yield* Effect.fail(
+						new ClaudeBoundaryError({
+							operation: "executeCommand",
+							cause: `Unsupported Claude runner command: ${unknown.type}`,
+						}),
+					);
 				}
 			}
 		});
@@ -1693,6 +1718,15 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 			}
 
 			const existingCtx = yield* getSession(this.stateRef, sessionId);
+			if (
+				input.rewind !== undefined &&
+				(yield* hasPendingTurn(this.stateRef, sessionId))
+			)
+				return yield* Effect.fail(
+					new ClaudeRuntimeError({
+						message: "Cannot commit a Claude rewind while a turn is active",
+					}),
+				);
 			if (existingCtx?.stopped) {
 				// Safety net: any path that stopped this context (interruptTurn,
 				// endSession, shutdown) leaves it in sessions with a closed prompt
@@ -1711,7 +1745,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				);
 			} else if (
 				existingCtx &&
-				input.startFreshNativeSession &&
+				(input.startFreshNativeSession || input.rewind !== undefined) &&
 				!(yield* hasPendingTurn(this.stateRef, sessionId))
 			) {
 				return yield* this.restartSessionEffect(
@@ -1778,6 +1812,66 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
 				yield* this.placeUserMessageEffect(input);
+				let resumeSessionAt = input.resumeSessionAt;
+				const rewindPoint = input.rewind?.resumeSessionAt;
+				if (
+					rewindPoint !== undefined &&
+					rewindPoint !== null &&
+					input.resumeSessionId === undefined &&
+					input.handoff === undefined
+				)
+					return yield* Effect.fail(
+						new ClaudeRuntimeError({
+							message:
+								"Claude rewind has no native session or kept-history handoff",
+						}),
+					);
+				if (
+					rewindPoint !== undefined &&
+					rewindPoint !== null &&
+					input.resumeSessionId !== undefined
+				) {
+					const resumeSessionId = input.resumeSessionId;
+					const configDir = input.configDir ?? input.nativeThread?.configDir;
+					const transcript = yield* Effect.tryPromise({
+						try: () =>
+							(
+								this.deps.sessionForkSdk ?? defaultClaudeSessionForkSdk
+							).readTranscript(resumeSessionId, {
+								dir: input.workspaceRoot,
+								...(configDir !== undefined ? { configDir } : {}),
+							}),
+						catch: (cause) =>
+							new ClaudeBoundaryError({
+								operation: "resolveClaudeRewind",
+								cause,
+							}),
+					});
+					// Conduit uses API message ids; SDK resume needs the transcript's
+					// chain uuid. Keep tool-result tails belonging to the kept turn.
+					const resolvedPoint = resolveRewindUpToUuid(
+						transcript,
+						rewindPoint,
+						input.rewind?.targetMessageId,
+					);
+					resumeSessionAt = resolvedPoint ?? undefined;
+					if (resolvedPoint === undefined)
+						return yield* Effect.fail(
+							new ClaudeRuntimeError({
+								message: `Rewind point ${rewindPoint} before ${input.rewind?.targetMessageId ?? "the discarded turns"} was not found in the Claude transcript`,
+							}),
+						);
+				}
+				const launchInput =
+					rewindPoint === null ||
+					(input.rewind !== undefined && resumeSessionAt === undefined)
+						? {
+								...input,
+								resumeSessionId: undefined,
+								resumeSessionAt: undefined,
+								nativeThread: undefined,
+							}
+						: { ...input, resumeSessionAt };
 				const bridge = this.getPermissionBridge();
 				let ctx: ClaudeSessionContext | undefined;
 				const canUseTool: CanUseTool = async (
@@ -1793,7 +1887,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const launchOptions = yield* Effect.try({
 					try: () =>
 						buildClaudeQueryOptions(
-							input,
+							launchInput,
 							abortController,
 							canUseTool,
 							this.sinkBindings.get(this.sinkId(input.eventSink) ?? "")
@@ -1803,6 +1897,8 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
+				if (input.rewind !== undefined)
+					yield* this.warmedQueries.discardEffect(sessionId);
 				const warmed = yield* this.warmedQueries.takeEffect(
 					sessionId,
 					launchOptions,
@@ -1834,7 +1930,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				const context = {
 					sessionId,
 					instanceId: input.instanceId ?? "claude",
-					nativeThread: input.nativeThread,
+					nativeThread: launchInput.nativeThread,
 					workspaceRoot: input.workspaceRoot,
 					...(input.configDir !== undefined
 						? { configDir: input.configDir }
@@ -1855,14 +1951,19 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					currentTurnId: input.inputId,
 					currentUserMessageId:
 						input.continuation?.cutOffMessageId ?? input.inputId,
-					resumeFallbackAllowed: !!input.resumeSessionId && !!input.handoff,
+					resumeFallbackAllowed:
+						input.rewind === undefined &&
+						!!launchInput.resumeSessionId &&
+						!!launchInput.handoff,
 					queryInitialized: false,
 					turnInFlight: true,
 					currentModel: input.model?.modelId,
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
-					...(input.variant ? { currentVariant: input.variant } : {}),
+					...(input.variant === undefined
+						? {}
+						: { currentVariant: input.variant }),
 					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
@@ -2023,7 +2124,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				if (settings.variant) {
+				if (settings.variant !== undefined) {
 					ctx.currentVariant = settings.variant;
 				} else {
 					delete ctx.currentVariant;

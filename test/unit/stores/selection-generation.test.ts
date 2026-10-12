@@ -168,6 +168,7 @@ it("keeps B's GetModels pick when A's row changes model last", async () => {
 	const refresh = deferred<GetModelsResponse>();
 	vi.mocked(getModelsRpc).mockReturnValueOnce(refresh.promise);
 	const row = (id: string, model: string, provider: string) => ({
+		projectSlug: "project-a",
 		id,
 		title: id,
 		status: "idle" as const,

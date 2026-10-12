@@ -75,6 +75,22 @@ Examples:
   | baseline                  | threshold |
   | usage-footer-sheet-phone  | 98        |
 
+Scenario: the dock pulls up into the sheet and the sheet drags back down
+  Given the usage footer has several accounts with an unknown Claude reading
+  When I tap back to the session list
+  And I drag the phone usage dock up by 60 pixels
+  Then the usage sheet is open
+  When I drag the usage sheet down by 200 pixels
+  Then the usage sheet is closed
+  When I drag the phone usage dock up by 60 pixels
+  Then the usage sheet is open
+
+Scenario: the usage sheet rises under the finger pulling the dock
+  Given the usage footer has several accounts with an unknown Claude reading
+  When I tap back to the session list
+  Then the usage sheet follows my finger up the phone usage dock
+  And the usage sheet is open
+
 Scenario Outline: one account uses inline windows without the sheet
   Given the usage footer has one Claude account in the <state> state
   When I tap back to the session list

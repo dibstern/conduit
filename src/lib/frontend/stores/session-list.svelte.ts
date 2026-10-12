@@ -69,7 +69,7 @@ export const sessionList: SessionListView = {
 		const groups: { project: ProjectRef; rows: SessionRow[] }[] = [];
 		// Keep the current cross-project order when callers flatten the groups.
 		for (const row of getFilteredSessions()) {
-			const project = row.projectSlug ?? getCurrentSlug() ?? "";
+			const project = row.projectSlug;
 			const last = groups.at(-1);
 			if (last?.project === project) last.rows.push(row);
 			else groups.push({ project, rows: [row] });

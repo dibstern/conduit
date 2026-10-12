@@ -13,7 +13,7 @@ export { clearSessionSearch } from "../../../src/lib/frontend/stores/session.sve
 type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 
 const completeRows = (rows: readonly Row[]): SessionInfo[] =>
-	rows.map((row) => ({ status: "idle", ...row }));
+	rows.map((row) => ({ status: "idle", projectSlug: "project-a", ...row }));
 
 let sequence = 0;
 

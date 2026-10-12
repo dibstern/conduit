@@ -37,7 +37,7 @@
 	} from "../../stores/ui.svelte.js";
 	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
-	import { getSessionVerbs, runSessionVerbShortcut, type SessionVerbHost } from "./session-verbs.js";
+	import { getSessionCommands, runSessionCommandShortcut, type SessionCommandHost } from "./session-commands.js";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Banners from "../overlays/Banners.svelte";
@@ -96,7 +96,7 @@
 		{ status: statusFilter, grouping },
 		sessionState.now,
 		(session) => {
-			const slug = session.projectSlug ?? getCurrentSlug() ?? "";
+			const slug = session.projectSlug;
 			return { key: slug, label: projectDisplayName(slug) };
 		},
 	));
@@ -283,7 +283,7 @@
 		renamingSessionId = id;
 	}
 
-	function sessionVerbHost(getSession: () => SessionInfo | null): SessionVerbHost {
+	function sessionCommandHost(getSession: () => SessionInfo | null): SessionCommandHost {
 		return {
 			rename: () => { const session = getSession(); if (session) handleCtxRename(session.id); },
 			select: () => { const session = getSession(); if (session) handleEnterSelect(session.id); },
@@ -363,7 +363,7 @@
 		if (!(row instanceof HTMLAnchorElement) || !row.matches("#session-list .session-item")) return;
 		const session = filtered.find((item) => item.id === row.dataset["sessionId"]);
 		if (!session) return;
-		runSessionVerbShortcut(event, getSessionVerbs(session, sessionState.now, sessionVerbHost(() => session), "center"));
+		runSessionCommandShortcut(event, getSessionCommands(session, sessionState.now, sessionCommandHost(() => session), "center"));
 	}
 
 	function closeShortcutSheet() {
@@ -432,7 +432,7 @@
 		bulkPending = true;
 		const count = selectionCount;
 		const label = count === 1 ? "1 session" : `${count} sessions`;
-		const selected = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		const selected = selectedSessions.map((session) => ({ projectSlug: session.projectSlug, sessionId: session.id, originId: getBrowserClientId() }));
 		let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
 		try {
 			targets = await confirmSessionDeletion(
@@ -506,7 +506,7 @@
 		branch={ctxMenuSession.git?.branch}
 		presentation={ctxMenuPresentation}
 		now={sessionState.now}
-		host={sessionVerbHost(() => ctxMenuSession)}
+		host={sessionCommandHost(() => ctxMenuSession)}
 		onclose={handleCloseContextMenu}
 	/>
 {/if}

@@ -571,9 +571,10 @@ describe("SessionManager Effect", () => {
 				cause: "read model unavailable",
 			});
 			const readQuery: ReadQueryEffect = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),
+				getSessionFamilyRoot: vi.fn(() => Effect.fail(readQueryFailure)),
 				getGoalDetails: () =>
 					Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
@@ -599,6 +600,7 @@ describe("SessionManager Effect", () => {
 				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -711,12 +713,12 @@ describe("SessionManager Effect", () => {
 						id, provider, title, status, created_at, updated_at
 					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
 
-				const before = yield* listSessions();
+				const before = yield* listSessions("test-project");
 				expect(before.map((s) => s.id)).toContain("ses-doomed");
 
 				yield* deleteSession("ses-doomed");
 
-				const after = yield* listSessions();
+				const after = yield* listSessions("test-project");
 				expect(after.map((s) => s.id)).not.toContain("ses-doomed");
 			}).pipe(
 				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
@@ -747,7 +749,7 @@ describe("SessionManager Effect", () => {
 
 				yield* deleteSession("ses-parent");
 
-				const after = yield* listSessions();
+				const after = yield* listSessions("test-project");
 				const ids = after.map((s) => s.id);
 				expect(ids).not.toContain("ses-parent");
 				expect(ids).not.toContain("ses-child");

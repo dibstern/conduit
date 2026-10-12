@@ -101,7 +101,7 @@ describe("TextInput", () => {
 
 		expect(emitted.filter((t) => t.startsWith("rounded-"))).toHaveLength(1);
 		expect(emitted.filter((t) => /^bg-/.test(t))).toHaveLength(1);
-		expect(emitted.filter((t) => /^h-/.test(t))).toHaveLength(1);
+		expect(emitted.filter((t) => /^min-h-/.test(t))).toHaveLength(1);
 		expect(emitted.filter((t) => /^px-/.test(t))).toHaveLength(1);
 	});
 

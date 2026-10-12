@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
           "title": "New session - 2026-03-27T04:02:41.474Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
           "title": "New session - 2026-03-27T04:02:41.474Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "busy",
@@ -684,6 +692,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "busy",
@@ -698,6 +707,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "busy",
@@ -767,6 +777,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -785,6 +796,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -798,6 +810,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",
@@ -811,6 +824,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a9b3dffexJKa2YWiVjiv5e",
               "title": "New session - 2026-03-27T04:02:41.474Z",
               "status": "idle",

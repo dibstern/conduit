@@ -54,6 +54,7 @@ import {
 } from "./session-fixtures.js";
 
 const session = (id: string, title = id): SessionInfo => ({
+	projectSlug: "project-a",
 	id,
 	title,
 	status: "idle",

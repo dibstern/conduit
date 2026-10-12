@@ -4,6 +4,7 @@ import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import type { SessionMode } from "../../contracts/project-file.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
+import type { ToolCallId } from "../../contracts/tool-wire.js";
 import {
 	type GetSessionSkillsResponse,
 	type GetSkillContentResponse,
@@ -39,7 +40,7 @@ import type {
 	GetFileTreeResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
-	GetToolContentResponse,
+	GetToolDetailsResponse,
 	InboxCommandResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
@@ -65,6 +66,7 @@ import type {
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
 	SwitchVariantResponse,
+	UndoRewindResponse,
 	ViewSessionResponse,
 } from "./ws-rpc.js";
 
@@ -226,6 +228,10 @@ export interface StartSideThreadRpcInput {
 	readonly projectSlug: string;
 	readonly parentSessionId: string;
 	readonly title: string;
+	readonly inputId: string;
+	readonly text: string;
+	readonly images?: readonly string[];
+	readonly originId?: string;
 }
 
 export interface RespondPermissionRpcInput {
@@ -273,9 +279,10 @@ export interface GetFileContentRpcInput {
 	readonly path: string;
 }
 
-export interface GetToolContentRpcInput {
+export interface GetToolDetailsRpcInput {
 	readonly projectSlug: string;
-	readonly toolId: string;
+	readonly sessionId: string;
+	readonly toolIds: readonly [ToolCallId, ...ToolCallId[]];
 }
 
 export interface GetSkillContentRpcInput {
@@ -495,6 +502,11 @@ export interface RewindSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly messageId: string;
+}
+
+export interface UndoRewindRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
 }
 
 export interface SendMessageRpcInput {
@@ -897,8 +909,8 @@ const callGetFileList = (input: GetFileListRpcInput) =>
 const callGetFileContent = (input: GetFileContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetFileContent(input));
 
-const callGetToolContent = (input: GetToolContentRpcInput) =>
-	callControl(input.projectSlug, (client) => client.GetToolContent(input));
+const callGetToolDetails = (input: GetToolDetailsRpcInput) =>
+	callControl(input.projectSlug, (client) => client.GetToolDetails(input));
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetSkillContent(input));
@@ -1083,6 +1095,9 @@ const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 
 const callRewindSession = (input: RewindSessionRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RewindSession(input));
+
+const callUndoRewind = (input: UndoRewindRpcInput) =>
+	callControl(input.projectSlug, (client) => client.UndoRewind(input));
 
 const callSendMessage = (input: SendMessageRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -1316,10 +1331,10 @@ export async function getFileContentRpc(
 	return await runTransportEffect(callGetFileContent(input));
 }
 
-export async function getToolContentRpc(
-	input: GetToolContentRpcInput,
-): Promise<GetToolContentResponse> {
-	return await runTransportEffect(callGetToolContent(input));
+export async function getToolDetailsRpc(
+	input: GetToolDetailsRpcInput,
+): Promise<GetToolDetailsResponse> {
+	return await runTransportEffect(callGetToolDetails(input));
 }
 
 export async function getSkillContentRpc(
@@ -1642,6 +1657,12 @@ export async function rewindSessionRpc(
 	input: RewindSessionRpcInput,
 ): Promise<RewindSessionResponse> {
 	return await runTransportEffect(callRewindSession(input));
+}
+
+export async function undoRewindRpc(
+	input: UndoRewindRpcInput,
+): Promise<UndoRewindResponse> {
+	return await runTransportEffect(callUndoRewind(input));
 }
 
 export async function sendMessageRpc(

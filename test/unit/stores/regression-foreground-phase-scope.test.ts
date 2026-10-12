@@ -14,6 +14,7 @@ import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { detailUpserts } from "../../helpers/detail-rows.js";
 
 afterEach(() => {
 	sessionActivity.clear();
@@ -33,32 +34,26 @@ it("keeps a background session's row in its own slot", () => {
 		hasMore: false,
 		status: { _tag: "live" as const },
 		pending: [],
+		waiting: new Map(),
+		partOrder: new Map(),
 	};
-	const running = applyTranscriptEnvelope(entry, {
-		_tag: "upsert",
-		sequence: 1,
-		item: {
-			_tag: "transcriptMessage",
-			message: {
-				id: "r",
-				role: "user",
-				parts: [{ id: "rp", type: "text", text: "running" }],
-				turnTiming: { startedAt: 1, waits: [] },
-			},
+	const running = detailUpserts(
+		{
+			id: "r",
+			role: "user",
+			parts: [{ id: "rp", type: "text", text: "running" }],
+			turnTiming: { startedAt: 1, waits: [] },
 		},
-	});
-	const next = applyTranscriptEnvelope(running, {
-		_tag: "upsert",
-		sequence: 2,
-		item: {
-			_tag: "transcriptMessage",
-			message: {
-				id: "u",
-				role: "user",
-				parts: [{ id: "p", type: "text", text: "queued" }],
-			},
+		1,
+	).reduce(applyTranscriptEnvelope, entry);
+	const next = detailUpserts(
+		{
+			id: "u",
+			role: "user",
+			parts: [{ id: "p", type: "text", text: "queued" }],
 		},
-	});
+		2,
+	).reduce(applyTranscriptEnvelope, running);
 	background.messages.messages = deriveTranscriptMessages(next, []);
 	expect(background.messages.messages[1]).toMatchObject({
 		type: "user",
@@ -72,28 +67,23 @@ it("the row going idle finalizes the visible turn once", () => {
 	const { activity, messages } = getOrCreateSessionSlot("A");
 	sessionState.currentId = "A";
 	phaseToProcessing(activity);
-	const entry = applyTranscriptEnvelope(
+	const entry = detailUpserts(
 		{
-			project: "test",
-			rows: [],
-			hwm: null,
-			hasMore: false,
-			status: { _tag: "live" as const },
-			pending: [],
+			id: "a",
+			role: "assistant",
+			parts: [{ id: "p", type: "text", text: "answer" }],
 		},
-		{
-			_tag: "upsert",
-			sequence: 1,
-			item: {
-				_tag: "transcriptMessage",
-				message: {
-					id: "a",
-					role: "assistant",
-					parts: [{ id: "p", type: "text", text: "answer" }],
-				},
-			},
-		},
-	);
+		1,
+	).reduce(applyTranscriptEnvelope, {
+		project: "test",
+		rows: [],
+		hwm: null,
+		hasMore: false,
+		status: { _tag: "live" as const },
+		pending: [],
+		waiting: new Map(),
+		partOrder: new Map(),
+	});
 	messages.messages = deriveTranscriptMessages(entry, []);
 	followSessionBusy("A", false);
 	followSessionBusy("A", false);

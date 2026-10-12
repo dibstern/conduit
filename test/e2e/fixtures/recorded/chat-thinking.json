@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
           "title": "New session - 2026-03-27T04:03:21.427Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
           "title": "New session - 2026-03-27T04:03:21.427Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "New session - 2026-03-27T04:03:21.427Z",
               "status": "busy",
@@ -579,6 +587,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
               "status": "busy",
@@ -593,6 +602,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
               "status": "busy",
@@ -668,6 +678,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
               "status": "idle",
@@ -686,6 +697,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
               "status": "idle",
@@ -699,6 +711,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
               "status": "idle",
@@ -712,6 +725,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d289ff2cffe6mD7ksB37sDVUa",
               "title": "Agentic AI context management essay planning",
               "status": "idle",

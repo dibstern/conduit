@@ -11,9 +11,16 @@ import {
 } from "effect";
 import { expect, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	CreateSession,
+	WsRpcError,
+	WsRpcGroup,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -33,6 +40,38 @@ import {
 } from "../../helpers/mock-factories.js";
 
 describe("routed RPC server", () => {
+	it.scoped(
+		"rejects session creation without a project even with a relay default",
+		() =>
+			Effect.gen(function* () {
+				const resolve = vi.fn(() =>
+					Effect.fail(
+						new WsRpcError({ message: "unexpected relay resolution" }),
+					),
+				);
+				const createSession = yield* WsRpcGroup.accessHandler(
+					"CreateSession",
+				).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, undefined, "conduit"),
+					),
+				);
+				const malformed = new CreateSession(
+					// @ts-expect-error CreateSession requires an explicit projectSlug.
+					{ originId: "relay-client" },
+					{ disableValidation: true },
+				);
+				const result = yield* Effect.either(
+					createSession(malformed, Headers.empty),
+				);
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: { message: "projectSlug is required" },
+				});
+				expect(resolve).not.toHaveBeenCalled();
+			}),
+	);
+
 	it.scoped("keeps two project shell streams on their own read models", () =>
 		Effect.gen(function* () {
 			const contexts = new Map<string, Context.Context<unknown>>();
@@ -49,6 +88,7 @@ describe("routed RPC server", () => {
 							bus,
 						),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
+						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
 					),
 				);
 				contexts.set(slug, context as Context.Context<unknown>);
@@ -87,7 +127,7 @@ describe("routed RPC server", () => {
 					.SubscribeShell({ projectSlug: slug })
 					.pipe(Stream.take(2), Stream.runCollect);
 				expect(Array.from(envelopes)).toMatchObject([
-					{ _tag: "snapshot", rows: [{ id: slug }] },
+					{ _tag: "snapshot", rows: [{ id: slug, projectSlug: slug }] },
 					{ _tag: "synchronized" },
 				]);
 			}
@@ -415,3 +455,5 @@ describe("routed RPC server", () => {
 		}),
 	);
 });
+
+import { Headers } from "@effect/platform";

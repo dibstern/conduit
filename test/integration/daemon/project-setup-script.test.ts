@@ -338,6 +338,20 @@ describe("Project setup scripts through the built daemon", () => {
 			exitCode: 0,
 		});
 		expect(setupOutput(fixture, session.id)).toContain("setup complete");
+		// A browser already viewing the session must see the block finish live,
+		// not only on a fresh history read.
+		await browser.waitFor((message) => {
+			const parts: unknown = message["parts"];
+			return (
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === session.id &&
+				Array.isArray(parts) &&
+				parts.some(
+					(part: { type?: string; setup?: { status?: string } }) =>
+						part.type === "setup" && part.setup?.status === "succeeded",
+				)
+			);
+		});
 		const succeededParts = (await browser.history(session.id))
 			.flatMap((message) => message.parts ?? [])
 			.filter((part) => part.type === "setup");

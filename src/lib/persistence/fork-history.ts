@@ -26,8 +26,23 @@ const messageIdOf = (event: StoredEvent | CanonicalEvent) =>
 
 export function copyForkHistory(
 	parentEvents: readonly (StoredEvent | CanonicalEvent)[],
-	input: { readonly newSessionId: string; readonly upToMessageId?: string },
+	input: {
+		readonly newSessionId: string;
+		readonly upToMessageId?: string;
+		readonly retainedMessageIds?: ReadonlySet<string>;
+	},
 ): { events: CanonicalEvent[]; forkMessageId?: string } | undefined {
+	const removedMessageIds = new Set(
+		parentEvents.flatMap((event) =>
+			event.type === "message.removed" ? [event.data.messageId] : [],
+		),
+	);
+	if (
+		input.upToMessageId !== undefined &&
+		(removedMessageIds.has(input.upToMessageId) ||
+			input.retainedMessageIds?.has(input.upToMessageId) === false)
+	)
+		return undefined;
 	let end = parentEvents.length - 1;
 	// A prompt queued mid-turn is created before the target turn ends, so the
 	// cut is by message, not only by position: keep messages created no later
@@ -64,7 +79,12 @@ export function copyForkHistory(
 	for (const event of parentEvents.slice(0, end + 1)) {
 		if (!FORK_HISTORY_TYPES.has(event.type)) continue;
 		const messageId = messageIdOf(event);
-		if (messageId !== undefined && keptMessageIds?.has(messageId) === false)
+		if (
+			messageId !== undefined &&
+			(removedMessageIds.has(messageId) ||
+				input.retainedMessageIds?.has(messageId) === false ||
+				keptMessageIds?.has(messageId) === false)
+		)
 			continue;
 		const data: Record<string, unknown> = { ...event.data };
 		for (const field of ["messageId", "partId", "callId", "turnId"] as const) {
@@ -73,6 +93,21 @@ export function copyForkHistory(
 		if ("sessionId" in data) data["sessionId"] = input.newSessionId;
 		if (event.type === "message.created") {
 			lastMessageId = rekey(event.data.messageId);
+		}
+		// A streamed part arrives as thousands of fragments that project to their
+		// concatenation; copying each one makes a long session slow to fork.
+		const previous = events.at(-1);
+		if (
+			(event.type === "text.delta" || event.type === "thinking.delta") &&
+			previous?.type === event.type &&
+			previous.data.partId === data["partId"] &&
+			previous.data.messageId === data["messageId"]
+		) {
+			events[events.length - 1] = {
+				...previous,
+				data: { ...previous.data, text: previous.data.text + event.data.text },
+			};
+			continue;
 		}
 		// Build a fresh envelope: StoredEvent sequence and streamVersion belong to
 		// the parent stream and must be assigned by the event store on append.

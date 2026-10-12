@@ -5,10 +5,7 @@ import { setModel } from "../../../src/lib/domain/relay/Services/session-overrid
 import type { SessionTitleService } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import type { ClaudeEventPersistEffect } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
-import {
-	type ReadQueryEffect,
-	ReadQueryEffectError,
-} from "../../../src/lib/persistence/effect/read-query-effect.js";
+import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
@@ -46,10 +43,13 @@ const makePersistService = (
 });
 
 const makeTitleService = (): SessionTitleService => ({
-	startForFirstClaudeMessage: vi.fn(() => Effect.void),
+	titleFromMessage: vi.fn(() => Effect.void),
 });
 
-const makeSessionRow = (provider: "claude" | "opencode"): SessionRow => ({
+const makeSessionRow = (
+	provider: "claude" | "opencode",
+	title: string,
+): SessionRow => ({
 	id: "session-1",
 	version: 1,
 	provider,
@@ -58,7 +58,7 @@ const makeSessionRow = (provider: "claude" | "opencode"): SessionRow => ({
 	variant: "",
 	context_window: "",
 	provider_sid: null,
-	title: "Test Session",
+	title,
 	status: "idle",
 	parent_id: null,
 	fork_point_event: null,
@@ -76,12 +76,13 @@ const makeSessionRow = (provider: "claude" | "opencode"): SessionRow => ({
 });
 
 const makeReadQuery = (
-	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"],
-	provider: "claude" | "opencode" = "claude",
+	provider: "claude" | "opencode",
+	title: string,
 ): ReadQueryEffect => ({
-	getToolContent: vi.fn(() => Effect.succeed(undefined)),
+	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
-	getSession: vi.fn(() => Effect.succeed(makeSessionRow(provider))),
+	getSessionFamilyRoot: () => Effect.succeed(undefined),
+	getSession: vi.fn(() => Effect.succeed(makeSessionRow(provider, title))),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
@@ -95,6 +96,7 @@ const makeReadQuery = (
 	),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
+	readStoreIdentity: () => Effect.succeed("store"),
 	readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -104,15 +106,16 @@ const makeReadQuery = (
 	readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 	getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
-	getSessionHistoryMetadata,
+	getSessionHistoryMetadata: vi.fn(() =>
+		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
+	),
 });
 
 const providePromptLayer = (input: {
 	readonly engine: OrchestrationEngine;
 	readonly titleService: SessionTitleService;
-	readonly persistService?: ClaudeEventPersistEffect;
-	readonly priorMessageCount?: number;
-	readonly provider?: "claude" | "opencode";
+	readonly provider: "claude" | "opencode";
+	readonly title: string;
 }) => {
 	const wsHandler = makeMockWebSocketHandler({
 		getClientSession: vi.fn(() => "session-1"),
@@ -127,147 +130,18 @@ const providePromptLayer = (input: {
 		sessionManagerService,
 		orchestrationEngine: input.engine,
 		sessionTitleService: input.titleService,
-		readQueryEffect: makeReadQuery(
-			() =>
-				Effect.succeed({
-					messageCount: input.priorMessageCount ?? 0,
-					cumulativeTokens: 0,
-				}),
-			input.provider,
-		),
-		...(input.persistService
-			? { claudeEventPersistEffect: input.persistService }
-			: {}),
+		readQueryEffect: makeReadQuery(input.provider, input.title),
 	});
 	return baseLayer;
 };
 
-describe("Claude prompt title generation", () => {
-	it.effect("starts title generation for the first Claude user message", () => {
-		const engine = makeEngine("claude");
-		const events: string[] = [];
-		const persistService = makePersistService(vi.fn(() => Effect.void));
-		const wsHandler = makeMockWebSocketHandler({
-			getClientSession: vi.fn(() => "session-1"),
-			getClientsForSession: vi.fn(() => []),
-		});
-		const layer = makeTestHandlerLayer({
-			wsHandler,
-			orchestrationEngine: engine,
-			readQueryEffect: makeReadQuery(() =>
-				Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
-			),
-			claudeEventPersistEffect: persistService,
-			sessionTitleService: {
-				startForFirstClaudeMessage: vi.fn((input) =>
-					Effect.sync(() => {
-						events.push("title");
-						expect(input).toEqual({
-							sessionId: "session-1",
-							firstMessage: "current prompt",
-						});
-					}),
-				),
-			},
-		});
-
-		return Effect.gen(function* () {
-			yield* setModel("session-1", {
-				providerID: "claude",
-				modelID: "sonnet",
-			});
-			yield* handleMessage("client-1", {
-				text: "current prompt",
-				commandId: "cmd-auto-rename-current",
-			});
-
-			expect(persistService.persistUserMessage).not.toHaveBeenCalled();
-			expect(events).toEqual(["title"]);
-			expect(engine.dispatchEffect).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "send_turn",
-					providerId: "claude",
-				}),
-			);
-		}).pipe(Effect.provide(layer));
-	});
-
-	it.effect("does not start title generation for later Claude messages", () => {
-		const engine = makeEngine("claude");
-		const titleService = makeTitleService();
-		const persistService = makePersistService(vi.fn(() => Effect.void));
-		const layer = providePromptLayer({
-			engine,
-			titleService,
-			persistService,
-			priorMessageCount: 1,
-		});
-
-		return Effect.gen(function* () {
-			yield* setModel("session-1", {
-				providerID: "claude",
-				modelID: "sonnet",
-			});
-			yield* handleMessage("client-1", {
-				text: "follow up",
-				commandId: "cmd-auto-rename-follow-up",
-			});
-
-			expect(persistService.persistUserMessage).not.toHaveBeenCalled();
-			expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
-			expect(engine.dispatchEffect).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "send_turn",
-					providerId: "claude",
-				}),
-			);
-		}).pipe(Effect.provide(layer));
-	});
-
-	it.effect("does not start title generation for OpenCode messages", () => {
-		const engine = makeEngine("opencode");
-		const titleService = makeTitleService();
-		const persistService = makePersistService(vi.fn(() => Effect.void));
-		const layer = providePromptLayer({
-			engine,
-			titleService,
-			persistService,
-			provider: "opencode",
-		});
-
-		return Effect.gen(function* () {
-			yield* handleMessage("client-1", {
-				text: "opencode prompt",
-				commandId: "cmd-auto-rename-opencode",
-			});
-
-			expect(persistService.persistUserMessage).not.toHaveBeenCalled();
-			expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
-			expect(engine.dispatchEffect).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "send_turn",
-					providerId: "opencode",
-				}),
-			);
-		}).pipe(Effect.provide(layer));
-	});
-
+describe("prompt title generation", () => {
 	it.effect(
-		"does not start title generation when prior Claude history fails to load",
+		"starts title generation for a Claude session with a placeholder title",
 		() => {
 			const engine = makeEngine("claude");
-			const titleService = makeTitleService();
+			const events: string[] = [];
 			const persistService = makePersistService(vi.fn(() => Effect.void));
-			const readQuery = makeReadQuery(
-				vi.fn(() =>
-					Effect.fail(
-						new ReadQueryEffectError({
-							operation: "getSessionHistoryMetadata",
-							cause: new Error("history unavailable"),
-						}),
-					),
-				),
-			);
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-1"),
 				getClientsForSession: vi.fn(() => []),
@@ -275,9 +149,19 @@ describe("Claude prompt title generation", () => {
 			const layer = makeTestHandlerLayer({
 				wsHandler,
 				orchestrationEngine: engine,
-				sessionTitleService: titleService,
-				readQueryEffect: readQuery,
+				readQueryEffect: makeReadQuery("claude", "Untitled"),
 				claudeEventPersistEffect: persistService,
+				sessionTitleService: {
+					titleFromMessage: vi.fn((input) =>
+						Effect.sync(() => {
+							events.push("title");
+							expect(input).toEqual({
+								sessionId: "session-1",
+								message: "current prompt",
+							});
+						}),
+					),
+				},
 			});
 
 			return Effect.gen(function* () {
@@ -286,22 +170,77 @@ describe("Claude prompt title generation", () => {
 					modelID: "sonnet",
 				});
 				yield* handleMessage("client-1", {
-					text: "maybe first prompt",
-					commandId: "cmd-auto-rename-maybe-first",
+					text: "current prompt",
+					commandId: "cmd-auto-rename-current",
 				});
 
-				expect(readQuery.getSessionHistoryMetadata).toHaveBeenCalledWith(
-					"session-1",
-				);
 				expect(persistService.persistUserMessage).not.toHaveBeenCalled();
-				expect(titleService.startForFirstClaudeMessage).not.toHaveBeenCalled();
+				expect(events).toEqual(["title"]);
 				expect(engine.dispatchEffect).toHaveBeenCalledWith(
 					expect.objectContaining({
 						type: "send_turn",
 						providerId: "claude",
-						input: expect.objectContaining({
-							history: [],
-						}),
+					}),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"starts title generation for an OpenCode session with a placeholder title",
+		() => {
+			const engine = makeEngine("opencode");
+			const titleService = makeTitleService();
+			const layer = providePromptLayer({
+				engine,
+				titleService,
+				provider: "opencode",
+				title: "New session - 2026-10-12T00:00:00.000Z",
+			});
+
+			return Effect.gen(function* () {
+				yield* handleMessage("client-1", {
+					text: "opencode prompt",
+					commandId: "cmd-auto-rename-opencode",
+				});
+
+				expect(titleService.titleFromMessage).toHaveBeenCalledWith({
+					sessionId: "session-1",
+					message: "opencode prompt",
+				});
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "opencode",
+					}),
+				);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect(
+		"does not start title generation for a session with a real title",
+		() => {
+			const engine = makeEngine("opencode");
+			const titleService = makeTitleService();
+			const layer = providePromptLayer({
+				engine,
+				titleService,
+				provider: "opencode",
+				title: "Fix Header Selector",
+			});
+
+			return Effect.gen(function* () {
+				yield* handleMessage("client-1", {
+					text: "follow up",
+					commandId: "cmd-auto-rename-follow-up",
+				});
+
+				expect(titleService.titleFromMessage).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "send_turn",
+						providerId: "opencode",
 					}),
 				);
 			}).pipe(Effect.provide(layer));

@@ -177,7 +177,7 @@ const QUIET = new Set<Command["kind"]>([
 	"rename",
 ]);
 
-type Item = Omit<SessionInfo, "updatedAt">;
+type Item = Omit<SessionInfo, "updatedAt" | "projectSlug">;
 interface Shown {
 	readonly item: Item;
 	/** The item without background work, which can hide a stored change. */
@@ -186,7 +186,10 @@ interface Shown {
 	readonly version: number;
 }
 
-const visible = ({ updatedAt: _, ...item }: SessionInfo): Item => item;
+const visible = ({
+	updatedAt: _,
+	...item
+}: Omit<SessionInfo, "projectSlug">): Item => item;
 const byId = (items: readonly Item[]) =>
 	[...items].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -201,6 +204,7 @@ const undoLaterMigrations = Effect.gen(function* () {
 	yield* sql`DROP INDEX idx_messages_input_id`;
 	yield* sql`ALTER TABLE messages DROP COLUMN input_id`;
 	yield* sql`ALTER TABLE messages DROP COLUMN steered`;
+	yield* sql`DROP TABLE session_git_published`;
 });
 
 const scenario = (store: Store) => {

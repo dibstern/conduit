@@ -778,23 +778,6 @@ describe("ReadQueryEffect session lookups", () => {
 			}).pipe(Effect.provide(Layer.mergeAll(testLayer, services)));
 		},
 	);
-	it.effect("reads tool content by tool id", () =>
-		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator();
-			yield* seedSession("s1");
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`
-				INSERT INTO tool_content (tool_id, session_id, content, created_at)
-				VALUES ('tool-abc', 's1', '{"result": "hello"}', 1)`;
-			const readQuery = yield* makeReadQueryEffect;
-
-			expect(yield* readQuery.getToolContent("tool-abc")).toBe(
-				'{"result": "hello"}',
-			);
-			expect(yield* readQuery.getToolContent("nonexistent")).toBeUndefined();
-		}).pipe(Effect.provide(testLayer)),
-	);
-
 	it.effect("reads one session's status and the status of every session", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

@@ -5,6 +5,7 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
@@ -17,6 +18,7 @@ import {
 	createOpenCodeSession,
 	forkOpenCodeSession,
 	SessionCommandError,
+	type SessionUpstreamAdapter,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type {
@@ -299,6 +301,39 @@ describe("applySessionCommand", () => {
 				// The Claude Agent SDK has no session registry, so there is nothing to
 				// tell — and telling OpenCode would delete an unrelated session.
 				expect(api.session.delete).not.toHaveBeenCalled();
+			}),
+		),
+	);
+
+	it.effect("syncs a rename only when its title applies locally", () =>
+		withHarness(() =>
+			Effect.gen(function* () {
+				yield* seedSession("ses-opencode", "opencode");
+				const sync = vi.fn(() => Effect.void);
+				const upstreamAdapter: SessionUpstreamAdapter = {
+					provider: "opencode",
+					sync,
+				};
+				const command = {
+					type: "session.renamed",
+					data: { sessionId: "ses-opencode", title: "Generated title" },
+				} as const;
+
+				yield* applySessionCommand(command, {
+					source: AUTO_TITLE_SOURCE,
+					upstreamAdapter,
+				});
+
+				expect(sync).not.toHaveBeenCalled();
+				const reads = yield* makeReadQueryEffect;
+				expect((yield* reads.getSession("ses-opencode"))?.title).toBe("Doomed");
+
+				yield* applySessionCommand(command, { upstreamAdapter });
+
+				expect((yield* reads.getSession("ses-opencode"))?.title).toBe(
+					command.data.title,
+				);
+				expect(sync).toHaveBeenCalledExactlyOnceWith(command);
 			}),
 		),
 	);

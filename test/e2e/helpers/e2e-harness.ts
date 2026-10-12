@@ -29,6 +29,7 @@ import {
 	type RelayStack,
 } from "../../../src/lib/relay/relay-stack.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
+import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
 	isOpenCodeRunning,
@@ -90,6 +91,8 @@ export async function createE2EHarness(opts?: {
 			staticDir,
 			configDir: dbDir,
 			persistenceDbPath: path.join(dbDir, "events.db"),
+			// Stubbed session titles: no test makes a live title call.
+			titleQuery: fakeClaudeSdk.titleQuery,
 			log: createSilentLogger(),
 		});
 	const stack = await startStack(0);
@@ -164,11 +167,28 @@ export async function createSession(
 		Effect.scoped(
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(WsRpcGroup);
+				const modelCatalog = yield* client.GetModels({
+					projectSlug: "e2e-replay",
+					instanceId:
+						instanceId === undefined
+							? defaultInstanceIdForDriver(providerId)
+							: ProviderInstanceIdSchema.make(instanceId),
+				});
+				if (!modelCatalog.active)
+					throw new Error(
+						"The replay fixture needs a valid harness model pick",
+					);
 				return yield* client.CreateSession({
 					permissionMode: "ask",
 					projectSlug: "e2e-replay",
 					originId: `e2e-${providerId}-replay`,
 					providerId,
+					model: {
+						providerId: modelCatalog.active.provider,
+						modelId: modelCatalog.active.model,
+						variant: modelCatalog.variant?.variant ?? "",
+						contextWindow: modelCatalog.contextWindow?.contextWindow ?? "",
+					},
 					// Naming the instance routes creation through OpenCode Instances
 					// `use`, which opens the event stream replayed turns arrive on.
 					...(providerId === "opencode"
@@ -277,7 +297,9 @@ export async function createReplayHarness(
 			staticDir,
 			configDir,
 			persistenceDbPath: eventsDbPath,
-			...(claudeReplayer ? { claudeSdk: claudeReplayer.sdk } : {}),
+			...(claudeReplayer
+				? { claudeSdk: claudeReplayer.sdk }
+				: { titleQuery: fakeClaudeSdk.titleQuery }),
 			log: createSilentLogger(),
 		});
 	let stack = await startStack(0);

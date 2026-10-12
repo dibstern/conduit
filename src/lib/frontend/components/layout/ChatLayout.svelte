@@ -56,7 +56,8 @@
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
-	import { viewTranscript } from "../../stores/transcript.svelte.js";
+	import { drawSavedTranscript, leaveSavedDraw, placedSessionId, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
+	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId, viewDraftModels } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
@@ -385,6 +386,13 @@
 	// Each mount attaches once: a remount keeps the previous mount's slug.
 	let attachedThisMount = false;
 	onMount(() => {
+		// A page load draws the session's saved page, if any, before any reply.
+		const loadSessionId = getCurrentSessionId();
+		if (loadSessionId)
+			void openSavedTranscript(loadSessionId).then((record) => {
+				if (record && sessionState.currentId === null && getCurrentSessionId() === loadSessionId)
+					drawSavedTranscript(record);
+			});
 		// A page load starts clean; only a change of project clears state.
 		let previousSlug = attachedProjectState.slug;
 		let attachGeneration = 0;
@@ -503,9 +511,11 @@
 			});
 		return () => { cancelled = true; };
 	});
+	// A drawn session is viewed once the server has placed it.
+	const placedId = $derived(placedSessionId());
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
-		const sessionId = project ? sessionState.currentId : null;
+		const sessionId = project ? placedId : null;
 		untrack(() => {
 			viewTranscript(project, sessionId);
 			viewTodos(project, sessionId);
@@ -530,7 +540,7 @@
 	// No null cleanup: moving within a family keeps its subscription.
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
-		const sessionId = project ? sessionState.currentId : null;
+		const sessionId = project ? placedId : null;
 		untrack(() => viewFamily(project, sessionId));
 	});
 	$effect(() => {
@@ -563,6 +573,7 @@
 		const groupScope = getScopeGroupKey(scope) !== null;
 		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : groupScope ? null : scope;
 		const attachedSlug = attachedProjectState.slug;
+		untrack(() => leaveSavedDraw(route.page === "chat" ? route.sessionId : undefined));
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
@@ -612,11 +623,12 @@
 				return;
 			}
 			if (!attachedSlug) return;
-			if (route.sessionId === sessionState.currentId) return;
+			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
 			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
 				if (cancelled) return;
-				if (sessionState.currentId === sessionId) return;
+				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
+				placeSavedDraw(sessionId, projectSlug);
 				if (projectSlug === null) {
 					routerState.sessionNotFound = true;
 					replaceRoute("/");
@@ -819,6 +831,7 @@
 								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>
 							</div>
 						{/if}
+						<RewindBanner pendingOnly />
 						<InputArea />
 					</div>
 					{#if sessionViewState.compact && sessionViewState.filesEverOpened}

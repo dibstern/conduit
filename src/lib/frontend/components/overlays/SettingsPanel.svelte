@@ -76,7 +76,7 @@
 	<div
 		id="settings-panel"
 		class:usage-phone={phone.current && shown === "usage" && section !== null}
-		class="bg-bg border border-border rounded-xl shadow-2xl w-[calc(100vw-2rem)] md:w-[min(720px,calc(100vw-2rem))] h-[80vh] md:h-[min(600px,80vh)] flex flex-col overflow-hidden font-brand"
+		class="bg-bg border border-border rounded-xl shadow-2xl w-[calc(100vw-2rem)] md:w-[min(720px,calc(100vw-2rem))] h-[80vh] md:h-[min(600px,80vh)] flex flex-col overflow-hidden font-brand leading-[1.35]"
 	>
 		<div class="shrink-0 flex items-center gap-[6px] px-[14px] py-[10px] border-b border-border-subtle">
 			{#if listHidden}

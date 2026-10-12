@@ -2,11 +2,13 @@
 // low-level stores (discovery) can read them without an import cycle.
 
 import { computeProjectGroups } from "../../project-grouping.js";
+import { getScopeGroupKey } from "../../session-scope.js";
 import type { GroupingMode, ProjectGroup } from "../../shared-types.js";
 import type { ProjectInfo } from "../types.js";
 import {
 	DRAFT_PROJECT_PARAM,
 	getCurrentSearchParams,
+	SCOPE_PARAM,
 } from "./router.svelte.js";
 
 // The project list and the current slug both come from the server. Writers
@@ -37,14 +39,21 @@ export function getProjectGroup(slug: string): ProjectGroup | undefined {
 	return groups[slug];
 }
 
-/** The project a draft will be created in: its own pick, else the last one
- *  added or given a session (on any client), else the first available. A draft
+/** The project a draft will be created in: its own pick, then the sidebar's
+ *  project scope, then the remembered project, then the first available. A draft
  *  never inherits the project of whatever session happened to be open. */
 export function getDraftProject(): string | null {
-	const picked = getCurrentSearchParams().get(DRAFT_PROJECT_PARAM);
+	const params = getCurrentSearchParams();
+	const picked = params.get(DRAFT_PROJECT_PARAM);
 	if (picked) return picked;
 	const available = projectState.projects.filter((p) => !p.missing);
+	const scope = params.get(SCOPE_PARAM);
+	const scopedProject =
+		getScopeGroupKey(scope) === null
+			? available.find((p) => p.slug === scope)
+			: undefined;
 	return (
+		scopedProject?.slug ??
 		available.find((p) => p.slug === projectState.newSessionProject)?.slug ??
 		available[0]?.slug ??
 		null

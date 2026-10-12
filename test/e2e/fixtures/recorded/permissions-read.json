@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
           "title": "New session - 2026-03-27T04:03:50.836Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
           "title": "New session - 2026-03-27T04:03:50.836Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "busy",
@@ -579,6 +587,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -593,6 +602,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -712,6 +722,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -726,6 +737,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -795,6 +807,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",
@@ -813,6 +826,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",
@@ -826,6 +840,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",
@@ -839,6 +854,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",

@@ -9,7 +9,10 @@ import type { Options } from "./types.js";
 export interface ClaudeRunnerSettingsSnapshot {
 	readonly input: PreWarmSessionInput;
 	readonly claudeSettingsOverrides?: Settings;
-	readonly options: Omit<Options, "abortController" | "canUseTool" | "resume">;
+	readonly options: Omit<
+		Options,
+		"abortController" | "canUseTool" | "resume" | "resumeSessionAt"
+	>;
 	readonly fileSettings?: ClaudeRunnerFileSettings;
 	/** Retain original launch directories across primary/extra folder swaps. */
 	readonly workspaceDirectories?: readonly string[];
@@ -39,6 +42,8 @@ export interface ClaudeRunnerUpgrade {
 	retryAt: number;
 	attemptActivity?: number;
 	boundaryWaiting?: boolean;
+	/** Changed settings rule out a warm switch, so only a restart upgrades. */
+	settingsDeferred?: boolean;
 }
 
 /** Warming is independent of admission. A send invalidates only the attempt. */

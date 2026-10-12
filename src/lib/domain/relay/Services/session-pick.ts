@@ -108,6 +108,8 @@ export const loadServerSessionPick = (
 	options: { readonly startIfStopped?: boolean } = { startIfStopped: true },
 ) =>
 	Effect.gen(function* () {
+		const sourcePick = storedSessionPick(source, harness);
+		if (source && !sourcePick) return yield* new PickRequired();
 		const config = yield* ConfigTag;
 		const catalog = yield* loadModelCatalog(harness, instanceId, options);
 		const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
@@ -117,7 +119,7 @@ export const loadServerSessionPick = (
 				: undefined;
 		const resolved = resolveServerSessionPick(
 			harness,
-			storedSessionPick(source, harness),
+			sourcePick,
 			harnessDefaultPick(
 				harness,
 				loadRelaySettings(config.configDir),
@@ -246,7 +248,7 @@ export const backfillSessionPicks = () =>
 					};
 			} else if (!turn && row.model_id == null) {
 				const resolved = yield* Effect.either(
-					loadServerSessionPick(driver, row.provider, row, {
+					loadServerSessionPick(driver, row.provider, undefined, {
 						startIfStopped: false,
 					}),
 				);

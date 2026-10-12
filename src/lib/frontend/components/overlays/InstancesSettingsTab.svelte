@@ -250,10 +250,7 @@
 	<div class="flex items-center gap-2">
 	<Button
 		variant="secondary"
-		tone="muted"
-		hoverFill="none"
-		size="content"
-		class="gap-1.5 px-2.5 py-1 text-xs rounded-[7px] hover:border-text-muted"
+		size="sm"
 		data-testid="scan-now-btn"
 		disabled={scanInFlight}
 		onclick={handleScanNow}
@@ -279,14 +276,12 @@
 
 {#if instanceFormMode !== null}
 	<form id="instance-form" class="border border-border-subtle bg-bg-surface rounded-[9px] p-3 flex flex-col gap-3" data-server-form data-testid="instance-form" aria-label={instanceFormMode === "edit" ? "Edit instance" : "New instance"} novalidate onsubmit={(event) => { event.preventDefault(); submitInstanceForm(); }}>
-		<h4 class="text-[12.5px] font-semibold text-text">{instanceFormMode === "edit" ? `Edit ${instances.find((inst) => inst.id === editingInstanceId)?.name ?? "instance"}` : "New instance"}</h4>
-		{#if instanceFormMode === "add"}
-			<SettingsRow label="Type" class="p-0">
-				{#snippet control()}
-					<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} class="whitespace-nowrap" />
-				{/snippet}
-			</SettingsRow>
-		{/if}
+		<div class="flex flex-wrap items-center gap-[10px] text-[12.5px]">
+			<h4 class="font-semibold text-text">{instanceFormMode === "edit" ? `Edit ${instances.find((inst) => inst.id === editingInstanceId)?.name ?? "instance"}` : "New instance"}</h4>
+			{#if instanceFormMode === "add"}
+				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="whitespace-nowrap" />
+			{/if}
+		</div>
 		{#if state.formDriver === "opencode"}
 			<SettingsRow label="Conduit starts it" description="Off: connect to one you run" checked={state.formManaged} onchange={() => { state.formManaged = !state.formManaged; }} disabled={state.formSaving || instanceFormMode === "edit"} testId="instance-form-managed" class="p-0" />
 		{/if}
@@ -331,31 +326,32 @@
 
 <div id="instance-settings-list" class="flex flex-col gap-[6px]">
 	{#if claudeAccounts.length > 0}
-		<div class="border border-border-subtle rounded-[7px] overflow-hidden" data-testid="claude-accounts-list">
-			<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 bg-bg-alt px-3 py-2">
-				<h4 class="text-[12px] font-semibold text-text">Claude accounts</h4>
-				<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-xs text-text-muted">
+		<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="claude-accounts-list">
+			<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
+				<h4>Claude accounts</h4>
+				<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-[11px] font-normal normal-case tracking-normal">
 					<span>Usage and switch order: </span>
-					<Button variant="ghost-accent" hoverFill="none" size="content" class="text-xs hover:underline" data-testid="claude-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
+					<Button variant="ghost-accent" hoverFill="none" size="content" class="text-[11px] hover:underline" data-testid="claude-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
 				</span>
 			</div>
 			{#each claudeAccounts as inst (inst.id)}
 				<div class="border-t border-border-subtle" data-testid="instance-row-{inst.id}" data-driver="claude">
-					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" class="min-h-[44px] focus-visible:-outline-offset-2">
-						<AccountDot instanceId={inst.id} size={7} />
+					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
+						<AccountDot instanceId={inst.id} size={9} />
 						<div class="flex-1 min-w-0">
-							<div class="flex items-center gap-2">
-								<span class="font-medium text-text truncate">{inst.name}</span>
-								{#if inst.id === defaultClaudeId}<Badge variant="tag" shape="pill" class="shrink-0">default</Badge>{/if}
+							<div class="flex items-center gap-[6px] text-[12.5px] text-text">
+								<span class="truncate">{inst.name}</span>
+								{#if inst.id === defaultClaudeId}<Badge variant="quiet" size="xs" shape="pill">default</Badge>{/if}
 							</div>
-							<div class="font-mono text-xs text-text-secondary truncate">{inst.configDir || "env"}</div>
+							<div class="font-mono text-[11px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
 						</div>
+						<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 					</Disclosure>
 					{#if state.expandedInstanceId === inst.id}
-						<div class="flex flex-col gap-2 border-t border-border-subtle bg-bg-alt px-3 py-2">
-							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+						<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+							<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
 								<dt class="text-text-muted">Config dir</dt>
-								<dd class="font-mono text-text break-all">{inst.configDir || "env"}</dd>
+								<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 								<dt class="text-text-muted">Used by</dt>
 								<dd class="text-text">{inst.id === defaultClaudeId ? "New sessions, unless a project picks another account" : "Sessions you move to it, and auto-switch"}</dd>
 								{#if inst.id === defaultClaudeId}
@@ -378,27 +374,28 @@
 		</div>
 	{/if}
 	<SettingsGroup testId="opencode-servers-list">
-		<div class="flex items-center gap-2 bg-bg-alt px-3 py-2">
-			<h4 class="text-[12px] font-semibold text-text">OpenCode servers</h4>
-			{#if opencodeInstances.length > 0}<span class="text-xs text-text-muted">{opencodeInstances.length}</span>{/if}
+		<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted">
+			<h4>OpenCode servers</h4>
+			{#if opencodeInstances.length > 0}<span class="ml-auto text-[11px] font-normal normal-case tracking-normal">{opencodeInstances.length}</span>{/if}
 		</div>
 		{#each opencodeInstances as inst (inst.id)}
 			<div data-testid="instance-row-{inst.id}" data-driver="opencode">
-				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" class="min-h-[44px] focus-visible:-outline-offset-2">
-					<span class={"w-2 h-2 rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
-					<div class="flex-1 min-w-0 flex items-center gap-2">
-						<span class="font-medium text-text truncate">{inst.name}</span>
-						{#if !inst.managed}<Badge variant="tag" shape="pill" class="shrink-0">discovered</Badge>{/if}
+				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
+					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
+					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[12.5px] text-text">
+						<span class="truncate">{inst.name}</span>
+						{#if !inst.managed}<Badge variant="quiet" size="xs" shape="pill">discovered</Badge>{/if}
 					</div>
-					<span class="font-mono text-xs text-text-secondary shrink-0">:{inst.port}</span>
+					<span class="font-mono text-[11px] text-text-muted shrink-0">:{inst.port}</span>
+					<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 				</Disclosure>
 				{#if state.expandedInstanceId === inst.id}
-					<div class="flex flex-col gap-2 border-t border-border-subtle bg-bg-alt px-3 py-2">
-						<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+					<div class="flex flex-col gap-[8px] border-t border-border-subtle bg-[rgba(var(--overlay-rgb),0.015)] pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+						<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[11px] [&_dd]:truncate">
 							<dt class="text-text-muted">Status</dt>
 							<dd class="text-text capitalize">{inst.status}</dd>
 							<dt class="text-text-muted">Address</dt>
-							<dd class="font-mono text-text break-all">{inst.url ?? `http://127.0.0.1:${inst.port}`}</dd>
+							<dd class="font-mono text-text">{inst.url ?? `http://127.0.0.1:${inst.port}`}</dd>
 							<dt class="text-text-muted">Started by</dt>
 							<dd class="text-text">{inst.managed ? "Conduit" : "You (found by scan)"}</dd>
 						</dl>

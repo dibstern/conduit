@@ -2,8 +2,8 @@
  * `content` is an opt-out, not a third size, exactly as on ui/Button: it emits
  * no height, padding or type scale, so the call site supplies its own
  * ADDITIVELY through `class`. Without it the three chromeless fields in the app
- * cannot migrate at all — `sm`/`md` hard-code `h-8`/`h-9`, and a consumer class
- * cannot beat a primitive utility in the same group.
+ * cannot migrate at all — `sm`/`md` hard-code a height (or a height floor), and a
+ * consumer class cannot beat a primitive utility in the same group.
  */
 export type FieldSize = "sm" | "md";
 export type FieldControlSize = FieldSize | "content";
@@ -59,8 +59,8 @@ export const FIELD_BASE_CLASSES =
  * this design system; keyboard focus is deliberately neutral everywhere else
  * and there is no reason for a chromeless field to be the exception.
  *
- * `placeholder:text-text-muted` is chrome rather than base because the model
- * picker uses `text-text-dimmer` and would have collided with it.
+ * The placeholder colour is chrome rather than base because the chromeless
+ * fields state their own and would have collided with it.
  *
  * `aria-invalid:border-error` is chrome for a sharper reason: it paints a
  * BORDER, so on a borderless field it is not a subtler affordance, it is no
@@ -68,17 +68,18 @@ export const FIELD_BASE_CLASSES =
  * outline the way CHOICE_BASE_CLASSES does. No consumer needs one today, so
  * this is recorded rather than built.
  */
+const BORDERED_CLASSES =
+	"block w-full rounded-[7px] border border-border text-text transition-colors " +
+	// Tracks Button deliberately — a neutral ring, not accent.
+	// `border-accent` stays: on a field the accent border is the "this one
+	// is live" signal, and the ring is the keyboard-focus signal.
+	"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text " +
+	"focus-visible:border-accent " +
+	"aria-invalid:border-error";
+
 export const FIELD_CHROME_CLASSES = {
-	bordered:
-		"block w-full rounded-md border border-border bg-input-bg " +
-		"text-text transition-colors " +
-		"placeholder:text-text-muted " +
-		// Tracks Button deliberately — a neutral ring, not accent.
-		// `border-accent` stays: on a field the accent border is the "this one
-		// is live" signal, and the ring is the keyboard-focus signal.
-		"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text " +
-		"focus-visible:border-accent " +
-		"aria-invalid:border-error",
+	// Text entry sits recessed on the page colour (the mockup's `.inp`).
+	bordered: `${BORDERED_CLASSES} bg-bg placeholder:text-text-muted`,
 	bare: "outline-none",
 	"focus-only":
 		"outline-none " +
@@ -88,12 +89,25 @@ export const FIELD_CHROME_CLASSES = {
 
 export type FieldChrome = keyof typeof FIELD_CHROME_CLASSES;
 
-// Height-bearing controls (TextInput, Select). Mirror Button's sm/md heights.
+// A select is a choice, not text entry, so it sits raised on the input fill
+// rather than recessed like `bordered` (the mockup's `.sel`). It has no
+// placeholder and no bare variant, hence one string rather than a union.
+export const SELECT_CHROME_CLASSES = `${BORDERED_CLASSES} bg-input-bg`;
+
+// Height-bearing controls (TextInput, Select). `sm` mirrors Button's sm;
+// `md` is literal px from the mockup's `.inp` and `.sel`. `min-h`, not `h`, so
+// a taller consumer height or Select's phone touch target composes without a
+// collision. It is a floor: anything shorter needs `content`.
 // `content` emits nothing; see FieldControlSize above.
 export const CONTROL_SIZE_CLASSES: Record<FieldControlSize, string> = {
 	sm: "h-8 px-2.5 text-xs",
-	md: "h-9 px-3 text-sm",
+	md: "min-h-[29px] px-[9px] py-[6px] text-[12px]",
 	content: "",
+};
+
+export const SELECT_SIZE_CLASSES: Record<FieldSize, string> = {
+	sm: CONTROL_SIZE_CLASSES.sm,
+	md: "min-h-[25px] px-[10px] py-[4px] text-[11.5px]",
 };
 
 // Textarea: no fixed height (rows drives it); vertical padding + text scale only.

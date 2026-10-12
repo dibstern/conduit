@@ -1,4 +1,5 @@
 import { SqlClient } from "@effect/sql";
+import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -819,8 +820,9 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -857,6 +859,7 @@ describe("switchModelForSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -1494,6 +1497,7 @@ describe("handleForkSession", () => {
 			const serviceListSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "ses-parent",
 						title: "Parent Session",
 						status: "idle" as const,
@@ -1501,6 +1505,7 @@ describe("handleForkSession", () => {
 						messageCount: 1,
 					},
 					{
+						projectSlug: "test-project",
 						id: "ses-child",
 						title: "Forked Session",
 						status: "idle" as const,
@@ -2338,8 +2343,9 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "ses-local-placeholder",
@@ -2376,6 +2382,7 @@ describe("handleNewSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2437,8 +2444,9 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() =>
 					Effect.succeed({
 						id: "session-in-flight",
@@ -2475,6 +2483,7 @@ describe("handleNewSession", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -2546,6 +2555,7 @@ describe("handleDeleteSession", () => {
 			const listSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "remaining-session",
 						title: "Remaining Session",
 						status: "idle" as const,
@@ -2728,8 +2738,9 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
-			getToolContent: vi.fn(() => Effect.succeed(undefined)),
+			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+			getSessionFamilyRoot: () => Effect.succeed(undefined),
 			getSession: vi.fn(() =>
 				Effect.succeed({
 					id: "session-1",
@@ -2766,6 +2777,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 			readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 			readInboxState: () => Effect.succeed(undefined),
+			readStoreIdentity: () => Effect.succeed("store"),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
@@ -2782,7 +2794,7 @@ describe("loadMoreHistoryForSession", () => {
 							tokens_cache_read: null,
 							tokens_cache_write: null,
 							context_window: null,
-							version: 0,
+							version: MessageVersion.make(0),
 							is_streaming: 0,
 							is_backfilled: 0,
 							created_at: 1,
@@ -2819,7 +2831,7 @@ describe("loadMoreHistoryForSession", () => {
 						tokens_cache_read: null,
 						tokens_cache_write: null,
 						context_window: null,
-						version: 0,
+						version: MessageVersion.make(0),
 						is_streaming: 0,
 						is_backfilled: 0,
 						created_at: 1,
@@ -3039,15 +3051,22 @@ describe("rewindSessionToMessage", () => {
 		const log = mockLogger();
 		const client = makeHandlerOpenCodeAPI({
 			session: {
-				messages: vi.fn(async () => [makeMessage({ id: "msg-1" })]),
 				revert: vi.fn(async () => {}),
 			},
 		});
 
-		const layer = Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag, client),
-			Layer.succeed(LoggerTag, log),
-		);
+		const layer = makeTestHandlerLayer({
+			api: client,
+			log,
+			seedEvents: [
+				canonicalEvent("session.created", "session-1", {
+					sessionId: "session-1", title: "Rewind", provider: "opencode",
+				}, { provider: "opencode" }),
+				canonicalEvent("message.created", "session-1", {
+					sessionId: "session-1", messageId: "msg-1", role: "user",
+				}, { provider: "opencode" }),
+			],
+		});
 
 		return rewindSessionToMessage({
 			clientId: "client-1",
@@ -3300,8 +3319,9 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
-				getToolContent: vi.fn(() => Effect.succeed(undefined)),
+				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
 				getSession: vi.fn(() => Effect.succeed({
 					id: "session-1", provider: "claude", provider_sid: null, version: 0,
 					title: "Session", status: "idle", parent_id: null, fork_point_event: null,
@@ -3322,6 +3342,7 @@ describe("handleMessage", () => {
 				),
 				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
@@ -3410,6 +3431,7 @@ describe("handleMessage", () => {
 			const listSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "session-1",
 						title: "Untitled",
 						status: "idle" as const,
@@ -3475,6 +3497,7 @@ describe("handleMessage", () => {
 		const listSessions = vi.fn(() =>
 			Effect.succeed([
 				{
+					projectSlug: "test-project",
 					id: "session-1",
 					title: "User named this",
 					status: "idle" as const,
@@ -3526,6 +3549,145 @@ describe("handleMessage", () => {
 			expect(renameSession).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 	});
+
+	it.effect(
+		"rejects a missing stored pick rather than materializing OpenCode from a runtime override",
+		() => {
+			const ws = mockWsHandler({
+				getClientSession: vi.fn(() => "ses-local-placeholder"),
+				getClientsForSession: vi.fn(() => ["client-1"]),
+			});
+			const log = mockLogger();
+			const serviceCreateSession = vi.fn(() =>
+				Effect.succeed({
+					id: "ses-opencode-created",
+					projectID: "project-1",
+					directory: "/tmp/project",
+					title: "Untitled",
+					version: "1.0.0",
+					time: { created: 100, updated: 100 },
+					providerID: "opencode",
+				}),
+			);
+			const sessionManagerService = makeMockSessionManagerService({
+				createSession: serviceCreateSession,
+			});
+			const ingestBatch = vi.fn(() => Effect.succeed(0));
+			const config = mockConfig();
+			const client = makeHandlerOpenCodeAPI();
+			const readQuery = {
+				readToolDetails: vi.fn(() => Effect.succeed([])),
+				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
+				getSessionFamilyRoot: () => Effect.succeed(undefined),
+				getSession: vi.fn(() =>
+					Effect.succeed({
+						id: "ses-local-placeholder",
+						provider: "claude",
+						provider_sid: null,
+						version: 0,
+						title: "Untitled",
+						status: "idle",
+						parent_id: null,
+						fork_point_event: null,
+						last_message_at: null,
+						last_turn_error_at: null,
+						permission_mode: null,
+						read_at: null,
+						settled_at: null,
+						pinned_at: null,
+						snoozed_at: null,
+						snoozed_until: null,
+						woken_at: null,
+						woken_reason: null,
+						created_at: 1,
+						updated_at: 1,
+					}),
+				),
+				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
+				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
+				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
+				getSessionsForReconciliation: () => Effect.succeed([]),
+				getStrandedChildren: () => Effect.succeed([]),
+				listSessions: vi.fn(() => Effect.succeed([])),
+				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				readSessionTranscript: vi.fn(() =>
+					Effect.succeed({ messages: [], version: 0 }),
+				),
+				readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
+				readInboxState: () => Effect.succeed(undefined),
+				readStoreIdentity: () => Effect.succeed("store"),
+				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionTranscriptPage: vi.fn(() =>
+					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+				),
+				readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
+				countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
+				readPendingApprovals: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
+				getSessionHistoryMetadata: vi.fn(() => Effect.succeed({ messageCount: 0, cumulativeTokens: 0 })),
+				getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
+			} satisfies ReadQueryEffect;
+			const engine = withDispatchEffect({
+				getProviderForSessionEffect: vi.fn(() => Effect.succeed(undefined)),
+				bindSession: vi.fn(),
+				dispatch: vi.fn(async () => ({
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				})),
+			});
+
+			const layer = Layer.provideMerge(
+				ProviderTurnServiceLive,
+				Layer.mergeAll(
+					Layer.succeed(OpenCodeAPITag, client),
+					Layer.succeed(WebSocketHandlerTag, ws),
+					Layer.succeed(LoggerTag, log),
+					Layer.succeed(SessionManagerServiceTag, sessionManagerService),
+					Layer.succeed(ConfigTag, config),
+					PendingInteractionServiceLive,
+					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
+					Layer.succeed(ReadQueryEffectTag, readQuery),
+					Layer.succeed(ProviderRuntimeIngestionTag, {
+						ingest: () => Effect.succeed(0),
+						ingestBatch,
+						drain: () => Effect.void,
+					}),
+					makeOverridesStateLive(),
+				),
+			);
+
+			return Effect.gen(function* () {
+				yield* setModel("ses-local-placeholder", {
+					providerID: "opencode",
+					modelID: "big-pickle",
+				});
+
+				const { sessionId: dispatchedSessionId } = yield* sendMessageToSession({
+					clientId: "client-1",
+					sessionId: "ses-local-placeholder",
+					text: "Test query",
+					commandId: "cmd-materialize-opencode",
+				});
+				yield* flushDispatchContinuation();
+				expect(dispatchedSessionId).toBe("ses-local-placeholder");
+				expect(serviceCreateSession).not.toHaveBeenCalled();
+				expect(engine.bindSession).not.toHaveBeenCalled();
+				expect(ws.setClientSession).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).not.toHaveBeenCalled();
+				expect(ingestBatch).toHaveBeenCalledWith(expect.arrayContaining([
+					expect.objectContaining({
+						type: "turn.error",
+						sessionId: "ses-local-placeholder",
+						data: expect.objectContaining({ code: "PICK_REQUIRED" }),
+					}),
+				]));
+			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
+		},
+	);
 
 	it.effect(
 		"keeps dispatch rejection recovery after launching continuation",

@@ -6,6 +6,7 @@
 // Types also used locally in this file are imported separately.
 
 import type { ProjectSetupState } from "../contracts/project-setup.js";
+import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
 import type {
 	AskUserQuestion,
 	FileEntry,
@@ -139,6 +140,11 @@ export interface ThinkingMessage {
 	endedAt?: number;
 }
 
+export interface ToolPreview {
+	readonly inputCuts?: readonly InputCut[];
+	readonly resultBytes?: Utf8Bytes;
+}
+
 export interface ToolMessage {
 	type: "tool";
 	uuid: string;
@@ -149,8 +155,9 @@ export interface ToolMessage {
 	status: ToolStatus;
 	result?: string;
 	isError?: boolean;
-	isTruncated?: boolean;
-	fullContentLength?: number;
+	/** Set while `input` or `result` is a preview: each cut field's full size.
+	 *  Expanding the tool loads the rest. */
+	preview?: ToolPreview;
 	/** Tool part metadata — carries sessionId for Task/subagent tools. */
 	metadata?: Record<string, unknown>;
 	messageId?: string;

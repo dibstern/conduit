@@ -256,7 +256,7 @@
 	<div class="mt-[6px] flex min-h-[30px] items-center gap-[8px] border-t border-border pt-[10px]">
 		<span class="flex-1 text-[12px] text-text">Warn me at</span>
 		<SegmentedControl
-			variant="compact"
+			variant="joined"
 			label="Warn me at"
 			options={warnOptions.map((warnAt) => ({ value: String(warnAt), label: warnAt === "off" ? "off" : phone.current ? String(warnAt) : `${warnAt}%`, testId: `usage-settings-warn-${warnAt}`, disabled: setting === null }))}
 			bind:value={() => String(setting?.warnAt ?? 80), (next) => {

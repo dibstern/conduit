@@ -170,6 +170,8 @@ const serverDiscovery = $state({
 	currentProviderId: "" as string,
 	commands: [] as CommandInfo[],
 	commandsFetched: false,
+	/** The project's model catalog has answered at least once. */
+	modelsLoaded: false,
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
@@ -273,6 +275,7 @@ export function viewDraftModels(
 		if (generation !== inventoryGeneration) return;
 		draftModelInventory.loading = false;
 		draftModelInventory.error = message;
+		serverDiscovery.modelsLoaded = true;
 		if (
 			!sessionState.currentId &&
 			getEffectiveInstanceId() === target?.instanceId
@@ -490,6 +493,9 @@ export const discoveryState = {
 	},
 	get commandsFetched(): boolean {
 		return serverDiscovery.commandsFetched;
+	},
+	get modelsLoaded(): boolean {
+		return serverDiscovery.modelsLoaded;
 	},
 	get defaultVariant(): string {
 		return serverDiscovery.defaultVariant;
@@ -1030,6 +1036,7 @@ export function handleModelList({
 	readonly providers: GetModelsResponse["providers"];
 }): void {
 	serverDiscovery.providers = providersFromGetModelsResponse(providers);
+	serverDiscovery.modelsLoaded = true;
 	if (serverDiscovery.providers.some((provider) => provider.id === "claude")) {
 		for (const provider of serverDiscovery.providers)
 			if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
@@ -1074,6 +1081,7 @@ export function applyGetModelsResponse(
 	if (response.defaultOpenCodeInstanceId !== undefined)
 		serverDiscovery.defaultOpenCodeInstanceId =
 			response.defaultOpenCodeInstanceId;
+	serverDiscovery.modelsLoaded = true;
 	// Scoped reads describe one instance, not the project's catalog.
 	if (sessionId || response.instanceId === undefined)
 		handleModelList({
@@ -1464,6 +1472,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.currentProviderId = "";
 	serverDiscovery.commands = [];
 	serverDiscovery.commandsFetched = false;
+	serverDiscovery.modelsLoaded = false;
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";

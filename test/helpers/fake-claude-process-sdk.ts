@@ -23,7 +23,7 @@ import {
 	type CallToolResult,
 	CallToolResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/session-title-service.js";
+import type { ClaudeTitleQueryFactory } from "../../src/lib/domain/relay/Services/claude-title-generator.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	Options,
@@ -40,6 +40,11 @@ import {
 	provisionalRejectedLimitWithoutReset,
 	provisionalUsageLimitTurnWithoutReset,
 } from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn-no-reset.js";
+import {
+	LONG_COMMAND,
+	LONG_QUESTION,
+	LONG_RESULT,
+} from "../fixtures/tool-previews.js";
 
 type QuotaBehavior =
 	| "available"
@@ -462,11 +467,13 @@ export const claudeSubagentSdk: ClaudeSubagentSdk = {
 
 let initializationAttempts = 0;
 
+type NativeMessage = SessionMessage & { parentUuid?: string | null };
+
 function readNativeTranscript(
 	sessionId: string,
 	configDir: string | undefined,
 	directory?: string,
-): SessionMessage[] {
+): NativeMessage[] {
 	if (!configDir)
 		throw new Error("A native transcript requires an account config dir");
 	const file = join(configDir, `conduit-test-transcript-${sessionId}.ndjson`);
@@ -482,7 +489,7 @@ function readNativeTranscript(
 	return readFileSync(file, "utf8")
 		.split("\n")
 		.filter(Boolean)
-		.map((line) => JSON.parse(line) as SessionMessage);
+		.map((line) => JSON.parse(line) as NativeMessage);
 }
 
 function gitCommonDirectory(directory: string): string | undefined {
@@ -514,7 +521,7 @@ function gitCommonDirectory(directory: string): string | undefined {
 }
 
 function recordNativeMessage(
-	entry: SessionMessage,
+	entry: NativeMessage,
 	configDir: string | undefined,
 	directory?: string,
 ): void {
@@ -537,6 +544,25 @@ function query(params: {
 	const accountConfigDir =
 		params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 		process.env["CLAUDE_CONFIG_DIR"];
+	let nativeParentUuid: string | null = params.options?.resumeSessionAt ?? null;
+	if (params.options?.resumeSessionAt) {
+		const transcript = readNativeTranscript(sessionId, accountConfigDir);
+		if (
+			!transcript.some(
+				(entry) => entry.uuid === params.options?.resumeSessionAt,
+			)
+		)
+			throw new Error("Native resume boundary was not found");
+	} else if (
+		params.options?.resume &&
+		accountConfigDir &&
+		existsSync(
+			join(accountConfigDir, `conduit-test-transcript-${sessionId}.ndjson`),
+		)
+	) {
+		nativeParentUuid =
+			readNativeTranscript(sessionId, accountConfigDir).at(-1)?.uuid ?? null;
+	}
 	const queryId = randomUUID();
 	let liveModel = params.options?.model;
 	let liveEffort = params.options?.effort;
@@ -826,6 +852,7 @@ function query(params: {
 				{
 					type: "user",
 					uuid: userUuid,
+					parentUuid: nativeParentUuid,
 					session_id: sessionId,
 					message: { ...input.message, id: userUuid },
 					parent_tool_use_id: null,
@@ -834,6 +861,7 @@ function query(params: {
 				accountConfigDir,
 				params.options?.cwd,
 			);
+			nativeParentUuid = userUuid;
 			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 			if (optionsFile) {
 				const seen = new WeakSet<object>();
@@ -1304,6 +1332,9 @@ function query(params: {
 						? [existsSync(workspaceFile) ? "present" : "absent"]
 						: responseChunks(prompt);
 			const messageId = randomUUID();
+			const assistantUuid = request.startsWith("rewind-")
+				? randomUUID()
+				: messageId;
 			yield stream(sessionId, {
 				type: "message_start",
 				message: { id: messageId, role: "assistant", content: [] },
@@ -1562,27 +1593,117 @@ function query(params: {
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
-				await params.options.canUseTool(
-					"AskUserQuestion",
-					{
-						questions: [
+				const toolUseID = randomUUID();
+				const longQuestion = request.startsWith("question-long-");
+				const questionInput = longQuestion
+					? LONG_QUESTION
+					: {
+							questions: [
+								{
+									question: "Continue?",
+									header: "Runner",
+									options: [
+										{ label: "Continue", description: "Continue the turn" },
+									],
+								},
+							],
+						};
+				// The long question also reaches the transcript as its tool call.
+				if (longQuestion) {
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index: 1,
+						content_block: {
+							type: "tool_use",
+							id: toolUseID,
+							name: "AskUserQuestion",
+							input: questionInput,
+						},
+					});
+					yield stream(sessionId, { type: "content_block_stop", index: 1 });
+				}
+				await params.options.canUseTool("AskUserQuestion", questionInput, {
+					signal:
+						params.options.abortController?.signal ??
+						new AbortController().signal,
+					toolUseID,
+					requestId: randomUUID(),
+				});
+			}
+			// A long Bash call. With a proof directory it stays running until the
+			// spec releases its result; without one it completes straight away.
+			if (request.startsWith("tool-long-")) {
+				const toolUseID = randomUUID();
+				yield stream(sessionId, {
+					type: "content_block_start",
+					index: 1,
+					content_block: {
+						type: "tool_use",
+						id: toolUseID,
+						name: "Bash",
+						input: { command: LONG_COMMAND },
+					},
+				});
+				yield stream(sessionId, { type: "content_block_stop", index: 1 });
+				const release = proof && join(dirname(proof), "release-tool-long");
+				while (release && !existsSync(release) && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+				yield {
+					type: "user",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: [
 							{
-								question: "Continue?",
-								header: "Runner",
-								options: [
-									{ label: "Continue", description: "Continue the turn" },
-								],
+								type: "tool_result",
+								tool_use_id: toolUseID,
+								content: LONG_RESULT,
+								is_error: false,
 							},
 						],
 					},
-					{
-						signal:
-							params.options.abortController?.signal ??
-							new AbortController().signal,
-						toolUseID: randomUUID(),
-						requestId: randomUUID(),
-					},
-				);
+				} as unknown as SDKMessage;
+			}
+			// A long turn of `load-tools-<n>` Bash calls in one message, each call
+			// and each result its own live change.
+			if (request.startsWith("load-tools-")) {
+				const count = Number(request.slice("load-tools-".length));
+				for (let call = 1; call <= count && !closed; call++) {
+					const toolUseID = randomUUID();
+					const marker = `load-tool-${count}-${call}`;
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index: call,
+						content_block: {
+							type: "tool_use",
+							id: toolUseID,
+							name: "Bash",
+							input: { command: `printf ${marker} ${"x".repeat(400)}` },
+						},
+					});
+					yield stream(sessionId, { type: "content_block_stop", index: call });
+					await new Promise<void>((done) => setTimeout(done, 50));
+					yield {
+						type: "user",
+						uuid: randomUUID(),
+						session_id: sessionId,
+						parent_tool_use_id: null,
+						message: {
+							role: "user",
+							content: [
+								{
+									type: "tool_result",
+									tool_use_id: toolUseID,
+									content: `${marker}-result ${"y".repeat(800)}`,
+									is_error: false,
+								},
+							],
+						},
+					} as unknown as SDKMessage;
+				}
 			}
 			if (request.startsWith("approval-")) {
 				const toolUseID = randomUUID();
@@ -1721,7 +1842,8 @@ function query(params: {
 			recordNativeMessage(
 				{
 					type: "assistant",
-					uuid: messageId,
+					uuid: assistantUuid,
+					parentUuid: nativeParentUuid,
 					session_id: sessionId,
 					message: {
 						id: messageId,
@@ -1734,9 +1856,10 @@ function query(params: {
 				accountConfigDir,
 				params.options?.cwd,
 			);
+			nativeParentUuid = assistantUuid;
 			yield {
 				type: "assistant",
-				uuid: messageId,
+				uuid: assistantUuid,
 				session_id: sessionId,
 				parent_tool_use_id: null,
 				message: {

@@ -7,8 +7,11 @@ import {
 	CURRENT_EVENT_STORE_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
+	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
+	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
+	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
 	MESSAGE_TOMBSTONES_MIGRATION,
@@ -29,6 +32,7 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
@@ -41,6 +45,7 @@ import {
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_MODEL_SETTINGS_MIGRATION,
+	SESSIONS_PENDING_REWIND_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_RESUMES_MIGRATION,
@@ -50,6 +55,7 @@ import {
 	SESSIONS_WORKSPACE_HINT_MIGRATION,
 	SESSIONS_WORKSPACE_MIGRATION,
 	STARTUP_RESTORE_INDEXES_MIGRATION,
+	STORE_IDENTITY_MIGRATION,
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
@@ -333,6 +339,7 @@ const expectedTableColumns = {
 		"marked_unread_at",
 		"last_turn_end_version",
 		"seen_version",
+		"pending_rewind_message_id",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -480,6 +487,7 @@ const appendedSessionColumns = [
 	"claude_worktree_state",
 	"workspace_hint",
 	"workspace_hint_sequence",
+	"pending_rewind_message_id",
 ] as const;
 
 function sameStrings(
@@ -1138,6 +1146,28 @@ export const effectMigrationEntries = {
 		"sessions",
 		"workspace_hint",
 		readMigrationSql(SESSIONS_WORKSPACE_HINT_MIGRATION),
+	),
+	"0050_sessions_pending_rewind": runAddColumnMigrationIfMissing(
+		"sessions",
+		"pending_rewind_message_id",
+		readMigrationSql(SESSIONS_PENDING_REWIND_MIGRATION),
+	),
+	"0051_message_part_versions": runAddColumnMigrationIfMissing(
+		"message_parts",
+		"version",
+		readMigrationSql(MESSAGE_PART_VERSIONS_MIGRATION),
+	),
+	"0052_session_git_published": executeSqlStatements(
+		readMigrationSql(SESSION_GIT_PUBLISHED_MIGRATION),
+	),
+	"0053_store_identity": executeSqlStatements(
+		readMigrationSql(STORE_IDENTITY_MIGRATION),
+	),
+	"0054_events_unstamped_index": executeSqlStatements(
+		readMigrationSql(EVENTS_UNSTAMPED_INDEX_MIGRATION),
+	),
+	"0055_events_session_type_index": executeSqlStatements(
+		readMigrationSql(EVENTS_SESSION_TYPE_INDEX_MIGRATION),
 	),
 } satisfies Record<
 	string,

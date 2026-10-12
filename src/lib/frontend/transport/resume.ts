@@ -65,6 +65,16 @@
 // A detail suffix length mismatch is different: its buffer is untrustworthy,
 // so it explicitly requests a cold snapshot and discards the resume cursor.
 //
+// **A resume is checked, and the server wins** (conduit-test-y7eo.9). A
+// subscription given a ledger records, for every row it delivers, the version
+// that row moved at, starting from its last snapshot (whose rows all count at
+// the snapshot's sequence), and a resume names that snapshot as its base. The
+// server ends a catch-up against a base with the checksum of the set it holds;
+// a ledger that disagrees is a view that has drifted, however it happened, so
+// it is logged and treated as the suffix mismatch is: discard the cursor, take
+// a cold snapshot. The `synchronized` that failed the check is not delivered;
+// the snapshot's own is.
+//
 // **What is worth re-issuing.** `RpcClientError` — the transport's own error,
 // raised for a dead socket or an undecodable frame — is protocol class and is
 // re-issued; it says nothing about whether the subscription is servable. So is a
@@ -95,15 +105,74 @@ import type { RpcClientError } from "@effect/rpc/RpcClientError";
 import {
 	Cause,
 	Chunk,
+	Data,
 	Duration,
 	Effect,
 	HashSet,
 	Option,
 	Ref,
+	Schema,
 	Stream,
 } from "effect";
-import type { WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	digestRows,
+	PartRemovalId,
+	type ResumeBase,
+	ResumeChecksum,
+	ResumePoint,
+	type WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import type { DetailLengthMismatch } from "./session-detail-wire.js";
+
+declare global {
+	/**
+	 * Test seam: the next change a checked subscription delivers that this
+	 * matches is dropped, as a lost frame would be, while the cursor still
+	 * moves past it. Cleared once it drops one.
+	 */
+	var __conduitDropChange: ((envelope: object) => boolean) | undefined;
+}
+
+/**
+ * What a checked subscription holds: the base its last snapshot began, and
+ * each row since applied, by id, at the version it moved at. Owned by the
+ * caller, so a subscription opened again from a cursor it kept is checked too.
+ */
+export interface ResumeLedger {
+	base: ResumeBase | undefined;
+	/** The server's name for the base, when its snapshot carried one. */
+	point: ResumePoint | undefined;
+	/**
+	 * The newest sequence delivered, where a subscription opened again
+	 * resumes. Its rows may have been cut short, which the checksum catches;
+	 * what the checksum does not cover, the server re-sends on every resume.
+	 */
+	cursor: number | undefined;
+	readonly rows: Map<string, number>;
+	/** The part rows seen under each message, which go when it goes. */
+	readonly parts: Map<string, Set<string>>;
+}
+
+export const makeResumeLedger = (): ResumeLedger => ({
+	base: undefined,
+	point: undefined,
+	cursor: undefined,
+	rows: new Map(),
+	parts: new Map(),
+});
+
+const clearLedger = (ledger: ResumeLedger) => {
+	ledger.base = undefined;
+	ledger.point = undefined;
+	ledger.cursor = undefined;
+	ledger.rows.clear();
+	ledger.parts.clear();
+};
+
+/** The server's checksum of a resumed set disagrees with the ledger's. */
+class ResumeChecksumMismatch extends Data.TaggedError(
+	"ResumeChecksumMismatch",
+) {}
 
 /**
  * How far the consumer has provably got. `open` is the sequence currently being
@@ -138,13 +207,22 @@ const tagOf = (envelope: object): string | undefined =>
 		? envelope._tag
 		: undefined;
 
-/** What an `upsert` wraps: a session row, or a transcript message or event. */
+/** What an `upsert` wraps: a session row, or a transcript message or part. */
 const payloadOf = (envelope: object): unknown => {
 	if (!("item" in envelope)) return undefined;
 	const item = envelope.item;
 	if (typeof item !== "object" || item === null) return undefined;
 	if ("message" in item) return item.message;
 	if ("event" in item) return item.event;
+	// A part is named by its message and its own id, as its removal is.
+	if (
+		"part" in item &&
+		typeof item.part === "object" &&
+		item.part !== null &&
+		"id" in item.part &&
+		"messageId" in item
+	)
+		return { id: JSON.stringify([item.messageId, item.part.id]) };
 	return item;
 };
 
@@ -214,6 +292,88 @@ const advance = (cursor: Cursor, envelope: object): Step => {
 	return { cursor: closing ? settled(opened) : opened, deliver: true };
 };
 
+/** Note one row the subscription holds, at the version it moved at. */
+const holdRow = (ledger: ResumeLedger, envelope: object, version: number) => {
+	const id = subjectOf(payloadOf(envelope));
+	if (id === undefined) return;
+	ledger.rows.set(id, Math.max(ledger.rows.get(id) ?? version, version));
+	const item = "item" in envelope ? envelope.item : undefined;
+	if (
+		typeof item === "object" &&
+		item !== null &&
+		"part" in item &&
+		"messageId" in item &&
+		typeof item.messageId === "string"
+	)
+		ledger.parts.set(
+			item.messageId,
+			(ledger.parts.get(item.messageId) ?? new Set()).add(id),
+		);
+};
+
+/**
+ * Fold one delivered envelope into the ledger, and check a `synchronized`
+ * that carries the server's checksum against it.
+ */
+const record = (
+	ledger: ResumeLedger,
+	envelope: object,
+): Effect.Effect<void, ResumeChecksumMismatch> => {
+	const sequence = sequenceOf(envelope);
+	switch (tagOf(envelope)) {
+		case "snapshot": {
+			if (sequence === undefined) return Effect.void;
+			clearLedger(ledger);
+			ledger.base = {
+				sequence,
+				...("cursor" in envelope && typeof envelope.cursor === "string"
+					? { cursor: envelope.cursor }
+					: {}),
+			};
+			const point =
+				"resumePoint" in envelope ? envelope.resumePoint : undefined;
+			ledger.point = Schema.is(ResumePoint)(point) ? point : undefined;
+			const rows: readonly unknown[] =
+				"rows" in envelope && Array.isArray(envelope.rows) ? envelope.rows : [];
+			for (const row of rows) holdRow(ledger, { item: row }, sequence);
+			return Effect.void;
+		}
+		case "upsert":
+			if (sequence !== undefined) holdRow(ledger, envelope, sequence);
+			return Effect.void;
+		case "remove": {
+			if (!("id" in envelope) || typeof envelope.id !== "string")
+				return Effect.void;
+			ledger.rows.delete(envelope.id);
+			// A removed message takes its parts.
+			for (const part of ledger.parts.get(envelope.id) ?? [])
+				ledger.rows.delete(part);
+			ledger.parts.delete(envelope.id);
+			// A removed part leaves its message's index.
+			const part = Schema.decodeUnknownOption(PartRemovalId)(envelope.id);
+			if (Option.isSome(part))
+				ledger.parts.get(part.value[0])?.delete(envelope.id);
+			return Effect.void;
+		}
+		case "synchronized": {
+			const checksum = "checksum" in envelope ? envelope.checksum : undefined;
+			if (ledger.base === undefined || !Schema.is(ResumeChecksum)(checksum))
+				return Effect.void;
+			const held = digestRows(ledger.rows, ledger.base.sequence);
+			if (held.hash === checksum.hash && held.rows === checksum.rows)
+				return Effect.void;
+			console.warn("[resume] checksum mismatch, taking a fresh snapshot", {
+				base: ledger.base,
+				server: { hash: checksum.hash, rows: checksum.rows },
+				client: held,
+			});
+			return Effect.fail(new ResumeChecksumMismatch());
+		}
+		default:
+			return Effect.void;
+	}
+};
+
 const reissueDelay = (failures: number): Duration.Duration =>
 	Duration.millis(Math.min(50 * 2 ** (failures - 1), 1000));
 
@@ -239,39 +399,72 @@ const unsubscribed = Effect.map(
  * sequence the consumer provably completed.
  *
  * `issue` is called with the sequence to resume from — `undefined` on the first
- * attempt unless `from` is given, and again on a drop that completed nothing, so
- * a subscription that never got a snapshot still asks for one.
+ * attempt unless `from` is given or the `ledger` kept one, and again on a drop that completed nothing, so
+ * a subscription that never got a snapshot still asks for one. With a `ledger`
+ * it is also given the base a resume is checked against, and the server's
+ * point for it when there is one.
+ *
+ * `saved` is a snapshot kept from an earlier page load. It is delivered
+ * first, before anything is asked, and the subscription resumes from it as
+ * from any snapshot it was sent, so the server's checksum confirms it or a
+ * fresh snapshot replaces it.
  */
 export const resumeStream = <A extends object>(
 	issue: (
 		resumeFromSequence: number | undefined,
+		resumeBase?: ResumeBase,
+		resumePoint?: ResumePoint,
 	) => Stream.Stream<A, WsRpcError | RpcClientError | DetailLengthMismatch>,
 	options: {
 		readonly from?: number | undefined;
 		readonly onTransportDrop?: () => void;
+		readonly ledger?: ResumeLedger;
+		readonly saved?: A | undefined;
 	} = {},
 ): Stream.Stream<A, WsRpcError> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
+			const ledger = options.ledger;
 			const cursor = yield* Ref.make<Cursor>({
-				closed: options.from,
+				closed: options.from ?? ledger?.cursor,
 				open: undefined,
 				seen: nothingSeen,
 			});
 			const failures = yield* Ref.make(0);
+			const keep = (at: Cursor) => {
+				if (ledger !== undefined) ledger.cursor = at.open ?? at.closed;
+			};
 
 			const attempt = (): Stream.Stream<A, WsRpcError> =>
 				Stream.unwrap(
-					Effect.map(Ref.get(cursor), (at) => issue(at.closed)),
+					Effect.map(Ref.get(cursor), (at) =>
+						at.closed === undefined || ledger?.base === undefined
+							? issue(at.closed)
+							: issue(at.closed, ledger.base, ledger.point),
+					),
 				).pipe(
 					Stream.filterEffect((envelope) =>
-						Effect.zipRight(
-							Ref.set(failures, 0),
-							Ref.modify(cursor, (from) => {
+						Effect.gen(function* () {
+							yield* Ref.set(failures, 0);
+							const step = yield* Ref.modify(cursor, (from) => {
 								const step = advance(from, envelope);
-								return [step.deliver, step.cursor];
-							}),
-						),
+								return [step, step.cursor];
+							});
+							keep(step.cursor);
+							if (!step.deliver || ledger === undefined) return step.deliver;
+							const tag = tagOf(envelope);
+							const drop = globalThis.__conduitDropChange;
+							if (
+								drop !== undefined &&
+								(tag === "upsert" || tag === "remove") &&
+								drop(envelope)
+							) {
+								globalThis.__conduitDropChange = undefined;
+								return false;
+							}
+							yield* record(ledger, envelope);
+							return true;
+						}),
 					),
 					Stream.catchAllCause((cause): Stream.Stream<A, WsRpcError> => {
 						// A defect is nobody's contract, and it decides before anything
@@ -280,13 +473,16 @@ export const resumeStream = <A extends object>(
 						if (Chunk.isNonEmpty(Cause.defects(cause)))
 							return Stream.failCause(Cause.flatMap(cause, Cause.die));
 
-						// A suffix can only be decoded against the exact sent prefix.
+						// A suffix can only be decoded against the exact sent prefix,
+						// and a view the server's checksum disowns cannot be resumed.
 						// Ask the existing cold-start path for whole rows, even if the
-						// cursor claims they were delivered before the buffer was lost.
+						// cursor claims they were delivered.
 						if (
 							Chunk.some(
 								Cause.failures(cause),
-								(failure) => failure._tag === "DetailLengthMismatch",
+								(failure) =>
+									failure._tag === "DetailLengthMismatch" ||
+									failure._tag === "ResumeChecksumMismatch",
 							)
 						) {
 							return Stream.unwrap(
@@ -294,7 +490,12 @@ export const resumeStream = <A extends object>(
 									closed: undefined,
 									open: undefined,
 									seen: nothingSeen,
-								}).pipe(Effect.as(reissue())),
+								}).pipe(
+									Effect.tap(() => {
+										if (ledger !== undefined) clearLedger(ledger);
+									}),
+									Effect.as(reissue()),
+								),
 							);
 						}
 
@@ -341,6 +542,12 @@ export const resumeStream = <A extends object>(
 					),
 				);
 
-			return attempt();
+			const saved = options.saved;
+			if (saved === undefined || ledger === undefined) return attempt();
+			keep(
+				yield* Ref.updateAndGet(cursor, (from) => advance(from, saved).cursor),
+			);
+			yield* Effect.orDie(record(ledger, saved));
+			return Stream.concat(Stream.make(saved), attempt());
 		}),
 	);

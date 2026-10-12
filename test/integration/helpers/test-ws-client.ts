@@ -29,8 +29,10 @@ import {
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { harnessForModelProvider } from "../../../src/lib/provider/turn-settings.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
+import { assembleDetailRows } from "../../helpers/detail-rows.js";
 
 class TestRpc extends Context.Tag("IntegrationTestBrowserRpc")<
 	TestRpc,
@@ -224,18 +226,51 @@ export class TestWsClient {
 
 	async createSession(
 		title?: string,
-		opts: { readonly providerId?: string; readonly instanceId?: string } = {},
+		opts: {
+			readonly providerId?: string;
+			readonly instanceId?: string;
+			readonly model?: {
+				readonly providerId: string;
+				readonly modelId: string;
+				readonly variant: string;
+				readonly contextWindow: string;
+			};
+		} = {},
 	): Promise<ReceivedMessage> {
 		const clientId = this.clientId;
+		const instanceId =
+			opts.instanceId ??
+			(opts.providerId ? harnessForModelProvider(opts.providerId) : undefined);
+		const models = await this.rpcCall((client) =>
+			client.GetModels({
+				projectSlug: this.projectSlug,
+				...(instanceId
+					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
+					: {}),
+			}),
+		);
+		const model =
+			opts.model ??
+			(models.active
+				? {
+						providerId: models.active.provider,
+						modelId: models.active.model,
+						variant: models.variant?.variant ?? "",
+						contextWindow: models.contextWindow?.contextWindow ?? "",
+					}
+				: undefined);
+		if (!model)
+			throw new Error("The session fixture needs a valid harness model pick");
 		const result = await this.rpcCall((client) =>
 			client.CreateSession({
 				permissionMode: "ask",
 				projectSlug: this.projectSlug,
 				originId: clientId,
+				model,
 				...(title != null ? { title } : {}),
 				...(opts.providerId ? { providerId: opts.providerId } : {}),
-				...(opts.instanceId
-					? { instanceId: ProviderInstanceIdSchema.make(opts.instanceId) }
+				...(instanceId
+					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
 					: {}),
 			}),
 		);
@@ -743,6 +778,7 @@ export class TestWsClient {
 			}
 		}
 		this.detailSubscriptionKey = key;
+		const assemble = assembleDetailRows();
 		await this.follow(
 			"session_detail",
 			(client) => client.SubscribeSessionDetail({ projectSlug, sessionId }),
@@ -754,15 +790,11 @@ export class TestWsClient {
 						: envelope._tag === "upsert"
 							? [envelope.item]
 							: [];
-				for (const item of items)
-					if (item._tag === "event")
-						this.receive({ ...item.event, type: item.event.type, sessionId });
-					else if (item._tag === "transcriptMessage")
-						this.receive({
-							...item.message,
-							type: "transcript_message",
-							sessionId,
-						});
+				for (const item of items) {
+					const message = assemble(item);
+					if (message)
+						this.receive({ ...message, type: "transcript_message", sessionId });
+				}
 			},
 		);
 	}

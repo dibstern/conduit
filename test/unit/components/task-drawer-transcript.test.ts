@@ -91,6 +91,8 @@ function seedTranscript(id: string, text: string) {
 		status: { _tag: "live" },
 		project: "conduit",
 		pending: [],
+		waiting: new Map(),
+		partOrder: new Map(),
 	};
 	messages.transcript = entry;
 	messages.messages = deriveTranscriptMessages(entry, []);

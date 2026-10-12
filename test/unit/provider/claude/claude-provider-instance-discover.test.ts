@@ -71,7 +71,7 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 		expect(caps.supportsQuestions).toBe(true);
 		expect(caps.supportsAttachments).toBe(true);
 		expect(caps.supportsFork).toBe(true);
-		expect(caps.supportsRevert).toBe(false);
+		expect(caps.supportsRevert).toBe(true);
 	});
 
 	it("enumerates built-in commands", async () => {

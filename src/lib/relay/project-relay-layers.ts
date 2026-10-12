@@ -251,6 +251,7 @@ export function createProjectRelayLayers({
 		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		claudeQueryFactory: claudeSdk.query,
+		claudeSessionForkSdk: claudeSdk.fork,
 		...(config.claudeSdk?.subagentSdk && {
 			claudeSubagentSdk: config.claudeSdk.subagentSdk,
 		}),
@@ -658,7 +659,7 @@ export function createProjectRelayLayers({
 	// (provides sseTracker, getMonitoringState).
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
-			titleQueryFactory: claudeSdk.titleQuery,
+			titleQueryFactory: config.titleQuery ?? claudeSdk.titleQuery,
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
 		bridgeLayers,
@@ -713,12 +714,23 @@ export function createProjectRelayLayers({
 	).pipe(Layer.provide(baseLayers));
 	// The inbox drains on the relay's one bus (memoised by layer reference).
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
+	// The borrowed daemon tracer goes BENEATH everything, not beside it:
+	// Layer.setTracer patches a FiberRef in its own build fiber, so a merged
+	// tracer never reaches fibers forked while building sibling layers
+	// (e.g. the status poller loop).
 	const fullLayer = Layer.provideMerge(
-		RpcSubscriptionScopeLive,
 		Layer.provideMerge(
-			Layer.mergeAll(wiringLayers, inboxLayer, SessionWorkspaceHintReactorLive),
-			fullBaseLayers,
+			RpcSubscriptionScopeLive,
+			Layer.provideMerge(
+				Layer.mergeAll(
+					wiringLayers,
+					inboxLayer,
+					SessionWorkspaceHintReactorLive,
+				),
+				fullBaseLayers,
+			),
 		),
+		config.tracer === undefined ? Layer.empty : Layer.setTracer(config.tracer),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

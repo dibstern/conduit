@@ -24,6 +24,28 @@ import {
 } from "../../helpers/effect-projection-harness.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
+// The wire tags a tool's state (conduit-test-y7eo.6); these short values travel whole.
+const wirePart = <
+	Part extends { readonly type: string; readonly state?: unknown },
+>(
+	part: Part,
+) => {
+	const { state } = part;
+	if (part.type !== "tool" || typeof state !== "object" || state === null)
+		return part;
+	const { input, output, ...rest } = state as Record<string, unknown>;
+	return {
+		...part,
+		state: {
+			...rest,
+			...(input !== undefined && { input: { _tag: "whole", value: input } }),
+			...(typeof output === "string" && {
+				output: { _tag: "whole", text: output },
+			}),
+		},
+	};
+};
+
 const sessionId = "snapshot-session";
 const user: Message = {
 	id: "u1",
@@ -140,7 +162,7 @@ describe("OpenCode message snapshots", () => {
 					? { turnTiming: { startedAt: 10, endedAt: 60, waits: [] } }
 					: {}),
 				parts: normalized.parts.map((part) => ({
-					...part,
+					...wirePart(part),
 					type: part.type as HistoryMessagePart["type"],
 				})),
 			};
@@ -439,7 +461,10 @@ describe("OpenCode message snapshots", () => {
 		const projected = await live.sessionMessagesWithParts(sessionId);
 		expect(
 			messageRowsToHistory(projected, { pageSize: 50 }).messages[1],
-		).toEqual(snapshotPayload(corrected).message);
+		).toEqual({
+			...snapshotPayload(corrected).message,
+			parts: snapshotPayload(corrected).message.parts.map(wirePart),
+		});
 		const replay = makeHarness();
 		await replay.reproject(await live.storedEvents(sessionId));
 		for (const table of ["messages", "message_parts", "turns"] as const) {

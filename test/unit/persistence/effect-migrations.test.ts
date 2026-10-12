@@ -83,6 +83,12 @@ const expectedNames = [
 	"messages_completed_at",
 	"sessions_claude_worktree_state",
 	"sessions_workspace_hint",
+	"sessions_pending_rewind",
+	"message_part_versions",
+	"session_git_published",
+	"store_identity",
+	"events_unstamped_index",
+	"events_session_type_index",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -155,6 +161,12 @@ describe("Effect migration lineage", () => {
 					...Array.from({ length: 45 }, (_, index) => index + 1),
 					48,
 					49,
+					50,
+					51,
+					52,
+					53,
+					54,
+					55,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -233,8 +245,94 @@ describe("Effect migration lineage", () => {
 		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
 	);
 
-	it("registers the contiguous production chain from 1 through 49", () => {
-		expect(migrationEntries).toHaveLength(49);
+	it.effect(
+		"catches up a skipped workspace migration below the recorded maximum",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator(
+					Object.fromEntries(
+						migrationEntries.filter(
+							([key]) => key !== "0051_message_part_versions",
+						),
+					),
+				);
+				const sql = yield* SqlClient.SqlClient;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[51, "message_part_versions"],
+				]);
+				expect(
+					(yield* sql<{ name: string }>`PRAGMA table_info(message_parts)`).map(
+						({ name }) => name,
+					),
+				).toContain("version");
+				expect(
+					yield* sql`SELECT name FROM sqlite_master WHERE name = 'message_part_tombstones'`,
+				).toEqual([{ name: "message_part_tombstones" }]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"upgrades a store that recorded the workspace migrations at their old ids 46-48",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator({
+					...prefix(45),
+					"0046_message_part_versions":
+						effectMigrationEntries["0051_message_part_versions"],
+					"0047_session_git_published":
+						effectMigrationEntries["0052_session_git_published"],
+					"0048_store_identity": effectMigrationEntries["0053_store_identity"],
+				});
+				const sql = yield* SqlClient.SqlClient;
+				const identity = yield* sql`SELECT value FROM store_identity`;
+				yield* sql`INSERT INTO session_git_published (directory, git) VALUES ('/repo', NULL)`;
+
+				expect(yield* makeEffectSqlMigrator()).toEqual(
+					expectedNames
+						.slice(45)
+						.map((name, index) => [index + 46, name] as const),
+				);
+				expect(
+					yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
+				).toEqual(
+					expectedNames.map((name, index) => ({
+						migration_id: index + 1,
+						name,
+					})),
+				);
+				expect(yield* sql`SELECT value FROM store_identity`).toEqual(identity);
+				expect(
+					yield* sql`SELECT directory, git FROM session_git_published`,
+				).toEqual([{ directory: "/repo", git: null }]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it.effect(
+		"accepts a pending rewind point during baseline schema validation",
+		() =>
+			Effect.gen(function* () {
+				// An existing pending point must be recognized during adoption, and
+				// rewind must not add separate visibility or version columns.
+				yield* makeEffectSqlMigrator(prefix(24));
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`ALTER TABLE sessions ADD COLUMN pending_rewind_message_id TEXT`;
+				yield* effectMigrationEntries["0001_create_event_store_tables"];
+				const columns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(sessions)`;
+				expect(
+					columns.filter(
+						(column) => column.name === "pending_rewind_message_id",
+					),
+				).toHaveLength(1);
+				yield* effectMigrationEntries["0001_create_event_store_tables"];
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
+	it("registers the contiguous production chain from 1 through 55", () => {
+		expect(migrationEntries).toHaveLength(55);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -243,7 +341,7 @@ describe("Effect migration lineage", () => {
 	});
 
 	it.effect(
-		"upgrades a database with messages migrations 1 through 47 to 49",
+		"upgrades a database with messages migrations 1 through 47 to 54",
 		() =>
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(prefix(47));
@@ -264,6 +362,12 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
+					[51, "message_part_versions"],
+					[52, "session_git_published"],
+					[53, "store_identity"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				const after = yield* sql<{ migration_id: number; name: string }>`
 					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
@@ -308,6 +412,12 @@ describe("Effect migration lineage", () => {
 					VALUES ('kept-hint', 'claude', 'Preserved', 'idle', 1, 1)`;
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
+					[51, "message_part_versions"],
+					[52, "session_git_published"],
+					[53, "store_identity"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -357,6 +467,12 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
+					[51, "message_part_versions"],
+					[52, "session_git_published"],
+					[53, "store_identity"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -704,10 +820,18 @@ describe("Effect migration lineage", () => {
 						"claude_worktree_state",
 						"workspace_hint",
 						"workspace_hint_sequence",
+						"pending_rewind_message_id",
 					]),
 				);
 				for (const retired of ["read_at", "marked_unread_at", "last_viewed_at"])
 					expect(columns.map((row) => row.name)).not.toContain(retired);
+				expect(columns.map((row) => row.name)).not.toContain("rewind_version");
+				const messageColumns = yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(messages)`;
+				expect(messageColumns.map((row) => row.name)).not.toContain(
+					"rewind_hidden",
+				);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
@@ -928,6 +1052,12 @@ describe("Effect migration lineage", () => {
 				[47, "messages_completed_at"],
 				[48, "sessions_claude_worktree_state"],
 				[49, "sessions_workspace_hint"],
+				[50, "sessions_pending_rewind"],
+				[51, "message_part_versions"],
+				[52, "session_git_published"],
+				[53, "store_identity"],
+				[54, "events_unstamped_index"],
+				[55, "events_session_type_index"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1014,6 +1144,12 @@ describe("Effect migration lineage", () => {
 					[47, "messages_completed_at"],
 					[48, "sessions_claude_worktree_state"],
 					[49, "sessions_workspace_hint"],
+					[50, "sessions_pending_rewind"],
+					[51, "message_part_versions"],
+					[52, "session_git_published"],
+					[53, "store_identity"],
+					[54, "events_unstamped_index"],
+					[55, "events_session_type_index"],
 				]);
 				const rows = yield* sql<{
 					id: string;

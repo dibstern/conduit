@@ -74,6 +74,7 @@ const main = Effect.gen(function* () {
 		);
 	let queryFactory: ClaudeSessionRunnerDeps["queryFactory"];
 	let subagentSdk: ClaudeSessionRunnerDeps["subagentSdk"];
+	let sessionForkSdk: ClaudeSessionRunnerDeps["sessionForkSdk"];
 	let testSubagentPollTimeoutMs: number | undefined;
 	let settingsResolver: typeof sdkResolveSettings | undefined =
 		sdkResolveSettings;
@@ -81,6 +82,7 @@ const main = Effect.gen(function* () {
 	if (module) {
 		queryFactory = module.claudeSdk.query;
 		subagentSdk = module.claudeSubagentSdk;
+		sessionForkSdk = module.claudeSdk.fork;
 		const pollTimeout = Number(
 			process.env["CONDUIT_TEST_SUBAGENT_POLL_TIMEOUT_MS"],
 		);
@@ -215,7 +217,8 @@ const main = Effect.gen(function* () {
 		const options = params.options;
 		if (!options || !launchInput)
 			throw new Error("Claude runner launch input is missing");
-		const { abortController, canUseTool, resume, ...launch } = options;
+		const { abortController, canUseTool, resume, resumeSessionAt, ...launch } =
+			options;
 		const restoring = frozenSnapshot !== undefined && snapshot === undefined;
 		const frozenLaunch: Options | undefined = frozenSnapshot
 			? {
@@ -237,6 +240,7 @@ const main = Effect.gen(function* () {
 						...(abortController ? { abortController } : {}),
 						...(canUseTool ? { canUseTool } : {}),
 						...(resume ? { resume } : {}),
+						...(resumeSessionAt ? { resumeSessionAt } : {}),
 					}
 				: frozenSnapshot
 					? {
@@ -331,6 +335,7 @@ const main = Effect.gen(function* () {
 			abortController: _abort,
 			canUseTool: _tool,
 			resume: _resume,
+			resumeSessionAt: _rewindPoint,
 			...effectiveLaunch
 		} = queryLaunchOptions;
 		const retainedFiles = frozenSnapshot?.fileSettings ?? fileSettings;
@@ -449,6 +454,7 @@ const main = Effect.gen(function* () {
 										...config,
 										shellEnv: () => shellEnv,
 										queryFactory: createQuery,
+										...(sessionForkSdk ? { sessionForkSdk } : {}),
 										prepareQuery: async () => {
 											// First warming prepares the snapshot in the command path.
 											// Revalidate native sources only when creating another query.
@@ -589,6 +595,7 @@ const main = Effect.gen(function* () {
 								pendingOutputs: spool.pendingOutputs,
 								completedCommands: [...completedCommands.values()],
 								upgradeState: upgradeState(),
+								stopsTasks: true,
 							});
 							initializing = false;
 						}),

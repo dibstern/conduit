@@ -89,8 +89,8 @@ export {
 	type GetSkillContentResponse,
 	GetStatus,
 	type GetStatusResponse,
-	GetToolContent,
-	type GetToolContentResponse,
+	GetToolDetails,
+	type GetToolDetailsResponse,
 	type GoalDetails,
 	InspectSessionWorktrees,
 	type InstanceListResponse,
@@ -175,6 +175,7 @@ export {
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
+	UndoRewind,
 	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,
@@ -212,11 +213,14 @@ const subscribeSessionDetailWithPresence = (
 export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
-			subscribeShell(
-				request.resumeFromSequence === undefined
+			subscribeShell({
+				...(request.resumeFromSequence === undefined
 					? {}
-					: { resumeFromSequence: request.resumeFromSequence },
-			).pipe(
+					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+			}).pipe(
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
@@ -247,6 +251,12 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+				...(request.resumePoint === undefined
+					? {}
+					: { resumePoint: request.resumePoint }),
 			}).pipe(
 				(stream) =>
 					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
@@ -438,10 +448,11 @@ export const makeRoutedWsRpcServerLayer = <
 	const routeHandler =
 		<P extends { readonly projectSlug?: string }, A, E, R>(
 			handler: (payload: P) => Effect.Effect<A, E, R>,
+			fallbackProjectSlug?: string,
 		) =>
 		(payload: P) =>
 			Effect.gen(function* () {
-				const slug = payload.projectSlug ?? defaultProjectSlug;
+				const slug = payload.projectSlug ?? fallbackProjectSlug;
 				if (slug === undefined)
 					return yield* Effect.fail(
 						new WsRpcError({ message: "projectSlug is required" }),
@@ -470,7 +481,10 @@ export const makeRoutedWsRpcServerLayer = <
 				(daemonUnaryHandlers && Object.hasOwn(daemonUnaryHandlers, name)) ||
 				Object.hasOwn(daemonOnlyHandlers, name)
 					? handler
-					: routeHandler<never, unknown, unknown, unknown>(handler),
+					: routeHandler<never, unknown, unknown, unknown>(
+							handler,
+							name === "CreateSession" ? undefined : defaultProjectSlug,
+						),
 			],
 		),
 	) as {
@@ -493,12 +507,7 @@ export const makeRoutedWsRpcServerLayer = <
 			payload: Parameters<(typeof unaryHandlers)["CreateSession"]>[0],
 		) =>
 			routeCreateSession(payload).pipe(
-				Effect.tap(() => {
-					const slug = payload.projectSlug ?? defaultProjectSlug;
-					return slug === undefined
-						? Effect.void
-						: daemonHandlers.sessionCreated(slug);
-				}),
+				Effect.tap(() => daemonHandlers.sessionCreated(payload.projectSlug)),
 			);
 	}
 	const routeStream = <
@@ -546,11 +555,14 @@ export const makeRoutedWsRpcServerLayer = <
 		...handlers,
 		SubscribeShell: (request) =>
 			routeStream(request.projectSlug, () =>
-				subscribeShell(
-					request.resumeFromSequence === undefined
+				subscribeShell({
+					...(request.resumeFromSequence === undefined
 						? {}
-						: { resumeFromSequence: request.resumeFromSequence },
-				),
+						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+				}),
 			),
 		SubscribeApprovals: (request) =>
 			routeStream(request.projectSlug, () =>
@@ -567,6 +579,12 @@ export const makeRoutedWsRpcServerLayer = <
 					...(request.resumeFromSequence === undefined
 						? {}
 						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+					...(request.resumePoint === undefined
+						? {}
+						: { resumePoint: request.resumePoint }),
 				});
 				return request.textSuffixes === true
 					? encodeSessionDetail(source)

@@ -4,7 +4,6 @@
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId } from "../../stores/usage.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
@@ -19,7 +18,7 @@
 
 	const session = $derived(findSession(sessionState.currentId ?? ""));
 	const projectSlug = $derived(
-		session ? session.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "",
+		session ? session.projectSlug : getDraftProject() ?? "",
 	);
 	const accounts = $derived(getClaudeAccounts(projectSlug));
 	const instances = $derived(getAvailableInstances());

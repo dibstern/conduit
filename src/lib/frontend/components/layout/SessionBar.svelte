@@ -13,7 +13,7 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The title menu carries session verbs and global actions; the desktop overflow
+  The title menu carries session commands and global actions; the desktop overflow
   carries global actions.
 -->
 
@@ -51,7 +51,7 @@
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
-	import SessionVerbItems from "../session/SessionVerbItems.svelte";
+	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -61,7 +61,7 @@
 	import BannersRow from "../overlays/BannersRow.svelte";
 	import { stopBackgroundTasks, tasksPanel } from "../session/background-tasks.svelte.js";
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
-	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
+	import { getPrimaryCommand, getSessionCommands, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeysHint } from "../session/session-commands.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
@@ -193,7 +193,7 @@
 		}));
 	}
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
-	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
+	const primaryCommand = $derived(session ? getPrimaryCommand(session, sessionState.now) : undefined);
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
 		switch (connectionState.status) {
@@ -221,9 +221,9 @@
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
-	// The island is phone-only, so its verbs and the keyboard share one list.
-	const verbs = $derived(session
-		? getSessionVerbs(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
+	// The island is phone-only, so its commands and the keyboard share one list.
+	const commands = $derived(session
+		? getSessionCommands(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
 		: []);
 	const globalActions = $derived(chromeMenuActions());
 
@@ -235,7 +235,7 @@
 			const target = event.target;
 			if (!(target instanceof HTMLElement) || !target.closest("#messages") || target.isContentEditable || target.closest("input, textarea, select")) return;
 		}
-		runSessionVerbShortcut(event, verbs);
+		runSessionCommandShortcut(event, commands);
 	}
 
 	let barEl: HTMLElement | null = $state(null);
@@ -366,7 +366,7 @@
 			<MenuSeparator />
 			{#if session}
 				<MenuGroup label="Session">
-					<SessionVerbItems {verbs} presentation="sheet" onselect={selectOverflow} />
+					<SessionCommandItems {commands} presentation="sheet" onselect={selectOverflow} />
 				</MenuGroup>
 			{/if}
 		{/if}
@@ -391,7 +391,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if !sessionViewState.compact && settleVerb}
+			{#if primaryCommand}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button
 						{...props}
@@ -399,15 +399,16 @@
 						variant="ghost"
 						tone="default"
 						size="segment"
-						icon={settleVerb.icon ?? "check"}
+						icon={primaryCommand.icon ?? "check"}
+						touchTarget
 						class="shrink-0"
-						disabled={settleVerb.disabledReason != null}
-						title={settleVerb.disabledReason ?? undefined}
-						ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
+						disabled={primaryCommand.disabledReason != null}
+						title={primaryCommand.disabledReason ?? undefined}
+						ariaLabel={primaryCommand.disabledReason ? `${primaryCommand.label}: ${primaryCommand.disabledReason}` : primaryCommand.label}
 						data-testid="session-bar-settle"
-						onclick={() => settleVerb.run()}
-					><span id="session-bar-settle-label">{settleVerb.label}</span></Button>{/snippet}
-					{#snippet children()}{settleVerb.label}{#if settleVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(settleVerb.keys)}</span>{/if}{/snippet}
+						onclick={() => primaryCommand.run()}
+					><span id="session-bar-settle-label">{primaryCommand.label}</span></Button>{/snippet}
+					{#snippet children()}{primaryCommand.label}{#if primaryCommand.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionCommandKeysHint(primaryCommand.keys)}</span>{/if}{/snippet}
 				</Tooltip>
 			{/if}
 		</div>
@@ -533,7 +534,7 @@
 						</Badge>
 					</Button>
 				{/snippet}
-				<MenuItem data-testid="session-bar-unread-mark-read" onselect={() => void sessionVerbActions.markRead(session)}>Mark read</MenuItem>
+				<MenuItem data-testid="session-bar-unread-mark-read" onselect={() => void sessionCommandActions.markRead(session)}>Mark read</MenuItem>
 			</Menu>
 		{/if}
 		{#if stateChip && session && !collapsed}
@@ -563,14 +564,14 @@
 						{/if}
 					</div>
 					{#if stateChip.kind === "snoozed"}
-						<MenuItem data-testid="session-bar-wake" onselect={() => void sessionVerbActions.unsnooze(session)}>
+						<MenuItem data-testid="session-bar-wake" onselect={() => void sessionCommandActions.unsnooze(session)}>
 							<Icon name="undo" size={13} /><span>Wake now</span>
 						</MenuItem>
 					{:else}
-						<MenuItem data-testid="session-bar-unsettle" onselect={() => void sessionVerbActions.settle(session, false)}>
+						<MenuItem data-testid="session-bar-unsettle" onselect={() => void sessionCommandActions.settle(session, false)}>
 							<Icon name="undo" size={13} /><span>Un-settle</span>
 						</MenuItem>
-						<MenuCheckboxItem data-testid="session-bar-auto-settle" checked={session.autoSettleDisabled !== true} onselect={() => void sessionVerbActions.autoSettle(session, session.autoSettleDisabled !== true)}>
+						<MenuCheckboxItem data-testid="session-bar-auto-settle" checked={session.autoSettleDisabled !== true} onselect={() => void sessionCommandActions.autoSettle(session, session.autoSettleDisabled !== true)}>
 							<span class="w-[13px] shrink-0" aria-hidden="true"></span><span>Auto-settle when idle</span>
 						</MenuCheckboxItem>
 					{/if}

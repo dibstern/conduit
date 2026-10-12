@@ -4875,6 +4875,68 @@ test.describe("OpenCode draft inventory borrows", () => {
 		}
 	});
 
+	test("merge-cold-inventory-retry: a failed first inventory keeps the picker mounted through retries", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const setup = await prepareDraft(harness, "opencode");
+		const blocked = join(harness.configDir, "fake-opencode-reject-models");
+		writeFileSync(blocked, "test-only");
+		let identityReplies = 0;
+		const evidence: Record<string, unknown> = {
+			case: "merge-cold-inventory-retry",
+		};
+		try {
+			await editRpc(page, (frame, request) => {
+				if (request?.tag === "GetModels" && frame._tag === "Exit") {
+					identityReplies++;
+					// Inventory needs the resolved instance identity before starting.
+					// Supply that metadata without supplying a successful catalog.
+					return editModelInventories(frame, (response) => {
+						const {
+							active: _active,
+							modelExecution: _execution,
+							...metadata
+						} = response;
+						return {
+							...metadata,
+							providers: [],
+							variant: { variant: "", variants: [] },
+							contextWindow: { contextWindow: "", options: [] },
+						};
+					});
+				}
+				return frame;
+			});
+			const app = new AppPage(page);
+			await app.goto(
+				`${harness.baseUrl}/new?p=${encodeURIComponent(setup.slug)}`,
+			);
+			await expect(
+				page.getByText(/OpenCode model discovery failed:/).first(),
+			).toBeVisible({ timeout: 20_000 });
+			await expect.poll(() => identityReplies).toBeGreaterThan(0);
+			const picker = page.locator(pickerSelector);
+			await expect(picker).toBeVisible();
+			await expect(picker).toHaveAttribute("data-shown-model", "");
+			await app.input.fill("merge-cold-inventory-retry");
+			await expect(app.sendBtn).toBeDisabled();
+			await openPickerRoot(page, picker);
+			await expect(page.getByTestId("model-picker")).toBeVisible();
+			await page.getByTestId("picker-harness-claude").click();
+			await expect(picker).toHaveAttribute("data-shown-harness", "claude");
+			await expect(page.getByTestId("model-picker")).toBeVisible();
+			evidence["shownAfterSwitch"] = await readShown(picker);
+			evidence["identityReplies"] = identityReplies;
+			evidence["pickerVisible"] = await page
+				.getByTestId("model-picker")
+				.isVisible();
+		} finally {
+			rmSync(blocked, { force: true });
+			await writeGuardArtifact(testInfo, evidence);
+		}
+	});
+
 	for (const resource of ["events", "models"] as const)
 		test(`9cn3-discovery-${resource}-failure: failed discovery ends loading and the picker retries`, async ({
 			page,
@@ -5552,14 +5614,40 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 		}),
 	);
 	const source = readStoredState(harness, slug, sessionId);
+	const firstPrompt = "merge-side-first: Prove the source pick is inherited";
+	const sideRequest = {
+		projectSlug: slug,
+		parentSessionId: sessionId,
+		title: "Prove the source pick is inherited",
+		inputId: crypto.randomUUID(),
+		text: firstPrompt,
+	};
 	const side = await Effect.runPromise(
-		browser.rpc.StartSideThread({
-			projectSlug: slug,
-			parentSessionId: sessionId,
-			title: "Prove the source pick is inherited",
-		}),
+		browser.rpc.StartSideThread(sideRequest),
 	);
+	const retries = await Promise.all([
+		Effect.runPromise(browser.rpc.StartSideThread(sideRequest)),
+		Effect.runPromise(browser.rpc.StartSideThread(sideRequest)),
+	]);
+	await expect
+		.poll(
+			() =>
+				enqueues(harness, true).filter((mark) =>
+					mark.prompt.includes(firstPrompt),
+				).length,
+		)
+		.toBe(1);
+	const firstReceipt = enqueues(harness, true).find((mark) =>
+		mark.prompt.includes(firstPrompt),
+	);
+	expect(firstReceipt?.liveOptions.model).toBe("sonnet[1m]");
+	expect(firstReceipt?.liveOptions.effort).toBe("high");
+	expect(retries.map((retry) => retry.sessionId)).toEqual([
+		side.sessionId,
+		side.sessionId,
+	]);
 	const created = readStoredState(harness, slug, side.sessionId);
+	expect(created.sessionCount).toBe(source.sessionCount + 1);
 	const models = await Effect.runPromise(
 		browser.rpc.GetModels({ projectSlug: slug, sessionId: side.sessionId }),
 	);
@@ -5576,6 +5664,9 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 		source,
 		created,
 		reported,
+		sideRequest,
+		retries,
+		firstReceipt,
 	});
 	expect(source.pick).toEqual({
 		provider: "claude",
@@ -5594,6 +5685,46 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 		effort: "high",
 		contextWindow: "1m",
 	});
+	const db = new Database(harness.projectStorePath(slug));
+	try {
+		db.prepare("UPDATE sessions SET context_window = NULL WHERE id = ?").run(
+			sessionId,
+		);
+		const rejected = await Effect.runPromise(
+			Effect.either(
+				browser.rpc.StartSideThread({
+					...sideRequest,
+					inputId: crypto.randomUUID(),
+					text: "merge-side-missing-source-pick",
+				}),
+			),
+		);
+		const afterRejected = readStoredState(harness, slug, sessionId);
+		await writeGuardArtifact(testInfo, {
+			case: "server-side-thread-pick",
+			sent,
+			source,
+			created,
+			reported,
+			sideRequest,
+			retries,
+			firstReceipt,
+			rejected,
+			afterRejected,
+		});
+		expect(rejected._tag).toBe("Left");
+		expect(afterRejected.sessionCount).toBe(created.sessionCount);
+		expect(
+			enqueues(harness, true).filter((mark) =>
+				mark.prompt.includes("merge-side-missing-source-pick"),
+			),
+		).toHaveLength(0);
+	} finally {
+		db.prepare("UPDATE sessions SET context_window = '1m' WHERE id = ?").run(
+			sessionId,
+		);
+		db.close();
+	}
 });
 
 async function assertPickRejected(

@@ -3,6 +3,7 @@ import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InputArea from "../../../src/lib/frontend/components/input/InputArea.svelte";
 import {
+	followSessionBusy,
 	getOrCreateSessionActivity,
 	handleInputSyncReceived,
 	inputSyncState,
@@ -11,7 +12,11 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { syncInputDraftRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import {
+	cancelSessionRpc,
+	syncInputDraftRpc,
+} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { seedDaemonSessions } from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -20,6 +25,7 @@ vi.mock(
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
 		syncInputDraftRpc: vi.fn(async () => {}),
+		cancelSessionRpc: vi.fn(async () => {}),
 	}),
 );
 
@@ -78,6 +84,7 @@ describe("InputArea build reload recovery", () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
 		vi.mocked(syncInputDraftRpc).mockReset().mockResolvedValue(undefined);
+		vi.mocked(cancelSessionRpc).mockReset().mockResolvedValue(undefined);
 		sessionStorage.clear();
 		sessionState.currentId = sessionId;
 		attachedProjectState.slug = "test";
@@ -102,7 +109,47 @@ describe("InputArea build reload recovery", () => {
 		vi.unstubAllGlobals();
 		sessionState.currentId = null;
 		attachedProjectState.slug = null;
+		seedDaemonSessions([]);
 		sessionStorage.clear();
+	});
+
+	it("syncs a loaded foreign session draft through its owning project", async () => {
+		seedDaemonSessions([
+			{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" },
+		]);
+		const { getByRole } = render(InputArea);
+		const textarea = getByRole("textbox", {
+			name: "Message",
+		}) as HTMLTextAreaElement;
+		await enterText(textarea, "draft for dotfiles");
+		await vi.advanceTimersByTimeAsync(300);
+		expect(syncInputDraftRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "dotfiles",
+				sessionId,
+				text: "draft for dotfiles",
+			}),
+		);
+	});
+
+	it("stops a loaded foreign session through its owning project", async () => {
+		seedDaemonSessions([
+			{
+				id: sessionId,
+				title: "Foreign session",
+				projectSlug: "dotfiles",
+				status: "busy",
+			},
+		]);
+		followSessionBusy(sessionId, true);
+		const { getByRole } = render(InputArea);
+		await fireEvent.click(getByRole("button", { name: "Stop generating" }));
+		expect(cancelSessionRpc).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectSlug: "dotfiles",
+				sessionId,
+			}),
+		);
 	});
 
 	it("defers reload preparation without losing a pending image or draft", async () => {

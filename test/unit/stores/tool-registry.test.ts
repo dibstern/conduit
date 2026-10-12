@@ -86,19 +86,6 @@ describe("forward transitions", () => {
 		if (result.action !== "update") throw new Error("unreachable");
 		expect(result.tool.status).toBe("completed");
 	});
-
-	it("complete() stores truncation extras", () => {
-		registry.start("call-1", "Read");
-		registry.executing("call-1");
-		const result = registry.complete("call-1", "data...", false, {
-			isTruncated: true,
-			fullContentLength: 10000,
-		});
-		expect(result.action).toBe("update");
-		if (result.action !== "update") throw new Error("unreachable");
-		expect(result.tool.isTruncated).toBe(true);
-		expect(result.tool.fullContentLength).toBe(10000);
-	});
 });
 
 describe("backward transitions rejected", () => {

@@ -13,6 +13,7 @@ import {
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import { createEventId } from "../../../persistence/events.js";
 import {
+	completedCompactionEvent,
 	isSettled,
 	snapshotPayload,
 	synthesizeSnapshotEvent,
@@ -519,6 +520,15 @@ export class EffectOpenCodeRuntimeIngress
 						stored.get(message.id)?.rest_event_id ?? undefined,
 					),
 				);
+			// Even an unchanged snapshot may predate compaction ingestion. Always
+			// offer the summary outcome; append deduplicates its durable message ID.
+			for (const message of settled) {
+				const compaction = completedCompactionEvent(sessionId, message, {
+					kind: "opencode.rest",
+					endpoint: "session.messages",
+				});
+				if (compaction) events.push(compaction);
+			}
 			if (events.length > 0) {
 				if (!(yield* this.hasProjectedSession(sessionId))) {
 					const parentId = this.parentIds.get(sessionId);

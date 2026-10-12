@@ -22,6 +22,7 @@
 import { channel } from "node:diagnostics_channel";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Duration, Effect, Option, Stream } from "effect";
+import type { ResumeBase } from "../../../contracts/ws-rpc.js";
 import { withCachedSessionGit } from "../../../git/session-git.js";
 import {
 	type ReadQueryEffectError,
@@ -59,20 +60,21 @@ const sidebarReads = channel("conduit:sidebar-read");
  * transport (ni8.5) provides them once at the composition root.
  */
 export const subscribeShell = (
-	options: { readonly resumeFromSequence?: number } = {},
+	options: {
+		readonly resumeFromSequence?: number;
+		readonly resumeBase?: ResumeBase;
+	} = {},
 ): Stream.Stream<
 	Envelope<SessionInfo>,
 	ShellSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag
+	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag | ConfigTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const backgroundOf = yield* BackgroundLivenessTag;
-			const config = Option.getOrUndefined(
-				yield* Effect.serviceOption(ConfigTag),
-			);
+			const config = yield* ConfigTag;
 			// Optional so read-only hosts need not wire it; the relay always does.
 			const compactingOf = Option.getOrUndefined(
 				yield* Effect.serviceOption(SessionCompactionsTag),
@@ -85,42 +87,50 @@ export const subscribeShell = (
 				source: {
 					name: "shell",
 					shareReads: true,
-					read: (range) =>
-						readQuery.readSessionList({ ...range, backgroundOf }).pipe(
-							Effect.timed,
-							Effect.map(([elapsed, list]) => {
-								if (sidebarReads.hasSubscribers)
-									sidebarReads.publish({
-										ms: Duration.toMillis(elapsed),
-										rows: list.rows.length,
-									} satisfies SidebarRead);
-								return list;
-							}),
-							Effect.flatMap((list) =>
-								Effect.forEach(list.rows, (row) =>
-									Effect.gen(function* () {
-										const compacting = compactingOf?.(row.item.id);
-										const retrying = retryingOf?.(row.item.id);
-										return {
-											...row,
-											item: {
-												...(config
-													? yield* withSessionWorktreeStatus(
-															withCachedSessionGit(row.item, [
+					// The sidebar is never paged, so a resume base is the whole list.
+					read: (range, base) =>
+						readQuery
+							.readSessionList({
+								...range,
+								backgroundOf,
+								...(base === undefined ? {} : { listing: true }),
+							})
+							.pipe(
+								Effect.timed,
+								Effect.map(([elapsed, list]) => {
+									if (sidebarReads.hasSubscribers)
+										sidebarReads.publish({
+											ms: Duration.toMillis(elapsed),
+											rows: list.rows.length,
+										} satisfies SidebarRead);
+									return list;
+								}),
+								Effect.flatMap((list) =>
+									Effect.forEach(list.rows, (row) =>
+										Effect.gen(function* () {
+											const compacting = compactingOf?.(row.item.id);
+											const retrying = retryingOf?.(row.item.id);
+											return {
+												...row,
+												item: {
+													...(yield* withSessionWorktreeStatus(
+														withCachedSessionGit(
+															{ ...row.item, projectSlug: config.slug },
+															[
 																config.projectDir,
 																...(config.extraFolders ?? []),
-															]),
-															config,
-														)
-													: row.item),
-												...(compacting === undefined ? {} : { compacting }),
-												...(retrying === undefined ? {} : { retrying }),
-											},
-										};
-									}),
-								).pipe(Effect.map((rows) => ({ ...list, rows }))),
+															],
+														),
+														config,
+													)),
+													...(compacting === undefined ? {} : { compacting }),
+													...(retrying === undefined ? {} : { retrying }),
+												},
+											};
+										}),
+									).pipe(Effect.map((rows) => ({ ...list, rows }))),
+								),
 							),
-						),
 					// A descendant advance can change its root summary, and a
 					// deletion can end a family. The projectors move the root's
 					// sidebar row, or leave its tombstone, so the read finds either
@@ -136,6 +146,9 @@ export const subscribeShell = (
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: options.resumeFromSequence }),
+				...(options.resumeBase === undefined
+					? {}
+					: { resumeBase: options.resumeBase }),
 			});
 		}),
 	);

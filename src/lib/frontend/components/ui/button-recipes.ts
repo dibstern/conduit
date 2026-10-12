@@ -53,7 +53,7 @@ export type ButtonVariant =
 export const TONE_CLASSES = {
 	/** Emits nothing; the label inherits whatever colour surrounds it. */
 	inherit: "",
-	/** Body text, with no hover step. `secondary`'s resting colour. */
+	/** Body text, with no hover step. */
 	default: "text-text",
 	secondary: "text-text-secondary hover:text-text",
 	muted: "text-text-muted hover:text-text",
@@ -210,10 +210,14 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		tone: "text-inverse-text",
 		hoverFill: "hover:bg-inverse-bg/85",
 	},
+	/**
+	 * The mockup's `.btn`: a raised fill that brightens its border and label
+	 * on hover rather than washing, so it reads the same on any surface.
+	 */
 	secondary: {
-		chrome: "border border-border",
-		tone: TONE_CLASSES.default,
-		hoverFill: HOVER_FILL_CLASSES.text,
+		chrome: "border border-border bg-bg-alt",
+		tone: TONE_CLASSES.secondary,
+		hoverFill: "hover:border-text-muted",
 	},
 	ghost: {
 		chrome: "",
@@ -265,7 +269,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	 * no pill at all.
 	 *
 	 * Pair with `size="content"`; `sm`/`md` would add a conflicting
-	 * `rounded-lg`.
+	 * radius.
 	 */
 	pill: {
 		chrome:
@@ -332,9 +336,10 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
  * `content` is an opt-out, not a third size: it emits no padding, radius,
  * weight or type scale, so the call site supplies its own ADDITIVELY via
  * `class`. It exists because the component audit found 64 of 81 migration
- * candidates need intrinsic height — `sm`/`md` hard-code `h-8`/`h-9`, and
- * a call site cannot reliably override that (see component-conventions.mdx:
- * consumer `class` is additive; beating a size utility needs `h-auto!`).
+ * candidates need intrinsic height — `sm`/`md` hard-code a height (`md`'s
+ * `h-9`, or text `sm`'s 25px floor), and a call site cannot reliably override
+ * that (see component-conventions.mdx: consumer `class` is additive; beating
+ * a size utility needs `!`, and a `min-h` floor survives even `h-auto!`).
  * Without this, migrating the codebase onto Button means 64 `!` overrides.
  *
  * `segment` is one cell of a bordered segmented group (the session header's
@@ -478,11 +483,11 @@ export function buttonClasses({
 				? "h-[22px] gap-[5px] rounded-none px-[8px] text-[10px] font-medium"
 				: iconOnly
 					? `${size === "sm" ? "h-8 w-8" : "h-9 w-9"} ${SHARED_SIZE_CLASSES}`
-					: `${
-							size === "sm"
-								? "h-8 px-3 text-xs gap-1.5"
-								: "h-9 px-4 text-sm gap-2"
-						} ${SHARED_SIZE_CLASSES}`;
+					: size === "sm"
+						? // Literal px from the mockup's `.btn`. `min-h`, not `h`, so a
+							// taller touch target composes without a collision.
+							"min-h-[25px] px-[10px] py-[4px] text-[11.5px] gap-[5px] rounded-[7px] font-normal"
+						: `h-9 px-4 text-sm gap-2 ${SHARED_SIZE_CLASSES}`;
 
 	/**
 	 * Nearly every variant declares a `hover:bg-*`, and `:hover` keeps matching while a
