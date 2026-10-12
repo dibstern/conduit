@@ -104,6 +104,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"input.admitted": ["sessionId", "inputId", "delivery", "request"],
 	"input.sent": ["sessionId", "inputId"],
 	"input.cancelled": ["sessionId", "inputId"],
+	"input.interrupt_requested": ["sessionId", "inputId"],
 	"permission.asked": ["id", "sessionId", "toolName"],
 	"permission.resolved": ["id", "decision"],
 	"question.asked": ["id", "sessionId", "questions"],

@@ -137,6 +137,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"input.admitted",
 			"input.sent",
 			"input.cancelled",
+			"input.interrupt_requested",
 		];
 		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
 			(type) =>

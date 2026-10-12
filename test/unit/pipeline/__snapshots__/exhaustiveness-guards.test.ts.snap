@@ -5,6 +5,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "file.attached",
   "input.admitted",
   "input.cancelled",
+  "input.interrupt_requested",
   "input.sent",
   "message.created",
   "message.part.removed",

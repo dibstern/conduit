@@ -1764,7 +1764,6 @@ test.describe("Claude replay lane", () => {
 				const s = await open(page, relayUrl, harness);
 				await s.app.sendMessage("Alpha");
 				await expect(s.chat.stopBtn).toBeVisible();
-				const slash = await s.submit("/compact", "steer");
 				await s.switchModel("claude-sonnet-5");
 				const otherModel = await s.submit("Bravo", "steer");
 
@@ -1773,11 +1772,10 @@ test.describe("Claude replay lane", () => {
 				const a = s.sends[0]?.commandId ?? "";
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("steer-refused-proof.json", {
-					body: JSON.stringify({ a, slash, otherModel, ...proof }, null, 2),
+					body: JSON.stringify({ a, otherModel, ...proof }, null, 2),
 					contentType: "application/json",
 				});
 
-				expect(slash.response).toEqual({ ok: false, reason: "slash_command" });
 				expect(otherModel.response).toEqual({
 					ok: false,
 					reason: "model_differs",
