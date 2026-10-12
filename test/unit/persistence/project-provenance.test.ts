@@ -104,6 +104,7 @@ describe("Bound project provenance", () => {
 			"0051_message_part_versions",
 			"0052_session_git_published",
 			"0053_store_identity",
+			"0054_events_session_type_index",
 		]);
 	});
 

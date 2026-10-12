@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect } from "effect";
@@ -110,12 +110,10 @@ export const inspectSessionWorktree = (
 			Effect.gen(function* () {
 				// List reads inspect every session. A real checkout with a `.git`
 				// file needs no Git call; symlinks and unusable paths are inspected.
-				const present = yield* Effect.try(
-					() =>
-						lstatSync(directory, { throwIfNoEntry: false })?.isDirectory() &&
-						lstatSync(join(directory, ".git"), {
-							throwIfNoEntry: false,
-						})?.isFile(),
+				const present = yield* Effect.tryPromise(
+					async () =>
+						(await lstat(directory)).isDirectory() &&
+						(await lstat(join(directory, ".git"))).isFile(),
 				).pipe(Effect.orElseSucceed(() => false));
 				if (present) return [];
 				const state: WorkspaceMissing | undefined =
