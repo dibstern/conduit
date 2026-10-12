@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-	findSessionVerbForKey,
-	getSessionVerbs,
-	sessionVerbKeys,
-	sessionVerbKeysHint,
-} from "../../../src/lib/frontend/components/session/session-verbs.js";
+	findSessionCommandForKey,
+	getSessionCommands,
+	sessionCommandKeys,
+	sessionCommandKeysHint,
+} from "../../../src/lib/frontend/components/session/session-commands.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const now = Date.now();
@@ -21,16 +21,19 @@ function press(
 	session: SessionInfo,
 	event: Partial<typeof plain> & { key: string },
 ): string | undefined {
-	return findSessionVerbForKey(getSessionVerbs(session, now, host, "center"), {
-		...plain,
-		...event,
-	})?.testId;
+	return findSessionCommandForKey(
+		getSessionCommands(session, now, host, "center"),
+		{
+			...plain,
+			...event,
+		},
+	)?.testId;
 }
 
 const open: SessionInfo = { id: "s1", title: "Open", status: "idle" };
 
-describe("session verb shortcuts", () => {
-	it("runs each plain key's verb, following its current toggle state", () => {
+describe("session command shortcuts", () => {
+	it("runs each plain key's command, following its current toggle state", () => {
 		expect(press(open, { key: "s" })).toBe("session-ctx-settle");
 		expect(press({ ...open, settledAt: now }, { key: "s" })).toBe(
 			"session-ctx-unsettle",
@@ -49,7 +52,7 @@ describe("session verb shortcuts", () => {
 		expect(press(open, { key: "r" })).toBe("session-ctx-rename");
 	});
 
-	it("runs global verbs with ⌘⇧ or Ctrl+Shift", () => {
+	it("runs global commands with ⌘⇧ or Ctrl+Shift", () => {
 		expect(press(open, { key: "E", metaKey: true, shiftKey: true })).toBe(
 			"session-ctx-settle",
 		);
@@ -77,8 +80,8 @@ describe("session verb shortcuts", () => {
 	});
 
 	it("shows the same keys it matches", () => {
-		expect(sessionVerbKeysHint(sessionVerbKeys.settle)).toBe("s · ⌘⇧E");
-		expect(sessionVerbKeysHint(sessionVerbKeys.read)).toBe("u · ⌘⇧U");
-		expect(sessionVerbKeysHint(sessionVerbKeys.pin)).toBe("p");
+		expect(sessionCommandKeysHint(sessionCommandKeys.settle)).toBe("s · ⌘⇧E");
+		expect(sessionCommandKeysHint(sessionCommandKeys.read)).toBe("u · ⌘⇧U");
+		expect(sessionCommandKeysHint(sessionCommandKeys.pin)).toBe("p");
 	});
 });

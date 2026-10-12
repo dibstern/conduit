@@ -71,7 +71,7 @@ const LIGHT_STORY_IDS = new Set([
 	"project-projectdialog--warnings",
 	"project-projectdialog--suggestions-open",
 	"project-projectdialog--edit",
-	"session-sessionverbitems--sheet",
+	"session-sessioncommanditems--sheet",
 	"layout-sessionbar--collapsed",
 	"layout-sessionbar--overflow-menu-open",
 	"input-commandmenu--open",
@@ -484,7 +484,7 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-long-title-narrow", "mobile"],
 		["layout-sessionbar--desktop-settled", "mobile"],
 		["layout-sessionbar--desktop-no-session", "mobile"],
-		// Row hover verbs exist only from md up; phones use swipe and long-press.
+		// Row hover commands exist only from md up; phones use swipe and long-press.
 		["session-sessionitem--hover-actions-narrow-sidebar", "mobile"],
 		["layout-sessionbar--desktop-with-skills", "mobile"],
 		// These stories exercise the desktop Files pane; phone Files uses a separate overlay.

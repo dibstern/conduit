@@ -31,9 +31,9 @@ vi.mock(
 );
 
 import {
-	getSessionVerbs,
-	sessionVerbActions,
-} from "../../../src/lib/frontend/components/session/session-verbs.js";
+	getSessionCommands,
+	sessionCommandActions,
+} from "../../../src/lib/frontend/components/session/session-commands.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const foreign: SessionInfo = {
@@ -46,18 +46,21 @@ const foreign: SessionInfo = {
 describe("a session from another project (all-projects view)", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("offers the same verbs as a session from the attached project", () => {
+	it("offers the same commands as a session from the attached project", () => {
 		const testIds = (session: SessionInfo) =>
-			getSessionVerbs(session, Date.now(), { rename: () => {} }, "center").map(
-				(entry) => ("testId" in entry ? entry.testId : "divider"),
-			);
+			getSessionCommands(
+				session,
+				Date.now(),
+				{ rename: () => {} },
+				"center",
+			).map((entry) => ("testId" in entry ? entry.testId : "divider"));
 		expect(testIds(foreign)).toEqual(
 			testIds({ ...foreign, projectSlug: "home" }),
 		);
 	});
 
 	it("sends the change to the session's own project, then refreshes its row", async () => {
-		await sessionVerbActions.settle(foreign, true);
+		await sessionCommandActions.settle(foreign, true);
 		expect(rpc.setSessionSettledRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
 				projectSlug: "elsewhere",
@@ -69,7 +72,7 @@ describe("a session from another project (all-projects view)", () => {
 	});
 
 	it("does not refresh for a session of the attached project", async () => {
-		await sessionVerbActions.pin({ ...foreign, projectSlug: "home" }, true);
+		await sessionCommandActions.pin({ ...foreign, projectSlug: "home" }, true);
 		expect(rpc.setSessionPinnedRpc).toHaveBeenCalledWith(
 			expect.objectContaining({ projectSlug: "home", pinned: true }),
 		);

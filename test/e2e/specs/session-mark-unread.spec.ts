@@ -14,7 +14,7 @@ test.use({
 	screenshot: "off",
 });
 
-// Rows are picked by their title: the row centre can land on a hover verb
+// Rows are picked by their title: the row centre can land on a hover command
 // such as Mark read (e5b2819b).
 // Unread is relative to a turn end (ADR-0004, Scope; conduit-test-hk9m.3), and
 // the recorded session has none until its prompt replays. The replay also

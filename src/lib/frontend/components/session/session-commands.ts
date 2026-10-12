@@ -23,12 +23,12 @@ import { getSnoozePresets } from "../../utils/snooze.js";
 import { getSessionActionState } from "../../utils/swipe.js";
 import { confirmSessionDeletion } from "./session-deletion.js";
 
-export type SessionVerbHost = {
+export type SessionCommandHost = {
 	rename(): void;
 	select?(): void;
 };
 
-export type SessionVerb = {
+export type SessionCommand = {
 	testId: string;
 	label: string;
 	icon?:
@@ -46,32 +46,35 @@ export type SessionVerb = {
 		| "share"
 		| "settings"
 		| "bug";
-	keys?: SessionVerbKeys;
+	keys?: SessionCommandKeys;
 	disabledReason?: string | null;
 	checked?: boolean;
 	danger?: boolean;
 	run(returnFocus?: () => HTMLElement | null): void;
 };
-export type SessionVerbEntry = SessionVerb | { divider: true };
+export type SessionCommandEntry = SessionCommand | { divider: true };
 
 /**
- * Each verb's keys, defined once. `key` acts on the focused list row, or on the
+ * Each command's keys, defined once. `key` acts on the focused list row, or on the
  * open session from the transcript; `global` works anywhere with ⌘⇧ (Ctrl+Shift).
  */
-export type SessionVerbKeys = { key: string; global?: string };
-export const sessionVerbKeys = {
+export type SessionCommandKeys = { key: string; global?: string };
+export const sessionCommandKeys = {
 	settle: { key: "s", global: "e" },
 	snooze: { key: "z" },
 	pin: { key: "p" },
 	read: { key: "u", global: "u" },
 	rename: { key: "r" },
-} as const satisfies Record<string, SessionVerbKeys>;
+} as const satisfies Record<string, SessionCommandKeys>;
 
 export function globalKeyHint(global: string): string {
 	return `⌘⇧${global.toUpperCase()}`;
 }
 
-export function sessionVerbKeysHint({ key, global }: SessionVerbKeys): string {
+export function sessionCommandKeysHint({
+	key,
+	global,
+}: SessionCommandKeys): string {
 	return global ? `${key} · ${globalKeyHint(global)}` : key;
 }
 
@@ -80,37 +83,38 @@ type ShortcutEvent = Pick<
 	"key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "repeat"
 >;
 
-/** The verb among `entries` that `event` triggers, if any. */
-export function findSessionVerbForKey(
-	entries: readonly SessionVerbEntry[],
+/** The command among `entries` that `event` triggers, if any. */
+export function findSessionCommandForKey(
+	entries: readonly SessionCommandEntry[],
 	event: ShortcutEvent,
-): SessionVerb | undefined {
+): SessionCommand | undefined {
 	if (event.repeat || event.altKey) return undefined;
 	const command = event.metaKey || event.ctrlKey;
 	const global = command && event.shiftKey;
 	if (!global && (command || event.shiftKey)) return undefined;
 	const key = event.key.toLowerCase();
 	return entries.find(
-		(entry): entry is SessionVerb =>
+		(entry): entry is SessionCommand =>
 			"keys" in entry &&
 			(global ? entry.keys?.global : entry.keys?.key) === key,
 	);
 }
 
 /**
- * Runs the verb `event` triggers, or shows why it is unavailable. A dialog the
- * verb opens returns focus to where the key was pressed.
+ * Runs the command `event` triggers, or shows why it is unavailable. A dialog the
+ * command opens returns focus to where the key was pressed.
  */
-export function runSessionVerbShortcut(
+export function runSessionCommandShortcut(
 	event: ShortcutEvent & Pick<KeyboardEvent, "preventDefault" | "target">,
-	entries: readonly SessionVerbEntry[],
+	entries: readonly SessionCommandEntry[],
 ): void {
-	const verb = findSessionVerbForKey(entries, event);
-	if (!verb) return;
+	const command = findSessionCommandForKey(entries, event);
+	if (!command) return;
 	event.preventDefault();
 	const origin = event.target;
-	if (verb.disabledReason) showToast(verb.disabledReason, { variant: "warn" });
-	else verb.run(() => (origin instanceof HTMLElement ? origin : null));
+	if (command.disabledReason)
+		showToast(command.disabledReason, { variant: "warn" });
+	else command.run(() => (origin instanceof HTMLElement ? origin : null));
 }
 
 function isForeignSession(session: SessionInfo): boolean {
@@ -319,7 +323,7 @@ function commitTomorrow(session: SessionInfo) {
 	if (tomorrow) void snooze(session, tomorrow.until, now);
 }
 
-export const sessionVerbActions = {
+export const sessionCommandActions = {
 	settle,
 	remove,
 	pin,
@@ -331,14 +335,17 @@ export const sessionVerbActions = {
 	markRead: toggleSessionRead,
 };
 
-export function getSettleVerb(session: SessionInfo, now: number): SessionVerb {
+export function getSettleCommand(
+	session: SessionInfo,
+	now: number,
+): SessionCommand {
 	const actions = getSessionActionState(session, now);
 	return {
 		testId:
 			session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle",
 		label: session.settledAt != null ? "Un-settle" : "Settle",
 		icon: session.settledAt != null ? "undo" : "check",
-		keys: sessionVerbKeys.settle,
+		keys: sessionCommandKeys.settle,
 		disabledReason: actions.settleDisabledReason,
 		run: () => {
 			void settle(session, !actions.settled);
@@ -346,13 +353,13 @@ export function getSettleVerb(session: SessionInfo, now: number): SessionVerb {
 	};
 }
 
-export function getPinVerb(session: SessionInfo): SessionVerb {
+export function getPinCommand(session: SessionInfo): SessionCommand {
 	const pinned = session.pinnedAt != null;
 	return {
 		testId: pinned ? "session-ctx-unpin" : "session-ctx-pin",
 		label: pinned ? "Unpin" : "Pin to top",
 		icon: pinned ? "star-off" : "star",
-		keys: sessionVerbKeys.pin,
+		keys: sessionCommandKeys.pin,
 		run: () => {
 			void pin(session, !pinned);
 		},
@@ -360,24 +367,27 @@ export function getPinVerb(session: SessionInfo): SessionVerb {
 }
 
 /**
- * The one verb that moves this session along: Unpin while it is pinned (a
+ * The one command that moves this session along: Unpin while it is pinned (a
  * pinned session can't be settled), otherwise Settle or Un-settle.
  */
-export function getPrimaryVerb(session: SessionInfo, now: number): SessionVerb {
-	return session.pinnedAt != null
-		? getPinVerb(session)
-		: getSettleVerb(session, now);
-}
-
-export function getSessionVerbs(
+export function getPrimaryCommand(
 	session: SessionInfo,
 	now: number,
-	host: SessionVerbHost,
+): SessionCommand {
+	return session.pinnedAt != null
+		? getPinCommand(session)
+		: getSettleCommand(session, now);
+}
+
+export function getSessionCommands(
+	session: SessionInfo,
+	now: number,
+	host: SessionCommandHost,
 	snoozePlacement: "center" | "sheet",
-): SessionVerbEntry[] {
+): SessionCommandEntry[] {
 	const actions = getSessionActionState(session, now);
-	const items: SessionVerbEntry[] = [];
-	items.push(getSettleVerb(session, now), {
+	const items: SessionCommandEntry[] = [];
+	items.push(getSettleCommand(session, now), {
 		testId: "session-ctx-auto-settle",
 		label: "Auto-settle when idle",
 		checked: session.autoSettleDisabled !== true,
@@ -390,7 +400,7 @@ export function getSessionVerbs(
 			testId: "session-ctx-snooze",
 			label: actions.snoozed ? "Change snooze…" : "Snooze…",
 			icon: "moon",
-			...(actions.snoozed ? {} : { keys: sessionVerbKeys.snooze }),
+			...(actions.snoozed ? {} : { keys: sessionCommandKeys.snooze }),
 			disabledReason: actions.snoozeDisabledReason,
 			run: (returnFocus) =>
 				openSnoozePicker(session, snoozePlacement, returnFocus),
@@ -400,13 +410,13 @@ export function getSessionVerbs(
 				testId: "session-ctx-unsnooze",
 				label: "Unsnooze",
 				icon: "undo",
-				keys: sessionVerbKeys.snooze,
+				keys: sessionCommandKeys.snooze,
 				run: () => {
 					void unsnooze(session);
 				},
 			});
 	}
-	items.push(getPinVerb(session));
+	items.push(getPinCommand(session));
 	if (!actions.settled && !actions.snoozed)
 		items.push({
 			testId: session.unread
@@ -414,7 +424,7 @@ export function getSessionVerbs(
 				: "session-ctx-mark-unread",
 			label: session.unread ? "Mark read" : "Mark unread",
 			icon: session.unread ? "circle" : "circle-dot",
-			keys: sessionVerbKeys.read,
+			keys: sessionCommandKeys.read,
 			run: () => {
 				void toggleSessionRead(session);
 			},
@@ -435,7 +445,7 @@ export function getSessionVerbs(
 			testId: "session-ctx-rename",
 			label: "Rename",
 			icon: "pencil",
-			keys: sessionVerbKeys.rename,
+			keys: sessionCommandKeys.rename,
 			run: host.rename,
 		},
 		{

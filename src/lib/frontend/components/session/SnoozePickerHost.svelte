@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { snoozePicker } from "../../stores/snooze-picker.svelte.js";
-	import { sessionVerbActions } from "./session-verbs.js";
+	import { sessionCommandActions } from "./session-commands.js";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 </script>
 
@@ -13,6 +13,6 @@
 		now={snoozePicker.now}
 		returnFocus={snoozePicker.returnFocus}
 		onclose={() => { snoozePicker.session = null; }}
-		onsnooze={(until) => { void sessionVerbActions.snooze(session, until, snoozePicker.now); }}
+		onsnooze={(until) => { void sessionCommandActions.snooze(session, until, snoozePicker.now); }}
 	/>
 {/if}

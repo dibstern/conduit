@@ -200,7 +200,7 @@
 		oncommitsnooze?: (id: string) => void;
 		heldSessionId?: string | null;
 		onholdchange?: (id: string | null) => void;
-		/** This row's action menu is open: keep its anchor and verbs on screen. */
+		/** This row's action menu is open: keep its anchor and commands on screen. */
 		menuOpen?: boolean;
 		/**
 		 * Asks the list to put this row in rename mode. The list owns that state
@@ -278,7 +278,7 @@
 	const attention = $derived(sessionAttention(session));
 	const status = $derived(ATTENTION_DISPLAY[attention]);
 	// Approve and Reply are filled pills that read as buttons, so swapping them
-	// for the hover verbs looks like the button vanishing under the cursor.
+	// for the hover commands looks like the button vanishing under the cursor.
 	const statusHidesOnHover = $derived(
 		attention !== "needs-approval" && attention !== "needs-reply",
 	);
@@ -328,8 +328,8 @@
 	// the selection control, which is 44px wide because it is a touch target and
 	// not a glyph. It widens rather than letting the control overflow into the
 	// title. The middle column floors at 0, not a fixed width: the trailing column
-	// (time, or the hover verbs) must always fit, so in a narrow sidebar the title
-	// ellipsizes rather than pushing the verbs past the clipped edge.
+	// (time, or the hover commands) must always fit, so in a narrow sidebar the title
+	// ellipsizes rather than pushing the commands past the clipped edge.
 	const itemClass = $derived(
 		`session-item group grid ${
 			selectMode
@@ -740,11 +740,11 @@
 				>{wokeText}</span>
 			{/if}
 
-			<!-- Desktop verbs replace the time on hover and keyboard focus. -->
+			<!-- Desktop commands replace the time on hover and keyboard focus. -->
 			{#if !selectMode && oncontextmenuProp && !isRenaming}
 				<span class="hidden md:group-hover:inline-flex md:group-focus-within:inline-flex {menuOpen ? 'md:inline-flex' : ''} items-center gap-0.5" data-testid="session-row-actions">
 					<!-- The shortcuts need ~200px of row. Below that only the ellipsis
-					     stays, and its menu carries every one of these verbs. -->
+					     stays, and its menu carries every one of these commands. -->
 					<span class="contents @max-[260px]:hidden">
 					{#if canMarkRead}
 						<Button variant="ghost" size="content" tone="inherit" hoverFill="none"
