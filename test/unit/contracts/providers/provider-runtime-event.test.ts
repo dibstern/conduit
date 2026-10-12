@@ -104,6 +104,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 		// deliberately absent from the provider runtime event union.
 		const explicitlyReclassified: readonly string[] = [
 			"session.provider_cleanup_failed",
+			"session.setup_started",
+			"session.setup_output",
+			"session.setup_finished",
 			"session.handoff_delivered",
 			"session.cut_off_dismissed",
 			"session.resumed",
@@ -111,6 +114,9 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.resume_cancelled",
 			"session.usage_limited", // Continuation owns canonical intake of the adapter's same-named signal.
 			"session.forked",
+			"session.rewound",
+			"session.rewind_undone",
+			"session.rewind_committed",
 			"session.permission_mode_changed",
 			"session.model_changed",
 			"session.workspace_changed",

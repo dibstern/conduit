@@ -1,8 +1,16 @@
-import { Effect, Option } from "effect";
+import {
+	InMemorySpanExporter,
+	SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import { Effect, ManagedRuntime, Option } from "effect";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import { makeTracingLive } from "../../../src/lib/domain/daemon/Layers/tracing.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { calculateBackoffDelay } from "../../../src/lib/relay/sse-backoff.js";
-import { SSEStream } from "../../../src/lib/relay/sse-stream.js";
+import {
+	SSEStream,
+	type SSEStreamOptions,
+} from "../../../src/lib/relay/sse-stream.js";
 import type { ConnectionHealth } from "../../../src/lib/types.js";
 
 function makeStubApi(events: Array<{ type: string; properties?: unknown }>) {
@@ -56,6 +64,96 @@ const disconnect = (stream: SSEStream) =>
 const drain = (stream: SSEStream) => Effect.runPromise(stream.drainEffect());
 
 describe("SSEStream", () => {
+	it("emits relay.connection.attempt around the actual jittered backoff wait", async () => {
+		const exporter = new InMemorySpanExporter();
+		const processor = new SimpleSpanProcessor(exporter);
+		const runtime = ManagedRuntime.make(
+			makeTracingLive({
+				enabled: true,
+				spanProcessors: [processor],
+			}),
+		);
+		const random = vi.spyOn(Math, "random").mockReturnValue(0.25);
+		const api: SSEStreamOptions["api"] = {
+			event: {
+				subscribe: vi.fn(async () => {
+					throw "provider offline";
+				}),
+			},
+		};
+		const stream = new SSEStream({ api, baseDelay: 5000 });
+		const reconnecting = deferred<{ attempt: number; delay: number }>();
+		const errorSeen = deferred<Error>();
+		stream.on("reconnecting", (info) => reconnecting.resolve(info));
+		stream.on("error", (error) => errorSeen.resolve(error));
+
+		try {
+			await runtime.runPromise(stream.connectEffect());
+			const [reconnect, error] = await Promise.all([
+				withTimeout(reconnecting.promise, "first reconnect", 2000),
+				withTimeout(errorSeen.promise, "provider error", 2000),
+			]);
+			expect(reconnect).toEqual({ attempt: 1, delay: 4500 });
+			expect(error).toBeInstanceOf(Error);
+			expect(error.message).toBe("provider offline");
+
+			await processor.forceFlush();
+			expect(
+				exporter
+					.getFinishedSpans()
+					.filter((span) => span.name === "relay.connection.attempt"),
+				"backoff span finished before the wait was interrupted",
+			).toHaveLength(0);
+
+			const disconnectStartedAt = performance.now();
+			await runtime.runPromise(stream.disconnectEffect());
+			expect(performance.now() - disconnectStartedAt).toBeLessThan(1000);
+			await processor.forceFlush();
+
+			const attemptSpans = exporter
+				.getFinishedSpans()
+				.filter((span) => span.name === "relay.connection.attempt");
+			const attemptSpan = attemptSpans[0];
+			expect(
+				attemptSpan,
+				"expected relay.connection.attempt span after interrupting backoff wait",
+			).toBeDefined();
+			expect(attemptSpans).toHaveLength(1);
+			expect(attemptSpan?.attributes["attempt"]).toBe(1);
+			expect(attemptSpan?.attributes["delayMs"]).toBe(4500);
+			expect(attemptSpan?.attributes["failureReason"]).toBe("provider offline");
+		} finally {
+			random.mockRestore();
+			await runtime.runPromise(stream.drainEffect());
+			await runtime.dispose();
+		}
+	});
+
+	it("reconnects when subscribe rejects with AbortError while still running", async () => {
+		const subscribe = vi.fn(async () => {
+			const error = new Error("foreign abort");
+			error.name = "AbortError";
+			throw error;
+		});
+		const api: SSEStreamOptions["api"] = { event: { subscribe } };
+		const stream = new SSEStream({
+			api,
+			baseDelay: 20,
+			maxDelay: 20,
+		});
+
+		try {
+			await connect(stream);
+			await vi.waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2), {
+				timeout: 2000,
+				interval: 10,
+			});
+		} finally {
+			await disconnect(stream);
+			await drain(stream);
+		}
+	});
+
 	it("can be created and starts disconnected", () => {
 		const api = makeStubApi([]);
 		const stream = new SSEStream({ api });

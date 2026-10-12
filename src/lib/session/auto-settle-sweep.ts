@@ -8,10 +8,12 @@ import {
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 
 export interface AutoSettleSweepPorts<SettleError> {
+	readonly projectDir?: string;
 	readonly hasViewer: (sessionId: string) => boolean;
 	readonly hasLiveBackgroundWork: (sessionId: string) => boolean;
 	readonly setSettled: (
 		sessionId: string,
+		mergedHead?: string,
 	) => Effect.Effect<boolean, SettleError>;
 }
 
@@ -31,18 +33,24 @@ export const settleIdleSessions = <SettleError>(
 				now,
 				idleWindowMs,
 			);
-		const candidates = [...(yield* readPersistedAutoSettleFacts(now))].filter(
-			([sessionId, facts]) => decide(sessionId, facts),
-		);
+		const candidates = [
+			...(yield* readPersistedAutoSettleFacts(
+				now,
+				undefined,
+				ports.projectDir,
+			)),
+		].filter(([sessionId, facts]) => decide(sessionId, facts));
 		let settled = 0;
 		for (const [sessionId] of candidates) {
 			// Read again at the decision point: another command may have changed the
 			// projection since discovery, or a browser/task may have arrived.
-			const facts = (yield* readPersistedAutoSettleFacts(now, sessionId)).get(
+			const facts = (yield* readPersistedAutoSettleFacts(
+				now,
 				sessionId,
-			);
+				ports.projectDir,
+			)).get(sessionId);
 			if (facts === undefined || !decide(sessionId, facts)) continue;
-			if (yield* ports.setSettled(sessionId)) settled++;
+			if (yield* ports.setSettled(sessionId, facts.mergedHead)) settled++;
 		}
 		return settled;
 	});

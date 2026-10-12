@@ -1,7 +1,7 @@
 import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
-import { Effect, Layer, Schema } from "effect";
+import { Cause, Effect, Either, Layer, Schema } from "effect";
 import {
 	isKnownDriverKind,
 	PROVIDER_SESSION_CAPABILITIES,
@@ -11,6 +11,7 @@ import {
 	SessionWorkspaceSchema,
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
+import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
 import {
 	loadDaemonConfig,
 	resolveProviderRoutingDriver,
@@ -24,6 +25,7 @@ import {
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { readClaudeWorktreeState } from "../../../session/claude-worktree-state.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "../Services/services.js";
 import {
 	applySessionCommand,
@@ -34,6 +36,7 @@ import {
 	type SessionWorkspace,
 	SessionWorkspaceTag,
 } from "../Services/session-workspace.js";
+import { readSessionWorktreeOwnership } from "../Services/session-worktree-deletion.js";
 
 type Dependencies = Effect.Effect.Context<
 	ReturnType<typeof applySessionCommand>
@@ -87,12 +90,20 @@ export const SessionWorkspaceLive = Layer.effect(
 		}>`
 			SELECT sequence, json_extract(data, '$.cause') AS cause FROM events
 			WHERE session_id = ${sessionId} AND type = 'session.workspace_changed'
+			AND json_extract(data, '$.cause') != 'branch-rename'
 			ORDER BY sequence DESC LIMIT 1`;
 		const worktreesFor = (
 			target: ResolvedWorkspaceTarget,
 			previous: RecordedWorkspace | null,
+			cause: RecordedWorkspace["cause"],
 		): Record<string, string> => {
-			if (!target.reset) return { [target.projectFolder]: target.path };
+			if (!target.reset)
+				return {
+					...(target.origin === "conduit" && cause === "launch"
+						? previous?.worktrees
+						: {}),
+					[target.projectFolder]: target.path,
+				};
 			const worktrees =
 				target.projectFolder === config.projectDir
 					? {}
@@ -105,6 +116,7 @@ export const SessionWorkspaceLive = Layer.effect(
 			path,
 			cause,
 			origin = "existing",
+			requestedFolder,
 		) =>
 			Effect.gen(function* () {
 				const { row, workspace: previous } = yield* readWorkspace(sessionId);
@@ -116,17 +128,23 @@ export const SessionWorkspaceLive = Layer.effect(
 					!driver ||
 					!isKnownDriverKind(driver) ||
 					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
-						// OpenCode accepts declarations and fallbacks, but not direct user moves.
 						!(
-							driver === "opencode" &&
-							(cause === "agent" ||
-								(cause === "missing" &&
-									path === config.projectDir &&
-									previous?.origin === "existing" &&
-									effectiveWorkingDirectory(config.projectDir, previous) !==
-										config.projectDir) ||
-								// A hint acceptance records work already observed in that folder.
-								(cause === "user" && row.workspace_hint === path))
+							(PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree &&
+								cause === "launch" &&
+								origin === "conduit") ||
+							// OpenCode declarations acknowledge an already observed workspace.
+							(driver === "opencode" &&
+								(cause === "agent" ||
+									(cause === "missing" &&
+										path === config.projectDir &&
+										previous?.origin === "existing" &&
+										effectiveWorkingDirectory(config.projectDir, previous) !==
+											config.projectDir) ||
+									(cause === "user" &&
+										(row.workspace_hint === path ||
+											// Recovery of an owned launch stays in its original repository.
+											(previous?.origin === "conduit" &&
+												path === config.projectDir)))))
 						))
 				)
 					return yield* new WorkspaceMoveError({
@@ -134,9 +152,13 @@ export const SessionWorkspaceLive = Layer.effect(
 						reason: "unsupported-provider",
 					});
 				const normalized = yield* realWorkspacePath(path);
+				const candidates =
+					requestedFolder === undefined
+						? folders
+						: folders.filter((folder) => folder === requestedFolder);
 				let projectFolder: string | undefined;
 				let configured = false;
-				for (const folder of folders) {
+				for (const folder of candidates) {
 					const main = yield* realWorkspacePath(folder).pipe(Effect.option);
 					if (main._tag === "Some" && main.value === normalized) {
 						projectFolder = folder;
@@ -159,7 +181,7 @@ export const SessionWorkspaceLive = Layer.effect(
 							path,
 							reason: "not-a-worktree",
 						});
-					for (const folder of folders) {
+					for (const folder of candidates) {
 						const owner = yield* readWorktrees(folder).pipe(Effect.option);
 						if (
 							owner._tag === "Some" &&
@@ -192,14 +214,17 @@ export const SessionWorkspaceLive = Layer.effect(
 				};
 				const workspace = {
 					cause,
-					worktrees: worktreesFor(target, previous),
+					worktrees: worktreesFor(target, previous, cause),
 					origin,
 				};
 				// Warm outside the permit, using the key read-model consumers use.
 				yield* Effect.tryPromise(() =>
-					daemonSessionGitCache.refresh(
-						effectiveWorkingDirectory(config.projectDir, workspace),
-					),
+					Promise.all([
+						daemonSessionGitCache.refresh(normalized),
+						daemonSessionGitCache.refresh(
+							effectiveWorkingDirectory(config.projectDir, workspace),
+						),
+					]),
 				).pipe(
 					Effect.mapError(
 						(cause) =>
@@ -223,9 +248,10 @@ export const SessionWorkspaceLive = Layer.effect(
 							path: target.path,
 							reason: "unsupported-provider",
 						});
-					const worktrees = worktreesFor(target, previous);
+					const worktrees = worktreesFor(target, previous, cause);
 					if (
 						(!target.reset &&
+							!(target.origin === "conduit" && cause === "launch") &&
 							effectiveWorkingDirectory(config.projectDir, previous) ===
 								target.path) ||
 						isDeepStrictEqual(worktrees, previous?.worktrees ?? {})
@@ -267,6 +293,11 @@ export const SessionWorkspaceLive = Layer.effect(
 								path,
 								worktrees,
 								origin: target.origin ?? "existing",
+								...(cause === "launch" &&
+								target.origin === "conduit" &&
+								target.ownership
+									? { ownership: target.ownership }
+									: {}),
 							},
 						},
 						{ project, upstreamAdapter: null },
@@ -330,6 +361,97 @@ export const SessionWorkspaceLive = Layer.effect(
 		};
 		return {
 			withLaunch: launches.withPermits(1),
+			renameBranch: (sessionId, branchName) =>
+				launches.withPermits(1)(
+					Effect.gen(function* () {
+						const { workspace } = yield* readWorkspace(sessionId);
+						const ownership = yield* readSessionWorktreeOwnership(
+							sessionId,
+							false,
+						);
+						if (ownership.length === 0)
+							return yield* new WorktreeBranchRenameError({
+								folder: config.projectDir,
+								reason: "not-owned",
+								message: "This session has no Conduit launch ownership.",
+							});
+						const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
+						if (worktrees._tag === "None")
+							return yield* new SessionCommandError({
+								operation: "workspace.renameBranch",
+								cause: "Branch rename is unavailable.",
+							});
+						// Git and the canonical ownership update must finish together even if
+						// the requesting browser disconnects while Git is running.
+						yield* Effect.gen(function* () {
+							yield* worktrees.value.renameBranch(ownership, branchName);
+							if (ownership.every((owned) => owned.branchName === branchName))
+								return;
+							const renamed = ownership.map((owned) => ({
+								...owned,
+								branchName,
+							}));
+							yield* applySessionCommand({
+								type: "session.workspace_changed",
+								data: {
+									sessionId,
+									cause: "branch-rename",
+									worktrees: { ...workspace?.worktrees },
+									origin: workspace?.origin ?? "existing",
+									ownership: renamed,
+								},
+							}).pipe(
+								Effect.catchAllCause((cause) =>
+									Effect.gen(function* () {
+										// A post-COMMIT signal failure must not undo recorded ownership.
+										const recorded = yield* Effect.either(
+											readSessionWorktreeOwnership(sessionId, false),
+										);
+										if (Either.isLeft(recorded))
+											return yield* new WorktreeBranchRenameError({
+												folder: ownership[0]?.folder ?? config.projectDir,
+												reason: "git-failed",
+												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Cause.pretty(cause).slice(0, 2_000)}. ${String(recorded.left.cause).slice(0, 2_000)}`,
+											});
+										if (
+											recorded.right.length === renamed.length &&
+											recorded.right.every(
+												(owned) => owned.branchName === branchName,
+											)
+										)
+											return yield* Effect.failCause(cause);
+										const originalName = ownership[0]?.branchName;
+										if (originalName !== undefined)
+											yield* worktrees.value
+												.renameBranch(renamed, originalName)
+												.pipe(
+													Effect.mapError(
+														(error) =>
+															new WorktreeBranchRenameError({
+																folder: error.folder,
+																reason: "git-failed",
+																message: `${Cause.pretty(cause).slice(0, 2_000)}. Branch rollback failed: ${error.message}`,
+															}),
+													),
+												);
+										return yield* Effect.failCause(cause);
+									}),
+								),
+							);
+						}).pipe(Effect.uninterruptible);
+					}).pipe(
+						Effect.provide(services),
+						Effect.mapError((cause) =>
+							cause instanceof WorktreeBranchRenameError ||
+							cause instanceof SessionCommandError
+								? cause
+								: new SessionCommandError({
+										operation: "workspace.renameBranch",
+										cause,
+									}),
+						),
+					),
+				),
 			get: (sessionId) =>
 				readWorkspace(sessionId).pipe(
 					Effect.map(({ workspace }) =>
@@ -339,9 +461,15 @@ export const SessionWorkspaceLive = Layer.effect(
 			resolve,
 			record,
 			inherit,
-			move: (sessionId, path, cause, origin) =>
-				resolve(sessionId, path, cause, origin).pipe(
-					Effect.flatMap((target) => record(sessionId, target, cause)),
+			move: (sessionId, path, cause, origin, projectFolder, ownership) =>
+				resolve(sessionId, path, cause, origin, projectFolder).pipe(
+					Effect.flatMap((target) =>
+						record(
+							sessionId,
+							{ ...target, ...(ownership ? { ownership } : {}) },
+							cause,
+						),
+					),
 				),
 			claudeWorktreeState: (sessionId) =>
 				readClaudeWorktreeState(sql, sessionId, config.projectDir).pipe(

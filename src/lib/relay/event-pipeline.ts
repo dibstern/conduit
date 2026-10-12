@@ -9,36 +9,19 @@ import {
 } from "../domain/relay/Services/session-overrides-state.js";
 import type { Logger } from "../logger.js";
 import type { RelayMessage } from "../shared-types.js";
-import { truncateToolResult as truncateToolResultImpl } from "./truncate-content.js";
 
 export type RouteDecision =
 	| { action: "send"; sessionId: string }
 	| { action: "drop"; reason: string };
 
-export interface TruncateResult {
-	msg: RelayMessage;
-	/** Full content before truncation. Undefined if no truncation occurred. */
-	fullContent: string | undefined;
-}
-
 export type EventSource = "sse" | "message-poller" | "status-poller" | "prompt";
 
 export interface PipelineResult {
 	msg: RelayMessage;
-	fullContent: string | undefined;
 	route: RouteDecision;
 	cache: boolean;
 	timeout: "clear" | "reset" | "none";
 	source: EventSource;
-}
-
-/** Truncate tool_result messages over threshold. Other types pass through. */
-export function truncateIfNeeded(msg: RelayMessage): TruncateResult {
-	if (msg.type !== "tool_result") {
-		return { msg, fullContent: undefined };
-	}
-	const { truncated, fullContent } = truncateToolResultImpl(msg);
-	return { msg: truncated, fullContent };
 }
 
 /** Determine whether a message type is persisted to the event store for replay. */
@@ -163,13 +146,11 @@ export function processEvent(
 	viewers: string[],
 	source: EventSource = "sse",
 ): PipelineResult {
-	const truncated = truncateIfNeeded(msg);
 	return {
-		msg: truncated.msg,
-		fullContent: truncated.fullContent,
-		route: resolveRoute(truncated.msg.type, sessionId, viewers),
-		cache: sessionId != null && shouldCache(truncated.msg.type),
-		timeout: resolveTimeout(truncated.msg.type, sessionId),
+		msg,
+		route: resolveRoute(msg.type, sessionId, viewers),
+		cache: sessionId != null && shouldCache(msg.type),
+		timeout: resolveTimeout(msg.type, sessionId),
 		source,
 	};
 }

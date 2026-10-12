@@ -3,6 +3,9 @@ import { Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
+	type GroupingMode,
+	GroupingModeSchema,
+	ProjectGroupSchema,
 	RepositoryIdentitySchema,
 	SessionGitSchema,
 	type SessionInfo,
@@ -10,7 +13,11 @@ import {
 	SessionPermissionModeSchema,
 	SessionStatusSchema,
 } from "../shared-types.js";
-import { WorktreeCreationError } from "./worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "./worktree.js";
 
 // The single session type (ni8.5 T-1) is declared once, in shared-types, and
 // re-exported here so contract consumers never reach past the contract module.
@@ -29,19 +36,79 @@ import {
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
+import { type SessionMode, SessionModeSchema } from "./project-file.js";
 import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
-import { WorkspaceMoveError, WorktreeInfoSchema } from "./session-workspace.js";
+import {
+	SessionWorktreeInspectionSchema,
+	WorkspaceMoveError,
+	WorktreeInfoSchema,
+} from "./session-workspace.js";
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
 	STEER_BLOCKERS,
-	StoredEventSchema,
 } from "./stored-event.js";
+import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 
 const NonEmptyString = Schema.NonEmptyString;
+
+/**
+ * What a resuming client's changes were applied on top of: its last snapshot's
+ * version and, for a paged source, that page's cursor (conduit-test-y7eo.9).
+ */
+export const ResumeBase = Schema.Struct({
+	sequence: Schema.Number,
+	cursor: Schema.optional(NonEmptyString),
+});
+export type ResumeBase = typeof ResumeBase.Type;
+
+/**
+ * Where a saved snapshot can resume from, named by the store and session that
+ * sent it (conduit-test-y7eo.14). Opaque to the browser, which only keeps it
+ * and hands it back; it is not tamper-proof. The server validates it, refusing
+ * one from another store or session with a fresh snapshot, and the resume
+ * checksum backs whatever it accepts.
+ */
+export const ResumePoint = NonEmptyString.pipe(Schema.brand("ResumePoint"));
+export type ResumePoint = typeof ResumePoint.Type;
+
+/**
+ * A subscription's base set after a catch-up, as {@link digestRows} of the ids
+ * and versions it holds, and how many rows that is. Only the server
+ * subscription helper makes one; a client checks it against its own digest of
+ * what it applied.
+ */
+export const ResumeChecksum = Schema.Struct({
+	hash: Schema.NonNegativeInt,
+	rows: Schema.NonNegativeInt,
+}).pipe(Schema.brand("ResumeChecksum"));
+export type ResumeChecksum = typeof ResumeChecksum.Type;
+
+/**
+ * The digest both ends compute over `[id, version]` rows: a sum of 32-bit
+ * FNV-1a hashes, so row order does not matter. A row that has not moved since
+ * the base counts at the base's version, which is all a snapshot tells the
+ * client.
+ */
+export const digestRows = (
+	rows: Iterable<readonly [id: string, version: number]>,
+	base: number,
+): { readonly hash: number; readonly rows: number } => {
+	let hash = 0;
+	let count = 0;
+	for (const [id, version] of rows) {
+		const key = `${id}\u0000${Math.max(version, base)}`;
+		let row = 0x811c9dc5;
+		for (let index = 0; index < key.length; index++)
+			row = Math.imul(row ^ key.charCodeAt(index), 0x01000193);
+		hash = (hash + (row >>> 0)) >>> 0;
+		count += 1;
+	}
+	return { hash, rows: count };
+};
 
 export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 	Schema.Union(
@@ -52,7 +119,11 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			hasMore: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(NonEmptyString),
 		}),
-		Schema.Struct({ _tag: Schema.Literal("synchronized") }),
+		Schema.Struct({
+			_tag: Schema.Literal("synchronized"),
+			/** After a catch-up against the client's `resumeBase`. */
+			checksum: Schema.optional(ResumeChecksum),
+		}),
 		Schema.Struct({
 			_tag: Schema.Literal("upsert"),
 			item: itemSchema,
@@ -166,6 +237,11 @@ export const ProjectInfoSchema = Schema.Struct({
 	slug: Schema.String,
 	title: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
+	setupScript: Schema.optional(Schema.String),
+	sessionMode: Schema.optional(SessionModeSchema),
+	groupingMode: Schema.optional(GroupingModeSchema),
+	effectiveGroupingMode: Schema.optional(GroupingModeSchema),
+	group: Schema.optional(ProjectGroupSchema),
 	/** Keyed by Project Folder path; non-git folders have no entry. */
 	repositoryIdentities: Schema.optional(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
@@ -173,7 +249,6 @@ export const ProjectInfoSchema = Schema.Struct({
 	missing: Schema.optional(Schema.Boolean),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
-	instanceId: Schema.optional(Schema.String),
 });
 
 export const InstanceStatusSchema = Schema.Literal(
@@ -228,13 +303,19 @@ export const PtyInfoSchema = Schema.Struct({
 	pid: Schema.Number,
 });
 
-const HistoryMessagePartSchema = Schema.Struct({
+export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
 	text: Schema.optional(Schema.String),
 	renderedHtml: Schema.optional(Schema.String),
 	state: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		Schema.Struct(
+			{
+				input: Schema.optionalWith(ToolInput, { exact: true }),
+				output: Schema.optionalWith(ToolText, { exact: true }),
+			},
+			Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+		),
 	),
 	callID: Schema.optional(Schema.String),
 	tool: Schema.optional(Schema.String),
@@ -281,14 +362,29 @@ export const HistoryMessageSchema = Schema.Struct({
 	Schema.extend(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 );
 
+/**
+ * A transcript row: a message, or one of its parts. Each moves on its own, so
+ * a live update carries only what changed.
+ * - `message`: a message without `parts` or `text`; its parts are rows of
+ *   their own, and a message row leaves the parts already held in place.
+ * - `part`: one part of the message `messageId`, placed among that message's
+ *   parts by `sortOrder`.
+ */
 export const SessionDetailItemSchema = Schema.Union(
 	Schema.Struct({
-		_tag: Schema.Literal("transcriptMessage"),
+		_tag: Schema.Literal("message"),
 		message: HistoryMessageSchema,
 	}),
 	Schema.Struct({
-		_tag: Schema.Literal("event"),
-		event: StoredEventSchema,
+		_tag: Schema.Literal("part"),
+		messageId: Schema.String,
+		sortOrder: Schema.Int,
+		part: HistoryMessagePartSchema,
+	}),
+	// The session's pending rewind point, or null when none is pending.
+	Schema.Struct({
+		_tag: Schema.Literal("rewind"),
+		messageId: Schema.NullOr(Schema.String),
 	}),
 	// One input conduit is holding for the session: queued behind a running
 	// turn, or sent as a steer and not yet placed. Its row id is
@@ -314,20 +410,45 @@ export const SessionDetailItemSchema = Schema.Union(
 	}),
 );
 
+/**
+ * A detail `remove` names a message by its id, and a part by this JSON pair of
+ * its message's id and its own: a part may share its message's id.
+ */
+export const PartRemovalId = Schema.parseJson(
+	Schema.Tuple(Schema.String, Schema.String),
+);
+
+/**
+ * How many parts' last text each end of a detail subscription keeps, least
+ * recently written first out. Both ends see the same part writes in the same
+ * order, so the decoder still holds every part the encoder sends a suffix of.
+ * Usually only the streaming part grows; eight slots keep it plus seven nearby
+ * interleaved parts warm. An evicted part goes whole, so eviction only costs
+ * compression.
+ */
+export const SENT_PART_LIMIT = 8;
+
 // Lengths are JavaScript string lengths (UTF-16 code units), not wire bytes.
 const TextSuffixSchema = Schema.Struct({
-	partId: Schema.optional(Schema.String),
 	from: Schema.NonNegativeInt,
 	total: Schema.NonNegativeInt,
 });
 const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
 export const SessionDetailEnvelopeSchema = Schema.Union(
-	DetailEnvelope.members[0],
+	DetailEnvelope.members[0].pipe(
+		Schema.extend(
+			Schema.Struct({
+				// What a client that saves this snapshot resumes it from.
+				resumePoint: Schema.optional(ResumePoint),
+			}),
+		),
+	),
 	DetailEnvelope.members[1],
 	DetailEnvelope.members[2].pipe(
 		Schema.extend(
 			Schema.Struct({
-				textSuffixes: Schema.optional(Schema.Array(TextSuffixSchema)),
+				// On a part row: its text is the suffix past what was last sent.
+				textSuffix: Schema.optional(TextSuffixSchema),
 			}),
 		),
 	),
@@ -364,10 +485,46 @@ export const SwitchModelResponseSchema = Schema.Struct({
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
 
+export const HarnessDefaultStateSchema = Schema.Struct({
+	pick: Schema.optional(
+		Schema.Struct({
+			providerId: Schema.String,
+			modelId: Schema.String,
+			effort: Schema.String,
+			contextWindow: Schema.String,
+		}),
+	),
+	status: Schema.Literal("ok", "missing", "invalid", "unverified"),
+	problem: Schema.optional(Schema.String),
+});
+export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
+
+export const SetHarnessDefaultResponseSchema = Schema.Struct({
+	projectSlug: Schema.String,
+	harness: Schema.Literal("claude", "opencode"),
+	state: HarnessDefaultStateSchema,
+});
+export type SetHarnessDefaultResponse =
+	typeof SetHarnessDefaultResponseSchema.Type;
+
 export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	mode: SessionPermissionModeSchema,
 });
+
+export const SetDefaultSessionModeResponseSchema = Schema.Struct({
+	mode: SessionModeSchema,
+});
+export type SetDefaultSessionModeResponse =
+	typeof SetDefaultSessionModeResponseSchema.Type;
+
+export const ResolveSessionModeResponseSchema = Schema.Struct({
+	mode: SessionModeSchema,
+	source: Schema.Literal("project", "file", "global"),
+	warning: Schema.optional(Schema.String),
+});
+export type ResolveSessionModeResponse =
+	typeof ResolveSessionModeResponseSchema.Type;
 
 export const SetHiddenEntriesResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
@@ -584,7 +741,10 @@ export interface SaveProjectInput {
 	readonly slug?: string | undefined;
 	readonly title?: string | undefined;
 	readonly folders: readonly ProjectFolderInput[];
-	readonly instanceId?: string | undefined;
+	readonly setupScript?: string | undefined;
+	readonly sessionMode?: SessionMode | null | undefined;
+	/** null clears an override; omission preserves it. */
+	readonly groupingMode?: GroupingMode | null | undefined;
 }
 
 export class ProjectSaveRejected extends Schema.TaggedError<ProjectSaveRejected>()(
@@ -630,6 +790,9 @@ export const GetInstanceStatusResponseSchema = Schema.Struct({
 
 export const GetStatusResponseSchema = Schema.Struct({
 	uptime: Schema.Number,
+	version: Schema.String,
+	logLevel: RpcLogLevelSchema,
+	supervised: Schema.Boolean,
 	port: Schema.Number,
 	host: Schema.String,
 	tailscaleIP: Schema.optional(Schema.String),
@@ -640,6 +803,8 @@ export const GetStatusResponseSchema = Schema.Struct({
 	clientCount: Schema.Number,
 	pinEnabled: Schema.Boolean,
 	tlsEnabled: Schema.Boolean,
+	tailscaleServeEnabled: Schema.optional(Schema.Boolean),
+	tailscaleServeAvailable: Schema.optional(Schema.Boolean),
 	tailscaleServe: Schema.optional(
 		Schema.Union(
 			Schema.Struct({ url: Schema.String }),
@@ -714,6 +879,7 @@ export const GetFileTreeResponseSchema = Schema.Struct({
 				/** Stable Project Folder identity, independent of its mapped worktree. */
 				root: NonEmptyString,
 				label: NonEmptyString,
+				shared: Schema.optional(Schema.Boolean),
 			}),
 		),
 	),
@@ -734,10 +900,9 @@ export const GetFileContentResponseSchema = Schema.Struct({
 	binary: Schema.optional(Schema.Boolean),
 });
 
-export const GetToolContentResponseSchema = Schema.Struct({
+export const GetToolDetailsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
-	toolId: Schema.String,
-	content: Schema.String,
+	tools: Schema.Array(ToolDetail),
 });
 
 export const GetSkillContentResponseSchema = Schema.Struct({
@@ -788,7 +953,7 @@ export type GetFileTreeResponse = typeof GetFileTreeResponseSchema.Type;
 export type FileEntry = typeof FileEntrySchema.Type;
 export type GetFileListResponse = typeof GetFileListResponseSchema.Type;
 export type GetFileContentResponse = typeof GetFileContentResponseSchema.Type;
-export type GetToolContentResponse = typeof GetToolContentResponseSchema.Type;
+export type GetToolDetailsResponse = typeof GetToolDetailsResponseSchema.Type;
 export type GetSkillContentResponse = typeof GetSkillContentResponseSchema.Type;
 export type GetSessionSkillsResponse =
 	typeof GetSessionSkillsResponseSchema.Type;
@@ -880,6 +1045,15 @@ export class SetKeepAwakeCommand extends Schema.TaggedRequest<SetKeepAwakeComman
 	},
 ) {}
 
+export class SetTailscaleServe extends Schema.TaggedRequest<SetTailscaleServe>()(
+	"SetTailscaleServe",
+	{
+		failure: WsRpcError,
+		success: OkResponseSchema,
+		payload: { enabled: Schema.Boolean },
+	},
+) {}
+
 export class Shutdown extends Schema.TaggedRequest<Shutdown>()("Shutdown", {
 	payload: {},
 	failure: WsRpcError,
@@ -962,7 +1136,9 @@ export class SaveProject extends Schema.TaggedRequest<SaveProject>()(
 			slug: Schema.optional(NonEmptyString),
 			title: Schema.optional(NonEmptyString),
 			folders: Schema.Array(ProjectFolderInputSchema),
-			instanceId: Schema.optional(NonEmptyString),
+			setupScript: Schema.optional(Schema.String),
+			sessionMode: Schema.optional(Schema.NullOr(SessionModeSchema)),
+			groupingMode: Schema.optional(Schema.NullOr(GroupingModeSchema)),
 		},
 	},
 ) {}
@@ -975,19 +1151,6 @@ export class RemoveProject extends Schema.TaggedRequest<RemoveProject>()(
 		payload: {
 			projectSlug: Schema.optional(NonEmptyString),
 			slug: NonEmptyString,
-		},
-	},
-) {}
-
-export class SetProjectInstance extends Schema.TaggedRequest<SetProjectInstance>()(
-	"SetProjectInstance",
-	{
-		failure: WsRpcError,
-		success: ProjectMutationResponseSchema,
-		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
-			slug: NonEmptyString,
-			instanceId: NonEmptyString,
 		},
 	},
 ) {}
@@ -1266,6 +1429,24 @@ export class SetDefaultModel extends Schema.TaggedRequest<SetDefaultModel>()(
 	},
 ) {}
 
+export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()(
+	"SetHarnessDefault",
+	{
+		failure: WsRpcError,
+		success: SetHarnessDefaultResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			harness: Schema.Literal("claude", "opencode"),
+			providerId: NonEmptyString,
+			modelId: NonEmptyString,
+			/** Omitted: the effort last saved for this model, if still offered. */
+			effort: Schema.optional(Schema.String),
+			contextWindow: Schema.String,
+			originId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
 export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPermissionMode>()(
 	"SetDefaultPermissionMode",
 	{
@@ -1276,6 +1457,45 @@ export class SetDefaultPermissionMode extends Schema.TaggedRequest<SetDefaultPer
 			mode: SessionPermissionModeSchema,
 			originId: Schema.optional(NonEmptyString),
 		},
+	},
+) {}
+
+export class SetDefaultSessionMode extends Schema.TaggedRequest<SetDefaultSessionMode>()(
+	"SetDefaultSessionMode",
+	{
+		failure: WsRpcError,
+		success: SetDefaultSessionModeResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			mode: SessionModeSchema,
+		},
+	},
+) {}
+
+/** Resolve draft defaults without attaching or starting a project relay. */
+export class ResolveSessionMode extends Schema.TaggedRequest<ResolveSessionMode>()(
+	"ResolveSessionMode",
+	{
+		failure: WsRpcError,
+		success: ResolveSessionModeResponseSchema,
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+export class SetDefaultGroupingMode extends Schema.TaggedRequest<SetDefaultGroupingMode>()(
+	"SetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: { mode: GroupingModeSchema },
+	},
+) {}
+
+export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroupingMode>()(
+	"GetDefaultGroupingMode",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({ mode: GroupingModeSchema }),
+		payload: {},
 	},
 ) {}
 
@@ -1342,6 +1562,18 @@ export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSe
 	},
 ) {}
 
+export class ListBranches extends Schema.TaggedRequest<ListBranches>()(
+	"ListBranches",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			current: Schema.optional(Schema.String),
+			branches: Schema.Array(Schema.String),
+		}),
+		payload: { projectSlug: NonEmptyString },
+	},
+) {}
+
 export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 	"ListWorktrees",
 	{
@@ -1367,6 +1599,49 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
+	},
+) {}
+
+export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSessionWorktrees>()(
+	"InspectSessionWorktrees",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
+			removeWorktrees: Schema.Boolean,
+		}),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranch>()(
+	"RenameSessionBranch",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
+		success: Schema.Struct({ ok: Schema.Literal(true) }),
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
+			branchName: Schema.String,
+		},
+	},
+) {}
+
+export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessionWorktree>()(
+	"RecreateSessionWorktree",
+	{
+		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	},
+) {}
+
+export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSessionInMainFolder>()(
+	"ContinueSessionInMainFolder",
+	{
+		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
+		success: Schema.Struct({ directory: Schema.String }),
+		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1697,14 +1972,15 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 	},
 ) {}
 
-export class GetToolContent extends Schema.TaggedRequest<GetToolContent>()(
-	"GetToolContent",
+export class GetToolDetails extends Schema.TaggedRequest<GetToolDetails>()(
+	"GetToolDetails",
 	{
 		failure: WsRpcError,
-		success: GetToolContentResponseSchema,
+		success: GetToolDetailsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			toolId: NonEmptyString,
+			sessionId: NonEmptyString,
+			toolIds: Schema.NonEmptyArray(ToolCallId),
 		},
 	},
 ) {}
@@ -1755,6 +2031,7 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 			roots: Schema.optional(Schema.Boolean),
 			search: Schema.optional(Schema.String),
 			cursor: Schema.optional(DaemonSessionCursorSchema),
+			// A project slug or encodeGroupScope's reserved /group/<key> value.
 			scope: Schema.optional(NonEmptyString),
 			exclude: Schema.optional(NonEmptyString),
 		},
@@ -1780,6 +2057,8 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			providerId: Schema.optional(Schema.String),
 			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
+			// Local base for the primary folder; requires newWorktree.
+			worktreeBase: Schema.optional(NonEmptyString),
 			// The draft composer's model, and its effort if one was picked.
 			// Recorded as the session's own choice so the first turn runs them
 			// instead of the relay default.
@@ -1839,11 +2118,15 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 	"DeleteSession",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: Schema.Struct({
+			ok: Schema.Literal(true),
+			worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
+		}),
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
+			removeWorktrees: Schema.optional(Schema.Boolean),
 		},
 	},
 ) {}
@@ -1952,6 +2235,24 @@ export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			messageId: NonEmptyString,
+		},
+	},
+) {}
+
+export const UndoRewindResponseSchema = Schema.Struct({
+	ok: Schema.Literal(true),
+	sessionId: NonEmptyString,
+});
+export type UndoRewindResponse = typeof UndoRewindResponseSchema.Type;
+
+export class UndoRewind extends Schema.TaggedRequest<UndoRewind>()(
+	"UndoRewind",
+	{
+		failure: WsRpcError,
+		success: UndoRewindResponseSchema,
+		payload: {
+			projectSlug: NonEmptyString,
+			sessionId: NonEmptyString,
 		},
 	},
 ) {}
@@ -2099,6 +2400,7 @@ export const WsRpcRequest = Schema.Union(
 	SetPin,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
+	SetTailscaleServe,
 	Shutdown,
 	SetAgent,
 	RestartWithConfig,
@@ -2115,15 +2417,25 @@ export const WsRpcRequest = Schema.Union(
 	SwitchContextWindow,
 	SwitchModel,
 	SetDefaultModel,
+	SetHarnessDefault,
 	SetDefaultPermissionMode,
+	SetDefaultSessionMode,
+	ResolveSessionMode,
+	SetDefaultGroupingMode,
+	GetDefaultGroupingMode,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
+	ListBranches,
 	ListWorktrees,
+	InspectSessionWorktrees,
+	RenameSessionBranch,
 	MoveSessionWorkspace,
+	RecreateSessionWorktree,
+	ContinueSessionInMainFolder,
 	DismissWorkspaceHint,
 	OpenCodeUseWorktree,
 	MarkSessionUnread,
@@ -2145,13 +2457,12 @@ export const WsRpcRequest = Schema.Union(
 	GetFileTree,
 	GetFileList,
 	GetFileContent,
-	GetToolContent,
+	GetToolDetails,
 	GetSkillContent,
 	GetSessionSkills,
 	GetModels,
 	SaveProject,
 	RemoveProject,
-	SetProjectInstance,
 	StartInstance,
 	StopInstance,
 	RemoveInstance,
@@ -2181,6 +2492,7 @@ export const WsRpcRequest = Schema.Union(
 	RejectQuestion,
 	LoadMoreHistory,
 	RewindSession,
+	UndoRewind,
 	SubmitInput,
 	CancelInput,
 	SendInputNow,
@@ -2196,6 +2508,7 @@ export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
 		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
+		resumeBase: Schema.optional(ResumeBase),
 	},
 	success: EnvelopeSchema(SessionInfoSchema),
 	error: WsRpcError,
@@ -2207,7 +2520,10 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
-		// Only clients that decode textSuffixes may opt into compressed live rows.
+		resumeBase: Schema.optional(ResumeBase),
+		// From a saved snapshot: the server resumes from this, not resumeBase.
+		resumePoint: Schema.optional(ResumePoint),
+		// Only clients that decode textSuffix may opt into compressed live parts.
 		textSuffixes: Schema.optional(Schema.Boolean),
 	},
 	success: SessionDetailEnvelopeSchema,
@@ -2398,6 +2714,12 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("defaultPermissionMode", {
 		mode: SessionPermissionModeSchema,
 	}),
+	Schema.TaggedStruct("defaultSessionMode", {
+		mode: SessionModeSchema,
+	}),
+	Schema.TaggedStruct("defaultGroupingMode", {
+		mode: GroupingModeSchema,
+	}),
 	Schema.TaggedStruct("claudeSettings", {
 		overrides: ClaudeSettingsOverridesSchema,
 	}),
@@ -2416,6 +2738,10 @@ export const ProjectSettingSchema = Schema.Union(
 	Schema.TaggedStruct("providerModels", {
 		providers: Schema.Array(ProviderInfoSchema),
 	}),
+	Schema.TaggedStruct("harnessDefaults", {
+		claude: HarnessDefaultStateSchema,
+		opencode: HarnessDefaultStateSchema,
+	}),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */
@@ -2425,10 +2751,14 @@ export type GlobalProjectSetting = Extract<
 		readonly _tag:
 			| "defaultModel"
 			| "defaultPermissionMode"
+			| "defaultSessionMode"
+			| "defaultGroupingMode"
 			| "visibility"
 			| "claudeSettings";
 	}
 >;
+/** Global writes signal each relay to compute catalog-dependent facts locally. */
+export type GlobalSettingTag = GlobalProjectSetting["_tag"] | "harnessDefaults";
 const ProjectSettingsEnvelopeSchema = EnvelopeSchema(ProjectSettingSchema);
 export type ProjectSettingsEnvelope = typeof ProjectSettingsEnvelopeSchema.Type;
 
@@ -2506,6 +2836,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetPin),
 	Rpc.fromTaggedRequest(SetKeepAwake),
 	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
+	Rpc.fromTaggedRequest(SetTailscaleServe),
 	Rpc.fromTaggedRequest(Shutdown),
 	Rpc.fromTaggedRequest(SetAgent),
 	Rpc.fromTaggedRequest(RestartWithConfig),
@@ -2522,15 +2853,25 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SwitchContextWindow),
 	Rpc.fromTaggedRequest(SwitchModel),
 	Rpc.fromTaggedRequest(SetDefaultModel),
+	Rpc.fromTaggedRequest(SetHarnessDefault),
 	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
+	Rpc.fromTaggedRequest(SetDefaultSessionMode),
+	Rpc.fromTaggedRequest(ResolveSessionMode),
+	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
+	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
 	Rpc.fromTaggedRequest(SetClaudeSettings),
 	Rpc.fromTaggedRequest(ResolveClaudeSettings),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
+	Rpc.fromTaggedRequest(ListBranches),
 	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.fromTaggedRequest(InspectSessionWorktrees),
+	Rpc.fromTaggedRequest(RenameSessionBranch),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
+	Rpc.fromTaggedRequest(RecreateSessionWorktree),
+	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
 	Rpc.fromTaggedRequest(DismissWorkspaceHint),
 	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
 	Rpc.fromTaggedRequest(MarkSessionUnread),
@@ -2552,13 +2893,12 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetFileTree),
 	Rpc.fromTaggedRequest(GetFileList),
 	Rpc.fromTaggedRequest(GetFileContent),
-	Rpc.fromTaggedRequest(GetToolContent),
+	Rpc.fromTaggedRequest(GetToolDetails),
 	Rpc.fromTaggedRequest(GetSkillContent),
 	Rpc.fromTaggedRequest(GetSessionSkills),
 	Rpc.fromTaggedRequest(GetModels),
 	Rpc.fromTaggedRequest(SaveProject),
 	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(SetProjectInstance),
 	Rpc.fromTaggedRequest(StartInstance),
 	Rpc.fromTaggedRequest(StopInstance),
 	Rpc.fromTaggedRequest(RemoveInstance),
@@ -2588,6 +2928,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RejectQuestion),
 	Rpc.fromTaggedRequest(LoadMoreHistory),
 	Rpc.fromTaggedRequest(RewindSession),
+	Rpc.fromTaggedRequest(UndoRewind),
 	Rpc.fromTaggedRequest(SubmitInput),
 	Rpc.fromTaggedRequest(CancelInput),
 	Rpc.fromTaggedRequest(SendInputNow),

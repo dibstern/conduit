@@ -1,5 +1,6 @@
 // Canonical type definitions for conduit, derived from ticket specs.
 
+import type { Tracer } from "effect/Tracer";
 import type { Logger } from "./logger.js";
 import type { PushNotificationSender } from "./server/push.js";
 import type {
@@ -118,8 +119,12 @@ export interface StoredProject {
 	>;
 	readonly title: string;
 	readonly lastUsed?: number;
-	readonly instanceId?: string;
 	readonly shellEnv?: import("./contracts/project-shell-env.js").ProjectShellEnvConfig;
+	readonly setupScript?: string | undefined;
+	readonly sessionMode?:
+		| import("./contracts/project-file.js").SessionMode
+		| undefined;
+	readonly groupingMode?: import("./shared-types.js").GroupingMode | undefined;
 }
 
 export interface RecentProject {
@@ -177,6 +182,8 @@ export interface ProjectRelayConfig {
 	sessionTitle?: string;
 	/** Logger instance — defaults to a console-backed root logger */
 	log?: Logger;
+	/** Ambient daemon tracer borrowed by the relay ManagedRuntime. */
+	tracer?: Tracer;
 	/**
 	 * Enables per-directory scoping via x-opencode-directory header.
 	 * WebSocket upgrades are always owned by the caller, which attaches sockets
@@ -189,7 +196,10 @@ export interface ProjectRelayConfig {
 			slug: string;
 			title: string;
 			folders: readonly [string, ...string[]];
-			instanceId?: string;
+			setupScript?: string | undefined;
+			sessionMode?:
+				| import("./contracts/project-file.js").SessionMode
+				| undefined;
 		}>
 	>;
 	/** List sessions across every registered project without starting relays. */
@@ -202,7 +212,7 @@ export interface ProjectRelayConfig {
 	broadcastSessionListChanged?: () => Promise<void>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
 	publishGlobalSetting: (
-		tag: import("./contracts/ws-rpc.js").GlobalProjectSetting["_tag"],
+		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,
 	) => import("effect").Effect.Effect<void>;
 	/** Refresh the daemon's cached git context before publishing a turn-end list. */
 	refreshSessionGit?: () => Promise<void>;
@@ -244,11 +254,6 @@ export interface ProjectRelayConfig {
 	) => MaybePromise<import("./shared-types.js").OpenCodeInstance>;
 	/** Persist daemon config to disk after instance mutations. */
 	persistConfig?: () => MaybePromise<void>;
-	/** Change a project's instance binding and rebuild relay. */
-	setProjectInstance?: (
-		slug: string,
-		instanceId: string,
-	) => void | Promise<void>;
 	/** Trigger an immediate port scan (optional — daemon mode only). */
 	triggerScan?: () => Promise<{
 		discovered: number[];

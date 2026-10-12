@@ -139,8 +139,13 @@ test.describe("E2E Smoke Test", () => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 
-		// Project name
-		await expect(app.projectName).toBeVisible();
+		await expect(page.getByTestId("session-bar-title")).toBeVisible();
+		await expect(app.checkout).toBeVisible();
+		await expect(
+			page
+				.getByTestId("session-bar")
+				.getByRole("button", { name: /^Checkout:/ }),
+		).toHaveCount(0);
 
 		// Status dot
 		await expect(app.statusDot).toBeVisible();

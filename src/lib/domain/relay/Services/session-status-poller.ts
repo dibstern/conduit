@@ -34,6 +34,14 @@ const STATUS_RECONCILIATION_MAX_RETRIES = 5;
  */
 const SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 
+/**
+ * A task child stays busy until its outcome lands; a missed outcome would keep
+ * it busy forever. Once its task has been off the runtime's live list this
+ * long, the outcome is not coming. The list and outcome are separate streams
+ * with no ordering promise, so the grace covers the gap between them.
+ */
+const STRANDED_CHILD_GRACE_MS = 60_000;
+
 /** Payload published on the changed PubSub. */
 export interface PollerChangedEvent {
 	readonly statuses: Record<string, SessionStatus>;
@@ -262,6 +270,15 @@ export interface ReconciliationDeps {
 	>;
 	/** Sessions blocked on an open question or permission prompt. */
 	readonly getSessionsAwaitingUser: () => Effect.Effect<ReadonlySet<string>>;
+	readonly getStrandedChildren: () => Effect.Effect<
+		ReadonlyArray<{ id: string; task_id: string; owner_id: string }>,
+		unknown
+	>;
+	readonly liveListOf: (
+		sessionId: string,
+	) =>
+		| { readonly taskIds: ReadonlySet<string>; readonly since: number }
+		| undefined;
 	readonly injectCorrectiveEvent: (
 		sessionId: string,
 		status: string,
@@ -291,6 +308,31 @@ const runReconciliation = (deps: ReconciliationDeps) =>
 		}).pipe(
 			Effect.catchAll((e) =>
 				Effect.log(`staleness check failed: ${String(e)}`),
+			),
+		);
+		yield* Effect.gen(function* () {
+			const children = yield* deps.getStrandedChildren();
+			if (children.length === 0) return;
+			const awaitingUser = yield* deps.getSessionsAwaitingUser();
+			const now = Date.now();
+			for (const child of children) {
+				// No list heard since the daemon started is unknown, not empty.
+				const list = deps.liveListOf(child.owner_id);
+				if (
+					list &&
+					!list.taskIds.has(child.task_id) &&
+					now - list.since > STRANDED_CHILD_GRACE_MS &&
+					!awaitingUser.has(child.id)
+				) {
+					yield* Effect.log(
+						`Session ${child.id.slice(0, 24)} task ${child.task_id} is no longer running — marking idle`,
+					);
+					yield* deps.injectCorrectiveEvent(child.id, "idle");
+				}
+			}
+		}).pipe(
+			Effect.catchAll((e) =>
+				Effect.log(`stranded child check failed: ${String(e)}`),
 			),
 		);
 	}).pipe(Effect.withSpan("statusPoller.runReconciliation"));

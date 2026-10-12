@@ -13,7 +13,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "seed persisted session instance during an outage",
 		match:
-			/^the (Claude|OpenCode) session is persisted on instance (\S+)( as the project default)? with another instance healthy$/,
+			/^the (Claude|OpenCode) session is persisted on instance (\S+)( as the first OpenCode instance)? with another instance healthy$/,
 		run: ({ world, match }) => {
 			const name = match[1] ?? "";
 			const instanceId = match[2] ?? "";
@@ -27,7 +27,11 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 				resumes: [{ at: PINNED_CLOCK_MS, instanceId, reason: "user" }],
 			});
 			rpc.setDaemonList("SubscribeInstances", {
-				instances: ["healthy-oc", instanceId].map((id) => ({
+				// The relay drives the first OpenCode instance in the list.
+				instances: (match[3]
+					? [instanceId, "healthy-oc"]
+					: ["healthy-oc", instanceId]
+				).map((id) => ({
 					id,
 					name: id,
 					driver:
@@ -39,14 +43,6 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 					createdAt: PINNED_CLOCK_MS,
 				})),
 			});
-			if (match[3]) {
-				rpc.setDaemonList("SubscribeProjects", {
-					projects: [
-						{ slug: "myapp", title: "myapp", folders: ["/myapp"], instanceId },
-					],
-					current: "myapp",
-				});
-			}
 		},
 	},
 	{
@@ -72,7 +68,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 	{
 		name: "view a provider session",
 		match:
-			/^I view the (Claude|OpenCode) session( using the OpenCode project default| on instance (\S+))?( with rejected agent discovery)?$/,
+			/^I view the (Claude|OpenCode) session( using the OpenCode default model| on instance (\S+))?( with rejected agent discovery)?$/,
 		run: async ({ world, match }) => {
 			const name = match[1] ?? "";
 			const sessionId = `sess-banner-${name.toLowerCase()}`;
@@ -146,8 +142,8 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 				throw new WsRpcError({ message: match[2] ?? "" });
 			});
 			await openModelPicker(world.page);
-			await world.page.getByTestId("picker-row-harness").click();
-			await world.page.getByTestId(`picker-instance-${instanceId}`).click();
+			await world.page.getByTestId("picker-harness-opencode").click();
+			await world.page.getByTestId(`picker-account-${instanceId}`).click();
 			await world.page
 				.getByTestId("picker-row-model")
 				.waitFor({ state: "visible" });

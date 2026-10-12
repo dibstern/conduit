@@ -7,6 +7,7 @@ import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
@@ -123,9 +124,8 @@ async function sendAndCapture(
 
 /** Pick the OpenCode harness, then `picked`, in the draft composer. */
 async function pickOpenCodeModel(page: Page, picker: Locator) {
-	await picker.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-opencode").click();
 	await page.getByTestId("picker-row-model").click();
 	await page
 		.getByTestId("model-picker-list")
@@ -247,6 +247,19 @@ test("a model picked in the draft composer is the model OpenCode runs", async ({
 	expect
 		.soft(evidence.instanceAfterSend, "the composer stays on OpenCode")
 		.toBe("opencode");
+	const newSession = page.locator("#new-session-btn:visible");
+	if (!(await newSession.isVisible()))
+		await page.getByTestId("session-bar-back").click();
+	await newSession.click();
+	await expect(page).toHaveURL(/\/new\?/);
+	await expect(
+		picker,
+		"the next draft returns to the saved default harness",
+	).toHaveAttribute("data-instance-id", "claude");
+	await expect(picker).toHaveAccessibleName(/opus/i);
+	await page.screenshot({
+		path: testInfo.outputPath("next-draft-default.png"),
+	});
 });
 
 test("an OpenCode model runs at the effort conduit shows for it", async ({
@@ -293,11 +306,10 @@ test("an image attached in an OpenCode draft reaches OpenCode", async ({
 	page,
 	harness,
 }, testInfo) => {
-	const picker = await openDraft(page, harness, async (browser, slug) => {
-		await Effect.runPromise(
-			browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
-		);
-	});
+	const picker = await openDraft(page, harness);
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-opencode").click();
+	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 	const chooser = page.waitForEvent("filechooser");
 	await page.locator("#attach-btn:visible").click();
@@ -319,16 +331,14 @@ test("an image attached in an OpenCode draft reaches OpenCode", async ({
 	]);
 });
 
-test("a draft in a project bound to OpenCode never sends OpenCode a Claude model", async ({
+test("a draft with OpenCode picked never sends OpenCode a Claude model", async ({
 	page,
 	harness,
 }, testInfo) => {
-	// The binding lives on the daemon; the relay default stays a Claude model.
-	const picker = await openDraft(page, harness, async (browser, slug) => {
-		await Effect.runPromise(
-			browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
-		);
-	});
+	const picker = await openDraft(page, harness);
+	await openPickerRoot(page, picker);
+	await page.getByTestId("picker-harness-opencode").click();
+	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
 	const evidence = await sendAndCapture(page, harness, picker, testInfo);
@@ -372,15 +382,14 @@ test("a model picked on another harness never reaches an OpenCode that lists no 
 			);
 		},
 	);
-	await picker.click();
+	await openPickerRoot(page, picker);
 	await page.getByTestId("picker-row-model").click();
 	await page
 		.getByTestId("model-picker-list")
 		.locator('[data-provider-id="claude"]')
 		.first()
 		.click();
-	await page.getByTestId("picker-row-harness").click();
-	await page.getByTestId("picker-instance-opencode").click();
+	await page.getByTestId("picker-harness-opencode").click();
 	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
@@ -462,6 +471,15 @@ test.describe("a model id both harnesses list", () => {
 			opencodeRecording: "chat-simple",
 			capabilityModels: [
 				{ id: shared, name: "Sonnet 3.7", providerId: "claude" },
+				{
+					id: "opus",
+					name: "Opus",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200k" },
+						{ value: "1m", label: "1M", isDefault: true },
+					],
+				},
 			],
 		},
 	});
@@ -472,13 +490,12 @@ test.describe("a model id both harnesses list", () => {
 	}, testInfo) => {
 		const picker = await openDraft(page, harness);
 		const list = page.getByTestId("model-picker-list");
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-row-model").click();
 		await list
 			.locator(`[data-model-id="${shared}"][data-provider-id="claude"]`)
 			.click();
-		await page.getByTestId("picker-row-harness").click();
-		await page.getByTestId("picker-instance-opencode").click();
+		await page.getByTestId("picker-harness-opencode").click();
 		await page.getByTestId("picker-row-model").click();
 		const shownRow = list.locator('[aria-current="true"]');
 		await expect(shownRow).toHaveCount(1);
@@ -509,6 +526,10 @@ test.describe("effort", () => {
 					name: "Opus",
 					providerId: "claude",
 					variants: { high: {}, max: {} },
+					contextWindowOptions: [
+						{ value: "200k", label: "200k" },
+						{ value: "1m", label: "1M", isDefault: true },
+					],
 				},
 				{
 					id: "sonnet",
@@ -597,7 +618,7 @@ test.describe("effort", () => {
 		harness,
 	}, testInfo) => {
 		const picker = await openDraft(page, harness, saveEfforts);
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-row-model").click();
 		await page
 			.getByTestId("model-picker-list")
@@ -617,7 +638,7 @@ test.describe("effort", () => {
 		harness,
 	}, testInfo) => {
 		const picker = await openDraft(page, harness, saveEfforts);
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-effort-option-high").click();
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("model-picker")).toBeHidden();
@@ -646,7 +667,7 @@ test.describe("effort", () => {
 			return frame;
 		});
 		const picker = await openDraft(page, harness, saveEfforts);
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-row-model").click();
 		await page
 			.getByTestId("model-picker-list")
@@ -657,7 +678,7 @@ test.describe("effort", () => {
 		await expect.poll(() => held).toBe(1);
 
 		// Opus's efforts still show, and high is one of Sonnet's too.
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-effort-option-high").click();
 		release();
 		await expect(
@@ -684,7 +705,7 @@ test.describe("effort", () => {
 		harness,
 	}, testInfo) => {
 		const picker = await openDraft(page, harness, saveEfforts);
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-row-model").click();
 		await page
 			.getByTestId("model-picker-list")
@@ -692,7 +713,7 @@ test.describe("effort", () => {
 			.click();
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("model-picker")).toBeHidden();
-		await picker.click();
+		await openPickerRoot(page, picker);
 
 		await expect
 			.soft(
@@ -717,7 +738,7 @@ test.describe("effort", () => {
 	}, testInfo) => {
 		const picker = await openDraft(page, harness, saveEfforts);
 		const draftUrl = page.url();
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-effort-option-high").click();
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("model-picker")).toBeHidden();
@@ -742,10 +763,10 @@ test.describe("effort", () => {
 		// its own here, so max is not its effort to run at.
 		const picker = await openDraft(page, harness, async (browser, slug) => {
 			await saveEfforts(browser, slug);
-			await Effect.runPromise(
-				browser.rpc.SetProjectInstance({ slug, instanceId: "opencode" }),
-			);
 		});
+		await openPickerRoot(page, picker);
+		await page.getByTestId("picker-harness-opencode").click();
+		await page.keyboard.press("Escape");
 		await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 
 		const evidence = await sendAndCapture(page, harness, picker, testInfo);
@@ -756,7 +777,7 @@ test.describe("effort", () => {
 		// A fresh load shows only what conduit reports for the session. The model
 		// list arrives in the same reply as the session's efforts.
 		await page.reload();
-		await picker.click();
+		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-row-model").click();
 		await expect(
 			page.getByTestId("model-picker-list").locator("[data-model-id]").first(),

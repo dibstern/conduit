@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
+	import { getScopeGroupKey } from "../../../session-scope.js";
 	import type { SessionInfo } from "../../types.js";
 	import {
 		sessionState,
@@ -15,6 +16,7 @@
 	import {
 		getSessionGrouping,
 		getSessionScope,
+		getSessionScopeLabel,
 		getSessionStatusFilter,
 		setSessionScope,
 	} from "../../stores/session-scope.js";
@@ -23,19 +25,19 @@
 		routerState,
 	} from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
+	import { getProjectGroup } from "../../stores/project-state.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import {
 		deleteSessionRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import {
-		confirm,
 		dismissToast,
 		showToast,
 		uiState,
 	} from "../../stores/ui.svelte.js";
 	import { getSessionActionState } from "../../utils/swipe.js";
 	import SessionContextMenu from "./SessionContextMenu.svelte";
-	import { getSessionVerbs, runSessionVerbShortcut, type SessionVerbHost } from "./session-verbs.js";
+	import { getSessionCommands, runSessionCommandShortcut, type SessionCommandHost } from "./session-commands.js";
 	import SnoozeSheet from "./SnoozeSheet.svelte";
 	import ShortcutSheet from "./ShortcutSheet.svelte";
 	import Banners from "../overlays/Banners.svelte";
@@ -45,6 +47,7 @@
 	import SessionListRows from "./SessionListRows.svelte";
 	import SessionListBulkBar from "./SessionListBulkBar.svelte";
 	import { runBulkChange, runBulkSnooze } from "./session-list-bulk-actions.js";
+	import { confirmSessionDeletion } from "./session-deletion.js";
 	import { getProjectAccent, getProjectLabel, projectDisplayName } from "./session-list-project.js";
 
 	let { onaddproject }: { onaddproject?: (() => void) | undefined } = $props();
@@ -116,13 +119,23 @@
 	});
 
 	const scope = $derived(getSessionScope());
+	const scopeLabel = $derived(getSessionScopeLabel(scope));
+	const scopeGroupKey = $derived(getScopeGroupKey(scope));
+	// A group's membership can change without its URL changing. Re-read its
+	// pages and search when projects join, leave or change their grouping mode.
+	const scopeQueryKey = $derived(JSON.stringify([
+		scope,
+		scopeGroupKey === null ? null : projectState.projects
+			.filter((project) => getProjectGroup(project.slug)?.key === scopeGroupKey)
+			.map((project) => project.slug).sort(),
+	]));
 	const emptyMessage = $derived.by(() => {
 		if (searching && filtered.length === 0) return "No matching sessions";
 		if (statusFilter !== null) {
 			const label = statusFilter === "needs-you" ? "needs you" : statusFilter;
-			return `Nothing ${label}${scope === null ? "" : ` in ${projectDisplayName(scope)}`}`;
+			return `Nothing ${label}${scope === null ? "" : ` in ${scopeLabel}`}`;
 		}
-		if (scope !== null) return `No sessions in ${projectDisplayName(scope)}`;
+		if (scope !== null) return `No sessions in ${scopeLabel}`;
 		return "No sessions yet";
 	});
 
@@ -181,10 +194,10 @@
 	// The server scopes its page, so a new scope needs a fresh first page, and a
 	// live search its matches re-fetched. The initial scope is already loaded by
 	// ChatLayout on connect, hence skipping the first run.
-	let loadedScope = untrack(() => scope);
+	let loadedScope = untrack(() => scopeQueryKey);
 	$effect(() => {
-		if (scope === loadedScope) return;
-		loadedScope = scope;
+		if (scopeQueryKey === loadedScope) return;
+		loadedScope = scopeQueryKey;
 		void refreshSessionList();
 		const query = untrack(() => localSearchValue);
 		if (query.trim()) requestRemoteSearch(query);
@@ -270,7 +283,7 @@
 		renamingSessionId = id;
 	}
 
-	function sessionVerbHost(getSession: () => SessionInfo | null): SessionVerbHost {
+	function sessionCommandHost(getSession: () => SessionInfo | null): SessionCommandHost {
 		return {
 			rename: () => { const session = getSession(); if (session) handleCtxRename(session.id); },
 			select: () => { const session = getSession(); if (session) handleEnterSelect(session.id); },
@@ -350,7 +363,7 @@
 		if (!(row instanceof HTMLAnchorElement) || !row.matches("#session-list .session-item")) return;
 		const session = filtered.find((item) => item.id === row.dataset["sessionId"]);
 		if (!session) return;
-		runSessionVerbShortcut(event, getSessionVerbs(session, sessionState.now, sessionVerbHost(() => session), "center"));
+		runSessionCommandShortcut(event, getSessionCommands(session, sessionState.now, sessionCommandHost(() => session), "center"));
 	}
 
 	function closeShortcutSheet() {
@@ -419,18 +432,27 @@
 		bulkPending = true;
 		const count = selectionCount;
 		const label = count === 1 ? "1 session" : `${count} sessions`;
-		const confirmed = await confirm(
-			`Delete ${label}? These sessions and their history will be permanently removed.`,
-			"Delete",
-		);
-		if (confirmed) {
+		const selected = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
+		try {
+			targets = await confirmSessionDeletion(
+				selected,
+				`Delete ${label}? These sessions and their history will be permanently removed.`,
+			);
+		} catch {
+			showToast("Couldn't inspect worktrees. The sessions were kept.", { variant: "warn" });
+			bulkPending = false;
+			return;
+		}
+		if (targets) {
 			// Snapshot the rows, then clear selection so the UI responds at once.
 			// The list is cross-project, so each row deletes in its own project.
-			const targets = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id }));
 			resetSelectMode();
 			const results = await Promise.allSettled(
-				targets.map((target) => deleteSessionRpc({ ...target, originId: getBrowserClientId() })),
+				targets.map((target) => deleteSessionRpc(target)),
 			);
+			const warnings = results.flatMap((result) => result.status === "fulfilled" ? result.value.worktreeWarnings ?? [] : []);
+			if (warnings.length > 0) showToast(`Sessions deleted. ${warnings.join("; ")}`, { variant: "warn" });
 			void refreshListedSessions();
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {
@@ -484,7 +506,7 @@
 		branch={ctxMenuSession.git?.branch}
 		presentation={ctxMenuPresentation}
 		now={sessionState.now}
-		host={sessionVerbHost(() => ctxMenuSession)}
+		host={sessionCommandHost(() => ctxMenuSession)}
 		onclose={handleCloseContextMenu}
 	/>
 {/if}

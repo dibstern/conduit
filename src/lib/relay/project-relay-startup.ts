@@ -29,11 +29,13 @@ import {
 	setModel,
 	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../domain/relay/Services/session-setup.js";
 import {
 	PollerPubSubTag,
 	PollerStateTag,
 } from "../domain/relay/Services/session-status-poller.js";
 import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
+import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -365,6 +367,7 @@ function startSseConsumers(
 		orchestration,
 	} = services;
 	return Effect.gen(function* () {
+		const terminal = yield* OpenCodeTerminalServiceTag;
 		const sseConsumerDeps = {
 			translator,
 			wsHandler,
@@ -382,6 +385,7 @@ function startSseConsumers(
 			slug: config.slug,
 			providerInstanceId: defaultInstanceIdForDriver("opencode"),
 			onDoneProcessed: monitoring.recordDoneDelivered,
+			onPtysChanged: terminal.onOpenCodePtysChanged,
 			opencodeRuntimeIngress,
 		};
 		yield* wireSSEConsumerEffect(sseConsumerDeps, sseStream);
@@ -428,6 +432,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const { stopMonitoring } = monitoring;
 				yield* Effect.gen(function* () {
 					yield* startSseConsumers(inputs, services, monitoring);
+					yield* (yield* SessionSetupTag).recover;
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(

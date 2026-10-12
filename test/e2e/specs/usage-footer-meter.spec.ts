@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema } from "effect";
 import { usageForecastTime } from "../../../src/lib/frontend/utils/continuation.js";
+import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -13,8 +14,8 @@ test.skip(
 );
 
 // Failures: the daemon reads the wrong account directory, the subscription does
-// not reach the browser, a later account replaces the first, or the project
-// default follows the open session instead of the project's bound instance.
+// not reach the browser, a later account replaces the first, or the current
+// account ignores the account picked for a new session draft.
 test("real daemon usage controls reach the desktop sidebar footer per account", async ({
 	page,
 	harness,
@@ -74,7 +75,6 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 	const { savedSlug } = await Effect.runPromise(
 		browser.rpc.SaveProject({
 			folders: [mkdtempSync(join(harness.root, "usage-project-"))],
-			instanceId: personal.id,
 		}),
 	);
 	if (!savedSlug) throw new Error("No usage project slug");
@@ -101,9 +101,6 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 			)
 			.toBe(true);
 	}
-	await expect(
-		page.getByTestId(`usage-footer-row-${personal.id}`),
-	).toHaveAttribute("title", "Default for this project");
 	await expect(
 		page.getByTestId(`usage-footer-cell-${work.id}-five_hour`),
 	).toHaveAttribute("data-level", "warning");
@@ -178,6 +175,17 @@ test("real daemon usage controls reach the desktop sidebar footer per account", 
 			`${harness.baseUrl}/new?p=${encodeURIComponent(savedSlug)}&project=${encodeURIComponent(savedSlug)}`,
 		);
 		await expect(page.locator("#input")).toBeVisible();
+		const picker = page.locator(
+			'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+		);
+		await openPickerRoot(page, picker);
+		await page.getByTestId("picker-harness-claude").click();
+		await page.getByTestId(`picker-account-${personal.id}`).click();
+		await page.keyboard.press("Escape");
+		await expect(picker).toHaveAttribute("data-instance-id", personal.id);
+		await expect(
+			page.getByTestId(`usage-footer-row-${personal.id}`),
+		).toHaveAttribute("title", "Current account");
 		await expect(page.getByTestId("usage-warning-strip")).toBeVisible();
 		await expect(page.getByTestId("usage-warning-strip")).toHaveAttribute(
 			"data-window",
@@ -257,7 +265,6 @@ test.describe("send at an account's reset", () => {
 		const { savedSlug: projectSlug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [mkdtempSync(join(harness.root, "reset-project-"))],
-				instanceId: addedInstanceId,
 			}),
 		);
 		if (!projectSlug) throw new Error("No reset project slug");

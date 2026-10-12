@@ -204,7 +204,12 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const results: StoredEvent[] = [];
 				for (const event of events) {
-					if (event.type === "message.snapshot") {
+					if (
+						event.type === "message.snapshot" ||
+						(event.type === "session.compaction" &&
+							event.provider === "opencode" &&
+							event.data.state === "completed")
+					) {
 						const existing = yield* sql<{ sequence: number }>`
 							SELECT sequence FROM events WHERE event_id = ${event.eventId}`;
 						if (existing.length > 0) continue;

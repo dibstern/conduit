@@ -16,7 +16,9 @@ import type {
 	CommitAndSignalFailure,
 } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreError } from "../persistence/effect/event-store-effect.js";
+import { readPendingRewindCommit } from "../persistence/effect/pending-rewind.js";
 import type { CanonicalEvent } from "../persistence/events.js";
+import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {
 	CommandFingerprintMismatch,
 	CommandIdGenerationFailed,
@@ -167,6 +169,7 @@ export interface DurableCommandStoreOptions {
 	 */
 	readonly write?: CommitAndSignal["write"];
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
+	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 }
 
 export interface OrchestrationEngineOptions {
@@ -260,6 +263,9 @@ export class OrchestrationEngine {
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
 					...(durable.persistHandoffDelivered
 						? { persistHandoffDelivered: durable.persistHandoffDelivered }
+						: {}),
+					...(durable.claudeSessionForkSdk
+						? { claudeSessionForkSdk: durable.claudeSessionForkSdk }
 						: {}),
 					nowMs: durable.now,
 					...(this.resolveProviderDriver
@@ -525,9 +531,15 @@ export class OrchestrationEngine {
 		| Error
 		| CommandPayloadSerializationFailed
 	> {
-		// The request-sequence read shares the commit transaction so concurrent
-		// dispatches cannot allocate the same sequence.
+		const driver = this.resolveProviderDriver
+			? this.resolveProviderDriver(command.providerId)
+			: command.providerId;
+		// The rewind range and request sequence share ingestion's write boundary:
+		// a backfill accepted before this write must be removed by this commit.
 		const commit = Effect.gen(function* () {
+			const pendingRewind = command.input.continuation
+				? undefined
+				: yield* readPendingRewindCommit(durable.sql, command.input.sessionId);
 			const [maxRow] = yield* durable.sql<{ readonly m: number }>`
 					SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
 			const requestSequence = (maxRow?.m ?? 0) + 1;
@@ -538,7 +550,14 @@ export class OrchestrationEngine {
 				...payload
 			} = command.input;
 			const payloadJson = yield* Effect.try({
-				try: () => JSON.stringify({ ...payload, dispatchId }),
+				try: () =>
+					JSON.stringify({
+						...payload,
+						...(driver === "claude" && pendingRewind
+							? { rewind: pendingRewind.rewind }
+							: {}),
+						dispatchId,
+					}),
 				catch: (cause) =>
 					new CommandPayloadSerializationFailed({
 						commandId: command.commandId,
@@ -554,7 +573,7 @@ export class OrchestrationEngine {
 					nowMs,
 					requestSequence,
 					payloadJson,
-					events: command.events ?? [],
+					events: [...(pendingRewind?.events ?? []), ...(command.events ?? [])],
 				}),
 			);
 		});

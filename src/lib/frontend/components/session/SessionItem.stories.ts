@@ -136,7 +136,47 @@ export const WithBranch: Story = {
 		session: mockSession,
 		active: false,
 		projectLabel: "Conduit",
+		branch: "feature/workspace",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText("Conduit · feature/workspace"),
+		).toBeVisible();
+	},
+};
+
+export const RepositoryWithProjectQualifier: Story = {
+	name: "Repository with project qualifier",
+	args: {
+		session: {
+			...mockSessionProcessing,
+			id: "repository-main-checkout",
+			title: "Review API changes",
+		},
+		active: false,
+		projectLabel: "myapp · Main checkout",
 		branch: "main",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText("myapp · Main checkout · main"),
+		).toBeVisible();
+	},
+};
+
+export const RepositoryWithoutProjectQualifier: Story = {
+	name: "Repository without project qualifier",
+	args: {
+		session: {
+			...mockSessionIdle,
+			id: "repository-only-project",
+			title: "Plan release notes",
+		},
+		active: true,
+		projectLabel: "myapp",
+	},
+	play: async ({ canvasElement }) => {
+		await expect(within(canvasElement).getByText("myapp")).toBeVisible();
 	},
 };
 
@@ -400,8 +440,8 @@ export const SelectModeSelected: Story = {
 	},
 };
 
-// The sidebar's narrowest width (SIDEBAR_MIN_WIDTH). The hover verbs are the
-// row's last column, and the row clips, so any verb pushed past its right edge
+// The sidebar's narrowest width (SIDEBAR_MIN_WIDTH). The hover commands are the
+// row's last column, and the row clips, so any command pushed past its right edge
 // simply vanishes.
 export const HoverActionsNarrowSidebar: Story = {
 	name: "Hover actions in a narrow sidebar",
@@ -413,16 +453,16 @@ export const HoverActionsNarrowSidebar: Story = {
 		row.parentElement.style.width = "180px";
 		row.focus();
 		const rowRight = row.getBoundingClientRect().right;
-		const verbs = within(row)
+		const commands = within(row)
 			.getByTestId("session-row-actions")
 			.querySelectorAll("button");
 		await expect(
 			within(row).getByRole("button", { name: /More options/ }),
 		).toBeVisible();
-		for (const verb of verbs) {
+		for (const command of commands) {
 			await expect(
-				verb.getBoundingClientRect().right,
-				`${verb.getAttribute("aria-label")} must stay inside the row`,
+				command.getBoundingClientRect().right,
+				`${command.getAttribute("aria-label")} must stay inside the row`,
 			).toBeLessThanOrEqual(rowRight);
 		}
 	},

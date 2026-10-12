@@ -2,6 +2,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
+import { getScopeGroupKey } from "../../session-scope.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -9,55 +10,29 @@ import type {
 	ProjectMutationResponse,
 	WsRpcError,
 } from "../transport/ws-rpc.js";
-import {
-	getAgentsRpc,
-	removeProjectRpc,
-	setProjectInstanceRpc,
-} from "../transport/ws-rpc-client.js";
+import { removeProjectRpc } from "../transport/ws-rpc-client.js";
 import type { ProjectInfo } from "../types.js";
-import { applyGetAgentsResponse, selectInstance } from "./discovery.svelte.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
-import { getDraftProject, projectState } from "./project-state.svelte.js";
+import { projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
+	getCurrentSearchParams,
 	getCurrentSlug,
 	replaceRoute,
+	routerState,
+	SCOPE_PARAM,
 } from "./router.svelte.js";
-import { applyServerStatus, serverStatusFeed } from "./server-status.js";
-import { sessionState } from "./session.svelte.js";
+import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
 import { confirm } from "./ui.svelte.js";
 import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
 export { getDraftProject, projectState } from "./project-state.svelte.js";
 
-/** Each project's newest instance pick the daemon has not confirmed, with the
- *  daemon's binding to fall back to if it fails. */
-const pendingPicks = new Map<
-	string,
-	{ instanceId: string; confirmed: string | undefined }
->();
-
-const withBinding = (
-	projects: readonly ProjectInfo[],
-	slug: string,
-	instanceId: string | undefined,
-): ProjectInfo[] =>
-	projects.map((p) => {
-		if (p.slug !== slug) return p;
-		const { instanceId: _, ...rest } = p;
-		return instanceId === undefined ? rest : { ...rest, instanceId };
-	});
-
-/** Apply a full project list: the subscription's, or an RPC's reply. A
- *  pending pick outlives it, since the list may predate the pick. */
+/** Apply a full project list from a subscription or RPC reply. */
 export function applyProjectList(
 	response: Pick<ProjectMutationResponse, "projects" | "current">,
 ): void {
-	let projects = toProjectInfoList(response.projects);
-	for (const [slug, pick] of pendingPicks) {
-		pick.confirmed = projects.find((p) => p.slug === slug)?.instanceId;
-		projects = withBinding(projects, slug, pick.instanceId);
-	}
+	const projects = toProjectInfoList(response.projects);
 	projectState.projects = projects;
 	if (response.current != null) projectState.currentSlug = response.current;
 
@@ -67,50 +42,13 @@ export function applyProjectList(
 		!projects.some((p) => p.slug === attachedProjectState.slug)
 	) {
 		attachedProjectState.slug = null;
-		replaceRoute("/?");
+		// A repository scope survives removal of its attached checkout, including
+		// when the last member leaves and the group key becomes unknown.
+		const scope = getCurrentSearchParams().get(SCOPE_PARAM);
+		replaceRoute(
+			getScopeGroupKey(scope) === null ? "/?" : `/${routerState.search}`,
+		);
 	}
-}
-
-/** Bind a project's new sessions to an instance. Applied locally first: the
- *  daemon replies only after rebuilding the project's relay (seconds), and a
- *  send in that gap must already land on the picked instance. */
-export function bindProjectInstance(slug: string, instanceId: string): void {
-	const current = projectState.projects.find(
-		(p) => p.slug === slug,
-	)?.instanceId;
-	if (current === instanceId) return;
-	const earlier = pendingPicks.get(slug);
-	const pick = { instanceId, confirmed: earlier ? earlier.confirmed : current };
-	pendingPicks.set(slug, pick);
-	projectState.projects = withBinding(projectState.projects, slug, instanceId);
-	// Re-aim this project's draft. A reused relay sends no shell resync, so
-	// nothing else refetches the agents for the new harness.
-	if (sessionState.currentId == null && getDraftProject() === slug) {
-		selectInstance(instanceId);
-		void getAgentsRpc({ projectSlug: slug, instanceId })
-			.then(applyGetAgentsResponse)
-			.catch(() => undefined);
-	}
-	// Only the newest pick settles the binding; an older reply is just a list.
-	const settle = () => {
-		const ours = pendingPicks.get(slug) === pick;
-		if (ours) pendingPicks.delete(slug);
-		return ours;
-	};
-	void setProjectInstanceRpc({ projectSlug: slug, slug, instanceId }).then(
-		(reply) => {
-			settle();
-			applyProjectList(reply);
-		},
-		() => {
-			if (settle())
-				projectState.projects = withBinding(
-					projectState.projects,
-					slug,
-					pick.confirmed,
-				);
-		},
-	);
 }
 
 /** Asks once for all of them, then removes; resolves whether the user confirmed. */
@@ -156,26 +94,40 @@ const toProjectInfoList = (
 		slug: project.slug,
 		title: project.title,
 		folders: project.folders,
+		...(project.setupScript !== undefined
+			? { setupScript: project.setupScript }
+			: {}),
+		...(project.sessionMode !== undefined
+			? { sessionMode: project.sessionMode }
+			: {}),
+		...(project.groupingMode !== undefined
+			? { groupingMode: project.groupingMode }
+			: {}),
+		...(project.effectiveGroupingMode !== undefined
+			? { effectiveGroupingMode: project.effectiveGroupingMode }
+			: {}),
+		...(project.group !== undefined ? { group: project.group } : {}),
+		...(project.repositoryIdentities != null
+			? { repositoryIdentities: project.repositoryIdentities }
+			: {}),
 		...(project.git != null ? { git: project.git } : {}),
 		...(project.clientCount != null
 			? { clientCount: project.clientCount }
 			: {}),
-		...(project.instanceId != null ? { instanceId: project.instanceId } : {}),
 	}));
 
-let followedConnection: string | null = null;
+let following = false;
 let generation = 0;
 let fiber: RuntimeFiber<void, never> | null = null;
 
 /**
- * Follow the daemon-global project and instance lists over `connection`'s
- * socket pair. The lists are the same on every pair; the argument only picks
- * the pair this tab already holds, so following never opens a second one.
- * `null` stops following.
+ * Follow the daemon-global project, instance, usage and status lists over the
+ * tab's one socket pair. None is project-scoped, so a project switch must not
+ * re-follow: each new usage subscription re-reads every account's limits.
  */
-export function followDaemonLists(connection: string | null): void {
-	if (followedConnection === connection) return;
-	followedConnection = connection;
+export function followDaemonLists(on: boolean): void {
+	if (following === on) return;
+	following = on;
 	const currentGeneration = ++generation;
 	const old = fiber;
 	fiber = null;
@@ -193,50 +145,48 @@ export function followDaemonLists(connection: string | null): void {
 	void (old ? runTransportEffect(Fiber.interrupt(old)) : Promise.resolve())
 		.catch(() => undefined)
 		.then(async () => {
-			if (currentGeneration !== generation || connection === null) return;
+			if (currentGeneration !== generation || !on) return;
 			const runtime = await getRuntime();
 			if (currentGeneration !== generation) return;
 			const next = runtime.runFork(
 				Effect.flatMap(WsRpcClients, (clients) =>
-					Effect.flatMap(
-						clients.forProject(connection),
-						({ subscriptions, control }) =>
-							Effect.all(
-								[
-									follow(subscriptions.projects, (list) => {
-										applyProjectList(list);
-										projectState.newSessionProject =
-											list.newSessionProject ?? null;
-									}),
-									follow(subscriptions.instances, applyInstanceListResponse),
-									Stream.runForEach(
-										supervise(
-											Stream.suspend(subscriptions.usage),
-											() => undefined,
-										),
-										({ readings }) =>
-											Effect.gen(function* () {
-												if (currentGeneration !== generation) return;
-												applyUsageReadings(readings);
-												// Reload the shared order after reconnect and each snapshot.
-												yield* control.GetUsageLimitsSetting({}).pipe(
-													Effect.tap(({ usageLimits }) =>
-														Effect.sync(() => {
-															if (currentGeneration === generation)
-																applyUsageLimitsSetting(usageLimits);
-														}),
-													),
-													Effect.catchAll(() => Effect.void),
-												);
-											}),
+					Effect.flatMap(clients.forProject(""), ({ subscriptions, control }) =>
+						Effect.all(
+							[
+								follow(subscriptions.projects, (list) => {
+									applyProjectList(list);
+									projectState.newSessionProject =
+										list.newSessionProject ?? null;
+								}),
+								follow(subscriptions.instances, applyInstanceListResponse),
+								Stream.runForEach(
+									supervise(
+										Stream.suspend(subscriptions.usage),
+										() => undefined,
 									),
-									follow(
-										() => serverStatusFeed(subscriptions),
-										applyServerStatus,
-									),
-								],
-								{ concurrency: "unbounded", discard: true },
-							),
+									({ readings }) =>
+										Effect.gen(function* () {
+											if (currentGeneration !== generation) return;
+											applyUsageReadings(readings);
+											// Reload the shared order after reconnect and each snapshot.
+											yield* control.GetUsageLimitsSetting({}).pipe(
+												Effect.tap(({ usageLimits }) =>
+													Effect.sync(() => {
+														if (currentGeneration === generation)
+															applyUsageLimitsSetting(usageLimits);
+													}),
+												),
+												Effect.catchAll(() => Effect.void),
+											);
+										}),
+								),
+								follow(
+									() => serverStatusFeed(subscriptions),
+									applyServerStatus,
+								),
+							],
+							{ concurrency: "unbounded", discard: true },
+						),
 					),
 				),
 			);

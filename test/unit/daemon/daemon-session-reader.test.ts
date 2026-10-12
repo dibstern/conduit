@@ -118,7 +118,18 @@ describe("listDaemonSessions", () => {
 			const result = yield* listDaemonSessions(root, {}, cache);
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
-			).toEqual({ branch: "main", dirty: true });
+			).toEqual({
+				branch: "main",
+				dirty: true,
+				folders: [
+					{
+						root: gitProject,
+						label: "git-project",
+						branch: "main",
+						dirty: true,
+					},
+				],
+			});
 			expect(
 				result.sessions.find((session) => session.id === "plain-session"),
 			).not.toHaveProperty("git");
@@ -502,6 +513,7 @@ describe("listDaemonSessions", () => {
 						attention: "idle",
 						limitRecovery: null,
 						resumes: [],
+						canRenameBranch: false,
 					},
 					{
 						id: "b-mid",
@@ -514,6 +526,7 @@ describe("listDaemonSessions", () => {
 						attention: "idle",
 						limitRecovery: null,
 						resumes: [],
+						canRenameBranch: false,
 					},
 				]);
 				expect(result.availability).toEqual(

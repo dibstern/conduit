@@ -1,7 +1,9 @@
 // Server-owned session rows on one side, this tab's selection and search on
 // the other. The two halves never write each other.
 
+import { SvelteMap } from "svelte/reactivity";
 import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
+import { getScopeGroupKey } from "../../session-scope.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
 	isBusy,
@@ -49,10 +51,12 @@ import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
 	applyGetModelsResponse,
+	clearDraftSelection,
 	flushPendingPermissionMode,
 	followSessionModelSettings,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
+import { getProjectGroup } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentRoute,
@@ -61,7 +65,7 @@ import {
 	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
-import { restoreServerUpdateBanner } from "./server-status.js";
+import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
@@ -311,6 +315,65 @@ export function forgetSession(id: string): void {
  */
 export function sessionAttention(session: SessionInfo): SessionAttention {
 	return session.attention ?? "idle";
+}
+
+// Read marks this tab sent that the server has not sent back yet, so a tap
+// moves the sidebar dot at once rather than after the round trip (phones feel
+// it most). A mark is dropped when the server's row agrees, when the write
+// fails, or when the row's turn end moves: a new turn end is unread on its own
+// terms. A root's attention rolls up its forks, so marking one read can still
+// leave a dot once the server answers.
+const readMarks = new SvelteMap<
+	string,
+	{
+		readonly unread: boolean;
+		readonly lastTurnEndVersion: number | undefined;
+	}
+>();
+
+/** Returns a function that drops this mark, unless a newer one replaced it. */
+export function setReadMark(row: SessionInfo, unread: boolean): () => void {
+	const mark = { unread, lastTurnEndVersion: row.lastTurnEndVersion };
+	readMarks.set(row.id, mark);
+	return () => {
+		if (readMarks.get(row.id) === mark) readMarks.delete(row.id);
+	};
+}
+
+/** Drop the marks the server's rows have answered. */
+export function settleReadMarks(rows: ReadonlyMap<string, SessionInfo>): void {
+	for (const [id, mark] of readMarks) {
+		const row = rows.get(id);
+		if (
+			row &&
+			((row.unread === true) === mark.unread ||
+				row.lastTurnEndVersion !== mark.lastTurnEndVersion)
+		)
+			readMarks.delete(id);
+	}
+}
+
+/** The row as the user last marked it, until the server catches up. */
+export function withReadMark<T extends SessionInfo>(row: T): T {
+	const mark = readMarks.get(row.id);
+	if (
+		!mark ||
+		mark.lastTurnEndVersion !== row.lastTurnEndVersion ||
+		mark.unread === (row.unread === true)
+	)
+		return row;
+	const attention = sessionAttention(row);
+	return {
+		...row,
+		unread: mark.unread,
+		attention: mark.unread
+			? attention === "idle"
+				? "done-unread"
+				: attention
+			: attention === "done-unread"
+				? "idle"
+				: attention,
+	};
 }
 
 // Within "Needs you", an approval outranks a question outranks a failure: the
@@ -856,11 +919,19 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 /** The sidebar and its search show root sessions only. */
 export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
+	const groupKey = getScopeGroupKey(scope);
 	const currentSlug = getCurrentSlug();
 	// Local rows carry no projectSlug: they belong to the project this socket
 	// is attached to.
-	const inScope = (session: SessionInfo) =>
-		scope === null || (session.projectSlug ?? currentSlug) === scope;
+	const inScope = (session: SessionInfo) => {
+		const slug = session.projectSlug ?? currentSlug;
+		return (
+			scope === null ||
+			(groupKey === null
+				? slug === scope
+				: slug != null && getProjectGroup(slug)?.key === groupKey)
+		);
+	};
 	if (sessionState.searchResults !== null) {
 		const searchSlug = currentSlug;
 		// Root rows carry the subtree rollup, so local search hits use the
@@ -872,10 +943,10 @@ export function getFilteredSessions(): SessionInfo[] {
 			if (session.parentID || session.sideThread || !inScope(session))
 				return [];
 			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
-				return [session];
+				return [withReadMark(session)];
 			}
 			const liveSession = liveRoots.get(session.id);
-			return liveSession ? [liveSession] : [];
+			return liveSession ? [withReadMark(liveSession)] : [];
 		});
 	}
 	const localSessions = sessionState.rootSessions;
@@ -893,6 +964,7 @@ export function getFilteredSessions(): SessionInfo[] {
 	);
 	const sessions = [...localSessions, ...foreignSessions]
 		.filter(inScope)
+		.map(withReadMark)
 		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
 	if (!query) return sessions;
 	return sessions.filter((s) => s.title.toLowerCase().includes(query));
@@ -970,6 +1042,7 @@ export function switchToSession(
 	}
 
 	clientSession.currentId = sessionId;
+	clearDraftSelection();
 	if (clientSession.announcedParent?.sessionId !== sessionId)
 		clientSession.announcedParent = null;
 	activateSessionChatState(sessionId);
@@ -1085,6 +1158,7 @@ export function clearSessionState(): void {
 	clientSession.announcedParent = null;
 	setSearchQuery("");
 	resetSessionFamily();
+	readMarks.clear();
 	clientSession.daemonSessions = [];
 	clientSession.daemonUnavailableProjects = [];
 	clientSession.daemonCursor = null;

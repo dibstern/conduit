@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import AgentWorktreeLifecycle from "./__fixtures__/AgentWorktreeLifecycle.svelte";
 import GitIdentity from "./GitIdentity.svelte";
@@ -8,9 +9,10 @@ const meta = {
 	title: "Session/GitIdentity",
 	component: GitIdentity,
 	tags: ["autodocs"],
-	args: { directory: "/src/conduit", git: undefined },
+	args: { directory: "/src/conduit", git: undefined, presentation: "control" },
 	beforeEach: () => {
 		sessionViewState.compact = false;
+		sessionViewState.composerWidth = 760;
 	},
 } satisfies Meta<typeof GitIdentity>;
 
@@ -43,7 +45,7 @@ export const Narrow: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const identity = within(canvasElement).getByTestId("session-bar-identity");
+		const identity = within(canvasElement).getByTestId("composer-checkout");
 		// Size the story's own wrapper: #storybook-root outlives the story, so
 		// styling it would leak the narrow width into the next one.
 		const container = identity.parentElement;
@@ -93,11 +95,156 @@ export const DetailsOpen: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await expect(
 			within(document.body).getByRole("menu", { name: "Checkout" }),
 		).toHaveTextContent("/src/conduit");
+	},
+};
+
+export const FolderDetailsOpen: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		git: {
+			branch: "feature/web",
+			dirty: false,
+			folders: [
+				{
+					root: "/src/conduit",
+					label: "conduit",
+					branch: "feature/web",
+					dirty: false,
+					ahead: 0,
+					behind: 0,
+				},
+				{
+					root: "/src/api",
+					label: "api",
+					branch: "feature/api",
+					dirty: true,
+					ahead: 2,
+					behind: 1,
+				},
+				{
+					root: "/src/library",
+					label: "library",
+					head: "a1b2c3d",
+					dirty: false,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("composer-checkout"),
+		);
+		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
+			"session-folder-git",
+		);
+		await expect(rows).toHaveLength(3);
+		await expect(rows[0]).toHaveTextContent("feature/web");
+		await expect(rows[0]).toHaveTextContent("clean");
+		await expect(rows[1]).toHaveTextContent("feature/api");
+		await expect(rows[1]).toHaveTextContent("uncommitted");
+		await expect(rows[1]).toHaveTextContent("↑2 ↓1");
+		await expect(rows[2]).toHaveTextContent("Detached at a1b2c3d");
+	},
+};
+
+export const NonGitPrimary: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/notes",
+		git: {
+			folders: [
+				{
+					root: "/src/api",
+					label: "api",
+					branch: "feature/api",
+					dirty: true,
+					ahead: 2,
+					behind: 1,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const identity = within(canvasElement).getByTestId("composer-checkout");
+		await expect(
+			identity.querySelector('[data-icon="folder"]'),
+		).toBeInTheDocument();
+		await userEvent.click(identity);
+		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
+			"session-folder-git",
+		);
+		await expect(rows).toHaveLength(1);
+		await expect(rows[0]).toHaveTextContent("api");
+		await expect(rows[0]).toHaveTextContent("feature/api");
+		await expect(rows[0]).toHaveTextContent("uncommitted");
+		await expect(rows[0]).toHaveTextContent("↑2 ↓1");
+	},
+};
+
+export const SharedFolderDetailsOpen: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/conduit/worktrees/workspace/session/app",
+		git: {
+			branch: "conduit/session-cross-repo",
+			worktree: "app",
+			folders: [
+				{
+					root: "/src/app",
+					label: "app",
+					branch: "conduit/session-cross-repo",
+					worktree: "app",
+					dirty: false,
+				},
+				{
+					root: "/src/api",
+					label: "api",
+					branch: "conduit/session-cross-repo",
+					worktree: "api",
+					dirty: true,
+				},
+				{ root: "/src/notes", label: "notes", shared: true },
+				{
+					root: "/src/library",
+					label: "library",
+					branch: "main",
+					dirty: false,
+					shared: true,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("composer-checkout"),
+		);
+		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
+			"session-folder-git",
+		);
+		const notes = within(canvasElement.ownerDocument.body).getByRole("region", {
+			name: "notes",
+		});
+		const library = within(canvasElement.ownerDocument.body).getByRole(
+			"region",
+			{ name: "library" },
+		);
+		await expect(rows).toHaveLength(4);
+		await expect(rows[0]).toHaveTextContent("conduit/session-cross-repo");
+		await expect(rows[1]).toHaveTextContent("conduit/session-cross-repo");
+		await expect(
+			within(notes).getByText("shared", { exact: true }),
+		).toBeVisible();
+		await expect(notes).not.toHaveTextContent(/Detached|Branch|Changes|clean/);
+		await expect(
+			within(library).getByText("shared", { exact: true }),
+		).toBeVisible();
+		await expect(library).toHaveTextContent("main");
+		await expect(library).toHaveTextContent("clean");
 	},
 };
 
@@ -118,7 +265,7 @@ export const WorktreeMenu: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await userEvent.click(
 			within(document.body).getByRole("menuitem", {
@@ -134,6 +281,70 @@ export const WorktreeMenu: Story = {
 	},
 };
 
+export const RenameBranch: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/conduit/worktrees/workspace/rename-session/app",
+		git: { branch: "conduit/session-rename", worktree: "app", dirty: false },
+		onrenamebranch: fn(async (_branchName: string) => {}),
+	},
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("composer-checkout"),
+		);
+		await expect(
+			within(canvasElement.ownerDocument.body).getByRole("menuitem", {
+				name: /^Rename branch$/,
+			}),
+		).toBeVisible();
+	},
+};
+
+export const RenameBranchError: Story = {
+	...RenameBranch,
+	tags: ["viewport-capture"],
+	args: {
+		...RenameBranch.args,
+		onrenamebranch: fn(async (_branchName: string) => {
+			throw new WorktreeBranchRenameError({
+				folder: "/src/api",
+				reason: "already-exists",
+				message: "Branch feature/taken already exists",
+			});
+		}),
+	},
+	play: async ({ canvasElement, args }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			within(canvasElement).getByTestId("composer-checkout"),
+		);
+		await userEvent.click(
+			body.getByRole("menuitem", { name: "Rename branch" }),
+		);
+		const dialog = body.getByRole("dialog", { name: "Rename branch" });
+		const input = within(dialog).getByRole("textbox", { name: "Branch name" });
+		await expect(input).toHaveValue("conduit/session-rename");
+		await userEvent.clear(input);
+		await userEvent.type(input, "feature/taken");
+		await userEvent.click(
+			within(dialog).getByRole("button", { name: /^Rename$/ }),
+		);
+		await expect(args["onrenamebranch"]).toHaveBeenCalledWith("feature/taken");
+		await expect(within(dialog).getByRole("alert")).toHaveTextContent(
+			"/src/api: Branch feature/taken already exists",
+		);
+		await expect(input).toHaveValue("feature/taken");
+	},
+};
+
+export const RenameBranchErrorPhone: Story = {
+	...RenameBranchError,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
 export const WorkspaceMismatch: Story = {
 	tags: ["viewport-capture"],
 	args: {
@@ -146,7 +357,7 @@ export const WorkspaceMismatch: Story = {
 	},
 	play: async ({ canvasElement, args }) => {
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(body.getByTestId("workspace-mismatch")).toHaveTextContent(
@@ -155,7 +366,7 @@ export const WorkspaceMismatch: Story = {
 		await userEvent.click(body.getByRole("menuitem", { name: "Retry move" }));
 		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-two");
 		await userEvent.click(
-			within(canvasElement).getByTestId("session-bar-identity"),
+			within(canvasElement).getByTestId("composer-checkout"),
 		);
 		await expect(body.getByTestId("workspace-mismatch")).toBeVisible();
 	},
@@ -168,9 +379,14 @@ export const MovedBack: Story = {
 		workspaceCause: "missing",
 	},
 	play: async ({ canvasElement }) => {
-		await expect(
-			within(canvasElement).getByTestId("workspace-moved-back"),
-		).toHaveTextContent("moved back: worktree removed");
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-moved-back")).toHaveAttribute(
+			"aria-label",
+			"moved back: worktree removed",
+		);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/moved back: worktree removed/,
+		);
 	},
 };
 
@@ -189,9 +405,131 @@ export const MovedBackPhone: Story = {
 			"moved back: worktree removed",
 		);
 		await expect(notice).toHaveTextContent(/^$/);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/moved back: worktree removed/,
+		);
+	},
+};
+
+export const WorktreeMissing: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-worktree",
+		workspaceCause: "launch",
+		workspaceMissing: {
+			path: "/src/conduit-worktree",
+			branch: "conduit/missing-session",
+			canRecreate: true,
+		},
+		onrecreate: fn(async () => {}),
+		oncontinue: fn(async () => {}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-missing")).toHaveAttribute(
+			"aria-label",
+			"worktree missing",
+		);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/worktree missing/,
+		);
+	},
+};
+
+export const WorktreeMissingOpen: Story = {
+	...WorktreeMissing,
+	tags: ["viewport-capture"],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("composer-checkout"),
+		);
+		const body = within(canvasElement.ownerDocument.body);
 		await expect(
-			canvas.getByTestId("session-bar-identity"),
-		).toHaveAccessibleName(/moved back: worktree removed/);
+			body.getByRole("menuitem", { name: "Recreate worktree" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("menuitem", { name: "Continue in main folder" }),
+		).toBeVisible();
+	},
+};
+
+export const WorktreeMissingPhone: Story = {
+	...WorktreeMissing,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-missing")).toHaveAttribute(
+			"aria-label",
+			"worktree missing",
+		);
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAccessibleName(
+			/worktree missing/,
+		);
+	},
+};
+
+export const WorktreeMissingExtraFolder: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		directory: "/src/conduit-worktree",
+		workspaceCause: "launch",
+		git: {
+			branch: "conduit/multi-folder-session",
+			worktree: "conduit-worktree",
+			dirty: true,
+			folders: [
+				{
+					root: "/src/conduit",
+					label: "conduit",
+					branch: "conduit/multi-folder-session",
+					worktree: "conduit-worktree",
+					dirty: true,
+				},
+				{ root: "/src/library", label: "library", missing: true },
+			],
+		},
+		workspaceMissing: {
+			path: "/src/library-worktree",
+			branch: "conduit/multi-folder-session",
+			canRecreate: true,
+			folders: [
+				{
+					folder: "/src/library",
+					path: "/src/library-worktree",
+					branch: "conduit/multi-folder-session",
+					canRecreate: true,
+				},
+			],
+		},
+		onrecreate: fn(async () => {}),
+		oncontinue: fn(async () => {}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("workspace-missing")).toHaveAttribute(
+			"aria-label",
+			"worktree missing: library",
+		);
+		await userEvent.click(canvas.getByTestId("composer-checkout"));
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body.getByTestId("workspace-missing-folder"),
+		).toHaveTextContent("library");
+		await expect(
+			body.getByTestId("workspace-missing-folder"),
+		).toHaveTextContent("/src/library-worktree");
+		await expect(
+			body.getByRole("menuitem", { name: "Recreate worktree" }),
+		).toBeVisible();
+		await expect(
+			body.getByRole("region", { name: "library" }),
+		).toHaveTextContent("Worktree missing");
+		await expect(
+			body.getByRole("region", { name: "library" }),
+		).not.toHaveTextContent("clean");
 	},
 };
 
@@ -203,24 +541,6 @@ export const WorkspaceHint: Story = {
 		workspaceHint: "/src/conduit-hint",
 		onmove: fn(async (_path: string) => {}),
 		ondismiss: fn(async (_path: string) => {}),
-	},
-	play: async ({ canvasElement, args }) => {
-		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("workspace-hint")).toHaveTextContent(
-			"working in conduit-hint?",
-		);
-		await userEvent.click(canvas.getByTestId("workspace-hint-move"));
-		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
-		await userEvent.click(canvas.getByTestId("workspace-hint-dismiss"));
-		await expect(args["ondismiss"]).toHaveBeenCalledWith("/src/conduit-hint");
-	},
-};
-
-export const WorkspaceHintPhone: Story = {
-	...WorkspaceHint,
-	tags: ["viewport-capture"],
-	beforeEach: () => {
-		sessionViewState.compact = true;
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
@@ -237,7 +557,7 @@ export const WorkspaceHintPhone: Story = {
 		await expect(
 			canvas.queryByTestId("workspace-hint-dismiss"),
 		).not.toBeInTheDocument();
-		const identity = canvas.getByTestId("session-bar-identity");
+		const identity = canvas.getByTestId("composer-checkout");
 		await userEvent.click(identity);
 		await expect(body.getByTestId("workspace-hint-dismiss")).toBeVisible();
 		await userEvent.click(body.getByTestId("workspace-hint-move"));
@@ -248,10 +568,114 @@ export const WorkspaceHintPhone: Story = {
 	},
 };
 
+export const WorkspaceHintPhone: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const Word: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		presentation: "word",
+		git: { branch: "account-chip", worktree: "account-chip" },
+	},
+	play: async ({ canvasElement, args }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		await expect(checkout).toHaveAttribute(
+			"title",
+			`${args["directory"]?.split("/").pop()} / ${args["git"]?.branch}`,
+		);
+		await userEvent.click(checkout);
+		await expect(
+			within(document.body).getByTestId("composer-checkout-menu"),
+		).toHaveTextContent(args["directory"] ?? "");
+	},
+};
+
+export const WordNarrow: Story = {
+	...Word,
+	tags: ["viewport-capture"],
+	args: {
+		presentation: "word",
+		directory: "/src/conduit-worktrees",
+		git: {
+			branch: "feature/session-account-chip-redesign",
+			worktree: "account-chip",
+		},
+	},
+	beforeEach: () => {
+		sessionViewState.composerWidth = 480;
+	},
+	play: async ({ canvasElement }) => {
+		const checkout = within(canvasElement).getByTestId("composer-checkout");
+		const container = checkout.parentElement;
+		if (!container) throw new Error("Missing checkout wrapper");
+		container.style.width = "240px";
+		const project = checkout.querySelector('[data-part="project"]');
+		const branch = checkout.querySelector('[data-part="branch"]');
+		if (!project || !branch) throw new Error("Missing checkout labels");
+		expect(project.scrollWidth).toBeGreaterThan(project.clientWidth);
+		expect(project.getBoundingClientRect().width).toBeCloseTo(
+			Number.parseFloat(getComputedStyle(project).minWidth),
+			0,
+		);
+		expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
+		await userEvent.click(checkout);
+		await expect(
+			within(document.body).getByTestId("composer-checkout-menu"),
+		).toHaveTextContent("feature/session-account-chip-redesign");
+	},
+};
+
+export const WordPhone: Story = {
+	...Word,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		sessionViewState.compact = true;
+	},
+};
+
+export const WordAttention: Story = {
+	args: {
+		presentation: "word",
+		git: {
+			branch: "account-chip",
+			worktree: "account-chip",
+			dirty: true,
+			ahead: 2,
+			behind: 1,
+			operation: "rebase",
+		},
+	},
+};
+
+export const WordWorkspaceHint: Story = {
+	...WorkspaceHint,
+	tags: ["viewport-capture"],
+	args: { ...WorkspaceHint.args, presentation: "word" },
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByTestId("workspace-hint")).toHaveAttribute(
+			"aria-label",
+			"working in conduit-hint?",
+		);
+		await expect(
+			canvas.queryByTestId("workspace-hint-move"),
+		).not.toBeInTheDocument();
+		await userEvent.click(canvas.getByTestId("composer-checkout"));
+		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await expect(args["onmove"]).toHaveBeenCalledWith("/src/conduit-hint");
+	},
+};
+
 async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	const canvas = within(canvasElement);
 	const body = within(canvasElement.ownerDocument.body);
-	const identity = canvas.getByTestId("session-bar-identity");
+	const identity = canvas.getByTestId("composer-checkout");
 	await expect(identity).toHaveAttribute("title", "conduit / main");
 	await userEvent.click(canvas.getByRole("button", { name: "EnterWorktree" }));
 	await waitFor(() =>
@@ -264,7 +688,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		identity.querySelector('[data-icon="worktree"]'),
 	).toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
-		"Session header · Running turn",
+		"Composer checkout · Running turn",
 	);
 	await userEvent.click(identity);
 	let menu = await body.findByRole("menu", { name: "Checkout" });
@@ -290,7 +714,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 		identity.querySelector('[data-part="worktree"]'),
 	).not.toBeInTheDocument();
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
-		"Session header · Running turn",
+		"Composer checkout · Running turn",
 	);
 	await userEvent.click(identity);
 	menu = await body.findByRole("menu", { name: "Checkout" });
@@ -351,14 +775,21 @@ export const LongNames: Story = {
 		git: { branch: "docs/architecture-deepening-design", dirty: true },
 	},
 	play: async ({ canvasElement }) => {
-		const project = within(canvasElement)
-			.getByTestId("session-bar-identity")
-			.querySelector('[data-part="project"]');
+		const identity = within(canvasElement).getByTestId("composer-checkout");
+		const project = identity.querySelector('[data-part="project"]');
+		const branch = identity.querySelector('[data-part="branch"]');
+		const container = identity.parentElement;
 		expect(project).not.toBeNull();
-		if (!project) return;
-		expect(project.getBoundingClientRect().width).toBeCloseTo(
-			Number.parseFloat(getComputedStyle(project).minWidth),
-			0,
-		);
+		expect(branch).not.toBeNull();
+		expect(container).not.toBeNull();
+		if (!project || !branch || !container) return;
+		// The control has no width cap of its own, so take away exactly the
+		// project's slack: the project must give all of it up before the branch
+		// loses a character. Size the story's own wrapper, as Narrow does.
+		const floor = Number.parseFloat(getComputedStyle(project).minWidth);
+		const slack = project.getBoundingClientRect().width - floor;
+		container.style.width = `${identity.getBoundingClientRect().width - slack}px`;
+		expect(project.getBoundingClientRect().width).toBeCloseTo(floor, 0);
+		expect(branch.scrollWidth).toBe(branch.clientWidth);
 	},
 };

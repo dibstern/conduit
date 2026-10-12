@@ -13,9 +13,7 @@
   Phone geometry lives in style.css as a grid keyed on `data-collapsed`, so the
   title moves between rows without being re-parented and the <h1> never unmounts.
 
-  The instance badge stays beside the project identity; a Claude session wears
-  its own account pill there instead, which moves the session, not the project.
-  The title menu carries session verbs and global actions; the desktop overflow
+  The title menu carries session commands and global actions; the desktop overflow
   carries global actions.
 -->
 
@@ -38,9 +36,8 @@
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
-	import { stopBackgroundTaskRpc, getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import { getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
-	import { showToast } from "../../stores/ui.svelte.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -54,10 +51,7 @@
 	import Tooltip from "../ui/Tooltip.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import SessionContextMenu from "../session/SessionContextMenu.svelte";
-	import SessionVerbItems from "../session/SessionVerbItems.svelte";
-	import GitIdentity from "../session/GitIdentity.svelte";
-	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
-	import { dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc } from "../../transport/ws-rpc-client.js";
+	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import SessionRenameInput from "../session/SessionRenameInput.svelte";
 	import SessionSkillsChip from "../session/SessionSkillsChip.svelte";
 	import BackgroundTasksPanel from "../session/BackgroundTasksPanel.svelte";
@@ -65,14 +59,12 @@
 	import SideThreadsPanel, { waitingMarker } from "../session/SideThreadsPanel.svelte";
 	import { appBanners } from "../overlays/Banners.svelte";
 	import BannersRow from "../overlays/BannersRow.svelte";
-	import { taskStopIds, tasksPanel } from "../session/background-tasks.svelte.js";
+	import { stopBackgroundTasks, tasksPanel } from "../session/background-tasks.svelte.js";
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
-	import { getSessionVerbs, getSettleVerb, runSessionVerbShortcut, sessionVerbActions, sessionVerbKeysHint } from "../session/session-verbs.js";
+	import { getPrimaryCommand, getSessionCommands, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeysHint } from "../session/session-commands.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
-	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
-	import SessionAccountPill from "./SessionAccountPill.svelte";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
 	let { getGoalDetails = getGoalDetailsRpc }: { getGoalDetails?: typeof getGoalDetailsRpc | undefined } = $props();
@@ -118,21 +110,6 @@
 		if (backgroundTasks.length === 0) tasksPanel.open = false;
 	});
 
-	async function stopBackgroundTasks(taskId?: string) {
-		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
-		const ids = taskStopIds(backgroundTasks, taskId);
-		let failed = false;
-		for (const id of ids) {
-			try {
-				await stopBackgroundTaskRpc({ projectSlug, sessionId, taskId: id });
-			} catch {
-				failed = true;
-			}
-		}
-		if (failed) showToast(taskId ? "Failed to stop background task" : "Failed to stop background tasks", { variant: "error" });
-	}
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
 	let detailsFailed = $state(false);
@@ -216,7 +193,7 @@
 		}));
 	}
 	const stateChip = $derived(getSessionBarState(session, sessionState.now));
-	const settleVerb = $derived(session ? getSettleVerb(session, sessionState.now) : undefined);
+	const primaryCommand = $derived(session ? getPrimaryCommand(session, sessionState.now) : undefined);
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
 		switch (connectionState.status) {
@@ -228,28 +205,12 @@
 	});
 
 	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
-	// The project list can arrive after the bar; the git pill waits for its directory.
-	const directory = $derived(project ? effectiveWorkingDirectory(project.folders[0], session?.workspace) : undefined);
-	const git = $derived(session?.workspace ? session.git : session?.git ?? project?.git);
 	const sessionInstanceId = $derived(session ? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] : undefined);
 	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
-	const supportsWorktree = $derived(
-		sessionInstance?.capabilities?.supportsWorktree
-			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsWorktree,
-	);
 	const supportsTaskStop = $derived((
 		sessionInstance?.capabilities?.supportsTaskStop
 			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsTaskStop
 	) === true);
-	async function loadWorktrees() {
-		return project && session ? await listWorktreesRpc(project.slug, session.id) : { worktrees: [] };
-	}
-	async function moveWorkspace(path: string) {
-		if (project && session) await moveSessionWorkspaceRpc({ projectSlug: project.slug, sessionId: session.id, path });
-	}
-	async function dismissWorkspaceHint(path: string) {
-		if (project && session) await dismissWorkspaceHintRpc({ projectSlug: project.slug, sessionId: session.id, path });
-	}
 
 	const attentionCount = $derived(
 		getAttentionSessions(sessionState.currentId, getDescendantSessionIds).size,
@@ -260,9 +221,9 @@
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
-	// The island is phone-only, so its verbs and the keyboard share one list.
-	const verbs = $derived(session
-		? getSessionVerbs(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
+	// The island is phone-only, so its commands and the keyboard share one list.
+	const commands = $derived(session
+		? getSessionCommands(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
 		: []);
 	const globalActions = $derived(chromeMenuActions());
 
@@ -274,7 +235,7 @@
 			const target = event.target;
 			if (!(target instanceof HTMLElement) || !target.closest("#messages") || target.isContentEditable || target.closest("input, textarea, select")) return;
 		}
-		runSessionVerbShortcut(event, verbs);
+		runSessionCommandShortcut(event, commands);
 	}
 
 	let barEl: HTMLElement | null = $state(null);
@@ -405,7 +366,7 @@
 			<MenuSeparator />
 			{#if session}
 				<MenuGroup label="Session">
-					<SessionVerbItems {verbs} presentation="sheet" onselect={selectOverflow} />
+					<SessionCommandItems {commands} presentation="sheet" onselect={selectOverflow} />
 				</MenuGroup>
 			{/if}
 		{/if}
@@ -418,9 +379,9 @@
 	</Menu>
 {/snippet}
 
-<!-- One border for the controls; the instance picker stays beside it. -->
+<!-- One border for the session controls. -->
 {#snippet identityBlock()}
-	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2" class:desktop-session-identity={session != null}>
+	<div id="session-bar-meta" class="flex min-w-0 items-center gap-2">
 		<div class="session-bar-segments inline-flex h-[24px] items-stretch rounded-lg border border-border">
 			<SessionSkillsChip presentation={sessionViewState.compact ? "sheet" : "popover"} />
 			{#if sideThreads.length > 0 && !session?.sideThread}
@@ -430,8 +391,7 @@
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
-			{#if directory}<GitIdentity {directory} {git} workspaceCause={session?.workspace?.cause} workspaceMismatch={session?.workspaceMismatch} workspaceHint={session?.workspaceHint} loadWorktrees={session && supportsWorktree !== false ? loadWorktrees : undefined} onmove={session ? moveWorkspace : undefined} ondismiss={session ? dismissWorkspaceHint : undefined} />{/if}
-			{#if !sessionViewState.compact && settleVerb}
+			{#if primaryCommand}
 				<Tooltip side="bottom">
 					{#snippet trigger({ props })}<Button
 						{...props}
@@ -439,26 +399,19 @@
 						variant="ghost"
 						tone="default"
 						size="segment"
-						icon={settleVerb.icon ?? "check"}
+						icon={primaryCommand.icon ?? "check"}
+						touchTarget
 						class="shrink-0"
-						disabled={settleVerb.disabledReason != null}
-						title={settleVerb.disabledReason ?? undefined}
-						ariaLabel={settleVerb.disabledReason ? `${settleVerb.label}: ${settleVerb.disabledReason}` : settleVerb.label}
+						disabled={primaryCommand.disabledReason != null}
+						title={primaryCommand.disabledReason ?? undefined}
+						ariaLabel={primaryCommand.disabledReason ? `${primaryCommand.label}: ${primaryCommand.disabledReason}` : primaryCommand.label}
 						data-testid="session-bar-settle"
-						onclick={() => settleVerb.run()}
-					><span id="session-bar-settle-label">{settleVerb.label}</span></Button>{/snippet}
-					{#snippet children()}{settleVerb.label}{#if settleVerb.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionVerbKeysHint(settleVerb.keys)}</span>{/if}{/snippet}
+						onclick={() => primaryCommand.run()}
+					><span id="session-bar-settle-label">{primaryCommand.label}</span></Button>{/snippet}
+					{#snippet children()}{primaryCommand.label}{#if primaryCommand.keys}<span class="shortcut-hint ml-2 text-text-muted" aria-hidden="true">{sessionCommandKeysHint(primaryCommand.keys)}</span>{/if}{/snippet}
 				</Tooltip>
 			{/if}
 		</div>
-		<!-- Until an open session's provider is known, show neither: the project badge would flash before a Claude session's pill. -->
-		{#if !session}
-			<InstanceBadgeMenu />
-		{:else if discoveryState.sessionProviderIds[session.id] === "claude"}
-			<SessionAccountPill {session} />
-		{:else if discoveryState.sessionProviderIds[session.id] !== undefined}
-			<InstanceBadgeMenu />
-		{/if}
 	</div>
 {/snippet}
 
@@ -581,7 +534,7 @@
 						</Badge>
 					</Button>
 				{/snippet}
-				<MenuItem data-testid="session-bar-unread-mark-read" onselect={() => void sessionVerbActions.markRead(session)}>Mark read</MenuItem>
+				<MenuItem data-testid="session-bar-unread-mark-read" onselect={() => void sessionCommandActions.markRead(session)}>Mark read</MenuItem>
 			</Menu>
 		{/if}
 		{#if stateChip && session && !collapsed}
@@ -611,14 +564,14 @@
 						{/if}
 					</div>
 					{#if stateChip.kind === "snoozed"}
-						<MenuItem data-testid="session-bar-wake" onselect={() => void sessionVerbActions.unsnooze(session)}>
+						<MenuItem data-testid="session-bar-wake" onselect={() => void sessionCommandActions.unsnooze(session)}>
 							<Icon name="undo" size={13} /><span>Wake now</span>
 						</MenuItem>
 					{:else}
-						<MenuItem data-testid="session-bar-unsettle" onselect={() => void sessionVerbActions.settle(session, false)}>
+						<MenuItem data-testid="session-bar-unsettle" onselect={() => void sessionCommandActions.settle(session, false)}>
 							<Icon name="undo" size={13} /><span>Un-settle</span>
 						</MenuItem>
-						<MenuCheckboxItem data-testid="session-bar-auto-settle" checked={session.autoSettleDisabled !== true} onselect={() => void sessionVerbActions.autoSettle(session, session.autoSettleDisabled !== true)}>
+						<MenuCheckboxItem data-testid="session-bar-auto-settle" checked={session.autoSettleDisabled !== true} onselect={() => void sessionCommandActions.autoSettle(session, session.autoSettleDisabled !== true)}>
 							<span class="w-[13px] shrink-0" aria-hidden="true"></span><span>Auto-settle when idle</span>
 						</MenuCheckboxItem>
 					{/if}
@@ -735,7 +688,7 @@
 	{/if}
 
 	{#if tasksPanel.open && backgroundTasks.length > 0}
-		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(); } : undefined} />
+		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, getCurrentSlug(), taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId, getCurrentSlug()); } : undefined} />
 	{/if}
 
 	{#if sideThreadsPanel.open}

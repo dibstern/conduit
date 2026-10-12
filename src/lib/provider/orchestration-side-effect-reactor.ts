@@ -12,6 +12,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
+import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {
 	type PreparedTurn,
 	sendPreparedClaudeTurn,
@@ -122,6 +123,7 @@ export interface ProviderSideEffectReactorOptions {
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
 	readonly persistHandoffDelivered?: ClaudeEventPersistEffect["persistHandoffDelivered"];
+	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
@@ -399,7 +401,8 @@ export class ProviderSideEffectReactor {
 									configDir: prepared?.configDir,
 									resumeSessionId: prepared?.resumeSessionId,
 									startFreshNativeSession:
-										prepared?.resumeSessionId === undefined,
+										prepared?.resumeSessionId === undefined ||
+										payload.rewind !== undefined,
 									nativeResumeFallback,
 									nativeThread: prepared?.nativeThread,
 									...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
@@ -410,7 +413,7 @@ export class ProviderSideEffectReactor {
 					});
 				const result =
 					driver === "claude"
-						? yield* Effect.gen(function* () {
+						? yield* Effect.gen(this, function* () {
 								const state = yield* makeProviderStateEffect.pipe(
 									Effect.provideService(PersistenceProjectTag, {
 										projectId: row.project_key,
@@ -432,6 +435,9 @@ export class ProviderSideEffectReactor {
 											payload.continuation?.cutOffMessageId ?? payload.inputId,
 										continuation: payload.continuation !== undefined,
 										nativeResumeFallback: payload.nativeResumeFallback,
+										rewind: payload.rewind,
+										sessionForkSdk: this.options.claudeSessionForkSdk,
+										workspaceRoot: payload.workspaceRoot,
 										modelContextWindow:
 											payload.contextWindow === "1m" ? 1000000 : undefined,
 									},
@@ -764,6 +770,12 @@ function isSendTurnOutboxPayload(
 		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
 		(value["history"] === undefined || Array.isArray(value["history"])) &&
+		(value["rewind"] === undefined ||
+			(isRecord(value["rewind"]) &&
+				(value["rewind"]["resumeSessionAt"] === null ||
+					typeof value["rewind"]["resumeSessionAt"] === "string") &&
+				(value["rewind"]["targetMessageId"] === undefined ||
+					typeof value["rewind"]["targetMessageId"] === "string"))) &&
 		isRecord(value["providerState"]) &&
 		typeof value["workspaceRoot"] === "string"
 	);

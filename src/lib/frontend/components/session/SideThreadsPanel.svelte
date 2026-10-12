@@ -26,7 +26,7 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
-	import { sessionVerbActions } from "./session-verbs.js";
+	import { sessionCommandActions } from "./session-commands.js";
 	import { sideThreadsPanel } from "./side-threads.svelte.js";
 
 	let { threads, compact }: { threads: readonly Immutable<SessionInfo>[]; compact: boolean } = $props();
@@ -37,7 +37,7 @@
 	}
 
 	function remove(thread: Immutable<SessionInfo>, button: HTMLElement) {
-		void sessionVerbActions.remove(thread, () => button.isConnected ? button : document.getElementById("side-threads-control"));
+		void sessionCommandActions.remove(thread, () => button.isConnected ? button : document.getElementById("side-threads-control"));
 	}
 </script>
 

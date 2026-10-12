@@ -1,4 +1,5 @@
 import { projectState } from "../../stores/project.svelte.js";
+import { getProjectGroup } from "../../stores/project-state.svelte.js";
 import { getCurrentSlug } from "../../stores/router.svelte.js";
 import type { SessionInfo } from "../../types.js";
 
@@ -11,7 +12,11 @@ export function projectDisplayName(slug: string): string {
 
 export function getProjectLabel(session: SessionInfo): string | undefined {
 	const slug = session.projectSlug ?? getCurrentSlug();
-	return slug ? projectDisplayName(slug) : undefined;
+	if (!slug) return undefined;
+	const group = getProjectGroup(slug);
+	return group
+		? `${group.label}${group.needsProjectQualifier ? ` · ${projectDisplayName(slug)}` : ""}`
+		: projectDisplayName(slug);
 }
 
 export function projectAccent(slug: string | null): number {

@@ -17,6 +17,7 @@ import {
 	applyClaudeOwnershipDecisionEffect,
 	decideClaudeMessageOwnershipEffect,
 } from "../../../../src/lib/provider/claude/claude-message-ownership-runtime.js";
+import { sdkResultToTurnResult } from "../../../../src/lib/provider/claude/claude-runtime-turn.js";
 import type {
 	ClaudeSessionContext,
 	SDKMessage,
@@ -25,6 +26,10 @@ import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-s
 import type { EventSink } from "../../../../src/lib/provider/types.js";
 import { makeSessionBackgroundLiveness } from "../../../../src/lib/session/background-liveness.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
+import {
+	makeErrorResult,
+	makeSuccessResult,
+} from "../../../helpers/mock-sdk.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEventFromCanonical } from "../../../helpers/provider-runtime-event.js";
 import { assertProviderRuntimeStreamInvariants } from "../../../helpers/provider-runtime-stream-invariants.js";
@@ -1902,6 +1907,40 @@ describe("ClaudeEventTranslator", () => {
 
 	// 15. result (interrupted)
 
+	it("settles an explicitly interrupted execution result without a visible error", async () => {
+		ctx.interruptRequested = true;
+		const result = makeErrorResult({ errors: ["Execution ended"] });
+		await runTranslate(translator, ctx, result);
+		expect(
+			sink.events.filter((event) => event.type === "turn.interrupted"),
+		).toHaveLength(1);
+		expect(sink.events.filter((event) => event.type === "turn.error")).toEqual(
+			[],
+		);
+		expect(sdkResultToTurnResult(ctx, result).status).toBe("interrupted");
+	});
+
+	it.each([
+		makeErrorResult({
+			subtype: "error_max_turns",
+			errors: ["Maximum turns exceeded"],
+		}),
+		makeSuccessResult({ is_error: true, result: "Upstream provider failed" }),
+	])("retains real failures after Stop: $subtype", async (result) => {
+		ctx.interruptRequested = true;
+		await runTranslate(translator, ctx, result);
+		expect(
+			sink.events.filter((event) => event.type === "turn.error"),
+		).toHaveLength(1);
+		expect(
+			sink.events.filter((event) => event.type === "turn.interrupted"),
+		).toEqual([]);
+		expect(sdkResultToTurnResult(ctx, result)).toMatchObject({
+			status: "error",
+			error: { code: "provider_error" },
+		});
+	});
+
 	it("translates result with interrupt error to turn.interrupted", async () => {
 		ctx.lastAssistantUuid = "assist-uuid-3";
 
@@ -2666,6 +2705,300 @@ describe("ClaudeEventTranslator", () => {
 				ancestorTaskIds: ["middle", "agentA"],
 			},
 		]);
+	});
+
+	describe("background task detail and observation times", () => {
+		const shell = {
+			task_id: "shell",
+			task_type: "local_bash",
+			description: "Watch",
+		};
+		const snapshot = (tasks: readonly Record<string, unknown>[] = [shell]) =>
+			({
+				type: "system",
+				subtype: "background_tasks_changed",
+				tasks,
+				uuid: "live-snapshot",
+				session_id: "sdk-sess",
+			}) as unknown as SDKMessage;
+		const toolMessage = (
+			id: string,
+			name: string,
+			input: Record<string, unknown>,
+			parent: string | null = null,
+		) =>
+			({
+				type: "assistant",
+				uuid: `message-${id}`,
+				session_id: "sdk-sess",
+				parent_tool_use_id: parent,
+				message: {
+					id: `message-${id}`,
+					content: [{ type: "tool_use", id, name, input }],
+				},
+			}) as unknown as SDKMessage;
+		const start = (taskId = "shell", toolId = "launch", type = "local_bash") =>
+			({
+				type: "system",
+				subtype: "task_started",
+				task_id: taskId,
+				tool_use_id: toolId,
+				task_type: type,
+				description: "Watch",
+				is_backgrounded: true,
+				uuid: `start-${taskId}`,
+				session_id: "sdk-sess",
+			}) as unknown as SDKMessage;
+		const setup = () => {
+			const liveness = makeSessionBackgroundLiveness();
+			const instance = new ClaudeEventTranslator({
+				getSink: () => sink,
+				onBackgroundTask: liveness.record,
+			});
+			const context = makeCtx({
+				subagentTasks: new Map(),
+				messageOwnership: createClaudeMessageOwnership({
+					childSessionIdFor: (id) => `child-${id}`,
+				}),
+			});
+			return { liveness, instance, context };
+		};
+
+		it.each([
+			false,
+			true,
+		])("uses the earliest start or snapshot observation, snapshot first: %s", async (snapshotFirst) => {
+			const { liveness, instance, context } = setup();
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					yield* TestClock.setTime(100);
+					if (snapshotFirst) yield* instance.translate(context, snapshot());
+					else yield* instance.translate(context, start());
+					yield* TestClock.setTime(500);
+					if (snapshotFirst) yield* instance.translate(context, start());
+					else yield* instance.translate(context, snapshot());
+					yield* instance.publishBackgroundTasks(context);
+				}).pipe(Effect.provide(TestContext.TestContext)),
+			);
+			expect(
+				liveness.backgroundOf(context.sessionId)?.tasks[0]?.firstSeenAt,
+			).toBe(100);
+		});
+
+		it.each([
+			"Bash",
+			"Monitor",
+		])("retains %s input when the launch returned before task_started and across later turns", async (name) => {
+			const { liveness, instance, context } = setup();
+			const command = "printf '<tag>'\nsleep 40";
+			context.messageOwnership?.decide({
+				kind: "sdk",
+				message: toolMessage("launch", name, { command }),
+			});
+			context.inFlightTools.set(0, {
+				itemId: "launch",
+				toolName: name,
+				title: "Shell",
+				input: { command },
+				partialInputJson: "",
+			});
+			await runTranslate(instance, context, {
+				type: "user",
+				message: {
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "launch",
+							content: "Backgrounded",
+						},
+					],
+				},
+			} as unknown as SDKMessage);
+			expect(context.inFlightTools.size).toBe(0);
+			await runTranslate(instance, context, start());
+			await runTranslate(instance, context, snapshot());
+			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
+				{ detail: command },
+			]);
+			instance.resetInFlightState();
+			context.inFlightTools.clear();
+			context.messageOwnership?.decide({
+				kind: "sdk",
+				message: toolMessage("later", "Bash", {
+					command: "wrong later command",
+				}),
+			});
+			await runTranslate(instance, context, snapshot());
+			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
+				{ detail: command },
+			]);
+		});
+
+		it("fills late streamed input and retains it after completion without an assistant snapshot", async () => {
+			const { liveness, instance, context } = setup();
+			await runTranslate(instance, context, start());
+			await runTranslate(instance, context, snapshot());
+			const command = "pnpm test --watch";
+			const blockStart = makeStreamEvent({
+				type: "content_block_start",
+				index: 0,
+				content_block: {
+					type: "tool_use",
+					id: "launch",
+					name: "Bash",
+					input: {},
+				},
+			});
+			context.messageOwnership?.decide({ kind: "sdk", message: blockStart });
+			await runTranslate(instance, context, blockStart);
+			await runTranslate(
+				instance,
+				context,
+				makeStreamEvent({
+					type: "content_block_delta",
+					index: 0,
+					delta: {
+						type: "input_json_delta",
+						partial_json: JSON.stringify({ command }),
+					},
+				}),
+			);
+			await runTranslate(
+				instance,
+				context,
+				makeStreamEvent({ type: "content_block_stop", index: 0 }),
+			);
+			await Effect.runPromise(instance.publishBackgroundTasks(context));
+			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
+				{ detail: command },
+			]);
+			context.inFlightTools.clear();
+			await runTranslate(instance, context, snapshot());
+			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
+				{ detail: command },
+			]);
+		});
+
+		it("uses nested transcript input and keeps session ownership isolated", async () => {
+			const { liveness, instance, context } = setup();
+			context.messageOwnership?.decide({
+				kind: "sdk",
+				message: toolMessage("agent-launch", "Agent", {
+					subagent_type: "Explore",
+				}),
+			});
+			context.messageOwnership?.decide({
+				kind: "sdk",
+				message: start("agent", "agent-launch", "local_agent"),
+			});
+			context.messageOwnership?.decide({
+				kind: "transcript",
+				taskId: "agent",
+				messages: [
+					{
+						type: "assistant",
+						uuid: "nested-message",
+						session_id: "sdk-sess",
+						parent_tool_use_id: null,
+						parent_agent_id: null,
+						message: {
+							content: [
+								{
+									type: "tool_use",
+									id: "launch",
+									name: "Bash",
+									input: { command: "nested command" },
+								},
+							],
+						},
+					},
+				],
+			});
+			context.subagentTasks?.set("shell", {
+				toolUseId: "launch",
+				parentTaskId: "agent",
+			});
+			context.subagentTasks?.set("agent", {
+				toolUseId: "agent-launch",
+				childSessionId: "child-agent",
+			});
+			await runTranslate(
+				instance,
+				context,
+				snapshot([
+					shell,
+					{
+						task_id: "agent",
+						task_type: "local_agent",
+						description: "Explore",
+					},
+				]),
+			);
+			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
+				{ detail: "nested command", parentTaskId: "agent" },
+				{ detail: "Explore" },
+			]);
+			const other = setup();
+			other.context.messageOwnership?.decide({
+				kind: "sdk",
+				message: toolMessage("launch", "Bash", { command: "other session" }),
+			});
+			other.context.subagentTasks?.set("shell", { toolUseId: "launch" });
+			await runTranslate(other.instance, other.context, snapshot());
+			expect(
+				other.liveness.backgroundOf(other.context.sessionId)?.tasks,
+			).toMatchObject([{ detail: "other session" }]);
+			expect(liveness.backgroundOf(context.sessionId)?.tasks[0]).toMatchObject({
+				detail: "nested command",
+			});
+		});
+
+		it("uses workflow_name and falls back for unknown joins, unsupported tools or malformed input", async () => {
+			const { liveness, instance, context } = setup();
+			const tasks = [
+				{ task_id: "missing", task_type: "local_bash", description: "No join" },
+				{
+					task_id: "malformed",
+					task_type: "local_agent",
+					description: "Malformed",
+				},
+				{
+					task_id: "unsupported",
+					task_type: "local_bash",
+					description: "Unsupported",
+				},
+				{
+					task_id: "workflow",
+					task_type: "local_workflow",
+					description: "Review",
+				},
+			];
+			for (const [id, name, input] of [
+				["malformed", "Agent", { subagent_type: 42 }],
+				["unsupported", "Read", { command: "not a shell" }],
+			] as const) {
+				context.messageOwnership?.decide({
+					kind: "sdk",
+					message: toolMessage(id, name, input),
+				});
+				context.subagentTasks?.set(id, { toolUseId: id });
+			}
+			context.messageOwnership?.decide({
+				kind: "sdk",
+				message: toolMessage("workflow-tool", "Workflow", {}),
+			});
+			await runTranslate(instance, context, {
+				...start("workflow", "workflow-tool", "local_workflow"),
+				workflow_name: "review workflow",
+			} as unknown as SDKMessage);
+			await runTranslate(instance, context, snapshot(tasks));
+			const live = liveness.backgroundOf(context.sessionId)?.tasks ?? [];
+			expect(live.find((task) => task.id === "workflow")).toMatchObject({
+				detail: "review workflow",
+			});
+			for (const task of live.filter((task) => task.id !== "workflow"))
+				expect(task).not.toHaveProperty("detail");
+		});
 	});
 
 	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {

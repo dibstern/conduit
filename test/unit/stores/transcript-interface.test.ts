@@ -32,6 +32,7 @@ import {
 	transcriptStatus,
 	viewTranscript,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { detailRowsOf } from "../../helpers/detail-rows.js";
 
 interface Request {
 	id: string;
@@ -122,7 +123,7 @@ const snapshot = (
 	_tag: "snapshot",
 	sequence,
 	hasMore,
-	rows: rows.map((message) => ({ _tag: "transcriptMessage", message })),
+	rows: rows.flatMap(detailRowsOf),
 });
 const requestFor = (
 	requests: Request[],
@@ -206,7 +207,7 @@ describe("transcript feed interface", () => {
 		);
 	});
 
-	it("shows cached rows immediately and resumes from the held HWM", async () => {
+	it("shows cached rows immediately and replays the held HWM on reconnect", async () => {
 		viewTranscript("project", "A");
 		await settled(() => requestFor(wire.requests, "A") !== undefined);
 		const first = requestFor(wire.requests, "A");
@@ -224,7 +225,9 @@ describe("transcript feed interface", () => {
 		expect(transcriptStatus("A")._tag).toBe("cold");
 		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
 		const resumed = requestFor(wire.requests, "A", 1);
-		expect(resumed?.payload).toHaveProperty("resumeFromSequence", 9);
+		// Replaying the held sequence also recovers a pending rewind point
+		// projected at that watermark during the reconnect.
+		expect(resumed?.payload).toHaveProperty("resumeFromSequence", 8);
 		if (!resumed) throw new Error("missing resumed request");
 		await wire.emit(resumed, { _tag: "synchronized" });
 		await settled(() => transcriptStatus("A")._tag === "live");
@@ -260,8 +263,13 @@ describe("transcript feed interface", () => {
 		await wire.emit(first, {
 			_tag: "upsert",
 			sequence: 5,
-			item: { _tag: "transcriptMessage", message: row("u1", "!") },
-			textSuffixes: [{ partId: "u1-text", from: 999, total: 1000 }],
+			item: {
+				_tag: "part",
+				messageId: "u1",
+				sortOrder: 0,
+				part: { id: "u1-text", type: "text", text: "!" },
+			},
+			textSuffix: { from: 999, total: 1000 },
 		});
 		// The decoder's sent prefix is untrustworthy, so the transport re-asks
 		// for whole rows instead of resuming; the feed never reports failing.

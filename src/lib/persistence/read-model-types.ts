@@ -1,5 +1,6 @@
 // SQLite projection row types returned by the Effect read services.
 
+import type { MessageVersion, PartVersion } from "../contracts/tool-wire.js";
 import type { HistoryMessage } from "../shared-types.js";
 
 export interface SessionRow {
@@ -7,6 +8,7 @@ export interface SessionRow {
 	version: number;
 	provider: string;
 	provider_sid: string | null;
+	pending_rewind_message_id?: string | null;
 	title: string;
 	status: string;
 	history_complete?: number;
@@ -83,7 +85,7 @@ export interface PendingClaudeQuestionToolRow {
 
 export interface MessageRow {
 	id: string;
-	version: number;
+	version: MessageVersion;
 	session_id: string;
 	turn_id: string | null;
 	role: string;
@@ -126,7 +128,10 @@ export interface MessagePartRow {
 	sort_order: number;
 	created_at: number;
 	updated_at: number;
+	version: PartVersion;
 	rest_payload?: string | null;
+	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
+	result_bytes?: number | null;
 }
 
 export interface MessageWithParts extends MessageRow {

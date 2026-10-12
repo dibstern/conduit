@@ -348,7 +348,6 @@ export function createMockProjectRelay(
 		syncGlobalSetting: () => Effect.void,
 		refreshGlobalDefaults: () => Effect.void,
 		settleIdleSessions: () => Effect.succeed(0),
-		openCodeInstanceId: "opencode",
 		wsHandler: makeMockWebSocketHandler(),
 		rpcWsHandler: {
 			handleUpgrade: vi.fn(),
@@ -505,6 +504,7 @@ export function makeOpenCodeInstancesStub(
 		events: () => Stream.empty,
 		use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
+		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
 	};
 }
@@ -1135,6 +1135,10 @@ export const PassThroughSessionInbox = Layer.effect(
 		const turns = yield* ProviderTurnServiceTag;
 		const overrides = yield* OverridesStateTag;
 		return {
+			withSession: <A, E, R>(
+				_sessionId: string,
+				effect: Effect.Effect<A, E, R>,
+			) => effect,
 			submit: ({ inputId, request, ...input }) =>
 				turns
 					.sendTurn({

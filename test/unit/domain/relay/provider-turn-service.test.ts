@@ -5,6 +5,10 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref } from "effect";
 import { afterEach, expect, vi } from "vitest";
+import {
+	MessageVersion,
+	PartVersion,
+} from "../../../../src/lib/contracts/tool-wire.js";
 import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
@@ -166,7 +170,7 @@ const historyRow = (text: string) => ({
 	tokens_cache_read: null,
 	tokens_cache_write: null,
 	context_window: null,
-	version: 0,
+	version: MessageVersion.make(0),
 	is_streaming: 0,
 	is_backfilled: 0,
 	created_at: 1,
@@ -185,6 +189,7 @@ const historyRow = (text: string) => ({
 			duration: null,
 			status: null,
 			sort_order: 0,
+			version: PartVersion.make(0),
 			created_at: 1,
 			updated_at: 1,
 		},
@@ -196,13 +201,15 @@ const makeReadQuery = (
 	getSessionHistoryMetadata: ReadQueryEffect["getSessionHistoryMetadata"] = () =>
 		Effect.succeed({ messageCount: 0, cumulativeTokens: 0 }),
 ): ReadQueryEffect => ({
-	getToolContent: vi.fn(() => Effect.succeed(undefined)),
+	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+	getSessionFamilyRoot: () => Effect.succeed(undefined),
 	getSession: vi.fn(() => Effect.succeed(undefined)),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 	getSessionsForReconciliation: () => Effect.succeed([]),
+	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -212,6 +219,7 @@ const makeReadQuery = (
 	getSessionMessagesWithParts,
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
+	readStoreIdentity: () => Effect.succeed("store"),
 	getSessionHistoryMetadata,
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),

@@ -14,6 +14,7 @@ import {
 } from "effect";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import { MissingWorktreeError } from "../../../contracts/worktree.js";
 import {
 	loadDaemonConfig,
 	resolveClaudeInstanceConfigDir,
@@ -42,7 +43,10 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../../../provider/types.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";
@@ -53,6 +57,7 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
+	WebSocketHandlerTag,
 } from "./services.js";
 import { inferSessionModel } from "./session-model-settings.js";
 import {
@@ -65,8 +70,12 @@ import {
 	setPermissionMode,
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
+import { SessionSetupTag } from "./session-setup.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
-import { SessionWorkspaceTag } from "./session-workspace.js";
+import {
+	inspectSessionWorktree,
+	SessionWorkspaceTag,
+} from "./session-workspace.js";
 import { SSEStreamTag } from "./sse-stream-service.js";
 import { makeFailTurn } from "./turn-failure.js";
 
@@ -112,6 +121,16 @@ export const resolveSessionFolders = (
 						savedWorkspace,
 					);
 		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
+		if (
+			yield* inspectSessionWorktree(
+				{ id: session.id, workspace: state },
+				config,
+			)
+		)
+			return yield* new MissingWorktreeError({
+				path: workspaceRoot,
+				message: `Worktree missing: ${workspaceRoot}. Recreate worktree or Continue in main folder before sending another message.`,
+			});
 		if (!existsSync(workspaceRoot)) {
 			const fallback =
 				fallbackMissingWorktree &&
@@ -134,11 +153,10 @@ export const resolveSessionFolders = (
 			);
 			state = null;
 		}
-		const worktrees = state?.worktrees;
-		const effectiveFolders = [
-			config.projectDir,
-			...(config.extraFolders ?? []),
-		].map((root) => ({ root, directory: worktrees?.[root] ?? root }));
+		const effectiveFolders = effectiveSessionFolders(
+			[config.projectDir, ...(config.extraFolders ?? [])],
+			state,
+		);
 		const extraFolders: string[] = [];
 		const launchFolders = state
 			? effectiveFolders
@@ -174,10 +192,10 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 			return {
 				workspaceRoot: config.projectDir,
 				extraFolders,
-				effectiveFolders: [config.projectDir, ...extraFolders].map((root) => ({
-					root,
-					directory: root,
-				})),
+				effectiveFolders: effectiveSessionFolders(
+					[config.projectDir, ...extraFolders],
+					null,
+				),
 			};
 		}
 		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
@@ -189,14 +207,6 @@ export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
 			);
 		return yield* resolveSessionFolders(session);
 	});
-
-const NOOP_EVENT_SINK: SendTurnInput["eventSink"] = {
-	push: () => Effect.void,
-	requestPermission: () => Effect.succeed({ decision: "once" as const }),
-	requestQuestion: () => Effect.succeed({}),
-	resolvePermission: () => Effect.void,
-	resolveQuestion: () => Effect.void,
-};
 
 export class ProviderTurnDispatchFibersTag extends Context.Tag(
 	"ProviderTurnDispatchFibers",
@@ -300,7 +310,6 @@ const makeEventSink = (sessionId: string, driver: ProviderDriverKind) =>
 		const { runtime, overridesRef } = yield* ProviderTurnTimeoutRuntimeTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
-		if (!isClaudeDriver(driver)) return NOOP_EVENT_SINK;
 		return createRelayEventSink({
 			sessionId,
 			providerId: driver,
@@ -360,11 +369,10 @@ const handleDispatchFailure = (
 			`client=${input.clientId} session=${input.sessionId} Failed to send message:`,
 			formatErrorDetail(sendErr),
 		);
-		const error = RelayError.fromCaught(
-			sendErr,
-			"SEND_FAILED",
-			"Failed to send message",
-		);
+		const missing = sendErr instanceof MissingWorktreeError;
+		const error = missing
+			? { message: sendErr.message, code: "WORKTREE_MISSING" }
+			: RelayError.fromCaught(sendErr, "SEND_FAILED", "Failed to send message");
 		yield* failUnfinishedSend(
 			input,
 			driver,
@@ -372,6 +380,20 @@ const handleDispatchFailure = (
 			error.message,
 			error.code,
 		);
+		if (missing) {
+			const ws = yield* Effect.serviceOption(WebSocketHandlerTag);
+			if (
+				ws._tag === "Some" &&
+				ws.value.getClientsForSession(input.sessionId).length > 0
+			)
+				yield* publishAlert({
+					_tag: "alert",
+					kind: "error",
+					alertId: randomUUID(),
+					sessionId: input.sessionId,
+					message: error.message,
+				});
+		}
 	});
 
 const handleDispatchResult = (
@@ -599,6 +621,10 @@ const prepareEngineTurnInput = (
 					}),
 				),
 			);
+		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
+			yield* clearProcessingTimeout(resolvedInput.sessionId);
+			return;
+		}
 		const folders = yield* resolveSessionFolders(
 			{
 				id: resolvedInput.sessionId,
@@ -810,9 +836,14 @@ const dispatchEngineTurn = (
 			dispatchProgram,
 			{ onlyIfMissing: true },
 		);
-		yield* Effect.raceFirst(
-			Deferred.await(accepted),
-			Fiber.await(fiber).pipe(Effect.asVoid),
+		// The race interrupts its loser, which an uninterruptible caller (a
+		// continuation) would otherwise wait out for the whole turn. The
+		// dispatch runs in the map, so only the wait is interrupted.
+		yield* Effect.interruptible(
+			Effect.raceFirst(
+				Deferred.await(accepted),
+				Fiber.await(fiber).pipe(Effect.asVoid),
+			),
 		);
 	});
 
@@ -835,7 +866,8 @@ const sendViaEngine = (
 		).pipe(
 			Effect.catchIf(
 				(cause) =>
-					cause instanceof RelayError && cause.code === "FILE_NOT_FOUND",
+					cause instanceof MissingWorktreeError ||
+					(cause instanceof RelayError && cause.code === "FILE_NOT_FOUND"),
 				(cause) => handleDispatchFailure(resolvedInput, cause, driver),
 			),
 		);
@@ -875,6 +907,8 @@ const startProcessing = (input: ProviderTurnServiceSendInput) =>
 
 export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 	Effect.gen(function* () {
+		const setup = yield* Effect.serviceOption(SessionSetupTag);
+		if (setup._tag === "Some") yield* setup.value.wait(input.sessionId);
 		if (!input.steer) yield* startProcessing(input);
 		const config = yield* ConfigTag;
 		const engine = yield* OrchestrationEngineTag;

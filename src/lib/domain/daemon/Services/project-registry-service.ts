@@ -37,11 +37,16 @@ import {
 } from "effect";
 import {
 	ProjectSaveRejected,
+	type ResolveSessionModeResponse,
 	type SaveProjectInput,
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
+import { readProjectFile } from "../../../daemon/project-file.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
-import { withCachedProjectGit } from "../../../git/session-git.js";
+import {
+	daemonSessionGitCache,
+	withCachedProjectGit,
+} from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import {
 	chooseProjectSlug,
@@ -53,7 +58,9 @@ import {
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
+import { computeProjectGroups } from "../../../project-grouping.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
@@ -63,7 +70,6 @@ import {
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
-import { getInstances } from "./instance-manager-service.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -124,8 +130,16 @@ const toStoredProject = (project: DaemonProject): StoredProject => ({
 	folders: project.folders,
 	title: project.title ?? project.slug,
 	lastUsed: project.addedAt,
-	...(project.instanceId !== undefined && { instanceId: project.instanceId }),
 	...(project.shellEnv !== undefined && { shellEnv: project.shellEnv }),
+	...(project.setupScript !== undefined && {
+		setupScript: project.setupScript,
+	}),
+	...(project.sessionMode !== undefined && {
+		sessionMode: project.sessionMode,
+	}),
+	...(project.groupingMode !== undefined && {
+		groupingMode: project.groupingMode,
+	}),
 	...(project.repositoryIdentities !== undefined && {
 		repositoryIdentities: project.repositoryIdentities,
 	}),
@@ -198,6 +212,32 @@ export const getProject = (slug: string) =>
 		Effect.withSpan("projectRegistry.getProject"),
 	);
 
+/** Resolve each draft from the primary folder's current file and persisted defaults. */
+export const resolveSessionMode = (slug: string) =>
+	Effect.gen(function* () {
+		const project = yield* getProject(slug);
+		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
+		const file = yield* readProjectFile(project.folders[0]);
+		const warning = file._tag === "invalid" ? { warning: file.message } : {};
+		if (project.sessionMode !== undefined)
+			return {
+				mode: project.sessionMode,
+				source: "project",
+				...warning,
+			} satisfies ResolveSessionModeResponse;
+		if (file._tag === "parsed" && file.file.sessionMode !== undefined)
+			return {
+				mode: file.file.sessionMode,
+				source: "file",
+				...warning,
+			} satisfies ResolveSessionModeResponse;
+		return {
+			mode: loadRelaySettings(configDir).defaultSessionMode ?? "local",
+			source: "global",
+			...warning,
+		} satisfies ResolveSessionModeResponse;
+	}).pipe(Effect.withSpan("projectRegistry.resolveSessionMode"));
+
 /** Check if a slug is registered. */
 export const has = (slug: string) =>
 	Effect.gen(function* () {
@@ -241,7 +281,16 @@ export const allProjects = Effect.gen(function* () {
 
 export const projectInfos = Effect.gen(function* () {
 	const ref = yield* ProjectRegistryTag;
-	for (const project of yield* allProjects) {
+	const projects = yield* allProjects;
+	// Cold projects need branches too. Share the relay cache and its refresh interval.
+	yield* Effect.forEach(
+		[...new Set(projects.flatMap(({ folders }) => folders))].filter((folder) =>
+			daemonSessionGitCache.isStale(folder),
+		),
+		(folder) => Effect.tryPromise(() => daemonSessionGitCache.refresh(folder)),
+		{ concurrency: 4, discard: true },
+	);
+	for (const project of projects) {
 		if (project.repositoryIdentities !== undefined) continue;
 		const repositoryIdentities = yield* deriveRepositoryIdentities(
 			project.folders,
@@ -267,20 +316,42 @@ export const projectInfos = Effect.gen(function* () {
 			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
 		}
 	}
-	return withCachedProjectGit(
+	const daemonState = yield* Effect.serviceOption(DaemonStateTag);
+	const defaultGroupingMode = Option.isSome(daemonState)
+		? (loadRelaySettings((yield* Ref.get(daemonState.value)).configDir)
+				.defaultGroupingMode ?? "repository")
+		: "repository";
+	const entries = withCachedProjectGit(
 		(yield* allProjects).map((project) => ({
 			slug: project.slug,
 			folders: project.folders,
 			title: project.title,
+			...(project.setupScript !== undefined && {
+				setupScript: project.setupScript,
+			}),
+			...(project.sessionMode !== undefined && {
+				sessionMode: project.sessionMode,
+			}),
+			...(project.groupingMode !== undefined && {
+				groupingMode: project.groupingMode,
+			}),
+			effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
 			...(project.repositoryIdentities !== undefined && {
 				repositoryIdentities: project.repositoryIdentities,
 			}),
 			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-			...(project.instanceId !== undefined && {
-				instanceId: project.instanceId,
-			}),
 		})),
 	);
+	const groups = computeProjectGroups(
+		entries.map((project) => ({
+			...project,
+			groupingMode: project.effectiveGroupingMode,
+		})),
+	);
+	return entries.map((project) => ({
+		...project,
+		group: groups[project.slug],
+	}));
 });
 
 export const broadcastProjectList = Effect.gen(function* () {
@@ -507,7 +578,7 @@ export const remove = (slug: string) =>
 	);
 
 /**
- * Update project fields (title, instanceId). Publishes InstanceStatusChanged.
+ * Update project fields. Publishes InstanceStatusChanged.
  * Fails with ProjectNotFound if slug not registered.
  */
 export const updateProject = (
@@ -515,7 +586,12 @@ export const updateProject = (
 	updates: Partial<
 		Pick<
 			StoredProject,
-			"title" | "instanceId" | "folders" | "repositoryIdentities"
+			| "title"
+			| "folders"
+			| "repositoryIdentities"
+			| "setupScript"
+			| "sessionMode"
+			| "groupingMode"
 		>
 	>,
 ) =>
@@ -729,31 +805,10 @@ export const replaceRelay = (slug: string) =>
 		Effect.withSpan("projectRegistry.replaceRelay"),
 	);
 
-/** The OpenCode instance a project's relay drives: its bound instance when
- *  that is OpenCode, else the first OpenCode instance. */
+/** The first OpenCode instance drives the relay's default sessions. */
 export const openCodeInstanceFor = <I extends { id: string; driver?: string }>(
 	instances: readonly I[],
-	instanceId: string | undefined,
-): I | undefined =>
-	instances.find((i) => i.driver !== "claude" && i.id === instanceId) ??
-	instances.find((i) => i.driver !== "claude");
-
-/** Bind a project's new sessions to an instance. The relay reads the binding
- *  only through openCodeInstanceFor, so a running relay that already drives
- *  the new choice (say, after a rebind between two Claude accounts) is kept
- *  instead of rebuilt, which takes seconds. */
-export const setProjectInstance = (slug: string, instanceId: string) =>
-	Effect.gen(function* () {
-		yield* updateProject(slug, { instanceId });
-		const relay = yield* (yield* RelayCacheTag).peek(slug);
-		const openCode = openCodeInstanceFor(yield* getInstances, instanceId)?.id;
-		if (Option.isSome(relay) && relay.value.openCodeInstanceId === openCode)
-			return;
-		yield* replaceRelay(slug);
-	}).pipe(
-		Effect.annotateLogs("slug", slug),
-		Effect.withSpan("projectRegistry.setProjectInstance"),
-	);
+): I | undefined => instances.find((i) => i.driver !== "claude");
 
 /**
  * Check if a project is currently in Registering state
@@ -1040,28 +1095,48 @@ export const saveProject = (input: SaveProjectInput) =>
 				const canonicalFolders = Arr.map(folders, normalizeProjectDirectory);
 				const repositoryIdentities =
 					yield* deriveRepositoryIdentities(canonicalFolders);
+				const setupScript =
+					input.setupScript === undefined
+						? existing?.setupScript
+						: input.setupScript.trim()
+							? input.setupScript
+							: undefined;
+				const sessionMode =
+					input.sessionMode === undefined
+						? existing?.sessionMode
+						: (input.sessionMode ?? undefined);
+				const groupingMode =
+					input.groupingMode === undefined
+						? existing?.groupingMode
+						: (input.groupingMode ?? undefined);
 				const project: StoredProject = existing
 					? {
 							...existing,
 							folders: canonicalFolders,
 							repositoryIdentities,
+							setupScript,
+							sessionMode,
+							groupingMode,
 							...(title !== undefined && { title }),
 						}
 					: {
 							slug,
 							folders: canonicalFolders,
 							repositoryIdentities,
+							setupScript,
+							sessionMode,
+							groupingMode,
 							title: title ?? titleForDirectory(mainFolder),
 							lastUsed: Date.now(),
-							...(input.instanceId !== undefined && {
-								instanceId: input.instanceId,
-							}),
 						};
 				if (existing) {
 					yield* updateProject(slug, {
 						folders: canonicalFolders,
 						repositoryIdentities,
 						title: project.title,
+						setupScript,
+						sessionMode,
+						groupingMode,
 					});
 				} else {
 					yield* addWithoutRelay(project);

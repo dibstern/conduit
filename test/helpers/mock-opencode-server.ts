@@ -9,6 +9,7 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
+import type { PtyInfo } from "../../src/lib/shared-types.js";
 import type {
 	OpenCodeInteraction,
 	OpenCodeRecording,
@@ -97,8 +98,11 @@ export class MockOpenCodeServer {
 	/** Counter for generating unique PTY IDs when no recording exists. */
 	private ptyCounter = 0;
 
-	/** Dynamically created PTY IDs (not from recording). */
-	private dynamicPtyIds = new Set<string>();
+	/** Dynamically created PTYs (not from recording). */
+	private dynamicPtys = new Map<string, Record<string, unknown>>();
+	private ptyListHold: Promise<void> | undefined;
+	ptyListFailures = 0;
+	readonly rejectedPtyConnections = new Set<string>();
 
 	/** Sessions injected via POST /session (tracked separately for merging into all GET /session responses). */
 	private injectedSessions = new Map<string, Record<string, unknown>>();
@@ -115,6 +119,7 @@ export class MockOpenCodeServer {
 			{ info: Record<string, unknown>; parts: Record<string, unknown>[] }
 		>
 	>();
+	private pendingReverts = new Map<string, string>();
 
 	/** Session IDs that have been deleted (filtered from GET /session). */
 	private deletedSessionIds = new Set<string>();
@@ -275,7 +280,8 @@ export class MockOpenCodeServer {
 		this.sseSegments = [[]];
 		this.promptsFired = 0;
 		this.ptyCounter = 0;
-		this.dynamicPtyIds.clear();
+		this.ptyListFailures = 0;
+		this.dynamicPtys.clear();
 		this.injectedSessions.clear();
 		this.sessionDirectories.clear();
 		this.deletedSessionIds.clear();
@@ -283,6 +289,7 @@ export class MockOpenCodeServer {
 		this.sseIdleSessions.clear();
 		this.sseBusySessions.clear();
 		this.sseMessages.clear();
+		this.pendingReverts.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.answers?.clear();
@@ -319,6 +326,21 @@ export class MockOpenCodeServer {
 		const allEvents = this.sseSegments.flat();
 		this.emitEvents(allEvents);
 		this.promptsFired = this.sseSegments.length;
+	}
+
+	/** Keep provider discovery pending while a test exercises local terminals. */
+	holdPtyListsUntil(released: Promise<void>): void {
+		this.ptyListHold = released;
+	}
+
+	/** Drop the transport while preserving authoritative provider state. */
+	disconnectSseClients(): void {
+		this.cleanupSseClients();
+	}
+
+	/** Change provider state independently of lifecycle SSE delivery. */
+	setPtyInfo(info: PtyInfo): void {
+		this.dynamicPtys.set(info.id, { args: [], ...info });
 	}
 
 	/**
@@ -455,13 +477,14 @@ export class MockOpenCodeServer {
 		this.ptyQueues.clear();
 		this.promptsFired = 0;
 		this.ptyCounter = 0;
-		this.dynamicPtyIds.clear();
+		this.dynamicPtys.clear();
 		this.injectedSessions.clear();
 		this.deletedSessionIds.clear();
 		this.renamedSessions.clear();
 		this.sseIdleSessions.clear();
 		this.sseBusySessions.clear();
 		this.sseMessages.clear();
+		this.pendingReverts.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.buildQueues();
@@ -683,6 +706,43 @@ export class MockOpenCodeServer {
 		const normalized = normalizedKey(method, path);
 
 		const basePath = path.split("?")[0] ?? path;
+		const rewindRoute = /^\/session\/([^/]+)\/(revert|unrevert)$/.exec(
+			basePath,
+		);
+		if (method === "POST" && rewindRoute) {
+			const sessionId = rewindRoute[1] as string;
+			const operation = rewindRoute[2];
+			const override = this.getActiveQueue(this.exactQueues, exact)?.[0];
+			if (override && override.status >= 400) {
+				res.writeHead(override.status, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(override.responseBody));
+				return;
+			}
+			if (operation === "revert") {
+				const body = JSON.parse(rawBody ?? "{}") as { messageID?: string };
+				if (
+					!body.messageID ||
+					!this.sseMessages.get(sessionId)?.has(body.messageID)
+				) {
+					res.writeHead(404, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ error: "message not found" }));
+					return;
+				}
+				this.pendingReverts.set(sessionId, body.messageID);
+			} else {
+				this.pendingReverts.delete(sessionId);
+			}
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(
+				JSON.stringify({
+					...(this.injectedSessions.get(sessionId) ?? { id: sessionId }),
+					...(this.pendingReverts.has(sessionId)
+						? { revert: { messageID: this.pendingReverts.get(sessionId) } }
+						: {}),
+				}),
+			);
+			return;
+		}
 
 		// The relay answers permissions on the session-scoped route.
 		const answered =
@@ -695,14 +755,33 @@ export class MockOpenCodeServer {
 
 		if (method === "POST" && basePath === "/pty") {
 			const id = `pty_mock${String(++this.ptyCounter).padStart(3, "0")}`;
-			this.dynamicPtyIds.add(id);
+			const pty = {
+				id,
+				title: "Terminal",
+				command: "bash",
+				args: [],
+				cwd: this.defaultDirectory,
+				status: "running",
+				pid: 0,
+			};
+			this.dynamicPtys.set(id, pty);
 			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify({ id }));
+			res.end(JSON.stringify(pty));
 			return;
 		}
 
 		if (method === "GET" && basePath === "/pty") {
-			const list = [...this.dynamicPtyIds].map((id) => ({ id }));
+			const list = [...this.dynamicPtys.values()];
+			this.diagnostics.push({ ts: Date.now(), event: "pty_list" });
+			if (this.ptyListFailures > 0) {
+				this.ptyListFailures--;
+				res.writeHead(503, { "Content-Type": "application/json" });
+				res.end(
+					JSON.stringify({ error: "PTY discovery temporarily unavailable" }),
+				);
+				return;
+			}
+			await this.ptyListHold;
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify(list));
 			return;
@@ -710,9 +789,10 @@ export class MockOpenCodeServer {
 
 		if (method === "DELETE" && /^\/pty\/[^/]+$/.test(basePath)) {
 			const id = basePath.split("/").pop() ?? "";
-			this.dynamicPtyIds.delete(id);
-			res.writeHead(204);
-			res.end();
+			this.dynamicPtys.delete(id);
+			// OpenCode answers pty.remove with a JSON boolean, and the client decodes it.
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end("true");
 			return;
 		}
 
@@ -899,6 +979,16 @@ export class MockOpenCodeServer {
 			return;
 		}
 
+		// Recordings carry the recording machine's folder, so every replayed
+		// turn asks to move its session into the test workspace.
+		if (
+			method === "POST" &&
+			basePath === "/experimental/control-plane/move-session"
+		) {
+			res.writeHead(204).end();
+			return;
+		}
+
 		if (method === "PATCH" && /^\/session\/[^/]+$/.test(basePath)) {
 			const id = basePath.split("/").pop() ?? "";
 			let title: string | undefined;
@@ -1057,7 +1147,7 @@ export class MockOpenCodeServer {
 			const sessionMsgs = sessionId
 				? this.sseMessages.get(sessionId)
 				: undefined;
-			if (sessionMsgs && sessionMsgs.size > 0) {
+			if (sessionMsgs) {
 				let messages = [...sessionMsgs.values()];
 				const query = new URL(path, "http://127.0.0.1").searchParams;
 				const before = query.get("before");
@@ -1126,7 +1216,11 @@ export class MockOpenCodeServer {
 		// Detect prompt_async — emit the corresponding SSE segment.
 		// Rewrite session IDs in SSE events so that the relay routes them
 		// to the session the test is actually using (not the recording's).
-		if (method === "POST" && path.includes("/prompt_async")) {
+		if (
+			method === "POST" &&
+			path.includes("/prompt_async") &&
+			entry.status < 400
+		) {
 			this.promptsFired++;
 			const sseClientCount = this.sseClients.size;
 			const hold = this.nextPromptHold;
@@ -1135,6 +1229,23 @@ export class MockOpenCodeServer {
 			// Extract the actual session ID the test is prompting
 			const promptMatch = /\/session\/([^/]+)\/prompt_async/.exec(path);
 			const actualSessionId = promptMatch?.[1];
+			if (actualSessionId) {
+				const target = this.pendingReverts.get(actualSessionId);
+				if (target) {
+					const messages = [
+						...(this.sseMessages.get(actualSessionId)?.keys() ?? []),
+					];
+					const cut = messages.indexOf(target);
+					if (cut >= 0)
+						this.injectSSEEvents(
+							messages.slice(cut).map((messageID) => ({
+								type: "message.removed",
+								properties: { sessionID: actualSessionId, messageID },
+							})),
+						);
+					this.pendingReverts.delete(actualSessionId);
+				}
+			}
 
 			// Determine which recorded session ID to replace:
 			// promptsFired=1 → recordedPromptSessionIds[0], etc.
@@ -1382,7 +1493,12 @@ export class MockOpenCodeServer {
 		type: string,
 		properties: Record<string, unknown>,
 	): void {
-		if (type === "message.updated") {
+		if (type === "message.removed") {
+			const sessionId = properties["sessionID"] as string | undefined;
+			const messageId = properties["messageID"] as string | undefined;
+			if (sessionId && messageId)
+				this.sseMessages.get(sessionId)?.delete(messageId);
+		} else if (type === "message.updated") {
 			const info = properties["info"] as Record<string, unknown> | undefined;
 			if (!info) return;
 			const sessionId = info["sessionID"] as string | undefined;
@@ -1441,6 +1557,15 @@ export class MockOpenCodeServer {
 		}
 
 		const ptyId = ptyMatch[1];
+		this.diagnostics.push({
+			ts: Date.now(),
+			event: "pty_connect",
+			detail: ptyId,
+		});
+		if (this.rejectedPtyConnections.has(ptyId)) {
+			socket.destroy();
+			return;
+		}
 		const queue = this.ptyQueues.get(ptyId);
 
 		if (!queue || queue.length === 0) {

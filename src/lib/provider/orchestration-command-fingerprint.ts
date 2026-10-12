@@ -73,6 +73,7 @@ export function effectiveDispatchFingerprint(
 	const providerOptions = normalizeOptions({
 		variant: input.variant,
 		agent: input.agent,
+		rewind: input.rewind,
 		// contextWindow folds into effectiveModel for Claude; keep it as a raw
 		// option for providers that treat it independently.
 		...(providerId === "claude" ? {} : { contextWindow: input.contextWindow }),

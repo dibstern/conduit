@@ -20,6 +20,7 @@ import type {
 	EventStoreEffectTag,
 	EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
+import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
@@ -339,6 +340,19 @@ export const makeProviderRuntimeIngestionLive = (
 											const accepted: CanonicalEvent[] = [];
 											for (let event of domainEvents) {
 												if (deleted.has(event.sessionId)) continue;
+												// A committed rewind already removed these messages locally.
+												// Ignore OpenCode's later removals and stale content/backfills.
+												if (
+													"messageId" in event.data &&
+													typeof event.data.messageId === "string"
+												) {
+													const [removed] = yield* sql<{
+														message_id: string;
+													}>`SELECT message_id
+														FROM message_tombstones WHERE session_id = ${event.sessionId}
+														AND message_id = ${event.data.messageId}`;
+													if (removed) continue;
+												}
 												if (
 													event.type === "session.created" &&
 													event.data.parentId &&
@@ -418,7 +432,49 @@ export const makeProviderRuntimeIngestionLive = (
 												if (!deleted.has(event.sessionId))
 													yield* record?.(project) ?? Effect.void;
 											let pending: CanonicalEvent[] = [];
+											const rewoundMessageIds = new Set<string>();
 											for (const event of persistentEvents) {
+												if (
+													"messageId" in event.data &&
+													typeof event.data.messageId === "string" &&
+													rewoundMessageIds.has(event.data.messageId)
+												) {
+													domainEvents = domainEvents.filter(
+														(candidate) => candidate.eventId !== event.eventId,
+													);
+													continue;
+												}
+												if (event.type === "message.removed") {
+													// Include prior content in this same batch before computing the
+													// cut. Upstream removal means the provider committed its tail.
+													if (pending.length > 0) {
+														yield* project(yield* appendEvents(pending));
+														pending = [];
+													}
+													const rewind = yield* readPendingRewindCommit(
+														sql,
+														event.sessionId,
+														event.data.messageId,
+													);
+													if (rewind) {
+														const events = rewind.events.map((removal) => {
+															if (removal.type !== "message.removed")
+																return removal;
+															rewoundMessageIds.add(removal.data.messageId);
+															return removal.data.messageId ===
+																event.data.messageId
+																? event
+																: removal;
+														});
+														yield* project(yield* appendEvents(events));
+														domainEvents = domainEvents.flatMap((candidate) =>
+															candidate.eventId === event.eventId
+																? events
+																: [candidate],
+														);
+														continue;
+													}
+												}
 												if (event.type === "session.usage_limited") {
 													if (pending.length > 0) {
 														yield* project(yield* appendEvents(pending));

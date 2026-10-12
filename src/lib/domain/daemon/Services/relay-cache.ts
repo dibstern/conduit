@@ -23,7 +23,7 @@ import {
 	Scope,
 	ScopedRef,
 } from "effect";
-import type { GlobalProjectSetting } from "../../../contracts/ws-rpc.js";
+import type { GlobalSettingTag } from "../../../contracts/ws-rpc.js";
 import type { PersistenceEffectError } from "../../../persistence/effect/live.js";
 import type { RpcWebSocketHandlerShape } from "../../../server/ws-rpc-handler.js";
 import type { ConnectionHealth } from "../../../types.js";
@@ -40,15 +40,13 @@ export interface RelayStatusSnapshot {
 }
 
 export interface Relay {
-	syncGlobalSetting: (tag: GlobalProjectSetting["_tag"]) => Effect.Effect<void>;
+	syncGlobalSetting: (tag: GlobalSettingTag) => Effect.Effect<void>;
 	refreshGlobalDefaults: () => Effect.Effect<void>;
 	settleIdleSessions?: (
 		idleWindowMs: number,
 		now: number,
 	) => Effect.Effect<number, Error | SqlError | SessionManagerError>;
 	slug: string;
-	/** The OpenCode instance this relay drives, fixed when it was built. */
-	openCodeInstanceId?: string | undefined;
 	rpcWsHandler: Pick<RpcWebSocketHandlerShape, "context">;
 	getStatusSnapshot?: () => RelayStatusSnapshot;
 	setDefaultAgent?: (agent: string) => Promise<void>;

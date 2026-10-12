@@ -100,6 +100,10 @@ describe("Bound project provenance", () => {
 			"0047_messages_completed_at",
 			"0048_sessions_claude_worktree_state",
 			"0049_sessions_workspace_hint",
+			"0050_sessions_pending_rewind",
+			"0051_message_part_versions",
+			"0052_session_git_published",
+			"0053_store_identity",
 		]);
 	});
 

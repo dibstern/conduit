@@ -257,6 +257,7 @@ export const makeContinuation = Effect.gen(function* () {
 							...(session ? { actualInstanceId: session.provider } : {}),
 						});
 					if (
+						(options.at === undefined && session.pending_rewind_message_id) ||
 						(!ownRequest && requesting.has(sessionId)) ||
 						(!policy &&
 							options.at === undefined &&

@@ -45,10 +45,7 @@ const IGNORED_ERRORS = ["Unexpected token 'export'", "vite-inject-mocker"];
 // Closed overlays built on overlays/Modal.svelte do not belong here: Modal keeps
 // its native <dialog> mounted so showModal()/close() can manage focus, and a
 // closed <dialog> is display:none and absent from the accessibility tree.
-const EXPECTED_EMPTY_ROOT = new Set([
-	"overlays-notifsettings--closed",
-	"chat-pastepreview--empty",
-]);
+const EXPECTED_EMPTY_ROOT = new Set(["chat-pastepreview--empty"]);
 
 const realErrors = (messages: string[]): string[] =>
 	messages.filter(

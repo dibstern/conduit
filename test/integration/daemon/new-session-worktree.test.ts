@@ -2,10 +2,12 @@
  * Failure modes exercised through the daemon before implementing the launch:
  * - Git creates a checkout/branch then fails: no session event or owned files remain.
  * - Model initialization is interrupted after creation: session and checkout roll back.
- * - A provider or multi-folder project bypasses the disabled chip: reject before creation.
+ * - An unsupported provider or project without Git bypasses the disabled chip.
  * - Owned paths, including symlink aliases and missing children, become project folders.
  * - The first turn or a freshly started runner after restart uses the main checkout.
  * - Worktree edits leak into a parallel Local session or another worktree session.
+ * - An explicit base is ignored, or a tag/revision is accepted as a local branch.
+ * - An invalid base creates a session, generated branch or checkout before failing.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -24,6 +26,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	CreateSession,
 	FindFolders,
+	ListBranches,
 	ListDaemonSessions,
 	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -53,6 +56,8 @@ describe("New worktree drafts through the built daemon", () => {
 	const names = new Map<string, string>();
 	const branches = new Map<string, string>();
 	const paths = new Map<string, string>();
+	const heads = new Map<string, string>();
+	const bases = new Map<string, string>();
 	let evidence: Record<string, unknown> = {};
 
 	async function start(name: string, failGit = false) {
@@ -61,6 +66,8 @@ describe("New worktree drafts through the built daemon", () => {
 		names.clear();
 		branches.clear();
 		paths.clear();
+		heads.clear();
+		bases.clear();
 		evidence = {};
 		harness = ProcessHarness.create();
 		const fixture = harness;
@@ -86,6 +93,7 @@ describe("New worktree drafts through the built daemon", () => {
 		git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
 		git(fixture.root, "clone", remote, fixture.projectDir);
 		initialHead = git(fixture.projectDir, "rev-parse", "HEAD");
+		heads.set(initialHead, "initial");
 		if (failGit) {
 			const shim = join(fixture.root, "git-shim");
 			mkdirSync(shim);
@@ -122,7 +130,11 @@ process.exit(result.status ?? 1);
 					scope: "process-test",
 				}),
 			);
-		const create = async (title: string, newWorktree = true) => {
+		const create = async (
+			title: string,
+			newWorktree = true,
+			worktreeBase?: string,
+		) => {
 			const result = await sendRpcRequest(
 				socket,
 				new CreateSession({
@@ -131,6 +143,7 @@ process.exit(result.status ?? 1);
 					providerId: "claude",
 					title,
 					...(newWorktree ? { newWorktree: true } : {}),
+					...(worktreeBase === undefined ? {} : { worktreeBase }),
 				}),
 			);
 			names.set(result.sessionId, title);
@@ -138,8 +151,13 @@ process.exit(result.status ?? 1);
 				({ id }) => id === result.sessionId,
 			);
 			const path = session?.workspace?.worktrees[fixture.projectDir];
-			if (path)
+			if (path) {
 				paths.set(path, `<root>/config/worktrees/process-test/${title}/app`);
+				bases.set(
+					path,
+					worktreeBase ?? git(fixture.projectDir, "branch", "--show-current"),
+				);
+			}
 			if (newWorktree && session?.git?.branch)
 				branches.set(session.git.branch, `<branch:${title}>`);
 			return { id: result.sessionId, session, path };
@@ -220,10 +238,8 @@ process.exit(result.status ?? 1);
 				.map(([path]) => ({
 					path,
 					branch: git(path, "branch", "--show-current"),
-					head:
-						git(path, "rev-parse", "HEAD") === initialHead
-							? "initial"
-							: "unexpected-head",
+					base: bases.get(path),
+					head: heads.get(git(path, "rev-parse", "HEAD")) ?? "unexpected-head",
 					dirty: git(path, "status", "--porcelain").length > 0,
 				}));
 			evidence["launches"] = [...names]
@@ -273,6 +289,145 @@ process.exit(result.status ?? 1);
 			}
 		}
 	});
+
+	it("starts from the chosen local branch and defaults to the current branch", async () => {
+		const { fixture, socket, create } = await start("base-branch-selection");
+		git(fixture.projectDir, "branch", "feature/base");
+		git(fixture.projectDir, "tag", "release");
+		writeFileSync(
+			join(fixture.projectDir, "base.txt"),
+			"current main commit\n",
+		);
+		git(
+			fixture.projectDir,
+			"-c",
+			"user.name=Workspace test",
+			"-c",
+			"user.email=workspace@example.test",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"commit",
+			"-am",
+			"Advance main",
+		);
+		const currentHead = git(fixture.projectDir, "rev-parse", "HEAD");
+		heads.set(initialHead, "base:feature/base");
+		heads.set(currentHead, "current:main");
+		expect(currentHead).not.toBe(initialHead);
+		expect(
+			await sendRpcRequest(
+				socket,
+				new ListBranches({ projectSlug: "process-test" }),
+			),
+		).toEqual({
+			current: "main",
+			branches: ["feature/base", "main"],
+		});
+		const selected = await create("selected-base", true, "feature/base");
+		const defaulted = await create("default-base");
+		expect(git(selected.path ?? "", "rev-parse", "HEAD")).toBe(initialHead);
+		expect(git(defaulted.path ?? "", "rev-parse", "HEAD")).toBe(currentHead);
+		expect(git(fixture.projectDir, "branch", "--show-current")).toBe("main");
+		evidence["baseSelections"] = [
+			{
+				session: "selected-base",
+				base: "feature/base",
+				head: "base:feature/base",
+			},
+			{ session: "default-base", base: "main", head: "current:main" },
+		];
+		git(fixture.projectDir, "checkout", "--detach", "main");
+		const detached = await sendRpcRequest(
+			socket,
+			new ListBranches({ projectSlug: "process-test" }),
+		);
+		expect(detached).not.toHaveProperty("current");
+		expect(detached.branches).toEqual(
+			[
+				git(selected.path ?? "", "branch", "--show-current"),
+				git(defaulted.path ?? "", "branch", "--show-current"),
+				"feature/base",
+				"main",
+			].sort(),
+		);
+		evidence["detachedBranches"] = detached;
+	}, 300_000);
+
+	it("rejects missing and non-branch bases without a session, branch or worktree", async () => {
+		const { fixture, socket, sessions } = await start("invalid-base");
+		git(fixture.projectDir, "tag", "release");
+		const beforeSessions = (await sessions()).sessions.map(({ id }) => id);
+		const beforeBranches = git(
+			fixture.projectDir,
+			"for-each-ref",
+			"--format=%(refname) %(objectname)",
+		);
+		const beforeWorktrees = git(
+			fixture.projectDir,
+			"worktree",
+			"list",
+			"--porcelain",
+		);
+		const invalid = [
+			"missing",
+			"release",
+			"origin/main",
+			"HEAD",
+			"main^{commit}",
+			"refs/heads/main",
+		];
+		for (const worktreeBase of invalid) {
+			await expect(
+				sendRpcRequest(
+					socket,
+					new CreateSession({
+						projectSlug: "process-test",
+						originId: "base-test",
+						providerId: "claude",
+						newWorktree: true,
+						worktreeBase,
+					}),
+				),
+			).rejects.toMatchObject({
+				_tag: "WorktreeCreationError",
+				reason: "invalid-branch",
+			});
+		}
+		await expect(
+			sendRpcRequest(
+				socket,
+				new CreateSession({
+					projectSlug: "process-test",
+					originId: "base-test",
+					providerId: "claude",
+					worktreeBase: "main",
+				}),
+			),
+		).rejects.toMatchObject({
+			_tag: "WsRpcError",
+			message: expect.stringContaining("worktreeBase requires newWorktree"),
+		});
+		expect((await sessions()).sessions.map(({ id }) => id)).toEqual(
+			beforeSessions,
+		);
+		expect(
+			git(
+				fixture.projectDir,
+				"for-each-ref",
+				"--format=%(refname) %(objectname)",
+			),
+		).toBe(beforeBranches);
+		expect(git(fixture.projectDir, "worktree", "list", "--porcelain")).toBe(
+			beforeWorktrees,
+		);
+		expect(ownedCheckouts(fixture)).toEqual([]);
+		evidence["invalidBases"] = invalid;
+		evidence["failure"] = {
+			sessionCreated: false,
+			branchesChanged: false,
+			worktreesChanged: false,
+		};
+	}, 300_000);
 
 	it("isolates first-turn edits and resumes a new runner in canonical worktrees after restart", async () => {
 		const { fixture, create } = await start("isolation-restart");
@@ -493,7 +648,7 @@ process.exit(result.status ?? 1);
 		};
 	}, 300_000);
 
-	it("rejects unsupported providers and multi-folder launches before creating anything", async () => {
+	it("rejects unsupported providers and projects without Git before creating anything", async () => {
 		const { fixture, socket, sessions } = await start("unsupported-launches");
 		const before = (await sessions()).sessions.map(({ id }) => id);
 		await expect(
@@ -502,7 +657,7 @@ process.exit(result.status ?? 1);
 				new CreateSession({
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
-					providerId: "opencode",
+					providerId: "unsupported-provider",
 					newWorktree: true,
 				}),
 			),
@@ -533,7 +688,7 @@ process.exit(result.status ?? 1);
 			socket,
 			new SaveProject({
 				slug: "process-test",
-				folders: [fixture.projectDir, secondary],
+				folders: [secondary],
 			}),
 		);
 		await expect(
@@ -563,7 +718,7 @@ process.exit(result.status ?? 1);
 		evidence["refused"] = [
 			"opencode",
 			"conflicting-draft-choices",
-			"multi-folder",
+			"no-git-folders",
 		];
 	}, 300_000);
 

@@ -16,6 +16,7 @@ import {
 	Runtime,
 	Stream,
 } from "effect";
+import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
 import { migrateDaemonConfigFolders } from "../../../daemon/config-persistence.js";
 import {
 	closeHttpServer,
@@ -28,7 +29,7 @@ import {
 	startOnboardingServer,
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
-import { resolveTraceConfig } from "../../../env.js";
+import { ENV, resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import { ServerBuildUpdateLive } from "../../../server/build-update.js";
@@ -76,7 +77,6 @@ import {
 } from "../Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
-	InstanceManagerStateTag,
 	ManagedOpenCodeLifecycleLive,
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
@@ -90,7 +90,6 @@ import {
 	ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
 	saveProject,
-	setProjectInstance as setEffectProjectInstance,
 } from "../Services/project-registry-service.js";
 import {
 	makeRelayCacheService,
@@ -357,7 +356,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| DaemonStateTag
-	| InstanceManagerStateTag
 > =>
 	Layer.scoped(
 		RelayCacheTag,
@@ -369,7 +367,6 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 			const eventBus = yield* DaemonEventBusTag;
 			const configPersistence = yield* ConfigPersistenceTag;
 			const daemonState = yield* DaemonStateTag;
-			const instanceState = yield* InstanceManagerStateTag;
 			const runtime = yield* Effect.runtime<never>();
 			let relayCache: RelayCache | undefined;
 
@@ -437,22 +434,10 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 									),
 								),
 							),
-						setProjectInstance: (projectSlug: string, instanceId: string) =>
-							runCallback(
-								provideProjectMutationDeps(
-									setEffectProjectInstance(projectSlug, instanceId).pipe(
-										Effect.provideService(
-											InstanceManagerStateTag,
-											instanceState,
-										),
-									),
-								),
-							),
 					};
 					const relay = yield* relayFactory.create(project, projectControls);
 					return {
 						slug,
-						openCodeInstanceId: relay.openCodeInstanceId,
 						syncGlobalSetting: relay.syncGlobalSetting,
 						refreshGlobalDefaults: relay.refreshGlobalDefaults,
 						settleIdleSessions: (idleWindowMs: number, now: number) =>
@@ -741,18 +726,41 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			: makeDaemonStateLive()
 	).pipe(
 		Layer.tap((context) =>
-			Ref.update(Context.get(context, DaemonStateTag), (current) => ({
-				...current,
-				configDir,
-				socketPath,
-				keepAwake: options.initialConfig.keepAwake,
-				...(options.initialConfig.keepAwakeCommand !== undefined && {
-					keepAwakeCommand: options.initialConfig.keepAwakeCommand,
-				}),
-				...(options.initialConfig.keepAwakeArgs !== undefined && {
-					keepAwakeArgs: options.initialConfig.keepAwakeArgs,
-				}),
-			})),
+			Ref.update(Context.get(context, DaemonStateTag), (current) => {
+				const defaultId = defaultInstanceIdForDriver("claude");
+				const existing = current.instances.find(({ id }) => id === defaultId);
+				const defaultClaude = {
+					...(existing ?? {
+						id: defaultId,
+						name: "Claude",
+						driver: "claude" as const,
+						port: 0,
+						managed: false,
+					}),
+					...(options.initialConfig.claudeConfigDir !== undefined && {
+						configDir: options.initialConfig.claudeConfigDir,
+					}),
+				};
+				return {
+					...current,
+					configDir,
+					socketPath,
+					keepAwake: options.initialConfig.keepAwake,
+					...(options.configPath !== undefined && {
+						instances: existing
+							? current.instances.map((instance) =>
+									instance.id === defaultId ? defaultClaude : instance,
+								)
+							: [...current.instances, defaultClaude],
+					}),
+					...(options.initialConfig.keepAwakeCommand !== undefined && {
+						keepAwakeCommand: options.initialConfig.keepAwakeCommand,
+					}),
+					...(options.initialConfig.keepAwakeArgs !== undefined && {
+						keepAwakeArgs: options.initialConfig.keepAwakeArgs,
+					}),
+				};
+			}),
 		),
 	);
 
@@ -803,9 +811,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
-			Layer.merge(makeWorktreeLive(configDir), UsageLive()).pipe(
-				Layer.provideMerge(withOpenCodeInstances),
-			),
+			Layer.merge(
+				makeWorktreeLive(configDir, {
+					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
+				}),
+				UsageLive(),
+			).pipe(Layer.provideMerge(withOpenCodeInstances)),
 		),
 	);
 
@@ -825,7 +836,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const http = HttpServerLive.pipe(Layer.provideMerge(httpRequestHandler));
 
 	const tailscale = TailscaleServeLive.pipe(
-		Layer.provide(TailscaleCliLive),
+		Layer.provideMerge(TailscaleCliLive),
 		Layer.provideMerge(http),
 		Layer.provideMerge(withDaemonControl),
 	);

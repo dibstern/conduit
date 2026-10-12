@@ -5,16 +5,24 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 const project = "e2e-replay";
 const a = "transcript-a";
 const b = "transcript-b";
-const reply = (text: string) => ({
-	_tag: "transcriptMessage",
-	message: {
-		id: "assistant-a",
-		role: "assistant",
-		parentID: "user-a",
-		time: { created: 1 },
-		parts: [{ id: "part-a", type: "text", text }],
+// A message travels as its header, then each part as a row of its own.
+const reply = (text: string) => [
+	{
+		_tag: "message",
+		message: {
+			id: "assistant-a",
+			role: "assistant",
+			parentID: "user-a",
+			time: { created: 1 },
+		},
 	},
-});
+	{
+		_tag: "part",
+		messageId: "assistant-a",
+		sortOrder: 0,
+		part: { id: "part-a", type: "text", text },
+	},
+];
 
 test("detail feed renders streamed text once and resumes cached content across switches", async ({
 	page,
@@ -81,13 +89,13 @@ test("detail feed renders streamed text once and resumes cached content across s
 	);
 	rpc.sendChunk(
 		"SubscribeSessionDetail",
-		[{ _tag: "upsert", item: reply("Hel"), sequence: 1 }],
+		reply("Hel").map((item) => ({ _tag: "upsert", item, sequence: 1 })),
 		a,
 	);
 	await expect(page.locator(".msg-assistant .md-content")).toContainText("Hel");
 	rpc.sendChunk(
 		"SubscribeSessionDetail",
-		[{ _tag: "upsert", item: reply("Hello world"), sequence: 2 }],
+		reply("Hello world").map((item) => ({ _tag: "upsert", item, sequence: 2 })),
 		a,
 	);
 	await expect(page.locator(".msg-assistant")).toHaveCount(1);
@@ -152,7 +160,7 @@ test("detail catch-up removes a message after returning to a session", async ({
 					? [
 							{
 								_tag: "snapshot",
-								rows: [reply("Remove me")],
+								rows: reply("Remove me"),
 								sequence: 1,
 								hasMore: false,
 							},

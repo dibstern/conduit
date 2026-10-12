@@ -39,20 +39,22 @@ describe("instance lifecycle integration", () => {
 			smartDefault: false,
 		});
 		const instances = daemon.getInstances();
-		expect(instances).toHaveLength(1);
-		const [instance] = instances;
+		expect(instances).toHaveLength(2);
+		const instance = instances.find(({ id }) => id === "opencode");
 		assert.exists(instance, "expected the default instance");
 		expect(instance.id).toBe("opencode");
 	});
 
-	it("daemon without opencodeUrl has no instances (smartDefault=false)", async () => {
+	it("daemon without opencodeUrl keeps only the Claude default (smartDefault=false)", async () => {
 		daemon = await startForegroundDaemon({
 			port: 0,
 			configDir: tmpDir,
 			socketPath: join(tmpDir, "relay.sock"),
 			smartDefault: false,
 		});
-		expect(daemon.getInstances()).toHaveLength(0);
+		expect(daemon.getInstances()).toEqual([
+			expect.objectContaining({ id: "claude", driver: "claude" }),
+		]);
 	});
 
 	it("persists instances in config via saveDaemonConfig", async () => {
@@ -69,7 +71,6 @@ describe("instance lifecycle integration", () => {
 					folders: ["/src/app"],
 					slug: "app",
 					addedAt: Date.now(),
-					instanceId: "personal",
 				},
 			],
 			instances: [
@@ -85,11 +86,9 @@ describe("instance lifecycle integration", () => {
 		expect(loaded.instances).toHaveLength(2);
 		const [project] = loaded.projects;
 		assert.exists(project, "expected the saved personal project");
-		expect(project.instanceId).toBe("personal");
+		expect(project).not.toHaveProperty("instanceId");
 	});
 
-	// A binding picks the harness for new sessions, so a default one would
-	// override the default model's harness.
 	it("addProject leaves a new project unbound", async () => {
 		const projectDir = join(tmpDir, "lifecycle-test");
 		mkdirSync(projectDir);
@@ -101,6 +100,6 @@ describe("instance lifecycle integration", () => {
 			smartDefault: false,
 		});
 		const project = await daemon.addProject(projectDir);
-		expect(project.instanceId).toBeUndefined();
+		expect(project).not.toHaveProperty("instanceId");
 	});
 });

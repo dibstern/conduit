@@ -438,7 +438,6 @@ describe("makeDaemonLive wiring", () => {
 							folders: ["/tmp/alpha"],
 							title: "Alpha",
 							lastUsed: 1700000000000,
-							instanceId: "remote-1",
 						},
 						{ silent: true },
 					);
@@ -557,6 +556,13 @@ describe("makeDaemonLive wiring", () => {
 						id: "remote-1",
 						url: "https://opencode.example.test",
 					}),
+					{
+						id: "claude",
+						name: "Claude",
+						driver: "claude",
+						port: 0,
+						managed: false,
+					},
 				]);
 			}),
 	);

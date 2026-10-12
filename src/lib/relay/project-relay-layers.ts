@@ -15,6 +15,7 @@ import {
 	defaultDaemonConfig,
 	getConfigDir,
 	loadDaemonConfig,
+	resolveClaudeInstanceConfigDir,
 	resolveConfiguredInstances,
 } from "../daemon/config-persistence.js";
 import {
@@ -76,6 +77,7 @@ import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
 	BackgroundLivenessTag,
 	type ConfigTag,
+	LiveTaskListTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
 	OpenCodeModelServiceLive,
@@ -90,6 +92,10 @@ import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
+import {
+	SessionSetupLive,
+	type SessionSetupTag,
+} from "../domain/relay/Services/session-setup.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
@@ -164,6 +170,8 @@ const relayOpenCodeInstances = (
 					),
 				),
 		use,
+		useIfRunning: (instanceId, directory = scope) =>
+			instances.useIfRunning(target(instanceId), directory),
 		ifRunning: (instanceId, directory = scope) =>
 			instances.ifRunning(target(instanceId), directory),
 		stop: (instanceId) => instances.stop(target(instanceId)),
@@ -172,6 +180,7 @@ const relayOpenCodeInstances = (
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
+	| SessionSetupTag
 	| OverridesStateTag
 	| DaemonConfigRefTag
 	| ConfigPersistenceTag
@@ -236,6 +245,7 @@ export function createProjectRelayLayers({
 		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		claudeQueryFactory: claudeSdk.query,
+		claudeSessionForkSdk: claudeSdk.fork,
 		...(config.claudeSdk?.subagentSdk && {
 			claudeSubagentSdk: config.claudeSdk.subagentSdk,
 		}),
@@ -305,7 +315,9 @@ export function createProjectRelayLayers({
 									.filter((instance) => instance.driver === "claude")
 									.map((instance) => {
 										const configDir =
-											instance.configDir ?? saved.claudeConfigDir;
+											instance.id === defaultInstanceIdForDriver("claude")
+												? resolveClaudeInstanceConfigDir(saved, instance.id)
+												: (instance.configDir ?? saved.claudeConfigDir);
 										return {
 											id: instance.id,
 											harness: "claude" as const,
@@ -620,6 +632,7 @@ export function createProjectRelayLayers({
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
+		Layer.sync(LiveTaskListTag, () => backgroundLiveness.liveListOf),
 		Layer.sync(SessionCompactionsTag, () => compactions.compactingOf),
 		Layer.sync(SessionRetriesTag, () => retries.retryingOf),
 		ptyRuntimeLayer,
@@ -665,7 +678,11 @@ export function createProjectRelayLayers({
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(
-			Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
+			SessionSetupLive.pipe(
+				Layer.provideMerge(
+					Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
+				),
+			),
 			makeWsTransportLive({ noServer: true }),
 		),
 	);
@@ -691,12 +708,23 @@ export function createProjectRelayLayers({
 	).pipe(Layer.provide(baseLayers));
 	// The inbox drains on the relay's one bus (memoised by layer reference).
 	const inboxLayer = SessionInboxLive.pipe(Layer.provide(SessionEventBusLive));
+	// The borrowed daemon tracer goes BENEATH everything, not beside it:
+	// Layer.setTracer patches a FiberRef in its own build fiber, so a merged
+	// tracer never reaches fibers forked while building sibling layers
+	// (e.g. the status poller loop).
 	const fullLayer = Layer.provideMerge(
-		RpcSubscriptionScopeLive,
 		Layer.provideMerge(
-			Layer.mergeAll(wiringLayers, inboxLayer, SessionWorkspaceHintReactorLive),
-			fullBaseLayers,
+			RpcSubscriptionScopeLive,
+			Layer.provideMerge(
+				Layer.mergeAll(
+					wiringLayers,
+					inboxLayer,
+					SessionWorkspaceHintReactorLive,
+				),
+				fullBaseLayers,
+			),
 		),
+		config.tracer === undefined ? Layer.empty : Layer.setTracer(config.tracer),
 	);
 	const relayManagedRuntime = ManagedRuntime.make(fullLayer);
 	const effectRuntime: RelayRuntime = {

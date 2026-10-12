@@ -4,11 +4,35 @@ Feature: Named provider instances are managed in Settings and drive the composer
 Background:
   Given the conduit app is served with the connected mockup
 
+Scenario: the Server card shows daemon-wide status
+  When I open settings to the Server section
+  Then the Server card shows uptime, version, port and connected browsers
+
+Scenario Outline: Shut down explains how the daemon starts again
+  Given the daemon is <supervision>
+  When I open settings to the Server section
+  Then Server Restart is <restart>
+  When I open the Server Shut down confirmation
+  Then the Server Shut down warning says <warning>
+  When I cancel the Server Shut down confirmation
+
+Examples:
+  | supervision  | restart | warning                                                                                |
+  | supervised   | visible | Every browser disconnects. The login service will start it straight back.               |
+  | unsupervised | hidden  | Every browser disconnects. Start it again from the terminal with conduit serve.          |
+
+Scenario: opening Shut down closes the instance editor
+  When I open settings to the Server section
+  And I start adding a Claude instance
+  And I open the Server Shut down confirmation
+  Then the Server instance editor is closed
+  When I cancel the Server Shut down confirmation
+
 Scenario Outline: adding a named instance makes it selectable in the composer rail
   When I open settings to the Server section
   And I add a <driver> instance named <name>
   And I open the model picker
-  Then the <name> instance is selectable in the rail
+  Then the <name> instance is selectable in the picker
 
 Examples:
   | driver   | name        |
@@ -22,6 +46,40 @@ Scenario: editing a named instance updates it in the settings list
   Then the Instances list shows Prod OC
   And the Instances list does not show Staging OC
 
+Scenario: the default Claude account shares the editor and cannot be removed
+  Given the default Claude account is named Personal Claude with folder /profiles/personal
+  When I open settings to the Server section
+  And I edit the default Claude account
+  Then the default Claude editor shows name Personal Claude and folder /profiles/personal
+  And the default Claude account cannot be removed
+  When I save the default Claude account as Home Claude with folder /profiles/home
+  Then the Instances list shows Home Claude
+  And the default Claude account shows folder /profiles/home with Applies after restart
+  And UpdateInstance saves the default Claude name Home Claude and folder /profiles/home
+
+Scenario: the default Claude account can return to the environment's login
+  Given the default Claude account is named Personal Claude with folder /profiles/personal
+  When I open settings to the Server section
+  And I edit the default Claude account
+  And I save the default Claude account as Personal Claude with folder empty
+  Then the default Claude account shows folder env with Applies after restart
+  And UpdateInstance saves the default Claude name Personal Claude and folder empty
+
+Scenario: the OpenCode empty state includes setup guides even with a Claude account
+  Given no OpenCode servers are configured and CCS is detected
+  When I open settings to the Server section
+  Then the OpenCode empty state offers the serve command and Scan link
+  And the OpenCode setup guides are collapsed with the CCS tick
+
+Scenario: the Add form switches between managed and external OpenCode servers
+  When I open settings to the Server section
+  And I start adding an OpenCode instance
+  Then the OpenCode editor offers name and port with environment variables collapsed
+  When I expand the instance environment variables
+  Then the instance environment field is visible
+  When I turn off Conduit starts it
+  Then the OpenCode editor offers name and URL
+
 Scenario: removing a named instance drops it from the settings list
   Given a named OpenCode instance Staging OC is already configured
   When I open settings to the Server section
@@ -30,12 +88,12 @@ Scenario: removing a named instance drops it from the settings list
 
 Scenario Outline: the instance editor matches the approved layout
   When I open settings to the Server section
-  And I start adding a Claude instance
+  And I start adding a <driver> instance
   Then the instances-settings region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | baseline                         | threshold |
-  | provider-instances-settings-dark | 98        |
+  | driver | baseline                         | threshold |
+  | Claude | provider-instances-settings-dark | 98        |
 
 Scenario: Usage owns the limit settings beside the Claude and Server sections
   When I open settings to the Server section

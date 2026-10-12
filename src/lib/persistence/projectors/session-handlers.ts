@@ -91,6 +91,9 @@ SELECT id FROM subtree`;
 type SessionHandledType =
 	| "session.created"
 	| "session.renamed"
+	| "session.rewound"
+	| "session.rewind_undone"
+	| "session.rewind_committed"
 	| "session.workspace_changed"
 	| "session.workspace_hint_changed"
 	| "session.workspace_started"
@@ -224,6 +227,24 @@ export const sessionHandlers: {
 		event: StoredEvent & { type: K; data: EventPayloadMap[K] },
 	) => readonly SessionStatement[];
 } = {
+	"session.rewound": (event) => [
+		{
+			sql: "UPDATE sessions SET pending_rewind_message_id = ?, updated_at = ? WHERE id = ?",
+			params: [event.data.messageId, event.createdAt, event.sessionId],
+		},
+	],
+	"session.rewind_undone": (event) => [
+		{
+			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",
+			params: [event.createdAt, event.sessionId],
+		},
+	],
+	"session.rewind_committed": (event) => [
+		{
+			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",
+			params: [event.createdAt, event.sessionId],
+		},
+	],
 	"session.created": (event) => {
 		// Use INSERT ... ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
 		// to preserve user/auto-renamed titles plus nullable columns
@@ -325,29 +346,32 @@ export const sessionHandlers: {
 		},
 	],
 
-	"session.workspace_changed": (event) => [
-		{
-			sql: `UPDATE sessions SET workspace = ?,
+	"session.workspace_changed": (event) =>
+		event.data.cause === "branch-rename"
+			? []
+			: [
+					{
+						sql: `UPDATE sessions SET workspace = ?,
 				workspace_hint = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint END,
 				workspace_hint_sequence = CASE WHEN workspace_hint = ? THEN NULL ELSE workspace_hint_sequence END
 				WHERE id = ?`,
-			params: [
-				// Keep fallback and origin metadata on the existing browser session row.
-				Object.keys(event.data.worktrees).length === 0 &&
-				event.data.cause !== "missing" &&
-				event.data.origin === "existing"
-					? null
-					: JSON.stringify({
-							cause: event.data.cause,
-							worktrees: event.data.worktrees,
-							origin: event.data.origin,
-						}),
-				event.data.path ?? null,
-				event.data.path ?? null,
-				event.data.sessionId,
-			],
-		},
-	],
+						params: [
+							// Keep fallback and origin metadata on the existing browser session row.
+							Object.keys(event.data.worktrees).length === 0 &&
+							event.data.cause !== "missing" &&
+							event.data.origin === "existing"
+								? null
+								: JSON.stringify({
+										cause: event.data.cause,
+										worktrees: event.data.worktrees,
+										origin: event.data.origin,
+									}),
+							event.data.path ?? null,
+							event.data.path ?? null,
+							event.data.sessionId,
+						],
+					},
+				],
 	"session.workspace_hint_changed": (event) => {
 		const sequence = event.data.path === null ? null : event.sequence;
 		return [

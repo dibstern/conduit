@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 
 describe("makeSessionBackgroundLiveness", () => {
+	it("publishes late task detail without resetting age or merging removed tasks", () => {
+		let now = 100;
+		const onChange = vi.fn();
+		const liveness = makeSessionBackgroundLiveness(onChange, () => now);
+		const task = { id: "shell", type: "local_bash", description: "Watch" };
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [task] });
+		now = 200;
+		const detailed = { ...task, detail: "pnpm test --watch" };
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [detailed] });
+		expect(liveness.backgroundOf("one")?.tasks).toEqual([
+			{ ...detailed, firstSeenAt: 100 },
+		]);
+		expect(onChange).toHaveBeenCalledTimes(2);
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [detailed] });
+		expect(onChange).toHaveBeenCalledTimes(2);
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [] });
+		expect(liveness.backgroundOf("one")).toBeUndefined();
+	});
+
 	it("publishes newly learned ancestry without changing a live task's age", () => {
 		const onChange = vi.fn();
 		const liveness = makeSessionBackgroundLiveness(onChange, () => 100);
@@ -189,5 +208,48 @@ describe("makeSessionBackgroundLiveness", () => {
 		expect(liveness.hasLiveWork("one")).toBe(false);
 		expect(liveness.backgroundOf("one")).toBeUndefined();
 		expect(onChange.mock.calls).toEqual([["one"], ["one"]]);
+	});
+	it("reports a runtime's live task ids and since when that list has held", () => {
+		let clock = 100;
+		const liveness = makeSessionBackgroundLiveness(undefined, () => clock);
+		const a = { id: "a", type: "local_bash", description: "Watch" };
+		const b = { id: "b", type: "local_agent", description: "Audit" };
+
+		// Nothing heard since the daemon started: unknown, not empty.
+		expect(liveness.liveListOf("one")).toBeUndefined();
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [] });
+		expect(liveness.liveListOf("one")).toEqual({
+			taskIds: new Set(),
+			since: 100,
+		});
+
+		clock = 200;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [a, b] });
+		// A replay of the same list must not restart the clock.
+		clock = 300;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [b, a] });
+		expect(liveness.liveListOf("one")).toEqual({
+			taskIds: new Set(["a", "b"]),
+			since: 200,
+		});
+
+		clock = 400;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [b] });
+		expect(liveness.liveListOf("one")?.since).toBe(400);
+
+		// An ended runtime has no live tasks: known and empty.
+		clock = 500;
+		liveness.record({ sessionId: "one", kind: "session-ended" });
+		liveness.record({ sessionId: "two", kind: "session-ended" });
+		clock = 600;
+		liveness.record({ sessionId: "one", kind: "snapshot", tasks: [] });
+		expect(liveness.liveListOf("one")).toEqual({
+			taskIds: new Set(),
+			since: 500,
+		});
+		expect(liveness.liveListOf("two")).toEqual({
+			taskIds: new Set(),
+			since: 500,
+		});
 	});
 });

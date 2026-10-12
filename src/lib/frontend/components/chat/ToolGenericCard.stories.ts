@@ -1,14 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { PartVersion, ToolCallId } from "../../../contracts/tool-wire.js";
 import {
 	mockToolBash,
 	mockToolCompleted,
 	mockToolError,
 	mockToolPending,
+	mockToolPreview,
 	mockToolReadWithOffset,
 	mockToolRunning,
-	mockToolTruncated,
 } from "../../stories/mocks.js";
+import type { ToolMessage } from "../../types.js";
 import ToolGenericCard from "./ToolGenericCard.svelte";
 
 const meta = {
@@ -62,13 +64,53 @@ export const ExpandedBashCommand: Story = {
 	},
 };
 
-export const ExpandedTruncatedResult: Story = {
-	args: { message: mockToolTruncated },
+const fullGrepOutput = `${mockToolPreview.result}\n${Array.from(
+	{ length: 12 },
+	(_, i) =>
+		`src/lib/frontend/utils/history-logic.ts:${200 + i}:// TODO: line ${i + 1} of the full output`,
+).join("\n")}`;
+
+/** Expanding a previewed tool loads the rest straight away; the preview shows meanwhile. */
+export const ExpandedPreviewLoading: Story = {
+	args: { message: mockToolPreview, loadDetails: () => new Promise(() => {}) },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvas.getByText("Loading full output…")).toBeVisible();
+	},
+};
+
+/** Once loaded, the whole output replaces the preview with nothing more to click. */
+export const ExpandedFullDetail: Story = {
+	args: {
+		message: mockToolPreview,
+		loadDetails: async (tool: ToolMessage) => ({
+			toolId: ToolCallId.make(tool.id),
+			version: PartVersion.make(1),
+			settled: true,
+			output: { _tag: "whole", text: fullGrepOutput },
+		}),
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByRole("button"));
 		await expect(
-			canvas.getByRole("button", { name: "Show full output" }),
+			await canvas.findByText(/line 12 of the full output/),
+		).toBeVisible();
+	},
+};
+
+/** A failed load keeps the preview, says the rest did not load, and offers a retry. */
+export const ExpandedLoadFailedRetry: Story = {
+	args: {
+		message: mockToolPreview,
+		loadDetails: () => Promise.reject(new Error("connection lost")),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(
+			await canvas.findByRole("button", { name: "Retry" }),
 		).toBeVisible();
 	},
 };

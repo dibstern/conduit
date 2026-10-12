@@ -5,6 +5,15 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => {
+		localStorage.setItem(
+			"conduit-composer-preferences",
+			JSON.stringify({ controls: "words" }),
+		);
+	});
+});
+
 const projectSlug = "e2e-replay";
 const main = "/workspace/conduit";
 const hintPath = "/workspace/conduit-hint";
@@ -63,12 +72,17 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 }, testInfo) => {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
-	await expect(page.getByTestId("workspace-hint")).toContainText(
+	const checkout = page.getByTestId("composer-checkout");
+	await expect(checkout.getByTestId("workspace-hint")).toHaveAttribute(
+		"aria-label",
 		"working in conduit-hint?",
 	);
-	await expect(page.getByTestId("workspace-hint-dismiss")).toBeVisible();
+	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-desktop");
-	await page.getByTestId("workspace-hint-move").click();
+	await checkout.click();
+	const menu = page.getByTestId("composer-checkout-menu");
+	await expect(menu.getByTestId("workspace-hint-dismiss")).toBeVisible();
+	await menu.getByTestId("workspace-hint-move").click();
 	await expect
 		.poll(() =>
 			rpc
@@ -89,10 +103,7 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 		git: { branch: "hint", worktree: "conduit-hint" },
 	});
 	await expect(page.getByTestId("workspace-hint")).toHaveCount(0);
-	await expect(page.getByTestId("session-bar-identity")).toHaveAttribute(
-		"title",
-		"conduit-hint / hint",
-	);
+	await expect(checkout).toHaveAttribute("title", "conduit-hint / hint");
 });
 
 test("desktop dismissal targets the current hint and follows shell row updates", async ({
@@ -102,14 +113,16 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
 	const changedPath = "/workspace/conduit-other";
-	await expect(page.getByTestId("workspace-hint")).toContainText(
-		"working in conduit-hint?",
-	);
+	const checkout = page.getByTestId("composer-checkout");
+	const hint = checkout.getByTestId("workspace-hint");
+	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	rpc.upsertShellRow({ ...session, workspaceHint: changedPath });
-	await expect(page.getByTestId("workspace-hint")).toContainText(
-		"working in conduit-other?",
-	);
-	await page.getByTestId("workspace-hint-dismiss").click();
+	await expect(hint).toHaveAttribute("aria-label", "working in conduit-other?");
+	await checkout.click();
+	await page
+		.getByTestId("composer-checkout-menu")
+		.getByTestId("workspace-hint-dismiss")
+		.click();
 	await expect
 		.poll(() =>
 			rpc
@@ -125,13 +138,14 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 	await capture(page, testInfo, "workspace-hint-dismissed");
 });
 
-test("phone hint is an accessible icon with both actions in the pill menu", async ({
+test("phone hint is an accessible icon with both actions in the checkout menu", async ({
 	page,
 	harness,
 }, testInfo) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
-	const hint = page.getByTestId("workspace-hint");
+	const checkout = page.getByTestId("composer-checkout");
+	const hint = checkout.getByTestId("workspace-hint");
 	await expect(hint).toBeVisible();
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	await expect(hint).toHaveText("");
@@ -139,11 +153,11 @@ test("phone hint is an accessible icon with both actions in the pill menu", asyn
 	await expect(page.getByTestId("workspace-hint-move")).toHaveCount(0);
 	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-phone");
-	const identity = page.getByTestId("session-bar-identity");
-	await identity.click();
-	await expect(page.getByTestId("workspace-hint-dismiss")).toBeVisible();
+	await checkout.click();
+	const menu = page.getByTestId("composer-checkout-menu");
+	await expect(menu.getByTestId("workspace-hint-dismiss")).toBeVisible();
 	await capture(page, testInfo, "workspace-hint-phone-menu");
-	await page.getByTestId("workspace-hint-move").click();
+	await menu.getByTestId("workspace-hint-move").click();
 	await expect
 		.poll(() =>
 			rpc
@@ -152,8 +166,8 @@ test("phone hint is an accessible icon with both actions in the pill menu", asyn
 				.map(({ payload }) => payload),
 		)
 		.toMatchObject([{ projectSlug, sessionId: session.id, path: hintPath }]);
-	await identity.click();
-	await page.getByTestId("workspace-hint-dismiss").click();
+	await checkout.click();
+	await menu.getByTestId("workspace-hint-dismiss").click();
 	await expect
 		.poll(() =>
 			rpc

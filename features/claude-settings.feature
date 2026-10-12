@@ -6,10 +6,11 @@ Background:
 Scenario: opening the Claude section shows the available settings
   When I open settings to the Claude section
   Then the Claude settings are shown
+  And the Claude Attribution group is collapsed with summary "Commit · PR · Session link"
 
-Scenario: the Claude section shows the default model and thinking level
+Scenario: Models & agents shows the Claude default model and effort
   Given the default model is Claude Sonnet 4 with a thinking level of high
-  When I open settings to the Claude section
+  When I open settings to the Models & agents section
   Then the default model row shows Claude Sonnet 4
   And the default model row shows Thinking level: high
 
@@ -35,6 +36,7 @@ Scenario: turning hooks off stores the inverted setting truthfully
 
 Scenario: changing the session link preserves inherited attribution
   When I open settings to the Claude section
+  And I expand the Claude Attribution group
   And I turn off the Claude attribution session link
   Then the attribution override keeps the inherited commit text with the session link off
 
@@ -45,11 +47,11 @@ Scenario: changing the default approval mode elevates new sessions
   Then a SetDefaultPermissionMode RPC is sent with mode full
   And the default approval mode row shows the elevated-permissions warning
 
-Scenario: the default model is selectable from the Claude section
+Scenario: the Claude default model is selectable from Models & agents
   Given the default model is Claude Sonnet 4 with a thinking level of high
-  When I open settings to the Claude section
+  When I open settings to the Models & agents section
   And I choose claude-opus-4-1 as the default model
-  Then a SetDefaultModel RPC is sent for claude-opus-4-1
+  Then a SetHarnessDefault RPC is sent for claude-opus-4-1
 
 Scenario: Auto is available as a default approval mode
   Given the default approval mode is Ask
@@ -74,6 +76,7 @@ Examples:
 
 Scenario Outline: the Claude section attribution controls match the approved layout
   When I open settings to the Claude section
+  And I expand the Claude Attribution group
   And I scroll the Claude settings to the Attribution row
   Then the settings-panel region visually matches <baseline> at <threshold> percent
 

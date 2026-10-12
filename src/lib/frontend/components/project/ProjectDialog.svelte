@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
+	import type { SessionMode } from "../../../contracts/project-file.js";
+	import type { GroupingMode } from "../../../shared-types.js";
 	import {
 		ProjectSaveRejected,
 		type FindFoldersResponse,
 		type SaveProjectResponse,
 	} from "../../transport/ws-rpc.js";
-	import type { FolderIssue } from "../../../project-folders.js";
+	import { type FolderIssue, labelProjectFolders } from "../../../project-folders.js";
 	import {
 		addFolder,
 		check,
@@ -31,8 +33,11 @@
 	import Checkbox from "../ui/Checkbox.svelte";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
 	import Dialog from "../ui/Dialog.svelte";
+	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Select from "../ui/Select.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
 	let {
@@ -64,6 +69,9 @@
 	const listboxId = `${uid}-matches`;
 	const optionId = (index: number) => `${listboxId}-${index}`;
 	let draft = $state<ProjectDraft>(createDraft());
+	let setupScript = $state("");
+	let sessionMode = $state<SessionMode | "">("");
+	let groupingMode = $state<GroupingMode | "">("");
 	let query = $state("");
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
@@ -92,6 +100,8 @@
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
 	const expanded = $derived(choices.length > 0);
 	const original = $derived(createDraft(project));
+	const setupValue = $derived(setupScript.trim() ? setupScript : "");
+	const folderRoots = $derived(labelProjectFolders(draft.folders.map(folderPath)));
 	const unsupportedProviders = $derived((instances ?? getAvailableInstances().map(({ id, label, capabilities }) => ({
 		id, name: getInstanceById(id)?.name ?? label, capabilities,
 	}))).filter((instance) => instance.capabilities?.supportsMultiFolder === false));
@@ -103,7 +113,7 @@
 		...saveIssues.filter((issue) => issue.kind !== "permission-denied"),
 	]);
 	const canSave = $derived(
-		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original)),
+		!saving && issues.errors.length === 0 && !issues.nameError && (!project || isDirty(draft, original) || setupValue !== (project.setupScript ?? "") || sessionMode !== (project.sessionMode ?? "") || groupingMode !== (project.groupingMode ?? "")),
 	);
 
 	onMount(() => {
@@ -134,6 +144,9 @@
 			return;
 		}
 		draft = original;
+		setupScript = project?.setupScript ?? "";
+		sessionMode = project?.sessionMode ?? "";
+		groupingMode = project?.groupingMode ?? "";
 		query = "";
 		entries = [];
 		addIssues = [];
@@ -232,6 +245,9 @@
 				...(project ? { slug: project.slug } : {}),
 				title: draft.name,
 				folders: draft.folders,
+				...(setupValue ? { setupScript: setupValue } : project?.setupScript ? { setupScript: "" } : {}),
+				...(sessionMode ? { sessionMode } : project?.sessionMode ? { sessionMode: null } : {}),
+				...(groupingMode ? { groupingMode } : project?.groupingMode ? { groupingMode: null } : {}),
 			});
 			if (!open || version !== saveVersion) return;
 			onsaved?.(response);
@@ -364,10 +380,21 @@
 					<ul aria-label="Project folders" class="flex flex-col gap-[7px]">
 						{#each draft.folders as folder, index (folderPath(folder))}
 							{@const path = folderPath(folder)}
+							{@const label = folderRoots[index]?.label ?? path}
+							{@const repository = project?.repositoryIdentities?.[path]}
+							{@const git = project?.git?.folders?.find(({ root }) => root === path) ?? (path === project?.folders[0] && !project?.git?.folders ? project?.git : undefined)}
 							<li data-testid="project-folder-row" aria-label={`${index === 0 ? "Main" : "Extra"} folder: ${path}`}>
 								<Surface variant="inset" radius="md" class="flex items-center gap-[7px] px-[8px] py-[6px] max-md:min-h-[56px]">
 									<Icon name="folder" size={13} class="shrink-0 text-text-muted" />
-									<div class="min-w-0 flex-1 font-mono text-[11px]">{@render pathLabel(path)}{#if typeof folder !== "string" && folder.create.gitInit}<span class="text-[9px] text-text-muted">git init</span>{/if}</div>
+									<div class="min-w-0 flex-1 font-mono text-[11px]">
+										{@render pathLabel(path)}
+										{#if repository || git}
+											<span class="block break-all text-[9px] text-text-muted">{repository?.name ?? label} · {git?.branch ?? (git?.head ? `Detached at ${git.head}` : "Branch unavailable")}</span>
+										{:else if project?.folders.includes(path) && project.repositoryIdentities !== undefined}
+											<span class="block text-[9px] text-text-muted">Not a git repository</span>
+										{/if}
+										{#if typeof folder !== "string" && folder.create.gitInit}<span class="text-[9px] text-text-muted">git init</span>{/if}
+									</div>
 									{#if typeof folder !== "string"}<Badge variant="quiet">new</Badge>{/if}
 									{#if index === 0}<Badge variant="accent-solid" class="font-mono">MAIN</Badge>{:else}<Button variant="secondary" size="sm" ariaLabel={`Make main: ${path}`} class="max-md:min-h-[44px]" disabled={saving} onclick={() => changeFolders(makeMain(draft, path))}>Make main</Button>{/if}
 									<Button variant="ghost" size="sm" iconOnly icon="x" ariaLabel={`Remove folder: ${path}`} touchTarget disabled={saving} onclick={() => changeFolders(removeFolder(draft, path))} />
@@ -383,6 +410,24 @@
 						{/each}
 					</section>
 				{/if}
+				<Field label="Default session mode" hint="Without a project override, conduit.json takes precedence over the global default.">
+					<Select bind:value={sessionMode} disabled={saving}>
+						<option value="">Use global default</option>
+						<option value="local">Local</option>
+						<option value="worktree">New worktree</option>
+					</Select>
+				</Field>
+				<Field label="Setup script" hint="It runs in each new worktree before the agent starts.">
+					<Textarea bind:value={setupScript} rows={3} disabled={saving} spellcheck={false} autocapitalize="none" class="font-mono text-xs max-md:text-[16px]" />
+				</Field>
+				<Field label="Repository grouping" hint="How this project's sessions are labelled in the session list.">
+					<Select bind:value={groupingMode} disabled={saving} touchTarget>
+						<option value="">Use global default</option>
+						<option value="repository">By repository</option>
+						<option value="repository+subfolder">By repository and subfolder</option>
+						<option value="off">Off</option>
+					</Select>
+				</Field>
 				{#if errors.length || saveError || issues.nameError}
 					<div role="alert" class="flex flex-col gap-[5px] break-words text-[11px] text-error">
 						{#if issues.nameError}<p id={`${uid}-name-error`}>{issues.nameError}</p>{/if}

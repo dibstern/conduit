@@ -11,22 +11,32 @@ export const daemonOnlyHandlers = {
 		daemonRequired("SetPin"),
 	SetKeepAwake: (_request) => daemonRequired("SetKeepAwake"),
 	SetKeepAwakeCommand: (_request) => daemonRequired("SetKeepAwakeCommand"),
+	SetTailscaleServe: (_request) => daemonRequired("SetTailscaleServe"),
 	Shutdown: (_request) => daemonRequired("Shutdown"),
 	SetAgent: (_request) => daemonRequired("SetAgent"),
 	RestartWithConfig: (_request) => daemonRequired("RestartWithConfig"),
 	GetInstances: (_request) => daemonRequired("GetInstances"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
+	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
+	SetDefaultGroupingMode: (_request) =>
+		daemonRequired("SetDefaultGroupingMode"),
+	GetDefaultGroupingMode: (_request) =>
+		daemonRequired("GetDefaultGroupingMode"),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetStatus"
 	| "SetPin"
 	| "SetKeepAwake"
 	| "SetKeepAwakeCommand"
+	| "SetTailscaleServe"
 	| "Shutdown"
 	| "SetAgent"
 	| "RestartWithConfig"
 	| "GetInstances"
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
+	| "ResolveSessionMode"
+	| "SetDefaultGroupingMode"
+	| "GetDefaultGroupingMode"
 >;

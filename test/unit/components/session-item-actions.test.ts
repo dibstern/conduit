@@ -104,7 +104,7 @@ describe("SessionItem row actions", () => {
 		expect(second.oncommitsnooze).toHaveBeenCalledWith("a");
 	});
 
-	it("uses the inverse swipe verbs on settled and snoozed rows", async () => {
+	it("uses the inverse swipe commands on settled and snoozed rows", async () => {
 		const settled = item({ id: "a", title: "Alpha", settledAt: 1 });
 		await swipe(settled.row, 120);
 		expect(settled.onsettle).toHaveBeenCalledWith("a", false);
@@ -316,7 +316,7 @@ describe("SessionItem row actions", () => {
 		expect(await fireEvent.touchEnd(row)).toBe(false);
 	});
 
-	it("renders stateful desktop verbs with menu reasons", async () => {
+	it("renders stateful desktop commands with menu reasons", async () => {
 		const first = item();
 		await fireEvent.click(screen.getByTestId("session-act-settle"));
 		expect(first.onsettle).toHaveBeenCalledWith("a", true);

@@ -1,12 +1,19 @@
 // Agents, models, providers, and commands.
 
-import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+import type { SessionMode } from "../../contracts/project-file.js";
+import type {
+	ProviderDriverKind,
+	ProviderSessionCapabilities,
+} from "../../contracts/provider-instance.js";
 
 import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
 	GetModelsResponse,
+	HarnessDefaultState,
+	ProjectSetting,
 	SetDefaultModelResponse,
+	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
 	SwitchContextWindowResponse,
 	SwitchModelResponse,
@@ -26,7 +33,6 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
-import { getDraftProject, projectState } from "./project-state.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 
 export const conduitCommands = [
@@ -116,7 +122,7 @@ const providersFromGetModelsResponse = (
 
 export interface InstanceOption {
 	readonly id: string;
-	readonly driver: "claude" | "opencode";
+	readonly driver: ProviderDriverKind;
 	readonly label: string;
 	/** Non-default instance of a driver — disambiguated with an accent badge. */
 	readonly isCustom: boolean;
@@ -158,6 +164,10 @@ const serverDiscovery = $state({
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
+	harnessDefaults: {
+		claude: { status: "missing" },
+		opencode: { status: "missing" },
+	} as Record<"claude" | "opencode", HarnessDefaultState>,
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -165,6 +175,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
+	defaultSessionMode: "local" as SessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -182,6 +193,7 @@ const serverDiscovery = $state({
 // `if (state.x === mine) state.x = previous` dance was written to dodge.
 
 const choice = $state({
+	instanceId: null as string | null,
 	agentId: null as string | null,
 	modelId: null as string | null,
 	providerId: null as string | null,
@@ -233,6 +245,11 @@ export const discoveryState = {
 	get defaultVariant(): string {
 		return serverDiscovery.defaultVariant;
 	},
+	get harnessDefaults(): Readonly<
+		Record<"claude" | "opencode", HarnessDefaultState>
+	> {
+		return serverDiscovery.harnessDefaults;
+	},
 	get availableVariants(): readonly string[] {
 		return serverDiscovery.availableVariants;
 	},
@@ -244,17 +261,37 @@ export const discoveryState = {
 	},
 
 	// Server-owned, with this tab's unconfirmed click read first.
+	get hasInstanceChoice(): boolean {
+		return choice.instanceId !== null;
+	},
 	get hasModelChoice(): boolean {
 		return choice.modelId !== null || choice.variant !== null;
 	},
 	get currentModelId(): string {
-		return choice.modelId ?? serverDiscovery.currentModelId;
+		return (
+			choice.modelId ??
+			(sessionState.currentId
+				? serverDiscovery.currentModelId
+				: discoveryState.defaultModelId || serverDiscovery.currentModelId)
+		);
 	},
 	get currentProviderId(): string {
-		return choice.providerId ?? serverDiscovery.currentProviderId;
+		return (
+			choice.providerId ??
+			(sessionState.currentId
+				? serverDiscovery.currentProviderId
+				: discoveryState.defaultProviderId || serverDiscovery.currentProviderId)
+		);
 	},
 	get currentVariant(): string {
-		return choice.variant ?? serverDiscovery.currentVariant;
+		return (
+			choice.variant ??
+			(!sessionState.currentId &&
+			choice.modelId === null &&
+			discoveryState.defaultModelId
+				? serverDiscovery.defaultVariant
+				: serverDiscovery.currentVariant)
+		);
 	},
 	get currentContextWindow(): string {
 		return choice.contextWindow ?? serverDiscovery.currentContextWindow;
@@ -272,6 +309,9 @@ export const discoveryState = {
 		return (
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
+	},
+	get defaultSessionMode(): SessionMode {
+		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
 		return choice.hiddenModels ?? serverDiscovery.hiddenModels;
@@ -388,12 +428,12 @@ export function getAvailableInstances(): InstanceOption[] {
 		}
 	}
 	for (const inst of instanceState.instances) {
-		const driver: "claude" | "opencode" =
-			inst.driver === "claude" ? "claude" : "opencode";
+		const driver = inst.driver ?? "opencode";
 		const existing = byId.get(inst.id);
 		if (existing) {
 			byId.set(inst.id, {
 				...existing,
+				driver,
 				status: inst.status,
 				capabilities:
 					inst.capabilities ?? instanceState.providerCapabilities[driver],
@@ -436,21 +476,16 @@ export function getProviderGroupsForInstance(
 	);
 }
 
-/** The instance a new session in `project` (default: the draft's) is created
- *  on: the project's binding when still available, else the instance derived from the current/default
- *  model's provider. The project binding is the only harness choice, so the
- *  header badge and the composer picker cannot disagree. Bound-session
- *  locking is layered on top by the picker (it needs session state). */
-export function getEffectiveInstanceId(
-	project: string | null = getDraftProject(),
-): string {
+/** The draft's available pick, else its model's provider, else the first instance. */
+export function getEffectiveInstanceId(): string {
 	const available = getAvailableInstances();
 	const isAvailable = (id: string) =>
 		available.length === 0 || available.some((i) => i.id === id);
-	const bound = projectState.projects.find(
-		(p) => p.slug === project,
-	)?.instanceId;
-	if (bound != null && isAvailable(bound)) return bound;
+	if (
+		choice.instanceId !== null &&
+		available.some((i) => i.id === choice.instanceId)
+	)
+		return choice.instanceId;
 	const derived = instanceIdForProviderId(
 		discoveryState.currentProviderId || discoveryState.defaultProviderId,
 	);
@@ -474,11 +509,9 @@ export function getSessionInstanceId(sessionId: string): string {
 		: getEffectiveInstanceId();
 }
 
-/** Re-aim the local model selection after a harness pick (pre-creation
- *  only): if the active model falls outside the instance, choose the
- *  instance's default-or-first visible model. The pick itself is a project
- *  rebind, which the caller makes. */
+/** Pick this draft's instance and re-aim its model if it belongs to another harness. */
 export function selectInstance(instanceId: string): void {
+	choice.instanceId = instanceId;
 	const groups = getProviderGroupsForInstance(instanceId);
 	const models = groups.flatMap((g) => g.models);
 	// Match the provider too: both harnesses list ids like claude-sonnet-4-6,
@@ -500,6 +533,17 @@ export function selectInstance(instanceId: string): void {
 		// sent anywhere yet.
 		chooseModel({ modelId: preferred.id, providerId: preferred.provider });
 	}
+}
+
+/** A created or viewed session consumes the draft's harness and model picks. */
+export function clearDraftSelection(): void {
+	choice.instanceId = null;
+	choice.modelId = null;
+	choice.providerId = null;
+	choice.variant = null;
+	delete owner.modelId;
+	delete owner.providerId;
+	delete owner.variant;
 }
 
 /** Format agent label for display. */
@@ -742,6 +786,21 @@ export function handleDefaultModelInfo(msg: {
 	choice.defaultProviderId = null;
 }
 
+export function handleHarnessDefaults(
+	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
+): void {
+	serverDiscovery.harnessDefaults = {
+		claude: setting.claude,
+		opencode: setting.opencode,
+	};
+}
+
+export function applyHarnessDefaultSet(
+	response: SetHarnessDefaultResponse,
+): void {
+	serverDiscovery.harnessDefaults[response.harness] = response.state;
+}
+
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
 	const model = getActiveModel();
@@ -969,6 +1028,15 @@ export function getChosenModel(instanceId: string):
 }
 
 export function chooseVariant(variant: string): UndoChoice {
+	if (!sessionState.currentId && choice.modelId === null) {
+		return undoAll([
+			chooseModel({
+				modelId: discoveryState.currentModelId,
+				providerId: discoveryState.currentProviderId,
+			}),
+			propose("variant", variant),
+		]);
+	}
 	return propose("variant", variant);
 }
 
@@ -1054,6 +1122,10 @@ export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	choice.defaultPermissionMode = null;
 }
 
+export function applyDefaultSessionMode(mode: SessionMode): void {
+	serverDiscovery.defaultSessionMode = mode;
+}
+
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
 	serverDiscovery.agents = [];
@@ -1069,6 +1141,10 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
+	serverDiscovery.harnessDefaults = {
+		claude: { status: "missing" },
+		opencode: { status: "missing" },
+	};
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";

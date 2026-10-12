@@ -234,7 +234,8 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				) === true &&
 				(message["parts"] as HistoryMessage["parts"])?.some(
 					(part) =>
-						part.type === "tool" && part.state?.output === "harness-approved",
+						part.type === "tool" &&
+						part.state?.output?.text === "harness-approved",
 				) === true,
 			sendCursor,
 		);

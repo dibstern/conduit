@@ -1,5 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
+import type { Fragment } from "@effect/sql/Statement";
 import { Context, Data, Effect, Option, Schema } from "effect";
 import {
 	LimitRecoverySchema,
@@ -12,6 +13,7 @@ import {
 	type SessionGoalChangedPayload,
 	SessionGoalChangedPayloadSchema,
 } from "../../contracts/stored-event.js";
+import type { ToolDetail } from "../../contracts/tool-wire.js";
 import type {
 	GoalDetails,
 	SessionTodos,
@@ -38,13 +40,19 @@ import type {
 	SessionRow,
 	TurnModelExecutionRow,
 } from "../read-model-types.js";
-import { sessionFamilyWindowQuery } from "../session-family-query.js";
 import {
-	messageRowsToHistory,
-	toolOutputText,
-} from "../session-history-adapter.js";
+	sessionFamilyMembersQuery,
+	sessionFamilyRootQuery,
+	sessionFamilyWindowQuery,
+} from "../session-family-query.js";
+import { messageRowsToHistory } from "../session-history-adapter.js";
 import { type SidebarRow, SidebarRowSchema } from "../sidebar-row.js";
 import { pendingClaudeQuestionToolsQuery } from "../startup-restore-queries.js";
+import {
+	NEVER_CUT_TOOL_NAMES,
+	PREVIEW_CODE_POINTS,
+	toolDetail,
+} from "../tool-wire-projection.js";
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(
@@ -382,12 +390,50 @@ interface SessionTranscriptPageOptions {
 	readonly limit: number;
 	/** Read from the oldest message, or inclusively from the supplied cursor. */
 	readonly forward?: { readonly from?: string };
+	/** Cut long tool outputs as the browser opens them (see previewParts). */
+	readonly previewTools?: boolean;
+}
+
+interface TranscriptListingOptions {
+	/** The page's oldest message; omitted, the whole session. */
+	readonly from?: string;
+	/** The version the page was read at. */
+	readonly since: number;
+}
+
+interface TranscriptWindow {
+	readonly messages: MessageWithParts[];
+	readonly version: number;
+	readonly removed?: readonly {
+		readonly id: string;
+		readonly version: number;
+	}[];
+	readonly removedParts?: readonly {
+		readonly messageId: string;
+		readonly partId: string;
+		readonly version: number;
+	}[];
+	/** With listing options whose `from` still exists, read from a cursor
+	 *  the store has reached. */
+	readonly listing?: {
+		readonly messages: readonly {
+			readonly id: string;
+			readonly version: number;
+		}[];
+		readonly parts: readonly {
+			readonly messageId: string;
+			readonly partId: string;
+			readonly version: number;
+		}[];
+	};
 }
 
 export interface ReadQueryEffect {
-	readonly getToolContent: (
-		toolId: string,
-	) => Effect.Effect<string | undefined, ReadQueryEffectError | SqlError>;
+	/** The named tools of one session exactly as stored; unknown ids are left out. */
+	readonly readToolDetails: (
+		sessionId: string,
+		toolIds: readonly string[],
+	) => Effect.Effect<readonly ToolDetail[], ReadQueryEffectError | SqlError>;
 
 	readonly getSessionStatus: (
 		sessionId: string,
@@ -396,6 +442,11 @@ export interface ReadQueryEffect {
 	readonly getSession: (
 		sessionId: string,
 	) => Effect.Effect<SessionRow | undefined, ReadQueryEffectError | SqlError>;
+
+	/** The topmost ancestor still present; none for a missing session or a cycle. */
+	readonly getSessionFamilyRoot: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined, ReadQueryEffectError>;
 
 	readonly getGoalDetails: (
 		sessionId: string,
@@ -415,6 +466,13 @@ export interface ReadQueryEffect {
 		reportedIds: readonly string[],
 	) => Effect.Effect<
 		readonly Pick<SessionRow, "id" | "status" | "updated_at">[],
+		ReadQueryEffectError | SqlError
+	>;
+
+	/** Busy children launched by a task while their parent has no turn in
+	 * flight, with the task id and the session whose Claude runtime lists it. */
+	readonly getStrandedChildren: () => Effect.Effect<
+		readonly { id: string; task_id: string; owner_id: string }[],
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -527,6 +585,8 @@ export interface ReadQueryEffect {
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
+		/** Also list every sidebar row, for a resume checksum. */
+		readonly listing?: boolean;
 	}) => Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -550,30 +610,31 @@ export interface ReadQueryEffect {
 			 * opening before it may have missed removals.
 			 */
 			readonly removedSince?: number;
+			/** With `listing`: each sidebar row's id and version, no bodies. */
+			readonly listing?: readonly (readonly [id: string, version: number])[];
 		},
 		ReadQueryEffectError | SqlError
 	>;
 
 	/**
 	 * As {@link readSessionList}, for one session's projected transcript. A
-	 * message part carries no version of its own, so a part write advances the
-	 * message that owns it and the whole message comes back. Each row carries
-	 * its own `version`.
+	 * message and each of its parts carry their own `version`. A ranged read
+	 * returns the parts that moved inside `range` with the message that owns
+	 * each, which may itself have moved past it; the message moved in `range`
+	 * when its own version is inside it. Removed messages and removed parts
+	 * come back separately. Tool outputs come back as the browser opens them
+	 * (`previewTools`).
+	 *
+	 * `listing` also lists, by id and version and in the same transaction, the
+	 * messages and parts a client holding a page from `from` and every change
+	 * past `since` holds: those of messages at or after `from` (the whole
+	 * session without one), and any that moved past `since`.
 	 */
 	readonly readSessionTranscript: (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
-	) => Effect.Effect<
-		{
-			readonly messages: MessageWithParts[];
-			readonly version: number;
-			readonly removed?: readonly {
-				readonly id: string;
-				readonly version: number;
-			}[];
-		},
-		ReadQueryEffectError | SqlError
-	>;
+		listing?: TranscriptListingOptions,
+	) => Effect.Effect<TranscriptWindow, ReadQueryEffectError | SqlError>;
 
 	/**
 	 * One session's todo list: the items its newest completed TodoWrite left
@@ -644,6 +705,12 @@ export interface ReadQueryEffect {
 				readonly version: number;
 		  }
 		| undefined,
+		ReadQueryEffectError
+	>;
+	/** This store's random name, minted once by migration. Resume points carry
+	 *  it so a point from another store is refused. */
+	readonly readStoreIdentity: () => Effect.Effect<
+		string | undefined,
 		ReadQueryEffectError
 	>;
 }
@@ -793,6 +860,17 @@ function groupMessagesWithPartsAndTurnModels(
 
 export const makeReadQueryEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	// The provider may reconcile streamed timestamps while a rewind is pending.
+	// Visibility follows the transcript's current (created_at, id) ordering.
+	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
+		EXISTS (
+			SELECT 1 FROM sessions s JOIN messages cut
+				ON cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
+			WHERE s.id = ${sql.literal(`${table}.session_id`)}
+				AND (${sql.literal(`${table}.created_at`)} > cut.created_at
+					OR (${sql.literal(`${table}.created_at`)} = cut.created_at
+						AND ${sql.literal(`${table}.id`)} >= cut.id))
+		)`;
 	const hintDismissals = Option.getOrUndefined(
 		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
 	);
@@ -816,26 +894,77 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			ORDER BY created_at ASC, id ASC
 		) pa) AS turn_waits`;
 
-	const getToolContent = (
-		toolId: string,
-	): Effect.Effect<string | undefined, ReadQueryEffectError | SqlError> =>
+	// A part's stored tool result as text: a JSON string decoded, anything
+	// else as stored. Nested so json_type never sees malformed JSON.
+	const toolOutput = sql`
+		CASE WHEN json_valid(mp.result)
+			THEN CASE WHEN json_type(mp.result) = 'text'
+				THEN json_extract(mp.result, '$') ELSE mp.result END
+			ELSE mp.result END`;
+
+	// Parts as the browser opens them, by the rule tool-wire-projection.ts
+	// owns: a tool output over the budget comes back as the JSON of its first
+	// PREVIEW_CODE_POINTS code points with `result_bytes` its whole UTF-8 size;
+	// never-cut tools come back whole. Only results whose stored JSON is over
+	// the budget are decoded, and parts' rest_payload blobs stay behind.
+	// `source` is the FROM clause over `message_parts mp`.
+	const previewParts = (source: Fragment) => sql<MessagePartRow>`
+		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
+			duration, status, sort_order, created_at, updated_at, version,
+			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
+				ELSE result END AS result,
+			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
+				THEN length(CAST(output AS BLOB)) END AS result_bytes
+		FROM (
+			SELECT mp.*,
+				CASE WHEN mp.type = 'tool'
+					AND mp.tool_name NOT IN ${sql.in(NEVER_CUT_TOOL_NAMES)}
+					AND length(mp.result) > ${PREVIEW_CODE_POINTS}
+				THEN ${toolOutput} END AS output
+			${source}
+		)
+		ORDER BY message_id, sort_order`;
+
+	const readToolDetails = (
+		sessionId: string,
+		toolIds: readonly string[],
+	): Effect.Effect<readonly ToolDetail[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
-			const rows = yield* sql<{ content: string }>`
-				SELECT content FROM tool_content WHERE tool_id = ${toolId}`;
-			if (rows[0]) return rows[0].content;
-			// Nothing writes tool_content any more: the part keeps the whole
-			// output, and transcripts ship a preview of it.
-			const parts = yield* sql<{ result: string }>`
-				SELECT result FROM message_parts
-				WHERE type = 'tool' AND call_id = ${toolId} AND result IS NOT NULL
-				LIMIT 1`;
-			return parts[0] && toolOutputText(parts[0].result);
+			if (toolIds.length === 0) return [];
+			// The browser names a tool by its call id, or by its part id when it
+			// has none; a fork repeats its parent's call ids in another session.
+			const rows = yield* sql<{
+				tool_id: string;
+				input: string | null;
+				output: string | null;
+				version: number;
+				settled: number | null;
+			}>`
+				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input,
+					${toolOutput} AS output, mp.version,
+					mp.status IN ('completed', 'error') AS settled
+				FROM message_parts mp
+				JOIN messages ON messages.id = mp.message_id
+				WHERE (mp.call_id IN ${sql.in(toolIds)}
+						OR (mp.call_id IS NULL AND mp.id IN ${sql.in(toolIds)}))
+					AND mp.type = 'tool' AND messages.session_id = ${sessionId}
+				ORDER BY messages.created_at, mp.sort_order`;
+			return rows.map((row) =>
+				toolDetail({
+					toolId: row.tool_id,
+					version: row.version,
+					settled: row.settled === 1,
+					input: row.input,
+					output: row.output,
+				}),
+			);
 		}).pipe(
 			Effect.mapError((e) =>
 				e instanceof ReadQueryEffectError
 					? e
 					: new ReadQueryEffectError({
-							operation: "getToolContent",
+							operation: "readToolDetails",
 							cause: e,
 						}),
 			),
@@ -874,6 +1003,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "getSession",
 							cause: e,
 						}),
+			),
+		);
+
+	const getSessionFamilyRoot = (sessionId: string) =>
+		sql.unsafe<{ id: string }>(sessionFamilyRootQuery, [sessionId]).pipe(
+			Effect.map((rows) => rows[0]?.id),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getSessionFamilyRoot",
+						cause,
+					}),
 			),
 		);
 
@@ -922,6 +1063,43 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				(cause) =>
 					new ReadQueryEffectError({
 						operation: "getSessionsForReconciliation",
+						cause,
+					}),
+			),
+		);
+
+	// The link is found through the parent's own messages, which are indexed;
+	// CROSS JOIN pins that order, as the planner otherwise scans every part. SDK subagents share their
+	// parent's runtime, so the owner climbs through them; forks own theirs.
+	const getStrandedChildren = () =>
+		sql<{ id: string; task_id: string; owner_id: string }>`
+			WITH RECURSIVE stranded AS (
+				SELECT c.id, c.parent_id AS owner_id,
+					json_extract(mp.metadata, '$.providerTaskId') AS task_id
+				FROM sessions c
+				CROSS JOIN sessions parent
+				CROSS JOIN messages m
+				CROSS JOIN message_parts mp
+				WHERE c.status IN ('busy', 'retry')
+					AND parent.id = c.parent_id AND parent.status = 'idle'
+					AND m.session_id = c.parent_id AND mp.message_id = m.id
+					AND json_valid(mp.metadata)
+					AND json_extract(mp.metadata, '$.childSessionId') = c.id
+					AND json_type(mp.metadata, '$.providerTaskId') = 'text'
+			),
+			owned AS (
+				SELECT id, task_id, owner_id FROM stranded
+				UNION
+				SELECT o.id, o.task_id, s.parent_id FROM owned o
+				JOIN sessions s ON s.id = o.owner_id
+				WHERE o.owner_id LIKE 'claude-subagent-%' AND s.parent_id IS NOT NULL
+			)
+			SELECT id, task_id, owner_id FROM owned
+			WHERE owner_id NOT LIKE 'claude-subagent-%'`.pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getStrandedChildren",
 						cause,
 					}),
 			),
@@ -1131,6 +1309,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				LEFT JOIN turns ON turns.id = messages.turn_id
 				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 				WHERE messages.session_id = ${sessionId}
+					AND NOT ${pendingRewindHides()}
 				ORDER BY messages.created_at ASC, messages.id ASC`;
 			if (messages.length === 0) return [];
 
@@ -1168,7 +1347,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						THEN COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)
 							+ COALESCE(tokens_cache_read, 0) + COALESCE(tokens_cache_write, 0)
 						ELSE 0 END), 0) AS cumulativeTokens
-				FROM messages WHERE session_id = ${sessionId}`;
+				FROM messages m WHERE m.session_id = ${sessionId}
+					AND NOT ${pendingRewindHides("m")}
+					AND NOT EXISTS (
+						SELECT 1 FROM message_parts p WHERE p.message_id = m.id
+							AND CASE WHEN json_valid(p.metadata)
+								THEN json_type(p.metadata, '$.setup') END = 'object'
+					)`;
 			const metadata = rows[0];
 			if (!metadata)
 				return yield* new ReadQueryEffectError({
@@ -1271,7 +1456,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						cursorId !== undefined
 							? (yield* sql<{ created_at: number; id: string }>`
 									SELECT created_at, id FROM messages
-									WHERE session_id = ${sessionId} AND id = ${cursorId}`)[0]
+									WHERE session_id = ${sessionId} AND id = ${cursorId} AND NOT ${pendingRewindHides()}`)[0]
 							: undefined;
 					if (cursorId !== undefined && !cursor) {
 						return yield* new TranscriptPageCursorNotFoundError({
@@ -1288,7 +1473,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							? []
 							: yield* sql<{ created_at: number; id: string }>`
 								SELECT created_at, id FROM messages
-								WHERE session_id = ${sessionId} AND role = 'user'
+								WHERE session_id = ${sessionId} AND role = 'user' AND NOT ${pendingRewindHides()}
 								ORDER BY id IS (
 									SELECT id FROM turns
 									WHERE session_id = ${sessionId} AND state = 'running'
@@ -1309,6 +1494,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
+									AND NOT ${pendingRewindHides()}
 									AND (${cursor?.id ?? null} IS NULL
 										OR messages.created_at > ${cursor?.created_at ?? null}
 										OR (messages.created_at = ${cursor?.created_at ?? null} AND messages.id >= ${cursor?.id ?? null}))
@@ -1325,6 +1511,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
+									AND NOT ${pendingRewindHides()}
 									AND (messages.created_at < ${cursor.created_at}
 										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
 								ORDER BY messages.created_at DESC, messages.id DESC
@@ -1339,11 +1526,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								LEFT JOIN turns ON turns.id = messages.turn_id
 								LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 								WHERE messages.session_id = ${sessionId}
+									AND NOT ${pendingRewindHides()}
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT (
 									SELECT MAX(${options.limit}, COUNT(*)) + 1
 									FROM messages m
 									WHERE m.session_id = ${sessionId}
+										AND NOT ${pendingRewindHides("m")}
 										AND (m.created_at > ${anchor?.created_at ?? null}
 											OR (m.created_at = ${anchor?.created_at ?? null} AND m.id >= ${anchor?.id ?? null}))
 								)`;
@@ -1356,12 +1545,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								);
 					const page = rows.slice(0, pageLimit);
 					if (!forward) page.reverse();
-					const parts = page.length
-						? yield* sql<MessagePartRow>`
-								SELECT * FROM message_parts
-								WHERE message_id IN ${sql.in(page.map((message) => message.id))}
-								ORDER BY message_id, sort_order`
-						: [];
+					const ids = sql.in(page.map((message) => message.id));
+					const parts =
+						page.length === 0
+							? []
+							: options.previewTools
+								? yield* previewParts(
+										sql`FROM message_parts mp WHERE mp.message_id IN ${ids}`,
+									)
+								: yield* sql<MessagePartRow>`
+										SELECT * FROM message_parts
+										WHERE message_id IN ${ids}
+										ORDER BY message_id, sort_order`;
 					return {
 						messages: groupMessagesWithPartsAndTurnModels(page, parts),
 						hasMore: rows.length > pageLimit,
@@ -1387,6 +1582,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
+		readonly listing?: boolean;
 	}): Effect.Effect<
 		{
 			readonly rows: readonly {
@@ -1400,6 +1596,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly deleted: boolean;
 			}[];
 			readonly removedSince?: number;
+			readonly listing?: readonly (readonly [id: string, version: number])[];
 		},
 		ReadQueryEffectError | SqlError
 	> =>
@@ -1429,6 +1626,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WHERE session_sidebar.version > ${floor} AND session_sidebar.version <= ${ceiling}
 							AND (row IS NOT NULL OR ${ranged ? 1 : 0})
 							ORDER BY last_activity DESC, session_id DESC`;
+						const removedSince = ranged
+							? ((yield* sql<{ version: number }>`
+									SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
+									?.version ?? 0)
+							: undefined;
+						// A cursor the tombstones cannot cover, or one past the store,
+						// is answered with a snapshot, so it is not listed.
+						const listable =
+							range?.listing === true &&
+							floor <= version &&
+							floor >= (removedSince ?? floor);
 						const sidebars = stored.flatMap(({ row }) =>
 							row === null ? [] : [decodeSidebarRow(row)],
 						);
@@ -1487,43 +1695,54 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 											]
 										: [],
 								),
-								removedSince:
-									(yield* sql<{ version: number }>`
-										SELECT version FROM session_sidebar_horizon WHERE id = 1`)[0]
-										?.version ?? 0,
+							}),
+							...(removedSince === undefined ? {} : { removedSince }),
+							...(listable && {
+								listing: (yield* sql<{ session_id: string; version: number }>`
+									SELECT session_id, version FROM session_sidebar
+									WHERE row IS NOT NULL`).map(
+									({ session_id, version }) => [session_id, version] as const,
+								),
 							}),
 						};
 					}
 					const rows = yield* sql.unsafe<
 						SessionRow & { effective_version: number }
 					>(sessionFamilyWindowQuery, [range.familyOf, floor, ceiling]);
-					const [lineage, approvals, projectedStatuses] = yield* Effect.all([
-						getSessionLineage(),
-						countPendingApprovalsBySession(),
-						getAllSessionStatuses(),
-					]);
+					// A window no member moved in costs the window query alone. The
+					// roll-ups (busy, unread, pending counts) read only the family: a
+					// member's ancestors and descendants are all in it.
+					if (rows.length === 0) return { rows: [], version };
+					const family = yield* sql.unsafe<{
+						id: string;
+						parent_id: string | null;
+						status: string;
+						unread: number;
+						side_thread: number;
+					}>(sessionFamilyMembersQuery, [range.familyOf]);
+					const approvals = yield* sql<PendingApprovalCountRow>`
+						SELECT session_id, type, COUNT(*) AS pending_count
+						FROM pending_approvals
+						WHERE status = 'pending'
+							AND session_id IN (SELECT value FROM json_each(${JSON.stringify(family.map((row) => row.id))}))
+						GROUP BY session_id, type`;
 					const pending = pendingApprovalCountsByType(approvals);
 					const items = sessionRowsToSessionInfoList(rows, {
 						sideThreadIds: new Set(
-							lineage.rows.flatMap((row) =>
-								row.side_thread === 1 ? [row.id] : [],
-							),
+							family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
 						),
 						parentMap: new Map(
-							lineage.rows.flatMap((row) =>
+							family.flatMap((row) =>
 								row.parent_id === null
 									? []
 									: [[row.id, row.parent_id] as const],
 							),
 						),
 						unreadSessionIds: new Set(
-							lineage.rows.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
+							family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 						),
 						statuses: Object.fromEntries(
-							Object.entries(projectedStatuses).map(([id, type]) => [
-								id,
-								{ type },
-							]),
+							family.map((row) => [row.id, { type: row.status }]),
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
@@ -1595,23 +1814,74 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const readSessionTranscript = (
 		sessionId: string,
 		range?: { readonly after?: number; readonly through?: number },
-	): Effect.Effect<
-		{
-			readonly messages: MessageWithParts[];
-			readonly version: number;
-			readonly removed?: readonly {
-				readonly id: string;
-				readonly version: number;
-			}[];
-		},
-		ReadQueryEffectError | SqlError
-	> =>
+		listing?: TranscriptListingOptions,
+	): Effect.Effect<TranscriptWindow, ReadQueryEffectError | SqlError> =>
 		sql
 			.withTransaction(
 				Effect.gen(function* () {
 					const version = yield* readModelVersion;
 					const floor = range?.after ?? BEFORE_FIRST_VERSION;
 					const ceiling = range?.through ?? AFTER_LAST_VERSION;
+					const from =
+						listing?.from === undefined
+							? undefined
+							: (yield* sql<{ created_at: number; id: string }>`
+									SELECT created_at, id FROM messages
+									WHERE session_id = ${sessionId} AND id = ${listing.from}`)[0];
+					// Ids and versions only: the page, from its first message on (the
+					// whole session without one), then whatever moved past the page's
+					// version before it. Each half is one index range within the
+					// session; a part write stamps its message, so a moved part's
+					// message has moved too. A cursor past the store is answered with
+					// a snapshot, so it is not listed.
+					const inPage =
+						from === undefined
+							? sql.literal("1")
+							: sql`m.created_at >= ${from.created_at}
+								AND (m.created_at > ${from.created_at} OR m.id >= ${from.id})`;
+					const listed =
+						listing === undefined ||
+						(listing.from !== undefined && !from) ||
+						floor > version
+							? undefined
+							: {
+									messages: yield* sql<{ id: string; version: number }>`
+										SELECT m.id, m.version FROM messages m
+										WHERE m.session_id = ${sessionId} AND ${inPage}
+											AND NOT ${pendingRewindHides("m")}
+										${
+											from === undefined
+												? sql.literal("")
+												: sql`UNION ALL
+										SELECT m.id, m.version FROM messages m
+										WHERE m.session_id = ${sessionId}
+											AND m.version > ${listing.since} AND NOT (${inPage})
+											AND NOT ${pendingRewindHides("m")}`
+										}`,
+									parts: yield* sql<{
+										messageId: string;
+										partId: string;
+										version: number;
+									}>`
+										SELECT mp.message_id AS messageId, mp.id AS partId, mp.version
+										FROM messages m JOIN message_parts mp ON mp.message_id = m.id
+										WHERE m.session_id = ${sessionId} AND ${inPage}
+											AND NOT ${pendingRewindHides("m")}
+										${
+											from === undefined
+												? sql.literal("")
+												: sql`UNION ALL
+										SELECT mp.message_id, mp.id, mp.version
+										FROM messages m CROSS JOIN message_parts mp ON mp.message_id = m.id
+										WHERE m.session_id = ${sessionId} AND m.version > ${listing.since}
+											AND mp.version > ${listing.since} AND NOT (${inPage})
+											AND NOT ${pendingRewindHides("m")}`
+										}`,
+								};
+					// A part write stamps its message too, so a message is never older
+					// than its parts: every message with a part in the window is past
+					// the floor. Its own version may be past the ceiling; it then
+					// comes back only as the parent of the parts that moved.
 					const messages = yield* sql<MessageWithTurnModelRow>`
 						SELECT messages.*,
 							turns.requested_model AS turn_requested_model,
@@ -1622,20 +1892,28 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						LEFT JOIN turns ON turns.id = messages.turn_id
 						LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 						WHERE messages.session_id = ${sessionId}
-							AND messages.version > ${floor} AND messages.version <= ${ceiling}
+							AND NOT ${pendingRewindHides()}
+							AND messages.version > ${floor}
 						ORDER BY messages.created_at ASC, messages.id ASC`;
 
 					let parts: readonly MessagePartRow[] = [];
 					if (messages.length > 0) {
-						parts = yield* sql<MessagePartRow>`
-							WITH target_messages AS (
-								SELECT id FROM messages
-								WHERE session_id = ${sessionId}
-									AND version > ${floor} AND version <= ${ceiling}
-							)
-							SELECT mp.* FROM message_parts mp
-							JOIN target_messages tm ON mp.message_id = tm.id
-							ORDER BY mp.message_id, mp.sort_order`;
+						// The parts that moved, by their own version. A live window is a
+						// narrow range, so it starts from idx_message_parts_version
+						// (CROSS JOIN fixes the join order; unanalyzed, SQLite would
+						// start from the session's messages). A resume has no ceiling
+						// and may reach back past every session's writes, so it starts
+						// from this session's moved messages instead.
+						parts = yield* previewParts(
+							range?.through === undefined
+								? sql`FROM messages m CROSS JOIN message_parts mp ON mp.message_id = m.id
+									WHERE m.session_id = ${sessionId} AND m.version > ${floor}
+										AND mp.version > ${floor} AND NOT ${pendingRewindHides("m")}`
+								: sql`FROM message_parts mp CROSS JOIN messages m ON m.id = mp.message_id
+									WHERE m.session_id = ${sessionId}
+										AND mp.version > ${floor} AND mp.version <= ${ceiling}
+										AND NOT ${pendingRewindHides("m")}`,
+						);
 					}
 					const removed =
 						range === undefined
@@ -1646,12 +1924,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								}>`SELECT message_id AS id, version FROM message_tombstones
 						WHERE session_id = ${sessionId}
 						AND version > ${floor} AND version <= ${ceiling}
-						ORDER BY version, message_id`;
+						UNION ALL
+						SELECT id, version FROM messages
+						WHERE session_id = ${sessionId} AND ${pendingRewindHides()}
+							AND version > ${floor} AND version <= ${ceiling}
+						ORDER BY version, id`;
+					const removedParts =
+						range === undefined
+							? undefined
+							: yield* sql<{
+									messageId: string;
+									partId: string;
+									version: number;
+								}>`SELECT message_id AS messageId, part_id AS partId, version
+						FROM message_part_tombstones
+						WHERE session_id = ${sessionId}
+						AND version > ${floor} AND version <= ${ceiling}
+						ORDER BY version, part_id`;
 
 					return {
 						messages: groupMessagesWithPartsAndTurnModels(messages, parts),
 						version,
 						...(removed === undefined ? {} : { removed }),
+						...(removedParts === undefined ? {} : { removedParts }),
+						...(listed === undefined ? {} : { listing: listed }),
 					};
 				}),
 			)
@@ -1701,6 +1997,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			Effect.mapError(
 				(cause) =>
 					new ReadQueryEffectError({ operation: "readInboxState", cause }),
+			),
+		);
+
+	const readStoreIdentity = () =>
+		sql<{ value: string }>`SELECT value FROM store_identity WHERE id = 1`.pipe(
+			Effect.map(([row]) => row?.value),
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({ operation: "readStoreIdentity", cause }),
 			),
 		);
 
@@ -1791,6 +2096,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						FROM message_parts mp
 						JOIN messages ON messages.id = mp.message_id
 						WHERE messages.session_id = ${sessionId}
+							AND NOT ${pendingRewindHides()}
 							AND messages.version <= ${ceiling}
 							AND mp.tool_name = 'TodoWrite' AND mp.status = 'completed'
 						ORDER BY messages.created_at DESC, messages.id DESC, mp.sort_order DESC
@@ -1848,9 +2154,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		);
 
 	return {
-		getToolContent,
+		readToolDetails,
 		getSessionStatus,
 		getSession,
+		getSessionFamilyRoot,
 		getGoalDetails,
 		getAllSessionStatuses,
 		getAllSessionStatusesWithProviders,
@@ -1858,6 +2165,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listSessionInfos,
 		getSessionLineage,
 		getSessionsForReconciliation,
+		getStrandedChildren,
 		countPendingApprovalsBySession,
 		readPendingApprovals,
 		listPendingClaudeQuestionTools,
@@ -1871,5 +2179,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getLatestTurnModelExecution,
 		readPendingInputs,
 		readInboxState,
+		readStoreIdentity,
 	} satisfies ReadQueryEffect;
 });

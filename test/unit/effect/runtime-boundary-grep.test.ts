@@ -84,6 +84,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows the row query, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/session/GitIdentity.stories.ts",
+		snippetPattern: /Missing checkout (wrapper|labels)/,
+		reason:
+			"storybook play() guards that narrow the checkout queries, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/input/ComposerStatusHeader.stories.ts",
 		snippetPattern: /Checking spinner is missing/,
 		reason:
@@ -274,10 +280,7 @@ describe("Effect runtime boundary grep", () => {
 		const path = "src/lib/handlers/prompt.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const cancelStart = source.indexOf("export const cancelSessionById");
-		const cancelEnd = source.indexOf(
-			"export const rewindSessionToMessage",
-			cancelStart,
-		);
+		const cancelEnd = source.indexOf("\nexport ", cancelStart + 1);
 		expect(cancelStart).toBeGreaterThanOrEqual(0);
 		expect(cancelEnd).toBeGreaterThan(cancelStart);
 		const cancelSource = source.slice(cancelStart, cancelEnd);

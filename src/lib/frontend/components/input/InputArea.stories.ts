@@ -24,8 +24,12 @@ import {
 } from "../../stores/discovery.svelte.js";
 import { fileTreeState } from "../../stores/file-tree.svelte.js";
 import { handleGoalChanged, sessionGoals } from "../../stores/goal.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
+import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import InputArea from "./InputArea.svelte";
 
 const testId = "story-input";
@@ -190,6 +194,11 @@ export const Empty: Story = {};
 function setupWords(phone: boolean) {
 	const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
 	const path = routerState.path;
+	const sessions = [...sessionState.sessions.values()];
+	const projects = projectState.projects;
+	const instances = instanceState.instances;
+	const compact = sessionViewState.compact;
+	const composerWidth = sessionViewState.composerWidth;
 	const root = document.getElementById("storybook-root");
 	const style = root?.getAttribute("style");
 	Object.defineProperty(window, "innerWidth", {
@@ -202,6 +211,25 @@ function setupWords(phone: boolean) {
 		`display:flex;flex-direction:column;justify-content:flex-end;min-height:100vh;max-width:${phone ? "393px" : "none"}`,
 	);
 	routerState.path = "/";
+	sessionViewState.compact = phone;
+	sessionViewState.composerWidth = phone ? 393 : 760;
+	instanceState.instances = [];
+	projectState.projects = [
+		{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
+	];
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: Date.now(),
+		rows: [
+			{
+				id: testId,
+				title: "Composer",
+				status: "idle",
+				projectSlug: "conduit",
+				git: { branch: "account-chip", worktree: "account-chip" },
+			},
+		],
+	});
 	clearDiscoveryState();
 	const contextWindowOptions = [
 		{ value: "200k", label: "200K", isDefault: true },
@@ -246,6 +274,15 @@ function setupWords(phone: boolean) {
 	return () => {
 		setComposerPreferences({ controls: "icons" });
 		clearDiscoveryState();
+		applySessionChange({
+			_tag: "snapshot",
+			rows: sessions,
+			sequence: Date.now(),
+		});
+		projectState.projects = projects;
+		instanceState.instances = instances;
+		sessionViewState.compact = compact;
+		sessionViewState.composerWidth = composerWidth;
 		routerState.path = path;
 		if (width) Object.defineProperty(window, "innerWidth", width);
 		else Reflect.deleteProperty(window, "innerWidth");
@@ -263,13 +300,29 @@ export const WordsDesktop: Story = {
 		const canvas = within(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
 		const row = canvas.getByTestId("composer-words-row");
+		const phone = sessionViewState.composerTier === "phone";
+		async function closePicker() {
+			const sheet = canvasElement.ownerDocument.querySelector("dialog[open]");
+			if (sheet) sheet.dispatchEvent(new Event("cancel", { cancelable: true }));
+			else await userEvent.keyboard("{Escape}");
+			await waitFor(() =>
+				expect(body.queryByTestId("model-picker")).toBeNull(),
+			);
+		}
 		await expect(row).toBeVisible();
 		await expect(row.querySelector(".glyph")).toBeNull();
 		await expect(canvas.getByTestId("composer-word-model")).toHaveTextContent(
-			"Sonnet 5",
+			phone ? "S5" : "Sonnet 5",
 		);
-		await expect(canvas.getByTestId("composer-word-context")).toHaveTextContent(
-			"200K",
+		if (phone)
+			await expect(canvas.queryByTestId("composer-word-context")).toBeNull();
+		else
+			await expect(
+				canvas.getByTestId("composer-word-context"),
+			).toHaveTextContent("200K");
+		await expect(canvas.getByTestId("composer-checkout")).toHaveAttribute(
+			"title",
+			"conduit / account-chip",
 		);
 		await expect(canvas.getByTestId("composer-word-effort")).toHaveTextContent(
 			"high",
@@ -289,21 +342,21 @@ export const WordsDesktop: Story = {
 			composer.getBoundingClientRect().bottom,
 		);
 		await userEvent.click(canvas.getByTestId("composer-word-effort"));
+		await expect(await body.findByTestId("picker-row-effort")).toBeVisible();
+		await userEvent.click(body.getByTestId("picker-effort-option-xhigh"));
 		await expect(canvas.getByTestId("composer-word-effort")).toHaveTextContent(
 			"xhigh",
 		);
 		await expect(body.queryByTestId("variant-dropdown")).toBeNull();
+		await closePicker();
 		await userEvent.click(canvas.getByTestId("composer-word-model"));
 		await expect(await body.findByTestId("model-picker")).toBeVisible();
-		await expect(body.getByTestId("picker-row-model")).toHaveTextContent(
+		await expect(body.getByTestId("model-picker-list")).toHaveTextContent(
 			"Sonnet 5",
 		);
 		// The phone sheet is a native <dialog>: a real Escape fires its cancel
 		// event, but a synthetic keypress never reaches the browser's handler.
-		const sheet = canvasElement.ownerDocument.querySelector("dialog[open]");
-		if (sheet) sheet.dispatchEvent(new Event("cancel", { cancelable: true }));
-		else await userEvent.keyboard("{Escape}");
-		await waitFor(() => expect(body.queryByTestId("model-picker")).toBeNull());
+		await closePicker();
 		await expect(composerPreferences.controls).toBe("words");
 	},
 };

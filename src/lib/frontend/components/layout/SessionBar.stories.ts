@@ -121,6 +121,7 @@ const meta = {
 		// module-level state across story files. Pin the expanded state so only
 		// the story that wants the collapse gets it.
 		sessionViewState.compact = true;
+		sessionViewState.composerWidth = 760;
 		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = true;
 		sessionViewState.filesOpen = false;
@@ -165,15 +166,12 @@ export const Default: Story = {
 		expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
 			"Test Session",
 		);
-		expect(canvas.getByTestId("session-bar-identity")).toHaveTextContent(
-			"conduit",
-		);
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
 		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
-		expect(canvas.queryByTestId("instance-badge")).toBeNull();
 	},
 };
 
@@ -661,8 +659,6 @@ export const NarrowestPhone: Story = {
 	},
 };
 
-// Two instances minimum: the badge is a picker, and a picker with one option is
-// noise.
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
@@ -684,40 +680,43 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 ];
 
-/**
- * The instance badge stays in the bar rather than moving into a menu
- * menu: it says where this project's work runs, which is identity, and a status
- * dot that only exists behind a closed menu reports nothing.
- */
-export const WithInstanceBadge: Story = {
-	beforeEach: () => {
-		instanceState.instances = [...mockInstances];
-		// The bar shows the badge only once the open session's provider is known.
-		applyGetAgentsResponse(
-			{
-				projectSlug: "conduit",
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [],
-			},
-			mockSession.id,
-		);
-		projectState.projects = [
-			{
-				slug: "conduit",
-				title: "conduit",
-				folders: ["/src/conduit"],
-				instanceId: "inst-personal",
-			},
-		];
-	},
+function seedOpenCodeHeader(): void {
+	instanceState.instances = [...mockInstances];
+	applyGetAgentsResponse(
+		{
+			projectSlug: "conduit",
+			providerScope: { id: "opencode", name: "OpenCode" },
+			agents: [],
+		},
+		mockSession.id,
+	);
+	projectState.projects = [
+		{
+			slug: "conduit",
+			title: "conduit",
+			folders: ["/src/conduit"],
+			git: { branch: "account-chip", dirty: true },
+		},
+	];
+}
+
+export const PhoneOpenCodeHeader: Story = {
+	beforeEach: seedOpenCodeHeader,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const badge = canvas.getByTestId("instance-badge");
-		await expect(badge).toHaveTextContent("Personal");
-		// The back control is still whole with identity, badge and overflow all
-		// competing for a 393px row.
-		const back = canvas.getByRole("button", { name: /Sessions/ });
-		expect(back.scrollWidth).toBe(back.clientWidth);
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
+		expect(canvas.queryByTestId("account-dot")).toBeNull();
+		const bar = canvas.getByTestId("session-bar");
+		expect(bar.scrollWidth).toBe(bar.clientWidth);
+	},
+};
+
+export const DesktopOpenCodeHeader: Story = {
+	...PhoneOpenCodeHeader,
+	args: { width: 900 },
+	beforeEach: () => {
+		seedOpenCodeHeader();
+		sessionViewState.compact = false;
 	},
 };
 
@@ -811,9 +810,7 @@ export const Collapsed: Story = {
 			bar.getBoundingClientRect().bottom,
 		);
 
-		// Where you are shrinks to the name alone: the identity and the instance
-		// badge are both out of the smallest row.
-		expect(canvas.queryByTestId("session-bar-identity")).not.toBeVisible();
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 
 		// The word goes but the accessible name does not — this is the only way
 		// off the screen.
@@ -838,7 +835,8 @@ export const ExpandedByChevron: Story = {
 		await userEvent.click(canvas.getByTestId("session-bar-expand"));
 
 		expect(canvas.queryByTestId("session-bar-expand")).toBeNull();
-		expect(canvas.getByTestId("session-bar-identity")).toBeVisible();
+		expect(canvasElement.querySelector("#session-bar-meta")).toBeVisible();
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.getByTestId("session-bar")).toHaveFocus();
 		// Still at the bottom: the chevron overrides the rule, it does not move
 		// the transcript.
@@ -846,7 +844,7 @@ export const ExpandedByChevron: Story = {
 	},
 };
 
-export const DesktopGitIdentity: Story = {
+export const DesktopNoCheckout: Story = {
 	args: { width: 900 },
 	beforeEach: () => {
 		sessionViewState.compact = false;
@@ -864,10 +862,8 @@ export const DesktopGitIdentity: Story = {
 		const canvas = within(canvasElement);
 		const bar = canvas.getByTestId("session-bar");
 		await expect(bar).toHaveAttribute("data-compact", "false");
-		await expect(canvas.getByTestId("session-bar-identity")).toHaveTextContent(
-			/conduit.*feature\/17xt/,
-		);
-		await expect(canvas.getByTitle("Uncommitted changes")).toBeVisible();
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
+		expect(canvas.queryByTitle("Uncommitted changes")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
 		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
 		const count = canvasElement.querySelector("#client-count-badge");
@@ -958,28 +954,22 @@ function seedHeaderGit(): void {
 	];
 }
 
-export const PhoneGitIdentity: Story = {
+export const PhoneNoCheckout: Story = {
 	beforeEach: seedHeaderGit,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
-		const pill = canvas.getByTestId("session-bar-identity");
-		const git = pill.getBoundingClientRect();
 		const more = canvas
 			.getByTestId("session-bar-island-overflow")
 			.getBoundingClientRect();
-		await expect(pill).toHaveAttribute("title", "conduit / main");
-		expect(back.right).toBeLessThanOrEqual(git.left);
-		expect(git.right).toBeLessThanOrEqual(more.left);
-		expect(
-			Math.abs(git.y + git.height / 2 - more.y - more.height / 2),
-		).toBeLessThan(1);
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
+		expect(back.right).toBeLessThanOrEqual(more.left);
 		expect(canvas.queryByTestId("session-skills-chip")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views-button")).toBeNull();
 	},
 };
 
-export const PhoneGitIdentityWithSkills: Story = {
+export const PhoneControlsWithSkills: Story = {
 	beforeEach: () => {
 		seedHeaderGit();
 		seedSkills();
@@ -987,90 +977,75 @@ export const PhoneGitIdentityWithSkills: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const chip = canvas.getByTestId("session-skills-chip");
-		const pill = canvas.getByTestId("session-bar-identity");
 		await expect(chip).toBeVisible();
-		await expect(pill).toBeVisible();
-		// The pill sits in a grid wrapper that carries its width floor.
-		const segment = pill.parentElement;
-		expect(chip.parentElement).toBe(segment?.parentElement);
-		expect(chip.getBoundingClientRect().right).toBe(
-			segment?.getBoundingClientRect().left,
+		expect(chip.parentElement).toHaveClass("session-bar-segments");
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
+		expect(
+			canvas.getByTestId("session-bar-back").getBoundingClientRect().right,
+		).toBeLessThanOrEqual(chip.getBoundingClientRect().left);
+		expect(chip.getBoundingClientRect().right).toBeLessThanOrEqual(
+			canvas.getByTestId("session-bar-island-overflow").getBoundingClientRect()
+				.left,
 		);
 	},
 };
 
-/**
- * The worst case for the phone row: a long dirty branch beside a Claude
- * session's account pill with a long account name.
- */
-export const PhoneLongBranchAccount: Story = {
-	beforeEach: () => {
-		projectState.projects = [
-			{
-				slug: "conduit",
-				title: "conduit",
-				folders: ["/src/conduit"],
-				instanceId: "claude-work",
-				git: { branch: "feature/session-header-overlap-fix", dirty: true },
-			},
-		];
-		const accounts = [
-			{ id: "claude-work", name: "Work Claude Max" },
-			{ id: "claude-personal", name: "Personal" },
-		];
-		instanceState.instances = mockInstances.map((instance, index) => ({
-			...instance,
-			...accounts[index],
-			driver: "claude",
-		}));
-		applyGetAgentsResponse(
-			{
-				projectSlug: "conduit",
-				providerScope: { id: "claude", name: "Claude" },
-				agents: [],
-				instanceId: "claude-work",
-			},
-			mockSession.id,
-		);
-	},
+// Long checkout and account names leave the header controls unchanged.
+function seedClaudeHeader(): void {
+	projectState.projects = [
+		{
+			slug: "conduit",
+			title: "conduit",
+			folders: ["/src/conduit"],
+			git: { branch: "feature/session-header-overlap-fix", dirty: true },
+		},
+	];
+	const accounts = [
+		{ id: "claude-work", name: "Work Claude Max" },
+		{ id: "claude-personal", name: "Personal" },
+	];
+	instanceState.instances = mockInstances.map((instance, index) => ({
+		...instance,
+		...accounts[index],
+		driver: "claude",
+	}));
+	applyGetAgentsResponse(
+		{
+			projectSlug: "conduit",
+			providerScope: { id: "claude", name: "Claude" },
+			agents: [],
+			instanceId: "claude-work",
+		},
+		mockSession.id,
+	);
+}
+
+export const PhoneClaudeHeader: Story = {
+	beforeEach: seedClaudeHeader,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const back = canvas.getByTestId("session-bar-back").getBoundingClientRect();
-		const pill = canvas.getByTestId("session-bar-identity");
-		const group = pill
-			.closest(".session-bar-segments")
-			?.getBoundingClientRect();
-		const account = canvas.getByTestId("session-account-pill");
-		const more = canvas
-			.getByTestId("session-bar-island-overflow")
-			.getBoundingClientRect();
-		const dirty = pill
-			.querySelector('[data-part="dirty"]')
-			?.getBoundingClientRect();
-		const accountDot = within(account)
-			.getByTestId("account-dot")
-			.getBoundingClientRect();
-		// Both give way and neither overlaps a neighbour.
-		expect(back.right).toBeLessThanOrEqual(group?.left ?? 0);
-		expect(group?.right).toBeLessThanOrEqual(
-			account.getBoundingClientRect().left,
-		);
-		expect(account.getBoundingClientRect().right).toBeLessThanOrEqual(
-			more.left,
-		);
-		expect(pill.querySelector('[data-part="branch"]')?.textContent).toBe(
-			"feature/session-header-overlap-fix",
-		);
-		// The dirty mark stays inside the pill, well clear of the account dot.
-		expect(dirty?.left).toBeGreaterThanOrEqual(group?.left ?? 0);
-		expect(dirty?.right).toBeLessThanOrEqual(group?.right ?? 0);
-		expect(accountDot.left - (dirty?.right ?? 0)).toBeGreaterThan(40);
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
+		expect(
+			canvas.queryByRole("button", { name: /^Session account:/ }),
+		).toBeNull();
+		expect(canvas.queryByTestId("account-dot")).toBeNull();
+		const bar = canvas.getByTestId("session-bar");
+		expect(bar.scrollWidth).toBe(bar.clientWidth);
 	},
 };
 
-export const PhoneLongBranchAccountNarrowest: Story = {
-	...PhoneLongBranchAccount,
+export const PhoneClaudeHeaderNarrowest: Story = {
+	...PhoneClaudeHeader,
 	args: { width: 320 },
+};
+
+export const DesktopClaudeHeader: Story = {
+	...PhoneClaudeHeader,
+	args: { width: 900 },
+	beforeEach: () => {
+		seedClaudeHeader();
+		sessionViewState.compact = false;
+	},
 };
 
 export const DesktopLongTitleNarrow: Story = {
@@ -1117,7 +1092,7 @@ export const DesktopNoSession: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("session-bar-identity")).toBeVisible();
+		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		await expect(canvas.getByTestId("session-bar-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-title")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
@@ -1320,7 +1295,7 @@ export const DesktopBackgroundTasks: Story = {
 			...[
 				"session-bar-title",
 				"session-skills-chip",
-				"session-bar-identity",
+				"session-bar-overflow",
 			].map((id) => canvas.getByTestId(id)),
 		])
 			expect(

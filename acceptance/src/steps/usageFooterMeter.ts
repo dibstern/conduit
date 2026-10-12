@@ -5,7 +5,7 @@ import type {
 } from "../../../src/lib/contracts/limit-recovery.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { openModelPicker, requireRpcControl } from "./shared.js";
 
 const states = {
 	normal: [41, 22],
@@ -13,6 +13,28 @@ const states = {
 	warnWk: [30, 91],
 	limit: [100, 71],
 } as const;
+
+/** A real finger drag: CDP touch events, which the page also sees as pointer events. */
+async function touchDrag(page: Page, x: number, y: number, dy: number) {
+	const touch = await page.context().newCDPSession(page);
+	try {
+		await touch.send("Input.dispatchTouchEvent", {
+			type: "touchStart",
+			touchPoints: [{ x, y }],
+		});
+		for (let step = 1; step <= 12; step++)
+			await touch.send("Input.dispatchTouchEvent", {
+				type: "touchMove",
+				touchPoints: [{ x, y: y + (dy * step) / 12 }],
+			});
+		await touch.send("Input.dispatchTouchEvent", {
+			type: "touchEnd",
+			touchPoints: [],
+		});
+	} finally {
+		await touch.detach();
+	}
+}
 
 function reading(
 	accountId: string,
@@ -81,14 +103,14 @@ function setAccounts(
 		})),
 	});
 	rpc.setDaemonList("SubscribeProjects", {
-		projects: [
-			{
-				slug: "myapp",
-				title: "myapp",
-				folders: ["/src/myapp"],
-				instanceId: "claude",
-			},
-		],
+		projects: [{ slug: "myapp", title: "myapp", folders: ["/src/myapp"] }],
+	});
+	// A Claude default model makes the claude account current outside a session.
+	rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-5",
+		provider: "claude",
+		variant: "",
 	});
 }
 
@@ -246,6 +268,16 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert the window's warning level against the saved threshold",
+		match:
+			/^the usage footer (\S+) (five_hour|seven_day|month) window is at level (normal|warning|danger)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(`usage-footer-cell-${match[1]}-${match[2]}`),
+			).toHaveAttribute("data-level", match[3] ?? "");
+		},
+	},
+	{
 		name: "assert the window's threshold colour and filled share",
 		match:
 			/^the usage footer (\S+) (five_hour|seven_day|month) meter is (normal|warning|danger) at (\d+) percent$/,
@@ -336,8 +368,8 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the project's default account colour and tooltip",
-		match: /^the usage footer (\S+) row is the highlighted project default$/,
+		name: "assert the current account's colour and tooltip",
+		match: /^the usage footer (\S+) row is the highlighted current account$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId(`usage-footer-row-${match[1]}`);
 			await expect(
@@ -346,7 +378,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 					.locator('[data-default="true"]'),
 			).toHaveCount(1);
 			await expect(row).toHaveAttribute("data-default", "true");
-			await expect(row).toHaveAttribute("title", "Default for this project");
+			await expect(row).toHaveAttribute("title", "Current account");
 			await expect(row).toHaveCSS(
 				"background-color",
 				await themeColour(world.page, "--color-bg-alt"),
@@ -357,18 +389,20 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert account dots retain the account pill's identity colour",
-		match: /^the usage footer (\S+) dot matches the session account pill$/,
+		name: "assert account dots match the composer account badge colour",
+		match: /^the usage footer (\S+) dot matches the composer account badge$/,
 		run: async ({ world, match }) => {
 			const footerDot = world.page.getByTestId(`usage-footer-dot-${match[1]}`);
-			const pillDot = world.page
-				.getByTestId("session-account-pill")
-				.getByTestId("account-dot");
+			const badge = world.page
+				.locator(
+					`#input-area [data-testid="harness-logo"][data-account="${match[1]}"]`,
+				)
+				.getByTestId("harness-logo-badge");
 			await expect(footerDot).toHaveAttribute("data-account", match[1] ?? "");
-			await expect(pillDot).toBeVisible();
+			await expect(badge).toBeVisible();
 			await expect(footerDot).toHaveCSS(
 				"background-color",
-				await pillDot.evaluate((dot) => getComputedStyle(dot).backgroundColor),
+				await badge.evaluate((dot) => getComputedStyle(dot).backgroundColor),
 			);
 		},
 	},
@@ -551,8 +585,29 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// The draft's pick is the only per-tab account choice; it decides the
+		// highlighted account until a session exists.
+		name: "pick an account for a new session draft",
+		match: /^I pick (\S+) for a new session draft$/,
+		run: async ({ world, match }) => {
+			const newSession = world.page.locator("#new-session-btn:visible");
+			if ((await newSession.count()) === 0)
+				await world.page.getByTestId("session-bar-back").click();
+			await newSession.click();
+			await openModelPicker(world.page);
+			await world.page.getByTestId("picker-harness-claude").click();
+			await world.page.getByTestId(`picker-account-${match[1]}`).click();
+			await world.page.keyboard.press("Escape");
+			await expect(
+				world.page.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				),
+			).toHaveAttribute("data-instance-id", match[1] ?? "");
+		},
+	},
+	{
 		// Opening a session from the list attaches its project, which is
-		// what gives the phone list a project default after going back.
+		// what gives the phone list a current account after going back.
 		name: "open a project session from the phone session list",
 		match: /^I open "([^"]+)" from the phone session list$/,
 		run: async ({ world, match }) => {
@@ -567,88 +622,157 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the phone chips follow shared account order",
-		match: /^the phone usage chips are (.+) in that order$/,
+		name: "assert the phone dock's rows follow shared account order",
+		match: /^the phone usage rows are (.+) in that order$/,
 		run: async ({ world, match }) => {
 			const expected = (match[1] ?? "").split(", ");
-			const chips = world.page
+			const rows = world.page
 				.getByTestId("usage-footer-phone")
-				.locator('[data-testid^="usage-phone-chip-"]');
-			await expect(chips).toHaveCount(expected.length);
-			for (const [index, accountId] of expected.entries()) {
-				await expect(chips.nth(index)).toBeVisible();
-				await expect(chips.nth(index)).toHaveAttribute(
-					"data-account",
-					accountId,
+				.locator('[data-testid^="usage-footer-row-"]');
+			await expect(rows).toHaveCount(expected.length);
+			for (const [index, accountId] of expected.entries())
+				await expect(rows.nth(index)).toHaveAttribute(
+					"data-testid",
+					`usage-footer-row-${accountId}`,
 				);
-			}
 		},
 	},
 	{
-		name: "assert the phone default chip highlight and design dimensions",
-		match: /^the phone usage chip (\S+) is the highlighted project default$/,
+		name: "assert the highlighted current account in the phone dock or sheet",
+		match:
+			/^the (phone usage|usage sheet) row (\S+) is the highlighted current account$/,
 		run: async ({ world, match }) => {
-			const chip = world.page.getByTestId(`usage-phone-chip-${match[1]}`);
+			const [scope, prefix] =
+				match[1] === "usage sheet"
+					? ["usage-sheet", "usage-sheet"]
+					: ["usage-footer-phone", "usage-footer"];
+			const row = world.page.getByTestId(`${prefix}-row-${match[2]}`);
 			await expect(
-				world.page
-					.getByTestId("usage-footer-phone")
-					.locator('[data-default="true"]'),
+				world.page.getByTestId(scope).locator('[data-default="true"]'),
 			).toHaveCount(1);
-			await expect(chip).toHaveAttribute("data-default", "true");
-			await expect(chip).toHaveAttribute("title", "Default for this project");
-			await expect(chip).toHaveCSS(
+			await expect(row).toHaveAttribute("data-default", "true");
+			await expect(row).toHaveAttribute("title", "Current account");
+			await expect(row).toHaveCSS(
 				"background-color",
 				await themeColour(world.page, "--color-bg-alt"),
 			);
-			await expect(chip).toHaveCSS("height", "22px");
-			await expect(chip).toHaveCSS("padding-left", "7px");
-			await expect(chip).toHaveCSS("padding-right", "7px");
 			await expect(
-				world.page.getByTestId(`usage-phone-dot-${match[1]}`),
-			).toHaveAttribute("data-account", match[1] ?? "");
+				world.page.getByTestId(`${prefix}-name-${match[2]}`),
+			).toHaveCSS("color", await themeColour(world.page, "--color-text"));
 		},
 	},
 	{
-		name: "assert a phone chip's window, display value and colour",
-		match:
-			/^the phone usage chip (\S+) shows (5h|wk|mo|none) (\S+) at level (ok|warn|limited|unknown)$/,
+		name: "assert the accounts folded behind the phone dock's count",
+		match: /^the phone usage footer folds (\d+) more accounts?$/,
 		run: async ({ world, match }) => {
-			const [accountId, kind, value, level] = match.slice(1);
-			const chip = world.page.getByTestId(`usage-phone-chip-${accountId}`);
-			await expect(chip).toBeVisible();
-			await expect(chip).toHaveAttribute("data-level", level ?? "");
-			const window = world.page.getByTestId(`usage-phone-window-${accountId}`);
-			if (kind === "none") await expect(window).toHaveCount(0);
-			else {
-				await expect(window).toHaveText(kind ?? "");
-				await expect(window).toHaveCSS(
-					"color",
-					await themeColour(world.page, "--color-text-dimmer"),
-				);
+			const count = Number(match[1]);
+			const more = world.page.getByTestId("usage-phone-more");
+			if (count === 0) {
+				await expect(more).toHaveCount(0);
+				return;
 			}
-			const caption = world.page.getByTestId(`usage-phone-value-${accountId}`);
-			await expect(caption).toHaveText(value ?? "");
-			const token =
-				level === "limited"
-					? "--color-error"
-					: level === "warn"
-						? "--color-fill-amber"
-						: level === "unknown"
-							? "--color-text-dimmer"
-							: "--color-text-secondary";
-			await expect(caption).toHaveCSS(
-				"color",
-				await themeColour(world.page, token),
+			await expect(world.page.getByTestId("usage-phone-more-count")).toHaveText(
+				`+${count} more`,
+			);
+			await expect(
+				more.locator('[data-testid^="usage-phone-folded-"]'),
+			).toHaveCount(count);
+		},
+	},
+	{
+		name: "open the usage sheet from the phone dock",
+		match: /^I open the phone usage sheet$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("usage-phone-dock").click();
+			await expect(world.page.getByTestId("usage-sheet")).toBeVisible();
+			await expect(
+				world.page.getByRole("dialog", { name: "Usage" }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the usage sheet lists every account by harness",
+		match: /^the usage sheet groups read CLAUDE, CODEX, CURSOR with rows (.+)$/,
+		run: async ({ world, match }) => {
+			const sheet = world.page.getByTestId("usage-sheet");
+			await expect(
+				sheet.locator('[data-testid^="usage-sheet-heading-"]'),
+			).toHaveText(["CLAUDE", "CODEX", "CURSOR"]);
+			const expected = (match[1] ?? "").split(", ");
+			const rows = sheet.locator('[data-testid^="usage-sheet-row-"]');
+			await expect(rows).toHaveCount(expected.length);
+			for (const [index, accountId] of expected.entries())
+				await expect(rows.nth(index)).toHaveAttribute(
+					"data-testid",
+					`usage-sheet-row-${accountId}`,
+				);
+		},
+	},
+	{
+		name: "pull the phone usage dock up with a finger",
+		match: /^I drag the phone usage dock up by (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page
+				.getByTestId("usage-phone-dock")
+				.boundingBox();
+			if (!box) throw new Error("Missing phone usage dock");
+			await touchDrag(
+				world.page,
+				box.x + box.width / 2,
+				box.y + box.height / 2,
+				-Number(match[1]),
 			);
 		},
 	},
 	{
-		name: "assert the count includes every remaining account",
-		match: /^the phone usage footer counts (\d+) remaining accounts$/,
+		name: "pull the usage sheet down by its grab handle",
+		match: /^I drag the usage sheet down by (\d+) pixels$/,
 		run: async ({ world, match }) => {
-			const more = world.page.getByTestId("usage-phone-more");
-			if (Number(match[1]) === 0) await expect(more).toHaveCount(0);
-			else await expect(more).toHaveText(`+${match[1]}`);
+			const box = await world.page.getByTestId("usage-sheet").boundingBox();
+			if (!box) throw new Error("Missing usage sheet");
+			await touchDrag(
+				world.page,
+				box.x + box.width / 2,
+				box.y + 10,
+				Number(match[1]),
+			);
+		},
+	},
+	{
+		name: "assert whether the usage sheet is open",
+		match: /^the usage sheet is (open|closed)$/,
+		run: async ({ world, match }) => {
+			const dialog = world.page.getByRole("dialog", { name: "Usage" });
+			if (match[1] === "open") await expect(dialog).toBeVisible();
+			else await expect(world.page.getByTestId("usage-sheet")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert an account's two windows in the usage sheet",
+		match: /^the usage sheet (\S+) shows five_hour (\S+) and seven_day (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(`usage-sheet-value-${match[1]}-five_hour`),
+			).toHaveText(match[2] ?? "");
+			await expect(
+				world.page.getByTestId(`usage-sheet-value-${match[1]}-seven_day`),
+			).toHaveText(match[3] ?? "");
+		},
+	},
+	{
+		name: "open Usage settings from the usage sheet",
+		match: /^I tap Settings in the usage sheet$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("usage-sheet-settings").click();
+		},
+	},
+	{
+		name: "assert the sheet gave way to Usage settings",
+		match: /^the usage sheet is closed and Usage settings are open$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("usage-sheet")).toHaveCount(0);
+			await expect(world.page.locator("#settings-panel")).toBeVisible();
+			await expect(world.page.locator("#usage-limit-settings")).toBeVisible();
 		},
 	},
 	{
@@ -656,10 +780,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		match: /^the single phone usage footer shows 5h (\S+) and Wk (\S+)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("usage-phone-single")).toBeVisible();
-			await expect(
-				world.page.locator('[data-testid^="usage-phone-chip-"]'),
-			).toHaveCount(0);
-			await expect(world.page.getByTestId("usage-phone-more")).toHaveCount(0);
+			await expect(world.page.getByTestId("usage-phone-dock")).toHaveCount(0);
 			await expect(
 				world.page.getByTestId("usage-phone-column-five_hour"),
 			).toHaveText("5h");
@@ -691,7 +812,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone footer and last-row geometry after scrolling",
+		name: "assert the dock, new-session button and last row stack without overlap",
 		match:
 			/^the phone usage footer clears the new-session button and the last row text$/,
 		run: async ({ world }) => {
@@ -720,38 +841,24 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						const textBounds = Array.from(text, (item) =>
 							item.getBoundingClientRect(),
 						).filter((box) => box.width > 0 && box.height > 0);
-						const chips = Array.from(
-							element.querySelectorAll(
-								'[data-testid^="usage-phone-chip-"], [data-testid="usage-phone-more"], [data-testid="usage-phone-single"]',
-							),
-							(item) => item.getBoundingClientRect(),
-						);
 						return {
 							scrollable: scroller.scrollHeight > scroller.clientHeight,
-							clearOfButton: chips.every((box) => box.right <= button.left),
-							lastTextVisible:
+							dockAtBottom: Math.round(bounds.bottom) === window.innerHeight,
+							buttonAboveDock: button.bottom <= bounds.top,
+							lastTextClearOfButton:
 								textBounds.length > 0 &&
 								textBounds.every(
 									(box) =>
-										box.top >= listBounds.top && box.bottom <= bounds.top,
-								),
-							contentContained:
-								chips.length > 0 &&
-								chips.every(
-									(box) =>
-										box.left >= bounds.left &&
-										box.right <= bounds.right &&
-										box.top >= bounds.top &&
-										box.bottom <= bounds.bottom,
+										box.top >= listBounds.top && box.bottom <= button.top,
 								),
 						};
 					});
 				})
 				.toEqual({
 					scrollable: true,
-					clearOfButton: true,
-					lastTextVisible: true,
-					contentContained: true,
+					dockAtBottom: true,
+					buttonAboveDock: true,
+					lastTextClearOfButton: true,
 				});
 		},
 	},

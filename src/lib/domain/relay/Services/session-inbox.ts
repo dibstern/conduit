@@ -297,6 +297,11 @@ export interface SessionInboxTarget {
 export type SessionInboxOutcome = "accepted" | "already_started" | SteerBlocker;
 
 export interface SessionInbox {
+	/** Rewind and undo share the input handoff lock, so they cannot race a send. */
+	readonly withSession: <A, E, R>(
+		sessionId: string,
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E, R>;
 	/** Admit an input; `handedOff` is true when this input was sent at once.
 	 *  A refused steer admits nothing. */
 	readonly submit: (
@@ -659,6 +664,7 @@ export const SessionInboxLive = Layer.scoped(
 		);
 
 		return {
+			withSession: (sessionId, effect) => serialised(sessionId)(effect),
 			start: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
 			cancel: act("Cancel"),
 			sendNow: act("SendNow"),

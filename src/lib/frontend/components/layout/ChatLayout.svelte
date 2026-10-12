@@ -4,6 +4,7 @@
 
 <script lang="ts">
 	import { onMount, tick, untrack } from "svelte";
+	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime } from "../../transport/runtime.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
@@ -55,8 +56,9 @@
 	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
-	import { viewTranscript } from "../../stores/transcript.svelte.js";
-	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState } from "../../stores/discovery.svelte.js";
+	import { drawSavedTranscript, leaveSavedDraw, placedSessionId, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
+	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
+	import { applyGetAgentsResponse, applyGetCommandsResponse, applyGetModelsResponse, clearDiscoveryState, discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -369,6 +371,13 @@
 	// Each mount attaches once: a remount keeps the previous mount's slug.
 	let attachedThisMount = false;
 	onMount(() => {
+		// A page load draws the session's saved page, if any, before any reply.
+		const loadSessionId = getCurrentSessionId();
+		if (loadSessionId)
+			void openSavedTranscript(loadSessionId).then((record) => {
+				if (record && sessionState.currentId === null && getCurrentSessionId() === loadSessionId)
+					drawSavedTranscript(record);
+			});
 		// A page load starts clean; only a change of project clears state.
 		let previousSlug = attachedProjectState.slug;
 		let attachGeneration = 0;
@@ -396,12 +405,9 @@
 			const generation = attachGeneration;
 			const routeSessionId = getCurrentSessionId();
 			const workspace = commandWorkspace;
-			// With no session in the route, scope the agent fetch to the draft
-			// project's bound instance, so the agent list matches the picker.
-			// Unbound, the relay's default scope already matches.
 			const draftInstanceId =
-				routeSessionId == null
-					? projectState.projects.find((p) => p.slug === draftSlug)?.instanceId
+				routeSessionId == null && discoveryState.hasInstanceChoice
+					? getEffectiveInstanceId()
 					: undefined;
 			void getAgentsRpc({
 				projectSlug: slug,
@@ -409,7 +415,11 @@
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetAgentsResponse(response, routeSessionId ?? undefined);
+					if (
+						generation === attachGeneration &&
+						getCurrentSessionId() === routeSessionId &&
+						(routeSessionId != null || draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined))
+					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
 			void getModelsRpc({
@@ -417,7 +427,7 @@
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration) applyGetModelsResponse(response);
+					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyGetModelsResponse(response);
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({
@@ -487,9 +497,11 @@
 			});
 		return () => { cancelled = true; };
 	});
+	// A drawn session is viewed once the server has placed it.
+	const placedId = $derived(placedSessionId());
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
-		const sessionId = project ? sessionState.currentId : null;
+		const sessionId = project ? placedId : null;
 		untrack(() => {
 			viewTranscript(project, sessionId);
 			viewTodos(project, sessionId);
@@ -514,7 +526,7 @@
 	// No null cleanup: moving within a family keeps its subscription.
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
-		const sessionId = project ? sessionState.currentId : null;
+		const sessionId = project ? placedId : null;
 		untrack(() => viewFamily(project, sessionId));
 	});
 	$effect(() => {
@@ -531,9 +543,8 @@
 		};
 	});
 	$effect(() => {
-		const connection = attachedProjectState.slug ?? "";
-		untrack(() => followDaemonLists(connection));
-		return () => followDaemonLists(null);
+		followDaemonLists(true);
+		return () => followDaemonLists(false);
 	});
 	// The version is daemon-wide, so it follows the connection, not the project:
 	// a reconnect after a restart can be a new build.
@@ -544,14 +555,17 @@
 		const route = getCurrentRoute();
 		// A draft attaches the project it will be created in, so models and
 		// commands match it before the first send.
-		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : getCurrentSearchParams().get("p");
+		const scope = getCurrentSearchParams().get("p");
+		const groupScope = getScopeGroupKey(scope) !== null;
+		const projectHint = route.page === "chat" && route.draft ? getDraftProject() : groupScope ? null : scope;
 		const attachedSlug = attachedProjectState.slug;
+		untrack(() => leaveSavedDraw(route.page === "chat" ? route.sessionId : undefined));
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
 			// The server picks the project on a cold load (the session's, the hint,
 			// else its default); afterwards only a project-only route switches it.
-			if (!attachedThisMount || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
+			if (!attachedThisMount || (groupScope && attachedSlug === null) || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
 				requestedProject = projectHint ?? null;
 				void attachProjectRpc({
 					originId: getBrowserClientId(),
@@ -571,15 +585,32 @@
 				if (sessionState.currentId !== null) {
 					sessionState.currentId = null;
 					clearTodoState();
+					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
+						const draftInstanceId = discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined;
+						void getAgentsRpc({
+							projectSlug: attachedSlug,
+							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
+						})
+							.then((response) => {
+								if (
+									sessionState.currentId === null &&
+									getCurrentSessionId() === null &&
+									attachedProjectState.slug === attachedSlug &&
+									draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined)
+								) applyGetAgentsResponse(response);
+							})
+							.catch(() => undefined);
+					}
 				}
 				return;
 			}
 			if (!attachedSlug) return;
-			if (route.sessionId === sessionState.currentId) return;
+			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
 			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
 				if (cancelled) return;
-				if (sessionState.currentId === sessionId) return;
+				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
+				placeSavedDraw(sessionId, projectSlug);
 				if (projectSlug === null) {
 					routerState.sessionNotFound = true;
 					replaceRoute("/");
@@ -782,6 +813,7 @@
 								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>
 							</div>
 						{/if}
+						<RewindBanner pendingOnly />
 						<InputArea />
 					</div>
 					{#if sessionViewState.compact && sessionViewState.filesEverOpened}

@@ -9,8 +9,6 @@
 	import { uiState } from "../../stores/ui.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { getCachedInstances, instanceState } from "../../stores/instance.svelte.js";
-	import { projectState } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import { openSettings } from "../layout/chrome-actions.js";
@@ -61,13 +59,9 @@
 		const providerId = instance ? instance.driver ?? "opencode"
 			: instanceId === "claude" || instanceId === "opencode" ? instanceId
 			: sessionId ? discoveryState.sessionProviderIds[sessionId] : undefined;
-		const projectInstanceId = projectState.projects.find(
-			(project) => project.slug === (session?.projectSlug ?? getCurrentSlug()),
-		)?.instanceId;
 		// The relay publishes its selected instance's status under the default
 		// alias, including when it implicitly selects the first OpenCode instance.
-		const defaultInstance = instances.find((candidate) => candidate.driver !== "claude" && candidate.id === projectInstanceId)
-			?? instances.find((candidate) => candidate.driver !== "claude");
+		const defaultInstance = instances.find((candidate) => candidate.driver !== "claude");
 		const connectionInstanceId = instanceId === defaultInstance?.id ? "opencode" : instanceId ?? "opencode";
 		const status =
 			sessionId && providerId === "opencode"

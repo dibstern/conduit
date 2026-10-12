@@ -19,6 +19,7 @@ import {
 } from "../../../src/lib/frontend/transport/shared-client.js";
 import { WsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
+import { detailRowsOf, detailUpserts } from "../../helpers/detail-rows.js";
 
 const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
@@ -46,7 +47,11 @@ const assistant = (text: string): HistoryMessage => ({
 			type: "tool",
 			callID: "tool-1",
 			tool: "Read",
-			state: { status: "completed", input: {}, output: "ok" },
+			state: {
+				status: "completed",
+				input: { _tag: "whole", value: {} },
+				output: { _tag: "whole", text: "ok" },
+			},
 		},
 	],
 });
@@ -128,18 +133,12 @@ it("applies each detail update once", async () => {
 	await wire.emit({
 		_tag: "snapshot",
 		sequence: 4,
-		rows: [user, assistant("hello")].map((message) => ({
-			_tag: "transcriptMessage",
-			message,
-		})),
+		rows: [user, assistant("hello")].flatMap(detailRowsOf),
 	});
 	await wire.emit({ _tag: "synchronized" });
 	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
-	await wire.emit({
-		_tag: "upsert",
-		sequence: 5,
-		item: { _tag: "transcriptMessage", message: assistant("hello world") },
-	});
+	for (const envelope of detailUpserts(assistant("hello world"), 5))
+		await wire.emit(envelope);
 	await vi.waitFor(() =>
 		expect(
 			getOrCreateSessionSlot("A").messages.messages.some(
@@ -154,4 +153,93 @@ it("applies each detail update once", async () => {
 				message.type === "assistant" && message.rawText.includes("world"),
 		),
 	).toHaveLength(1);
+});
+
+it("keeps a part in its place when a live update changes it", async () => {
+	const tool = (id: string, status: "running" | "completed") => ({
+		_tag: "part" as const,
+		messageId: "a1",
+		sortOrder: id === "tool-a" ? 1 : 2,
+		part: {
+			id,
+			type: "tool" as const,
+			callID: id,
+			tool: "Read",
+			state: {
+				status,
+				input: { _tag: "whole" as const, value: {} },
+				...(status === "completed"
+					? { output: { _tag: "whole" as const, text: "ok" } }
+					: {}),
+			},
+		},
+	});
+	viewTranscript("project", "A");
+	await vi.waitFor(() => expect(wire.ready).toBe(true));
+	await wire.emit({
+		_tag: "snapshot",
+		sequence: 4,
+		rows: [
+			{
+				_tag: "message",
+				message: { id: "a1", role: "assistant", time: { created: 2 } },
+			},
+			{
+				_tag: "part",
+				messageId: "a1",
+				sortOrder: 0,
+				part: { id: "think", type: "reasoning", text: "hmm" },
+			},
+			tool("tool-a", "running"),
+			tool("tool-b", "running"),
+		],
+	});
+	await wire.emit({ _tag: "synchronized" });
+	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
+	await wire.emit({
+		_tag: "upsert",
+		sequence: 5,
+		item: tool("tool-a", "completed"),
+	});
+	const parts = () =>
+		getOrCreateSessionSlot("A").messages.transcript?.rows[0]?.parts ?? [];
+	await vi.waitFor(() =>
+		expect(parts().find((part) => part.id === "tool-a")?.state?.status).toBe(
+			"completed",
+		),
+	);
+	expect(parts().map((part) => part.id)).toEqual(["think", "tool-a", "tool-b"]);
+});
+
+it("moves a held part when a reconcile changes its place", async () => {
+	const text = (id: string, sortOrder: number) => ({
+		_tag: "part" as const,
+		messageId: "a1",
+		sortOrder,
+		part: { id, type: "text" as const, text: id },
+	});
+	viewTranscript("project", "A");
+	await vi.waitFor(() => expect(wire.ready).toBe(true));
+	await wire.emit({
+		_tag: "snapshot",
+		sequence: 4,
+		rows: [
+			text("a", 0),
+			text("b", 1),
+			text("c", 2),
+			{
+				_tag: "message",
+				message: { id: "a1", role: "assistant", time: { created: 2 } },
+			},
+		],
+	});
+	await wire.emit({ _tag: "synchronized" });
+	await vi.waitFor(() => expect(transcriptStatus("A")._tag).toBe("live"));
+	// A message snapshot re-sends every part, with one new in the middle.
+	for (const item of [text("a", 0), text("new", 1), text("b", 2), text("c", 3)])
+		await wire.emit({ _tag: "upsert", sequence: 5, item });
+	const parts = () =>
+		getOrCreateSessionSlot("A").messages.transcript?.rows[0]?.parts ?? [];
+	await vi.waitFor(() => expect(parts()).toHaveLength(4));
+	expect(parts().map((part) => part.id)).toEqual(["a", "new", "b", "c"]);
 });

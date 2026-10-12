@@ -21,6 +21,7 @@ import {
 } from "effect";
 import { expect } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type SessionEventBus,
@@ -55,7 +56,7 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 
 const messageRow = (id: string, version = 0): MessageWithParts => ({
 	id,
-	version,
+	version: MessageVersion.make(version),
 	session_id: "session-1",
 	turn_id: null,
 	role: "assistant",
@@ -77,8 +78,6 @@ const historyMessage = (id: string) => ({
 	id,
 	role: "assistant",
 	time: { created: 1, completed: 1 },
-	text: id,
-	parts: [],
 });
 
 const readFailure = new ReadQueryEffectError({
@@ -96,8 +95,9 @@ const makeLayer = (options: {
 			Layer.mergeAll(
 				makeSessionManagerStateLive(),
 				Layer.succeed(ReadQueryEffectTag, {
-					getToolContent: () => Effect.succeed(undefined),
+					readToolDetails: () => Effect.succeed([]),
 					getSessionStatus: () => Effect.succeed(undefined),
+					getSessionFamilyRoot: () => Effect.succeed(undefined),
 					getSession: () => Effect.succeed(undefined),
 					getGoalDetails: () =>
 						Effect.succeed({ checks: [], tokensSinceStart: null }),
@@ -106,6 +106,7 @@ const makeLayer = (options: {
 					listSessions: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),
+					getStrandedChildren: () => Effect.succeed([]),
 					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 					countPendingApprovalsBySession: () => Effect.succeed([]),
 					readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
@@ -114,6 +115,7 @@ const makeLayer = (options: {
 					getSessionMessagesWithParts: () => Effect.succeed([]),
 					readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 					readInboxState: () => Effect.succeed(undefined),
+					readStoreIdentity: () => Effect.succeed("store"),
 					readSessionTranscriptPage: () =>
 						options.failRead
 							? Effect.fail(readFailure)
@@ -246,7 +248,7 @@ const deltas = (member: Member) =>
 		: [1, 2].map((version) => ({
 				_tag: "upsert",
 				item: {
-					_tag: "transcriptMessage",
+					_tag: "message",
 					message: historyMessage(`message-${version}`),
 				},
 				sequence: version,
@@ -259,7 +261,9 @@ describe("RpcTest subscription stream semantics", () => {
 				_tag: "snapshot",
 				rows: [],
 				sequence: 0,
-				...(member === "SubscribeSessionDetail" ? { hasMore: false } : {}),
+				...(member === "SubscribeSessionDetail"
+					? { hasMore: false, resumePoint: expect.any(String) }
+					: {}),
 			},
 			{ _tag: "synchronized" },
 		];

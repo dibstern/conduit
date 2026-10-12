@@ -5,6 +5,7 @@ import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 interface ClaudeSdkTestModule {
 	readonly claudeSdk: {
 		readonly query: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]>;
+		readonly fork?: ClaudeSessionRunnerDeps["sessionForkSdk"];
 	};
 	readonly claudeSubagentSdk?: ClaudeSessionRunnerDeps["subagentSdk"];
 	readonly resolveSettings?: typeof resolveSettings;

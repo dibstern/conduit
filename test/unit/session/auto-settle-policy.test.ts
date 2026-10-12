@@ -26,6 +26,86 @@ const eligible = (): AutoSettleFacts => ({
 });
 
 describe("automatic idle settlement policy", () => {
+	// Merge facts must use the session's checkout, preserve all settlement guards,
+	// and consume each merged head once, including after a fetch or daemon restart.
+	it("settles recent work when its own branch has a new merged head", () => {
+		expect(
+			shouldSettleIdleSession(
+				{
+					...eligible(),
+					lastMessageAt: NOW - 1_000,
+					latestUserMessageAt: NOW - 2_000,
+					latestTurn: {
+						state: "completed",
+						requestedAt: NOW - 2_000,
+						startedAt: NOW - 1_900,
+						completedAt: NOW - 1_000,
+					},
+					mergedHead: "new-head",
+				},
+				NOW,
+				idle,
+			),
+		).toBe(true);
+	});
+
+	it.each([
+		["a consumed merge", { settledMergedHead: "merged-head" }],
+		["unread", { unread: true }],
+		["running", { status: "busy" }],
+		["pending approval", { hasPendingApproval: true }],
+		["pinned", { pinnedAt: NOW - 2_000 }],
+		["viewed", { hasViewer: true }],
+		["snoozed", { isSnoozed: true }],
+		["background work", { hasLiveBackgroundWork: true }],
+		["disabled", { autoSettleDisabledAt: NOW - 2_000 }],
+	])("does not let a merge bypass %s", (_label, override) => {
+		expect(
+			shouldSettleIdleSession(
+				{
+					...eligible(),
+					lastMessageAt: NOW - 100,
+					latestUserMessageAt: NOW - 2_000,
+					latestTurn: {
+						state: "completed",
+						requestedAt: NOW - 2_000,
+						startedAt: NOW - 1_900,
+						completedAt: NOW - 100,
+					},
+					mergedHead: "merged-head",
+					...override,
+				},
+				NOW,
+				idle,
+			),
+		).toBe(false);
+	});
+
+	it("keeps resumed work active until a different branch head merges", () => {
+		const resumed = {
+			...eligible(),
+			lastMessageAt: NOW - 100,
+			unsettledAt: NOW - 500,
+			latestUserMessageAt: NOW - 500,
+			latestTurn: {
+				state: "completed",
+				requestedAt: NOW - 500,
+				startedAt: NOW - 450,
+				completedAt: NOW - 100,
+			},
+			mergedHead: "merged-head",
+			settledMergedHead: "merged-head",
+		};
+		expect(shouldSettleIdleSession(resumed, NOW, idle)).toBe(false);
+		expect(
+			shouldSettleIdleSession(
+				{ ...resumed, mergedHead: "next-head" },
+				NOW,
+				idle,
+			),
+		).toBe(true);
+	});
+
 	it("settles an eligible session", () => {
 		expect(shouldSettleIdleSession(eligible(), NOW, idle)).toBe(true);
 	});

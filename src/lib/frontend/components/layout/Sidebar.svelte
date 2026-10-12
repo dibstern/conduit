@@ -22,7 +22,6 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import { openSettings, toggleDebugPanel } from "./chrome-actions.js";
-	import InstanceBadgeMenu from "./InstanceBadgeMenu.svelte";
 	import Banners from "../overlays/Banners.svelte";
 	import UsageFooterMeter from "./UsageFooterMeter.svelte";
 
@@ -113,7 +112,6 @@
 			-->
 			{@render title("text-[19px]", "text-[13px]")}
 			<span class="flex-1"></span>
-			{#if listScreen}<InstanceBadgeMenu />{/if}
 			<SessionGroupMenu compact />
 			<Menu
 				bind:open={listMenuOpen}
@@ -230,7 +228,7 @@
 	{#if listScreen}<Banners />{/if}
 
 	<!-- Sidebar nav -->
-	<nav id="sidebar-nav" class:phone-list={listScreen} style:--phone-usage-height="{phoneUsageHeight}px" class="relative flex-1 flex flex-col overflow-hidden">
+	<nav id="sidebar-nav" class:phone-list={listScreen} class:usage-docked={listScreen && phoneUsageHeight > 0} style:--phone-usage-height="{phoneUsageHeight}px" class="relative flex-1 flex flex-col overflow-hidden">
 		<!-- Sessions panel -->
 		<div
 			id="sidebar-panel-sessions"
@@ -242,8 +240,10 @@
 			</div>
 		</div>
 
-		{#if sessionViewState.compact}
-			{#if listScreen}<UsageFooterMeter phone bind:height={phoneUsageHeight} />{/if}
+		{#if sessionViewState.compact && listScreen}
+			<UsageFooterMeter phone bind:height={phoneUsageHeight} />
+		{/if}
+		{#if sessionViewState.compact && !uiState.selectMode}
 			<Button
 				id="new-session-btn"
 				variant="ghost"
@@ -276,6 +276,15 @@
 
 <style>
 	.phone-list :global(#session-list-scroller) {
-		padding-bottom: calc(max(55px + env(safe-area-inset-bottom, 0px), var(--phone-usage-height, 0px)) + 12px);
+		padding-bottom: calc(55px + env(safe-area-inset-bottom, 0px) + 12px);
+	}
+
+	/* The usage dock sits below the list and takes the home-indicator inset,
+	   so the new-session button rides above it and the list only clears the button. */
+	.phone-list.usage-docked :global(#new-session-btn) {
+		bottom: calc(var(--phone-usage-height) + 12px);
+	}
+	.phone-list.usage-docked :global(#session-list-scroller) {
+		padding-bottom: 68px;
 	}
 </style>

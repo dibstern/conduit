@@ -4,7 +4,12 @@ import {
 	navigate,
 	previousHistoryEntryIsSessionList,
 } from "../stores/router.svelte.js";
-import { isSessionSnoozed, sessionState } from "../stores/session.svelte.js";
+import {
+	isSessionSnoozed,
+	sessionState,
+	setReadMark,
+	withReadMark,
+} from "../stores/session.svelte.js";
 import { refreshListedSessions } from "../stores/session-list.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
 import { showToast } from "../stores/ui.svelte.js";
@@ -33,23 +38,34 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 	};
-	const currentSession = foreign
-		? session
-		: (sessionState.rootSessions.find((row) => row.id === session.id) ??
-			session);
-	const markUnread = !currentSession.unread;
-	try {
-		await (markUnread
-			? markSessionUnreadRpc(input)
-			: markSessionReadRpc(input));
-		if (foreign) await refreshListedSessions();
-		if (
-			markUnread &&
-			sessionViewState.compact &&
-			sessionState.currentId === session.id
-		) {
-			backToSessions();
+	const latest = () =>
+		withReadMark(
+			foreign
+				? session
+				: (sessionState.rootSessions.find((row) => row.id === session.id) ??
+						session),
+		);
+	// The dot moves now; the server's row replaces the mark when it lands.
+	const write = async (unread: boolean) => {
+		const drop = setReadMark(latest(), unread);
+		try {
+			await (unread ? markSessionUnreadRpc(input) : markSessionReadRpc(input));
+		} catch (error) {
+			drop();
+			throw error;
 		}
+		// Rows from other projects only change on a fresh read.
+		if (foreign) await refreshListedSessions().finally(drop);
+	};
+	const markUnread = !latest().unread;
+	if (
+		markUnread &&
+		sessionViewState.compact &&
+		sessionState.currentId === session.id
+	)
+		backToSessions();
+	try {
+		await write(markUnread);
 		showToast(
 			`Marked ${markUnread ? "unread" : "read"} “${session.title || "New Session"}”`,
 			{
@@ -57,17 +73,9 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 				action: {
 					label: "Undo",
 					run: () => {
-						void (
-							markUnread
-								? markSessionReadRpc(input)
-								: markSessionUnreadRpc(input)
-						)
-							.then(async () => {
-								if (foreign) await refreshListedSessions();
-							})
-							.catch(() => {
-								showToast("Couldn't undo", { variant: "error" });
-							});
+						void write(!markUnread).catch(() => {
+							showToast("Couldn't undo", { variant: "error" });
+						});
 					},
 				},
 			},

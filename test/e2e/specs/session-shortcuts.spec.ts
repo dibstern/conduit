@@ -78,10 +78,10 @@ for (const mode of [
 			}
 		});
 
-		test("settle shortcuts toggle the open session and explain a disabled settle", async ({
+		test("settle shortcuts toggle the open session, and the header unpins before it settles", async ({
 			page,
 			relayUrl,
-		}) => {
+		}, testInfo) => {
 			await gotoRelay(page, relayUrl);
 			const messages = page.locator("#messages");
 			await messages.focus();
@@ -100,9 +100,22 @@ for (const mode of [
 				page.getByRole("status").filter({ hasText: "Unpin to settle" }),
 			).toBeVisible();
 			await expect(page.getByTestId("session-bar-state-chip")).toHaveCount(0);
+
+			const headerCommand = page.getByTestId("session-bar-settle");
+			await expect(headerCommand).toHaveAccessibleName("Unpin");
+			await page
+				.getByTestId("session-bar")
+				.screenshot({ path: testInfo.outputPath("header-unpin.png") });
+			await headerCommand.click();
+			await expect(
+				page.locator('#session-list [title="Pinned session"]'),
+			).toHaveCount(0);
+			await expect(headerCommand).toHaveAccessibleName("Settle");
+			await headerCommand.click();
+			await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
 		});
 
-		test("transcript verbs target the open session while composer letters remain text", async ({
+		test("transcript commands target the open session while composer letters remain text", async ({
 			page,
 			relayUrl,
 		}) => {
@@ -138,7 +151,7 @@ for (const mode of [
 			await expect(page.getByTestId("session-bar-state-chip")).toHaveCount(0);
 		});
 
-		test("plain verbs still act on the focused list row", async ({
+		test("plain commands still act on the focused list row", async ({
 			page,
 			relayUrl,
 		}) => {

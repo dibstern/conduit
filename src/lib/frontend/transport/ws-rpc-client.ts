@@ -1,20 +1,28 @@
 import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
+import type { SessionMode } from "../../contracts/project-file.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
-import type {
-	GetSessionSkillsResponse,
-	GetSkillContentResponse,
-	GoalDetails,
-	SaveProjectInput,
+import type { ToolCallId } from "../../contracts/tool-wire.js";
+import {
+	type GetSessionSkillsResponse,
+	type GetSkillContentResponse,
+	type GoalDetails,
+	RpcLogLevelSchema,
+	type SaveProjectInput,
+	type SetKeepAwakeResponse,
 } from "../../contracts/ws-rpc.js";
-import type { SessionPermissionMode } from "../../shared-types.js";
+import type {
+	GroupingMode,
+	SessionPermissionMode,
+} from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
 
 export type { GoalDetails } from "../../contracts/ws-rpc.js";
+export { SetPinRejected } from "../../contracts/ws-rpc.js";
 // Keep the public URL helper available to existing callers.
 export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
@@ -32,7 +40,7 @@ import type {
 	GetFileTreeResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
-	GetToolContentResponse,
+	GetToolDetailsResponse,
 	InboxCommandResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
@@ -51,12 +59,14 @@ import type {
 	ScanNowResponse,
 	SetDefaultModelResponse,
 	SetDefaultPermissionModeResponse,
+	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
 	SubmitInputResponse,
 	SwitchContextWindowResponse,
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
 	SwitchVariantResponse,
+	UndoRewindResponse,
 	ViewSessionResponse,
 } from "./ws-rpc.js";
 
@@ -100,12 +110,6 @@ export interface SaveProjectRpcInput extends SaveProjectInput {
 export interface RemoveProjectRpcInput {
 	readonly projectSlug: string;
 	readonly slug: string;
-}
-
-export interface SetProjectInstanceRpcInput {
-	readonly projectSlug: string;
-	readonly slug: string;
-	readonly instanceId: string;
 }
 
 export interface InstanceMutationRpcInput {
@@ -178,6 +182,7 @@ export interface CreateSessionRpcInput {
 	readonly providerId?: string;
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
+	readonly worktreeBase?: string;
 	/** The draft composer's model and effort, so the first turn runs what the
 	 *  user picked. */
 	readonly model?: {
@@ -208,6 +213,7 @@ export interface DeleteSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
+	readonly removeWorktrees?: boolean;
 }
 
 export interface ForkSessionRpcInput {
@@ -268,9 +274,10 @@ export interface GetFileContentRpcInput {
 	readonly path: string;
 }
 
-export interface GetToolContentRpcInput {
+export interface GetToolDetailsRpcInput {
 	readonly projectSlug: string;
-	readonly toolId: string;
+	readonly sessionId: string;
+	readonly toolIds: readonly [ToolCallId, ...ToolCallId[]];
 }
 
 export interface GetSkillContentRpcInput {
@@ -315,6 +322,16 @@ export interface SetDefaultModelRpcInput {
 	readonly projectSlug: string;
 	readonly model: string;
 	readonly provider: string;
+	readonly originId?: string;
+}
+
+export interface SetHarnessDefaultRpcInput {
+	readonly projectSlug: string;
+	readonly harness: "claude" | "opencode";
+	readonly providerId: string;
+	readonly modelId: string;
+	readonly effort?: string;
+	readonly contextWindow: string;
 	readonly originId?: string;
 }
 
@@ -482,6 +499,11 @@ export interface RewindSessionRpcInput {
 	readonly messageId: string;
 }
 
+export interface UndoRewindRpcInput {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}
+
 export interface SendMessageRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -500,9 +522,15 @@ export interface SyncInputDraftRpcInput {
 	readonly originId?: string;
 }
 
+export const LOG_LEVELS = RpcLogLevelSchema.literals;
+
 export interface SetLogLevelRpcInput {
 	readonly projectSlug?: string;
 	readonly level: RpcLogLevel;
+}
+
+export interface SetTailscaleServeRpcInput {
+	readonly enabled: boolean;
 }
 
 const callControl = <A, E>(
@@ -522,6 +550,66 @@ const callDaemon = <A, E>(
 	call: (client: WsRpcClient) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E, WsRpcClients> => callControl("", call);
 
+export const getServerStatusRpc = () =>
+	runTransportEffect(callDaemon((client) => client.GetStatus({})));
+
+export const restartServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.RestartWithConfig({})));
+
+export const shutdownServerRpc = () =>
+	runTransportEffect(callDaemon((client) => client.Shutdown({})));
+
+export async function setKeepAwakeRpc(input: {
+	readonly enabled: boolean;
+}): Promise<SetKeepAwakeResponse> {
+	return await runTransportEffect(
+		callDaemon((client) => client.SetKeepAwake(input)),
+	);
+}
+
+export async function setKeepAwakeCommandRpc(input: {
+	readonly command: string;
+	readonly args?: readonly string[];
+}): Promise<{ readonly ok: true }> {
+	return await runTransportEffect(
+		callDaemon((client) => client.SetKeepAwakeCommand(input)),
+	);
+}
+
+export async function setPinRpc(input: {
+	readonly pin: string | null;
+	readonly currentPin?: string;
+}): Promise<{ readonly ok: true }> {
+	const result = await runTransportEffect(
+		Effect.either(callDaemon((client) => client.SetPin(input))),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
+
+export async function listBranchesRpc(projectSlug: string) {
+	return runTransportEffect(
+		callControl(projectSlug, (client) => client.ListBranches({ projectSlug })),
+	);
+}
+
+export async function resolveSessionModeRpc(projectSlug: string) {
+	return runTransportEffect(
+		callDaemon((client) => client.ResolveSessionMode({ projectSlug })),
+	);
+}
+
+export async function setDefaultSessionModeRpc(input: {
+	readonly projectSlug: string;
+	readonly mode: SessionMode;
+}) {
+	return runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.SetDefaultSessionMode(input),
+		),
+	);
+}
+
 export async function listWorktreesRpc(
 	projectSlug: string,
 	sessionId?: string,
@@ -536,6 +624,17 @@ export async function listWorktreesRpc(
 	);
 }
 
+export async function inspectSessionWorktreesRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}) {
+	return runTransportEffect(
+		callControl(input.projectSlug, (client) =>
+			client.InspectSessionWorktrees(input),
+		),
+	);
+}
+
 export async function moveSessionWorkspaceRpc(input: {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -545,6 +644,49 @@ export async function moveSessionWorkspaceRpc(input: {
 		Effect.either(
 			callControl(input.projectSlug, (client) =>
 				client.MoveSessionWorkspace(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function renameSessionBranchRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+	readonly branchName: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.RenameSessionBranch(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function recreateSessionWorktreeRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.RecreateSessionWorktree(input),
+			),
+		),
+	);
+	if (Either.isLeft(result)) throw result.left;
+}
+
+export async function continueSessionInMainFolderRpc(input: {
+	readonly projectSlug: string;
+	readonly sessionId: string;
+}): Promise<void> {
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(input.projectSlug, (client) =>
+				client.ContinueSessionInMainFolder(input),
 			),
 		),
 	);
@@ -598,9 +740,6 @@ const callSaveProject = (input: SaveProjectRpcInput) =>
 
 const callRemoveProject = (input: RemoveProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RemoveProject(input));
-
-const callSetProjectInstance = (input: SetProjectInstanceRpcInput) =>
-	callControl(input.projectSlug, (client) => client.SetProjectInstance(input));
 
 const callStartInstance = (input: InstanceMutationRpcInput) =>
 	callDaemon((client) => client.StartInstance(input));
@@ -668,6 +807,9 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				? { worktreePath: input.worktreePath }
 				: {}),
 			...(input.newWorktree ? { newWorktree: true } : {}),
+			...(input.worktreeBase != null
+				? { worktreeBase: input.worktreeBase }
+				: {}),
 		}),
 	);
 
@@ -682,13 +824,14 @@ const callAttachProject = (input: AttachProjectRpcInput) =>
 
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
-		client
-			.DeleteSession({
-				projectSlug: input.projectSlug,
-				sessionId: input.sessionId,
-				...(input.originId != null ? { originId: input.originId } : {}),
-			})
-			.pipe(Effect.asVoid),
+		client.DeleteSession({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+			...(input.originId != null ? { originId: input.originId } : {}),
+			...(input.removeWorktrees === undefined
+				? {}
+				: { removeWorktrees: input.removeWorktrees }),
+		}),
 	);
 
 const callForkSession = (input: ForkSessionRpcInput) =>
@@ -760,8 +903,8 @@ const callGetFileList = (input: GetFileListRpcInput) =>
 const callGetFileContent = (input: GetFileContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetFileContent(input));
 
-const callGetToolContent = (input: GetToolContentRpcInput) =>
-	callControl(input.projectSlug, (client) => client.GetToolContent(input));
+const callGetToolDetails = (input: GetToolDetailsRpcInput) =>
+	callControl(input.projectSlug, (client) => client.GetToolDetails(input));
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client.GetSkillContent(input));
@@ -814,6 +957,9 @@ const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
 			...(input.originId ? { originId: input.originId } : {}),
 		}),
 	);
+
+const callSetHarnessDefault = (input: SetHarnessDefaultRpcInput) =>
+	callControl(input.projectSlug, (client) => client.SetHarnessDefault(input));
 
 const callSetDefaultPermissionMode = (
 	input: SetDefaultPermissionModeRpcInput,
@@ -944,6 +1090,9 @@ const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
 const callRewindSession = (input: RewindSessionRpcInput) =>
 	callControl(input.projectSlug, (client) => client.RewindSession(input));
 
+const callUndoRewind = (input: UndoRewindRpcInput) =>
+	callControl(input.projectSlug, (client) => client.UndoRewind(input));
+
 const callSendMessage = (input: SendMessageRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.input.submit({
@@ -971,6 +1120,9 @@ const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client.SetLogLevel(input).pipe(Effect.asVoid));
+
+const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
+	callDaemon((client) => client.SetTailscaleServe(input).pipe(Effect.asVoid));
 
 export async function cancelSessionRpc(
 	input: CancelSessionRpcInput,
@@ -1025,12 +1177,6 @@ export async function removeProjectRpc(
 	input: RemoveProjectRpcInput,
 ): Promise<ProjectMutationResponse> {
 	return await runTransportEffect(callRemoveProject(input));
-}
-
-export async function setProjectInstanceRpc(
-	input: SetProjectInstanceRpcInput,
-): Promise<ProjectMutationResponse> {
-	return await runTransportEffect(callSetProjectInstance(input));
 }
 
 export async function startInstanceRpc(
@@ -1123,10 +1269,8 @@ export function attachProjectRpc(
 	return runTransportEffect(callAttachProject(input));
 }
 
-export async function deleteSessionRpc(
-	input: DeleteSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callDeleteSession(input));
+export async function deleteSessionRpc(input: DeleteSessionRpcInput) {
+	return runTransportEffect(callDeleteSession(input));
 }
 
 export async function forkSessionRpc(
@@ -1181,10 +1325,10 @@ export async function getFileContentRpc(
 	return await runTransportEffect(callGetFileContent(input));
 }
 
-export async function getToolContentRpc(
-	input: GetToolContentRpcInput,
-): Promise<GetToolContentResponse> {
-	return await runTransportEffect(callGetToolContent(input));
+export async function getToolDetailsRpc(
+	input: GetToolDetailsRpcInput,
+): Promise<GetToolDetailsResponse> {
+	return await runTransportEffect(callGetToolDetails(input));
 }
 
 export async function getSkillContentRpc(
@@ -1234,10 +1378,32 @@ export async function setDefaultModelRpc(
 	return await runTransportEffect(callSetDefaultModel(input));
 }
 
+export async function setHarnessDefaultRpc(
+	input: SetHarnessDefaultRpcInput,
+): Promise<SetHarnessDefaultResponse> {
+	return await runTransportEffect(callSetHarnessDefault(input));
+}
+
 export async function setDefaultPermissionModeRpc(
 	input: SetDefaultPermissionModeRpcInput,
 ): Promise<SetDefaultPermissionModeResponse> {
 	return await runTransportEffect(callSetDefaultPermissionMode(input));
+}
+
+export async function getDefaultGroupingModeRpc(): Promise<GroupingMode> {
+	const response = await runTransportEffect(
+		callControl("", (client) => client.GetDefaultGroupingMode({})),
+	);
+	return response.mode;
+}
+
+export async function setDefaultGroupingModeRpc(
+	mode: GroupingMode,
+): Promise<GroupingMode> {
+	const response = await runTransportEffect(
+		callControl("", (client) => client.SetDefaultGroupingMode({ mode })),
+	);
+	return response.mode;
 }
 
 export async function setHiddenEntriesRpc(
@@ -1487,6 +1653,12 @@ export async function rewindSessionRpc(
 	return await runTransportEffect(callRewindSession(input));
 }
 
+export async function undoRewindRpc(
+	input: UndoRewindRpcInput,
+): Promise<UndoRewindResponse> {
+	return await runTransportEffect(callUndoRewind(input));
+}
+
 export async function sendMessageRpc(
 	input: SendMessageRpcInput,
 ): Promise<SubmitInputResponse> {
@@ -1528,4 +1700,10 @@ export async function setLogLevelRpc(
 	input: SetLogLevelRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callSetLogLevel(input));
+}
+
+export async function setTailscaleServeRpc(
+	input: SetTailscaleServeRpcInput,
+): Promise<void> {
+	await runTransportEffect(callSetTailscaleServe(input));
 }

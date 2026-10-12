@@ -137,7 +137,6 @@ const SESSION_SCOPED_MESSAGE_TYPES = new Set([
 	"thinking_delta",
 	"thinking_start",
 	"thinking_stop",
-	"tool_content",
 	"tool_executing",
 	"tool_result",
 	"tool_start",

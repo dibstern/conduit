@@ -8,50 +8,8 @@ import {
 	resolveRoute,
 	resolveTimeout,
 	shouldCache,
-	truncateIfNeeded,
 } from "../../../src/lib/relay/event-pipeline.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
-
-describe("truncateIfNeeded", () => {
-	it("passes through non-tool_result messages unchanged", () => {
-		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
-		const result = truncateIfNeeded(msg);
-		expect(result.msg).toBe(msg);
-		expect(result.fullContent).toBeUndefined();
-	});
-
-	it("truncates tool_result with content over threshold", () => {
-		const content = "x".repeat(60_000);
-		const msg: RelayMessage = {
-			type: "tool_result",
-			sessionId: "s1",
-			id: "t1",
-			content,
-			is_error: false,
-		};
-		const result = truncateIfNeeded(msg);
-		expect(result.msg.type).toBe("tool_result");
-		if (result.msg.type === "tool_result") {
-			expect(result.msg.content.length).toBeLessThan(content.length);
-			expect(result.msg.isTruncated).toBe(true);
-			expect(result.msg.fullContentLength).toBe(content.length);
-		}
-		expect(result.fullContent).toBe(content);
-	});
-
-	it("does not truncate tool_result under threshold", () => {
-		const msg: RelayMessage = {
-			type: "tool_result",
-			sessionId: "s1",
-			id: "t1",
-			content: "short",
-			is_error: false,
-		};
-		const result = truncateIfNeeded(msg);
-		expect(result.msg).toBe(msg);
-		expect(result.fullContent).toBeUndefined();
-	});
-});
 
 describe("resolveRoute", () => {
 	it("returns send when viewers exist", () => {
@@ -127,7 +85,6 @@ describe("processEvent (composed pipeline)", () => {
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result = processEvent(msg, "ses_abc", ["c1"]);
 		expect(result.msg).toBe(msg);
-		expect(result.fullContent).toBeUndefined();
 		expect(result.route).toEqual({ action: "send", sessionId: "ses_abc" });
 		expect(result.cache).toBe(true);
 		expect(result.timeout).toBe("reset");
@@ -175,24 +132,6 @@ describe("processEvent (composed pipeline)", () => {
 		expect(result.source).toBe("sse");
 	});
 
-	it("truncates large tool_result and preserves full content", () => {
-		const content = "x".repeat(60_000);
-		const msg: RelayMessage = {
-			type: "tool_result",
-			sessionId: "s1",
-			id: "t1",
-			content,
-			is_error: false,
-		};
-		const result = processEvent(msg, "ses_abc", ["c1"]);
-		expect(result.fullContent).toBe(content);
-		if (result.msg.type === "tool_result") {
-			expect(result.msg.content.length).toBeLessThan(content.length);
-			expect(result.msg.isTruncated).toBe(true);
-		}
-		expect(result.source).toBe("sse");
-	});
-
 	it("includes explicit source when provided", () => {
 		const msg: RelayMessage = { type: "done", sessionId: "s1", code: 0 };
 		const result = processEvent(msg, "ses_abc", ["c1"], "status-poller");
@@ -230,7 +169,6 @@ describe("applyPipelineResult", () => {
 		const deps = makeDeps();
 		const result: PipelineResult = {
 			msg: { type: "done", sessionId: "s1", code: 0 },
-			fullContent: undefined,
 			route: { action: "send", sessionId: "ses_abc" },
 			cache: true,
 			timeout: "clear",
@@ -249,7 +187,6 @@ describe("applyPipelineResult", () => {
 		const deps = makeDeps();
 		const result: PipelineResult = {
 			msg: { type: "delta", sessionId: "s1", text: "hi" },
-			fullContent: undefined,
 			route: { action: "send", sessionId: "ses_abc" },
 			cache: true,
 			timeout: "reset",
@@ -272,7 +209,6 @@ describe("applyPipelineResult", () => {
 		const msg: RelayMessage = { type: "delta", sessionId: "s1", text: "hi" };
 		const result: PipelineResult = {
 			msg,
-			fullContent: undefined,
 			route: { action: "drop", reason: "no viewers for session ses_abc" },
 			cache: true,
 			timeout: "reset",
@@ -288,7 +224,6 @@ describe("applyPipelineResult", () => {
 		const deps = makeDeps();
 		const result: PipelineResult = {
 			msg: { type: "delta", sessionId: "s1", text: "hi" },
-			fullContent: undefined,
 			route: { action: "drop", reason: "no session ID" },
 			cache: false,
 			timeout: "none",

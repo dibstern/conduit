@@ -112,14 +112,25 @@ export async function holdUntilVisible(
 export async function openModelPicker(page: Page): Promise<void> {
 	const picker = page.locator("#model-picker");
 	if ((await picker.count()) === 0) {
+		// One locator, not a count-then-pick: a tier change can swap the triggers mid-step.
 		await page
-			.getByTestId(/^(model-picker-trigger|composer-word-model)$/)
+			.getByTestId(
+				/^(composer-harness-trigger|model-picker-trigger|composer-word-model)$/,
+			)
+			.first()
 			.click();
 	}
 	await picker.waitFor({ state: "visible", timeout: 5_000 });
 	const back = page.getByTestId("picker-back");
 	if (await back.isVisible()) await back.click();
 	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
+}
+
+export async function openComposerMoreSheet(page: Page): Promise<void> {
+	const sheet = page.getByTestId("composer-more-sheet");
+	if (!(await sheet.isVisible()))
+		await page.getByTestId("composer-more").click();
+	await expect(sheet).toBeVisible();
 }
 
 export function exampleValue(

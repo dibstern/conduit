@@ -282,7 +282,6 @@ describe("ConfigPersistenceLive", () => {
 							folders: ["/tmp/alpha"],
 							title: "Alpha",
 							lastUsed: 1700000000000,
-							instanceId: "remote-1",
 							repositoryIdentities: {
 								"/tmp/alpha": {
 									key: "github.com/owner/alpha",
@@ -326,7 +325,6 @@ describe("ConfigPersistenceLive", () => {
 									root: "/tmp/alpha",
 								},
 							},
-							instanceId: "remote-1",
 							sessionCount: 3,
 						},
 					],

@@ -4,9 +4,20 @@ import {
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
-import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
+import {
+	isKnownDriverKind,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../contracts/provider-instance.js";
+import {
+	SessionWorkspaceSchema,
+	WorkspaceMoveError,
+} from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
-import { WorktreeCreationError } from "../../contracts/worktree.js";
+import {
+	WorktreeBranchRenameError,
+	WorktreeCreationError,
+	WorktreeRecoveryError,
+} from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	loadDaemonConfig,
@@ -21,19 +32,26 @@ import {
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
+import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
 	createLocalSessionId,
 	SessionManagerServiceTag,
 } from "../../domain/relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
+import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
+	listLocalBranches,
 	listProjectWorktrees,
 	realWorkspacePath,
 } from "../../git/worktrees.js";
-import { rewindSessionToMessage } from "../../handlers/prompt.js";
+import {
+	rewindSessionToMessage,
+	undoSessionRewind,
+} from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
 import {
 	createSessionForClient,
@@ -54,9 +72,14 @@ import {
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection } from "../../provider/turn-settings.js";
+import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const sessionsHandlers = {
+	ListBranches: (_request) =>
+		Effect.flatMap(ConfigTag, (config) =>
+			listLocalBranches(config.projectDir),
+		).pipe(Effect.catchAll(mapRpcFailure("ListBranches"))),
 	ListWorktrees: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -81,6 +104,34 @@ export const sessionsHandlers = {
 				]),
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("ListWorktrees"))),
+	InspectSessionWorktrees: (request) =>
+		Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			if (!(yield* read.getSession(request.sessionId)))
+				return yield* new WsRpcError({ message: "Session not found." });
+			const plan = yield* prepareSessionWorktreeDeletion(request.sessionId);
+			return {
+				worktrees: plan.worktrees,
+				removeWorktrees: plan.removeWorktrees,
+			};
+		}).pipe(Effect.catchAll(mapRpcFailure("InspectSessionWorktrees"))),
+	RenameSessionBranch: (request) =>
+		Effect.gen(function* () {
+			const workspace = yield* SessionWorkspaceTag;
+			yield* workspace.renameBranch(request.sessionId, request.branchName);
+			const git = yield* Effect.serviceOption(SessionGitServiceTag);
+			if (git._tag === "Some") yield* git.value.refresh();
+			return { ok: true as const };
+		}).pipe(
+			Effect.catchAll(
+				(
+					error,
+				): Effect.Effect<never, WorktreeBranchRenameError | WsRpcError> =>
+					error instanceof WorktreeBranchRenameError
+						? Effect.fail(error)
+						: mapRpcFailure("RenameSessionBranch")(error),
+			),
+		),
 	MoveSessionWorkspace: (request) =>
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
@@ -97,6 +148,73 @@ export const sessionsHandlers = {
 					error instanceof WorkspaceMoveError
 						? Effect.fail(error)
 						: mapRpcFailure("MoveSessionWorkspace")(error),
+			),
+		),
+	RecreateSessionWorktree: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const workspace = yield* SessionWorkspaceTag;
+			const worktrees = yield* WorktreeServiceTag;
+			const read = yield* ReadQueryEffectTag;
+			const result = yield* workspace.withLaunch(
+				Effect.gen(function* () {
+					const row = yield* read.getSession(request.sessionId);
+					const state =
+						row?.workspace == null
+							? null
+							: yield* Schema.decodeUnknown(
+									Schema.parseJson(SessionWorkspaceSchema),
+								)(row.workspace);
+					const directory = effectiveWorkingDirectory(config.projectDir, state);
+					const folders =
+						state?.origin === "conduit" ? Object.entries(state.worktrees) : [];
+					if (folders.length === 0)
+						return yield* new WorktreeRecoveryError({
+							path: directory,
+							reason: "not-owned",
+							message:
+								"Could not recreate worktree: the session has no Conduit-owned worktree.",
+						});
+					yield* worktrees.recreateAll(
+						folders.map(([path, directory]) => ({
+							folder: {
+								path,
+								projectSlug: config.slug,
+								sessionId: request.sessionId,
+							},
+							directory,
+						})),
+					);
+					return { directory };
+				}),
+			);
+			const git = yield* Effect.serviceOption(SessionGitServiceTag);
+			if (git._tag === "Some")
+				yield* git.value.refresh({ sessionId: request.sessionId });
+			return result;
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WorktreeRecoveryError | WsRpcError> =>
+					error instanceof WorktreeRecoveryError
+						? Effect.fail(error)
+						: mapRpcFailure("RecreateSessionWorktree")(error),
+			),
+		),
+	ContinueSessionInMainFolder: (request) =>
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const workspace = yield* SessionWorkspaceTag;
+			return yield* workspace.withLaunch(
+				workspace
+					.move(request.sessionId, config.projectDir, "user")
+					.pipe(Effect.map((directory) => ({ directory }))),
+			);
+		}).pipe(
+			Effect.catchAll(
+				(error): Effect.Effect<never, WorkspaceMoveError | WsRpcError> =>
+					error instanceof WorkspaceMoveError
+						? Effect.fail(error)
+						: mapRpcFailure("ContinueSessionInMainFolder")(error),
 			),
 		),
 	DismissWorkspaceHint: (request) =>
@@ -370,6 +488,10 @@ export const sessionsHandlers = {
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
+			if (request.worktreeBase !== undefined && !request.newWorktree)
+				return yield* new WsRpcError({
+					message: "worktreeBase requires newWorktree: true.",
+				});
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
 			const options = {
@@ -395,11 +517,14 @@ export const sessionsHandlers = {
 					request.providerId ??
 					overrides.defaultModel?.providerID ??
 					"claude";
+				const driver = resolveProviderRoutingDriver(
+					loadDaemonConfig(config.configDir),
+					provider === "claude-sdk" ? "claude" : provider,
+				);
 				if (
-					resolveProviderRoutingDriver(
-						loadDaemonConfig(config.configDir),
-						provider === "claude-sdk" ? "claude" : provider,
-					) !== "claude"
+					!driver ||
+					!isKnownDriverKind(driver) ||
+					!PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree
 				)
 					return yield* new WorkspaceMoveError({
 						path: config.projectDir,
@@ -420,23 +545,29 @@ export const sessionsHandlers = {
 											sessionId,
 										}),
 									),
+									request.worktreeBase === undefined
+										? undefined
+										: { [config.projectDir]: request.worktreeBase },
 								),
 							);
-							return yield* restore(
-								Effect.gen(function* () {
-									const launchPath = created.worktrees[config.projectDir];
-									if (launchPath === undefined)
-										return yield* new WsRpcError({
-											message: "Worktree creation returned no primary folder.",
-										});
-									return yield* createSessionForClient({
-										...options,
-										sessionId,
-										initializeWorkspace: (id: string) =>
-											workspace
-												.move(id, launchPath, "launch", "conduit")
-												.pipe(Effect.asVoid),
-									});
+							const session = yield* restore(
+								createSessionForClient({
+									...options,
+									sessionId,
+									initializeWorkspace: (id: string) =>
+										Effect.forEach(
+											Object.entries(created.worktrees),
+											([folder, path], index) =>
+												workspace.move(
+													id,
+													path,
+													"launch",
+													"conduit",
+													folder,
+													index === 0 ? created.ownership : undefined,
+												),
+											{ discard: true },
+										),
 								}),
 							).pipe(
 								Effect.catchAllCause((cause) =>
@@ -445,6 +576,13 @@ export const sessionsHandlers = {
 										.pipe(Effect.zipRight(Effect.failCause(cause))),
 								),
 							);
+							const setup = yield* Effect.serviceOption(SessionSetupTag);
+							if (setup._tag === "Some")
+								yield* setup.value.start(
+									session.id,
+									created.worktrees[config.projectDir] ?? config.projectDir,
+								);
+							return session;
 						}),
 					),
 				);
@@ -504,8 +642,14 @@ export const sessionsHandlers = {
 		deleteSessionForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
+			...(request.removeWorktrees === undefined
+				? {}
+				: { removeWorktrees: request.removeWorktrees }),
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.map((worktreeWarnings) => ({
+				ok: true as const,
+				...(worktreeWarnings.length > 0 ? { worktreeWarnings } : {}),
+			})),
 			Effect.catchAll((error) =>
 				Effect.fail(
 					new WsRpcError({
@@ -590,6 +734,14 @@ export const sessionsHandlers = {
 				),
 			),
 		),
+	UndoRewind: (request) =>
+		undoSessionRewind({
+			clientId: "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const, sessionId: request.sessionId }),
+			Effect.catchAll(mapRpcFailure("UndoRewind")),
+		),
 	RewindSession: (request) =>
 		rewindSessionToMessage({
 			clientId: "rpc",
@@ -617,8 +769,13 @@ export const sessionsHandlers = {
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
+	| "RenameSessionBranch"
 	| "ListWorktrees"
+	| "InspectSessionWorktrees"
+	| "ListBranches"
 	| "MoveSessionWorkspace"
+	| "RecreateSessionWorktree"
+	| "ContinueSessionInMainFolder"
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
 	| "SetSessionPinned"
@@ -641,4 +798,5 @@ export const sessionsHandlers = {
 	| "StartSideThread"
 	| "LoadMoreHistory"
 	| "RewindSession"
+	| "UndoRewind"
 >;

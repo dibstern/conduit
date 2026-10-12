@@ -114,9 +114,6 @@ export interface RelayFactory {
 export interface RelayFactoryProjectControls {
 	readonly saveProject: NonNullable<ProjectRelayConfig["saveProject"]>;
 	readonly removeProject: NonNullable<ProjectRelayConfig["removeProject"]>;
-	readonly setProjectInstance: NonNullable<
-		ProjectRelayConfig["setProjectInstance"]
-	>;
 }
 
 export class RelayFactoryTag extends Context.Tag("RelayFactory")<
@@ -174,6 +171,7 @@ export const RelayFactoryLive = (
 			const openCodeInstances = yield* OpenCodeInstancesTag;
 			const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 			const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
+			const tracer = yield* Effect.tracer;
 			const runtime = yield* Effect.runtime<never>();
 
 			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
@@ -368,10 +366,7 @@ export const RelayFactoryLive = (
 								Effect.provideService(InstanceManagerStateTag, instanceState),
 							),
 						);
-						const selectedInstance = openCodeInstanceFor(
-							instances,
-							project.instanceId,
-						);
+						const selectedInstance = openCodeInstanceFor(instances);
 						envResolver?.register(project.folders[0], project.shellEnv);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
@@ -414,6 +409,7 @@ export const RelayFactoryLive = (
 									signal: ac.signal,
 									configDir,
 									persistenceDbPath: dbPath,
+									tracer,
 									getProjects,
 									listDaemonSessions,
 									resolveSessionProject: (sessionId) =>
@@ -451,7 +447,6 @@ export const RelayFactoryLive = (
 									...(projectControls != null && {
 										saveProject: projectControls.saveProject,
 										removeProject: projectControls.removeProject,
-										setProjectInstance: projectControls.setProjectInstance,
 									}),
 								});
 								return creation;

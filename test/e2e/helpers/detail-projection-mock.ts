@@ -12,7 +12,13 @@ type PendingInput = {
 	admittedAt: number;
 };
 type DetailItem =
-	| { _tag: "transcriptMessage"; message: HistoryMessage }
+	| { _tag: "message"; message: HistoryMessage }
+	| {
+			_tag: "part";
+			messageId: string;
+			sortOrder: number;
+			part: HistoryMessagePart;
+	  }
 	| { _tag: "pendingInput"; input: PendingInput }
 	| { _tag: "inbox"; inbox: Inbox };
 type Inbox = { paused: boolean; steer: "no_steering" | "prompt_open" | null };
@@ -67,10 +73,43 @@ const isHistoryMessage = (value: unknown): value is HistoryMessage =>
 	"role" in value &&
 	(value.role === "user" || value.role === "assistant");
 
-const item = (message: HistoryMessage): DetailItem => ({
-	_tag: "transcriptMessage",
-	message,
+// Recorded fixtures keep the old raw tool state; the wire now tags it (y7eo.6).
+const tagged = (value: unknown): boolean =>
+	typeof value === "object" && value !== null && "_tag" in value;
+const toWire = (message: HistoryMessage): HistoryMessage => ({
+	...message,
+	...(message.parts && {
+		parts: message.parts.map((part) => {
+			const state: Record<string, unknown> | undefined = part.state;
+			if (!state) return part;
+			const { input, output } = state;
+			return {
+				...part,
+				state: {
+					...part.state,
+					...(input !== undefined &&
+						!tagged(input) && {
+							input: { _tag: "whole" as const, value: input },
+						}),
+					...(typeof output === "string" && {
+						output: { _tag: "whole" as const, text: output },
+					}),
+				},
+			};
+		}),
+	}),
 });
+
+// A message travels as its header, then each part as a row of its own.
+const items = ({ parts = [], ...message }: HistoryMessage): DetailItem[] => [
+	{ _tag: "message", message },
+	...parts.map((part, sortOrder) => ({
+		_tag: "part" as const,
+		messageId: message.id,
+		sortOrder,
+		part,
+	})),
+];
 
 const sortedRows = (state: SessionProjection): HistoryMessage[] =>
 	[...state.rows.values()].sort(
@@ -84,7 +123,7 @@ const snapshot = (state: SessionProjection): DetailEnvelope => {
 	return {
 		_tag: "snapshot",
 		rows: [
-			...rows.slice(-50).map(item),
+			...rows.slice(-50).flatMap(items),
 			...[...state.pending.values()].map(
 				(input): DetailItem => ({ _tag: "pendingInput", input }),
 			),
@@ -99,11 +138,8 @@ function upsert(page: Page, sessionId: string, message: HistoryMessage): void {
 	const state = session(page, sessionId);
 	state.rows.set(message.id, message);
 	const sequence = ++state.sequence;
-	listeners.get(page)?.(sessionId, {
-		_tag: "upsert",
-		item: item(message),
-		sequence,
-	});
+	for (const item of items(message))
+		listeners.get(page)?.(sessionId, { _tag: "upsert", item, sequence });
 }
 
 function replacePart(
@@ -158,7 +194,7 @@ export function projectLegacyRelayMessage(
 			history !== null &&
 			"messages" in history &&
 			Array.isArray(history.messages)
-				? history.messages.filter(isHistoryMessage)
+				? history.messages.filter(isHistoryMessage).map(toWire)
 				: null;
 		if (messages) {
 			state.rows = new Map(messages.map((message) => [message.id, message]));
@@ -340,7 +376,9 @@ export function projectLegacyRelayMessage(
 					state: {
 						...part.state,
 						status: "running",
-						...(event["input"] !== undefined ? { input: event["input"] } : {}),
+						...(event["input"] !== undefined
+							? { input: { _tag: "whole" as const, value: event["input"] } }
+							: {}),
 					},
 				}),
 			);
@@ -364,7 +402,7 @@ export function projectLegacyRelayMessage(
 						...part.state,
 						status: event["is_error"] === true ? "error" : "completed",
 						...(typeof event["content"] === "string"
-							? { output: event["content"] }
+							? { output: { _tag: "whole" as const, text: event["content"] } }
 							: {}),
 					},
 				}),
@@ -405,10 +443,16 @@ export function projectLegacyRelayMessage(
 		(event["state"] === "completed" || event["state"] === "failed")
 	) {
 		const id = `compaction-${state.sequence + 1}`;
+		const created = Date.now() + state.sequence;
+		const clearedContext =
+			event["provider"] === "opencode" &&
+			event["state"] === "completed" &&
+			event["postTokens"] === undefined;
 		upsert(page, sessionId, {
 			id,
 			role: "assistant",
-			time: { created: Date.now() + state.sequence },
+			time: { created, ...(clearedContext ? { completed: created } : {}) },
+			...(clearedContext ? { contextTokens: 0 } : {}),
 			parts: [
 				{
 					id: `compaction-part-${state.sequence + 1}`,

@@ -4,6 +4,15 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => {
+		localStorage.setItem(
+			"conduit-composer-preferences",
+			JSON.stringify({ controls: "words" }),
+		);
+	});
+});
+
 for (const viewport of [
 	{ width: 1440, height: 900 },
 	{ width: 390, height: 844 },
@@ -65,9 +74,11 @@ for (const viewport of [
 				responses: new Map(),
 			});
 			await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
-			const identity = page.getByTestId("session-bar-identity");
-			await identity.click();
-			const mismatch = page.getByTestId("workspace-mismatch");
+			const checkout = page.getByTestId("composer-checkout");
+			await checkout.click();
+			const mismatch = page
+				.getByTestId("composer-checkout-menu")
+				.getByTestId("workspace-mismatch");
 			await expect(mismatch).toContainText(actualPath);
 			await expect(mismatch).toContainText(`The recorded folder is ${target}`);
 			await page.screenshot({
@@ -84,7 +95,7 @@ for (const viewport of [
 						.map(({ payload }) => payload),
 				)
 				.toMatchObject([{ projectSlug, sessionId: session.id, path: target }]);
-			await identity.click();
+			await checkout.click();
 			await expect(mismatch).toBeVisible();
 			// The shell feed clears the mismatch without a session-family update.
 			rpc.upsertShellRow({ ...session, workspaceMismatch: undefined });

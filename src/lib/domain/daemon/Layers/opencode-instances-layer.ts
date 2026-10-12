@@ -977,6 +977,30 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						"unbounded",
 					),
 				use,
+				useIfRunning: (instanceId, directory) =>
+					gate.withPermits(1)(
+						Effect.gen(function* () {
+							const endpoint = yield* resolveIn(instanceId);
+							if (
+								!endpoint ||
+								endpoint.status === "stopped" ||
+								(endpoint.managed && endpoint.status !== "healthy") ||
+								stopping.has(instanceId)
+							)
+								return Option.none();
+							// Check and retain under the stop/idle gate. Register release
+							// before opening transport, so interruption cannot leak demand.
+							yield* Effect.acquireRelease(
+								Effect.sync(() =>
+									holds.set(instanceId, (holds.get(instanceId) ?? 0) + 1),
+								),
+								() => release(instanceId),
+							);
+							yield* settle(instanceId);
+							yield* ensureStream(instanceId, endpoint);
+							return Option.some(clientFor(endpoint, directory));
+						}),
+					),
 				// Reads process state only: no request, no stream, never a start.
 				ifRunning: (instanceId: string, directory?: string) =>
 					Effect.map(resolveIn(instanceId), (endpoint) =>

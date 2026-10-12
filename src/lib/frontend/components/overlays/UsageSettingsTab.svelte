@@ -1,16 +1,15 @@
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
 	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
-	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
-	import { getInstanceById } from "../../stores/instance.svelte.js";
+	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { getUsageLimitsSettingRpc, quotaForAccountsRpc, setUsageLimitsSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { getUsageLimitsSettingRpc, setUsageLimitsSettingRpc } from "../../transport/ws-rpc-client.js";
 	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Button from "../ui/Button.svelte";
@@ -22,17 +21,18 @@
 
 	const phone = new MediaQuery("(max-width: 767px)");
 	const warnOptions = [70, 80, 90, "off"] as const;
+	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
+	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
+	const claudeAccounts = $derived(getClaudeAccounts(refreshSlug ?? ""));
 	const accounts = $derived(orderedSettingsUsageAccounts());
 	const several = $derived(accounts.length > 1);
 	const single = $derived(accounts[0]);
-	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
 	const sessionId = $derived(getCurrentSessionId());
 	const session = $derived(sessionId ? sessionState.sessions.get(sessionId) : undefined);
 	const sessionAccountId = $derived(session?.resumes?.at(-1)?.instanceId ?? (sessionId ? discoveryState.sessionInstanceIds[sessionId] : undefined));
-	const forecastAccount = $derived(accounts.find((account) => account.accountId === sessionAccountId) ?? accounts.find((account) => account.accountId === project?.instanceId) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
+	const forecastAccount = $derived(accounts.find((account) => account.accountId === (sessionId ? sessionAccountId : getEffectiveInstanceId())) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
 		!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
 	let expandedAccounts = $state<string[]>([]);
-	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
 	let setting = $state<UsageLimitsSetting | null>(null);
 	let confirmed: UsageLimitsSetting | null = null;
 	let saveTicket = 0;
@@ -41,7 +41,7 @@
 	const readAt = $derived(Math.min(...accounts.map((account) => account.readAt).filter((at) => at > 0)));
 	const updated = $derived(Number.isFinite(readAt) ? Math.floor(Math.max(0, now - readAt) / 60_000) : null);
 	const updatedLabel = $derived(updated === null ? "not read yet" : updated === 0 ? "just now" : `${updated}m ago`);
-	const nameOf = (account: UsageReading) => getInstanceById(account.accountId)?.name ?? account.accountId;
+	const nameOf = (account: UsageReading) => claudeAccounts.nameOf(account.accountId, account.accountId);
 
 	$effect(() => {
 		const timer = setInterval(() => { now = Date.now(); }, 30_000);
@@ -82,9 +82,7 @@
 		refreshing = true;
 		try {
 			// Usage.refresh publishes through SubscribeUsage, which owns the view.
-			await quotaForAccountsRpc({ projectSlug: refreshSlug, originId: getBrowserClientId() });
-		} catch {
-			showToast("Couldn't refresh plan usage", { variant: "error" });
+			if (!await claudeAccounts.refreshQuotas()) showToast("Couldn't refresh plan usage", { variant: "error" });
 		} finally {
 			refreshing = false;
 		}
@@ -132,7 +130,7 @@
 	}
 
 	const headline = $derived.by((): { text: string; limited: boolean; warning?: boolean; bold?: string } => {
-		const defaultAccount = accounts.find((account) => account.accountId === project?.instanceId) ?? single;
+		const defaultAccount = accounts.find((account) => account.accountId === (sessionId ? sessionAccountId : getEffectiveInstanceId())) ?? single;
 		const alert = usageAlert(accounts, usageState.limits.warnAt);
 		if (alert?.level === "limited") {
 			const limited = alert.account;
@@ -199,7 +197,7 @@
 	{#if !phone.current}<h3 class="text-[14px] font-semibold text-text">Claude plan usage</h3>{/if}
 	<div data-testid="usage-settings-subheader" class="mb-[12px] text-[11px] text-text-dimmer {phone.current ? '' : 'mt-[2px]'}">
 		{#if !several && !hasPlanData(single)}Claude{:else}
-		{several ? `${accounts.length} accounts` : single?.planLabel ?? "Claude"} · updated {updatedLabel} ·
+		{several ? `${accounts.length} accounts` : single?.planLabel ?? claudeAccounts.nameOf(undefined)} · updated {updatedLabel} ·
 		<TextButton tone="dimmer" underline="always" data-testid="usage-settings-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>{several ? "Refresh all" : "Refresh"}</TextButton>
 		{/if}
 	</div>

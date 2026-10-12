@@ -139,7 +139,7 @@ describe("subscription RPC handlers", () => {
 				);
 				for (const tag of ["snapshot", "synchronized"]) {
 					expect((yield* Queue.take(decoded))._tag).toBe(tag);
-					expect(yield* Queue.take(wire)).not.toHaveProperty("textSuffixes");
+					expect(yield* Queue.take(wire)).not.toHaveProperty("textSuffix");
 				}
 				// An empty delta moves the row version without changing its text.
 				for (const text of [" world", ""]) {
@@ -152,28 +152,22 @@ describe("subscription RPC handlers", () => {
 						),
 					);
 					expect(yield* Queue.take(decoded)).toMatchObject({
-						item: {
-							message: {
-								text: "Hello world",
-								parts: [{ text: "Hello world" }],
-							},
-						},
+						item: { _tag: "part", part: { text: "Hello world" } },
 					});
 					const envelope = yield* Queue.take(wire);
 					if (textSuffixes === true) {
-						expect(envelope).toHaveProperty("textSuffixes");
-						expect(envelope).toMatchObject({ item: { message: { text } } });
+						expect(envelope).toHaveProperty("textSuffix");
+						expect(envelope).toMatchObject({ item: { part: { text } } });
 					} else {
-						expect(envelope).not.toHaveProperty("textSuffixes");
+						expect(envelope).not.toHaveProperty("textSuffix");
 						expect(envelope).toMatchObject({
-							item: {
-								message: {
-									text: "Hello world",
-									parts: [{ text: "Hello world" }],
-								},
-							},
+							item: { part: { text: "Hello world" } },
 						});
 					}
+					// The message's header follows its part and carries no text, so never a suffix.
+					const header = { item: { _tag: "message", message: { id: "m" } } };
+					expect(yield* Queue.take(decoded)).toMatchObject(header);
+					expect(yield* Queue.take(wire)).toMatchObject(header);
 				}
 			}).pipe(Effect.provide(makeLayer())),
 		);
@@ -361,27 +355,38 @@ describe("subscription RPC handlers", () => {
 						);
 						expect(yield* Queue.take(envelopes)).toMatchObject({
 							_tag: "snapshot",
-							rows: [
-								expect.objectContaining(
-									member === "SubscribeShell"
-										? { id: "session-1", title: "Original" }
-										: {
-												_tag: "transcriptMessage",
-												message: expect.objectContaining({
-													id: "message-1",
+							rows:
+								member === "SubscribeShell"
+									? [
+											expect.objectContaining({
+												id: "session-1",
+												title: "Original",
+											}),
+										]
+									: [
+											{
+												_tag: "part",
+												messageId: "message-1",
+												part: expect.objectContaining({
+													id: "part-1",
 													text: "Hello",
 												}),
 											},
-								),
-							],
+											{
+												_tag: "message",
+												message: expect.objectContaining({ id: "message-1" }),
+											},
+											{ _tag: "rewind", messageId: null },
+										],
 						});
 						expect(yield* Queue.take(envelopes)).toEqual({
 							_tag: "synchronized",
 						});
 					}
 					// One commit, routed to the subscribers it touches: the shell re-reads
-					// the session row the rename moved, detail re-reads the message the
-					// part write moved. Each source asks its own `version > lastSeen`.
+					// the session row the rename moved, detail re-reads the part the
+					// write moved and the message it advanced. Each source asks its own
+					// `version > lastSeen`.
 					const liveVersion = yield* commit(
 						member === "SubscribeShell"
 							? canonicalEvent(
@@ -397,61 +402,65 @@ describe("subscription RPC handlers", () => {
 									{ provider: "claude", createdAt: 4 },
 								),
 					);
-					const expected = {
-						_tag: "upsert",
-						sequence: liveVersion,
-						item: expect.objectContaining(
-							member === "SubscribeShell"
-								? { id: "session-1", title: "Renamed" }
-								: {
-										_tag: "transcriptMessage",
-										message: expect.objectContaining({
-											id: "message-1",
+					const expected = (
+						member === "SubscribeShell"
+							? [{ id: "session-1", title: "Renamed" }]
+							: [
+									{
+										_tag: "part",
+										messageId: "message-1",
+										part: expect.objectContaining({
+											id: "part-1",
 											text: "Hello world",
-											parts: [
-												expect.objectContaining({
-													id: "part-1",
-													text: "Hello world",
-												}),
-											],
 										}),
 									},
-						),
-					};
+									{
+										_tag: "message",
+										message: expect.objectContaining({ id: "message-1" }),
+									},
+								]
+					).map((item) => ({
+						_tag: "upsert",
+						sequence: liveVersion,
+						item: expect.objectContaining(item),
+					}));
 					for (let i = 0; i < 33; i++)
-						expect(yield* Queue.take(envelopes)).toMatchObject(expected);
+						for (const envelope of expected)
+							expect(yield* Queue.take(envelopes)).toMatchObject(envelope);
 					// Check each encoder independently, including subscribers 2..33.
 					for (const wire of wireSubscriptions) {
 						expect(yield* Queue.take(wire)).toMatchObject({
 							_tag: "snapshot",
 							sequence: cursor,
+							rows: [
+								{ _tag: "part", part: { id: "part-1", text: "Hello" } },
+								{ _tag: "message", message: { id: "message-1" } },
+								{ _tag: "rewind", messageId: null },
+							],
 						});
 						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });
+						// Only the part's new text crosses the wire.
 						expect(yield* Queue.take(wire)).toMatchObject({
 							_tag: "upsert",
 							sequence: liveVersion,
-							item: {
-								_tag: "transcriptMessage",
-								message: {
-									id: "message-1",
-									text: " world",
-									parts: [
-										expect.objectContaining({ id: "part-1", text: " world" }),
-									],
-								},
-							},
-							textSuffixes: [
-								{ from: 5, total: 11 },
-								{ partId: "part-1", from: 5, total: 11 },
-							],
+							item: { _tag: "part", part: { id: "part-1", text: " world" } },
+							textSuffix: { from: 5, total: 11 },
+						});
+						expect(yield* Queue.take(wire)).toMatchObject({
+							_tag: "upsert",
+							sequence: liveVersion,
+							item: { _tag: "message", message: { id: "message-1" } },
 						});
 					}
 					const resumed = Array.from(
-						yield* subscribe(cursor).pipe(Stream.take(2), Stream.runCollect),
+						yield* subscribe(cursor).pipe(
+							Stream.take(member === "SubscribeShell" ? 2 : 3),
+							Stream.runCollect,
+						),
 					);
-					expect(resumed[1]).toEqual({ _tag: "synchronized" });
+					expect(resumed.at(-1)).toEqual({ _tag: "synchronized" });
 					// Both catch up from the cursor.
-					expect(resumed[0]).toMatchObject(expected);
+					expect(resumed.slice(0, -1)).toMatchObject(expected);
 				}).pipe(Effect.provide(makeLayer())),
 			{ timeout: 10000 },
 		);

@@ -113,6 +113,44 @@ export const Empty: Story = {
 	},
 };
 
+export const FolderRepositories: Story = {
+	args: {
+		project: {
+			slug: "conduit",
+			title: "Conduit",
+			folders: [app, docs, notes],
+			repositoryIdentities: {
+				[app]: { key: "example.test/team/conduit", name: "Conduit", root: app },
+				[docs]: {
+					key: "example.test/team/docs",
+					name: "Documentation",
+					root: docs,
+				},
+			},
+			git: {
+				branch: "main",
+				folders: [
+					{ root: app, label: "conduit", branch: "main", dirty: false },
+					{
+						root: docs,
+						label: "conduit-docs",
+						branch: "docs/folders",
+						dirty: true,
+					},
+				],
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const rows = canvasFor(canvasElement).getAllByTestId("project-folder-row");
+		await expect(rows[0]).toHaveTextContent("Conduit");
+		await expect(rows[0]).toHaveTextContent("main");
+		await expect(rows[1]).toHaveTextContent("Documentation");
+		await expect(rows[1]).toHaveTextContent("docs/folders");
+		await expect(rows[2]).toHaveTextContent("Not a git repository");
+	},
+};
+
 export const PathMatchesOpen: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
@@ -124,7 +162,7 @@ export const PathMatchesOpen: Story = {
 		await expect(input).toHaveAttribute("aria-expanded", "true");
 		await expect(input).toHaveFocus();
 		await expect(listbox.id).toBe(input.getAttribute("aria-controls"));
-		const options = canvas.getAllByRole("option");
+		const options = within(listbox).getAllByRole("option");
 		await expect(options[0]).toHaveAttribute("aria-selected", "true");
 		await userEvent.keyboard("{ArrowDown}");
 		await expect(options[1]).toHaveAttribute("aria-selected", "true");
@@ -188,13 +226,22 @@ export const NewFolder: Story = {
 	},
 };
 
+// Adding another project's main folder opens that project, so the clash only
+// shows when an edit makes it this project's main folder.
 export const Errors: Story = {
 	args: {
-		projects: [{ slug: "conduit", title: "Conduit", folders: [app] }],
+		project: { slug: "docs", title: "Docs", folders: [docs] },
+		projects: [
+			{ slug: "conduit", title: "Conduit", folders: [app] },
+			{ slug: "docs", title: "Docs", folders: [docs] },
+		],
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
 		await addPath(canvasElement, app);
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Make main: ${app}` }),
+		);
 		await expect(canvas.getByRole("alert")).toHaveTextContent(
 			"already the main folder",
 		);
@@ -202,9 +249,7 @@ export const Errors: Story = {
 			"href",
 			"/?p=conduit",
 		);
-		await expect(
-			canvas.getByRole("button", { name: "Add project" }),
-		).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
 	},
 };
 
@@ -323,6 +368,23 @@ const editedProject = {
 	folders: [app, docs] as const,
 };
 
+export const SessionModeSet: Story = {
+	args: {
+		project: {
+			...editedProject,
+			title: "Isolated workspace",
+			sessionMode: "worktree",
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.getByRole("combobox", { name: "Default session mode" }),
+		).toHaveValue("worktree");
+		await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+	},
+};
+
 const capabilityInstances = [
 	{
 		id: "all-folders",
@@ -427,5 +489,71 @@ export const Edit: Story = {
 			title: "Conduit",
 			folders: [docs, app],
 		});
+	},
+};
+
+export const WithSetupScript: Story = {
+	args: {
+		project: {
+			...editedProject,
+			setupScript: "pnpm install\nprintf 'Workspace ready\\n'",
+		},
+		projects: [editedProject],
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		await expect(
+			canvas.getByRole("textbox", { name: /^Setup script$/ }),
+		).toHaveValue("pnpm install\nprintf 'Workspace ready\\n'");
+		await expect(
+			canvas.getByText("It runs in each new worktree before the agent starts."),
+		).toBeVisible();
+	},
+};
+
+export const RepositoryGroupingOverride: Story = {
+	args: {
+		project: {
+			...editedProject,
+			groupingMode: "repository+subfolder",
+		},
+		projects: [editedProject],
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		const grouping = canvas.getByRole("combobox", {
+			name: "Repository grouping",
+		});
+		await expect(grouping).toHaveValue("repository+subfolder");
+		await expect(within(grouping).getAllByRole("option")).toHaveLength(4);
+		await expect(
+			within(grouping).getByRole("option", { name: "Use global default" }),
+		).toHaveValue("");
+		await expect(
+			within(grouping).getByRole("option", {
+				name: /^By repository$/,
+			}),
+		).toHaveValue("repository");
+		await expect(
+			within(grouping).getByRole("option", {
+				name: "By repository and subfolder",
+			}),
+		).toHaveValue("repository+subfolder");
+		await expect(
+			within(grouping).getByRole("option", { name: "Off" }),
+		).toHaveValue("off");
+		const save = canvas.getByRole("button", { name: "Save" });
+		await expect(save).toBeDisabled();
+		await userEvent.selectOptions(grouping, "off");
+		await expect(save).toBeEnabled();
+		await userEvent.click(save);
+		await expect(args["saveProject"]).toHaveBeenCalledWith({
+			slug: "conduit",
+			title: "Conduit",
+			folders: [app, docs],
+			groupingMode: "off",
+		});
+		await userEvent.selectOptions(grouping, "repository+subfolder");
+		await expect(grouping).toHaveValue("repository+subfolder");
 	},
 };

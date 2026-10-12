@@ -132,8 +132,22 @@ vi.mock("../../../src/lib/frontend/stores/chat.svelte.js", () => ({
 	registerClearMessagesHook: vi.fn(),
 }));
 
-vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", () => ({
-	viewTranscript: vi.fn(),
+vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", async () => {
+	const { sessionState } = await import(
+		"../../../src/lib/frontend/stores/session.svelte.js"
+	);
+	return {
+		viewTranscript: vi.fn(),
+		drawSavedTranscript: vi.fn(),
+		placeSavedDraw: vi.fn(),
+		leaveSavedDraw: vi.fn(),
+		placedSessionId: () => sessionState.currentId,
+		savedDraw: { sessionId: null },
+	};
+});
+
+vi.mock("../../../src/lib/frontend/stores/saved-transcripts.js", () => ({
+	openSavedTranscript: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/project-settings.js", () => ({
@@ -195,6 +209,7 @@ vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 	applyGetCommandsResponse: vi.fn(),
 	applyGetModelsResponse: vi.fn(),
 	getEffectiveInstanceId: () => "opencode",
+	discoveryState: { hasInstanceChoice: false },
 }));
 
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({

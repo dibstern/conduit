@@ -10,7 +10,7 @@
 	import type { SessionInfo } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import TextInput from "../ui/TextInput.svelte";
-	import { sessionVerbActions } from "./session-verbs.js";
+	import { sessionCommandActions } from "./session-commands.js";
 
 	let { session, onend, variant = "header", class: className = "" }: {
 		session: SessionInfo;
@@ -58,7 +58,7 @@
 		onend();
 		// An untouched draft is not a rename: saving it would revert a title
 		// that arrived while the field was open.
-		if (title && title !== seededTitle && title !== session.title) void sessionVerbActions.rename(session, title);
+		if (title && title !== seededTitle && title !== session.title) void sessionCommandActions.rename(session, title);
 	}
 
 	// A rebuilt row's field autofocuses while the old one is still attached, and

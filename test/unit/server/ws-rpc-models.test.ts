@@ -67,13 +67,15 @@ const makeReadQuery = (
 		ReadQueryEffect["getLatestTurnModelExecution"]
 	>,
 ): ReadQueryEffect => ({
-	getToolContent: () => Effect.succeed(undefined),
+	readToolDetails: () => Effect.succeed([]),
 	getSessionStatus: () => Effect.succeed(undefined),
 	getSession: () => Effect.succeed(undefined),
+	getSessionFamilyRoot: () => Effect.succeed(undefined),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 	getAllSessionStatuses: () => Effect.succeed({}),
 	getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 	getSessionsForReconciliation: () => Effect.succeed([]),
+	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
 	listSessionInfos: () => Effect.succeed([]),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -85,6 +87,7 @@ const makeReadQuery = (
 	getSessionMessagesWithParts: () => Effect.succeed([]),
 	readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 	readInboxState: () => Effect.succeed(undefined),
+	readStoreIdentity: () => Effect.succeed("store"),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),
@@ -609,6 +612,11 @@ describe("WsRpcServerLayer GetModels", () => {
 				yield* client
 					.SubscribeProjectSettings({ projectSlug: "project-a" })
 					.pipe(
+						Stream.filter(
+							(envelope) =>
+								envelope._tag !== "upsert" ||
+								envelope.item._tag === "providerModels",
+						),
 						Stream.runForEach((envelope) => Queue.offer(updates, envelope)),
 						Effect.forkScoped,
 					);

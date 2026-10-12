@@ -1,15 +1,29 @@
+import { channel } from "node:diagnostics_channel";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
-import { type Context, Effect, Layer, Schema } from "effect";
+import { type Context, Effect, Layer, Option, Schema } from "effect";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
-import type { SessionGit } from "../../../shared-types.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
+import { type SessionGit, SessionGitSchema } from "../../../shared-types.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
+import { inspectSessionWorktree } from "../Services/session-workspace.js";
+
+/** One git refresh pass: folders read from disk, and how many moved. For load tests. */
+export interface SessionGitRefresh {
+	readonly read: number;
+	readonly changed: number;
+}
+
+const gitRefreshes = channel("conduit:session-git-refresh");
 
 export const SessionGitLive = Layer.effect(
 	SessionGitServiceTag,
@@ -19,7 +33,43 @@ export const SessionGitLive = Layer.effect(
 		const sql = yield* SqlClient.SqlClient;
 		const commit = yield* makeCommitAndSignal;
 		const refreshes = yield* Effect.makeSemaphore(1);
-		let published = new Map<string, SessionGit | undefined>();
+		// What browsers were last sent per folder. It is kept with the versions
+		// that sent it, so after a restart only folders whose git moved while
+		// down are stamped again, and until the first read the cache serves it,
+		// so a row's version still covers the git it carries.
+		const decodeGit = Schema.decodeUnknownOption(
+			Schema.parseJson(SessionGitSchema),
+		);
+		let published = new Map<
+			string,
+			{
+				git: SessionGit | undefined;
+				workspaceMissing: WorkspaceMissing | undefined;
+			}
+		>();
+		// A record that cannot be read or decoded counts as never published.
+		// Only git is recorded: a missing worktree is found again on the first
+		// refresh and stamps just its own sessions.
+		for (const row of yield* sql<{
+			directory: string;
+			git: string | null;
+		}>`SELECT directory, git FROM session_git_published`.pipe(
+			Effect.catchAll((error) =>
+				Effect.logWarning(
+					"Could not read published git; every session is stamped again",
+					error,
+				).pipe(Effect.as([])),
+			),
+		)) {
+			const git =
+				row.git === null ? Option.some(undefined) : decodeGit(row.git);
+			if (Option.isNone(git)) continue;
+			published.set(row.directory, {
+				git: git.value,
+				workspaceMissing: undefined,
+			});
+			daemonSessionGitCache.seed(row.directory, git.value);
+		}
 		let queued:
 			| {
 					all: boolean;
@@ -51,36 +101,74 @@ export const SessionGitLive = Layer.effect(
 								const request = queued;
 								queued = undefined;
 								const sessions = yield* read.listSessionInfos();
+								const projectFolders = [
+									config.projectDir,
+									...(config.extraFolders ?? []),
+								];
 								const directories = new Map<string, boolean>(
-									request.all ? [[config.projectDir, request.forceAll]] : [],
+									request.all
+										? projectFolders.map((directory) => [
+												directory,
+												request.forceAll,
+											])
+										: [],
 								);
+								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
 									if (
 										!request.sessionIds.has(session.id) &&
-										!(request.all && session.settledAt == null)
+										!(
+											request.all &&
+											(session.settledAt == null ||
+												session.workspace?.origin === "conduit")
+										)
 									)
 										continue;
-									const directory = effectiveWorkingDirectory(
+									const workspaceDirectory = effectiveWorkingDirectory(
 										config.projectDir,
 										session.workspace,
 									);
-									directories.set(
-										directory,
-										Boolean(directories.get(directory)) ||
-											request.forceAll ||
-											request.forceSessionIds.has(session.id),
-									);
+									if (session.workspace?.origin === "conduit") {
+										const state = yield* inspectSessionWorktree(
+											session,
+											config,
+										);
+										if (state)
+											for (const { path } of state.folders ?? [state])
+												missing.set(path, state);
+									}
+									for (const directory of [
+										workspaceDirectory,
+										...Object.values(session.workspace?.worktrees ?? {}),
+										...effectiveSessionFolders(
+											projectFolders,
+											session.workspace,
+										).map(({ directory }) => directory),
+									])
+										directories.set(
+											directory,
+											Boolean(directories.get(directory)) ||
+												request.forceAll ||
+												request.forceSessionIds.has(session.id),
+										);
 								}
 								const next = new Map(published);
-								for (const [directory, force] of directories)
-									next.set(
-										directory,
-										!force && !daemonSessionGitCache.isStale(directory)
-											? daemonSessionGitCache.peek(directory)
-											: yield* Effect.tryPromise(() =>
-													daemonSessionGitCache.refresh(directory),
-												),
-									);
+								let fromDisk = 0;
+								for (const [directory, force] of directories) {
+									const workspaceMissing = missing.get(directory);
+									const stale =
+										force || daemonSessionGitCache.isStale(directory);
+									if (stale) fromDisk++;
+									const git = stale
+										? yield* Effect.tryPromise(() =>
+												daemonSessionGitCache.refresh(directory),
+											)
+										: daemonSessionGitCache.peek(directory);
+									next.set(directory, {
+										git: workspaceMissing ? undefined : git,
+										workspaceMissing,
+									});
+								}
 								const changed = new Set(
 									[...directories.keys()].filter(
 										(directory) =>
@@ -91,13 +179,24 @@ export const SessionGitLive = Layer.effect(
 											),
 									),
 								);
+								if (gitRefreshes.hasSubscribers)
+									gitRefreshes.publish({
+										read: fromDisk,
+										changed: changed.size,
+									} satisfies SessionGitRefresh);
 								if (changed.size === 0) continue;
 								// Git lives in the cache, so version both the session and its sidebar
 								// row without changing recency or storing the branch. Recheck workspace
 								// membership in the transaction: a move may have landed during git IO.
+								// The record of what was published commits with the stamp, so a
+								// crash cannot keep one without the other.
 								yield* commit.write((_project, stamp) =>
 									stamp((version) =>
 										Effect.gen(function* () {
+											for (const directory of changed) {
+												const git = next.get(directory)?.git;
+												yield* sql`INSERT INTO session_git_published (directory, git) VALUES (${directory}, ${git === undefined ? null : JSON.stringify(git)}) ON CONFLICT (directory) DO UPDATE SET git = excluded.git`;
+											}
 											const rows = yield* sql<
 												Pick<SessionRow, "id" | "workspace">
 											>`SELECT id, workspace FROM sessions`;
@@ -115,7 +214,11 @@ export const SessionGitLive = Layer.effect(
 															config.projectDir,
 															workspace,
 														),
-													)
+													) ||
+													effectiveSessionFolders(
+														projectFolders,
+														workspace,
+													).some(({ directory }) => changed.has(directory))
 												)
 													ids.push(row.id);
 											}

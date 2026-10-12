@@ -68,6 +68,7 @@ export {
 	GetCommands,
 	type GetCommandsResponse,
 	GetContinuationHandoff,
+	GetDefaultGroupingMode,
 	GetFileContent,
 	type GetFileContentResponse,
 	GetFileList,
@@ -88,10 +89,12 @@ export {
 	type GetSkillContentResponse,
 	GetStatus,
 	type GetStatusResponse,
-	GetToolContent,
-	type GetToolContentResponse,
+	GetToolDetails,
+	type GetToolDetailsResponse,
 	type GoalDetails,
+	InspectSessionWorktrees,
 	type InstanceListResponse,
+	ListBranches,
 	ListDaemonSessions,
 	type ListDaemonSessionsResponse,
 	ListPtys,
@@ -124,6 +127,8 @@ export {
 	ResolveClaudeSettings,
 	type ResolveClaudeSettingsResponse,
 	ResolveSession,
+	ResolveSessionMode,
+	type ResolveSessionModeResponse,
 	RespondPermission,
 	RestartWithConfig,
 	RewindSession,
@@ -135,16 +140,18 @@ export {
 	type SessionInfo,
 	SetAgent,
 	SetClaudeSettings,
+	SetDefaultGroupingMode,
 	SetDefaultModel,
 	type SetDefaultModelResponse,
 	SetDefaultPermissionMode,
 	type SetDefaultPermissionModeResponse,
+	SetDefaultSessionMode,
+	type SetDefaultSessionModeResponse,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
 	type SetKeepAwakeResponse,
 	SetLogLevel,
 	SetPin,
-	SetProjectInstance,
 	SetSessionAutoSettle,
 	SetSessionPinned,
 	SetSessionSettled,
@@ -168,6 +175,7 @@ export {
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
+	UndoRewind,
 	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,
@@ -205,11 +213,14 @@ const subscribeSessionDetailWithPresence = (
 export const wsRpcHandlers = WsRpcGroup.of({
 	SubscribeShell: (request) =>
 		Rpc.fork(
-			subscribeShell(
-				request.resumeFromSequence === undefined
+			subscribeShell({
+				...(request.resumeFromSequence === undefined
 					? {}
-					: { resumeFromSequence: request.resumeFromSequence },
-			).pipe(
+					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+			}).pipe(
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
@@ -240,6 +251,12 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				...(request.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+				...(request.resumePoint === undefined
+					? {}
+					: { resumePoint: request.resumePoint }),
 			}).pipe(
 				(stream) =>
 					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
@@ -348,7 +365,6 @@ export type DaemonRpcName =
 	| "GetProjects"
 	| "SaveProject"
 	| "RemoveProject"
-	| "SetProjectInstance"
 	| "StartInstance"
 	| "StopInstance"
 	| "RemoveInstance"
@@ -357,6 +373,8 @@ export type DaemonRpcName =
 	| "UpdateInstance"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "SetDefaultGroupingMode"
+	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "ScanNow"
@@ -537,11 +555,14 @@ export const makeRoutedWsRpcServerLayer = <
 		...handlers,
 		SubscribeShell: (request) =>
 			routeStream(request.projectSlug, () =>
-				subscribeShell(
-					request.resumeFromSequence === undefined
+				subscribeShell({
+					...(request.resumeFromSequence === undefined
 						? {}
-						: { resumeFromSequence: request.resumeFromSequence },
-				),
+						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+				}),
 			),
 		SubscribeApprovals: (request) =>
 			routeStream(request.projectSlug, () =>
@@ -558,6 +579,12 @@ export const makeRoutedWsRpcServerLayer = <
 					...(request.resumeFromSequence === undefined
 						? {}
 						: { resumeFromSequence: request.resumeFromSequence }),
+					...(request.resumeBase === undefined
+						? {}
+						: { resumeBase: request.resumeBase }),
+					...(request.resumePoint === undefined
+						? {}
+						: { resumePoint: request.resumePoint }),
 				});
 				return request.textSuffixes === true
 					? encodeSessionDetail(source)

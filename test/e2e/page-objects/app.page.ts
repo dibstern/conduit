@@ -5,7 +5,6 @@ export class AppPage {
 	readonly page: Page;
 
 	// Session bar
-	readonly projectName: Locator;
 	readonly statusDot: Locator;
 	readonly sidebarExpandBtn: Locator;
 	readonly terminalToggleBtn: Locator;
@@ -26,6 +25,7 @@ export class AppPage {
 	readonly connectOverlay: Locator;
 
 	// Input
+	readonly checkout: Locator;
 	readonly input: Locator;
 	readonly sendBtn: Locator;
 	readonly attachBtn: Locator;
@@ -41,7 +41,6 @@ export class AppPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.projectName = page.getByTestId("session-bar-identity");
 		this.statusDot = page.locator("#session-bar #status");
 		this.sidebarExpandBtn = page.getByTestId("session-bar-back");
 		this.terminalToggleBtn = page.getByTestId("views-rail-terminal");
@@ -56,6 +55,7 @@ export class AppPage {
 		this.sessionBarBack = page.locator("[data-testid='session-bar-back']");
 		this.app = page.locator("#layout #app");
 		this.connectOverlay = page.locator("#connect-overlay");
+		this.checkout = page.getByTestId("composer-checkout");
 		this.input = page.locator("#input");
 		this.sendBtn = page.locator("#send");
 		this.attachBtn = page.locator("#attach-btn");

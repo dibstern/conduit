@@ -75,6 +75,9 @@ type SessionCommandType =
 	| "session.created"
 	| "session.renamed"
 	| "session.workspace_changed"
+	| "session.setup_started"
+	| "session.setup_output"
+	| "session.setup_finished"
 	| "session.settled"
 	| "session.unsettled"
 	| "session.pinned"
@@ -151,6 +154,9 @@ export const openCodeUpstreamAdapter = (
 			case "session.unsnoozed":
 			case "session.provider_changed":
 			case "session.workspace_changed":
+			case "session.setup_started":
+			case "session.setup_output":
+			case "session.setup_finished":
 				// Triage state belongs to Conduit and has no provider-side equivalent.
 				return Effect.void;
 			case "session.forked":
@@ -285,7 +291,8 @@ export const normalizeSessionTitle = (title?: string): string => {
  * Create a session on an OpenCode server and record it locally.
  *
  * The one mutation that cannot be expressed as a command on its own: OpenCode
- * chooses the session id, and a command needs that id before it can be built.
+ * chooses the session id unless a worktree launch reserves it, and a command
+ * needs that id before it can be built.
  * So the direct `api.session.create` call lives here, next to the sync adapter,
  * and applying `session.created` is folded into the same function rather than
  * left to the caller.
@@ -297,13 +304,17 @@ export const normalizeSessionTitle = (title?: string): string => {
 export const createOpenCodeSession = (
 	title: string | undefined,
 	provider: string,
+	reservedSessionId?: string,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 
 		// No retry: create is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
-			api.session.create(title ? { title } : undefined),
+			api.session.create({
+				...(title ? { title } : {}),
+				...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
+			}),
 		).pipe(
 			Effect.mapError(
 				(cause) =>
@@ -618,6 +629,19 @@ const forkSessionInWorkspace = (
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
 		const parentEvents =
 			yield* eventStore.value.readAllBySession(parentSessionId);
+		const retainedMessageIds = new Set(
+			parentMessages.map((message) => message.id),
+		);
+		const lastRewindCommitSequence = parentEvents.reduce(
+			(sequence, event) =>
+				event.type === "session.rewind_committed" ? event.sequence : sequence,
+			0,
+		);
+		const historyMessageId =
+			messageId ??
+			(parent.pending_rewind_message_id != null || lastRewindCommitSequence > 0
+				? forkPointMessage.id
+				: undefined);
 		const forkPointSequence = parentEvents.find(
 			(event) =>
 				event.type === "message.created" &&
@@ -629,6 +653,7 @@ const forkSessionInWorkspace = (
 				!copyForkHistory(parentEvents, {
 					newSessionId: parentSessionId,
 					upToMessageId: messageId,
+					retainedMessageIds,
 				}))
 		) {
 			return yield* new SessionCommandError({
@@ -660,9 +685,16 @@ const forkSessionInWorkspace = (
 		// Prefer the thread that began closest to the point when an older
 		// account has since returned and received a catch-up covering that range.
 		const provider = selected?.instanceId ?? parent.provider;
-		const parentThread = selected?.thread;
+		// Pending cuts leave Claude's native tail intact. An older receipt after
+		// a committed cut may still point at that tail too. A fresh child's
+		// first turn hands off its kept canonical history instead of forking it.
+		const parentThread =
+			parent.pending_rewind_message_id != null ||
+			(selected && lastRewindCommitSequence > selected.thread.deliveredThrough)
+				? undefined
+				: selected?.thread;
 		const claudeConfigDir =
-			parentThread?.configDir ??
+			selected?.thread.configDir ??
 			resolveClaudeInstanceConfigDir(
 				loadDaemonConfig(config.value.configDir),
 				provider,
@@ -680,8 +712,10 @@ const forkSessionInWorkspace = (
 									configDir: claudeConfigDir,
 								}),
 								title,
-								...(messageId !== undefined && { messageId }),
-								...(messageId !== undefined && {
+								...(historyMessageId !== undefined && {
+									messageId: historyMessageId,
+								}),
+								...(historyMessageId !== undefined && {
 									fallbackMessageIds: parentMessages
 										.slice(0, parentMessages.indexOf(forkPointMessage))
 										.flatMap((message) =>
@@ -702,7 +736,10 @@ const forkSessionInWorkspace = (
 			: { sdkSessionId: randomUUID() };
 		const history = copyForkHistory(parentEvents, {
 			newSessionId: forked.sdkSessionId,
-			...(messageId !== undefined && { upToMessageId: messageId }),
+			...(historyMessageId !== undefined && {
+				upToMessageId: historyMessageId,
+			}),
+			retainedMessageIds,
 		});
 		const forkPointEvent = messageId ?? forkPointMessage.id;
 		// A native cursor commits before the row is announced. Without one,
@@ -740,8 +777,19 @@ const forkSessionInWorkspace = (
 					yield* workspace.value.inherit(forked.sdkSessionId, parentSessionId, {
 						project,
 					});
+				// The fork has nothing in flight. Copied history can end inside a
+				// turn the parent is still running; the idle closes it, or the
+				// inbox reads the fork as busy and holds every send.
 				const stored = history?.events.length
-					? yield* eventStore.value.appendBatch(history.events)
+					? yield* eventStore.value.appendBatch([
+							...history.events,
+							canonicalEvent(
+								"session.status",
+								forked.sdkSessionId,
+								{ sessionId: forked.sdkSessionId, status: "idle" },
+								{ provider, metadata: { source: "relay" } },
+							),
+						])
 					: created;
 				if (history?.events.length) yield* project(stored);
 				if (parentThread)

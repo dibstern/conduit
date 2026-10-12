@@ -38,30 +38,22 @@ describe("subscription RPC contracts", () => {
 		expect(member.successSchema.failure).toBe(Contracts.WsRpcError);
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const message = {
-			_tag: "transcriptMessage",
+			_tag: "message",
 			message: { id: "message-1", role: "assistant" },
 		};
-		const event = {
-			_tag: "event",
-			event: {
-				eventId: "event-1",
-				sessionId: "session-1",
-				type: "text.delta",
-				data: { messageId: "message-1", partId: "part-1", text: "Hello" },
-				metadata: {},
-				provider: "claude",
-				createdAt: 100,
-				projectId: "project-1",
-				sequence: 43,
-				streamVersion: 1,
-			},
+		const part = {
+			_tag: "part",
+			messageId: "message-1",
+			sortOrder: 0,
+			part: { id: "part-1", type: "text", text: "Hello" },
 		};
 		for (const envelope of [
-			{ _tag: "snapshot", rows: [message, event], sequence: 43 },
+			{ _tag: "snapshot", rows: [message, part], sequence: 43 },
 			{ _tag: "synchronized" },
 			{ _tag: "upsert", item: message, sequence: 44 },
-			{ _tag: "upsert", item: event, sequence: 45 },
-			{ _tag: "remove", id: "message-1", sequence: 46 },
+			{ _tag: "upsert", item: part, sequence: 45 },
+			{ _tag: "remove", id: '["message-1","part-1"]', sequence: 46 },
+			{ _tag: "remove", id: "message-1", sequence: 47 },
 		]) {
 			expect(decode(envelope)).toEqual(envelope);
 		}
@@ -69,7 +61,8 @@ describe("subscription RPC contracts", () => {
 			message,
 			{ _tag: "upsert", item: [message], sequence: 44 },
 			{ _tag: "upsert", item: message },
-			{ _tag: "snapshot", rows: [{ _tag: "event", event: {} }], sequence: 43 },
+			{ _tag: "snapshot", rows: [{ _tag: "part", part: {} }], sequence: 43 },
+			{ _tag: "upsert", item: { ...part, sortOrder: 0.5 }, sequence: 45 },
 		]) {
 			expect(() => decode(invalid)).toThrow();
 		}
@@ -185,6 +178,21 @@ describe("subscription RPC contracts", () => {
 			item: visibility,
 			sequence: 2,
 		});
+		for (const mode of ["local", "worktree"]) {
+			const item = { _tag: "defaultSessionMode", mode };
+			expect(decode({ _tag: "upsert", item, sequence: 3 })).toEqual({
+				_tag: "upsert",
+				item,
+				sequence: 3,
+			});
+		}
+		expect(() =>
+			decode({
+				_tag: "upsert",
+				item: { _tag: "defaultSessionMode", mode: "sometimes" },
+				sequence: 3,
+			}),
+		).toThrow();
 		expect(() =>
 			decode({
 				_tag: "upsert",

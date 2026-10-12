@@ -7,7 +7,9 @@ import {
 	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
 
-class TailscaleServeError extends Data.TaggedError("TailscaleServeError")<{
+export class TailscaleServeError extends Data.TaggedError(
+	"TailscaleServeError",
+)<{
 	readonly message: string;
 }> {}
 
@@ -86,19 +88,34 @@ const ServeStatusSchema = Schema.Struct({
 	),
 });
 
-const reconcile = (port: number, enabled: boolean) =>
+const getTailscaleStatus = Effect.gen(function* () {
+	const cli = yield* TailscaleCliTag;
+	return yield* Schema.decodeUnknown(Schema.parseJson(TailscaleStatusSchema))(
+		yield* cli.exec(["status", "--json"]),
+	).pipe(
+		Effect.mapError(
+			() =>
+				new TailscaleServeError({
+					message: "Could not read Tailscale status JSON. Update Tailscale.",
+				}),
+		),
+	);
+});
+
+export const isTailscaleServeAvailable = getTailscaleStatus.pipe(
+	Effect.map(
+		(status) =>
+			status.BackendState === "Running" &&
+			(status.CertDomains?.length ?? 0) > 0 &&
+			Boolean(status.Self?.DNSName?.trim().replace(/\.$/, "")),
+	),
+	Effect.orElseSucceed(() => false),
+);
+
+const reconcile = (port: number, enabled: boolean, tlsEnabled: boolean) =>
 	Effect.gen(function* () {
 		const cli = yield* TailscaleCliTag;
-		const status = yield* Schema.decodeUnknown(
-			Schema.parseJson(TailscaleStatusSchema),
-		)(yield* cli.exec(["status", "--json"])).pipe(
-			Effect.mapError(
-				() =>
-					new TailscaleServeError({
-						message: "Could not read Tailscale status JSON. Update Tailscale.",
-					}),
-			),
-		);
+		const status = yield* getTailscaleStatus;
 		if (enabled && status.BackendState !== "Running") {
 			return yield* new TailscaleServeError({
 				message: `Tailscale is not Running (${status.BackendState}). Open Tailscale and sign in, or run tailscale up.`,
@@ -129,19 +146,22 @@ const reconcile = (port: number, enabled: boolean) =>
 			),
 		);
 		const root = serve.Web?.[`${dnsName}:${port}`]?.Handlers?.["/"];
-		const proxy = `http://127.0.0.1:${port}`;
+		const httpProxy = `http://127.0.0.1:${port}`;
+		const httpsProxy = `https+insecure://127.0.0.1:${port}`;
+		const proxy = tlsEnabled ? httpsProxy : httpProxy;
+		const ownRoot = root?.Proxy === httpProxy || root?.Proxy === httpsProxy;
 		if (!enabled) {
-			if (root?.Proxy === proxy) {
+			if (ownRoot) {
 				yield* cli.exec(["serve", `--https=${port}`, "--set-path=/", "off"]);
 			}
 			return undefined;
 		}
-		if (root !== undefined && root.Proxy !== proxy) {
+		if (root !== undefined && !ownRoot) {
 			return yield* new TailscaleServeError({
 				message: `Tailscale Serve conflict: '/' on ${dnsName}:${port} already serves ${root.Proxy ?? "a file or text handler"}. Move that '/' handler to another path or port.`,
 			});
 		}
-		if (root === undefined) {
+		if (root?.Proxy !== proxy) {
 			yield* cli.exec([
 				"serve",
 				"--bg",
@@ -153,6 +173,19 @@ const reconcile = (port: number, enabled: boolean) =>
 		return { url: `https://${dnsName}:${port}` };
 	});
 
+/** Apply first so a rejected browser change leaves the stored choice intact. */
+export const applyTailscaleServe = (enabled: boolean) =>
+	Effect.gen(function* () {
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		const result = yield* reconcile(config.port, enabled, config.tlsEnabled);
+		yield* commitDaemonRuntimeConfig((current) => ({
+			...current,
+			tailscaleServeEnabled: enabled,
+			tailscaleServeCleanupPending: false,
+			tailscaleServe: result,
+		}));
+	});
+
 /** Runs after HTTP binds; shutdown deliberately leaves tailscaled's mapping alone. */
 export const TailscaleServeLive = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -160,7 +193,7 @@ export const TailscaleServeLive = Layer.effectDiscard(
 		const config = yield* Ref.get(configRef);
 		const enabled = config.tailscaleServeEnabled === true;
 		if (!enabled && !config.tailscaleServeCleanupPending) return;
-		const result = yield* Effect.either(reconcile(config.port, enabled));
+		const result = yield* Effect.either(applyTailscaleServe(enabled));
 		if (Either.isLeft(result)) {
 			const error = `${result.left.message} Restart conduit with ${enabled ? "--tailscale-serve" : "--no-tailscale-serve"} to retry.`;
 			yield* Effect.logWarning(error);
@@ -171,10 +204,5 @@ export const TailscaleServeLive = Layer.effectDiscard(
 			}));
 			return;
 		}
-		yield* commitDaemonRuntimeConfig((current) => ({
-			...current,
-			tailscaleServeCleanupPending: false,
-			...(result.right !== undefined && { tailscaleServe: result.right }),
-		}));
 	}),
 );

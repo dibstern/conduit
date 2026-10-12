@@ -7,6 +7,7 @@
 		field,
 		controls,
 		send,
+		splitFooter = false,
 		class: className,
 		...rest
 	}: {
@@ -14,6 +15,7 @@
 		field: Snippet;
 		controls: Snippet;
 		send: Snippet;
+		splitFooter?: boolean | undefined;
 		class?: string | undefined;
 	} & Omit<HTMLAttributes<HTMLDivElement>, "children" | "class"> = $props();
 
@@ -62,9 +64,9 @@
 				}
 			}
 
-			// Always decide at the collapsed width. Both DOM writes happen before
-			// paint, so a draft that fits at full width cannot toggle the layout back.
-			element.dataset["rows"] = "1";
+			// Auto layout decides at the collapsed width; a split footer always
+			// gives the field the full width. Both writes happen before paint.
+			element.dataset["rows"] = splitFooter ? "2" : "1";
 			const style = getComputedStyle(textarea);
 			probe.style.font = style.font;
 			probe.style.fontFeatureSettings = style.fontFeatureSettings;
@@ -91,7 +93,7 @@
 			probe.textContent = "\u200b";
 			const lineHeight = probe.scrollHeight;
 			probe.textContent = textarea.value ? `${textarea.value}\u200b` : textarea.placeholder;
-			element.dataset["rows"] = probe.scrollHeight > lineHeight + 1 ? "2" : "1";
+			element.dataset["rows"] = splitFooter || probe.scrollHeight > lineHeight + 1 ? "2" : "1";
 
 			// A placeholder longer than even the full-width field must grow too.
 			// The field can use this inherited minimum height with an absolute editor.
@@ -132,7 +134,7 @@
 	});
 </script>
 
-<div {...rest} bind:this={root} class="composer-layout {className ?? ''}" data-rows="1">
+<div {...rest} bind:this={root} class="composer-layout {className ?? ''}" class:split-footer={splitFooter} data-rows={splitFooter ? "2" : "1"}>
 	<div data-slot="leading">{@render leading()}</div>
 	<div data-slot="field">{@render field()}</div>
 	<div data-slot="controls">{@render controls()}</div>
@@ -187,6 +189,22 @@
 	[data-rows="2"] > [data-slot="send"] {
 		grid-column: 3;
 		grid-row: 2;
+	}
+
+	.split-footer[data-rows="2"] {
+		grid-template-columns: auto auto minmax(0, 1fr);
+		align-items: center;
+		column-gap: 8px;
+		row-gap: 6px;
+	}
+
+	.split-footer > [data-slot="controls"] {
+		margin-left: 0;
+	}
+
+	.split-footer > [data-slot="send"] {
+		justify-content: flex-end;
+		gap: 2px;
 	}
 
 	[data-slot="field"] :global(textarea:placeholder-shown) {

@@ -9,6 +9,7 @@ import type {
 	ChatMessage,
 	HistoryMessage,
 } from "../../../src/lib/frontend/types.js";
+import { detailRowsOf, detailUpserts } from "../../helpers/detail-rows.js";
 
 vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
 	renderMarkdown: (text: string) => text,
@@ -25,10 +26,13 @@ const row = (
 	time: { created, ...(completed ? { completed: created + 1 } : {}) },
 	parts: [{ id: `${id}-part`, type: "text", text }],
 });
-const item = (message: HistoryMessage) => ({
-	_tag: "transcriptMessage" as const,
-	message,
-});
+// A message lands as each part and then its header, all at one sequence.
+const upsert = (
+	state: TranscriptEntry,
+	message: HistoryMessage,
+	sequence: number,
+): TranscriptEntry =>
+	detailUpserts(message, sequence).reduce(applyTranscriptEnvelope, state);
 const entry = (): TranscriptEntry => ({
 	project: "test",
 	rows: [],
@@ -36,6 +40,8 @@ const entry = (): TranscriptEntry => ({
 	hasMore: false,
 	status: { _tag: "live" },
 	pending: [],
+	waiting: new Map(),
+	partOrder: new Map(),
 });
 const snapshot = (
 	rows: HistoryMessage[],
@@ -45,7 +51,7 @@ const snapshot = (
 	_tag: "snapshot",
 	sequence,
 	hasMore,
-	rows: rows.map(item),
+	rows: rows.flatMap(detailRowsOf),
 });
 
 describe("transcript detail reducer", () => {
@@ -55,11 +61,7 @@ describe("transcript detail reducer", () => {
 			snapshot([row("b", 2, "B"), row("a", 1, "A")], 4),
 		);
 		expect(first.rows.map((message) => message.id)).toEqual(["a", "b"]);
-		const next = applyTranscriptEnvelope(first, {
-			_tag: "upsert",
-			sequence: 6,
-			item: item(row("b", 2, "new B")),
-		});
+		const next = upsert(first, row("b", 2, "new B"), 6);
 		expect(next.rows[1]?.parts?.[0]?.text).toBe("new B");
 		expect(next.rows[0]).toBe(first.rows[0]);
 		const removed = applyTranscriptEnvelope(next, {
@@ -76,12 +78,10 @@ describe("transcript detail reducer", () => {
 			entry(),
 			snapshot([row("b", 2, "B")], 2, true),
 		);
-		const next = applyTranscriptEnvelope(held, {
-			_tag: "upsert",
-			sequence: 3,
-			item: item(row("a", 1, "A")),
-		});
+		const next = upsert(held, row("a", 1, "A"), 3);
 		expect(next.rows.map((message) => message.id)).toEqual(["b"]);
+		// Its parts came ahead of it and go with it.
+		expect(next.waiting.size).toBe(0);
 		expect(next.hwm).toBe(3);
 	});
 
@@ -96,11 +96,7 @@ describe("transcript detail reducer", () => {
 			"b/b-part",
 		]);
 		const finalized = { ...first[0], finalized: true } as ChatMessage;
-		const updated = applyTranscriptEnvelope(initial, {
-			_tag: "upsert",
-			sequence: 2,
-			item: item(row("b", 2, "B2")),
-		});
+		const updated = upsert(initial, row("b", 2, "B2"), 2);
 		const second = deriveTranscriptMessages(updated, [
 			finalized,
 			...first.slice(1),
@@ -129,11 +125,7 @@ describe("transcript detail reducer", () => {
 			text: "error",
 			variant: "error",
 		};
-		const next = applyTranscriptEnvelope(initial, {
-			_tag: "upsert",
-			sequence: 2,
-			item: item(user),
-		});
+		const next = upsert(initial, user, 2);
 		expect(
 			deriveTranscriptMessages(next, [...first, local]).map(
 				(message) => message.uuid,
@@ -154,7 +146,7 @@ describe("transcript detail reducer", () => {
 		const first = applyTranscriptEnvelope(entry(), {
 			_tag: "snapshot",
 			sequence: 1,
-			rows: [pending("b", 2), item(row("a", 1, "A"))],
+			rows: [pending("b", 2), ...detailRowsOf(row("a", 1, "A"))],
 		});
 		expect(first.rows.map((message) => message.id)).toEqual(["a"]);
 		expect(first.pending.map((input) => input.inputId)).toEqual(["b"]);
@@ -205,10 +197,9 @@ describe("transcript detail reducer", () => {
 				};
 			return message;
 		});
-		const refreshed = applyTranscriptEnvelope(firstState, {
-			_tag: "upsert",
-			sequence: 2,
-			item: item({
+		const refreshed = upsert(
+			firstState,
+			{
 				...original,
 				parts: [
 					{
@@ -220,8 +211,9 @@ describe("transcript detail reducer", () => {
 					},
 					{ id: "thought", type: "thinking", text: "why now" },
 				],
-			}),
-		});
+			},
+			2,
+		);
 		const second = deriveTranscriptMessages(refreshed, sticky);
 		expect(second.find((message) => message.type === "thinking")).toMatchObject(
 			{ done: true, duration: 42, text: "why now" },

@@ -25,6 +25,7 @@ describe("Schema Migration", () => {
 				"activities",
 				"command_receipts",
 				"events",
+				"message_part_tombstones",
 				"message_parts",
 				"message_tombstones",
 				"messages",
@@ -41,11 +42,13 @@ describe("Schema Migration", () => {
 				"provider_state",
 				"read_model_counter",
 				"sent_alerts",
+				"session_git_published",
 				"session_goal_checks",
 				"session_providers",
 				"session_sidebar",
 				"session_sidebar_horizon",
 				"sessions",
+				"store_identity",
 				"tool_content",
 				"turns",
 			]);
@@ -103,6 +106,11 @@ describe("Schema Migration", () => {
 				},
 				{ name: "idx_events_type", table: "events", unique: false },
 				{
+					name: "idx_message_part_tombstones_session_version",
+					table: "message_part_tombstones",
+					unique: false,
+				},
+				{
 					name: "idx_message_parts_message",
 					table: "message_parts",
 					unique: false,
@@ -114,6 +122,11 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_message_parts_tool_call",
+					table: "message_parts",
+					unique: false,
+				},
+				{
+					name: "idx_message_parts_version",
 					table: "message_parts",
 					unique: false,
 				},

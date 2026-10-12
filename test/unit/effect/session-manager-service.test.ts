@@ -140,8 +140,9 @@ function makeReadQueryEffect(
 	pendingApprovalCounts: readonly PendingApprovalCountRow[] = [],
 ): ReadQueryEffect {
 	return {
-		getToolContent: vi.fn(() => Effect.succeed(undefined)),
+		readToolDetails: vi.fn(() => Effect.succeed([])),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
+		getSessionFamilyRoot: () => Effect.succeed(undefined),
 		getSession: vi.fn((sessionId: string) =>
 			Effect.succeed(rows.find((row) => row.id === sessionId)),
 		),
@@ -150,6 +151,7 @@ function makeReadQueryEffect(
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 		getSessionsForReconciliation: () => Effect.succeed([]),
+		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionInfos: vi.fn((options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
@@ -205,6 +207,7 @@ function makeReadQueryEffect(
 		getSessionMessagesWithParts: vi.fn(() => Effect.succeed([])),
 		readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 		readInboxState: () => Effect.succeed(undefined),
+		readStoreIdentity: () => Effect.succeed("store"),
 		readSessionTranscriptPage: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 		),
@@ -1095,6 +1098,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const engine = new OrchestrationEngine({
@@ -1287,6 +1291,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const dispatchObservations: ReturnType<typeof readTombstoneFirstState>[] =
@@ -1575,6 +1580,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const dispatch = vi.fn(async () => undefined);
@@ -1674,6 +1680,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const engine = withDispatchEffect({
@@ -1745,6 +1752,7 @@ describe("SessionManagerService", () => {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
 			ifRunning: () => Effect.succeedNone,
+			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
 		} satisfies OpenCodeInstances;
 		const engine = withDispatchEffect({
@@ -1940,6 +1948,7 @@ describe("SessionManagerService", () => {
 				events: () => Stream.empty,
 				use,
 				ifRunning: () => Effect.succeedNone,
+				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const layer = Layer.provideMerge(
@@ -2015,6 +2024,7 @@ describe("SessionManagerService", () => {
 					events: () => Stream.empty,
 					use,
 					ifRunning: () => Effect.succeedNone,
+					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,
 				} satisfies OpenCodeInstances;
 				const layer = Layer.provideMerge(

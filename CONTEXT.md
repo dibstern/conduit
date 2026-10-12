@@ -39,6 +39,36 @@ save. The daemon's project registry layer refreshes every stored folder before
 HTTP/RPC consumers start, so remote changes are reflected after restart. Identity
 discovery is best-effort and never rejects a project save or daemon startup.
 
+## Project Group
+
+A **Project Group** contains the projects sharing a grouping key under their
+effective grouping mode. The primary Project Folder alone determines the group;
+attaching another folder does not change it. The daemon stores an optional
+`groupingMode` override on each project. Unset overrides inherit the global
+`defaultGroupingMode` in persisted settings, which defaults to `repository`.
+
+`repository` keys on Repository Identity, `repository+subfolder` adds the primary
+folder's path relative to its repository root, and `off` gives the project its
+own group. A primary folder without an identity also stands alone. Repository
+groups use one repository display name; standalone projects use their title.
+Session rows add the project title only when the group has multiple projects,
+even when those titles are identical.
+
+The shared pure `computeProjectGroups` function derives group keys, labels and
+qualifier decisions for the daemon and frontend. It leaves ordering to the
+daemon. Project and global grouping edits publish a fresh project list so rows
+relabel on every client without a reload.
+
+The session list's **Scope** is one project or one Project Group. Its only state
+is the URL's `p` parameter: a plain slug selects that project, while
+`/group/<group key>` selects every project with that key. Only groups with more
+than one project get a repository choice in the chip's menu; their projects
+remain available for further narrowing. Each selection adds a browser history
+entry. `project:` search tokens select projects only. A missing group key has
+the same empty result as an unknown project slug, without widening the scope.
+Daemon search and paging select projects by the computed groups before reading
+sessions; frontend live rows use those same computed memberships.
+
 ## Session Workspace
 
 **Session Workspace** is where a session runs: Local uses the project's folders;
@@ -48,25 +78,59 @@ origin, `existing` or `conduit`. Only the
 Session Workspace service writes it, as a `session.workspace_changed` canonical
 event through the session-command seam. An empty map means the project's main
 folders; its projection keeps fallback and origin metadata when needed, otherwise
-it is NULL. Existing sessions keep that default. Branch names
-are read from git, never stored in the workspace.
+it is NULL. Existing sessions keep that default. Current branch names
+are read from git, never stored in the workspace. Conduit launch events retain
+the originally created checkout, branch and committed base as deletion
+provenance; forks inherit the workspace without that ownership. A branch rename
+validates every launch-owned checkout, renames their branches together and rolls
+back Git failures. It records updated branch ownership as a
+`session.workspace_changed` event with cause `branch-rename`, leaving workspace
+paths, move cause and pending moves unchanged. Deletion follows that latest
+owned branch name. The git pill offers Rename branch only with launch ownership
+and refreshes git status immediately after a rename.
+
+Deleting a session inspects its launch-created checkouts, including ones left
+behind after a move or folder detach. Uncommitted changes, unpushed commits,
+unmerged commits or an unknown default branch default the prompt to Keep.
+Checkouts used by another live session are always kept. Cleanup follows the
+canonical `session.deleted` event and is best-effort; it rechecks use and
+dirtiness, never force-removes a dirty checkout, and removes a Conduit-created
+branch only after successful checkout removal and a merged check. Detached
+checkouts are kept unless their commits are known to be merged into the default
+branch.
+
+Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
 
 Conduit's Worktree daemon service creates a checkout under
 `<configDir>/worktrees/<project>/<session>/<folder>` before the session exists,
-then the Session Workspace service records its launch move. It starts from the
-folder's committed HEAD on its current branch. Uncommitted changes stay in the
-original checkout. Creation or launch failure rolls back the checkout and its
-new branch. These worktrees cannot become projects or Project Folders.
+then the Session Workspace service records its launch move. By default it starts
+from the folder's committed HEAD on its current branch. A new worktree draft can
+choose a local base branch for the primary Project Folder; other git folders
+still start from their own current HEAD. Tags, remote refs and revision
+expressions cannot be bases. Invalid bases fail before any checkout, branch or
+session is created, and a base requires New worktree mode. Uncommitted changes
+stay in the original checkout. Creation or launch failure rolls back the checkout
+and its new branch. These worktrees cannot become projects or Project Folders.
+
+A multi-folder worktree session creates a worktree in every git folder on one
+branch name. Folders of one repository share a checkout and must resolve to the
+same starting commit. Non-git folders and folders attached later are used in place and
+reported as shared; detaching a folder keeps its worktree on disk.
 
 Direct user moves require the session provider's `supportsWorktree` capability.
-OpenCode refuses those moves before recording an event; Claude supports moves.
+Claude supports moves. OpenCode keeps that capability disabled: its native
+`moveSession` rejects a destination belonging to another repository. The narrower
+`supportsNewWorktree` capability permits Conduit-owned launches, recreation and
+recovery to the primary folder. OpenCode reserves the launch id through its v2
+session API and aligns its native directory before the next turn.
 
 **Effective Working Directory** is the primary Project Folder's worktree,
-otherwise the only mapped worktree, otherwise the primary project folder. The
+otherwise the primary folder for a conduit-created workspace. An existing move
+can use its only mapped worktree instead. The
 session's git pill and next provider launch use it; new terminals default to it
 and the picker can start one in any Effective Folder.
 **Effective Folders** are each Project Folder's session worktree when mapped,
-otherwise the Project Folder itself. A worktree is session state, not a project.
+otherwise the Project Folder itself. A worktree is session state, not a project. Git status is reported per git Effective Folder.
 The file tree lists every Effective Folder, each Project Folder mapped through
 the workspace, as a labelled root, primary first. Single-folder projects keep
 their existing tree without an extra root row. File list and content requests
@@ -101,6 +165,49 @@ At turn start, a missing recorded worktree with origin `existing` moves back to
 the main folder with cause `missing`, using the same pending Claude directive
 rules as a user move; a missing main folder still fails. Forks copy the parent's
 complete worktrees map and origin as a launch move before their first turn.
+Conduit-created worktrees never fall back automatically: a missing checkout is
+reported on read and requires explicit recreation or a user move to the main folder.
+
+## Setup Script
+
+A **Setup Script** prepares a New worktree session before its first agent turn.
+The daemon project setting takes precedence over the Project File. Empty or
+whitespace-only settings clear the override. Local sessions never run setup.
+Creation returns as soon as the session and worktrees exist; its first turn waits
+for setup to finish. The script runs in the Effective Working Directory through
+the user's shell with the project's shell environment. Output is merged, streamed
+and capped at 64 KiB with a truncation note. A ten-minute timeout kills its process
+group. A daemon-lifetime pipe also stops the group if the daemon dies. Failure
+and timeout leave the session usable.
+
+`session.setup_started`, `session.setup_output` and `session.setup_finished` are
+canonical session commands. They project one notice in the durable transcript.
+Interrupted setup becomes a failed notice on shutdown or the next relay startup,
+so a restart never leaves it running forever.
+
+## Project File
+
+The **Project File** is `conduit.json` in the primary Project Folder, never in a
+session's worktree. Its implementation-free Effect Schema accepts optional
+`setupScript` and `sessionMode` and ignores unknown keys. It is read afresh for every new worktree
+session. Invalid JSON or schema data skips setup with a visible notice; a daemon
+setup override still takes precedence. An absent script means no setup.
+
+## Default Session Mode
+
+The **Default Session Mode** is `local` or `worktree`. The daemon project
+override wins, then the Project File, then the daemon's global default, which
+is Local when unset. Clearing a project override restores that inheritance.
+The daemon resolver reads the primary folder's Project File afresh for each
+draft project or provider change and returns the mode and its source. Invalid
+files are ignored with a visible warning, including when a project override
+wins.
+
+New worktree is selected only when the project has a Git folder and the provider
+supports creating worktrees. Otherwise the draft starts Local and the existing
+control explains why. Explicit draft choices survive late defaults and layout
+changes. Global edits apply to the next draft. Neither defaults nor workspace
+choices are stored in browser storage.
 
 ## Workspace Hint
 

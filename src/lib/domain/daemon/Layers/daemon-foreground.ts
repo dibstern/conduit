@@ -17,7 +17,9 @@ import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+	defaultDaemonConfig,
 	loadDaemonConfig,
+	resolveConfiguredInstances,
 } from "../../../daemon/config-persistence.js";
 import type {
 	DaemonOptions,
@@ -120,8 +122,12 @@ const buildInitialRuntimeConfig = (
 		options.keepAwakeCommand ?? persisted?.keepAwakeCommand ?? undefined;
 	const keepAwakeArgs =
 		options.keepAwakeArgs ?? persisted?.keepAwakeArgs ?? undefined;
-	const claudeConfigDir =
-		options.claudeConfigDir ?? persisted?.claudeConfigDir ?? undefined;
+	const claudeConfigDir = resolveConfiguredInstances({
+		...(persisted ?? defaultDaemonConfig()),
+		...(options.claudeConfigDir !== undefined && {
+			claudeConfigDir: options.claudeConfigDir,
+		}),
+	}).find(({ id }) => id === defaultInstanceIdForDriver("claude"))?.configDir;
 
 	const tailscaleServeEnabled =
 		options.tailscaleServe ?? persisted?.tailscaleServe ?? false;

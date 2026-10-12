@@ -171,6 +171,7 @@ export interface LoadHistoryOptions {
 export interface SetSessionSettledOptions {
 	readonly settled: boolean;
 	readonly automatic?: boolean;
+	readonly mergedHead?: string;
 }
 
 /**
@@ -749,6 +750,7 @@ const makeServiceCreateSession = ({
 						return yield* createOpenCodeSession(
 							title,
 							instanceId ?? "opencode",
+							options?.sessionId,
 						).pipe(
 							Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 							Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -793,11 +795,6 @@ const makeServiceCreateSession = ({
 					});
 				}
 				if (selectedDriver === "opencode") {
-					if (options?.sessionId)
-						return yield* new SessionManagerError({
-							operation: "createSession",
-							cause: "Reserved workspace sessions require Claude",
-						});
 					const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
 					if (openCodeResult._tag === "Right") {
 						yield* bindSessionProvider(
@@ -823,11 +820,6 @@ const makeServiceCreateSession = ({
 					harnessForModelProvider(requestedProvider) === "claude") ||
 				requestedProvider === CLAUDE_SDK_PROVIDER_ID;
 			if (requestedProvider && !requestedLocalProvider) {
-				if (options?.sessionId)
-					return yield* new SessionManagerError({
-						operation: "createSession",
-						cause: "Reserved workspace sessions require Claude",
-					});
 				const openCodeResult = yield* createViaOpenCode();
 				if (openCodeResult._tag === "Right") {
 					yield* bindSessionProvider(openCodeResult.right, "opencode");
@@ -841,7 +833,6 @@ const makeServiceCreateSession = ({
 
 			const configuredProvider = yield* getConfiguredLocalSessionProvider();
 			if (
-				options?.sessionId !== undefined ||
 				configuredProvider == null ||
 				harnessForModelProvider(configuredProvider) === "claude"
 			) {
@@ -951,7 +942,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				statusPollerOption,
 				backgroundOf,
 				snapshot,
-				projectDir: config.projectDir,
+				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
+				projectSlug: config.slug,
 			});
 		const establishOpenCodeSession = (
 			session: SessionDetail,

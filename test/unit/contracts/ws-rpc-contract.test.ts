@@ -5,6 +5,10 @@ import { expect } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import {
+	PartVersion,
+	ToolCallId,
+} from "../../../src/lib/contracts/tool-wire.js";
+import {
 	AnswerQuestion,
 	CancelSession,
 	ClosePty,
@@ -24,7 +28,7 @@ import {
 	GetProjects,
 	GetSessionSkills,
 	GetSkillContent,
-	GetToolContent,
+	GetToolDetails,
 	InstanceListResponseSchema,
 	ListDaemonSessions,
 	ListPtys,
@@ -51,7 +55,6 @@ import {
 	SetDefaultModel,
 	SetDefaultPermissionMode,
 	SetLogLevel,
-	SetProjectInstance,
 	SetSessionPinned,
 	SetSessionSettled,
 	SnoozeSession,
@@ -117,8 +120,16 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 		Effect.provide(
 			WsRpcGroup.toLayer({
 				...daemonOnlyHandlers,
+				ListBranches: () => Effect.succeed({ branches: [] }),
 				ListWorktrees: () => Effect.succeed({ worktrees: [] }),
+				InspectSessionWorktrees: () =>
+					Effect.succeed({ worktrees: [], removeWorktrees: true }),
 				MoveSessionWorkspace: ({ path }) => Effect.succeed({ directory: path }),
+				RenameSessionBranch: () => Effect.succeed({ ok: true as const }),
+				RecreateSessionWorktree: () =>
+					Effect.succeed({ directory: "/worktree" }),
+				ContinueSessionInMainFolder: () =>
+					Effect.succeed({ directory: "/main" }),
 				DismissWorkspaceHint: () => Effect.succeed({ ok: true }),
 				SubscribeShell: () => Stream.empty,
 				SubscribeSessionDetail: () => Stream.empty,
@@ -233,19 +244,6 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						projects: [],
-						current: "demo",
-					}),
-				SetProjectInstance: (request) =>
-					Effect.succeed({
-						projectSlug: request.projectSlug,
-						projects: [
-							{
-								slug: request.slug,
-								title: "Demo",
-								folders: ["/tmp/demo"],
-								instanceId: request.instanceId,
-							},
-						],
 						current: "demo",
 					}),
 				StartInstance: (request) =>
@@ -416,11 +414,29 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						variant: "",
 						variants: [],
 					}),
+				SetHarnessDefault: (request) =>
+					Effect.succeed({
+						projectSlug: request.projectSlug,
+						harness: request.harness,
+						state: {
+							status: "ok" as const,
+							pick: {
+								providerId: request.providerId,
+								modelId: request.modelId,
+								effort: request.effort ?? "",
+								contextWindow: request.contextWindow,
+							},
+						},
+					}),
 				SetDefaultPermissionMode: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						mode: request.mode,
 					}),
+				SetDefaultSessionMode: (request) =>
+					Effect.succeed({ mode: request.mode }),
+				ResolveSessionMode: (_request) =>
+					Effect.succeed({ mode: "local" as const, source: "global" as const }),
 				SetHiddenEntries: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
@@ -539,11 +555,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						path: request.path,
 						content: "file contents",
 					}),
-				GetToolContent: (request) =>
+				GetToolDetails: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
-						toolId: request.toolId,
-						content: "full output",
+						tools: request.toolIds.map((toolId) => ({
+							toolId,
+							version: PartVersion.make(1),
+							settled: true,
+							output: { _tag: "whole" as const, text: "full output" },
+						})),
 					}),
 				GetSkillContent: (request) =>
 					Effect.succeed({
@@ -584,6 +604,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						sessionId: request.sessionId,
 						messageId: request.messageId,
 					}),
+				UndoRewind: (request) =>
+					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
 				"input.submit": (request) =>
 					Effect.succeed({ ok: true as const, sessionId: request.sessionId }),
 				"input.cancel": () => Effect.succeed({ ok: true as const }),
@@ -856,7 +878,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(
 			[...WsRpcGroup.requests.keys()].filter((tag) => tag === "SaveProject"),
 		).toHaveLength(1);
-		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetProjectInstance")).toBe(false);
 		expect(WsRpcGroup.requests.has("StartInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("StopInstance")).toBe(true);
 		expect(WsRpcGroup.requests.has("RemoveInstance")).toBe(true);
@@ -883,6 +905,8 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("SwitchModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultModel")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetDefaultPermissionMode")).toBe(true);
+		expect(WsRpcGroup.requests.has("SetDefaultSessionMode")).toBe(true);
+		expect(WsRpcGroup.requests.has("ResolveSessionMode")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("SetClaudeSettings")).toBe(true);
 		expect(WsRpcGroup.requests.has("ResolveClaudeSettings")).toBe(true);
@@ -894,7 +918,7 @@ describe("browser WebSocket RPC contract", () => {
 		expect(WsRpcGroup.requests.has("GetFileTree")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileList")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetFileContent")).toBe(true);
-		expect(WsRpcGroup.requests.has("GetToolContent")).toBe(true);
+		expect(WsRpcGroup.requests.has("GetToolDetails")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetSkillContent")).toBe(true);
 		expect(WsRpcGroup.requests.has("GetSessionSkills")).toBe(true);
 		expect(WsRpcGroup.requests.has("ListSessions")).toBe(false);
@@ -998,7 +1022,6 @@ describe("browser WebSocket RPC contract", () => {
 				const addedProject = yield* client.SaveProject({
 					projectSlug: "demo",
 					folders: ["/tmp/new-project"],
-					instanceId: "inst-1",
 				});
 				expect(addedProject.savedSlug).toBe("new-project");
 				expect(addedProject.projects[0]?.folders[0]).toBe("/tmp/new-project");
@@ -1021,13 +1044,6 @@ describe("browser WebSocket RPC contract", () => {
 					folders: ["/tmp/demo"],
 				});
 				expect(renamedProject.projects[0]?.title).toBe("Renamed Demo");
-
-				const reboundProject = yield* client.SetProjectInstance({
-					projectSlug: "demo",
-					slug: "demo",
-					instanceId: "inst-2",
-				});
-				expect(reboundProject.projects[0]?.instanceId).toBe("inst-2");
 
 				const startedInstance = yield* client.StartInstance({
 					projectSlug: "demo",
@@ -1260,14 +1276,21 @@ describe("browser WebSocket RPC contract", () => {
 					content: "file contents",
 				});
 
-				const toolContent = yield* client.GetToolContent({
+				const toolDetails = yield* client.GetToolDetails({
 					projectSlug: "demo",
-					toolId: "tool-1",
+					sessionId: "session-1",
+					toolIds: [ToolCallId.make("tool-1")],
 				});
-				expect(toolContent).toEqual({
+				expect(toolDetails).toEqual({
 					projectSlug: "demo",
-					toolId: "tool-1",
-					content: "full output",
+					tools: [
+						{
+							toolId: "tool-1",
+							version: 1,
+							settled: true,
+							output: { _tag: "whole", text: "full output" },
+						},
+					],
 				});
 
 				const skillContent = yield* client.GetSkillContent({
@@ -1451,13 +1474,6 @@ describe("browser WebSocket RPC contract", () => {
 				folders: ["/tmp/demo"],
 			})._tag,
 		).toBe("SaveProject");
-		expect(
-			new SetProjectInstance({
-				projectSlug: "demo",
-				slug: "demo",
-				instanceId: "inst-1",
-			})._tag,
-		).toBe("SetProjectInstance");
 		expect(
 			new StartInstance({
 				projectSlug: "demo",
@@ -1663,8 +1679,12 @@ describe("browser WebSocket RPC contract", () => {
 			new GetFileContent({ projectSlug: "demo", path: "README.md" })._tag,
 		).toBe("GetFileContent");
 		expect(
-			new GetToolContent({ projectSlug: "demo", toolId: "tool-1" })._tag,
-		).toBe("GetToolContent");
+			new GetToolDetails({
+				projectSlug: "demo",
+				sessionId: "session-1",
+				toolIds: [ToolCallId.make("tool-1")],
+			})._tag,
+		).toBe("GetToolDetails");
 		expect(new GetModels({ projectSlug: "demo" })._tag).toBe("GetModels");
 		expect(
 			new GetSkillContent({ projectSlug: "demo", name: "review" })._tag,

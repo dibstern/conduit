@@ -13,9 +13,15 @@ import {
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
+import { computeProjectGroups } from "../../../project-grouping.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import {
+	effectiveSessionFolders,
+	effectiveWorkingDirectory,
+} from "../../../session/session-workspace.js";
+import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
 	DaemonSessionCursor,
 	DaemonSessionQueryOptions,
@@ -23,6 +29,7 @@ import type {
 	SessionInfo,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
+import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
@@ -73,8 +80,8 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
-		if (gitCache.isStale(projectDirectory))
-			void gitCache.refresh(projectDirectory);
+		for (const folder of project.folders)
+			if (gitCache.isStale(folder)) void gitCache.refresh(folder);
 
 		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
@@ -113,9 +120,12 @@ const readProjectSessions = (
 			});
 		}).pipe(Effect.provide(readQueryLayer));
 		const directories = new Set(
-			sessions.map((session) =>
-				effectiveWorkingDirectory(projectDirectory, session.workspace),
-			),
+			sessions.flatMap((session) => [
+				effectiveWorkingDirectory(project.folders[0], session.workspace),
+				...effectiveSessionFolders(project.folders, session.workspace).map(
+					({ directory }) => directory,
+				),
+			]),
 		);
 		yield* Effect.tryPromise({
 			try: () =>
@@ -126,15 +136,26 @@ const readProjectSessions = (
 				),
 			catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
 		});
-		return sessions.map(
-			(session): ProjectSessionCandidate => ({
-				sortKey: { updatedAt: session.updatedAt, id: session.id },
-				session: {
-					...withCachedSessionGit(session, projectDirectory, gitCache),
-					projectSlug,
+		return yield* Effect.forEach(sessions, (session) =>
+			withSessionWorktreeStatus(
+				withCachedSessionGit(session, project.folders, gitCache),
+				{
+					projectDir: projectDirectory,
+					slug: projectSlug,
+					extraFolders: project.folders.slice(1),
 				},
-			}),
-		);
+			).pipe(
+				Effect.map(
+					(enriched): ProjectSessionCandidate => ({
+						sortKey: { updatedAt: session.updatedAt, id: session.id },
+						session: {
+							...enriched,
+							projectSlug,
+						},
+					}),
+				),
+			),
+		).pipe(Effect.provide(sqliteLayer));
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */
@@ -239,9 +260,11 @@ export const hasColdAutoSettleCandidate = (
 			readonly: true,
 			disableWAL: true,
 		}).pipe(Layer.provide(Reactivity.layer));
-		const facts = yield* readPersistedAutoSettleFacts(now).pipe(
-			Effect.provide(sqliteLayer),
-		);
+		const facts = yield* readPersistedAutoSettleFacts(
+			now,
+			undefined,
+			project.folders[0],
+		).pipe(Effect.provide(sqliteLayer));
 		return [...facts.values()].some((item) =>
 			shouldSettleIdleSession(item, now, idleWindowMs),
 		);
@@ -253,9 +276,27 @@ export const listDaemonSessions = (
 	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
 	Effect.gen(function* () {
-		const projects = (yield* allProjects).filter(
+		const registered = yield* allProjects;
+		const groupKey = getScopeGroupKey(options.scope);
+		const defaultMode =
+			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
+		const groups =
+			groupKey === null
+				? null
+				: computeProjectGroups(
+						registered.map((project) => ({
+							...project,
+							groupingMode: project.groupingMode ?? defaultMode,
+						})),
+					);
+		// Scope before querying or merging any project pages. The same pure
+		// function owns membership in the registry and in the frontend.
+		const projects = registered.filter(
 			(project) =>
-				(options.scope === undefined || project.slug === options.scope) &&
+				(options.scope === undefined ||
+					(groupKey === null
+						? project.slug === options.scope
+						: groups?.[project.slug]?.key === groupKey)) &&
 				project.slug !== options.exclude,
 		);
 		const limit =

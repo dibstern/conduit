@@ -32,8 +32,14 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--banners-row-expands | layout-sessionbar--island-with-banners":
 		"tapping the collapsed banners row opens the full header with its banners",
-	"input-newsessioncontext--multi-folder-supported | input-newsessioncontext--multi-folder-unknown":
-		"unknown worktree support is offered like supported support, so the open start menu is identical",
+	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
+		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
+
+	// Verified legitimate (conduit-test-cju0.13). On desktop both open General.
+	"overlays-settingspanel--composer | overlays-settingspanel--default":
+		"Composer's play walks every composer preference and restores the defaults so module state cannot leak into later stories; its assertions live in play(), and phone still differs because Composer opens drilled in",
+	"overlays-settingspanel--composer-light | overlays-settingspanel--default-light":
+		"the light pair of Composer and Default, identical for the same reason",
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.
@@ -81,8 +87,25 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
 	"input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--phone-open-code-cycle | input-permissionmodeselector--responsive":
 		"all three end on the phone-width OpenCode ASK badge; the cycle, normalisation and breakpoint are asserted in play()",
-	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared":
-		"a cleared goal renders no subtitle, so both end on the plain expanded bar",
+	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
+		"a cleared goal renders no subtitle and the A1 header (bn6x.10) shows no checkout, account pill or instance badge for either harness, so all five end on the plain expanded phone bar; the header stories assert those absences in play()",
+
+	// Verified legitimate (conduit-test-dc8k.1). The A1 header is the same for
+	// every harness and has no checkout, so these stories now meet in one frame.
+	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-no-checkout | layout-sessionbar--desktop-open-code-header":
+		"the A1 header shows no checkout, account pill or instance badge for either harness; each story asserts those absences in play()",
+	"layout-sessionbar--desktop-claude-header | layout-sessionbar--desktop-open-code-header":
+		"the A1 header is the same for Claude and OpenCode; each story asserts no account pill or instance badge in play()",
+
+	// Verified legitimate (conduit-test-dc8k.1). The composer checkout control
+	// looks the same at every tier; the phone tier only turns its menu into a
+	// sheet, and these stories end with the menu closed.
+	"session-gitidentity--moved-back | session-gitidentity--moved-back-phone":
+		"same closed control at both tiers; the phone story asserts the notice's img role in play()",
+	"session-gitidentity--workspace-hint | session-gitidentity--workspace-hint-phone":
+		"same closed control at both tiers; the hint asserts the same in play() at each",
+	"session-gitidentity--worktree-missing | session-gitidentity--worktree-missing-phone":
+		"same closed control at both tiers; the phone story asserts the missing-worktree label in play()",
 	"ui-microlabelbutton--cancelled-hold | ui-microlabelbutton--default | ui-microlabelbutton--hold-and-tap | ui-microlabelbutton--hold-lifecycle":
 		"hold interactions end with the menu closed and the button at rest; the hold timing is asserted in play()",
 	"ui-microlabelbutton--default-light | ui-microlabelbutton--hold-and-tap-light":

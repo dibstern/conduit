@@ -28,7 +28,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			title: "App",
 			folders: [main, docs],
 			git: { branch: "main" },
-			instanceId: provider,
 		},
 		{
 			slug: "other",
@@ -111,6 +110,11 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	rpc.setDaemonList("SubscribeInstances", instances);
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
+	const picker = page.locator(
+		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+	);
+	// The only harness is the draft's default, so the picker shows no harness segment.
+	await expect(picker).toHaveAttribute("data-instance-id", provider);
 	await expect(page.getByTestId("draft-start-chip")).toHaveText("main");
 	return rpc;
 }
@@ -159,6 +163,12 @@ for (const mode of [
 			page,
 			harness,
 		}) => {
+			await page.addInitScript(() => {
+				localStorage.setItem(
+					"conduit-composer-preferences",
+					JSON.stringify({ controls: "words" }),
+				);
+			});
 			const rpc = await openDraft(page, harness.relayBaseUrl);
 			await page.locator("#input").fill("Start in docs");
 			await press(page.getByTestId("draft-start-chip"));
@@ -167,7 +177,7 @@ for (const mode of [
 			).toHaveAttribute("aria-checked", "true");
 			await expect(
 				page.getByRole("menuitem", { name: /New worktree/ }),
-			).toHaveAttribute("aria-disabled", "true");
+			).toHaveAttribute("aria-disabled", "false");
 			await expect(
 				page.getByRole("menuitem", { name: /New branch/ }),
 			).toHaveAttribute("aria-disabled", "true");
@@ -210,6 +220,7 @@ for (const mode of [
 			);
 			expect(create.payload).toMatchObject({
 				projectSlug: "e2e-replay",
+				instanceId: "claude",
 				worktreePath: docsLinked,
 			});
 			const send = await rpc.waitForRequest(
@@ -219,7 +230,7 @@ for (const mode of [
 				sessionId: "draft-session",
 				text: "Start in docs",
 			});
-			await expect(page.getByTestId("session-bar-identity")).toContainText(
+			await expect(page.getByTestId("composer-checkout")).toContainText(
 				"feature/docs",
 			);
 		});
@@ -244,6 +255,7 @@ for (const mode of [
 			const create = await rpc.waitForRequest(
 				({ tag }) => tag === "CreateSession",
 			);
+			expect(create.payload).toMatchObject({ instanceId: "claude" });
 			expect(create.payload).not.toHaveProperty("worktreePath");
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 		});
