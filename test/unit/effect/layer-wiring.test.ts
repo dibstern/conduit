@@ -20,6 +20,7 @@ import {
 	Ref,
 } from "effect";
 import { expect, vi } from "vitest";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import {
 	type DaemonLiveOptions,
@@ -522,7 +523,7 @@ describe("makeDaemonLive wiring", () => {
 					...base,
 					configDir,
 					socketPath,
-					configPath,
+					persistedConfig: yield* loadDaemonConfigResult(configDir),
 					initialConfig: makeDaemonConfigFromOptions({
 						port: 0,
 						host: "127.0.0.1",

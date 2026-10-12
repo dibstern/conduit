@@ -13,6 +13,8 @@ export interface DaemonOptions {
 	socketPath?: string;
 	pinHash?: string;
 	tlsEnabled?: boolean;
+	/** First-run TLS preference when no config exists. Stored settings take precedence. */
+	defaultTlsEnabled?: boolean;
 	tailscaleServe?: boolean;
 	keepAwake?: boolean;
 	/** User-provided keep-awake command (overrides auto-detection). */

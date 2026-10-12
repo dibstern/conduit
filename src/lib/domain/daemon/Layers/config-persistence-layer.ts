@@ -9,7 +9,7 @@ import { Context, Data, Duration, Effect, Layer, Queue, Ref } from "effect";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import {
@@ -191,7 +191,11 @@ export const makeConfigWriterLive = (configDir: string) =>
 		write: (config: DaemonConfig) =>
 			Effect.tryPromise({
 				try: () => {
-					const persisted = loadDaemonConfig(configDir);
+					const loaded = loadDaemonConfigResult(configDir);
+					if (loaded._tag === "Left" && loaded.left._tag !== "NotFound") {
+						throw loaded.left;
+					}
+					const persisted = loaded._tag === "Right" ? loaded.right : null;
 					return saveDaemonConfig(
 						{
 							...config,

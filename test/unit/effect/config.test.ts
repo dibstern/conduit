@@ -1,20 +1,7 @@
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "@effect/vitest";
-import { Effect, Either, Schema } from "effect";
+import { describe, it } from "@effect/vitest";
+import { Either, Schema } from "effect";
 import { expect } from "vitest";
-import {
-	DaemonConfigSchema,
-	DaemonConfigTag,
-	ServerConfigLive,
-} from "../../../src/lib/daemon/config-persistence.js";
+import { DaemonConfigSchema } from "../../../src/lib/daemon/config-persistence.js";
 
 describe("DaemonConfigSchema", () => {
 	it("ignores dismissedPaths from older daemon.json files", () => {
@@ -162,79 +149,5 @@ describe("DaemonConfigSchema", () => {
 		};
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
 		expect(Either.isLeft(result)).toBe(true);
-	});
-});
-
-describe("ServerConfigLive", () => {
-	let tempDir: string;
-
-	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "config-layer-test-"));
-	});
-
-	afterEach(() => {
-		rmSync(tempDir, { recursive: true, force: true });
-	});
-
-	it.effect("creates defaults when daemon.json is missing", () =>
-		Effect.gen(function* () {
-			const config = yield* DaemonConfigTag;
-
-			expect(config.pid).toBe(process.pid);
-			expect(config.port).toBe(2633);
-			expect(config.pinHash).toBeNull();
-			expect(config.projects).toEqual([]);
-
-			// Should also have written the file
-			const written = JSON.parse(
-				readFileSync(join(tempDir, "daemon.json"), "utf-8"),
-			);
-			expect(written.port).toBe(2633);
-		}).pipe(Effect.provide(ServerConfigLive(tempDir))),
-	);
-
-	it.effect("reads and validates existing daemon.json", () => {
-		mkdirSync(tempDir, { recursive: true });
-		const saved = {
-			pid: 99,
-			port: 8080,
-			pinHash: "hash",
-			tls: true,
-			debug: false,
-			keepAwake: false,
-			projects: [{ path: "/app", slug: "app", addedAt: 1000 }],
-			instances: [{ id: "i1", name: "Instance", port: 4096, managed: true }],
-		};
-		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(saved), "utf-8");
-
-		return Effect.gen(function* () {
-			const config = yield* DaemonConfigTag;
-
-			expect(config.pid).toBe(99);
-			expect(config.port).toBe(8080);
-			expect(config.tls).toBe(true);
-			expect(config.projects).toHaveLength(1);
-			expect(config.instances).toHaveLength(1);
-		}).pipe(Effect.provide(ServerConfigLive(tempDir)));
-	});
-
-	it.effect("fails on invalid daemon.json", () => {
-		mkdirSync(tempDir, { recursive: true });
-		writeFileSync(
-			join(tempDir, "daemon.json"),
-			JSON.stringify({ pid: "wrong", port: "bad" }),
-			"utf-8",
-		);
-
-		return Effect.gen(function* () {
-			const exit = yield* Effect.exit(
-				Effect.gen(function* () {
-					yield* DaemonConfigTag;
-				}).pipe(
-					Effect.provide(ServerConfigLive(tempDir)),
-				) as Effect.Effect<void>,
-			);
-			expect(exit._tag).toBe("Failure");
-		});
 	});
 });

@@ -17,7 +17,10 @@ import {
 	Stream,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../../../contracts/provider-instance.js";
-import { migrateDaemonConfigFolders } from "../../../daemon/config-persistence.js";
+import {
+	type DaemonConfig,
+	migrateDaemonConfig,
+} from "../../../daemon/config-persistence.js";
 import {
 	closeHttpServer,
 	closeOnboardingServer,
@@ -50,10 +53,6 @@ import {
 } from "../../server/Layers/ws-routing-layer.js";
 import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
 import {
-	loadConfig,
-	PersistencePathTag,
-} from "../Services/daemon-config-persistence.js";
-import {
 	commitDaemonRuntimeConfig,
 	type DaemonConfigMirror,
 	DaemonConfigMirrorLive,
@@ -72,7 +71,6 @@ import {
 } from "../Services/daemon-pubsub.js";
 import {
 	DaemonStateTag,
-	emptyDaemonState,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
@@ -324,27 +322,6 @@ export const DaemonWiringLive: Layer.Layer<
 		);
 	}),
 );
-
-/**
- * DaemonState layer — loads config from disk, seeds Ref.
- * Requires FileSystem.FileSystem in the environment (for testability).
- * Provides PersistencePathTag internally.
- */
-export const makeDaemonStateFromDisk = (configPath: string) =>
-	Layer.effect(
-		DaemonStateTag,
-		Effect.gen(function* () {
-			const initial = yield* loadConfig;
-			return yield* Ref.make({ ...emptyDaemonState(), ...initial });
-		}),
-	).pipe(Layer.provide(Layer.succeed(PersistencePathTag, configPath)));
-
-/**
- * DaemonState layer with NodeFileSystem — convenience for production use.
- * Loads config from disk using the real filesystem.
- */
-export const makeDaemonStateFromDiskNode = (configPath: string) =>
-	makeDaemonStateFromDisk(configPath).pipe(Layer.provide(NodeFileSystem.layer));
 
 export const makeRelayCacheLayer = (): Layer.Layer<
 	RelayCacheTag,
@@ -632,9 +609,8 @@ export interface DaemonLiveOptions {
 	configDir: string;
 	socketPath: string;
 
-	// DaemonState + RelayCache (Tasks 1-4 integration)
-	/** Path to daemon.json config file. When set, loads config from disk. */
-	configPath?: string;
+	/** Already decoded startup snapshot; seeds the project and instance registries. */
+	persistedConfig?: DaemonConfig;
 }
 
 /**
@@ -660,12 +636,18 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
-		Layer.effectDiscard(
-			migrateDaemonConfigFolders(configDir).pipe(
-				Effect.andThen(migrateProjectStorage(configDir)),
-				Effect.andThen(migrateForkLineage(configDir)),
-			),
-		),
+		options.persistedConfig === undefined
+			? Layer.empty
+			: Layer.effectDiscard(
+					migrateDaemonConfig(options.persistedConfig, configDir).pipe(
+						Effect.andThen(
+							migrateProjectStorage(configDir, options.persistedConfig),
+						),
+						Effect.andThen(
+							migrateForkLineage(configDir, options.persistedConfig),
+						),
+					),
+				),
 		DaemonEventBusLive,
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
@@ -719,11 +701,13 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// grouped here. RelayFactoryLive needs DaemonConfigRefTag (from Tier 0,
 	// available via Tier 1's provideMerge passthrough).
 	//
-	// DaemonState from disk (with real FS) or empty defaults.
-	const stateLayer = (
-		options.configPath
-			? makeDaemonStateFromDiskNode(options.configPath)
-			: makeDaemonStateLive()
+	const stateLayer = makeDaemonStateLive(
+		options.persistedConfig === undefined
+			? undefined
+			: {
+					...options.persistedConfig,
+					instances: options.persistedConfig.instances ?? [],
+				},
 	).pipe(
 		Layer.tap((context) =>
 			Ref.update(Context.get(context, DaemonStateTag), (current) => {
@@ -746,7 +730,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 					configDir,
 					socketPath,
 					keepAwake: options.initialConfig.keepAwake,
-					...(options.configPath !== undefined && {
+					...(options.persistedConfig !== undefined && {
 						instances: existing
 							? current.instances.map((instance) =>
 									instance.id === defaultId ? defaultClaude : instance,
@@ -767,7 +751,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Compose registry layers explicitly to preserve type information.
 	// RelayFactoryLive has R = DaemonConfigRefTag, which is satisfied by
 	// the services tier (via provideMerge passthrough from foundation).
-	const projectRegistryLayer = options.configPath
+	const projectRegistryLayer = options.persistedConfig
 		? makeProjectRegistryFromDaemonStateLive
 		: makeProjectRegistryLive();
 	const instanceManagerOptions = {
@@ -781,7 +765,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			smartDefaultUrl: options.smartDefaultUrl,
 		}),
 	};
-	const instanceManagerLayer = options.configPath
+	const instanceManagerLayer = options.persistedConfig
 		? makeInstanceManagerStateFromDaemonStateLive(
 				undefined,
 				instanceManagerOptions,

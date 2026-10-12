@@ -14,7 +14,7 @@ import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Layer, Schema } from "effect";
-import { loadDaemonConfig } from "../../daemon/config-persistence.js";
+import type { DaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
 import { refreshSidebar, rerootSession } from "../effect/sidebar-projection.js";
 import { projectEventsDbPath } from "../project-storage.js";
@@ -42,7 +42,7 @@ const Sidecar = Schema.Record({
  * the first project would delete the remaining projects' only copy of lineage.
  * Unresolved entries are retried from the archive at startup; partial imports are idempotent.
  */
-export const migrateForkLineage = (configDir: string) =>
+export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
 	Effect.gen(function* () {
 		const source = yield* Effect.try({
 			try: () => {
@@ -86,7 +86,7 @@ export const migrateForkLineage = (configDir: string) =>
 				}
 				if (!hasSidecar && archiveText === undefined) return undefined;
 				const projects = new Map(
-					loadDaemonConfig(configDir)?.projects.map((project) => [
+					config.projects.map((project) => [
 						project.path,
 						{ slug: project.slug, folders: project.folders },
 					]),

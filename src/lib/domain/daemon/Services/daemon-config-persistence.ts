@@ -3,20 +3,10 @@
 // coalesced saves to avoid write contention under rapid state changes.
 
 import { FileSystem } from "@effect/platform";
-import { Context, Effect, Ref, Schema } from "effect";
-import { migrateLegacyDefaultOpencodeInstanceId } from "../../../contracts/provider-instance.js";
-import {
-	DaemonProjectSchema,
-	migrateProjectFolders,
-	sanitizeRestartMetadata,
-} from "../../../daemon/config-persistence.js";
-import { isRecord } from "../../../utils.js";
-import type {
-	DaemonInstanceConfig,
-	DaemonProject,
-	DaemonState,
-} from "./daemon-state.js";
-import { DaemonStateTag, emptyDaemonState } from "./daemon-state.js";
+import { Context, Effect, Ref } from "effect";
+import { migrateProjectFolders } from "../../../daemon/config-persistence.js";
+import type { DaemonState } from "./daemon-state.js";
+import { DaemonStateTag } from "./daemon-state.js";
 
 /** Path to the daemon.json config file on disk. */
 export class PersistencePathTag extends Context.Tag("PersistencePath")<
@@ -24,25 +14,8 @@ export class PersistencePathTag extends Context.Tag("PersistencePath")<
 	string
 >() {}
 
-/** Shape of daemon state on disk (JSON-safe). */
-interface DaemonConfigOnDisk {
-	pid: number;
-	port: number;
-	host: string;
-	pinHash: string | null;
-	tls: boolean;
-	tlsCertPath?: string;
-	tlsKeyPath?: string;
-	debug: boolean;
-	keepAwake: boolean;
-	keepAwakeCommand?: string;
-	keepAwakeArgs?: string[];
-	projects: DaemonProject[];
-	instances: DaemonInstanceConfig[];
-}
-
 /** Serialize persisted fields of DaemonState to a JSON-safe object. */
-function serializeState(state: DaemonState): DaemonConfigOnDisk {
+function serializeState(state: DaemonState) {
 	return {
 		pid: state.pid,
 		port: state.port,
@@ -63,111 +36,6 @@ function serializeState(state: DaemonState): DaemonConfigOnDisk {
 		instances: state.instances,
 	};
 }
-
-/** Deserialize a parsed JSON object into a DaemonState, merged with defaults. */
-function deserializeConfig(value: Record<string, unknown>): DaemonState {
-	const defaults = emptyDaemonState();
-	const raw = sanitizeRestartMetadata(value);
-	if (!isRecord(raw)) return defaults;
-
-	const state: DaemonState = {
-		...defaults,
-		// Overlay persisted fields that are present in the JSON
-		...(typeof raw["pid"] === "number" && { pid: raw["pid"] }),
-		...(typeof raw["port"] === "number" && { port: raw["port"] }),
-		...(typeof raw["host"] === "string" && { host: raw["host"] }),
-		...(raw["pinHash"] === null || typeof raw["pinHash"] === "string"
-			? { pinHash: raw["pinHash"] as string | null }
-			: {}),
-		...(typeof raw["tls"] === "boolean" && { tls: raw["tls"] }),
-		...(typeof raw["tlsCertPath"] === "string" && {
-			tlsCertPath: raw["tlsCertPath"],
-		}),
-		...(typeof raw["tlsKeyPath"] === "string" && {
-			tlsKeyPath: raw["tlsKeyPath"],
-		}),
-		...(typeof raw["debug"] === "boolean" && { debug: raw["debug"] }),
-		...(typeof raw["keepAwake"] === "boolean" && {
-			keepAwake: raw["keepAwake"],
-		}),
-		...(typeof raw["keepAwakeCommand"] === "string" && {
-			keepAwakeCommand: raw["keepAwakeCommand"],
-		}),
-		...(Array.isArray(raw["keepAwakeArgs"]) && {
-			keepAwakeArgs: raw["keepAwakeArgs"] as string[],
-		}),
-		...(Array.isArray(raw["projects"]) && {
-			// Schema strips unknown fields; the assertion accounts for exact optional properties.
-			projects: raw["projects"].map(
-				(project) =>
-					Schema.decodeUnknownSync(DaemonProjectSchema)(
-						project,
-					) as DaemonProject,
-			),
-		}),
-		...(Array.isArray(raw["instances"]) && {
-			instances: raw["instances"] as DaemonInstanceConfig[],
-		}),
-	};
-
-	// Normalize a pre-driver-model legacy default OpenCode instance id to the
-	// canonical "opencode" so the seeded instance list matches the composer rail.
-	const migrated = migrateLegacyDefaultOpencodeInstanceId(state.instances);
-	return migrated === null ? state : { ...state, instances: migrated };
-}
-
-/**
- * Load daemon config from disk into a DaemonState.
- *
- * On any error (missing file, corrupt JSON), logs a warning and returns
- * `emptyDaemonState()`. The error channel is `never` — all errors are
- * handled internally.
- */
-export const loadConfig: Effect.Effect<
-	DaemonState,
-	never,
-	FileSystem.FileSystem | PersistencePathTag
-> = Effect.gen(function* () {
-	const configPath = yield* PersistencePathTag;
-	const fs = yield* FileSystem.FileSystem;
-
-	const content = yield* fs.readFileString(configPath).pipe(
-		Effect.catchTag("SystemError", (err) =>
-			Effect.gen(function* () {
-				yield* Effect.logWarning(`Config file not accessible: ${err.message}`);
-				return null;
-			}),
-		),
-		Effect.catchTag("BadArgument", (err) =>
-			Effect.gen(function* () {
-				yield* Effect.logWarning(`Config file bad argument: ${err.message}`);
-				return null;
-			}),
-		),
-	);
-
-	if (content === null) {
-		return emptyDaemonState();
-	}
-
-	// Parse JSON
-	const parsed = yield* Effect.try(
-		() => JSON.parse(content) as Record<string, unknown>,
-	).pipe(
-		Effect.catchAll((err) =>
-			Effect.gen(function* () {
-				yield* Effect.logWarning(`Config file contains corrupt JSON: ${err}`);
-				return null;
-			}),
-		),
-	);
-
-	if (parsed === null) {
-		return emptyDaemonState();
-	}
-
-	return deserializeConfig(parsed);
-});
 
 /**
  * Atomic write helper: write to a temp file, then rename to target path.

@@ -89,6 +89,7 @@ describe("project storage migration through the daemon", () => {
 			configFile,
 			JSON.stringify({
 				...config,
+				configVersion: undefined,
 				projects: config.projects.map(({ folders, ...project }) => ({
 					...project,
 					directory: folders[0],

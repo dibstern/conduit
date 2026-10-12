@@ -182,7 +182,7 @@ describe("serve handler", () => {
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
 			port: 3000,
 			opencodeUrl: "http://localhost:5000",
-			tlsEnabled: true,
+			defaultTlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});
@@ -198,7 +198,7 @@ describe("serve handler", () => {
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
 			port: 3000,
 			opencodeUrl: "http://opencode:4096",
-			tlsEnabled: true,
+			defaultTlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});
@@ -255,23 +255,15 @@ describe("serve handler", () => {
 		expect(io.exit).toHaveBeenCalledExactlyOnceWith(0);
 	});
 
-	it("lets the daemon resolve the saved port and respects saved TLS", async () => {
+	it("leaves saved port and TLS resolution to the daemon", async () => {
 		const io = createMockIO("/test");
-		vi.mocked(loadDaemonConfig).mockReturnValueOnce({
-			pid: 0,
-			port: 3000,
-			pinHash: null,
-			tls: false,
-			debug: false,
-			keepAwake: false,
-			projects: [],
-		});
 
 		await run(["--foreground"], io);
 
+		expect(loadDaemonConfig).not.toHaveBeenCalled();
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
 			opencodeUrl: "http://localhost:4096",
-			tlsEnabled: false,
+			defaultTlsEnabled: true,
 			logLevel: "info",
 			logFormat: "pretty",
 		});

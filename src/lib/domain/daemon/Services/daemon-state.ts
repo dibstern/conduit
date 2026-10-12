@@ -7,43 +7,16 @@
 //   makeDaemonStateLive(overrides?) → Layer providing the Tag
 
 import { Context, Effect, Layer, Ref } from "effect";
-import type { ManagedOpenCodeProcessIdentity } from "../../../contracts/managed-opencode.js";
-
-import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import type { DaemonConfig } from "../../../daemon/config-persistence.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 
 /** Project entry stored in daemon config. */
-export interface DaemonProject {
-	path: string;
-	folders: readonly [string, ...string[]];
-	repositoryIdentities?: Readonly<
-		Record<string, import("../../../shared-types.js").RepositoryIdentity>
-	>;
-	slug: string;
-	title?: string;
-	addedAt: number;
-	shellEnv?: import("../../../contracts/project-shell-env.js").ProjectShellEnvConfig;
-	setupScript?: string;
-	sessionMode?: import("../../../contracts/project-file.js").SessionMode;
-	groupingMode?: import("../../../shared-types.js").GroupingMode;
-	/** Cached session count from last run — for instant CLI display. */
-	sessionCount?: number;
-}
+export type DaemonProject = DaemonConfig["projects"][number];
 
 /** Provider instance configuration persisted in daemon.json. */
-export interface DaemonInstanceConfig {
-	id: string;
-	name: string;
-	port: number;
-	managed: boolean;
-	pid?: number;
-	version?: string;
-	processIdentity?: ManagedOpenCodeProcessIdentity;
-	env?: Record<string, string>;
-	url?: string;
-	driver?: ProviderDriverKind;
-	configDir?: string;
-}
+export type DaemonInstanceConfig = NonNullable<
+	DaemonConfig["instances"]
+>[number];
 
 /**
  * Observable + persisted subset of the Daemon class fields.

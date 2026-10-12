@@ -7,6 +7,7 @@ import {
 	Data,
 	Deferred,
 	Effect,
+	Either,
 	Exit,
 	HashMap,
 	Layer,
@@ -18,7 +19,7 @@ import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveConfiguredInstances,
 } from "../../../daemon/config-persistence.js";
 import type {
@@ -114,9 +115,8 @@ const persistedSessionCounts = (config: DaemonConfig | null) =>
 
 const buildInitialRuntimeConfig = (
 	options: DaemonOptions,
-	configDir: string,
+	persisted: DaemonConfig | null,
 ) => {
-	const persisted = loadDaemonConfig(configDir);
 	const pinHash = options.pinHash ?? persisted?.pinHash ?? undefined;
 	const keepAwakeCommand =
 		options.keepAwakeCommand ?? persisted?.keepAwakeCommand ?? undefined;
@@ -136,7 +136,11 @@ const buildInitialRuntimeConfig = (
 		host: options.host ?? "127.0.0.1",
 		hostExplicit: options.host !== undefined,
 		...(pinHash != null && { pinHash }),
-		tlsEnabled: options.tlsEnabled ?? persisted?.tls ?? false,
+		tlsEnabled:
+			options.tlsEnabled ??
+			persisted?.tls ??
+			options.defaultTlsEnabled ??
+			false,
 		tailscaleServeEnabled,
 		tailscaleServeCleanupPending:
 			!tailscaleServeEnabled &&
@@ -209,7 +213,12 @@ export async function startForegroundDaemon(
 	if (options.logFormat) setLogFormat(options.logFormat);
 
 	const configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
-	const initialConfig = buildInitialRuntimeConfig(options, configDir);
+	const loaded = loadDaemonConfigResult(configDir);
+	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound") {
+		throw loaded.left;
+	}
+	const persisted = Either.getOrNull(loaded);
+	const initialConfig = buildInitialRuntimeConfig(options, persisted);
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	// Check before acquiring runtime resources or replacing a stale RPC socket.
 	await new Promise<void>((ready, fail) => {
@@ -403,7 +412,7 @@ export async function startForegroundDaemon(
 					}),
 				}
 			: {},
-		configPath: join(configDir, "daemon.json"),
+		persistedConfig: persisted ?? defaultDaemonConfig(),
 	};
 
 	// A native file lock excludes concurrent owners even across a stale RPC socket.

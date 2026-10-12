@@ -5,7 +5,7 @@ import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Cause, Data, Effect, Layer } from "effect";
-import { loadDaemonConfig } from "../../daemon/config-persistence.js";
+import type { DaemonConfig } from "../../daemon/config-persistence.js";
 import {
 	projectStorageDir,
 	readProjectStorageOwner,
@@ -37,12 +37,12 @@ const readTableCounts = Effect.gen(function* () {
 });
 
 /** Move legacy history before any project relay opens its store. */
-export const migrateProjectStorage = (configDir: string) =>
+export const migrateProjectStorage = (
+	configDir: string,
+	config: DaemonConfig,
+) =>
 	Effect.gen(function* () {
-		const projects = yield* Effect.sync(
-			() => loadDaemonConfig(configDir)?.projects ?? [],
-		);
-		for (const project of projects) {
+		for (const project of config.projects) {
 			const storageDir = projectStorageDir(configDir, project.slug);
 			const filename = join(storageDir, "events.db");
 			const legacy = resolve(project.path, ".conduit", "events.db");

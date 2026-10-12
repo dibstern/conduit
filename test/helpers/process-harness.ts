@@ -578,6 +578,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_SERVICE"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
+					| "NODE_OPTIONS"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "XPC_SERVICE_NAME"
 				>

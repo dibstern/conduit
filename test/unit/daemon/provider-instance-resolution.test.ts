@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	CURRENT_CONFIG_VERSION,
 	type DaemonConfig,
 	DaemonConfigSchema,
 	loadDaemonConfig,
@@ -317,7 +318,10 @@ describe("provider instance resolution", () => {
 		expect(config.claudeConfigDir).toBe("/explicit/claude");
 		expect(config.instances?.[0]).not.toHaveProperty("configDir");
 		await saveDaemonConfig(config, tempDir);
-		expect(loadDaemonConfig(tempDir)).toEqual(config);
+		expect(loadDaemonConfig(tempDir)).toEqual({
+			...config,
+			configVersion: CURRENT_CONFIG_VERSION,
+		});
 	});
 
 	it("resolves server URLs only for named OpenCode instances", () => {

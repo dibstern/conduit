@@ -7,28 +7,17 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { Context, Effect, Layer, Option, Schema } from "effect";
-import {
-	type UsageLimitsSetting,
-	UsageLimitsSettingSchema,
-} from "../contracts/limit-recovery.js";
-import {
-	type ManagedOpenCodeProcessIdentity,
-	ManagedOpenCodeProcessIdentitySchema,
-} from "../contracts/managed-opencode.js";
-import {
-	type SessionMode,
-	SessionModeSchema,
-} from "../contracts/project-file.js";
+import { Data, Effect, Either, Schema } from "effect";
+import { UsageLimitsSettingSchema } from "../contracts/limit-recovery.js";
+import { ManagedOpenCodeProcessIdentitySchema } from "../contracts/managed-opencode.js";
+import { SessionModeSchema } from "../contracts/project-file.js";
 
-import {
-	type ProjectShellEnvConfig,
-	ProjectShellEnvConfigSchema,
-} from "../contracts/project-shell-env.js";
+import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
 
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
+	KnownProviderDriverKindSchema,
 	migrateLegacyDefaultOpencodeInstanceId,
 	type ProviderDriverKind,
 	type ProviderInstanceId,
@@ -36,9 +25,7 @@ import {
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
-	type GroupingMode,
 	GroupingModeSchema,
-	type RepositoryIdentity,
 	RepositoryIdentitySchema,
 } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
@@ -52,81 +39,32 @@ import {
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 
-export interface DaemonConfig {
-	pid: number;
-	port: number;
-	pinHash: string | null;
-	tls: boolean;
-	tailscaleServe?: boolean;
-	/** Retry an owned root-handler removal after a transient Tailscale failure. */
-	tailscaleServeCleanupPending?: boolean;
-	debug: boolean;
-	keepAwake: boolean;
-	/** Days of inactivity before automatic settlement; null disables it. */
-	autoSettleAfterDays?: number | null;
-	/** What to do when a Claude account reaches its usage limit; absent means the defaults. */
-	usageLimits?: UsageLimitsSetting;
-	/** The project a new session prefills: the last one added or given a session. */
-	newSessionProject?: string;
-	/** User-provided keep-awake command override (e.g. "systemd-inhibit"). */
-	keepAwakeCommand?: string;
-	/** Arguments for the keep-awake command override. */
-	keepAwakeArgs?: string[];
-	/**
-	 * Claude Code config directory (CLAUDE_CONFIG_DIR) for Claude SDK
-	 * subprocesses. Applied to process.env at daemon startup; restart to change.
-	 */
-	claudeConfigDir?: string;
-	projects: Array<{
-		path: string;
-		folders: readonly [string, ...string[]];
-		repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
-		slug: string;
-		title?: string;
-		addedAt: number;
-		shellEnv?: ProjectShellEnvConfig;
-		setupScript?: string;
-		sessionMode?: SessionMode;
-		groupingMode?: GroupingMode;
-		/** Cached session count from last run — for instant CLI display. */
-		sessionCount?: number;
-	}>;
-	instances?: Array<{
-		id: string;
-		name: string;
-		port: number;
-		managed: boolean;
-		pid?: number;
-		version?: string;
-		processIdentity?: ManagedOpenCodeProcessIdentity;
-		env?: Record<string, string>;
-		url?: string;
-		driver?: ProviderDriverKind;
-		configDir?: string;
-	}>;
-}
+export const CURRENT_CONFIG_VERSION = 1;
 
 const ProjectSchema = Schema.Struct({
 	path: Schema.String,
 	folders: Schema.NonEmptyArray(Schema.String),
-	repositoryIdentities: Schema.optional(
+	repositoryIdentities: Schema.optionalWith(
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
+		{ exact: true },
 	),
 	slug: Schema.String,
-	title: Schema.optional(Schema.String),
+	title: Schema.optionalWith(Schema.String, { exact: true }),
 	addedAt: Schema.Number,
-	shellEnv: Schema.optional(ProjectShellEnvConfigSchema),
-	setupScript: Schema.optional(Schema.String),
-	sessionMode: Schema.optional(SessionModeSchema),
-	groupingMode: Schema.optional(GroupingModeSchema),
-	sessionCount: Schema.optional(Schema.Number),
+	shellEnv: Schema.optionalWith(ProjectShellEnvConfigSchema, { exact: true }),
+	setupScript: Schema.optionalWith(Schema.String, { exact: true }),
+	sessionMode: Schema.optionalWith(SessionModeSchema, { exact: true }),
+	groupingMode: Schema.optionalWith(GroupingModeSchema, { exact: true }),
+	sessionCount: Schema.optionalWith(Schema.Number, { exact: true }),
 });
 
 /** A project as any daemon version wrote it; older ones have no `folders`, only `directory` or `path`. */
 const PersistedProjectSchema = Schema.Struct({
 	...ProjectSchema.fields,
-	directory: Schema.optional(Schema.String),
-	folders: Schema.optional(Schema.NonEmptyArray(Schema.String)),
+	directory: Schema.optionalWith(Schema.String, { exact: true }),
+	folders: Schema.optionalWith(Schema.NonEmptyArray(Schema.String), {
+		exact: true,
+	}),
 });
 export type PersistedProject = Omit<
 	DaemonConfig["projects"][number],
@@ -168,42 +106,73 @@ export const migrateProjectFolders = <
 	};
 };
 
-const DaemonInstanceSchema = Schema.Struct({
-	id: Schema.String,
-	name: Schema.String,
-	port: Schema.Number,
-	managed: Schema.Boolean,
-	pid: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
-	version: Schema.optional(Schema.String),
-	processIdentity: Schema.optional(ManagedOpenCodeProcessIdentitySchema),
-	env: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.String }),
-	),
-	url: Schema.optional(Schema.String),
-	driver: Schema.optional(Schema.String),
-	configDir: Schema.optional(Schema.String),
-});
+const DaemonInstanceSchema = Schema.mutable(
+	Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		port: Schema.Number,
+		managed: Schema.Boolean,
+		pid: Schema.optionalWith(
+			Schema.Number.pipe(Schema.int(), Schema.positive()),
+			{ exact: true },
+		),
+		version: Schema.optionalWith(Schema.String, { exact: true }),
+		processIdentity: Schema.optionalWith(ManagedOpenCodeProcessIdentitySchema, {
+			exact: true,
+		}),
+		env: Schema.optionalWith(
+			Schema.mutable(
+				Schema.Record({ key: Schema.String, value: Schema.String }),
+			),
+			{ exact: true },
+		),
+		url: Schema.optionalWith(Schema.String, { exact: true }),
+		driver: Schema.optionalWith(KnownProviderDriverKindSchema, { exact: true }),
+		configDir: Schema.optionalWith(Schema.String, { exact: true }),
+	}),
+);
 
-export const DaemonConfigSchema = Schema.Struct({
-	pid: Schema.Number,
-	port: Schema.Number,
-	pinHash: Schema.NullOr(Schema.String),
-	tls: Schema.Boolean,
-	tailscaleServe: Schema.optional(Schema.Boolean),
-	tailscaleServeCleanupPending: Schema.optional(Schema.Boolean),
-	debug: Schema.Boolean,
-	keepAwake: Schema.Boolean,
-	autoSettleAfterDays: Schema.optional(
-		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
-	),
-	usageLimits: Schema.optional(UsageLimitsSettingSchema),
-	keepAwakeCommand: Schema.optional(Schema.String),
-	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
-	claudeConfigDir: Schema.optional(Schema.String),
-	newSessionProject: Schema.optional(Schema.String),
-	projects: Schema.Array(DaemonProjectSchema),
-	instances: Schema.optional(Schema.Array(DaemonInstanceSchema)),
-});
+export const DaemonConfigSchema = Schema.mutable(
+	Schema.Struct({
+		// Missing versions are legacy; never decode a newer version and discard its fields.
+		configVersion: Schema.optionalWith(
+			Schema.Number.pipe(
+				Schema.int(),
+				Schema.between(0, CURRENT_CONFIG_VERSION),
+			),
+			{ exact: true },
+		),
+		pid: Schema.Number,
+		port: Schema.Number,
+		pinHash: Schema.NullOr(Schema.String),
+		tls: Schema.Boolean,
+		tailscaleServe: Schema.optionalWith(Schema.Boolean, { exact: true }),
+		tailscaleServeCleanupPending: Schema.optionalWith(Schema.Boolean, {
+			exact: true,
+		}),
+		debug: Schema.Boolean,
+		keepAwake: Schema.Boolean,
+		autoSettleAfterDays: Schema.optionalWith(
+			Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
+			{ exact: true },
+		),
+		usageLimits: Schema.optionalWith(UsageLimitsSettingSchema, { exact: true }),
+		keepAwakeCommand: Schema.optionalWith(Schema.String, { exact: true }),
+		keepAwakeArgs: Schema.optionalWith(
+			Schema.mutable(Schema.Array(Schema.String)),
+			{ exact: true },
+		),
+		claudeConfigDir: Schema.optionalWith(Schema.String, { exact: true }),
+		newSessionProject: Schema.optionalWith(Schema.String, { exact: true }),
+		projects: Schema.mutable(Schema.Array(DaemonProjectSchema)),
+		instances: Schema.optionalWith(
+			Schema.mutable(Schema.Array(DaemonInstanceSchema)),
+			{ exact: true },
+		),
+	}),
+);
+
+export type DaemonConfig = Schema.Schema.Type<typeof DaemonConfigSchema>;
 
 // Process recovery is disposable. A damaged recovery field must not invalidate
 // authentication, project registration, or any other daemon setting.
@@ -262,11 +231,6 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 		}),
 	};
 };
-
-export class DaemonConfigTag extends Context.Tag("DaemonConfig")<
-	DaemonConfigTag,
-	DaemonConfig
->() {}
 
 export interface ResolvedProviderInstance {
 	id: ProviderInstanceId;
@@ -405,6 +369,7 @@ function normalizeDefaultClaudeConfig(config: DaemonConfig): DaemonConfig {
 /** Default config for first-startup when no daemon.json exists. */
 export function defaultDaemonConfig(): DaemonConfig {
 	return {
+		configVersion: CURRENT_CONFIG_VERSION,
 		pid: process.pid,
 		port: 2633,
 		pinHash: null,
@@ -415,50 +380,6 @@ export function defaultDaemonConfig(): DaemonConfig {
 		projects: [],
 	};
 }
-
-/**
- * Layer that reads daemon.json (or creates defaults on first startup),
- * validates through DaemonConfigSchema, and provides the result via
- * DaemonConfigTag. Write-path functions remain imperative.
- */
-export const ServerConfigLive = (configDir?: string) =>
-	Layer.effect(
-		DaemonConfigTag,
-		Effect.gen(function* () {
-			const dir = configDir ?? DEFAULT_CONFIG_DIR;
-			const raw = yield* Effect.try(() =>
-				readFileSync(join(dir, "daemon.json"), "utf-8"),
-			).pipe(Effect.option);
-			if (Option.isNone(raw)) {
-				const defaults = defaultDaemonConfig();
-				yield* Effect.try(() => {
-					mkdirSync(dir, { recursive: true });
-					writeFileSync(
-						join(dir, "daemon.json"),
-						JSON.stringify(defaults, null, 2),
-						"utf-8",
-					);
-				});
-				return defaults;
-			}
-			const json = yield* Effect.try(() => JSON.parse(raw.value));
-			// Cast: Schema.optional produces `T | undefined` but
-			// DaemonConfig uses exact optional properties (key absent, never
-			// undefined). The schema guarantees structural correctness.
-			const decoded = yield* Schema.decodeUnknown(DaemonConfigSchema)(
-				sanitizeRestartMetadata(json),
-			);
-			return {
-				...normalizeDefaultClaudeConfig(
-					migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
-				),
-				autoSettleAfterDays:
-					decoded.autoSettleAfterDays === undefined
-						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
-						: decoded.autoSettleAfterDays,
-			};
-		}),
-	);
 
 function resolveDir(configDir?: string): string {
 	return configDir ?? DEFAULT_CONFIG_DIR;
@@ -506,26 +427,71 @@ export function migrateLegacyInstanceIds(config: DaemonConfig): DaemonConfig {
 	return migrated === null ? config : { ...config, instances: migrated };
 }
 
-/** Read and parse daemon.json. Returns null if missing or corrupt. */
-export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
-	try {
-		const dir = resolveDir(configDir);
-		const data = readFileSync(join(dir, "daemon.json"), "utf-8");
-		const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(
-			sanitizeRestartMetadata(JSON.parse(data)),
-		);
-		return {
-			...normalizeDefaultClaudeConfig(
-				migrateLegacyInstanceIds(decoded as unknown as DaemonConfig),
-			),
-			autoSettleAfterDays:
-				decoded.autoSettleAfterDays === undefined
-					? DEFAULT_AUTO_SETTLE_AFTER_DAYS
-					: decoded.autoSettleAfterDays,
-		};
-	} catch {
-		return null;
+export class DaemonConfigNotFound extends Data.TaggedError("NotFound")<{
+	readonly path: string;
+	readonly cause: unknown;
+}> {
+	override get message(): string {
+		return `Daemon config not found at ${this.path}: ${String(this.cause)}`;
 	}
+}
+
+export class DaemonConfigUnreadable extends Data.TaggedError("Unreadable")<{
+	readonly path: string;
+	readonly cause: unknown;
+}> {
+	override get message(): string {
+		return `Unreadable daemon config at ${this.path}: ${String(this.cause)}`;
+	}
+}
+
+export class DaemonConfigInvalid extends Data.TaggedError("Invalid")<{
+	readonly path: string;
+	readonly cause: unknown;
+}> {
+	override get message(): string {
+		return `Invalid daemon config at ${this.path}: ${String(this.cause)}`;
+	}
+}
+
+export type DaemonConfigLoadError =
+	| DaemonConfigNotFound
+	| DaemonConfigUnreadable
+	| DaemonConfigInvalid;
+
+/** Read once and distinguish first startup from a file that must be preserved. */
+export function loadDaemonConfigResult(
+	configDir?: string,
+): Either.Either<DaemonConfig, DaemonConfigLoadError> {
+	const path = join(resolveDir(configDir), "daemon.json");
+	const data = Either.try({
+		try: () => readFileSync(path, "utf-8"),
+		catch: (cause) =>
+			cause instanceof Error && "code" in cause && cause.code === "ENOENT"
+				? new DaemonConfigNotFound({ path, cause })
+				: new DaemonConfigUnreadable({ path, cause }),
+	});
+	if (Either.isLeft(data)) return Either.left(data.left);
+	return Either.try({
+		try: () => {
+			const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(
+				sanitizeRestartMetadata(JSON.parse(data.right)),
+			);
+			return {
+				...normalizeDefaultClaudeConfig(migrateLegacyInstanceIds(decoded)),
+				autoSettleAfterDays:
+					decoded.autoSettleAfterDays === undefined
+						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
+						: decoded.autoSettleAfterDays,
+			};
+		},
+		catch: (cause) => new DaemonConfigInvalid({ path, cause }),
+	});
+}
+
+/** Compatibility for callers moved to typed loading in the next ticket. */
+export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
+	return Either.getOrNull(loadDaemonConfigResult(configDir));
 }
 
 /** Atomic write: write to a unique tmp file then rename to daemon.json. */
@@ -541,7 +507,11 @@ export async function saveDaemonConfig(
 	const projects = normalized.projects.map(migrateProjectFolders);
 	await writeFile(
 		tmpPath,
-		JSON.stringify({ ...normalized, projects }, null, 2),
+		JSON.stringify(
+			{ ...normalized, configVersion: CURRENT_CONFIG_VERSION, projects },
+			null,
+			2,
+		),
 		{
 			encoding: "utf-8",
 			mode: 0o600,
@@ -551,34 +521,15 @@ export async function saveDaemonConfig(
 	await rename(tmpPath, finalPath);
 }
 
-/** Rewrite daemon.json once at startup when a project still has the pre-folders shape (`directory`, no `folders`). */
-export const migrateDaemonConfigFolders = (configDir?: string) =>
+/** Persist decode migrations once, using the same snapshot that seeds startup. */
+export const migrateDaemonConfig = (config: DaemonConfig, configDir: string) =>
 	Effect.gen(function* () {
-		const raw = yield* Effect.try(
-			() =>
-				JSON.parse(
-					readFileSync(join(resolveDir(configDir), "daemon.json"), "utf-8"),
-				) as unknown,
-		).pipe(Effect.orElseSucceed(() => undefined));
-		const legacy =
-			isRecord(raw) &&
-			Array.isArray(raw["projects"]) &&
-			raw["projects"].some(
-				(project) =>
-					isRecord(project) &&
-					(!("folders" in project) || "directory" in project),
-			);
-		const config = legacy ? loadDaemonConfig(configDir) : null;
-		if (!config) return;
-		yield* Effect.promise(() => saveDaemonConfig(config, configDir));
-		yield* Effect.logInfo("Migrated project config to folders", {
-			projects: config.projects.map((project) => project.slug),
+		if (config.configVersion === CURRENT_CONFIG_VERSION) return;
+		yield* Effect.tryPromise(() => saveDaemonConfig(config, configDir));
+		yield* Effect.logInfo("Migrated daemon config", {
+			configVersion: CURRENT_CONFIG_VERSION,
 		});
-	}).pipe(
-		Effect.catchAllCause((cause) =>
-			Effect.logWarning("Project config migration failed", { cause }),
-		),
-	);
+	});
 
 /** Remove daemon.json and relay.sock. Ignores ENOENT. */
 export function clearDaemonConfig(configDir?: string): void {

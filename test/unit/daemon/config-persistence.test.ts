@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
 import {
+	CURRENT_CONFIG_VERSION,
 	clearDaemonConfig,
 	type DaemonConfig,
 	getConfigDir,
@@ -27,6 +28,7 @@ let tempDir: string;
 
 function makeSampleConfig(overrides?: Partial<DaemonConfig>): DaemonConfig {
 	return {
+		configVersion: CURRENT_CONFIG_VERSION,
 		pid: 12345,
 		port: 2633,
 		pinHash: null,

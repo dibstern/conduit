@@ -12,12 +12,26 @@ import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, Layer } from "effect";
+import { Effect, Either, Layer } from "effect";
 import { expect, it, vi } from "vitest";
+import {
+	defaultDaemonConfig,
+	loadDaemonConfigResult,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { migrateForkLineage } from "../../../src/lib/persistence/migrations/fork-lineage-import.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
+
+const migrateWithConfig = (dir: string) =>
+	Effect.gen(function* () {
+		const loaded = loadDaemonConfigResult(dir);
+		const config = yield* Either.isLeft(loaded) &&
+		loaded.left._tag === "NotFound"
+			? Effect.succeed(defaultDaemonConfig())
+			: loaded;
+		return yield* migrateForkLineage(dir, config);
+	});
 
 function makePersistenceEffectLayer(filename: string) {
 	const sqlite = SqliteNode.layer({ filename }).pipe(
@@ -68,7 +82,7 @@ it.each([
 			unlink(path);
 		});
 		syncBuiltinESMExports();
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		const expected =
 			scenario === "delete"
 				? ["remove archive", "sync directory", "remove source"]
@@ -112,7 +126,7 @@ it("repairs an archived boundary whose event is present but timestamp is missing
 				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES ('boundary', 'parent', 'assistant', 200, 200)`;
 			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 		);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -151,7 +165,7 @@ it("an interrupted archive write leaves no partial archive and can be retried", 
 			});
 		syncBuiltinESMExports();
 		try {
-			await Effect.runPromise(migrateForkLineage(dir));
+			await Effect.runPromise(migrateWithConfig(dir));
 		} finally {
 			interrupted.mockRestore();
 			syncBuiltinESMExports();
@@ -159,7 +173,7 @@ it("an interrupted archive write leaves no partial archive and can be retried", 
 		expect(existsSync(archive)).toBe(false);
 		expect(fs.readdirSync(dir)).toEqual(["fork-metadata.json"]);
 		expect(readFileSync(sidecar, "utf8")).toBe(contents);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(readFileSync(archive, "utf8")).toBe(contents);
 		expect(existsSync(sidecar)).toBe(false);
 	} finally {
@@ -184,7 +198,7 @@ it("refuses to overwrite a different archive appearing before publication", asyn
 			});
 		syncBuiltinESMExports();
 		try {
-			await Effect.runPromise(migrateForkLineage(dir));
+			await Effect.runPromise(migrateWithConfig(dir));
 		} finally {
 			concurrentWrite.mockRestore();
 			syncBuiltinESMExports();
@@ -209,7 +223,7 @@ it("retains both sources when they contain conflicting lineage for the same sess
 	try {
 		writeFileSync(sidecar, contents);
 		writeFileSync(archive, other);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(readFileSync(archive, "utf8")).toBe(other);
 		expect(readFileSync(sidecar, "utf8")).toBe(contents);
 	} finally {
@@ -263,7 +277,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 				),
 			);
 		}
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		for (const [i] of projects.entries()) {
 			await Effect.runPromise(
 				Effect.gen(function* () {
@@ -292,7 +306,7 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			);
 		}
 		expect(existsSync(sidecar)).toBe(false);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -318,7 +332,7 @@ for (const kind of [
 		try {
 			if (kind === "unreadable") mkdirSync(path);
 			else if (kind !== "missing") writeFileSync(path, contents);
-			await Effect.runPromise(migrateForkLineage(dir));
+			await Effect.runPromise(migrateWithConfig(dir));
 			expect(existsSync(path)).toBe(kind !== "missing");
 			if (kind !== "missing" && kind !== "unreadable")
 				expect(readFileSync(path, "utf8")).toBe(contents);
@@ -361,7 +375,7 @@ it("retrying an incomplete import does not advance an already imported session",
 				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('parent', 'claude', 1, 1), ('child', 'claude', 1, 1)`;
 			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 		);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		const snapshot = () =>
 			Effect.runPromise(
 				Effect.gen(function* () {
@@ -370,7 +384,7 @@ it("retrying an incomplete import does not advance an already imported session",
 				}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 			);
 		const first = await snapshot();
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(await snapshot()).toEqual(first);
 		expect(existsSync(join(dir, "fork-metadata.json"))).toBe(true);
 	} finally {
@@ -384,7 +398,7 @@ it("retires unmatched lineage to a startup archive instead of keeping the active
 	const contents = { gone: { parentID: "parent", forkMessageId: "message" } };
 	try {
 		writeFileSync(path, JSON.stringify(contents));
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(existsSync(path)).toBe(false);
 		expect(
 			JSON.parse(
@@ -411,7 +425,7 @@ it("retries archived lineage when an unavailable project returns and merges live
 			sidecar,
 			JSON.stringify({ child: { parentID: "parent", forkMessageId: "point" } }),
 		);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(existsSync(sidecar)).toBe(false);
 		writeFileSync(
 			sidecar,
@@ -426,7 +440,7 @@ it("retries archived lineage when an unavailable project returns and merges live
 				yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at) VALUES ('point', 'parent', 'assistant', 'answer', 100, 100)`;
 			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 		);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(existsSync(sidecar)).toBe(false);
 		expect(JSON.parse(readFileSync(archive, "utf8"))).toEqual({
 			later: { parentID: "parent", forkMessageId: "point" },
@@ -447,7 +461,7 @@ it("retries archived lineage when an unavailable project returns and merges live
 				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('later', 'opencode', 1, 1)`;
 			}).pipe(Effect.provide(makePersistenceEffectLayer(filename))),
 		);
-		await Effect.runPromise(migrateForkLineage(dir));
+		await Effect.runPromise(migrateWithConfig(dir));
 		expect(existsSync(archive)).toBe(false);
 		await Effect.runPromise(
 			Effect.gen(function* () {

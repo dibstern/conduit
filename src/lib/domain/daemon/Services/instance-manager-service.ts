@@ -19,12 +19,14 @@ import {
 	Option,
 	Ref,
 	Schedule,
+	Schema,
 	Scope,
 } from "effect";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
 	defaultInstanceIdForDriver,
 	isKnownDriverKind,
+	KnownProviderDriverKindSchema,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import {
@@ -319,7 +321,9 @@ export const addInstance = (input: AddInstanceInput) =>
 	Effect.gen(function* () {
 		const ref = yield* InstanceManagerStateTag;
 		const fiberMap = yield* PollerFibersTag;
-		const driver = input.driver ?? "opencode";
+		const driver = yield* Schema.decodeUnknown(KnownProviderDriverKindSchema)(
+			input.driver ?? "opencode",
+		);
 
 		const inputExternalUrl = input.url;
 		if (driver === "opencode" && inputExternalUrl !== undefined) {
@@ -525,6 +529,9 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 	const state = yield* Ref.get(ref);
 	const configs: DaemonInstanceConfig[] = [];
 	for (const inst of HashMap.values(state.instances)) {
+		const driver = yield* Schema.decodeUnknown(KnownProviderDriverKindSchema)(
+			inst.driver ?? "opencode",
+		);
 		const externalUrl = HashMap.get(state.externalUrls, inst.id);
 		const privateRecord = HashMap.get(
 			state.managedProcesses ?? HashMap.empty(),
@@ -549,7 +556,7 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 						...(inst.version !== undefined ? { version: inst.version } : {}),
 					}
 				: {}),
-			driver: inst.driver ?? "opencode",
+			driver,
 			...((record?.env ?? inst.env) !== undefined
 				? { env: record?.env ?? inst.env }
 				: {}),
@@ -1347,6 +1354,11 @@ export const updateInstance = (
 ) =>
 	Effect.gen(function* () {
 		const stateRef = yield* InstanceManagerStateTag;
+		if (updates.driver !== undefined) {
+			yield* Schema.decodeUnknown(KnownProviderDriverKindSchema)(
+				updates.driver,
+			);
+		}
 		const isDefaultClaude = instanceId === defaultInstanceIdForDriver("claude");
 		if (
 			isDefaultClaude &&
