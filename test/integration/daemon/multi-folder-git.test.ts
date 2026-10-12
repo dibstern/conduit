@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { Schema } from "effect";
@@ -25,6 +25,7 @@ import {
 // detached HEAD is lost; labels change to worktree names; restart loses mapping.
 // A non-git primary hides a sole git extra; detaching a mapped folder freezes
 // the legacy checkout fields even though the provider still uses that worktree.
+// A deleted settled folder keeps its record and is read on every restart.
 const git = (directory: string, ...args: string[]) =>
 	execFileSync("git", ["-C", directory, ...args], {
 		encoding: "utf8",
@@ -504,5 +505,21 @@ describe("Multi-folder git through the built daemon", () => {
 			},
 			{ timeout: 20_000 },
 		);
-	}, 60_000);
+
+		await fixture.shutdown();
+		rmSync(worktree, { recursive: true, force: true });
+		await fixture.restart();
+		await vi.waitFor(
+			() => expect(readGitState().published).not.toContain(worktree),
+			{ timeout: 20_000 },
+		);
+		expect(readGitState().published).toEqual(
+			expect.arrayContaining([fixture.projectDir, secondary, scratch]),
+		);
+		await fixture.shutdown();
+		await fixture.restart();
+		await list();
+		expect(readGitState().published).not.toContain(worktree);
+		evidence["afterWorktreeDeleted"] = readGitState().published;
+	}, 90_000);
 });
