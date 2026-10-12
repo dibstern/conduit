@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import type { ProjectSetupState } from "../../../src/lib/contracts/project-setup.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
+import { detailRowsOf } from "../../helpers/detail-rows.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -17,24 +18,21 @@ const sessionId = "setup-session";
 const controls = new WeakMap<Page, RpcMockControl>();
 const storedScript = "printf 'Preparing workspace\\n'\npnpm install";
 
-function setupRow(setup: ProjectSetupState, output = "") {
-	return {
-		_tag: "transcriptMessage",
-		message: {
-			id: "session-setup",
-			role: "assistant",
-			time: { created: 1 },
-			parts: [
-				{
-					id: "session-setup-part",
-					type: "setup",
-					text: output,
-					setup,
-					time: { start: 1 },
-				},
-			],
-		},
-	};
+function setupRows(setup: ProjectSetupState, output = "") {
+	return detailRowsOf({
+		id: "session-setup",
+		role: "assistant",
+		time: { created: 1 },
+		parts: [
+			{
+				id: "session-setup-part",
+				type: "setup",
+				text: output,
+				setup,
+				time: { start: 1 },
+			},
+		],
+	});
 }
 
 async function openSession(
@@ -84,7 +82,7 @@ async function openSession(
 		],
 		responses: new Map(),
 	});
-	rpc.setDetailRows(sessionId, setup ? [setupRow(setup)] : []);
+	rpc.setDetailRows(sessionId, setup ? setupRows(setup) : []);
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/s/${sessionId}`);
 	await rpc.waitForRequest(
@@ -154,14 +152,14 @@ test("setup streams in one block before a turn and survives reload", async ({
 	await expect(block).toHaveAttribute("data-setup-status", "running");
 	await expect(block).toContainText("Setup script running");
 	rpc.setDetailRows(sessionId, [
-		setupRow(
+		...setupRows(
 			{ source: "daemon", status: "running" },
 			"Installing dependencies…\n",
 		),
 	]);
 	await expect(block).toContainText("Installing dependencies…");
 	rpc.setDetailRows(sessionId, [
-		setupRow(
+		...setupRows(
 			{ source: "daemon", status: "succeeded", exitCode: 0 },
 			"Installing dependencies…\nWorkspace ready\n",
 		),
@@ -202,7 +200,7 @@ for (const outcome of [
 		const { label, output, ...setup } = outcome;
 		const rpc = await openSession(page, harness.relayBaseUrl);
 		rpc.setDetailRows(sessionId, [
-			setupRow({ source: "file", ...setup }, output),
+			...setupRows({ source: "file", ...setup }, output),
 		]);
 		const block = page.getByTestId("session-setup-block");
 		await expect(block).toHaveAttribute("data-setup-status", outcome.status);

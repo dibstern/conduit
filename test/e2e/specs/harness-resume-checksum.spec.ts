@@ -533,10 +533,10 @@ test("a resume is checked against the server, and the server wins", async ({
 	// reloaded. The folder becomes a repository on main; then a restart with
 	// nothing changed; then a switch to a new branch with an untracked file.
 	const branch = page.locator(
-		'[data-testid="session-bar-identity"] [data-part="branch"]',
+		'[data-testid="composer-checkout"] [data-part="branch"]',
 	);
 	const dirty = page.locator(
-		'[data-testid="session-bar-identity"] [data-part="dirty"]',
+		'[data-testid="composer-checkout"] [data-part="dirty"]',
 	);
 	const gitInit = await restartWith(
 		"git-init",

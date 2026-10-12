@@ -346,17 +346,17 @@ export const makeMessageProjector = (): EffectProjector => ({
 				// Like other daemon notices, this uses the transcript's existing
 				// part storage. Typed metadata distinguishes it from agent text.
 				yield* sql`INSERT INTO message_parts
-					(id, message_id, type, text, metadata, sort_order, created_at, updated_at)
+					(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
 					VALUES (${`${messageId}-part`}, ${messageId}, 'text', '',
 						${encodeJson({ setup: { source: event.data.source, status: "running" } })},
-						0, ${event.createdAt}, ${event.createdAt})
+						0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
 				return [messageId];
 			}
 			if (isEventType(event, "session.setup_output")) {
 				const messageId = `setup-${event.sessionId}`;
 				yield* sql`UPDATE message_parts SET text = text || ${event.data.output},
-					updated_at = ${event.createdAt} WHERE id = ${`${messageId}-part`}`;
+					updated_at = ${event.createdAt}, version = ${ctx.version} WHERE id = ${`${messageId}-part`}`;
 				return ids(
 					yield* sql<{ id: string }>`UPDATE messages
 					SET updated_at = ${event.createdAt} WHERE id = ${messageId} RETURNING id`,
@@ -368,7 +368,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 					metadata = json_set(metadata, '$.setup.status', ${event.data.status},
 						'$.setup.exitCode', ${event.data.exitCode ?? null},
 						'$.setup.message', ${event.data.message ?? null}),
-					updated_at = ${event.createdAt} WHERE id = ${`${messageId}-part`}`;
+					updated_at = ${event.createdAt}, version = ${ctx.version} WHERE id = ${`${messageId}-part`}`;
 				return ids(
 					yield* sql<{ id: string }>`UPDATE messages
 					SET updated_at = ${event.createdAt}, completed_at = ${event.createdAt}
