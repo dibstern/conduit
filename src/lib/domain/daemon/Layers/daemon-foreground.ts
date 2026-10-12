@@ -148,6 +148,9 @@ const buildInitialRuntimeConfig = (
 			persisted?.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: persisted.autoSettleAfterDays,
+		...(persisted?.worktreeCleanup !== undefined && {
+			worktreeCleanup: persisted.worktreeCleanup,
+		}),
 		...(persisted?.usageLimits !== undefined && {
 			usageLimits: persisted.usageLimits,
 		}),

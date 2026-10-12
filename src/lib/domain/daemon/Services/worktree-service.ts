@@ -3,6 +3,7 @@ import type { SessionWorktreeOwnership } from "../../../contracts/session-worksp
 import type {
 	WorkspaceMissing,
 	WorktreeBranchRenameError,
+	WorktreeCleanup,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
@@ -32,6 +33,10 @@ export type WorktreeSetupUpdate =
 	| WorktreeSetupResult;
 
 export interface WorktreeService {
+	/** Serialize cleanup with terminal creation, including from other project relays. */
+	readonly withCheckoutUse: <A, E, R>(
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E, R>;
 	/** Validate all owned checkouts before renaming; restore refs on a Git failure. */
 	readonly renameBranch: (
 		ownership: readonly SessionWorktreeOwnership[],
@@ -62,6 +67,23 @@ export interface WorktreeService {
 		owned: SessionWorktreeOwnership,
 		inUse?: Effect.Effect<boolean, WorktreeRecoveryError, R>,
 	) => Effect.Effect<void, WorktreeRecoveryError, R>;
+	/** Inspect checkout ownership and local files without changing its refs. */
+	readonly inspectCheckoutCleanup: (
+		folder: WorktreeFolder,
+		owned: SessionWorktreeOwnership,
+		keepWhen: WorktreeCleanup["keepWhen"],
+	) => Effect.Effect<
+		{ readonly head?: string; readonly keepReason?: string },
+		WorktreeRecoveryError
+	>;
+	/** Remove only the checkout. A returned reason means it was kept. Never delete its branch. */
+	readonly removeCheckout: <E, R>(
+		folder: WorktreeFolder,
+		owned: SessionWorktreeOwnership,
+		keepWhen: WorktreeCleanup["keepWhen"],
+		head: string,
+		changed: Effect.Effect<boolean, E, R>,
+	) => Effect.Effect<string | undefined, WorktreeRecoveryError | E, R>;
 	/** Read Git's registration, including prunable entries, without changing refs; fall back to the recorded branch only when Git has none. */
 	readonly inspectMissing: (
 		folder: WorktreeFolder,

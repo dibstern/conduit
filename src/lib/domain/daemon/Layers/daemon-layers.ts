@@ -96,6 +96,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
+import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import {
 	ConfigPersistenceLive,
@@ -136,6 +137,7 @@ import {
 	VersionCheckerLive,
 	VersionCheckerTag,
 } from "./version-checker-layer.js";
+import { WorktreeCleanupLive } from "./worktree-cleanup-layer.js";
 import { makeWorktreeLive } from "./worktree-layer.js";
 
 /** Shutdown signal — Deferred that completes when SIGTERM/SIGINT received. */
@@ -712,6 +714,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const auxiliaryServices = Layer.mergeAll(
 		versionCheckLayer,
 		portScannerLayer,
+		WorktreeCleanupQueueLive,
 	).pipe(Layer.provideMerge(services));
 
 	// State containers and factories. ProjectRegistryLive and
@@ -874,6 +877,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
 		AutoSettleLive(configDir),
+		WorktreeCleanupLive(configDir),
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		ServerBuildUpdateLive,

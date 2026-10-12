@@ -29,6 +29,7 @@ import { it as effectIt } from "@effect/vitest";
 import {
 	Context,
 	Effect,
+	Fiber,
 	Layer,
 	Queue,
 	Schedule,
@@ -151,6 +152,19 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 			switchAgent: () => Effect.die("The sweep never switches agents"),
 		}),
 		Effect.provide(AlertsLive),
+	);
+};
+
+const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
+	const permit = Effect.unsafeMakeSemaphore(1);
+	return effect.pipe(
+		Effect.provideService(SessionInboxTag, {
+			withSession: (_sessionId, admission) => permit.withPermits(1)(admission),
+			start: Effect.void,
+			submit: () => Effect.die("This fixture only dispatches continuations"),
+			cancel: () => Effect.die("This fixture only dispatches continuations"),
+			sendNow: () => Effect.die("This fixture only dispatches continuations"),
+		}),
 	);
 };
 
@@ -297,7 +311,9 @@ const withResetInbox = <A, E, R>(
 		fixture: Effect.Effect.Success<typeof resetInboxFixture>,
 	) => Effect.Effect<A, E, R>,
 ) =>
-	Effect.flatMap(resetInboxFixture, use).pipe(
+	Effect.flatMap(resetInboxFixture, (fixture) =>
+		use(fixture).pipe(Effect.provideService(SessionInboxTag, fixture.inbox)),
+	).pipe(
 		Effect.provideService(ConfigTag, config),
 		Effect.provideService(Usage, {
 			readings: Stream.empty,
@@ -320,6 +336,54 @@ const withResetInbox = <A, E, R>(
 			),
 		),
 	);
+
+// A continuation must wait for cleanup/admission's inbox permit before it
+// resolves a launch directory, then retain that permit until handoff commits.
+it("a due continuation waits for the session admission lock before dispatch", async () => {
+	await Effect.runPromise(
+		withResetInbox(
+			() => usageReading("claude", { status: "available" }),
+			(fixture) =>
+				Effect.gen(function* () {
+					yield* fixture.commit([
+						canonicalEvent("message.created", "s1", {
+							sessionId: "s1",
+							messageId: "u1",
+							role: "user",
+						}),
+						canonicalEvent("session.usage_limited", "s1", {
+							instanceId: "claude",
+							rateLimitType: "seven_day",
+							cutOffMessageId: "u1",
+							resetsAt: 5,
+						}),
+						canonicalEvent("session.resume_scheduled", "s1", {
+							instanceId: "claude",
+							at: 10,
+						}),
+					]);
+					const dispatch = yield* fixture.inbox.withSession(
+						"s1",
+						Effect.gen(function* () {
+							const fiber = yield* Effect.forkScoped(fixture.sweep);
+							yield* fixture.read.listSessionInfos().pipe(
+								Effect.repeat({
+									until: (sessions) =>
+										sessions[0]?.limitRecovery?.continued === true,
+									schedule: Schedule.spaced("5 millis"),
+								}),
+								Effect.timeout("3 seconds"),
+							);
+							expect(fixture.dispatches).toEqual([]);
+							return fiber;
+						}),
+					);
+					yield* Fiber.join(dispatch);
+					expect(fixture.dispatches).toEqual(["resume"]);
+				}),
+		).pipe(Effect.scoped),
+	);
+});
 
 for (const admission of ["user", "quota-reset"] as const) {
 	effectIt.scoped(
@@ -779,6 +843,7 @@ for (const scenario of [
 					interruptTurn: () => Effect.void,
 				}),
 				withSwitchServices,
+				withContinuationAdmission,
 				Effect.provide(makeOverridesStateLive()),
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
@@ -1091,6 +1156,7 @@ for (const scenario of [
 						interruptTurn: () => Effect.void,
 					}),
 					withSwitchServices,
+					withContinuationAdmission,
 					Effect.provide(makeOverridesStateLive()),
 					Effect.provide(
 						makePersistenceEffectLayer(":memory:", "test-project"),
@@ -1156,6 +1222,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 				interruptTurn: () => Effect.void,
 			}),
 			withSwitchServices,
+			withContinuationAdmission,
 			Effect.provide(makeOverridesStateLive()),
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),

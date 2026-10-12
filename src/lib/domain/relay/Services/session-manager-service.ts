@@ -1223,9 +1223,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
 			setSessionSettled: (sessionId, options) =>
-				triageLock.withPermits(1)(
-					withSessionCommandServices(setSessionSettled(sessionId, options)),
-				),
+				triageLock
+					.withPermits(1)(
+						withSessionCommandServices(setSessionSettled(sessionId, options)),
+					)
+					.pipe(
+						Effect.tap((changed) =>
+							changed && options.settled
+								? (config.requestWorktreeCleanup?.() ?? Effect.void)
+								: Effect.void,
+						),
+					),
 			setSessionAutoSettleDisabled: (sessionId, disabled) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(

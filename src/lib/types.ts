@@ -210,6 +210,8 @@ export interface ProjectRelayConfig {
 	resolveSessionProject?: (sessionId: string) => Promise<string | null>;
 	/** Notify browsers on other project relays that the daemon list changed. */
 	broadcastSessionListChanged?: () => Promise<void>;
+	/** Request the daemon's serialized worktree sweep after a session settles. */
+	requestWorktreeCleanup?: () => import("effect").Effect.Effect<void>;
 	/** Notify the daemon's other live relays; standalone relays use a no-op. */
 	publishGlobalSetting: (
 		tag: import("./contracts/ws-rpc.js").GlobalSettingTag,

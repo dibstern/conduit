@@ -34,6 +34,11 @@ import {
 	type ProviderInstanceId,
 	ProviderInstanceIdSchema,
 } from "../contracts/provider-instance.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	type WorktreeCleanup,
+	WorktreeCleanupSchema,
+} from "../contracts/worktree.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
 	type GroupingMode,
@@ -64,6 +69,7 @@ export interface DaemonConfig {
 	keepAwake: boolean;
 	/** Days of inactivity before automatic settlement; null disables it. */
 	autoSettleAfterDays?: number | null;
+	worktreeCleanup?: WorktreeCleanup;
 	/** What to do when a Claude account reaches its usage limit; absent means the defaults. */
 	usageLimits?: UsageLimitsSetting;
 	/** The project a new session prefills: the last one added or given a session. */
@@ -196,6 +202,9 @@ export const DaemonConfigSchema = Schema.Struct({
 	autoSettleAfterDays: Schema.optional(
 		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
 	),
+	worktreeCleanup: Schema.optionalWith(WorktreeCleanupSchema, {
+		default: () => DEFAULT_WORKTREE_CLEANUP,
+	}),
 	usageLimits: Schema.optional(UsageLimitsSettingSchema),
 	keepAwakeCommand: Schema.optional(Schema.String),
 	keepAwakeArgs: Schema.optional(Schema.Array(Schema.String)),
@@ -412,6 +421,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 	};
 }

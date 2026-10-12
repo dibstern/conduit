@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	clearDaemonConfig,
 	type DaemonConfig,
@@ -213,7 +214,10 @@ describe("saveDaemonConfig", () => {
 		await saveDaemonConfig(config, tempDir);
 		const loaded = loadDaemonConfig(tempDir);
 
-		expect(loaded).toEqual(config);
+		expect(loaded).toEqual({
+			...config,
+			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
+		});
 	});
 
 	it("loads legacy projects without folders, using directory or path as the main folder", async () => {

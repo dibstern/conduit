@@ -1,7 +1,7 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { lstat, mkdir, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import {
 	basename,
 	dirname,
@@ -118,6 +118,7 @@ export const makeWorktreeLive = (
 	Layer.effect(
 		WorktreeServiceTag,
 		Effect.sync(() => {
+			const checkoutUse = Effect.unsafeMakeSemaphore(1);
 			const runSetup: WorktreeService["runSetup"] = (cwd, script, env) =>
 				Stream.asyncPush<WorktreeSetupUpdate>((emit) =>
 					Effect.acquireRelease(
@@ -1054,6 +1055,132 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						`start\nverify ${main.ref} ${main.head}\ndelete refs/heads/${owned.branchName} ${tip}\nprepare\ncommit\n`,
 					);
 				}).pipe(Effect.mapError(recoveryError));
+			const inspectCheckoutCleanup: WorktreeService["inspectCheckoutCleanup"] =
+				(folder, owned, keepWhen) =>
+					Effect.gen(function* () {
+						const stat = yield* pathStat(owned.path);
+						if (!stat) return { keepReason: "Checkout is missing" };
+						if (stat.isSymbolicLink())
+							return { keepReason: "Checkout is a symlink" };
+						if (
+							!stat.isDirectory() ||
+							!(yield* pathStat(join(owned.path, ".git")))?.isFile()
+						)
+							return { keepReason: "Not a linked worktree" };
+						const state = yield* readOwned(folder, owned).pipe(
+							Effect.catchIf(
+								(error) => error.reason === "not-owned",
+								() => Effect.succeed(undefined),
+							),
+						);
+						if (!state)
+							return { keepReason: "Not the recorded Conduit-owned checkout" };
+						if (state.missing) return { keepReason: "Checkout is missing" };
+						if (
+							(yield* git(owned.path, ["branch", "--show-current"])) !==
+							owned.branchName
+						)
+							return {
+								keepReason: "Branch differs from the recorded owned branch",
+							};
+						const index = yield* git(owned.path, ["ls-files", "-v", "-z"]);
+						if (index.split("\0").some((entry) => /^[Sa-z] /.test(entry)))
+							return {
+								keepReason: "Has files Git is told to ignore changes in",
+							};
+						const nestedRepository = yield* filesystem(owned.path, async () => {
+							const directories = [owned.path];
+							while (directories.length > 0) {
+								const directory = directories.pop();
+								if (directory === undefined) break;
+								for (const entry of await readdir(directory, {
+									withFileTypes: true,
+								})) {
+									if (entry.name === ".git") {
+										if (directory !== owned.path) return true;
+										continue;
+									}
+									// Do not traverse symlinks or dependency trees.
+									if (entry.isDirectory() && entry.name !== "node_modules")
+										directories.push(join(directory, entry.name));
+								}
+							}
+							return false;
+						});
+						if (nestedRepository)
+							return { keepReason: "Contains a nested Git repository" };
+						const status = yield* git(owned.path, [
+							"status",
+							"--porcelain=v1",
+							"-z",
+							"--ignore-submodules=none",
+							keepWhen === "tracked-changes"
+								? "--untracked-files=no"
+								: "--untracked-files=all",
+						]);
+						const records = status.split("\0").filter(Boolean);
+						let count = 0;
+						for (let i = 0; i < records.length; i++) {
+							count++;
+							if (/^[RC]|^.[RC]/.test(records[i] ?? "")) i++;
+						}
+						if (count > 0)
+							return {
+								keepReason: `Has uncommitted changes (${count} ${count === 1 ? "file" : "files"})`,
+							};
+						if (keepWhen === "any-local-files") {
+							const ignored = yield* git(owned.path, [
+								"ls-files",
+								"--others",
+								"--ignored",
+								"--exclude-standard",
+								"--directory",
+								"-z",
+							]);
+							const file = ignored
+								.split("\0")
+								.find(
+									(entry) =>
+										entry !== "" && !/(^|\/)node_modules\/$/.test(entry),
+								);
+							if (file !== undefined)
+								return { keepReason: `Has ignored files (${file})` };
+						}
+						return {
+							head: yield* git(owned.path, ["rev-parse", "--verify", "HEAD"]),
+						};
+					}).pipe(Effect.mapError(recoveryError));
+			const removeCheckout: WorktreeService["removeCheckout"] = (
+				folder,
+				owned,
+				keepWhen,
+				head,
+				changed,
+			) =>
+				Effect.gen(function* () {
+					const latest = yield* inspectCheckoutCleanup(folder, owned, keepWhen);
+					if (latest.keepReason) return latest.keepReason;
+					if (latest.head !== head || (yield* changed))
+						return "Changed during check";
+					if (keepWhen === "tracked-changes")
+						yield* git(owned.path, ["clean", "-ffdx"]);
+					// Pin untracked protection even if the repository disables it in Git config.
+					yield* git(owned.folder, [
+						"-c",
+						"status.showUntrackedFiles=normal",
+						"worktree",
+						"remove",
+						"--",
+						owned.path,
+					]);
+					return undefined;
+				}).pipe(
+					Effect.mapError((error) =>
+						error instanceof WorktreeCreationError
+							? recoveryError(error)
+							: error,
+					),
+				);
 			const rollback: WorktreeService["rollback"] = (created) =>
 				Effect.validateAll([...created.ownership].reverse(), (owned) =>
 					Effect.gen(function* () {
@@ -1419,8 +1546,11 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 					);
 				});
 			return {
+				withCheckoutUse: checkoutUse.withPermits(1),
 				renameBranch,
 				runSetup,
+				inspectCheckoutCleanup,
+				removeCheckout,
 				create,
 				rollback,
 				inspectMissing,

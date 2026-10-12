@@ -15,6 +15,8 @@ import {
 } from "../shared-types.js";
 import {
 	WorktreeBranchRenameError,
+	WorktreeCleanupReportSchema,
+	WorktreeCleanupSchema,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "./worktree.js";
@@ -1240,6 +1242,37 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 			),
 			configDir: Schema.optional(Schema.String),
 		},
+	},
+) {}
+
+const WorktreeCleanupSettingResponseSchema = Schema.Struct({
+	worktreeCleanup: WorktreeCleanupSchema,
+});
+
+export class GetWorktreeCleanupSetting extends Schema.TaggedRequest<GetWorktreeCleanupSetting>()(
+	"GetWorktreeCleanupSetting",
+	{
+		failure: WsRpcError,
+		success: WorktreeCleanupSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetWorktreeCleanupSetting extends Schema.TaggedRequest<SetWorktreeCleanupSetting>()(
+	"SetWorktreeCleanupSetting",
+	{
+		failure: WsRpcError,
+		success: WorktreeCleanupSettingResponseSchema,
+		payload: { worktreeCleanup: WorktreeCleanupSchema },
+	},
+) {}
+
+export class CleanUpWorktreesNow extends Schema.TaggedRequest<CleanUpWorktreesNow>()(
+	"CleanUpWorktreesNow",
+	{
+		failure: WsRpcError,
+		success: WorktreeCleanupReportSchema,
+		payload: { projectSlug: Schema.optional(NonEmptyString) },
 	},
 ) {}
 
@@ -2471,6 +2504,9 @@ export const WsRpcRequest = Schema.Union(
 	UpdateInstance,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetWorktreeCleanupSetting,
+	SetWorktreeCleanupSetting,
+	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
 	ScanNow,
@@ -2907,6 +2943,9 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(UpdateInstance),
 	Rpc.fromTaggedRequest(GetAutoSettleSetting),
 	Rpc.fromTaggedRequest(SetAutoSettleSetting),
+	Rpc.fromTaggedRequest(GetWorktreeCleanupSetting),
+	Rpc.fromTaggedRequest(SetWorktreeCleanupSetting),
+	Rpc.fromTaggedRequest(CleanUpWorktreesNow),
 	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
 	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
 	Rpc.fromTaggedRequest(ScanNow),

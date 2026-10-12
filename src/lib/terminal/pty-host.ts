@@ -312,9 +312,12 @@ export async function runPtyHost(options: {
 								requestId: message.requestId,
 								terminals: [...terminals.values()]
 									.filter(
-										(terminal) => terminal.projectDir === resolve(message.cwd),
+										(terminal) =>
+											message.allProjects ||
+											terminal.projectDir === resolve(message.cwd),
 									)
 									.map(({ pty, exitCode }) => ({ pty, exitCode })),
+								...(message.allProjects ? { allProjects: true } : {}),
 							});
 							break;
 						case "attach": {

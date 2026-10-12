@@ -81,6 +81,7 @@ export const PtyHostRequestSchema = Schema.Union(
 		type: Schema.Literal("list"),
 		requestId,
 		cwd: Schema.String,
+		allProjects: Schema.optional(Schema.Boolean),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("attach"),
@@ -122,6 +123,7 @@ export const PtyHostMessageSchema = Schema.Union(
 		type: Schema.Literal("list"),
 		requestId,
 		terminals: Schema.Array(terminal),
+		allProjects: Schema.optional(Schema.Boolean),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("attached"),

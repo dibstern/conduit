@@ -288,6 +288,9 @@ export function createProjectRelayLayers({
 											current.autoSettleAfterDays === undefined
 												? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 												: current.autoSettleAfterDays,
+										...(current.worktreeCleanup !== undefined && {
+											worktreeCleanup: current.worktreeCleanup,
+										}),
 										...(current.usageLimits !== undefined && {
 											usageLimits: current.usageLimits,
 										}),
@@ -585,6 +588,9 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(openCodeInstancesLayer, configLayer, loggerLayer),
 		),
 	);
+	const localPtyServiceLayer = LocalPtyServiceLive.pipe(
+		Layer.provide(Layer.merge(configLayer, loggerLayer)),
+	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -593,9 +599,7 @@ export function createProjectRelayLayers({
 				loggerLayer,
 				configLayer,
 				ptyRuntimeLayer,
-				LocalPtyServiceLive.pipe(
-					Layer.provide(Layer.merge(configLayer, loggerLayer)),
-				),
+				localPtyServiceLayer,
 			),
 		),
 	);
@@ -627,6 +631,7 @@ export function createProjectRelayLayers({
 		DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
+		localPtyServiceLayer,
 		pendingInteractionServiceLayer,
 		toolContentServiceLayer,
 		webSocketHandlerLayer,

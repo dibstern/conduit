@@ -8,6 +8,7 @@ import {
 	PartVersion,
 	ToolCallId,
 } from "../../../src/lib/contracts/tool-wire.js";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	AnswerQuestion,
 	CancelSession,
@@ -501,6 +502,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
 				SetAutoSettleSetting: (request) =>
 					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
+				GetWorktreeCleanupSetting: () =>
+					Effect.succeed({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP }),
+				SetWorktreeCleanupSetting: (request) =>
+					Effect.succeed({ worktreeCleanup: request.worktreeCleanup }),
+				CleanUpWorktreesNow: () =>
+					Effect.succeed({ removed: [], kept: [], failed: [] }),
 				GetUsageLimitsSetting: () =>
 					Effect.succeed({
 						usageLimits: {

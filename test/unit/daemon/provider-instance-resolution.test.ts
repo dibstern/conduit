@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	type DaemonConfig,
 	DaemonConfigSchema,
@@ -70,6 +71,7 @@ describe("provider instance resolution", () => {
 
 		const migrated = {
 			...oldConfig,
+			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 			projects: [
 				{
 					path: "/src/project",
@@ -134,7 +136,10 @@ describe("provider instance resolution", () => {
 		};
 		const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(config);
 
-		expect(decoded).toEqual(config);
+		expect(decoded).toEqual({
+			...config,
+			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
+		});
 		expect(resolveConfiguredInstances(config)).toEqual([
 			{
 				id: "claude",

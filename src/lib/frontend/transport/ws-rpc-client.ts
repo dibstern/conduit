@@ -5,6 +5,10 @@ import type { SessionMode } from "../../contracts/project-file.js";
 import { ProviderInstanceIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
+import type {
+	WorktreeCleanup,
+	WorktreeCleanupReport,
+} from "../../contracts/worktree.js";
 import {
 	type GetSessionSkillsResponse,
 	type GetSkillContentResponse,
@@ -1495,6 +1499,36 @@ export async function getAutoSettleSettingRpc(): Promise<number | null> {
 		callControl(undefined, (client) => client.GetAutoSettleSetting({})),
 	);
 	return result.autoSettleAfterDays;
+}
+
+export async function getWorktreeCleanupSettingRpc(): Promise<WorktreeCleanup> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) => client.GetWorktreeCleanupSetting({})),
+	);
+	return result.worktreeCleanup;
+}
+
+export async function setWorktreeCleanupSettingRpc(
+	worktreeCleanup: WorktreeCleanup,
+): Promise<WorktreeCleanup> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) =>
+			client.SetWorktreeCleanupSetting({ worktreeCleanup }),
+		),
+	);
+	return result.worktreeCleanup;
+}
+
+export async function cleanUpWorktreesNowRpc(
+	projectSlug?: string,
+): Promise<WorktreeCleanupReport> {
+	return runTransportEffect(
+		callControl(undefined, (client) =>
+			client.CleanUpWorktreesNow({
+				...(projectSlug !== undefined && { projectSlug }),
+			}),
+		),
+	);
 }
 
 export async function setAutoSettleSettingRpc(

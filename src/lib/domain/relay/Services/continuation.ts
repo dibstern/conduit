@@ -41,6 +41,7 @@ import {
 } from "./provider-turn-service.js";
 import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { applySessionCommand } from "./session-command.js";
+import { SessionInboxTag } from "./session-inbox.js";
 import {
 	getAgent,
 	getContextWindow,
@@ -517,18 +518,28 @@ export const makeContinuation = Effect.gen(function* () {
 							const agent = yield* getAgent(sessionId);
 							const variant = yield* getVariant(sessionId);
 							const contextWindow = yield* getContextWindow(sessionId);
-							yield* turns.sendTurn({
-								clientId: "continuation",
-								commandId: randomUUID(),
+							// The inbox constructs this service's scheduling context before
+							// it exists. Actual resumes run in the completed relay context.
+							const inbox = yield* Effect.serviceOption(SessionInboxTag);
+							if (inbox._tag === "None")
+								return yield* Effect.dieMessage(
+									"Continuation admission requires the session inbox",
+								);
+							yield* inbox.value.withSession(
 								sessionId,
-								text: "",
-								continuation: { cutOffMessageId: continued.cutOffMessageId },
-								modelUserSelected: yield* isModelUserSelected(sessionId),
-								...(model ? { model } : {}),
-								...(agent ? { agent } : {}),
-								...(variant ? { variant } : {}),
-								...(contextWindow ? { contextWindow } : {}),
-							});
+								turns.sendTurn({
+									clientId: "continuation",
+									commandId: randomUUID(),
+									sessionId,
+									text: "",
+									continuation: { cutOffMessageId: continued.cutOffMessageId },
+									modelUserSelected: yield* isModelUserSelected(sessionId),
+									...(model ? { model } : {}),
+									...(agent ? { agent } : {}),
+									...(variant ? { variant } : {}),
+									...(contextWindow ? { contextWindow } : {}),
+								}),
+							);
 						}).pipe(Effect.scoped),
 					),
 				() => Effect.sync(() => requesting.delete(sessionId)),

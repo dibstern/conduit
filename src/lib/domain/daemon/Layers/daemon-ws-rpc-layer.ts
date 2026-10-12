@@ -715,6 +715,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetWorktreeCleanupSetting: (request) =>
+				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
+			SetWorktreeCleanupSetting: (request) =>
+				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
+			CleanUpWorktreesNow: (request) =>
+				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
 			GetDefaultGroupingMode: (_request) =>
 				run(
 					Effect.sync(() => ({
