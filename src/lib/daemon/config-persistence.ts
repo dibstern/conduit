@@ -435,11 +435,6 @@ export function loadDaemonConfigResult(
 	});
 }
 
-/** Compatibility for callers moved to typed loading in the next ticket. */
-export function loadDaemonConfig(configDir?: string): DaemonConfig | null {
-	return Either.getOrNull(loadDaemonConfigResult(configDir));
-}
-
 /** Atomic write: write to a unique tmp file then rename to daemon.json. */
 export async function saveDaemonConfig(
 	config: DaemonConfig,

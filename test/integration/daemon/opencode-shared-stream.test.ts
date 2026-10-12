@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetInstances,
@@ -8,7 +9,7 @@ import {
 	StartInstance,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -264,9 +265,10 @@ describe("daemon shared OpenCode global stream", () => {
 			new StartInstance({ instanceId: namedInstance.id }),
 		);
 		const connectionsAfterStart = fixture.opencodeStreamConnections().length;
-		const replacement = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === namedInstance.id,
-		);
+		const replacement = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === namedInstance.id);
 		expect(replacement?.port).toBeGreaterThan(0);
 		if (!replacement) throw new Error("Replacement OpenCode instance missing");
 		const a = await fixture.connect();
@@ -293,9 +295,10 @@ describe("daemon shared OpenCode global stream", () => {
 					.filter(({ action }) => action === "open"),
 			).toHaveLength(2);
 		});
-		evidence["endpoints"] = loadDaemonConfig(fixture.configDir)?.instances?.map(
-			({ id, port, pid }) => ({ id, port, pid }),
-		);
+		evidence["endpoints"] = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.map(({ id, port, pid }) => ({ id, port, pid }));
 		evidence["endpointChange"] = {
 			instanceId: defaultId,
 			from: defaultInstance.port,

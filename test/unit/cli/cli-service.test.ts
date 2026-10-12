@@ -2,10 +2,13 @@
 // foreground flags, pinned node paths, shell/XML/systemd expansion, missing
 // executables, stale service arguments, existing daemons/listeners, failed service-manager or
 // filesystem operations, stopped/missing services, and removing a unit before
-// its process has stopped. Every effect below uses an in-memory runner.
+// its process has stopped. Invalid/unreadable config must retain its tagged
+// error and prevent config or unit writes; only a missing config may default.
+// Every effect below uses an in-memory runner.
 
 import * as childProcess from "node:child_process";
 import { dirname } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseArgs, run } from "../../../src/bin/cli-core.js";
 import * as service from "../../../src/bin/cli-service.js";
@@ -18,6 +21,11 @@ import {
 	type ServiceOptions,
 	type ServiceRunner,
 } from "../../../src/bin/cli-service.js";
+import {
+	DaemonConfigInvalid,
+	DaemonConfigNotFound,
+	DaemonConfigUnreadable,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { getVersion } from "../../../src/lib/version.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -63,7 +71,12 @@ function options(platform: NodeJS.Platform): ServiceOptions {
 function fakeRunner(platform: NodeJS.Platform) {
 	const files = new Map<string, string>([[cliEntry, "installed CLI"]]);
 	const events: string[] = [];
-	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = null;
+	let storedConfig: ReturnType<ServiceRunner["loadConfig"]> = Either.left(
+		new DaemonConfigNotFound({
+			path: `${configDir}/daemon.json`,
+			cause: "ENOENT",
+		}),
+	);
 	const runner = {
 		exec: vi.fn<ServiceRunner["exec"]>(async (command, args) => {
 			events.push(`${command} ${args.join(" ")}`);
@@ -90,7 +103,7 @@ function fakeRunner(platform: NodeJS.Platform) {
 		}),
 		loadConfig: vi.fn<ServiceRunner["loadConfig"]>(() => storedConfig),
 		saveConfig: vi.fn<ServiceRunner["saveConfig"]>(async (config, dir) => {
-			storedConfig = config;
+			storedConfig = Either.right(config);
 			events.push(`save config ${dir}`);
 			files.set(`${dir}/daemon.json`, JSON.stringify(config));
 		}),
@@ -321,6 +334,24 @@ describe.each([
 	"darwin",
 	"linux",
 ] as const)("service commands on %s", (platform) => {
+	it.each([
+		DaemonConfigInvalid,
+		DaemonConfigUnreadable,
+	])("refuses %s config before writing settings or installing a unit", async (ErrorType) => {
+		const { runner, files, config } = fakeRunner(platform);
+		const path = `${config.paths.configDir}/daemon.json`;
+		const content = "{ damaged config";
+		files.set(path, content);
+		const error = new ErrorType({ path, cause: "fixture config failure" });
+		runner.loadConfig.mockReturnValue(Either.left(error));
+		await expect(runServiceCommand("install", config, runner)).rejects.toBe(
+			error,
+		);
+		expect(runner.saveConfig).not.toHaveBeenCalled();
+		expect(runner.writeFile).not.toHaveBeenCalled();
+		expect(files.get(path)).toBe(content);
+	});
+
 	it("installs only after conflict checks and directory creation", async () => {
 		const { runner, events, files, config } = fakeRunner(platform);
 		const output = await runServiceCommand("install", config, runner);

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Either, Layer, Ref } from "effect";
 import {
 	GetAutoSettleSetting,
 	GetUsageLimitsSetting,
@@ -14,7 +14,7 @@ import {
 import {
 	type DaemonConfig,
 	defaultDaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
@@ -82,7 +82,12 @@ describe("settings RPC config persistence", () => {
 				.pipe(Effect.provide(context));
 			expect((yield* Ref.get(configRef)).usageLimits).toEqual(usageLimits);
 			expect(writes).toHaveLength(1);
-			expect(loadDaemonConfig(configDir)?.usageLimits).toEqual(usageLimits);
+			expect(
+				Either.getOrThrowWith(
+					loadDaemonConfigResult(configDir),
+					(error) => error,
+				)?.usageLimits,
+			).toEqual(usageLimits);
 			yield* settingsHandlers
 				.SetAutoSettleSetting(
 					new SetAutoSettleSetting({
@@ -92,12 +97,22 @@ describe("settings RPC config persistence", () => {
 				.pipe(Effect.provide(context));
 			expect((yield* Ref.get(configRef)).autoSettleAfterDays).toBeNull();
 			expect(writes).toHaveLength(2);
-			expect(loadDaemonConfig(configDir)?.autoSettleAfterDays).toBeNull();
+			expect(
+				Either.getOrThrowWith(
+					loadDaemonConfigResult(configDir),
+					(error) => error,
+				)?.autoSettleAfterDays,
+			).toBeNull();
 
 			const persistence = Context.get(context, ConfigPersistenceTag);
 			yield* persistence.requestSave;
 			yield* persistence.flush;
-			expect(loadDaemonConfig(configDir)).toMatchObject({
+			expect(
+				Either.getOrThrowWith(
+					loadDaemonConfigResult(configDir),
+					(error) => error,
+				),
+			).toMatchObject({
 				usageLimits,
 				autoSettleAfterDays: null,
 			});

@@ -220,7 +220,10 @@ describe("Claude runner adoption", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{ workspaceRoot: fixture.workspaceRoot },
+						{
+							workspaceRoot: fixture.workspaceRoot,
+							daemonConfigDir: config.root,
+						},
 						(output) =>
 							Effect.sync(() => {
 								emitted.push(output);
@@ -279,7 +282,10 @@ describe("Claude runner adoption", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{ workspaceRoot: fixture.workspaceRoot },
+						{
+							workspaceRoot: fixture.workspaceRoot,
+							daemonConfigDir: config.root,
+						},
 						() => Effect.succeed({}),
 					);
 					yield* runner.recoverEffect;
@@ -313,7 +319,10 @@ describe("Claude runner adoption", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{ workspaceRoot: fixture.workspaceRoot },
+						{
+							workspaceRoot: fixture.workspaceRoot,
+							daemonConfigDir: config.root,
+						},
 						() => Effect.succeed({}),
 					);
 					return yield* Effect.either(runner.recoverEffect);
@@ -348,7 +357,10 @@ describe("Claude runner adoption", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{ workspaceRoot: fixture.workspaceRoot },
+						{
+							workspaceRoot: fixture.workspaceRoot,
+							daemonConfigDir: config.root,
+						},
 						() => Effect.succeed({}),
 					);
 					const recovery = yield* Effect.fork(runner.recoverEffect);
@@ -386,7 +398,10 @@ describe("Claude runner adoption", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{ workspaceRoot: fixture.workspaceRoot },
+						{
+							workspaceRoot: fixture.workspaceRoot,
+							daemonConfigDir: config.root,
+						},
 						() => Effect.succeed({}),
 					);
 					yield* runner.recoverEffect;

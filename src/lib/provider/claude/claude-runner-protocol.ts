@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { Effect, Schema } from "effect";
+import { Effect, Either, Schema } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
 import { isRecord } from "../../utils.js";
@@ -159,7 +159,12 @@ export function normalizeClaudeLaunchInput<
 >(
 	input: T,
 	defaultFolder: () => ClaudeLaunchConfig = () =>
-		resolveClaudeLaunchConfig(loadDaemonConfig()),
+		resolveClaudeLaunchConfig(
+			Either.getOrElse(loadDaemonConfigResult(), (error) => {
+				if (error._tag === "NotFound") return null;
+				throw error;
+			}),
+		),
 ): Omit<T, "configDir" | "folderSource"> & ClaudeLaunchConfig {
 	const { configDir: folder, folderSource: source, ...payload } = input;
 	const launch =
@@ -310,7 +315,12 @@ export class ClaudeRunnerSocket {
 		onClose: (failure: ClaudeSessionFailure) => void,
 		private readonly beforeCommandFailure?: () => Effect.Effect<void>,
 		private readonly defaultClaudeFolder: () => ClaudeLaunchConfig = () =>
-			resolveClaudeLaunchConfig(loadDaemonConfig()),
+			resolveClaudeLaunchConfig(
+				Either.getOrElse(loadDaemonConfigResult(), (error) => {
+					if (error._tag === "NotFound") return null;
+					throw error;
+				}),
+			),
 	) {
 		const lines = createInterface({ input: socket, crlfDelay: Infinity });
 		lines.on("line", (line) => {

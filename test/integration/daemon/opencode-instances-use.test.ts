@@ -2,13 +2,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AddInstance,
 	GetInstances,
 	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -89,9 +90,10 @@ describe("OpenCode Instances use", () => {
 			throw new Error("Expected two OpenCode instances");
 		// Session A uses the first OpenCode instance; session B selects the other.
 		const pidOf = (id: string) => {
-			const pid = loadDaemonConfig(fixture.configDir)?.instances?.find(
-				(instance) => instance.id === id,
-			)?.pid;
+			const pid = Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			)?.instances?.find((instance) => instance.id === id)?.pid;
 			if (!pid) throw new Error(`No pid for OpenCode instance ${id}`);
 			return pid;
 		};
@@ -198,9 +200,10 @@ describe("OpenCode Instances use", () => {
 			instanceB.id,
 			"opencode",
 		);
-		const pidB = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === instanceB.id,
-		)?.pid;
+		const pidB = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === instanceB.id)?.pid;
 		expect(pidB).toBeTypeOf("number");
 		const db = new Database(fixture.projectStorePath(), { readonly: true });
 		try {
@@ -267,9 +270,10 @@ describe("OpenCode Instances use", () => {
 			recovered.close();
 		}
 		expect(
-			loadDaemonConfig(fixture.configDir)?.projects.find(
-				({ slug }) => slug === "process-test",
-			),
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			)?.projects.find(({ slug }) => slug === "process-test"),
 		).not.toHaveProperty("instanceId");
 	}, 90_000);
 

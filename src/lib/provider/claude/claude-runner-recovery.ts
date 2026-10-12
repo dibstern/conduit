@@ -6,7 +6,7 @@ import {
 } from "../../daemon/account-directory.js";
 import {
 	defaultDaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
@@ -78,9 +78,13 @@ export const recoverClaudeRunnerCommands = (
 		claudeRunnerSinkId(commandId, attempt, nativeResumeFallback),
 ) =>
 	Effect.gen(function* () {
-		const config = loadDaemonConfig(deps.daemonConfigDir);
+		const config = yield* Effect.suspend(() =>
+			loadDaemonConfigResult(deps.daemonConfigDir),
+		).pipe(
+			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
+		);
 		const accounts = accountsStateFromConfig(
-			config ?? defaultDaemonConfig(),
+			config,
 			captureClaudeLaunchLogin(process.env),
 		);
 		const rows = yield* runningClaudeCommands(sql, sessionId);
@@ -243,9 +247,13 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 	daemonConfigDir?: string,
 ) =>
 	Effect.gen(function* () {
-		const config = loadDaemonConfig(daemonConfigDir);
+		const config = yield* Effect.suspend(() =>
+			loadDaemonConfigResult(daemonConfigDir),
+		).pipe(
+			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
+		);
 		const accounts = accountsStateFromConfig(
-			config ?? defaultDaemonConfig(),
+			config,
 			captureClaudeLaunchLogin(process.env),
 		);
 		for (const row of yield* runningClaudeCommands(sql)) {

@@ -56,13 +56,16 @@ vi.mock(
 			await importOriginal<
 				typeof import("../../../src/lib/daemon/config-persistence.js")
 			>();
-		return { ...original, loadDaemonConfig: vi.fn(() => null) };
+		return {
+			...original,
+			loadDaemonConfigResult: vi.fn(original.loadDaemonConfigResult),
+		};
 	},
 );
 
 // Import AFTER vi.mock (vitest hoists the mock)
 import { run } from "../../../src/bin/cli-core.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 
 function createMockIO(cwd = "/test/project") {
 	const output: string[] = [];
@@ -260,7 +263,7 @@ describe("serve handler", () => {
 
 		await run(["--foreground"], io);
 
-		expect(loadDaemonConfig).not.toHaveBeenCalled();
+		expect(loadDaemonConfigResult).not.toHaveBeenCalled();
 		expect(mockStartForegroundDaemon).toHaveBeenCalledWith({
 			opencodeUrl: "http://localhost:4096",
 			defaultTlsEnabled: true,

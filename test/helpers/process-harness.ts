@@ -25,6 +25,7 @@ import {
 	Cause,
 	Context,
 	Effect,
+	Either,
 	Exit,
 	Fiber,
 	Layer,
@@ -49,7 +50,7 @@ import {
 } from "../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 } from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
 import {
@@ -174,6 +175,7 @@ export class ProcessHarness {
 	private readonly ownedOpenCodeProcesses = new Map<string, Set<number>>();
 	private readonly observedOpenCodeProcesses = new Set<number>();
 	private readonly ownershipErrors: unknown[] = [];
+	private readonly configReadErrors = new Set<string>();
 	private readonly ownershipObserver: ReturnType<typeof setInterval>;
 	private readonly managedCleanup: Array<{
 		supervisorPid: number;
@@ -669,7 +671,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 			if (!address || typeof address === "string")
 				throw new Error("No isolated OpenCode placeholder port");
 			this.defaultOpenCodeUrl = `http://127.0.0.1:${address.port}`;
-			const config = loadDaemonConfig(this.configDir);
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(this.configDir),
+				(error) => error,
+			);
 			if (!config) throw new Error("Invalid process harness seed config");
 			writeFileSync(
 				join(this.configDir, "daemon.json"),
@@ -1242,9 +1247,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 		body: unknown,
 		instanceId: string = MANAGED_OPENCODE_ACCOUNT_ID,
 	): Promise<void> {
-		const instance = loadDaemonConfig(this.configDir)?.instances?.find(
-			({ id }) => id === instanceId,
-		);
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(this.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === instanceId);
 		if (!instance?.port)
 			throw new Error(`No fake OpenCode instance ${instanceId}`);
 		const response = await fetch(
@@ -1556,6 +1562,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			generations: this.generations,
 			buildIdentity: this.rpcDiagnostics.buildIdentity,
 			rpcDecodeFailures: this.rpcDiagnostics.failures,
+			configReadErrors: [...this.configReadErrors],
 			marks: this.marks,
 			cliPids: this.cliPids,
 			frames: this.browsers.map((browser) =>
@@ -1569,8 +1576,15 @@ Object.assign(ClaudeDriver, { create: deps => {
 	}
 
 	private rememberManagedOpenCode(): void {
-		const config = loadDaemonConfig(this.configDir);
-		for (const instance of config?.instances ?? []) {
+		const loaded = loadDaemonConfigResult(this.configDir);
+		if (loaded._tag === "Left") {
+			// Config-safety scenarios deliberately damage this file. Record the
+			// read failure and retain already authenticated process ownership.
+			if (loaded.left._tag !== "NotFound")
+				this.configReadErrors.add(loaded.left.message);
+			return;
+		}
+		for (const instance of loaded.right.instances ?? []) {
 			if (
 				instance.managed &&
 				instance.driver !== "claude" &&
@@ -1695,7 +1709,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 					"release",
 				);
 			}
-			for (const project of loadDaemonConfig(this.configDir)?.projects ?? []) {
+			for (const project of Either.getOrThrowWith(
+				loadDaemonConfigResult(this.configDir),
+				(error) => error,
+			)?.projects ?? []) {
 				if (!project.path.startsWith(`${this.root}/`)) continue;
 				for (const name of ["recovery-gated", "recovery-fail-after-adoption"]) {
 					const gate = join(project.path, ".conduit", name);

@@ -1,5 +1,6 @@
 // Failure cases: unsupported moves are offered, a tool ignores its launch cwd,
 // or recreation, restart and recovery lose history or restore the wrong cwd.
+
 import { execFileSync } from "node:child_process";
 import {
 	existsSync,
@@ -11,6 +12,7 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -21,7 +23,7 @@ import {
 	RecreateSessionWorktree,
 	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -206,7 +208,10 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		const address = modelServer.address();
 		if (!address || typeof address === "string")
 			throw new Error("Missing scripted model port");
-		const seed = loadDaemonConfig(fixture.configDir);
+		const seed = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		);
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify({
@@ -328,9 +333,10 @@ describe("Managed real OpenCode launch workspace execution", () => {
 					}),
 				);
 				// Browser instance responses redact credentials; native probes use config.
-				const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-					({ id }) => id === "managed-test",
-				);
+				const instance = Either.getOrThrowWith(
+					loadDaemonConfigResult(fixture.configDir),
+					(error) => error,
+				)?.instances?.find(({ id }) => id === "managed-test");
 				if (!instance?.port)
 					throw new Error("Managed OpenCode instance is missing");
 				const refusal = await fetch(

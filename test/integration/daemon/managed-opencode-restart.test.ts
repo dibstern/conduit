@@ -11,9 +11,10 @@ import {
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -33,8 +34,9 @@ describe("managed OpenCode survives server replacement", () => {
 	};
 	const recorded = () => {
 		if (!harness) throw new Error("No process harness");
-		const instance = loadDaemonConfig(
-			join(harness.root, "config"),
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(join(harness.root, "config")),
+			(error) => error,
 		)?.instances?.find((instance) => instance.id === "managed-test");
 		expect(instance).toBeDefined();
 		if (!instance) throw new Error("Managed instance record missing");
@@ -204,7 +206,10 @@ describe("managed OpenCode survives server replacement", () => {
 			if (!address || typeof address === "string")
 				throw new Error("Missing port");
 			const configFile = join(harness.root, "config", "daemon.json");
-			const config = loadDaemonConfig(join(harness.root, "config"));
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(join(harness.root, "config")),
+				(error) => error,
+			);
 			if (!config) throw new Error("Missing config");
 			config.instances = (config.instances ?? []).map((instance) =>
 				instance.id === "managed-test"
@@ -311,7 +316,10 @@ describe("managed OpenCode survives server replacement", () => {
 		if (strangerPid === undefined) throw new Error("Missing unrelated PID");
 		try {
 			const file = join(harness.root, "config", "daemon.json");
-			const config = loadDaemonConfig(join(harness.root, "config"));
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(join(harness.root, "config")),
+				(error) => error,
+			);
 			if (!config) throw new Error("Missing config");
 			config.instances = (config.instances ?? []).map((instance) =>
 				instance.id === "managed-test"
@@ -346,7 +354,10 @@ describe("managed OpenCode survives server replacement", () => {
 		harness = await startManaged();
 		await harness.kill();
 		const file = join(harness.root, "config", "daemon.json");
-		const config = loadDaemonConfig(join(harness.root, "config"));
+		const config = Either.getOrThrowWith(
+			loadDaemonConfigResult(join(harness.root, "config")),
+			(error) => error,
+		);
 		if (!config) throw new Error("Missing config");
 		const pinHash = "saved-pin-must-survive-invalid-process-metadata";
 		writeFileSync(
@@ -374,11 +385,17 @@ describe("managed OpenCode survives server replacement", () => {
 				),
 			}),
 		);
-		expect(loadDaemonConfig(join(harness.root, "config"))?.pinHash).toBe(
-			pinHash,
-		);
+		expect(
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(join(harness.root, "config")),
+				(error) => error,
+			)?.pinHash,
+		).toBe(pinHash);
 		await harness.restart({ skipBrowserProbe: true });
-		const saved = loadDaemonConfig(join(harness.root, "config"));
+		const saved = Either.getOrThrowWith(
+			loadDaemonConfigResult(join(harness.root, "config")),
+			(error) => error,
+		);
 		expect(saved?.pinHash).toBe(pinHash);
 		expect(saved?.debug).toBe(true);
 		expect(saved).not.toHaveProperty("dangerouslySkipPermissions");
@@ -523,7 +540,10 @@ describe("managed OpenCode survives server replacement", () => {
 		if (!strangerPid) throw new Error("Missing unrelated fixture PID");
 		try {
 			const configDir = join(harness.root, "config");
-			const config = loadDaemonConfig(configDir);
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(configDir),
+				(error) => error,
+			);
 			if (!config) throw new Error("Missing config");
 			config.instances = (config.instances ?? []).map((instance) =>
 				instance.id === "managed-test"
@@ -576,7 +596,10 @@ describe("managed OpenCode survives server replacement", () => {
 				join(configDir, "fake-opencode-pids.jsonl"),
 				`${JSON.stringify({ pid: strangerPid, childPid: strangerPid, groupPid: strangerPid })}\n`,
 			);
-			const config = loadDaemonConfig(configDir);
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(configDir),
+				(error) => error,
+			);
 			if (!config) throw new Error("Missing config");
 			config.instances = (config.instances ?? []).map((instance) =>
 				instance.processIdentity
@@ -674,7 +697,10 @@ describe("managed OpenCode survives server replacement", () => {
 		const projectDir = join(harness.root, "prefetch-project");
 		mkdirSync(projectDir);
 		const configDir = join(harness.root, "config");
-		const config = loadDaemonConfig(configDir);
+		const config = Either.getOrThrowWith(
+			loadDaemonConfigResult(configDir),
+			(error) => error,
+		);
 		if (!config) throw new Error("Missing config");
 		config.projects.push({
 			path: projectDir,
@@ -764,9 +790,10 @@ describe("managed OpenCode survives server replacement", () => {
 			expect(alive(before.childPid)).toBe(false);
 		});
 		expect(
-			loadDaemonConfig(join(harness.root, "config"))?.instances?.some(
-				(instance) => instance.id === "managed-test",
-			),
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(join(harness.root, "config")),
+				(error) => error,
+			)?.instances?.some((instance) => instance.id === "managed-test"),
 		).toBe(false);
 		results.push({
 			scenario: "removed-instance-cleanup",
@@ -819,7 +846,10 @@ describe("managed OpenCode survives server replacement", () => {
 		if (!identity) throw new Error("Missing private process identity");
 		await harness.kill();
 		const configDir = join(harness.root, "config");
-		const config = loadDaemonConfig(configDir);
+		const config = Either.getOrThrowWith(
+			loadDaemonConfigResult(configDir),
+			(error) => error,
+		);
 		if (!config) throw new Error("Missing config");
 		config.instances = (config.instances ?? []).map((instance) =>
 			instance.id === "managed-test"
@@ -838,7 +868,10 @@ describe("managed OpenCode survives server replacement", () => {
 		expect(recorded().processIdentity?.supervisorPid).toBe(before.groupPid);
 		expect(alive(before.pid)).toBe(true);
 		await harness.terminate();
-		const retained = loadDaemonConfig(configDir);
+		const retained = Either.getOrThrowWith(
+			loadDaemonConfigResult(configDir),
+			(error) => error,
+		);
 		if (!retained) throw new Error("Missing retained config");
 		retained.instances = (retained.instances ?? []).map((instance) =>
 			instance.id === "managed-test"

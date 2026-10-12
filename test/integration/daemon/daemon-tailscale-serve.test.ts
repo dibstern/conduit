@@ -1,6 +1,7 @@
 // Failure cases: missing CLI, logged-out backend, disabled certificates, missing
 // DNS name, malformed JSON, foreign root handlers, and failed Serve commands.
 // Every daemon uses an isolated config directory and a fake Tailscale binary.
+
 import {
 	existsSync,
 	mkdirSync,
@@ -11,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Either } from "effect";
 import {
 	afterEach,
 	assert,
@@ -22,7 +24,7 @@ import {
 } from "vitest";
 import { parseArgs } from "../../../src/bin/cli-utils.js";
 import { GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { DaemonOptions } from "../../../src/lib/daemon/daemon-types.js";
 import {
@@ -200,7 +202,12 @@ describe("daemon Tailscale Serve", () => {
 	it("persists the mode, leaves the mapping on shutdown, and makes no mutation when / is already ours", async () => {
 		const first = await start({ port: 0, tailscaleServe: true });
 		await first.stop();
-		expect(loadDaemonConfig(configDir)).toMatchObject({
+		expect(
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(configDir),
+				(error) => error,
+			),
+		).toMatchObject({
 			tailscaleServe: true,
 			tls: false,
 			port: first.port,
@@ -360,7 +367,10 @@ describe("daemon Tailscale Serve", () => {
 			otherHandlers(disabled.port),
 		);
 		await disabled.stop();
-		expect(loadDaemonConfig(configDir)?.tailscaleServe).toBe(false);
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(configDir), (error) => error)
+				?.tailscaleServe,
+		).toBe(false);
 		const beforeOffRestart = invocations().length;
 		const restarted = await start();
 		expect(restarted.getStatus().tailscaleServe).toBeUndefined();
@@ -407,7 +417,12 @@ describe("daemon Tailscale Serve", () => {
 		await expectHttp(disabled);
 		expect(disabled.getStatus().tailscaleServe).toBeUndefined();
 		await disabled.stop();
-		expect(loadDaemonConfig(configDir)).toMatchObject({
+		expect(
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(configDir),
+				(error) => error,
+			),
+		).toMatchObject({
 			tailscaleServe: false,
 			tailscaleServeCleanupPending: true,
 		});
@@ -430,7 +445,8 @@ describe("daemon Tailscale Serve", () => {
 		});
 		await retried.stop();
 		expect(
-			loadDaemonConfig(configDir)?.tailscaleServeCleanupPending,
+			Either.getOrThrowWith(loadDaemonConfigResult(configDir), (error) => error)
+				?.tailscaleServeCleanupPending,
 		).toBeUndefined();
 	});
 

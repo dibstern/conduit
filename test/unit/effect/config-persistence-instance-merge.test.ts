@@ -2,12 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Either, Layer } from "effect";
 import { afterEach, beforeEach } from "vitest";
 import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	migrateLegacyInstanceIds,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
@@ -105,7 +105,10 @@ const writeConfig = (config: DaemonConfig): void => {
 };
 
 const readConfig = (): DaemonConfig => {
-	const config = loadDaemonConfig(tempDir);
+	const config = Either.getOrThrowWith(
+		loadDaemonConfigResult(tempDir),
+		(error) => error,
+	);
 	if (config === null) {
 		throw new Error("Expected daemon config to load");
 	}

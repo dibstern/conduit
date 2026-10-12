@@ -17,7 +17,8 @@ import {
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
 import {
-	loadDaemonConfig,
+	defaultDaemonConfig,
+	loadDaemonConfigResult,
 	resolveOpenCodeInstanceUrl,
 } from "../../../daemon/config-persistence.js";
 import { OpenCodeConnectionError } from "../../../errors.js";
@@ -1113,24 +1114,36 @@ export const makeStandaloneOpenCodeInstancesLive = (
 		"opencodeUrl" | "opencodeAuth" | "configDir" | "log"
 	>,
 ) =>
-	makeOpenCodeInstancesLive(
-		(instanceId) =>
-			Effect.sync(() => {
-				if (instanceId === MANAGED_OPENCODE_ACCOUNT_ID)
-					return config.opencodeUrl === undefined
-						? undefined
-						: {
-								url: config.opencodeUrl,
-								...(config.opencodeAuth ? { auth: config.opencodeAuth } : {}),
-							};
-				const daemonConfig = loadDaemonConfig(config.configDir);
-				const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
-				const auth = openCodeAuth(
-					daemonConfig?.instances?.find(({ id }) => id === instanceId)?.env,
-				);
-				return url === undefined
-					? undefined
-					: { url, ...(auth ? { auth } : {}) };
-			}),
-		config.log ? { log: config.log.child("opencode") } : {},
+	Layer.unwrapEffect(
+		Effect.gen(function* () {
+			const daemonConfig = yield* Effect.suspend(() =>
+				loadDaemonConfigResult(config.configDir),
+			).pipe(
+				Effect.catchTag("NotFound", () =>
+					Effect.succeed(defaultDaemonConfig()),
+				),
+			);
+			return makeOpenCodeInstancesLive(
+				(instanceId) =>
+					Effect.sync(() => {
+						if (instanceId === MANAGED_OPENCODE_ACCOUNT_ID)
+							return config.opencodeUrl === undefined
+								? undefined
+								: {
+										url: config.opencodeUrl,
+										...(config.opencodeAuth
+											? { auth: config.opencodeAuth }
+											: {}),
+									};
+						const url = resolveOpenCodeInstanceUrl(daemonConfig, instanceId);
+						const auth = openCodeAuth(
+							daemonConfig?.instances?.find(({ id }) => id === instanceId)?.env,
+						);
+						return url === undefined
+							? undefined
+							: { url, ...(auth ? { auth } : {}) };
+					}),
+				config.log ? { log: config.log.child("opencode") } : {},
+			);
+		}),
 	);

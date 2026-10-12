@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { Either } from "effect";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../lib/daemon/config-persistence.js";
 import {
@@ -18,7 +19,10 @@ export async function handleDoctor(options: {
 	configDir?: string;
 	stdout: { write(value: string): void };
 }): Promise<void> {
-	const config = loadDaemonConfig(options.configDir);
+	const loaded = loadDaemonConfigResult(options.configDir);
+	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound")
+		throw loaded.left;
+	const config = Either.getOrNull(loaded);
 	const resolver = new ProjectShellEnvResolver();
 	const { stdout } = options;
 	stdout.write(

@@ -1,11 +1,13 @@
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TlsCerts } from "../../../src/lib/cli/tls.js";
 import { RestartWithConfig } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	loadDaemonConfig,
+	type DaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -30,13 +32,14 @@ const fixtureCerts: TlsCerts = makeTestTlsCerts();
 
 async function waitForPersistedConfig(
 	configDir: string,
-	predicate: (
-		config: NonNullable<ReturnType<typeof loadDaemonConfig>>,
-	) => boolean,
-): Promise<NonNullable<ReturnType<typeof loadDaemonConfig>>> {
+	predicate: (config: DaemonConfig) => boolean,
+): Promise<DaemonConfig> {
 	return vi.waitFor(
 		() => {
-			const config = loadDaemonConfig(configDir);
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(configDir),
+				(error) => error,
+			);
 			if (config && predicate(config)) return config;
 			throw new Error(
 				`Timed out waiting for persisted config: ${JSON.stringify(config)}`,
@@ -153,7 +156,10 @@ describe("daemon main runtime config status", () => {
 		await daemon.stop();
 		daemon = null;
 
-		const persisted = loadDaemonConfig(tmpDir);
+		const persisted = Either.getOrThrowWith(
+			loadDaemonConfigResult(tmpDir),
+			(error) => error,
+		);
 		expect(persisted?.keepAwake).toBe(true);
 		expect(persisted?.keepAwakeCommand).toBe("printf");
 		expect(persisted?.keepAwakeArgs).toEqual(["awake"]);
@@ -200,7 +206,10 @@ describe("daemon main runtime config status", () => {
 		await daemon.stop();
 		daemon = null;
 
-		const persisted = loadDaemonConfig(tmpDir);
+		const persisted = Either.getOrThrowWith(
+			loadDaemonConfigResult(tmpDir),
+			(error) => error,
+		);
 		expect(persisted).not.toHaveProperty("dismissedPaths");
 		expect(persisted?.projects).toContainEqual(
 			expect.objectContaining({
@@ -229,7 +238,10 @@ describe("daemon main runtime config status", () => {
 		]);
 		await daemon.removeProject(project.slug);
 		await daemon.stop();
-		expect(loadDaemonConfig(tmpDir)?.projects).toEqual([]);
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(tmpDir), (error) => error)
+				?.projects,
+		).toEqual([]);
 		daemon = await startForegroundDaemon(options);
 		expect(daemon.getProjects()).toEqual([]);
 		const added = await daemon.addProject(projectPath);
@@ -237,7 +249,10 @@ describe("daemon main runtime config status", () => {
 		expect(daemon.getProjects()).toEqual([added]);
 		await daemon.stop();
 		daemon = null;
-		expect(loadDaemonConfig(tmpDir)?.projects).toEqual([
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(tmpDir), (error) => error)
+				?.projects,
+		).toEqual([
 			expect.objectContaining({ path: canonicalProjectPath, slug: added.slug }),
 		]);
 	});

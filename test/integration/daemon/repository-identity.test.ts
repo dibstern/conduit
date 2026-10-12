@@ -1,9 +1,11 @@
 // Failure modes: transport spellings split clones, no-origin worktrees split,
 // non-git folders acquire an identity, old configs never backfill, folder edits
 // retain detached identities, and daemon restarts retain a changed/removed origin.
+
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetProjects,
@@ -12,7 +14,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -58,7 +60,10 @@ describe("repository identities through the daemon", () => {
 			);
 			await fixture.terminate();
 			manifest["storedAfter"] = state(
-				loadDaemonConfig(fixture.configDir)?.projects.map((project) => ({
+				Either.getOrThrowWith(
+					loadDaemonConfigResult(fixture.configDir),
+					(error) => error,
+				)?.projects.map((project) => ({
 					...project,
 					title: project.title ?? project.slug,
 				})) ?? [],
@@ -210,7 +215,10 @@ describe("repository identities through the daemon", () => {
 			},
 		});
 		await vi.waitFor(() => {
-			const stored = loadDaemonConfig(fixture.configDir);
+			const stored = Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			);
 			expect(
 				stored?.projects.find(
 					(project) => project.slug === sshProject.savedSlug,
@@ -245,7 +253,10 @@ describe("repository identities through the daemon", () => {
 		// Persist the old values before changing git, so refresh cannot be a first-load backfill.
 		await fixture.terminate();
 		manifest["storedBeforeRestart"] = state(
-			loadDaemonConfig(fixture.configDir)?.projects.map((project) => ({
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			)?.projects.map((project) => ({
 				...project,
 				title: project.title ?? project.slug,
 			})) ?? [],
@@ -278,7 +289,10 @@ describe("repository identities through the daemon", () => {
 			bySlug(after, scratchProject.savedSlug).repositoryIdentities,
 		).toEqual({});
 		await vi.waitFor(() => {
-			const stored = loadDaemonConfig(fixture.configDir);
+			const stored = Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			);
 			expect(
 				stored?.projects.find(
 					(project) => project.slug === sshProject.savedSlug,

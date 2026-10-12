@@ -29,6 +29,7 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Either,
 	Exit,
 	Fiber,
 	FiberMap,
@@ -45,7 +46,7 @@ import type {
 	ClaudeSDKPermissionMode,
 } from "../../contracts/providers/claude-agent-sdk.js";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
@@ -291,7 +292,15 @@ export const makeClaudeProviderRuntime = (
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
 				launchConfig: () =>
-					resolveClaudeLaunchConfig(loadDaemonConfig(deps.daemonConfigDir)),
+					resolveClaudeLaunchConfig(
+						Either.getOrElse(
+							loadDaemonConfigResult(deps.daemonConfigDir),
+							(error) => {
+								if (error._tag === "NotFound") return null;
+								throw error;
+							},
+						),
+					),
 			}));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
@@ -371,7 +380,15 @@ export const makeClaudeSessionRunner = (
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
 				launchConfig: () =>
-					resolveClaudeLaunchConfig(loadDaemonConfig(deps.daemonConfigDir)),
+					resolveClaudeLaunchConfig(
+						Either.getOrElse(
+							loadDaemonConfigResult(deps.daemonConfigDir),
+							(error) => {
+								if (error._tag === "NotFound") return null;
+								throw error;
+							},
+						),
+					),
 			}));
 		const warmedQueries = yield* makeClaudeWarmedQueryOwner(
 			deps.queryFactory ??
@@ -566,20 +583,27 @@ export class ClaudeProviderRuntime {
 		workspaceRoot?: string,
 		account?: Account,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return discoverCapabilitiesEffect(
-			workspaceRoot ?? this.deps.workspaceRoot,
-			this.deps.capabilitiesService,
-			account?.driver === "claude"
-				? account.folder
-				: resolveClaudeLaunchConfig(loadDaemonConfig(this.deps.daemonConfigDir))
-						.configDir,
-		).pipe(
+		return Effect.gen(this, function* () {
+			const configDir =
+				account?.driver === "claude"
+					? account.folder
+					: resolveClaudeLaunchConfig(
+							yield* Effect.suspend(() =>
+								loadDaemonConfigResult(this.deps.daemonConfigDir),
+							).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
+						).configDir;
+			return yield* discoverCapabilitiesEffect(
+				workspaceRoot ?? this.deps.workspaceRoot,
+				this.deps.capabilitiesService,
+				configDir,
+			);
+		}).pipe(
 			Effect.mapError(
-				(cause: ClaudeAdapterError) =>
+				(cause) =>
 					new ProviderInstanceFailure({
 						providerId: this.providerId,
 						operation: "discover",
-						cause: cause instanceof ClaudeBoundaryError ? cause.cause : cause,
+						cause,
 					}),
 			),
 		);
@@ -1694,9 +1718,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 		return buildUserMessage(input);
 	}
 
-	private mapProviderFailure<A>(
+	private mapProviderFailure<A, E>(
 		operation: string,
-		effect: Effect.Effect<A, ClaudeAdapterError>,
+		effect: Effect.Effect<A, E>,
 	): Effect.Effect<A, ProviderInstanceFailure> {
 		return effect.pipe(
 			Effect.mapError(
@@ -1717,15 +1741,21 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
-			discoverCapabilitiesEffect(
-				workspaceRoot ?? this.deps.workspaceRoot,
-				this.deps.capabilitiesService,
-				account?.driver === "claude"
-					? account.folder
-					: resolveClaudeLaunchConfig(
-							loadDaemonConfig(this.deps.daemonConfigDir),
-						).configDir,
-			),
+			Effect.gen(this, function* () {
+				const configDir =
+					account?.driver === "claude"
+						? account.folder
+						: resolveClaudeLaunchConfig(
+								yield* Effect.suspend(() =>
+									loadDaemonConfigResult(this.deps.daemonConfigDir),
+								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
+							).configDir;
+				return yield* discoverCapabilitiesEffect(
+					workspaceRoot ?? this.deps.workspaceRoot,
+					this.deps.capabilitiesService,
+					configDir,
+				);
+			}),
 		);
 	}
 

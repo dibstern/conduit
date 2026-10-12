@@ -17,7 +17,6 @@ import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
-	loadDaemonConfig,
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
 import {
@@ -307,9 +306,17 @@ export function createProjectRelayLayers({
 						Effect.gen(function* () {
 							const configRef = yield* DaemonConfigRefTag;
 							return {
-								build: Ref.get(configRef).pipe(
-									Effect.map((current) => ({
-										...(loadDaemonConfig(configDir) ?? defaultDaemonConfig()),
+								build: Effect.gen(function* () {
+									const current = yield* Ref.get(configRef);
+									const persisted = yield* Effect.suspend(() =>
+										loadDaemonConfigResult(configDir),
+									).pipe(
+										Effect.catchTag("NotFound", () =>
+											Effect.succeed(defaultDaemonConfig()),
+										),
+									);
+									return {
+										...persisted,
 										autoSettleAfterDays:
 											current.autoSettleAfterDays === undefined
 												? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -317,8 +324,8 @@ export function createProjectRelayLayers({
 										...(current.usageLimits !== undefined && {
 											usageLimits: current.usageLimits,
 										}),
-									})),
-								),
+									};
+								}),
 							};
 						}),
 					).pipe(Layer.provideMerge(configRefLayer));

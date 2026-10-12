@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Schema } from "effect";
+import { Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AnswerQuestion,
@@ -15,7 +15,7 @@ import {
 	StartSideThread,
 	SubmitInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { SessionWorkspaceChangedPayloadSchema } from "../../../src/lib/persistence/events.js";
 import {
@@ -302,9 +302,10 @@ describe("Forked session workspaces through the built daemon", () => {
 					: undefined;
 				expect(directory).toBe(worktree);
 			});
-			const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-				({ id }) => id === "managed-test",
-			);
+			const instance = Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			)?.instances?.find(({ id }) => id === "managed-test");
 			if (!instance?.port) throw new Error("Managed OpenCode did not start");
 			const nativeHeaders = {
 				Authorization: `Basic ${Buffer.from(`${instance.env?.["OPENCODE_SERVER_USERNAME"] ?? "opencode"}:${instance.env?.["OPENCODE_SERVER_PASSWORD"]}`).toString("base64")}`,

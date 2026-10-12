@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
+import { Either } from "effect";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetInstances,
@@ -10,7 +11,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -29,7 +30,10 @@ const test = base.extend<{
 				foregroundCli: true,
 			});
 			try {
-				const seed = loadDaemonConfig(harness.configDir);
+				const seed = Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				);
 				if (!seed) throw new Error("Missing process harness config");
 				const configDir = testInfo.outputPath("initial-claude-account");
 				mkdirSync(configDir, { recursive: true });

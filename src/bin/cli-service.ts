@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../lib/daemon/config-persistence.js";
 import { getVersion } from "../lib/version.js";
@@ -55,7 +55,7 @@ export interface ServiceRunner {
 	mkdir(path: string): Promise<void>;
 	writeFile(path: string, content: string): Promise<void>;
 	removeFile(path: string): Promise<void>;
-	loadConfig: typeof loadDaemonConfig;
+	loadConfig: typeof loadDaemonConfigResult;
 	saveConfig: typeof saveDaemonConfig;
 	checkDaemon(): Promise<boolean>;
 	isPortAvailable(port: number, host: string): Promise<boolean>;
@@ -357,15 +357,10 @@ export async function runServiceCommand(
 		);
 	}
 	// Read after stopping the old service so its shutdown flush is included.
-	const persisted = runner.loadConfig(paths.configDir);
-	if (
-		persisted === null &&
-		(await runner.exists(join(paths.configDir, "daemon.json")))
-	) {
-		throw new Error(
-			"Cannot read daemon.json; refusing to replace stored settings. Repair the config before installing the service.",
-		);
-	}
+	const loaded = runner.loadConfig(paths.configDir);
+	if (loaded._tag === "Left" && loaded.left._tag !== "NotFound")
+		throw loaded.left;
+	const persisted = loaded._tag === "Right" ? loaded.right : null;
 	const config: DaemonConfig = {
 		...(persisted ?? {
 			pid: 0,
@@ -499,7 +494,7 @@ export function createServiceRunner(
 			});
 		},
 		removeFile: (path) => unlink(path),
-		loadConfig: loadDaemonConfig,
+		loadConfig: loadDaemonConfigResult,
 		saveConfig: saveDaemonConfig,
 		checkDaemon,
 		isPortAvailable: (port, host) =>

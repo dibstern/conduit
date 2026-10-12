@@ -3,9 +3,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { StartInstance } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Failure cases: a server signal uses explicit-stop semantics, replacement
@@ -27,8 +28,9 @@ describe("managed OpenCode through CLI server replacement", () => {
 	};
 	const recorded = () => {
 		if (!harness) throw new Error("No process harness");
-		const instance = loadDaemonConfig(
-			join(harness.root, "config"),
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(join(harness.root, "config")),
+			(error) => error,
 		)?.instances?.find((instance) => instance.id === "managed-test");
 		if (!instance) throw new Error("Managed instance record missing");
 		return instance;

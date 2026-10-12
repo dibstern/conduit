@@ -16,7 +16,7 @@ import {
 } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../../daemon/config-persistence.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -144,15 +144,16 @@ export const makeSessionTitleServiceLive = (
 									Schema.parseJson(SessionWorkspaceSchema),
 								)(session.workspace);
 					const cwd = effectiveWorkingDirectory(primaryFolder, workspace);
+					const daemonConfig = yield* Effect.suspend(() =>
+						loadDaemonConfigResult(config.configDir),
+					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
 					const generator: TitleGenerator = Match.value(
 						resolveSessionTitleModel(),
 					).pipe(
 						Match.discriminator("harness")("claude", ({ model }) =>
 							makeClaudeTitleGenerator({
 								model,
-								...resolveClaudeLaunchConfig(
-									loadDaemonConfig(config.configDir),
-								),
+								...resolveClaudeLaunchConfig(daemonConfig),
 								log,
 								...(options.queryFactory === undefined
 									? {}

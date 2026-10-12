@@ -162,7 +162,10 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 				socketPath,
 				sessionId: "session",
 				runnerId: "runner",
-				deps: { workspaceRoot: directory },
+				deps: {
+					workspaceRoot: directory,
+					daemonConfigDir: join(directory, "config"),
+				},
 				receipts,
 				runFork: (effect) => fibers.push(runtime.runFork(effect)),
 				emit,

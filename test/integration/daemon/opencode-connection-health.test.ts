@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import Database from "better-sqlite3";
-import { Effect, HashMap, Ref, Stream } from "effect";
+import { Effect, Either, HashMap, Ref, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -12,7 +12,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import {
@@ -45,7 +45,10 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			...(managedOpenCode ? { holdRunnerOutput: "send-turn" as const } : {}),
 		});
 		if (managedOpenCode) {
-			const config = loadDaemonConfig(harness.configDir);
+			const config = Either.getOrThrowWith(
+				loadDaemonConfigResult(harness.configDir),
+				(error) => error,
+			);
 			if (!config) throw new Error("Missing initial harness config");
 			// The default session id aliases the project's selected instance.
 			// Select an explicit default so managed-test really is a second server.
@@ -384,15 +387,16 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			"claude",
 			"claude",
 		);
-		const instances = loadDaemonConfig(fixture.configDir)?.instances?.map(
-			({ id, port, pid, managed, driver }) => ({
-				id,
-				port,
-				pid,
-				managed,
-				driver,
-			}),
-		);
+		const instances = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.map(({ id, port, pid, managed, driver }) => ({
+			id,
+			port,
+			pid,
+			managed,
+			driver,
+		}));
 		evidence["instances"] = instances;
 		const primary = instances?.find(({ id }) => id === instanceId);
 		const secondary = instances?.find(({ id }) => id === "managed-test");

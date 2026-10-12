@@ -11,10 +11,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import { SaveProject } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import {
 	type ProcessBrowser,
@@ -161,9 +162,10 @@ describe("Managed real OpenCode lifecycle", () => {
 		directory: string,
 		body?: unknown,
 	) {
-		const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === instanceId,
-		);
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === instanceId);
 		if (!instance?.port) throw new Error("Managed OpenCode has no port");
 		const response = await fetch(`http://127.0.0.1:${instance.port}${path}`, {
 			method,
@@ -249,9 +251,10 @@ describe("Managed real OpenCode lifecycle", () => {
 		const sessionA = await a.createSession("Real A", instanceId, "opencode");
 		const first = snapshot(fixture, "first-session");
 		expect(first.binaries).toHaveLength(1);
-		const port = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === instanceId,
-		)?.port;
+		const port = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === instanceId)?.port;
 		evidence["port"] = port;
 		expect([4096, 2633]).not.toContain(port);
 

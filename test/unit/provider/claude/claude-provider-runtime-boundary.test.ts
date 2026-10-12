@@ -111,7 +111,7 @@ describe("Claude provider runtime boundary", () => {
 			usageEligible: false,
 		};
 		const loadConfig = vi
-			.spyOn(configPersistence, "loadDaemonConfig")
+			.spyOn(configPersistence, "loadDaemonConfigResult")
 			.mockImplementation(() => {
 				throw new Error("Account launch must not reread daemon config");
 			});
@@ -303,6 +303,7 @@ describe("Claude provider runtime boundary", () => {
 				const scope = yield* Scope.make();
 				const runtime = yield* makeClaudeProviderRuntime({
 					runnerFactory: makeClaudeSessionRunner,
+					daemonConfigDir: configPersistence.getConfigDir(),
 					workspaceRoot: "/tmp/ws",
 					queryFactory: () => query,
 				}).pipe(Effect.provideService(Scope.Scope, scope));
@@ -346,6 +347,7 @@ describe("Claude provider runtime boundary", () => {
 					let options: SDKOptions | undefined;
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
+						daemonConfigDir: configPersistence.getConfigDir(),
 						workspaceRoot: "/tmp/ws",
 						queryFactory: (params) => {
 							options = params.options;

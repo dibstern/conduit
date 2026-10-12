@@ -1,8 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -52,9 +53,10 @@ describe("OpenCode session deletion", () => {
 		path: string,
 		body?: unknown,
 	) {
-		const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === instanceId,
-		);
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === instanceId);
 		if (!instance?.port) throw new Error("Fake OpenCode has no port");
 		const response = await fetch(`http://127.0.0.1:${instance.port}${path}`, {
 			method,

@@ -11,10 +11,10 @@ import {
 	tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import { NodeRuntime } from "@effect/platform-node";
-import { Cause, Deferred, Effect, Exit, FiberSet, Scope } from "effect";
+import { Cause, Deferred, Effect, Either, Exit, FiberSet, Scope } from "effect";
 import { z } from "zod";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../lib/daemon/config-persistence.js";
 import { createLogger } from "../lib/logger.js";
@@ -999,7 +999,13 @@ const main = Effect.gen(function* () {
 				}
 			},
 			undefined,
-			() => resolveClaudeLaunchConfig(loadDaemonConfig(daemonConfigDir)),
+			() =>
+				resolveClaudeLaunchConfig(
+					Either.getOrElse(loadDaemonConfigResult(daemonConfigDir), (error) => {
+						if (error._tag === "NotFound") return null;
+						throw error;
+					}),
+				),
 		);
 		connection = peer;
 	});

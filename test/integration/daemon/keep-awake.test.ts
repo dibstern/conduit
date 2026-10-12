@@ -7,6 +7,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetStatus,
@@ -14,7 +15,7 @@ import {
 	SetKeepAwakeCommand,
 	Shutdown,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -196,7 +197,10 @@ describe("daemon keep-awake", () => {
 				await vi.waitFor(() => expect(alive(beforeRestart.pid)).toBe(false), {
 					timeout: 5000,
 				});
-				const persisted = loadDaemonConfig(harness.configDir);
+				const persisted = Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				);
 				expect(persisted?.keepAwake).toBe(true);
 				expect(persisted?.keepAwakeCommand).toBe("sleep");
 				expect(persisted?.keepAwakeArgs).toEqual(["86400"]);

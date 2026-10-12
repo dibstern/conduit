@@ -1,6 +1,6 @@
 import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 } from "../../daemon/config-persistence.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import type { ClaudeSessionOutput } from "./claude-session-runner.js";
@@ -22,7 +22,13 @@ export function makeClaudeRunnerIdleExit(
 			if (turns > 0 || sdkTurnInFlight || backgroundWork || hasHeldWork?.())
 				return;
 			// Resolve configuration on the background sweep, never on send or output.
-			const days = loadDaemonConfig(configDir)?.autoSettleAfterDays;
+			const loaded = loadDaemonConfigResult(configDir);
+			if (loaded._tag === "Left" && loaded.left._tag !== "NotFound") {
+				console.error(loaded.left.message);
+				return;
+			}
+			const days =
+				loaded._tag === "Right" ? loaded.right.autoSettleAfterDays : undefined;
 			const idleWindowMs =
 				testIdleWindowMs !== undefined
 					? testIdleWindowMs

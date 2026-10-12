@@ -2,13 +2,14 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
+import { Either } from "effect";
 import {
 	GetStatus,
 	RemoveProject,
 	SetKeepAwake,
 	SetKeepAwakeCommand,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -173,7 +174,12 @@ test("Power runs its command, shares the inline editor, persists edits and stops
 	if (!replacement) throw new Error("No replacement keep-awake child");
 	expect(replacement.pid).not.toBe(original.pid);
 	await expect
-		.poll(() => loadDaemonConfig(harness.configDir))
+		.poll(() =>
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(harness.configDir),
+				(error) => error,
+			),
+		)
 		.toMatchObject({
 			keepAwake: true,
 			keepAwakeCommand: "sleep",
@@ -208,7 +214,13 @@ test("Power runs its command, shares the inline editor, persists edits and stops
 		keepAwakeCommand: "sleep 601",
 	});
 	await expect
-		.poll(() => loadDaemonConfig(harness.configDir)?.keepAwake)
+		.poll(
+			() =>
+				Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				)?.keepAwake,
+		)
 		.toBe(false);
 	writeFileSync(
 		resolve(artifacts, `${testInfo.project.name}-processes.json`),
@@ -263,7 +275,12 @@ test("an argument containing spaces survives Edit and Save", async ({
 	await page.getByTestId("server-power-save").click();
 	await expect(page.getByTestId("server-power-form")).toBeHidden();
 	await expect
-		.poll(() => loadDaemonConfig(harness.configDir))
+		.poll(() =>
+			Either.getOrThrowWith(
+				loadDaemonConfigResult(harness.configDir),
+				(error) => error,
+			),
+		)
 		.toMatchObject({
 			keepAwakeCommand: "systemd-inhibit",
 			keepAwakeArgs: args,

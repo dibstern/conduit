@@ -1,4 +1,6 @@
-// Tests: Config Persistence Module (Ticket 8.3)
+/* Failure modes: valid/legacy config is changed on decode; NotFound is confused
+ * with invalid JSON/schema or an unreadable file; valid writes do not round-trip.
+ */
 
 import {
 	existsSync,
@@ -11,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -18,7 +21,7 @@ import {
 	clearDaemonConfig,
 	type DaemonConfig,
 	getConfigDir,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 	syncRecentProjects,
 } from "../../../src/lib/daemon/config-persistence.js";
@@ -56,7 +59,7 @@ describe("getConfigDir", () => {
 	});
 });
 
-describe("loadDaemonConfig", () => {
+describe("loadDaemonConfigResult", () => {
 	it("round-trips per-folder repository identities and accepts old projects without them", async () => {
 		const project = {
 			path: "/tmp/repo",
@@ -65,9 +68,10 @@ describe("loadDaemonConfig", () => {
 			addedAt: 0,
 		};
 		await saveDaemonConfig(makeSampleConfig({ projects: [project] }), tempDir);
-		expect(loadDaemonConfig(tempDir)?.projects[0]).not.toHaveProperty(
-			"repositoryIdentities",
-		);
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(tempDir), (error) => error)
+				?.projects[0],
+		).not.toHaveProperty("repositoryIdentities");
 		const repositoryIdentities = {
 			"/tmp/repo": {
 				key: "github.com/owner/repo",
@@ -80,7 +84,8 @@ describe("loadDaemonConfig", () => {
 			tempDir,
 		);
 		expect(
-			loadDaemonConfig(tempDir)?.projects[0]?.repositoryIdentities,
+			Either.getOrThrowWith(loadDaemonConfigResult(tempDir), (error) => error)
+				?.projects[0]?.repositoryIdentities,
 		).toEqual(repositoryIdentities);
 		await saveDaemonConfig(
 			makeSampleConfig({
@@ -89,7 +94,8 @@ describe("loadDaemonConfig", () => {
 			tempDir,
 		);
 		expect(
-			loadDaemonConfig(tempDir)?.projects[0]?.repositoryIdentities,
+			Either.getOrThrowWith(loadDaemonConfigResult(tempDir), (error) => error)
+				?.projects[0]?.repositoryIdentities,
 		).toEqual({});
 	});
 
@@ -97,12 +103,18 @@ describe("loadDaemonConfig", () => {
 		const legacy = makeSampleConfig();
 		delete legacy.autoSettleAfterDays;
 		await saveDaemonConfig(legacy, tempDir);
-		expect(loadDaemonConfig(tempDir)?.autoSettleAfterDays).toBe(3);
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(tempDir), (error) => error)
+				?.autoSettleAfterDays,
+		).toBe(3);
 		await saveDaemonConfig(
 			makeSampleConfig({ autoSettleAfterDays: null }),
 			tempDir,
 		);
-		expect(loadDaemonConfig(tempDir)?.autoSettleAfterDays).toBeNull();
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(tempDir), (error) => error)
+				?.autoSettleAfterDays,
+		).toBeNull();
 	});
 
 	it("round-trips a configured idle window", async () => {
@@ -110,7 +122,10 @@ describe("loadDaemonConfig", () => {
 			makeSampleConfig({ autoSettleAfterDays: 14 }),
 			tempDir,
 		);
-		expect(loadDaemonConfig(tempDir)?.autoSettleAfterDays).toBe(14);
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(tempDir), (error) => error)
+				?.autoSettleAfterDays,
+		).toBe(14);
 	});
 
 	it.each([
@@ -120,7 +135,10 @@ describe("loadDaemonConfig", () => {
 			makeSampleConfig({ autoSettleAfterDays: days }),
 			tempDir,
 		);
-		expect(loadDaemonConfig(tempDir)).toBeNull();
+		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
+			_tag: "Left",
+			left: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
+		});
 	});
 	it("returns parsed config from valid JSON file", () => {
 		const config = makeSampleConfig({ pid: 99999, port: 3000 });
@@ -130,7 +148,10 @@ describe("loadDaemonConfig", () => {
 			JSON.stringify({ ...config, dangerouslySkipPermissions: true }),
 		);
 
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 		expect(loaded).not.toBeNull();
 		assert.exists(loaded, "expected daemon config");
 		expect(loaded.pid).toBe(99999);
@@ -139,23 +160,29 @@ describe("loadDaemonConfig", () => {
 		expect(loaded).not.toHaveProperty("dangerouslySkipPermissions");
 	});
 
-	it("returns null when file doesn't exist", () => {
-		const loaded = loadDaemonConfig(tempDir);
-		expect(loaded).toBeNull();
+	it("returns NotFound when file doesn't exist", () => {
+		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
+			_tag: "Left",
+			left: { _tag: "NotFound", path: join(tempDir, "daemon.json") },
+		});
 	});
 
-	it("returns null when file is corrupt JSON", () => {
+	it("returns Invalid when file is corrupt JSON", () => {
 		mkdirSync(tempDir, { recursive: true });
 		writeFileSync(join(tempDir, "daemon.json"), "{ not valid json !!!");
 
-		const loaded = loadDaemonConfig(tempDir);
-		expect(loaded).toBeNull();
+		expect(loadDaemonConfigResult(tempDir)).toMatchObject({
+			_tag: "Left",
+			left: { _tag: "Invalid", path: join(tempDir, "daemon.json") },
+		});
 	});
 
 	it("handles missing configDir gracefully", () => {
 		const nonExistentDir = join(tempDir, "does", "not", "exist");
-		const loaded = loadDaemonConfig(nonExistentDir);
-		expect(loaded).toBeNull();
+		expect(loadDaemonConfigResult(nonExistentDir)).toMatchObject({
+			_tag: "Left",
+			left: { _tag: "NotFound", path: join(nonExistentDir, "daemon.json") },
+		});
 	});
 });
 
@@ -213,7 +240,10 @@ describe("saveDaemonConfig", () => {
 		});
 
 		await saveDaemonConfig(config, tempDir);
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 
 		expect(loaded).toEqual(config);
 	});
@@ -235,7 +265,10 @@ describe("saveDaemonConfig", () => {
 			}),
 		);
 
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 		expect(loaded?.projects.map(({ folders }) => folders)).toEqual([
 			["/src/old-dir"],
 			["/src/path-only"],
@@ -425,7 +458,10 @@ describe("DaemonConfig with instances", () => {
 			],
 		};
 		await saveDaemonConfig(config, tempDir);
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 		expect(loaded).not.toBeNull();
 		assert.exists(loaded, "expected daemon config");
 		assert.exists(loaded.instances, "expected instances");
@@ -447,7 +483,10 @@ describe("DaemonConfig with instances", () => {
 			projects: [],
 		};
 		await saveDaemonConfig(config, tempDir);
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 		expect(loaded).not.toBeNull();
 		assert.exists(loaded, "expected daemon config");
 		expect(loaded.instances).toBeUndefined();
@@ -473,7 +512,10 @@ describe("DaemonConfig with instances", () => {
 			instances: [],
 		};
 		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(config));
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 		assert.exists(loaded, "expected daemon config");
 		const project = loaded.projects[0];
 		assert.exists(project, "expected project");
@@ -496,7 +538,10 @@ describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
 		});
 
 		await saveDaemonConfig(config, tempDir);
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 
 		expect(loaded).not.toBeNull();
 		assert.exists(loaded, "expected daemon config");
@@ -512,7 +557,10 @@ describe("DaemonConfig with keepAwakeCommand/keepAwakeArgs", () => {
 		// Write a config that does NOT have keepAwakeCommand/keepAwakeArgs
 		const config = makeSampleConfig({ keepAwake: false });
 		await saveDaemonConfig(config, tempDir);
-		const loaded = loadDaemonConfig(tempDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tempDir),
+			(error) => error,
+		);
 
 		expect(loaded).not.toBeNull();
 		assert.exists(loaded, "expected daemon config");

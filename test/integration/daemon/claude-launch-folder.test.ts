@@ -4,9 +4,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -272,7 +272,10 @@ it.skipIf(!process.env["CONDUIT_LEGACY_DIST"]).each([
 			writeFileSync(
 				join(running.root, "config", "daemon.json"),
 				JSON.stringify({
-					...loadDaemonConfig(join(running.root, "config")),
+					...Either.getOrThrowWith(
+						loadDaemonConfigResult(join(running.root, "config")),
+						(error) => error,
+					),
 					instances: added.instances,
 				}),
 			);

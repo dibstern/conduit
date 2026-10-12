@@ -252,7 +252,7 @@ async function rebuild() {
 			if (!rpc) {
 				const [
 					{ DEFAULT_CONFIG_DIR, DEFAULT_PORT, DEFAULT_SOCKET_PATH, parseArgs },
-					{ loadDaemonConfig },
+					{ loadDaemonConfigResult },
 					{ isDaemonRunning },
 					{ sendRpcRequest },
 					{ GetStatus, RestartWithConfig },
@@ -265,10 +265,15 @@ async function rebuild() {
 				]);
 				// The port `serve` will bind: flag, then persisted config, then default.
 				const parsed = parseArgs(["serve", ...args]);
+				const loaded = loadDaemonConfigResult(DEFAULT_CONFIG_DIR);
+				if (loaded._tag === "Left" && loaded.left._tag !== "NotFound")
+					throw loaded.left;
 				rpc = {
 					port: parsed.portExplicit
 						? parsed.port
-						: (loadDaemonConfig(DEFAULT_CONFIG_DIR)?.port ?? DEFAULT_PORT),
+						: loaded._tag === "Right"
+							? loaded.right.port
+							: DEFAULT_PORT,
 					DEFAULT_SOCKET_PATH,
 					isDaemonRunning,
 					sendRpcRequest,

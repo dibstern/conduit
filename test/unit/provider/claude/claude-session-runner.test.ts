@@ -1,5 +1,6 @@
 import { Deferred, Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { getConfigDir } from "../../../../src/lib/daemon/config-persistence.js";
 import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
@@ -62,7 +63,12 @@ describe("Claude runner idle exit", () => {
 	])("stays alive for %s tasks and starts the idle window when they finish", (type) => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
-		const idle = makeClaudeRunnerIdleExit(onIdle, 100);
+		const idle = makeClaudeRunnerIdleExit(
+			onIdle,
+			100,
+			undefined,
+			getConfigDir(),
+		);
 		try {
 			idle.activity({
 				type: "background-task",
@@ -93,7 +99,12 @@ describe("Claude runner idle exit", () => {
 	it("does not extend the idle window for empty snapshots", () => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
-		const idle = makeClaudeRunnerIdleExit(onIdle, 100);
+		const idle = makeClaudeRunnerIdleExit(
+			onIdle,
+			100,
+			undefined,
+			getConfigDir(),
+		);
 		try {
 			vi.advanceTimersByTime(99);
 			idle.activity({
@@ -164,6 +175,7 @@ describe("in-process Claude session runner", () => {
 		]);
 		const deps = {
 			workspaceRoot: "/tmp/ws",
+			daemonConfigDir: getConfigDir(),
 			queryFactory: () => query,
 			capabilitiesService,
 			subagentSdk: {
@@ -331,7 +343,12 @@ describe("in-process Claude session runner", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
-						{ workspaceRoot: "/tmp/ws", queryFactory, capabilitiesService },
+						{
+							workspaceRoot: "/tmp/ws",
+							daemonConfigDir: getConfigDir(),
+							queryFactory,
+							capabilitiesService,
+						},
 						(output) =>
 							Effect.gen(function* () {
 								const message = roundTrip(output);
@@ -430,7 +447,12 @@ describe("in-process Claude session runner", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
-						{ workspaceRoot: "/tmp/ws", queryFactory, capabilitiesService },
+						{
+							workspaceRoot: "/tmp/ws",
+							daemonConfigDir: getConfigDir(),
+							queryFactory,
+							capabilitiesService,
+						},
 						(output) =>
 							output.type === "release-sink"
 								? Deferred.succeed(shutdown, undefined).pipe(Effect.as({}))

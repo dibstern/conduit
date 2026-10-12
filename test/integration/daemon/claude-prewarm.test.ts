@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	defaultDaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -763,8 +763,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		writeFileSync(
 			join(harness.root, "config/daemon.json"),
 			JSON.stringify({
-				...(loadDaemonConfig(join(harness.root, "config")) ??
-					defaultDaemonConfig()),
+				...(Either.getOrThrowWith(
+					loadDaemonConfigResult(join(harness.root, "config")),
+					(error) => error,
+				) ?? defaultDaemonConfig()),
 				port: harness.generations.at(-1)?.port ?? 0,
 				instances: added.instances,
 			}),

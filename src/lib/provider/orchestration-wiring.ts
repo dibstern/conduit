@@ -8,7 +8,10 @@ import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Option, type Scope } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
-import { loadDaemonConfig } from "../daemon/config-persistence.js";
+import {
+	type DaemonConfigLoadError,
+	loadDaemonConfigResult,
+} from "../daemon/config-persistence.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
@@ -129,7 +132,7 @@ const createOrchestrationComponentsEffect = (
 	options: OrchestrationLayerOptions,
 ): Effect.Effect<
 	OrchestrationComponents,
-	never,
+	DaemonConfigLoadError,
 	| Scope.Scope
 	| SqlClient.SqlClient
 	| PersistenceProjectTag
@@ -219,7 +222,10 @@ const createOrchestrationComponentsEffect = (
 				(value) => Effect.sync(() => value.close()),
 			);
 			const directory = options.workspaceRoot ?? process.cwd();
-			const config = loadDaemonConfig(options.configDir)?.projects.find(
+			const daemonConfig = yield* Effect.suspend(() =>
+				loadDaemonConfigResult(options.configDir),
+			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
+			const config = daemonConfig?.projects.find(
 				(project) => resolve(project.path) === resolve(directory),
 			);
 			resolver.register(directory, config?.shellEnv);
@@ -331,7 +337,7 @@ export const makeOrchestrationRuntimeLayer = (
 	options: OrchestrationRuntimeLayerOptions = {},
 ): Layer.Layer<
 	ProviderRegistryTag | OrchestrationEngineTag,
-	never,
+	DaemonConfigLoadError,
 	| OpenCodeAPITag
 	| SqlClient.SqlClient
 	| PersistenceProjectTag

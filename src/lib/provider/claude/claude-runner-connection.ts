@@ -1,8 +1,8 @@
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { Cause, Deferred, Effect } from "effect";
+import { Cause, Deferred, Effect, Either } from "effect";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
@@ -436,7 +436,13 @@ export const connectClaudeRunner = (options: {
 					beforeCommandFailure,
 					() =>
 						resolveClaudeLaunchConfig(
-							loadDaemonConfig(options.deps.daemonConfigDir),
+							Either.getOrElse(
+								loadDaemonConfigResult(options.deps.daemonConfigDir),
+								(error) => {
+									if (error._tag === "NotFound") return null;
+									throw error;
+								},
+							),
 						),
 				);
 				socket.once("connect", () =>

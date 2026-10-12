@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Schema } from "effect";
+import { Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ListDaemonSessions,
@@ -17,7 +17,7 @@ import {
 	OpenCodeUseWorktree,
 	SubmitInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
@@ -214,9 +214,10 @@ describe("Missing session worktrees through the built daemon", () => {
 					path: worktree,
 				}),
 			);
-			const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-				({ id }) => id === "managed-test",
-			);
+			const instance = Either.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			)?.instances?.find(({ id }) => id === "managed-test");
 			if (!instance?.port) throw new Error("Fake OpenCode instance is missing");
 			const baseUrl = `http://127.0.0.1:${instance.port}`;
 			const { client, authHeaders } = createSdkClient({

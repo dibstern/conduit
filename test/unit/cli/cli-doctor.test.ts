@@ -1,17 +1,24 @@
+/* Failure modes: missing config prevents first-run diagnostics; invalid JSON or
+ * unreadable config is treated as an empty project list; diagnostics overwrite
+ * the damaged file or inherit the developer's account/home.
+ */
+
 import {
 	chmodSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseArgs, run } from "../../../src/bin/cli-core.js";
 import {
 	defaultDaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 
@@ -22,6 +29,43 @@ afterEach(() => {
 });
 
 describe("conduit doctor", () => {
+	it.each([
+		"missing",
+		"invalid",
+		"unreadable",
+	] as const)("handles a %s daemon config without replacing it", async (kind) => {
+		home = mkdtempSync(join(tmpdir(), "conduit-doctor-"));
+		vi.stubEnv("HOME", home);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, "claude"));
+		const configDir = join(home, "config");
+		const path = join(configDir, "daemon.json");
+		mkdirSync(configDir);
+		const damaged = "{ invalid daemon config";
+		if (kind === "unreadable") mkdirSync(path);
+		else if (kind === "invalid") writeFileSync(path, damaged);
+		let output = "";
+		const operation = run(["doctor"], {
+			configDir,
+			stdout: {
+				write: (value) => {
+					output += value;
+				},
+			},
+		});
+		if (kind === "missing") {
+			await operation;
+			expect(output).toContain("No registered projects");
+		} else {
+			await expect(operation).rejects.toMatchObject({
+				_tag: kind === "invalid" ? "Invalid" : "Unreadable",
+				path,
+			});
+			await expect(operation).rejects.toThrow(path);
+			expect(output).not.toContain("No registered projects");
+			if (kind === "invalid") expect(readFileSync(path, "utf8")).toBe(damaged);
+		}
+	});
+
 	it("parses both the subcommand and --doctor", () => {
 		expect(parseArgs(["doctor"]).command).toBe("doctor");
 		expect(parseArgs(["--doctor"]).command).toBe("doctor");
@@ -67,7 +111,10 @@ describe("conduit doctor", () => {
 			},
 			configDir,
 		);
-		expect(loadDaemonConfig(configDir)?.projects[0]?.shellEnv).toEqual({
+		expect(
+			Either.getOrThrowWith(loadDaemonConfigResult(configDir), (error) => error)
+				?.projects[0]?.shellEnv,
+		).toEqual({
 			interactive: true,
 			overrides: { PATH: bin, PRIVATE_ENV: "never-print-this" },
 		});

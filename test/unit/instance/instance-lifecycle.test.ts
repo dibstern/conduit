@@ -1,10 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Either } from "effect";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	type DaemonConfig,
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import {
@@ -80,7 +81,10 @@ describe("instance lifecycle integration", () => {
 		};
 		await saveDaemonConfig(config, tmpDir);
 
-		const loaded = loadDaemonConfig(tmpDir);
+		const loaded = Either.getOrThrowWith(
+			loadDaemonConfigResult(tmpDir),
+			(error) => error,
+		);
 		expect(loaded).not.toBeNull();
 		assert.exists(loaded, "expected the saved daemon configuration");
 		expect(loaded.instances).toHaveLength(2);

@@ -12,6 +12,7 @@ import {
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
+import { Either } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetStatus,
@@ -20,7 +21,7 @@ import {
 	Shutdown,
 	ViewSession,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { inspectManagedOpenCodeProcess } from "../../../src/lib/instance/managed-opencode-process.js";
 import {
@@ -94,9 +95,10 @@ describe("foreground conduit serve", () => {
 
 	async function openCodeHealth() {
 		if (!harness) throw new Error("No process harness");
-		const instance = loadDaemonConfig(harness.configDir)?.instances?.find(
-			(entry) => entry.id === "managed-test",
-		);
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(harness.configDir),
+			(error) => error,
+		)?.instances?.find((entry) => entry.id === "managed-test");
 		if (!instance?.processIdentity)
 			throw new Error("Managed OpenCode identity is missing");
 		const response = await fetch(
@@ -1086,7 +1088,11 @@ describe("foreground conduit serve", () => {
 				expect(alive(retained.runner.pid)).toBe(true);
 			});
 			await vi.waitFor(() => {
-				const config = loadDaemonConfig(harness?.configDir);
+				if (!harness) throw new Error("Missing process harness");
+				const config = Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				);
 				evidence["persistedAfterRemoval"] = config?.projects;
 				expect(config?.projects.map((project) => project.slug)).not.toContain(
 					removed.projectSlug,
@@ -1219,7 +1225,10 @@ process.on("SIGTERM", () => { child.kill("SIGTERM"); process.exit(0); });
 		const root = harness.root;
 		const owned = harness.ownedOpenCodePids();
 		expect(owned).toContain(record.groupPid);
-		const instance = loadDaemonConfig(harness.configDir)?.instances?.find(
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(harness.configDir),
+			(error) => error,
+		)?.instances?.find(
 			(candidate) =>
 				candidate.processIdentity?.supervisorPid === record.groupPid,
 		);

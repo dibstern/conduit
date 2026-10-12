@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ListDaemonSessions,
@@ -16,7 +17,7 @@ import {
 	SaveProject,
 	SubmitInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
 import worktreePlugin from "../../../src/lib/provider/opencode-worktree-plugin.js";
@@ -106,7 +107,10 @@ describe("OpenCode declared worktree moves", () => {
 			"feature/worktree",
 			worktree,
 		);
-		const seed = loadDaemonConfig(fixture.configDir);
+		const seed = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		);
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify({
@@ -216,9 +220,10 @@ describe("OpenCode declared worktree moves", () => {
 			"opencode",
 		);
 
-		const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === "managed-test",
-		);
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === "managed-test");
 		for (const key of [
 			"CONDUIT_DAEMON_SOCKET",
 			"CONDUIT_OPENCODE_INSTANCE_ID",
@@ -354,9 +359,10 @@ describe("OpenCode declared worktree moves", () => {
 			expect(String(error)).toContain("Operation timed out after '4s'");
 			evidence["coldStartTimeout"] = true;
 		}
-		const instance = loadDaemonConfig(fixture.configDir)?.instances?.find(
-			({ id }) => id === "managed-test",
-		);
+		const instance = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.configDir),
+			(error) => error,
+		)?.instances?.find(({ id }) => id === "managed-test");
 		if (!instance?.port) throw new Error("Managed OpenCode did not start");
 		for (const key of [
 			"OPENCODE_CONFIG_CONTENT",

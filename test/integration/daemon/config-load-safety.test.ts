@@ -6,7 +6,9 @@
  * - A save overwrites an invalid/unreadable file, or cannot create a missing file.
  * - Legacy folder/account metadata is lost during the versioned startup rewrite.
  * - An unsupported RPC driver enters runtime state and prevents subsequent saves.
+ * - A CLI disk reader defaults after a running daemon's config is damaged.
  */
+
 import {
 	chmodSync,
 	existsSync,
@@ -16,6 +18,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	AddInstance,
@@ -23,7 +26,7 @@ import {
 	GetStatus,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const DIST = resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist");
@@ -32,12 +35,17 @@ describe("foreground config safety", { timeout: 90_000 }, () => {
 	let harness: ProcessHarness | undefined;
 	let scenario = "setup";
 	let evidence: Record<string, unknown> = {};
+	let cleanupConfig: { path: string; content: string } | undefined;
 
 	function createFixture(name: string) {
 		scenario = name;
 		const fixture = ProcessHarness.create({ dist: DIST, foregroundCli: true });
 		harness = fixture;
 		const configPath = join(fixture.configDir, "daemon.json");
+		cleanupConfig = {
+			path: configPath,
+			content: readFileSync(configPath, "utf8"),
+		};
 		const probePath = join(fixture.root, "config-probe.json");
 		const preloadPath = join(fixture.root, "config-probe.mjs");
 		writeFileSync(
@@ -88,16 +96,62 @@ syncBuiltinESMExports();
 		if (!harness) return;
 		const logs = harness.logTail;
 		try {
+			// Restore deliberately damaged startup fixtures after their assertions,
+			// so teardown can read the fixture's process ownership safely.
+			const loaded = loadDaemonConfigResult(harness.configDir);
+			if (
+				loaded._tag === "Left" &&
+				loaded.left._tag !== "NotFound" &&
+				cleanupConfig
+			) {
+				chmodSync(cleanupConfig.path, 0o600);
+				writeFileSync(cleanupConfig.path, cleanupConfig.content);
+			}
 			await harness.dispose();
 			harness.assertNoRunners();
 		} finally {
 			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
-				`test-results/g4zp-1-${scenario}.json`,
+				`test-results/g4zp-${scenario.startsWith("doctor-") ? "2" : "1"}-${scenario}.json`,
 				JSON.stringify({ ...evidence, logs }, null, 2),
 			);
 			harness = undefined;
 			evidence = {};
+			cleanupConfig = undefined;
+		}
+	});
+
+	it.each([
+		"invalid",
+		"unreadable",
+	] as const)("doctor rejects a %s config while the daemon is running", async (kind) => {
+		const fixture = createFixture(`doctor-${kind}`);
+		await fixture.start();
+		const original = readFileSync(fixture.configPath);
+		const damaged = "{ invalid live daemon config";
+		if (kind === "unreadable") chmodSync(fixture.configPath, 0o000);
+		else writeFileSync(fixture.configPath, damaged);
+		try {
+			const result = await fixture.harness.runCli(["doctor"]);
+			expect(result.code).toBe(1);
+			expect(result.output).toContain(fixture.configPath);
+			expect(result.output).toMatch(
+				kind === "invalid"
+					? /JSON|Unexpected|Expected/i
+					: /EACCES|permission denied/i,
+			);
+			expect(result.output).not.toContain("No registered projects");
+			if (kind === "unreadable") chmodSync(fixture.configPath, 0o600);
+			expect(readFileSync(fixture.configPath)).toEqual(
+				kind === "unreadable" ? original : Buffer.from(damaged),
+			);
+			expect(
+				(await fixture.harness.requestRpc(new GetStatus({}))).projects,
+			).toContainEqual(expect.objectContaining({ slug: "process-test" }));
+			evidence = { kind, result, unchanged: true, daemonStillRunning: true };
+		} finally {
+			chmodSync(fixture.configPath, 0o600);
+			writeFileSync(fixture.configPath, original);
 		}
 	});
 
@@ -145,7 +199,10 @@ syncBuiltinESMExports();
 		await fixture.harness.requestRpc(
 			new UpdateInstance({ instanceId: "claude", name: "Save still works" }),
 		);
-		const saved = loadDaemonConfig(fixture.harness.configDir);
+		const saved = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.harness.configDir),
+			(error) => error,
+		);
 		expect(saved?.instances).toContainEqual(
 			expect.objectContaining({ id: "claude", name: "Save still works" }),
 		);
@@ -160,7 +217,10 @@ syncBuiltinESMExports();
 		["bad-legacy-folders", "folders", /folders/],
 	] as const)("refuses %s without changing the config or migration sources", async (name, input, cause) => {
 		const fixture = createFixture(name);
-		const seed = loadDaemonConfig(fixture.harness.configDir);
+		const seed = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.harness.configDir),
+			(error) => error,
+		);
 		if (!seed) throw new Error("Missing fixture config");
 		const content =
 			input === "newer"
@@ -249,7 +309,10 @@ syncBuiltinESMExports();
 
 	it("seeds settings and accounts from one startup read and rewrites legacy folders", async () => {
 		const fixture = createFixture("single-read");
-		const seed = loadDaemonConfig(fixture.harness.configDir);
+		const seed = Either.getOrThrowWith(
+			loadDaemonConfigResult(fixture.harness.configDir),
+			(error) => error,
+		);
 		if (!seed) throw new Error("Missing fixture config");
 		const folder = join(fixture.harness.root, "saved-claude");
 		mkdirSync(folder);

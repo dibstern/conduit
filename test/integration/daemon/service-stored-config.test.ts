@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
+import { Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createServiceRunner,
@@ -25,7 +26,7 @@ import {
 import { parseArgs } from "../../../src/bin/cli-utils.js";
 import { GetStatus } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	loadDaemonConfig,
+	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -192,7 +193,10 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					dist: DIST,
 					platform: process.platform,
 				});
-				const seed = loadDaemonConfig(harness.configDir);
+				const seed = Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				);
 				if (!seed) throw new Error("Missing harness config");
 				await saveDaemonConfig(
 					{ ...seed, autoSettleAfterDays: 7, debug: true },
@@ -227,7 +231,10 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					"--no-tailscale-serve",
 					...retained,
 				]);
-				const installed = loadDaemonConfig(harness.configDir);
+				const installed = Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				);
 				expect(installed).toMatchObject({
 					port: installPort,
 					tls: false,
@@ -245,7 +252,12 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 				for (const flag of retained) expect(args).toContain(flag);
 				record("installed-unit", { args, unit, config: installed });
 				await install(retained);
-				expect(loadDaemonConfig(harness.configDir)).toEqual(installed);
+				expect(
+					Either.getOrThrowWith(
+						loadDaemonConfigResult(harness.configDir),
+						(error) => error,
+					),
+				).toEqual(installed);
 				expect(unitArguments(readFileSync(paths.unitFile, "utf8"))).toEqual(
 					args,
 				);
@@ -267,7 +279,10 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					logs: harness.logTail,
 				});
 				await harness.terminate();
-				const stopped = loadDaemonConfig(harness.configDir);
+				const stopped = Either.getOrThrowWith(
+					loadDaemonConfigResult(harness.configDir),
+					(error) => error,
+				);
 				if (!stopped) throw new Error("Missing stopped config");
 				const changedPort = await unusedPort();
 				const changedClaudeDir = join(harness.root, "another-claude-profile");
@@ -286,9 +301,12 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					port: changedPort,
 					tlsEnabled: false,
 				});
-				expect(loadDaemonConfig(harness.configDir)?.claudeConfigDir).toBe(
-					changedClaudeDir,
-				);
+				expect(
+					Either.getOrThrowWith(
+						loadDaemonConfigResult(harness.configDir),
+						(error) => error,
+					)?.claudeConfigDir,
+				).toBe(changedClaudeDir);
 				record("restarted-daemon", {
 					args,
 					status: restarted,
