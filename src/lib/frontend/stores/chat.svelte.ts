@@ -48,6 +48,8 @@ export type SessionMessages = {
 		project: string;
 		/** Inputs conduit holds for the session, oldest first: the tray. */
 		pending: PendingInput[];
+		/** Canonical pending cut point, supplied by the session-detail stream. */
+		pendingRewindMessageId?: string | null;
 		/** The queue stopped draining because the last turn did not end normally. */
 		paused?: boolean;
 		/** Why no draft can steer now, or null when one can. Undefined until the

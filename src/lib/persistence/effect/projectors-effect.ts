@@ -190,6 +190,22 @@ const stampMessage = (
 			}
 			stamped.push(...owners(rows));
 		}
+		// Reconciliation can move the cut across otherwise unchanged messages.
+		// Re-query every sibling in live transcript deltas when that cut moves.
+		if (messageIds.length > 0) {
+			const rows = yield* sql<OwnedRow>`UPDATE messages SET version = ${version}
+				WHERE session_id IN (
+					SELECT id FROM sessions WHERE pending_rewind_message_id IN ${sql.in(messageIds)}
+				)
+				RETURNING session_id`;
+			// A message the moved cut restores comes back with its parts.
+			if (rows.length > 0)
+				yield* sql`UPDATE message_parts SET version = ${version}
+					WHERE message_id IN (
+						SELECT id FROM messages WHERE session_id IN ${sql.in(owners(rows))}
+					)`;
+			stamped.push(...owners(rows));
+		}
 		// A message row that vanished under its own event went with the session
 		// that owned it, and the session projector reports that removal by name.
 		// Nothing to add here: the missing id is a message id, and the advance
@@ -314,6 +330,8 @@ export const makeSessionProjector = (): EffectProjector => ({
 export const makeMessageProjector = (): EffectProjector => ({
 	name: "message",
 	handles: [
+		"session.rewound",
+		"session.rewind_undone",
 		"message.created",
 		"message.removed",
 		"message.part.removed",
@@ -374,6 +392,21 @@ export const makeMessageProjector = (): EffectProjector => ({
 					SET updated_at = ${event.createdAt}, completed_at = ${event.createdAt}
 					WHERE id = ${messageId} RETURNING id`,
 				);
+			}
+			if (
+				isEventType(event, "session.rewound") ||
+				isEventType(event, "session.rewind_undone")
+			) {
+				// A browser drops a hidden message's parts with it, so a message
+				// this restores needs its parts again, not only its header. The
+				// cut it replaced is already cleared, so every part moves.
+				yield* sql`UPDATE message_parts SET version = ${ctx.version}
+					WHERE message_id IN (
+						SELECT id FROM messages WHERE session_id = ${event.sessionId}
+					)`;
+				const rows = yield* sql<{ id: string }>`
+					SELECT id FROM messages WHERE session_id = ${event.sessionId}`;
+				return ids(rows);
 			}
 			// A turn that ends without thinking.end must not leave thinking open.
 			const closeThinking = (messageId: string) =>
@@ -444,13 +477,14 @@ export const makeMessageProjector = (): EffectProjector => ({
 				const written = yield* sql<{ id: string }>`
 					INSERT INTO messages
 					(id, session_id, role, text, cost, tokens_in, tokens_out,
-					 tokens_cache_read, tokens_cache_write, context_window,
+					 tokens_cache_read, tokens_cache_write, context_window, context_tokens,
 					 is_streaming, is_backfilled, created_at, updated_at,
 					 rest_digest, rest_event_id, rest_payload, finish, error)
 					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
 					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
 					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
 					 ${message.tokens?.cache?.write ?? null}, ${message.tokens?.contextWindow ?? null},
+					 ${message.role === "assistant" && message.summary === true && message.time?.completed != null && message.error == null ? 0 : null},
 					 0, ${existing.length === 0 ? 1 : (existing[0]?.is_backfilled ?? 0)},
 					 ${created}, ${completed}, ${digest}, ${event.eventId}, ${encodeJson(message)},
 					 ${message.finish ?? null},
@@ -461,14 +495,18 @@ export const makeMessageProjector = (): EffectProjector => ({
 					 tokens_cache_read = excluded.tokens_cache_read,
 					 tokens_cache_write = excluded.tokens_cache_write,
 					 context_window = excluded.context_window, is_streaming = 0,
+					 context_tokens = excluded.context_tokens,
 					 completed_at = NULL,
 					 created_at = excluded.created_at, updated_at = excluded.updated_at,
 					 rest_digest = excluded.rest_digest, rest_event_id = excluded.rest_event_id,
 					 rest_payload = excluded.rest_payload,
 					 finish = excluded.finish, error = excluded.error
 				RETURNING id`;
+				// A provider snapshot replaces provider parts, while Conduit's own
+				// compaction outcomes must survive reconciliation and reconnects.
 				const replaced = yield* sql<{ id: string }>`
-					DELETE FROM message_parts WHERE message_id = ${message.id} RETURNING id`;
+					DELETE FROM message_parts WHERE message_id = ${message.id}
+					AND NOT (type = 'compaction' AND rest_payload IS NULL) RETURNING id`;
 				const kept = new Set(message.parts.map((part) => part.id));
 				for (const { id } of replaced) {
 					if (kept.has(id)) continue;
@@ -870,15 +908,24 @@ export const makeMessageProjector = (): EffectProjector => ({
 						? { postTokens: event.data.postTokens }
 						: {}),
 				});
-				if (latest?.role === "assistant" && latest.is_streaming === 1) {
+				const summaryId =
+					event.provider === "opencode"
+						? event.metadata.providerRefs?.providerMessageId
+						: undefined;
+				const ownerId =
+					summaryId ??
+					(latest?.role === "assistant" && latest.is_streaming === 1
+						? latest.id
+						: undefined);
+				if (ownerId) {
 					yield* sql`
 						INSERT INTO message_parts
 						(id, message_id, type, text, metadata, status, sort_order, created_at, updated_at, version)
-						VALUES (${partId}, ${latest.id}, 'compaction', ${event.data.detail}, ${metadata}, ${status},
-							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${latest.id}), 0),
+						VALUES (${partId}, ${ownerId}, 'compaction', ${event.data.detail}, ${metadata}, ${status},
+							COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${ownerId}), 0),
 							${event.createdAt}, ${event.createdAt}, ${ctx.version})
 						ON CONFLICT (id) DO NOTHING`;
-					return [latest.id];
+					return [ownerId];
 				}
 				const messageId = `compaction-${event.sequence}`;
 				yield* sql`

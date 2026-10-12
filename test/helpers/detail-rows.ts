@@ -39,8 +39,8 @@ export const assembleDetailRows = () => {
 	const headers = new Map<string, typeof HistoryMessageSchema.Type>();
 	const parts = new Map<string, PartRow[]>();
 	return (item: DetailItem): typeof HistoryMessageSchema.Type | undefined => {
-		// Pending inputs and the inbox state are not transcript messages.
-		if (item._tag === "pendingInput" || item._tag === "inbox") return undefined;
+		// Pending inputs, the inbox state and the rewind point are not messages.
+		if (item._tag !== "message" && item._tag !== "part") return undefined;
 		const messageId =
 			item._tag === "message" ? item.message.id : item.messageId;
 		if (item._tag === "message") headers.set(messageId, item.message);

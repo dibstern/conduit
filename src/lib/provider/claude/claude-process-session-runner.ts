@@ -819,8 +819,14 @@ export const makeProcessClaudeSessionRunner = (
 					const connection = yield* start(sessionId, replacement);
 					yield* Deferred.succeed(replacement.ready, connection);
 					upgradeMark(sessionId, old, "warming", replacement);
-					const { model, contextWindow, variant, permissionMode, ...launch } =
-						snapshot.input;
+					const {
+						model,
+						contextWindow,
+						variant,
+						permissionMode,
+						resumeSessionAt: _rewindPoint,
+						...launch
+					} = snapshot.input;
 					yield* connection.commandEffect(randomUUID(), {
 						type: "pre-warm",
 						sessionId,

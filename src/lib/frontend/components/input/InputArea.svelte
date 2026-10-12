@@ -1264,9 +1264,7 @@
 			<div data-testid="composer-context-warning" class="composer-context-warning flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
 				<Icon name="panels-top-left" size={14} class="shrink-0 text-status-amber" />
 				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Context {Math.round(currentChat().contextPercent)}% full.</b> Older turns compact soon.</span>
-				{#if discoveryState.currentProviderId === "claude"}
-					<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
-				{/if}
+				<TextButton tone="inherit" data-testid="composer-context-compact" class="shrink-0 font-semibold text-status-amber" onclick={() => sendMessage("/compact")}>Compact</TextButton>
 			</div>
 		{/if}
 

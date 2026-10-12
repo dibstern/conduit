@@ -95,10 +95,15 @@ describe("session detail removal over WebSocket", () => {
 					)
 					.get("rewound-message") as { version: number };
 
-				expect(await resume(harness, sessionId, cursor.value, 2)).toEqual([
+				expect(await resume(harness, sessionId, cursor.value, 3)).toEqual([
 					{
 						_tag: "remove",
 						id: "rewound-message",
+						sequence: removal.version,
+					},
+					{
+						_tag: "upsert",
+						item: { _tag: "rewind", messageId: null },
 						sequence: removal.version,
 					},
 					{ _tag: "synchronized" },

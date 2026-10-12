@@ -225,10 +225,10 @@ export const subscribeSessionDetail = (options: {
 					shareReads: true,
 					read: (range, base) =>
 						Effect.gen(function* () {
-							// Pending inputs and the inbox state ride the same window as
-							// the transcript, bounded by the version its read reports. A
-							// base read carries every input still pending, whatever
-							// transcript page it returns.
+							// Pending inputs, the inbox state and the rewind point ride the
+							// same window as the transcript, bounded by the version its read
+							// reports. A base read carries every input still pending,
+							// whatever transcript page it returns.
 							const held = (through: number) =>
 								Effect.gen(function* () {
 									const pending = yield* readQuery.readPendingInputs(
@@ -280,8 +280,28 @@ export const subscribeSessionDetail = (options: {
 													},
 												]
 											: [];
+									// The pending rewind point moves with the session row too.
+									const session = yield* readQuery.getSession(
+										options.sessionId,
+									);
+									const rewindRows =
+										session &&
+										(range === undefined ||
+											(session.version > (range.after ?? -1) &&
+												session.version <= through))
+											? [
+													{
+														item: {
+															_tag: "rewind" as const,
+															messageId:
+																session.pending_rewind_message_id ?? null,
+														} satisfies SessionDetailItem,
+														version: Math.min(session.version, through),
+													},
+												]
+											: [];
 									return {
-										rows: [...inputs, ...inboxRows],
+										rows: [...inputs, ...inboxRows, ...rewindRows],
 										removed: pending.removed,
 									};
 								});

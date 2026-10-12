@@ -184,7 +184,7 @@ export function discoverCapabilitiesEffect(
 			supportsQuestions: true,
 			supportsAttachments: true,
 			supportsFork: true,
-			supportsRevert: false,
+			supportsRevert: true,
 			commands,
 			agents: probe.agents,
 		};

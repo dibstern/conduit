@@ -138,6 +138,8 @@ describe("MessageProjector", () => {
 	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("message");
 		expect(projector.handles).toEqual([
+			"session.rewound",
+			"session.rewind_undone",
 			"message.created",
 			"message.removed",
 			"message.part.removed",

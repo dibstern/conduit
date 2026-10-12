@@ -629,6 +629,19 @@ const forkSessionInWorkspace = (
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
 		const parentEvents =
 			yield* eventStore.value.readAllBySession(parentSessionId);
+		const retainedMessageIds = new Set(
+			parentMessages.map((message) => message.id),
+		);
+		const lastRewindCommitSequence = parentEvents.reduce(
+			(sequence, event) =>
+				event.type === "session.rewind_committed" ? event.sequence : sequence,
+			0,
+		);
+		const historyMessageId =
+			messageId ??
+			(parent.pending_rewind_message_id != null || lastRewindCommitSequence > 0
+				? forkPointMessage.id
+				: undefined);
 		const forkPointSequence = parentEvents.find(
 			(event) =>
 				event.type === "message.created" &&
@@ -640,6 +653,7 @@ const forkSessionInWorkspace = (
 				!copyForkHistory(parentEvents, {
 					newSessionId: parentSessionId,
 					upToMessageId: messageId,
+					retainedMessageIds,
 				}))
 		) {
 			return yield* new SessionCommandError({
@@ -671,9 +685,16 @@ const forkSessionInWorkspace = (
 		// Prefer the thread that began closest to the point when an older
 		// account has since returned and received a catch-up covering that range.
 		const provider = selected?.instanceId ?? parent.provider;
-		const parentThread = selected?.thread;
+		// Pending cuts leave Claude's native tail intact. An older receipt after
+		// a committed cut may still point at that tail too. A fresh child's
+		// first turn hands off its kept canonical history instead of forking it.
+		const parentThread =
+			parent.pending_rewind_message_id != null ||
+			(selected && lastRewindCommitSequence > selected.thread.deliveredThrough)
+				? undefined
+				: selected?.thread;
 		const claudeConfigDir =
-			parentThread?.configDir ??
+			selected?.thread.configDir ??
 			resolveClaudeInstanceConfigDir(
 				loadDaemonConfig(config.value.configDir),
 				provider,
@@ -691,8 +712,10 @@ const forkSessionInWorkspace = (
 									configDir: claudeConfigDir,
 								}),
 								title,
-								...(messageId !== undefined && { messageId }),
-								...(messageId !== undefined && {
+								...(historyMessageId !== undefined && {
+									messageId: historyMessageId,
+								}),
+								...(historyMessageId !== undefined && {
 									fallbackMessageIds: parentMessages
 										.slice(0, parentMessages.indexOf(forkPointMessage))
 										.flatMap((message) =>
@@ -713,7 +736,10 @@ const forkSessionInWorkspace = (
 			: { sdkSessionId: randomUUID() };
 		const history = copyForkHistory(parentEvents, {
 			newSessionId: forked.sdkSessionId,
-			...(messageId !== undefined && { upToMessageId: messageId }),
+			...(historyMessageId !== undefined && {
+				upToMessageId: historyMessageId,
+			}),
+			retainedMessageIds,
 		});
 		const forkPointEvent = messageId ?? forkPointMessage.id;
 		// A native cursor commits before the row is announced. Without one,

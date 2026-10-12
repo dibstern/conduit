@@ -119,6 +119,7 @@ export class MockOpenCodeServer {
 			{ info: Record<string, unknown>; parts: Record<string, unknown>[] }
 		>
 	>();
+	private pendingReverts = new Map<string, string>();
 
 	/** Session IDs that have been deleted (filtered from GET /session). */
 	private deletedSessionIds = new Set<string>();
@@ -288,6 +289,7 @@ export class MockOpenCodeServer {
 		this.sseIdleSessions.clear();
 		this.sseBusySessions.clear();
 		this.sseMessages.clear();
+		this.pendingReverts.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.answers?.clear();
@@ -482,6 +484,7 @@ export class MockOpenCodeServer {
 		this.sseIdleSessions.clear();
 		this.sseBusySessions.clear();
 		this.sseMessages.clear();
+		this.pendingReverts.clear();
 		this.sessionCounter = 0;
 		this.recordedPromptSessionIds = [];
 		this.buildQueues();
@@ -703,6 +706,43 @@ export class MockOpenCodeServer {
 		const normalized = normalizedKey(method, path);
 
 		const basePath = path.split("?")[0] ?? path;
+		const rewindRoute = /^\/session\/([^/]+)\/(revert|unrevert)$/.exec(
+			basePath,
+		);
+		if (method === "POST" && rewindRoute) {
+			const sessionId = rewindRoute[1] as string;
+			const operation = rewindRoute[2];
+			const override = this.getActiveQueue(this.exactQueues, exact)?.[0];
+			if (override && override.status >= 400) {
+				res.writeHead(override.status, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(override.responseBody));
+				return;
+			}
+			if (operation === "revert") {
+				const body = JSON.parse(rawBody ?? "{}") as { messageID?: string };
+				if (
+					!body.messageID ||
+					!this.sseMessages.get(sessionId)?.has(body.messageID)
+				) {
+					res.writeHead(404, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ error: "message not found" }));
+					return;
+				}
+				this.pendingReverts.set(sessionId, body.messageID);
+			} else {
+				this.pendingReverts.delete(sessionId);
+			}
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(
+				JSON.stringify({
+					...(this.injectedSessions.get(sessionId) ?? { id: sessionId }),
+					...(this.pendingReverts.has(sessionId)
+						? { revert: { messageID: this.pendingReverts.get(sessionId) } }
+						: {}),
+				}),
+			);
+			return;
+		}
 
 		// The relay answers permissions on the session-scoped route.
 		const answered =
@@ -1107,7 +1147,7 @@ export class MockOpenCodeServer {
 			const sessionMsgs = sessionId
 				? this.sseMessages.get(sessionId)
 				: undefined;
-			if (sessionMsgs && sessionMsgs.size > 0) {
+			if (sessionMsgs) {
 				let messages = [...sessionMsgs.values()];
 				const query = new URL(path, "http://127.0.0.1").searchParams;
 				const before = query.get("before");
@@ -1176,7 +1216,11 @@ export class MockOpenCodeServer {
 		// Detect prompt_async — emit the corresponding SSE segment.
 		// Rewrite session IDs in SSE events so that the relay routes them
 		// to the session the test is actually using (not the recording's).
-		if (method === "POST" && path.includes("/prompt_async")) {
+		if (
+			method === "POST" &&
+			path.includes("/prompt_async") &&
+			entry.status < 400
+		) {
 			this.promptsFired++;
 			const sseClientCount = this.sseClients.size;
 			const hold = this.nextPromptHold;
@@ -1185,6 +1229,23 @@ export class MockOpenCodeServer {
 			// Extract the actual session ID the test is prompting
 			const promptMatch = /\/session\/([^/]+)\/prompt_async/.exec(path);
 			const actualSessionId = promptMatch?.[1];
+			if (actualSessionId) {
+				const target = this.pendingReverts.get(actualSessionId);
+				if (target) {
+					const messages = [
+						...(this.sseMessages.get(actualSessionId)?.keys() ?? []),
+					];
+					const cut = messages.indexOf(target);
+					if (cut >= 0)
+						this.injectSSEEvents(
+							messages.slice(cut).map((messageID) => ({
+								type: "message.removed",
+								properties: { sessionID: actualSessionId, messageID },
+							})),
+						);
+					this.pendingReverts.delete(actualSessionId);
+				}
+			}
 
 			// Determine which recorded session ID to replace:
 			// promptsFired=1 → recordedPromptSessionIds[0], etc.
@@ -1432,7 +1493,12 @@ export class MockOpenCodeServer {
 		type: string,
 		properties: Record<string, unknown>,
 	): void {
-		if (type === "message.updated") {
+		if (type === "message.removed") {
+			const sessionId = properties["sessionID"] as string | undefined;
+			const messageId = properties["messageID"] as string | undefined;
+			if (sessionId && messageId)
+				this.sseMessages.get(sessionId)?.delete(messageId);
+		} else if (type === "message.updated") {
 			const info = properties["info"] as Record<string, unknown> | undefined;
 			if (!info) return;
 			const sessionId = info["sessionID"] as string | undefined;

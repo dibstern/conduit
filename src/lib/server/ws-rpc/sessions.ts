@@ -48,7 +48,10 @@ import {
 	listProjectWorktrees,
 	realWorkspacePath,
 } from "../../git/worktrees.js";
-import { rewindSessionToMessage } from "../../handlers/prompt.js";
+import {
+	rewindSessionToMessage,
+	undoSessionRewind,
+} from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
 import {
 	createSessionForClient,
@@ -731,6 +734,14 @@ export const sessionsHandlers = {
 				),
 			),
 		),
+	UndoRewind: (request) =>
+		undoSessionRewind({
+			clientId: "rpc",
+			sessionId: request.sessionId,
+		}).pipe(
+			Effect.as({ ok: true as const, sessionId: request.sessionId }),
+			Effect.catchAll(mapRpcFailure("UndoRewind")),
+		),
 	RewindSession: (request) =>
 		rewindSessionToMessage({
 			clientId: "rpc",
@@ -787,4 +798,5 @@ export const sessionsHandlers = {
 	| "StartSideThread"
 	| "LoadMoreHistory"
 	| "RewindSession"
+	| "UndoRewind"
 >;

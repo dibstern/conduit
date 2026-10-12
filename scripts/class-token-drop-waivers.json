@@ -19,6 +19,7 @@
 		"requires": "accountColorClass(instanceId)",
 		"reason": "conduit-test-bn6x.1 extracts the unchanged account colour palette and hash to a shared TypeScript utility. AccountDot still applies its returned class."
 	},
+	"src/lib/frontend/components/overlays/RewindBanner.svelte :: cursor-pointer,flex-col,gap-2.5,text-text-muted,text-xs": "conduit-test-qqqm and conduit-test-bu61 replace the unused conversation/files radio options with a provider-specific confirmation and one pending Undo action. The deleted radio labels and their layout no longer need these tokens.",
 	"src/lib/frontend/components/overlays/UsageLimitsSettings.svelte :: font-mono,min-w-0,text-[10.5px],text-text-secondary,truncate": {
 		"movedTo": "src/lib/frontend/components/overlays/UsageSettingsTab.svelte",
 		"reason": "conduit-test-hwxv.4 moves the account order and quota display from the Instances limit section into Usage account cards. The account names and quota values retain these tokens in UsageSettingsTab."

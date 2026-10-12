@@ -467,11 +467,13 @@ export const claudeSubagentSdk: ClaudeSubagentSdk = {
 
 let initializationAttempts = 0;
 
+type NativeMessage = SessionMessage & { parentUuid?: string | null };
+
 function readNativeTranscript(
 	sessionId: string,
 	configDir: string | undefined,
 	directory?: string,
-): SessionMessage[] {
+): NativeMessage[] {
 	if (!configDir)
 		throw new Error("A native transcript requires an account config dir");
 	const file = join(configDir, `conduit-test-transcript-${sessionId}.ndjson`);
@@ -487,7 +489,7 @@ function readNativeTranscript(
 	return readFileSync(file, "utf8")
 		.split("\n")
 		.filter(Boolean)
-		.map((line) => JSON.parse(line) as SessionMessage);
+		.map((line) => JSON.parse(line) as NativeMessage);
 }
 
 function gitCommonDirectory(directory: string): string | undefined {
@@ -519,7 +521,7 @@ function gitCommonDirectory(directory: string): string | undefined {
 }
 
 function recordNativeMessage(
-	entry: SessionMessage,
+	entry: NativeMessage,
 	configDir: string | undefined,
 	directory?: string,
 ): void {
@@ -542,6 +544,25 @@ function query(params: {
 	const accountConfigDir =
 		params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 		process.env["CLAUDE_CONFIG_DIR"];
+	let nativeParentUuid: string | null = params.options?.resumeSessionAt ?? null;
+	if (params.options?.resumeSessionAt) {
+		const transcript = readNativeTranscript(sessionId, accountConfigDir);
+		if (
+			!transcript.some(
+				(entry) => entry.uuid === params.options?.resumeSessionAt,
+			)
+		)
+			throw new Error("Native resume boundary was not found");
+	} else if (
+		params.options?.resume &&
+		accountConfigDir &&
+		existsSync(
+			join(accountConfigDir, `conduit-test-transcript-${sessionId}.ndjson`),
+		)
+	) {
+		nativeParentUuid =
+			readNativeTranscript(sessionId, accountConfigDir).at(-1)?.uuid ?? null;
+	}
 	const queryId = randomUUID();
 	let liveModel = params.options?.model;
 	let liveEffort = params.options?.effort;
@@ -831,6 +852,7 @@ function query(params: {
 				{
 					type: "user",
 					uuid: userUuid,
+					parentUuid: nativeParentUuid,
 					session_id: sessionId,
 					message: { ...input.message, id: userUuid },
 					parent_tool_use_id: null,
@@ -839,6 +861,7 @@ function query(params: {
 				accountConfigDir,
 				params.options?.cwd,
 			);
+			nativeParentUuid = userUuid;
 			const optionsFile = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 			if (optionsFile) {
 				const seen = new WeakSet<object>();
@@ -1309,6 +1332,9 @@ function query(params: {
 						? [existsSync(workspaceFile) ? "present" : "absent"]
 						: responseChunks(prompt);
 			const messageId = randomUUID();
+			const assistantUuid = request.startsWith("rewind-")
+				? randomUUID()
+				: messageId;
 			yield stream(sessionId, {
 				type: "message_start",
 				message: { id: messageId, role: "assistant", content: [] },
@@ -1816,7 +1842,8 @@ function query(params: {
 			recordNativeMessage(
 				{
 					type: "assistant",
-					uuid: messageId,
+					uuid: assistantUuid,
+					parentUuid: nativeParentUuid,
 					session_id: sessionId,
 					message: {
 						id: messageId,
@@ -1829,9 +1856,10 @@ function query(params: {
 				accountConfigDir,
 				params.options?.cwd,
 			);
+			nativeParentUuid = assistantUuid;
 			yield {
 				type: "assistant",
-				uuid: messageId,
+				uuid: assistantUuid,
 				session_id: sessionId,
 				parent_tool_use_id: null,
 				message: {

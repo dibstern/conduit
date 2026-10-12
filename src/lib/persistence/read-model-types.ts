@@ -8,6 +8,7 @@ export interface SessionRow {
 	version: number;
 	provider: string;
 	provider_sid: string | null;
+	pending_rewind_message_id?: string | null;
 	title: string;
 	status: string;
 	history_complete?: number;

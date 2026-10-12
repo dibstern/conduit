@@ -16,7 +16,9 @@ import type {
 	PromptOptions,
 } from "../instance/sdk-types.js";
 import { createLogger } from "../logger.js";
+import { createEventId } from "../persistence/events.js";
 import type { SessionPermissionMode } from "../shared-types.js";
+import { isRecord } from "../utils.js";
 import { ProviderInstanceFailure } from "./errors.js";
 import type {
 	CommandInfo,
@@ -241,6 +243,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			abortSignal,
 			extraFolders,
 		} = input;
+		const isCompaction = prompt.trim() === "/compact";
+		const compactionEvent = {
+			type: "session.compaction" as const,
+			providerId: this.providerId,
+			sessionId,
+			providerRefs: { providerSessionId: sessionId },
+			rawSource: { kind: "opencode.command", endpoint: "session.summarize" },
+		};
 
 		const promptOptions: PromptOptions = {
 			text: prompt,
@@ -280,6 +290,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			}
 			const client = clientResult.right;
 			if (
+				!isCompaction &&
 				this.hasWorktreeToolForSession &&
 				(yield* this.hasWorktreeToolForSession(sessionId))
 			) {
@@ -322,10 +333,60 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 			return yield* Effect.gen(this, function* () {
 				if (abortSignal.aborted) return interruptedTurnResult();
+				if (isCompaction) {
+					yield* input.eventSink.push({
+						...compactionEvent,
+						eventId: createEventId(),
+						createdAt: Date.now(),
+						data: {
+							sessionId,
+							state: "started",
+							detail: "Compacting conversation…",
+						},
+					});
+				}
 
 				const promptResult = yield* Effect.either(
 					Effect.tryPromise({
 						try: async () => {
+							if (isCompaction) {
+								if (!abortSignal.aborted) {
+									let compactModel = promptOptions.model;
+									if (!compactModel) {
+										// Native session history owns the inherited model, not
+										// Conduit's global default (which may belong to Claude).
+										const messages = await client.session.messages(sessionId, {
+											signal: abortSignal,
+										});
+										const lastUser = messages
+											.slice()
+											.reverse()
+											.find((message) => message.role === "user");
+										const nativeModel = lastUser?.["model"];
+										if (
+											isRecord(nativeModel) &&
+											typeof nativeModel["providerID"] === "string" &&
+											typeof nativeModel["modelID"] === "string"
+										) {
+											compactModel = {
+												providerID: nativeModel["providerID"],
+												modelID: nativeModel["modelID"],
+											};
+										}
+									}
+									if (!compactModel)
+										throw this.providerFailure(
+											"summarize",
+											"Nothing to compact yet",
+										);
+									if (abortSignal.aborted) return;
+									const queue = this.unechoedInputs.get(sessionId) ?? [];
+									queue.push(input.inputId);
+									this.unechoedInputs.set(sessionId, queue);
+									await client.session.summarize(sessionId, compactModel);
+								}
+								return;
+							}
 							const session = await client.session.get(sessionId);
 							// Existing sessions use their stored directory, ignoring prompt cwd.
 							if (
@@ -415,6 +476,18 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 							? `${baseMessage} — this session does not exist on its bound OpenCode instance (it may predate named-instance routing); create a new session on that instance`
 							: baseMessage;
 					log.error(`sendTurn failed for session ${sessionId}: ${message}`);
+					if (isCompaction && !abortSignal.aborted) {
+						yield* input.eventSink.push({
+							...compactionEvent,
+							eventId: createEventId(),
+							createdAt: Date.now(),
+							data: {
+								sessionId,
+								state: "failed",
+								detail: `Compaction failed: ${message}`,
+							},
+						});
+					}
 					return sendFailedTurnResult(message);
 				}
 

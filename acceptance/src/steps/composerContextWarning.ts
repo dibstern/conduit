@@ -121,7 +121,7 @@ export const composerContextWarningHandlers: StepHandler[] = [
 	{
 		name: "replay current session compaction state",
 		match:
-			/^the mock relay (starts|fails|completes) compaction for the current session$/,
+			/^the mock relay (starts|fails|completes) compaction for the current session( with unreported token usage)?$/,
 		run: async ({ world, match }) => {
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Compaction requires an open session");
@@ -140,16 +140,22 @@ export const composerContextWarningHandlers: StepHandler[] = [
 			rpc.upsertShellRow({
 				...row,
 				id: sessionId,
+				status: state === "started" ? "busy" : "idle",
 				...(state === "started" ? { compacting: "Compacting…" } : {}),
 			});
 			if (state === "started") return;
+			const instanceId = await world.page
+				.getByTestId("model-picker-trigger")
+				.first()
+				.getAttribute("data-instance-id");
 			requireRelayControl(world.page).sendMessage({
 				type: "compaction",
+				provider: instanceId === "claude" ? "claude" : "opencode",
 				sessionId,
 				state,
 				detail:
 					state === "failed" ? "Compaction failed." : "Context compacted.",
-				...(state === "completed"
+				...(state === "completed" && !match[2]
 					? { preTokens: 170_000, postTokens: 164_000 }
 					: {}),
 			});
@@ -167,12 +173,39 @@ export const composerContextWarningHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert OpenCode has no Compact action",
-		match: /^the composer Compact action is absent$/,
+		name: "assert composer has a Compact action",
+		match: /^the composer Compact action is present$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page.getByTestId("composer-context-compact"),
-			).toHaveCount(0);
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert compaction busy state",
+		match: /^the composer is (busy|idle) after compaction$/,
+		run: async ({ world, match }) => {
+			const stop = world.page.locator("#stop");
+			if (match[1] === "busy") await expect(stop).toBeVisible();
+			else await expect(stop).toBeHidden();
+		},
+	},
+	{
+		name: "assert context usage after compaction",
+		match:
+			/^the picker (?:shows context usage ([0-9]+) percent|hides context usage)$/,
+		run: async ({ world, match }) => {
+			await openModelPicker(world.page);
+			const usage = world.page.getByTestId("picker-context-usage");
+			// The picker omits the usage label at 0%, so a cleared gauge reads as hidden.
+			if (match[1] === undefined) {
+				await expect(world.page.locator("#model-picker")).toBeVisible();
+				await expect(usage).toHaveCount(0);
+			} else {
+				await expect(usage).toHaveText(`${match[1]}% used`);
+			}
+			await world.page.keyboard.press("Escape");
+			await expect(world.page.locator("#model-picker")).toHaveCount(0);
 		},
 	},
 ];

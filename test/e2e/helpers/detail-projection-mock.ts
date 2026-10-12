@@ -443,10 +443,16 @@ export function projectLegacyRelayMessage(
 		(event["state"] === "completed" || event["state"] === "failed")
 	) {
 		const id = `compaction-${state.sequence + 1}`;
+		const created = Date.now() + state.sequence;
+		const clearedContext =
+			event["provider"] === "opencode" &&
+			event["state"] === "completed" &&
+			event["postTokens"] === undefined;
 		upsert(page, sessionId, {
 			id,
 			role: "assistant",
-			time: { created: Date.now() + state.sequence },
+			time: { created, ...(clearedContext ? { completed: created } : {}) },
+			...(clearedContext ? { contextTokens: 0 } : {}),
 			parts: [
 				{
 					id: `compaction-part-${state.sequence + 1}`,

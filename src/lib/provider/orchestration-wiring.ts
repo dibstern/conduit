@@ -61,6 +61,7 @@ export interface OrchestrationLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	readonly claudeSessionForkSdk?: ClaudeProviderInstanceDeps["sessionForkSdk"];
 	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
 	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
@@ -77,6 +78,7 @@ export interface OrchestrationRuntimeLayerOptions {
 	readonly configDir?: string;
 	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
 	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
+	readonly claudeSessionForkSdk?: ClaudeProviderInstanceDeps["sessionForkSdk"];
 	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
 	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
 	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
@@ -231,6 +233,9 @@ const createOrchestrationComponentsEffect = (
 			claudeSettingsOverrides: () =>
 				loadRelaySettings(options.configDir).claudeSettings,
 			subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
+			...(options.claudeSessionForkSdk
+				? { sessionForkSdk: options.claudeSessionForkSdk }
+				: {}),
 			persistUserMessage: persist.persistUserMessage,
 			...(options.claudeQueryFactory
 				? { queryFactory: options.claudeQueryFactory }
@@ -262,6 +267,9 @@ const createOrchestrationComponentsEffect = (
 			// A send_turn's input.sent projects and announces with its outbox row.
 			write: (yield* makeCommitAndSignal).write,
 			persistHandoffDelivered: persist.persistHandoffDelivered,
+			...(options.claudeSessionForkSdk
+				? { claudeSessionForkSdk: options.claudeSessionForkSdk }
+				: {}),
 		};
 		const engine = new OrchestrationEngine({
 			registry,
@@ -349,6 +357,9 @@ export const makeOrchestrationRuntimeLayer = (
 				...(options.configDir != null ? { configDir: options.configDir } : {}),
 				...(options.claudeQueryFactory
 					? { claudeQueryFactory: options.claudeQueryFactory }
+					: {}),
+				...(options.claudeSessionForkSdk
+					? { claudeSessionForkSdk: options.claudeSessionForkSdk }
 					: {}),
 				...(options.claudeSubagentSdk
 					? { claudeSubagentSdk: options.claudeSubagentSdk }

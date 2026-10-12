@@ -245,6 +245,7 @@ export function createProjectRelayLayers({
 		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
 		onBackgroundTask: backgroundLiveness.record,
 		claudeQueryFactory: claudeSdk.query,
+		claudeSessionForkSdk: claudeSdk.fork,
 		...(config.claudeSdk?.subagentSdk && {
 			claudeSubagentSdk: config.claudeSdk.subagentSdk,
 		}),

@@ -376,6 +376,7 @@ describe("subscription RPC handlers", () => {
 												_tag: "message",
 												message: expect.objectContaining({ id: "message-1" }),
 											},
+											{ _tag: "rewind", messageId: null },
 										],
 						});
 						expect(yield* Queue.take(envelopes)).toEqual({
@@ -431,6 +432,11 @@ describe("subscription RPC handlers", () => {
 						expect(yield* Queue.take(wire)).toMatchObject({
 							_tag: "snapshot",
 							sequence: cursor,
+							rows: [
+								{ _tag: "part", part: { id: "part-1", text: "Hello" } },
+								{ _tag: "message", message: { id: "message-1" } },
+								{ _tag: "rewind", messageId: null },
+							],
 						});
 						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });
 						// Only the part's new text crosses the wire.

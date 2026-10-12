@@ -43,6 +43,7 @@ import {
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_MODEL_SETTINGS_MIGRATION,
+	SESSIONS_PENDING_REWIND_MIGRATION,
 	SESSIONS_PERMISSION_MODE_MIGRATION,
 	SESSIONS_READ_AT_MIGRATION,
 	SESSIONS_RESUMES_MIGRATION,
@@ -336,6 +337,7 @@ const expectedTableColumns = {
 		"marked_unread_at",
 		"last_turn_end_version",
 		"seen_version",
+		"pending_rewind_message_id",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -483,6 +485,7 @@ const appendedSessionColumns = [
 	"claude_worktree_state",
 	"workspace_hint",
 	"workspace_hint_sequence",
+	"pending_rewind_message_id",
 ] as const;
 
 function sameStrings(
@@ -1142,15 +1145,20 @@ export const effectMigrationEntries = {
 		"workspace_hint",
 		readMigrationSql(SESSIONS_WORKSPACE_HINT_MIGRATION),
 	),
-	"0050_message_part_versions": runAddColumnMigrationIfMissing(
+	"0050_sessions_pending_rewind": runAddColumnMigrationIfMissing(
+		"sessions",
+		"pending_rewind_message_id",
+		readMigrationSql(SESSIONS_PENDING_REWIND_MIGRATION),
+	),
+	"0051_message_part_versions": runAddColumnMigrationIfMissing(
 		"message_parts",
 		"version",
 		readMigrationSql(MESSAGE_PART_VERSIONS_MIGRATION),
 	),
-	"0051_session_git_published": executeSqlStatements(
+	"0052_session_git_published": executeSqlStatements(
 		readMigrationSql(SESSION_GIT_PUBLISHED_MIGRATION),
 	),
-	"0052_store_identity": executeSqlStatements(
+	"0053_store_identity": executeSqlStatements(
 		readMigrationSql(STORE_IDENTITY_MIGRATION),
 	),
 } satisfies Record<

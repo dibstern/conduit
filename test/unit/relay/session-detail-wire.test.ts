@@ -424,6 +424,7 @@ describe("session detail wire", () => {
 				expect(repair.rows).toMatchObject([
 					{ _tag: "part", part: { text: "Hello world" } },
 					{ _tag: "message", message: { id: "m" } },
+					{ _tag: "rewind", messageId: null },
 				]);
 				expect(yield* Queue.take(output)).toEqual({ _tag: "synchronized" });
 				expect(issued).toEqual([undefined, undefined]);

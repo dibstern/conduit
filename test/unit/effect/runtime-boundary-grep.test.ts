@@ -280,10 +280,7 @@ describe("Effect runtime boundary grep", () => {
 		const path = "src/lib/handlers/prompt.ts";
 		const source = readFileSync(join(REPO_ROOT, path), "utf8");
 		const cancelStart = source.indexOf("export const cancelSessionById");
-		const cancelEnd = source.indexOf(
-			"export const rewindSessionToMessage",
-			cancelStart,
-		);
+		const cancelEnd = source.indexOf("\nexport ", cancelStart + 1);
 		expect(cancelStart).toBeGreaterThanOrEqual(0);
 		expect(cancelEnd).toBeGreaterThan(cancelStart);
 		const cancelSource = source.slice(cancelStart, cancelEnd);

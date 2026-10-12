@@ -1,6 +1,5 @@
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { publishInputDraft } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
@@ -177,46 +176,12 @@ export const cancelSessionById = (
 		});
 	});
 
-export class RewindTargetNotFound extends Data.TaggedError(
-	"RewindTargetNotFound",
-)<{
-	readonly sessionId: string;
-	readonly messageId: string;
-	readonly message: string;
-}> {}
-
-export const rewindSessionToMessage = ({
-	clientId,
-	sessionId,
-	messageId,
-}: {
-	clientId: string;
-	sessionId: string;
-	messageId: string;
-}) =>
-	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
-		const log = yield* LoggerTag;
-
-		const messages = yield* Effect.tryPromise(() =>
-			client.session.messages(sessionId),
-		);
-		if (!messages.some((message) => message.id === messageId)) {
-			return yield* Effect.fail(
-				new RewindTargetNotFound({
-					sessionId,
-					messageId,
-					message: `Rewind target ${messageId} not found in session ${sessionId}`,
-				}),
-			);
-		}
-		yield* Effect.tryPromise(() =>
-			client.session.revert(sessionId, { messageID: messageId }),
-		);
-		log.info(
-			`client=${clientId} session=${sessionId} Reverted to message: ${messageId}`,
-		);
-	});
+export {
+	RewindTargetNotFound,
+	RewindUnavailable,
+	rewindSessionToMessage,
+	undoSessionRewind,
+} from "../domain/relay/Services/session-rewind.js";
 
 export const syncInputDraftForSession = ({
 	sessionId,

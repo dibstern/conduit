@@ -359,6 +359,8 @@ const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 		}
 		case "inbox":
 			return { ...entry, ...item.inbox };
+		case "rewind":
+			return { ...entry, pendingRewindMessageId: item.messageId };
 	}
 };
 
@@ -378,6 +380,7 @@ export function applyTranscriptEnvelope(
 					partOrder: new Map(),
 					hasMore: false,
 					pending: [],
+					pendingRewindMessageId: null,
 					paused: false,
 					steer: undefined,
 				}),
@@ -742,9 +745,18 @@ function transcriptView(): {
 											sessionId,
 											ledger,
 											saved: first,
+											// A version can carry several rows, and the feed may have
+											// stopped after only some of them: replay the held one.
+											// Rows the checksum does not cover (the rewind point, the
+											// inbox, pending inputs) are only recovered this way.
 											...(slot.messages.transcript?.hwm == null
 												? {}
-												: { resumeFromSequence: slot.messages.transcript.hwm }),
+												: {
+														resumeFromSequence: Math.max(
+															0,
+															slot.messages.transcript.hwm - 1,
+														),
+													}),
 										});
 									}),
 									(status) => {

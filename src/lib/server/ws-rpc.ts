@@ -175,6 +175,7 @@ export {
 	SwitchVariant,
 	type SwitchVariantResponse,
 	SyncInputDraft,
+	UndoRewind,
 	UnsnoozeSession,
 	ViewSession,
 	WsRpcError,

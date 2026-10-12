@@ -69,6 +69,9 @@ export const CANONICAL_EVENT_TYPES = [
 	"input.cancelled",
 	"session.created",
 	"session.renamed",
+	"session.rewound",
+	"session.rewind_undone",
+	"session.rewind_committed",
 	"session.workspace_changed",
 	"session.workspace_hint_changed",
 	"session.workspace_started",
@@ -141,6 +144,7 @@ export interface MessageSnapshotPayload {
 		readonly sessionID: string;
 		readonly role: string;
 		readonly parentID?: string;
+		readonly summary?: boolean;
 		readonly time?: { readonly created?: number; readonly completed?: number };
 		readonly cost?: number;
 		readonly tokens?: {
@@ -620,6 +624,9 @@ export interface EventPayloadMap {
 	"input.cancelled": InputCancelledPayload;
 	"session.created": SessionCreatedPayload;
 	"session.renamed": SessionRenamedPayload;
+	"session.rewound": { readonly messageId: string };
+	"session.rewind_undone": Record<string, never>;
+	"session.rewind_committed": { readonly messageId: string };
 	"session.workspace_changed": SessionWorkspaceChangedPayload;
 	"session.workspace_hint_changed": SessionWorkspaceHintChangedPayload;
 	"session.workspace_started": SessionWorkspaceStartedPayload;
@@ -1506,6 +1513,12 @@ export const CanonicalEventSchema = Schema.Union(
 	InputCancelledEventSchema,
 	SessionCreatedEventSchema,
 	SessionRenamedEventSchema,
+	eventEnvelope("session.rewound", Schema.Struct({ messageId: Schema.String })),
+	eventEnvelope("session.rewind_undone", Schema.Struct({})),
+	eventEnvelope(
+		"session.rewind_committed",
+		Schema.Struct({ messageId: Schema.String }),
+	),
 	SessionWorkspaceChangedEventSchema,
 	SessionWorkspaceHintChangedEventSchema,
 	SessionWorkspaceStartedEventSchema,

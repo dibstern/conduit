@@ -1,8 +1,9 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockOpenCodeAPI,
@@ -14,7 +15,7 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer RewindSession", () => {
-	it.effect("rejects an unknown provider target without reverting", () => {
+	it.effect("rejects an unknown transcript target without reverting", () => {
 		const api = makeMockOpenCodeAPI();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -37,17 +38,29 @@ describe("WsRpcServerLayer RewindSession", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							seedEvents: [
+								canonicalEvent(
+									"session.created",
+									"session-1",
+									{
+										sessionId: "session-1",
+										title: "Rewind",
+										provider: "opencode",
+									},
+									{ provider: "opencode" },
+								),
+							],
+						}),
+					),
 				),
 			),
 		);
 	});
 	it.effect("reverts the requested session", () => {
 		const api = makeMockOpenCodeAPI();
-		vi.mocked(api.session.messages).mockResolvedValue([
-			{ id: "message-1", sessionID: "session-1", role: "user", parts: [] },
-		]);
-
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 
@@ -69,7 +82,33 @@ describe("WsRpcServerLayer RewindSession", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							seedEvents: [
+								canonicalEvent(
+									"session.created",
+									"session-1",
+									{
+										sessionId: "session-1",
+										title: "Rewind",
+										provider: "opencode",
+									},
+									{ provider: "opencode" },
+								),
+								canonicalEvent(
+									"message.created",
+									"session-1",
+									{
+										messageId: "message-1",
+										sessionId: "session-1",
+										role: "user",
+									},
+									{ provider: "opencode" },
+								),
+							],
+						}),
+					),
 				),
 			),
 		);
