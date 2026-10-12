@@ -6,6 +6,7 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -38,6 +39,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	MOCK_PROJECT_DIR,
+	makeMockAccountDirectory,
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
@@ -136,6 +138,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						SessionManagerServiceTag,
 						makeMockSessionManagerService(),
 					),
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag, {
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
@@ -240,6 +243,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					SessionManagerServiceTag,
 					makeMockSessionManagerService(),
 				),
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag, {
 					httpServer: createServer(),
 					opencodeUrl: "http://127.0.0.1:1",
@@ -349,6 +353,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						SessionManagerServiceTag,
 						makeMockSessionManagerService(),
 					),
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag, {
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",
@@ -480,6 +485,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						SessionManagerServiceTag,
 						makeMockSessionManagerService(),
 					),
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag, {
 						httpServer: createServer(),
 						opencodeUrl: "http://127.0.0.1:1",

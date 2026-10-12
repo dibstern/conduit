@@ -5,17 +5,14 @@
 // Extracted from createProjectRelay() — all closure captures are explicit params.
 
 import { SqlClient } from "@effect/sql";
-import { Cause, Deferred, Effect, FiberId, Runtime } from "effect";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import { Cause, Deferred, Effect, FiberId, Option, Runtime } from "effect";
+import type { Account, AccountRef } from "../contracts/account.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	type AlertsTag,
 	publishAlert,
 } from "../domain/relay/Services/alerts.js";
-import { OPENCODE_PROVIDER_ID } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { StatusPollerTag } from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
@@ -104,6 +101,7 @@ interface LegacyStatusPollerPort {
 }
 
 export interface MonitoringWiringDeps {
+	readonly resolveAccount: (ref: AccountRef) => Promise<Account | undefined>;
 	client: OpenCodeSessionReaderLike;
 	wsHandler: MonitoringWsHandlerLike;
 	sessionService: SessionServiceLike;
@@ -147,7 +145,7 @@ export interface MonitoringWiringResult {
 
 export type EffectMonitoringWiringDeps = Omit<
 	MonitoringWiringDeps,
-	"sessionService" | "processingTimeouts" | "statusPoller"
+	"sessionService" | "processingTimeouts" | "statusPoller" | "resolveAccount"
 >;
 
 export type EffectMonitoringWiringResult = Omit<
@@ -169,16 +167,8 @@ export function createMonitoringWiringState(): MonitoringWiringStateAccess {
 	};
 }
 
-function providerStreamsLifecycle(
-	daemonConfig: ReturnType<typeof loadDaemonConfig>,
-	provider: string | undefined,
-): boolean {
-	const driver =
-		provider === undefined
-			? undefined
-			: resolveProviderRoutingDriver(daemonConfig, provider);
-	return driver !== undefined && driver !== OPENCODE_PROVIDER_ID;
-}
+const providerStreamsLifecycle = (account: Account | undefined): boolean =>
+	account?.driver === "claude";
 
 const processAndApplyDoneEffect = (
 	sessionId: string,
@@ -400,6 +390,7 @@ export function wireMonitoring(
 	deps: MonitoringWiringDeps,
 ): MonitoringWiringResult {
 	const {
+		resolveAccount,
 		client,
 		wsHandler,
 		sessionService,
@@ -516,7 +507,13 @@ export function wireMonitoring(
 			activityOnly: true,
 		});
 		const providers = statusPoller.getSessionProviders?.();
-		const daemonConfig = loadDaemonConfig(config.configDir);
+		const accounts = new Map(
+			await Promise.all(
+				Array.from(new Set(providers?.values())).map(
+					async (id) => [id, await resolveAccount({ _tag: "Id", id })] as const,
+				),
+			),
+		);
 		const now = Date.now();
 		const prevState = getMonitoringState();
 		const contexts = new Map<string, SessionEvalContext>();
@@ -527,6 +524,7 @@ export function wireMonitoring(
 		)) {
 			const status = statuses[sessionId];
 			if (status == null) continue;
+			const boundId = providers?.get(sessionId);
 			contexts.set(
 				sessionId,
 				assembleContext(
@@ -537,7 +535,9 @@ export function wireMonitoring(
 					parentMap,
 					(sid) => wsHandler.getClientsForSession(sid).length > 0,
 					now,
-					providerStreamsLifecycle(daemonConfig, providers?.get(sessionId)),
+					providerStreamsLifecycle(
+						boundId === undefined ? undefined : accounts.get(boundId),
+					),
 				),
 			);
 		}
@@ -589,10 +589,15 @@ export const wireMonitoringEffect = (
 ): Effect.Effect<
 	EffectMonitoringWiringResult,
 	never,
-	SessionManagerServiceTag | StatusPollerTag | OverridesStateTag | AlertsTag
+	| SessionManagerServiceTag
+	| StatusPollerTag
+	| OverridesStateTag
+	| AlertsTag
+	| AccountDirectory
 > =>
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;
+		const directory = yield* AccountDirectory;
 		const runtime = yield* Effect.runtime<
 			SessionManagerServiceTag | OverridesStateTag | AlertsTag
 		>();
@@ -630,7 +635,18 @@ export const wireMonitoringEffect = (
 					if (!monitoringActive) return;
 					const sessionService = yield* SessionManagerServiceTag;
 					const providers = yield* statusPoller.getSessionProviders();
-					const daemonConfig = loadDaemonConfig(config.configDir);
+					const accounts = new Map(
+						yield* Effect.forEach(
+							Array.from(new Set(providers.values())),
+							(id) =>
+								directory.resolve({ _tag: "Id", id }).pipe(
+									Effect.option,
+									Effect.map(
+										(account) => [id, Option.getOrUndefined(account)] as const,
+									),
+								),
+						),
+					);
 
 					if (statusesChanged) {
 						yield* sessionService
@@ -663,6 +679,7 @@ export const wireMonitoringEffect = (
 						)) {
 							const status = statuses[sessionId];
 							if (status == null) continue;
+							const boundId = providers.get(sessionId);
 							contexts.set(
 								sessionId,
 								assembleContext(
@@ -674,8 +691,7 @@ export const wireMonitoringEffect = (
 									(sid) => wsHandler.getClientsForSession(sid).length > 0,
 									now,
 									providerStreamsLifecycle(
-										daemonConfig,
-										providers.get(sessionId),
+										boundId === undefined ? undefined : accounts.get(boundId),
 									),
 								),
 							);

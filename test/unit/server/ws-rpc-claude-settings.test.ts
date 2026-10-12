@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
-import { expect } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import { CLAUDE_TRUST_TIERED_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
 import {
 	type ProjectSettingsEnvelope,
@@ -17,6 +17,17 @@ import {
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-rpc-settings-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
 
 describe("WsRpcServerLayer Claude settings", () => {
 	it.effect("reads, persists, and publishes global overrides", () => {

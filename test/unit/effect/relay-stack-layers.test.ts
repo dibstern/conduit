@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
@@ -18,13 +19,17 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
-const configLayer = Layer.succeed(ConfigTag, makeMockConfig());
+const configLayer = Layer.mergeAll(
+	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+	Layer.succeed(ConfigTag, makeMockConfig()),
+);
 const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 const openCodeApi = makeMockOpenCodeAPI();
 const relayStateTestLayer = RelayStateLive.pipe(

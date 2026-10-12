@@ -8,7 +8,8 @@ import type { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
 
-import type { ProviderDriverKind } from "../contracts/provider-instance.js";
+import type { Account } from "../contracts/account.js";
+import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -108,6 +109,7 @@ export interface DiscoverCommand {
 	readonly type: "discover";
 	readonly commandId?: string;
 	readonly providerId: string;
+	readonly account?: Account;
 	readonly workspaceRoot?: string;
 }
 
@@ -117,6 +119,7 @@ export interface EndSessionCommand {
 	readonly sessionId: string;
 	/** Explicit provider-instance route captured before session projections change. */
 	readonly targetProviderId?: string;
+	readonly account?: Account;
 	/** Default false -- keep binding. Set true to also unbind. */
 	readonly unbind?: boolean;
 }
@@ -178,9 +181,10 @@ export interface OrchestrationEngineOptions {
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
-	readonly resolveProviderDriver?: (
-		providerId: string,
-	) => ProviderDriverKind | undefined;
+	readonly accountDirectory?: Pick<
+		AccountDirectory["Type"],
+		"resolve" | "defaultFor"
+	>;
 }
 
 interface DurableCommandRuntime {
@@ -230,9 +234,7 @@ const ORPHANED_TURN_RESULT: TurnResult = {
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
-	private readonly resolveProviderDriver:
-		| ((providerId: string) => ProviderDriverKind | undefined)
-		| undefined;
+	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
 	private readonly durable?: DurableCommandRuntime;
 	private readonly inFlightCommands = new Map<
 		string,
@@ -244,7 +246,7 @@ export class OrchestrationEngine {
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
-		this.resolveProviderDriver = options.resolveProviderDriver;
+		this.accountDirectory = options.accountDirectory;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
@@ -273,8 +275,8 @@ export class OrchestrationEngine {
 					...(options.defaultClaudeLaunchConfig
 						? { defaultClaudeLaunchConfig: options.defaultClaudeLaunchConfig }
 						: {}),
-					...(this.resolveProviderDriver
-						? { resolveProviderDriver: this.resolveProviderDriver }
+					...(this.accountDirectory
+						? { accountDirectory: this.accountDirectory }
 						: {}),
 				}),
 				sql: durable.sql,
@@ -472,7 +474,10 @@ export class OrchestrationEngine {
 			// Provider lookup before durable commit: a lookup failure consumes no
 			// receipt and can be retried after registration. The reactor re-looks
 			// up the instance when it executes; this is the pre-commit fail-fast.
-			yield* this.getProviderInstanceEffect(command.providerId);
+			yield* this.getProviderInstanceEffect(
+				command.providerId,
+				command.input.account,
+			);
 
 			yield* this.commitAcceptedSendTurn(
 				command,
@@ -536,9 +541,7 @@ export class OrchestrationEngine {
 		| Error
 		| CommandPayloadSerializationFailed
 	> {
-		const driver = this.resolveProviderDriver
-			? this.resolveProviderDriver(command.providerId)
-			: command.providerId;
+		const driver = command.input.account?.driver ?? command.providerId;
 		// The rewind range and request sequence share ingestion's write boundary:
 		// a backfill accepted before this write must be removed by this commit.
 		const commit = Effect.gen(function* () {
@@ -595,6 +598,7 @@ export class OrchestrationEngine {
 		return Effect.gen(this, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
+				command.input.account,
 			);
 			yield* command.onAccepted ?? Effect.void;
 			return yield* this.sendTurnThroughInstanceEffect(command, instance);
@@ -736,6 +740,7 @@ export class OrchestrationEngine {
 		return Effect.gen(this, function* () {
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
+				command.account,
 			);
 			return yield* instance
 				.discoverEffect(command.workspaceRoot)
@@ -773,7 +778,10 @@ export class OrchestrationEngine {
 				return;
 			}
 			const endSession = Effect.gen(this, function* () {
-				const instance = yield* this.getProviderInstanceEffect(providerId);
+				const instance = yield* this.getProviderInstanceEffect(
+					providerId,
+					command.account,
+				);
 				yield* Effect.sync(() =>
 					log.info(
 						`Dispatching endSession: session=${command.sessionId} provider=${providerId}`,
@@ -852,14 +860,17 @@ export class OrchestrationEngine {
 
 	private getProviderInstanceEffect(
 		providerId: string,
+		account?: Account,
 	): Effect.Effect<ProviderInstance, ProviderNotRegistered> {
-		const driver = this.resolveProviderDriver
-			? this.resolveProviderDriver(providerId)
-			: providerId;
-		if (driver === undefined) {
-			return Effect.fail(new ProviderNotRegistered({ providerId }));
-		}
-		return this.registry.getInstanceEffect(driver);
+		if (account) return this.registry.getInstanceEffect(account.driver);
+		if (this.accountDirectory)
+			return this.accountDirectory.resolve({ _tag: "Id", id: providerId }).pipe(
+				Effect.flatMap((resolved) =>
+					this.registry.getInstanceEffect(resolved.driver),
+				),
+				Effect.mapError(() => new ProviderNotRegistered({ providerId })),
+			);
+		return this.registry.getInstanceEffect(providerId);
 	}
 
 	private requireProviderForSessionEffect(

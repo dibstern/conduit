@@ -12,10 +12,6 @@ import {
 	WorkspaceMoveError,
 } from "../../../contracts/session-workspace.js";
 import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { readWorktrees, realWorkspacePath } from "../../../git/worktrees.js";
 import {
@@ -25,6 +21,7 @@ import {
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { readClaudeWorktreeState } from "../../../session/claude-worktree-state.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "../Services/services.js";
 import {
@@ -45,6 +42,7 @@ type Dependencies = Effect.Effect.Context<
 export const SessionWorkspaceLive = Layer.effect(
 	SessionWorkspaceTag,
 	Effect.gen(function* () {
+		const accounts = yield* AccountDirectory;
 		const config = yield* ConfigTag;
 		const read = yield* ReadQueryEffectTag;
 		const sql = yield* SqlClient.SqlClient;
@@ -120,10 +118,18 @@ export const SessionWorkspaceLive = Layer.effect(
 		) =>
 			Effect.gen(function* () {
 				const { row, workspace: previous } = yield* readWorkspace(sessionId);
-				const driver = resolveProviderRoutingDriver(
-					loadDaemonConfig(config.configDir),
-					row.provider,
-				);
+				const account = yield* accounts
+					.resolve({ _tag: "Id", id: row.provider })
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "workspace.resolve",
+									cause,
+								}),
+						),
+					);
+				const driver = account.driver;
 				if (
 					!driver ||
 					!isKnownDriverKind(driver) ||
@@ -368,7 +374,7 @@ export const SessionWorkspaceLive = Layer.effect(
 						const ownership = yield* readSessionWorktreeOwnership(
 							sessionId,
 							false,
-						);
+						).pipe(Effect.provideService(ConfigTag, config));
 						if (ownership.length === 0)
 							return yield* new WorktreeBranchRenameError({
 								folder: config.projectDir,
@@ -441,6 +447,7 @@ export const SessionWorkspaceLive = Layer.effect(
 						}).pipe(Effect.uninterruptible);
 					}).pipe(
 						Effect.provide(services),
+						Effect.provideService(ConfigTag, config),
 						Effect.mapError((cause) =>
 							cause instanceof WorktreeBranchRenameError ||
 							cause instanceof SessionCommandError

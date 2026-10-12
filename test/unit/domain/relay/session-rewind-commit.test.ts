@@ -2,6 +2,7 @@ import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
 import { Context, Deferred, Effect, Fiber, Layer } from "effect";
 import { expect } from "vitest";
+import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -35,6 +36,7 @@ import { CommandReadModelRepository } from "../../../../src/lib/provider/orchest
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../../src/lib/provider/types.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -45,6 +47,7 @@ import {
 
 const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 const services = Layer.mergeAll(
+	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 	persistence,
 	makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
@@ -142,7 +145,7 @@ it.scoped(
 			};
 			const engine = new OrchestrationEngine({
 				registry: new ProviderRegistry([provider]),
-				resolveProviderDriver: () => "opencode",
+				accountDirectory: makeMockAccountDirectory(),
 				durableCommands: {
 					sql,
 					projectKey: "test-project",

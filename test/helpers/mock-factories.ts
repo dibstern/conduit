@@ -14,8 +14,15 @@
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
 import { tmpdir } from "node:os";
-import { Effect, Layer, Stream } from "effect";
+import { join } from "node:path";
+import { Effect, Layer, Option, Stream } from "effect";
 import { vi } from "vitest";
+import type { Account } from "../../src/lib/contracts/account.js";
+import { AccountIdSchema } from "../../src/lib/contracts/provider-instance.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	type DaemonState,
@@ -125,6 +132,7 @@ import {
 	ReadQueryEffectTag,
 } from "../../src/lib/persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
 import { OrchestrationEngine } from "../../src/lib/provider/orchestration-engine.js";
 import type { OrchestrationLayer } from "../../src/lib/provider/orchestration-wiring.js";
 import {
@@ -285,6 +293,9 @@ function createMockConfig(): HandlerDeps["config"] {
 		httpServer: {} as HandlerDeps["config"]["httpServer"],
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
+		configDir:
+			process.env["CONDUIT_CONFIG_DIR"] ??
+			join(tmpdir(), "conduit-test-config"),
 		slug: "test-project",
 		persistenceDbPath: "/test/config/projects/test-project/events.db",
 		publishGlobalSetting: () => Effect.void,
@@ -764,11 +775,42 @@ export function makeMockConfig(
 	} as unknown as ProjectRelayConfig;
 }
 
+/** Real directory rules over explicit test accounts, with no disk or login reads. */
+export function makeMockAccountDirectory(
+	accounts: ReadonlyArray<Account> = [
+		{
+			driver: "claude",
+			id: AccountIdSchema.make("claude"),
+			name: "Claude",
+			folder: configuredClaudeConfigDir(`${tmpdir()}/conduit-test-login`),
+			usageEligible: true,
+		},
+		{
+			driver: "opencode",
+			id: AccountIdSchema.make("opencode"),
+			name: "OpenCode",
+		},
+	],
+): AccountDirectory["Type"] {
+	return makeAccountDirectory(
+		Effect.succeed({
+			accounts,
+			defaults: {
+				claude: Option.fromNullable(
+					accounts.find((account) => account.driver === "claude")?.id,
+				),
+			},
+			deleted: [],
+		}),
+	);
+}
+
 /**
  * Options for building the handler-level test Layer.
  * Every field is optional — defaults are used for omitted fields.
  */
 export interface TestHandlerLayerOptions {
+	accountDirectory?: AccountDirectory["Type"];
 	api?: OpenCodeAPI;
 	wsHandler?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
@@ -852,6 +894,10 @@ export function makeTestHandlerLayer(
 	const overridesStateLayer = makeOverridesStateLive();
 	const openCodeApiLayer = Layer.succeed(OpenCodeAPITag, api);
 	const configLayer = Layer.succeed(ConfigTag, config);
+	const accountDirectoryLayer = Layer.succeed(
+		AccountDirectory,
+		opts?.accountDirectory ?? makeMockAccountDirectory(),
+	);
 	const loggerLayer = Layer.succeed(LoggerTag, log);
 	const orchestrationLayer = Layer.succeed(
 		OrchestrationEngineTag,
@@ -934,7 +980,7 @@ export function makeTestHandlerLayer(
 		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
 	);
 	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
-		Layer.provide(configLayer),
+		Layer.provide(Layer.mergeAll(configLayer, accountDirectoryLayer)),
 	);
 	const scanServiceLayer = ScanServiceLive.pipe(Layer.provide(configLayer));
 	const agentServiceLayer = AgentServiceLive.pipe(
@@ -974,6 +1020,7 @@ export function makeTestHandlerLayer(
 						Layer.succeed(StatusPollerTag, statusPoller),
 						DaemonEventBusLive,
 						configLayer,
+						accountDirectoryLayer,
 						wsHandlerLayer,
 						RelayStatusSnapshotLive,
 						openCodeInstancesLayer,
@@ -997,6 +1044,7 @@ export function makeTestHandlerLayer(
 				wsHandlerLayer,
 				loggerLayer,
 				configLayer,
+				accountDirectoryLayer,
 				sessionManagerServiceLayer,
 				PendingInteractionServiceLive,
 				overridesStateLayer,
@@ -1048,6 +1096,7 @@ export function makeTestHandlerLayer(
 		InputDraftsLive,
 		ptyManagerLayer,
 		configLayer,
+		accountDirectoryLayer,
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
@@ -1062,7 +1111,7 @@ export function makeTestHandlerLayer(
 		...(instanceMgmt == null
 			? []
 			: [Layer.succeed(InstanceMgmtTag, instanceMgmt)]),
-	);
+	).pipe(Layer.provide(accountDirectoryLayer));
 }
 
 // Convenience wrappers around the Effect state Layer factories from

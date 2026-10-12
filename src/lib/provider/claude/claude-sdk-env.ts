@@ -1,5 +1,11 @@
-import { basename, dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { Schema } from "effect";
+import type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
+import { ClaudeConfigDirSchema as ClaudeConfigDirWireSchema } from "../../contracts/claude-config-dir.js";
+
+export type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
+
 import type { Options as SDKOptions } from "./types.js";
 
 const DIRECT_ANTHROPIC_ENV_KEYS = [
@@ -19,24 +25,16 @@ const DIRECT_ANTHROPIC_ENV_KEYS = [
 	"ANTHROPIC_SMALL_FAST_MODEL",
 ] as const;
 
-const ConfigDirPath = Schema.String.pipe(
-	Schema.filter((path) => path.trim().length > 0, {
-		message: () => "Claude config directory must be non-empty",
-	}),
+export const ClaudeConfigDirSchema = ClaudeConfigDirWireSchema.pipe(
+	Schema.filter(
+		(folder) =>
+			folder._tag === "Configured" ||
+			basename(resolve(folder.path)) === ".claude",
+		{
+			message: () => "Claude SDK default folder must be a .claude directory",
+		},
+	),
 );
-
-export const ClaudeConfigDirSchema = Schema.Union(
-	Schema.TaggedStruct("SdkDefault", {
-		path: ConfigDirPath.pipe(
-			Schema.filter((path) => basename(resolve(path)) === ".claude", {
-				message: () => "Claude SDK default folder must be a .claude directory",
-			}),
-		),
-	}),
-	Schema.TaggedStruct("Configured", { path: ConfigDirPath }),
-);
-
-export type ClaudeConfigDir = typeof ClaudeConfigDirSchema.Type;
 
 export const sdkDefaultClaudeConfigDir = (path: string): ClaudeConfigDir => ({
 	_tag: "SdkDefault",
@@ -47,6 +45,17 @@ export const configuredClaudeConfigDir = (path: string): ClaudeConfigDir => ({
 	_tag: "Configured",
 	path,
 });
+
+/** Capture once at a composition root, before daemon startup edits its env. */
+export function captureClaudeLaunchLogin(
+	baseEnv: Readonly<Record<string, string | undefined>>,
+	override?: string,
+): ClaudeConfigDir {
+	const path = override ?? baseEnv["CLAUDE_CONFIG_DIR"];
+	return path === undefined
+		? sdkDefaultClaudeConfigDir(join(baseEnv["HOME"] ?? homedir(), ".claude"))
+		: configuredClaudeConfigDir(path);
+}
 
 export const ClaudeFolderSourceSchema = Schema.Literal(
 	"account",
@@ -63,6 +72,7 @@ export interface ClaudeLaunchConfig {
 export function makeClaudeSdkEnv(
 	opts: Pick<ClaudeLaunchConfig, "configDir"> & {
 		baseEnv?: Readonly<Record<string, string | undefined>> | undefined;
+		accountEnv?: Readonly<Record<string, string>> | undefined;
 	},
 ): NonNullable<SDKOptions["env"]> {
 	const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
@@ -74,6 +84,7 @@ export function makeClaudeSdkEnv(
 	for (const key of DIRECT_ANTHROPIC_ENV_KEYS) {
 		delete env[key];
 	}
+	Object.assign(env, opts.accountEnv);
 	env["CLAUDE_AGENT_SDK_CLIENT_APP"] = "conduit";
 	// claude.ai account connectors (Gmail, Drive, ...) otherwise load into every
 	// session, and their "sign in again" notices leak into model replies.

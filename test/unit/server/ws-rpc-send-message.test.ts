@@ -89,6 +89,7 @@ describe("WsRpcServerLayer input.submit", () => {
 				Effect.zipRight(command.onAccepted ?? Effect.void, Effect.never),
 		);
 		const engine = withDispatchEffect({ dispatchEffect });
+		engine.bindSession("session-1", "opencode");
 		const recordMessageActivity = vi.fn(() => Effect.void);
 
 		return Effect.gen(function* () {
@@ -142,6 +143,7 @@ describe("WsRpcServerLayer input.submit", () => {
 				Effect.zipRight(command.onAccepted ?? Effect.void, Effect.never),
 		);
 		const engine = withDispatchEffect({ dispatchEffect });
+		engine.bindSession("session-1", "opencode");
 
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;

@@ -1,9 +1,11 @@
 import { Cause, Effect, Either, Ref } from "effect";
-import type { AccountId } from "../contracts/provider-instance.js";
 import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+	type Account,
+	type AccountRef,
+	accountRefFromSelection,
+} from "../contracts/account.js";
+import type { AccountId } from "../contracts/provider-instance.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -32,10 +34,7 @@ import {
 	newestRowsWithin,
 	PAGE_FRAME_BUDGET,
 } from "../persistence/session-history-adapter.js";
-import {
-	harnessForModelProvider,
-	resolveTurnSettings,
-} from "../provider/turn-settings.js";
+import { resolveTurnSettings } from "../provider/turn-settings.js";
 import {
 	loadModelCatalog,
 	savedVariantFor,
@@ -134,6 +133,8 @@ export const createSessionForClient = <E = never>({
 	title,
 	instanceId,
 	providerId,
+	accountRef,
+	account: resolvedAccount,
 	model,
 	initializeWorkspace,
 	sessionId,
@@ -142,6 +143,8 @@ export const createSessionForClient = <E = never>({
 	readonly title?: string;
 	readonly instanceId?: AccountId;
 	readonly providerId?: string;
+	readonly accountRef?: AccountRef;
+	readonly account?: Account;
 	readonly sessionId?: string;
 	readonly model?: {
 		readonly modelId: string;
@@ -153,35 +156,26 @@ export const createSessionForClient = <E = never>({
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
+		const accounts = yield* AccountDirectory;
+		const account =
+			resolvedAccount ??
+			(yield* accounts.resolve(
+				accountRef ??
+					accountRefFromSelection({
+						instanceId,
+						providerId,
+						model:
+							model === undefined
+								? undefined
+								: { providerID: model.providerId },
+					}),
+			));
 		// Validate before creating either a durable row or an upstream session.
 		const picked = model
 			? yield* Effect.gen(function* () {
-					const config = yield* ConfigTag;
 					const defaults = yield* Ref.get(yield* OverridesStateTag);
-					const requestedProvider = providerId?.trim();
-					const instanceHarness =
-						instanceId === undefined
-							? undefined
-							: resolveProviderRoutingDriver(
-									loadDaemonConfig(config.configDir),
-									instanceId,
-								);
-					// Match the creator's existing explicit-instance / provider / default order.
-					const harness =
-						(instanceHarness === undefined
-							? undefined
-							: harnessForModelProvider(instanceHarness)) ??
-						(requestedProvider &&
-						requestedProvider !== "claude-sdk" &&
-						harnessForModelProvider(requestedProvider) === "opencode"
-							? "opencode"
-							: harnessForModelProvider(
-									defaults.defaultModel?.providerID ?? "claude",
-								));
-					const catalog = yield* loadModelCatalog(
-						harness,
-						instanceId ?? harness,
-					);
+					const harness = account.driver;
+					const catalog = yield* loadModelCatalog(harness, account.id);
 					const resolved = resolveTurnSettings(
 						{ harness, model, effort: model.variant ?? "", contextWindow: "" },
 						catalog,
@@ -209,14 +203,10 @@ export const createSessionForClient = <E = never>({
 				})
 			: undefined;
 
-		const create =
-			instanceId != null || providerId != null || sessionId != null
-				? sessionManagerService.createSession(title, {
-						...(instanceId != null ? { instanceId } : {}),
-						...(providerId != null ? { providerId } : {}),
-						...(sessionId != null ? { sessionId } : {}),
-					})
-				: sessionManagerService.createSession(title);
+		const create = sessionManagerService.createSession(title, {
+			account,
+			...(sessionId != null ? { sessionId } : {}),
+		});
 		return yield* Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
 				// Protect the id handoff for workspace initialization, then allow

@@ -47,7 +47,8 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 		options?: SDKOptions;
 	}) => Q,
 	makeOptions: (abortController: AbortController) => SDKOptions,
-	launchConfig: Pick<ClaudeLaunchConfig, "configDir">,
+	launchConfig: Pick<ClaudeLaunchConfig, "configDir"> &
+		Pick<ClaudePreWarmSessionInput, "account">,
 	prepareQuery?: () => Promise<void>,
 ): Effect.Effect<EmptyClaudeQuery<Q>, ClaudeAdapterError> =>
 	Effect.gen(function* () {
@@ -67,6 +68,10 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 					env: makeClaudeSdkEnv({
 						...launchConfig,
 						baseEnv: launch.env,
+						accountEnv:
+							launchConfig.account?.driver === "claude"
+								? launchConfig.account.env
+								: undefined,
 					}),
 				};
 				return {

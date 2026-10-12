@@ -3,7 +3,10 @@ import {
 	ClaudeSettingsResolveError,
 	ClaudeSettingsTrustBoundaryError,
 } from "../../contracts/claude-settings.js";
-import { DEFAULT_USAGE_LIMITS } from "../../contracts/limit-recovery.js";
+import {
+	AccountUnroutable,
+	DEFAULT_USAGE_LIMITS,
+} from "../../contracts/limit-recovery.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { ConfigPersistenceTag } from "../../domain/daemon/Services/config-persistence-service.js";
@@ -153,7 +156,8 @@ export const settingsHandlers = {
 				resolved,
 			})),
 			Effect.mapError((error) =>
-				error instanceof ClaudeSettingsResolveError
+				error instanceof ClaudeSettingsResolveError ||
+				error instanceof AccountUnroutable
 					? error
 					: new WsRpcError({
 							message: `ResolveClaudeSettings failed: ${String(error)}`,

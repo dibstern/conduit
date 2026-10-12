@@ -11,23 +11,15 @@ import {
 	Option,
 	Ref,
 } from "effect";
-import {
-	type AccountId,
-	isKnownDriverKind,
-	type KnownProviderDriverKind,
-} from "../../../contracts/provider-instance.js";
-import {
-	loadDaemonConfig,
-	resolveInstanceDriver,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
+import type { Account } from "../../../contracts/account.js";
+import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
+import type { AccountId } from "../../../contracts/provider-instance.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../daemon/account-directory.js";
 import { formatErrorDetail } from "../../../errors.js";
-import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type {
 	SessionDetail,
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
-import type { Logger } from "../../../logger.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	type EventStoreEffect,
@@ -43,11 +35,10 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
-import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
-import { assertNever } from "../../../utils.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	DaemonEventBusTag,
 	publishSessionCreated,
@@ -109,9 +100,6 @@ import {
 } from "./session-manager-triage.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
 
-const CLAUDE_PROVIDER_ID = "claude";
-const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
-
 const PROVIDER_CLEANUP_TIMEOUT = "2 seconds";
 // Provider response bodies are untrusted; bound both durable receipts and the
 // matching warning so one cleanup failure cannot create oversized diagnostics.
@@ -153,8 +141,7 @@ export type ListSessionsOptions = {
 };
 
 export interface CreateSessionOptions {
-	readonly instanceId?: AccountId;
-	readonly providerId?: string;
+	readonly account?: Account;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
 }
@@ -244,33 +231,15 @@ export const initialize = (title?: string) =>
 export const createLocalSessionId = (): string =>
 	`ses_${randomUUID().replaceAll("-", "")}`;
 
-const getLocalSessionProvider = () =>
-	Effect.gen(function* () {
-		const configuredProvider = yield* getConfiguredLocalSessionProvider();
-		return configuredProvider ?? "claude";
-	});
-
-const getConfiguredLocalSessionProvider = () =>
-	Effect.gen(function* () {
-		const overrides = yield* OverridesStateTag;
-		const state = yield* Ref.get(overrides);
-		return state.defaultModel?.providerID;
-	});
-
 const createLocalSession = (
-	title?: string,
-	selectedInstanceId?: AccountId,
+	title: string | undefined,
+	account: Extract<Account, { driver: "claude" }>,
 	reservedSessionId?: string,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 
-		const provider =
-			selectedInstanceId === undefined
-				? reservedSessionId === undefined
-					? yield* getLocalSessionProvider()
-					: "claude"
-				: selectedInstanceId;
+		const provider = account.id;
 		const sessionId = reservedSessionId ?? createLocalSessionId();
 		const now = Date.now();
 		const sessionTitle = normalizeSessionTitle(title);
@@ -278,10 +247,13 @@ const createLocalSession = (
 		// The id is chosen here rather than upstream, so creation is one command:
 		// the seam appends session.created and the projector's upsert is what
 		// brings the sessions row into being.
-		yield* applySessionCommand({
-			type: "session.created",
-			data: { sessionId, title: sessionTitle, provider },
-		}).pipe(
+		yield* applySessionCommand(
+			{
+				type: "session.created",
+				data: { sessionId, title: sessionTitle, provider },
+			},
+			{ upstreamAdapter: null },
+		).pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({ operation: "createLocalSession", cause }),
@@ -310,7 +282,6 @@ export const deleteSession = (sessionId: string) =>
 			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
-		const configOption = yield* Effect.serviceOption(ConfigTag);
 
 		const sessions =
 			readQueryOption._tag === "Some"
@@ -371,46 +342,34 @@ export const deleteSession = (sessionId: string) =>
 		}
 
 		const capturedIdentity = capturedBinding ?? row?.provider;
-		const capturedInstanceId =
-			capturedIdentity === CLAUDE_SDK_PROVIDER_ID
-				? CLAUDE_PROVIDER_ID
-				: capturedIdentity;
+		const accountsOption = yield* Effect.serviceOption(AccountDirectory);
 		const providerResolutionExit =
-			capturedInstanceId === undefined
+			capturedIdentity === undefined
 				? undefined
 				: yield* Effect.exit(
-						Effect.sync(() => {
-							if (isKnownDriverKind(capturedInstanceId)) {
-								return capturedInstanceId;
-							}
-							return resolveProviderRoutingDriver(
-								configOption._tag === "Some"
-									? loadDaemonConfig(configOption.value.configDir)
-									: null,
-								capturedInstanceId,
-							);
-						}),
+						accountsOption._tag === "Some"
+							? accountsOption.value.resolve({
+									_tag: "Id",
+									id: capturedIdentity,
+								})
+							: Effect.fail(new Error("Account directory is unavailable")),
 					);
-		const provider =
+		const account =
 			providerResolutionExit !== undefined &&
 			Exit.isSuccess(providerResolutionExit)
 				? providerResolutionExit.value
 				: undefined;
+		const provider = account?.driver;
+		const capturedInstanceId = account?.id;
 		if (
 			providerResolutionExit !== undefined &&
 			Exit.isFailure(providerResolutionExit)
 		) {
 			cleanupFailures.push(
-				`provider_resolution: ${renderProviderCleanupDetail(
-					Cause.squash(providerResolutionExit.cause),
-				)}`,
-			);
-		} else if (capturedInstanceId !== undefined && provider === undefined) {
-			cleanupFailures.push(
-				`provider_resolution: provider driver is unavailable for "${capturedInstanceId}"`,
+				`provider_resolution: ${renderProviderCleanupDetail(Cause.squash(providerResolutionExit.cause))}`,
 			);
 		}
-		if (capturedInstanceId === undefined || provider === undefined) {
+		if (account === undefined) {
 			cleanupFailures.push(
 				"provider_route: no provider route could be determined, so cleanup was skipped",
 			);
@@ -455,7 +414,7 @@ export const deleteSession = (sessionId: string) =>
 					const providerDeleteExit = yield* Effect.exit(
 						Effect.gen(function* () {
 							let deleteApi = api;
-							if (capturedInstanceId !== "opencode") {
+							if (capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID) {
 								if (instanceClientsOption._tag === "None") {
 									return yield* Effect.fail(
 										new Error(
@@ -484,7 +443,7 @@ export const deleteSession = (sessionId: string) =>
 			});
 
 		const upstreamAdapter: SessionUpstreamAdapter = {
-			provider: provider === CLAUDE_PROVIDER_ID ? "claude" : "opencode",
+			provider: provider === "claude" ? "claude" : "opencode",
 			sync: (command) =>
 				Effect.gen(function* () {
 					const cleanupExit = yield* Effect.exit(
@@ -553,9 +512,8 @@ export const deleteSession = (sessionId: string) =>
 			const payload = {
 				sessionId,
 				provider: provider ?? capturedInstanceId ?? "unknown",
-				...(provider !== undefined &&
-				capturedInstanceId !== undefined &&
-				capturedInstanceId !== provider
+				...(capturedInstanceId !== undefined &&
+				capturedInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID
 					? { instanceId: capturedInstanceId }
 					: {}),
 				reason,
@@ -602,10 +560,12 @@ export const deleteSession = (sessionId: string) =>
 	);
 
 export interface SessionManagerService {
-	initialize(title?: string): Effect.Effect<string, SessionManagerError>;
+	initialize(
+		title?: string,
+	): Effect.Effect<string, SessionManagerError | AccountUnroutable>;
 	getDefaultSessionId(
 		title?: string,
-	): Effect.Effect<string, SessionManagerError>;
+	): Effect.Effect<string, SessionManagerError | AccountUnroutable>;
 	getLastKnownSessionCount(): Effect.Effect<number>;
 	listSessions(
 		options?: ListSessionsOptions,
@@ -614,7 +574,7 @@ export interface SessionManagerService {
 	createSession(
 		title?: string,
 		options?: CreateSessionOptions,
-	): Effect.Effect<SessionDetail, SessionManagerError>;
+	): Effect.Effect<SessionDetail, SessionManagerError | AccountUnroutable>;
 	establishOpenCodeSession(
 		session: SessionDetail,
 		providerInstanceId: AccountId,
@@ -679,220 +639,83 @@ export class SessionManagerServiceTag extends Context.Tag(
 	"SessionManagerService",
 )<SessionManagerServiceTag, SessionManagerService>() {}
 
-const makeServiceCreateSession = ({
-	api,
-	engine,
-	configDir,
-	instanceClients,
-	readQuery,
-	eventStore,
-	projectionRunner,
-	sql,
-	log,
-}: {
-	api: OpenCodeAPI;
-	engine: OrchestrationEngine;
-	configDir: string | undefined;
-	instanceClients: OpenCodeInstances;
-	readQuery: ReadQueryEffect;
-	eventStore: EventStoreEffect;
-	projectionRunner: ProjectionRunnerEffect;
-	sql: SqlClient.SqlClient;
-	log: Logger;
-}) => {
-	const serviceCreateSession = (
-		title?: string,
-		options?: CreateSessionOptions,
-	) =>
+const makeServiceCreateSession =
+	({
+		engine,
+		accounts,
+		instanceClients,
+		readQuery,
+		eventStore,
+		projectionRunner,
+		sql,
+	}: {
+		engine: OrchestrationEngine;
+		accounts: AccountDirectory["Type"];
+		instanceClients: OpenCodeInstances;
+		readQuery: ReadQueryEffect;
+		eventStore: EventStoreEffect;
+		projectionRunner: ProjectionRunnerEffect;
+		sql: SqlClient.SqlClient;
+	}) =>
+	(title?: string, options?: CreateSessionOptions) =>
 		Effect.gen(function* () {
-			const bindSessionProvider = (
-				session: SessionDetail,
-				providerId: string,
-			) =>
-				Effect.sync(() => {
-					engine.bindSession(session.id, providerId);
-				});
-			const resolveSelectedDriver = (
-				instanceId: AccountId,
-			): Effect.Effect<KnownProviderDriverKind, SessionManagerError> =>
-				Effect.gen(function* () {
-					const daemonConfig = loadDaemonConfig(configDir);
-					if (daemonConfig !== null) {
-						return resolveInstanceDriver(daemonConfig, instanceId);
-					}
-					if (isKnownDriverKind(instanceId)) {
-						return instanceId;
-					}
-					return yield* new SessionManagerError({
-						operation: "createSession.resolveInstanceDriver",
-						cause: `Cannot resolve provider instance without daemon config: ${instanceId}`,
-					});
-				});
-			const createViaOpenCode = (instanceId?: AccountId) =>
-				Effect.either(
-					Effect.gen(function* () {
-						// A session bound to an OpenCode instance is created on
-						// THAT instance's server; no explicit instance uses the
-						// project-default client. An instance that is unknown or
-						// unreachable fails the create cleanly instead of silently
-						// landing on the default server.
-						const instanceApi =
-							instanceId !== undefined
-								? yield* instanceClients.use(instanceId).pipe(
-										Effect.mapError(
-											(cause) =>
-												new SessionManagerError({
-													operation: "createSession.resolveInstanceClient",
-													cause,
-												}),
-										),
-									)
-								: undefined;
-						return yield* createOpenCodeSession(
-							title,
-							instanceId ?? "opencode",
-							options?.sessionId,
-						).pipe(
-							Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
-							Effect.provideService(ReadQueryEffectTag, readQuery),
-							Effect.provideService(EventStoreEffectTag, eventStore),
-							Effect.provideService(
-								ProjectionRunnerEffectTag,
-								projectionRunner,
-							),
-							Effect.provideService(SqlClient.SqlClient, sql),
-							Effect.mapError(
-								(cause) =>
-									new SessionManagerError({
-										operation: "createSession",
-										cause,
-									}),
-							),
-						);
-					}).pipe(Effect.scoped),
-				);
-			const createViaLocal = (instanceId?: AccountId) =>
-				Effect.either(
-					createLocalSession(title, instanceId, options?.sessionId).pipe(
-						Effect.provideService(ReadQueryEffectTag, readQuery),
-						Effect.provideService(EventStoreEffectTag, eventStore),
-						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
-						Effect.provideService(SqlClient.SqlClient, sql),
-					),
-				);
-
-			const selectedInstanceId = options?.instanceId;
-			if (selectedInstanceId !== undefined) {
-				const selectedDriver = yield* resolveSelectedDriver(selectedInstanceId);
-				switch (selectedDriver) {
-					case "claude": {
-						const localResult = yield* createViaLocal(selectedInstanceId);
-						if (localResult._tag === "Right") {
-							yield* bindSessionProvider(localResult.right, selectedInstanceId);
-							return localResult.right;
-						}
-						return yield* new SessionManagerError({
-							operation: "createSession",
-							cause: localResult.left,
-						});
-					}
-					case "opencode": {
-						const openCodeResult = yield* createViaOpenCode(selectedInstanceId);
-						if (openCodeResult._tag === "Right") {
-							yield* bindSessionProvider(
-								openCodeResult.right,
-								selectedInstanceId,
+			const account =
+				options?.account ??
+				(yield* accounts.resolve({ _tag: "DriverDefault", driver: "claude" }));
+			const create: Effect.Effect<
+				SessionDetail,
+				SessionManagerError,
+				| AccountDirectory
+				| ConfigTag
+				| LoggerTag
+				| OpenCodeAPITag
+				| ReadQueryEffectTag
+				| EventStoreEffectTag
+				| ProjectionRunnerEffectTag
+				| SqlClient.SqlClient
+			> =
+				account.driver === "claude"
+					? createLocalSession(title, account, options?.sessionId)
+					: Effect.gen(function* () {
+							const instanceApi = yield* instanceClients.use(account.id).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "createSession.resolveInstanceClient",
+											cause,
+										}),
+								),
 							);
-							return openCodeResult.right;
-						}
-						return yield* new SessionManagerError({
-							operation: "createSession",
-							cause: openCodeResult.left,
-						});
-					}
-					default:
-						return assertNever(selectedDriver);
-				}
-			}
-
-			const requestedProvider = options?.providerId?.trim();
-			const requestedLocalProvider =
-				(requestedProvider !== undefined &&
-					harnessForModelProvider(requestedProvider) === "claude") ||
-				requestedProvider === CLAUDE_SDK_PROVIDER_ID;
-			if (requestedProvider && !requestedLocalProvider) {
-				const openCodeResult = yield* createViaOpenCode();
-				if (openCodeResult._tag === "Right") {
-					yield* bindSessionProvider(openCodeResult.right, "opencode");
-					return openCodeResult.right;
-				}
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: openCodeResult.left,
-				});
-			}
-
-			const configuredProvider = yield* getConfiguredLocalSessionProvider();
-			if (
-				configuredProvider == null ||
-				harnessForModelProvider(configuredProvider) === "claude"
-			) {
-				const localResult = yield* createViaLocal();
-				if (localResult._tag === "Right") {
-					yield* bindSessionProvider(localResult.right, "claude");
-					return localResult.right;
-				}
-
-				if (options?.sessionId) return yield* localResult.left;
-				log.warn(
-					`Relay-owned Claude session create failed; falling back to OpenCode session create: ${localResult.left}`,
-				);
-				const openCodeResult = yield* createViaOpenCode();
-				if (openCodeResult._tag === "Right") {
-					yield* bindSessionProvider(openCodeResult.right, "opencode");
-					return openCodeResult.right;
-				}
-
-				return yield* new SessionManagerError({
-					operation: "createSession",
-					cause: {
-						local: localResult.left,
-						openCode: openCodeResult.left,
-					},
-				});
-			}
-
-			const openCodeResult = yield* createViaOpenCode();
-			if (openCodeResult._tag === "Right") {
-				yield* bindSessionProvider(openCodeResult.right, "opencode");
-				return openCodeResult.right;
-			}
-
-			log.warn(
-				`OpenCode session create failed; creating relay-owned session: ${openCodeResult.left}`,
+							return yield* createOpenCodeSession(
+								title,
+								account.id,
+								options?.sessionId,
+							).pipe(
+								Effect.provideService(OpenCodeAPITag, instanceApi),
+								Effect.mapError(
+									(cause) =>
+										new SessionManagerError({
+											operation: "createSession",
+											cause,
+										}),
+								),
+							);
+						}).pipe(Effect.scoped);
+			const session = yield* create.pipe(
+				Effect.provideService(AccountDirectory, accounts),
+				Effect.provideService(ReadQueryEffectTag, readQuery),
+				Effect.provideService(EventStoreEffectTag, eventStore),
+				Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+				Effect.provideService(SqlClient.SqlClient, sql),
 			);
-			const localResult = yield* createViaLocal();
-			if (localResult._tag === "Right") {
-				if (localResult.right.providerID === CLAUDE_PROVIDER_ID) {
-					yield* bindSessionProvider(localResult.right, "claude");
-				}
-				return localResult.right;
-			}
-
-			return yield* new SessionManagerError({
-				operation: "createSession",
-				cause: {
-					openCode: openCodeResult.left,
-					local: localResult.left,
-				},
-			});
+			engine.bindSession(session.id, account.id);
+			return session;
 		});
-	return serviceCreateSession;
-};
 
 export const SessionManagerServiceLive: Layer.Layer<
 	SessionManagerServiceTag,
 	never,
+	| AccountDirectory
 	| OpenCodeAPITag
 	| SessionManagerStateTag
 	| LoggerTag
@@ -915,7 +738,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const log = yield* LoggerTag;
 		const eventBus = yield* DaemonEventBusTag;
 		const config = yield* ConfigTag;
-		const configDir = config.configDir;
 		const engine = yield* OrchestrationEngineTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
@@ -926,6 +748,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const backgroundOf = yield* BackgroundLivenessTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
+		const accounts = yield* AccountDirectory;
 		const overrides = yield* OverridesStateTag;
 		// Captured here, not read at call time: the auto-settle sweep calls in from
 		// a daemon fiber that lacks the project's bus, and a commit without it
@@ -1063,15 +886,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 					);
 			});
 		const serviceCreateSession = makeServiceCreateSession({
-			api,
 			engine,
-			configDir,
+			accounts,
 			instanceClients,
 			readQuery,
 			eventStore,
 			projectionRunner,
 			sql,
-			log,
 		});
 		const createSessionWithServices = (
 			title?: string,
@@ -1089,6 +910,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			effect: Effect.Effect<
 				A,
 				E,
+				| AccountDirectory
 				| OpenCodeAPITag
 				| ReadQueryEffectTag
 				| EventStoreEffectTag
@@ -1099,6 +921,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
+				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
 				Effect.provideService(EventStoreEffectTag, eventStore),
@@ -1188,6 +1011,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
 							yield* deleteSession(sessionId).pipe(
+								Effect.provideService(AccountDirectory, accounts),
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),
 								Effect.provideService(OpenCodeInstancesTag, instanceClients),
@@ -1256,14 +1080,21 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-					const instanceId = row?.provider;
+					const account =
+						row === undefined
+							? undefined
+							: yield* accounts.resolve({ _tag: "Id", id: row.provider }).pipe(
+									Effect.mapError(
+										(cause) =>
+											new SessionManagerError({
+												operation: "loadPreRenderedHistory",
+												cause,
+											}),
+									),
+								);
 					const instanceApi =
-						instanceId &&
-						resolveProviderRoutingDriver(
-							loadDaemonConfig(configDir),
-							instanceId,
-						) === "opencode"
-							? yield* instanceClients.use(instanceId).pipe(
+						account?.driver === "opencode"
+							? yield* instanceClients.use(account.id).pipe(
 									Effect.mapError(
 										(cause) =>
 											new SessionManagerError({
@@ -1273,6 +1104,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								)
 							: undefined;
+
 					return yield* loadPreRenderedHistory(sessionId).pipe(
 						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 					);
@@ -1292,6 +1124,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			setForkEntry: (sessionId, entry) =>
 				Effect.gen(function* () {
 					yield* setForkEntry(sessionId, entry).pipe(
+						Effect.provideService(AccountDirectory, accounts),
 						Effect.provideService(SessionManagerStateTag, stateRef),
 						Effect.provideService(ReadQueryEffectTag, readQuery),
 						Effect.provideService(EventStoreEffectTag, eventStore),

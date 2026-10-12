@@ -266,7 +266,7 @@ export const sessionHandlers: {
 					         WHERE session_id = sessions.id AND status = 'active'
 					       )
 					       THEN sessions.provider
-					       WHEN sessions.provider NOT IN ('opencode', 'claude', 'claude-sdk')
+					       WHEN sessions.provider NOT IN ('opencode', 'claude')
 					       THEN sessions.provider
 					       ELSE excluded.provider
 					     END,

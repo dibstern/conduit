@@ -15,6 +15,7 @@ import {
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -36,7 +37,10 @@ import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-ser
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
-import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
 const createProjectRelayMock = vi.hoisted(() =>
@@ -85,6 +89,7 @@ describe("HttpServerRefTag", () => {
 
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 		ConfigPersistenceNoopLive,

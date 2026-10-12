@@ -7,12 +7,9 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Option, type Scope } from "effect";
-import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
+import { loadDaemonConfig } from "../daemon/config-persistence.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -136,6 +133,7 @@ const createOrchestrationComponentsEffect = (
 	| Scope.Scope
 	| SqlClient.SqlClient
 	| PersistenceProjectTag
+	| AccountDirectory
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
@@ -154,24 +152,30 @@ const createOrchestrationComponentsEffect = (
 			sql,
 		);
 
-		// Every session's provider calls run on its bound OpenCode instance.
-		// The binding is set before sendTurn dispatches (orchestration-engine
-		// binds session→providerId), so a session-keyed resolver over the
-		// binding read model is correct for sendTurn/interrupt/permission/question.
+		// Sends use their admitted account snapshot. Other session operations
+		// resolve the historical binding through the in-memory directory.
 		const instances = yield* OpenCodeInstancesTag;
+		const accountDirectory = yield* AccountDirectory;
 		const instanceManagement = Option.getOrUndefined(
 			yield* Effect.serviceOption(InstanceManagementServiceTag),
 		);
 		const clientForSession = (sessionId: string) =>
-			sessionBindingReadModel
-				.getProviderForSession(sessionId)
-				.pipe(
-					Effect.flatMap((boundInstanceId) =>
-						instances.use(
-							boundInstanceId ?? defaultInstanceIdForDriver("opencode"),
-						),
+			sessionBindingReadModel.getProviderForSession(sessionId).pipe(
+				Effect.flatMap((boundInstanceId) =>
+					accountDirectory.resolve(
+						boundInstanceId === undefined
+							? { _tag: "DriverDefault", driver: "opencode" }
+							: { _tag: "Id", id: boundInstanceId },
 					),
-				);
+				),
+				Effect.flatMap((account) =>
+					account.driver === "opencode"
+						? instances.use(account.id)
+						: Effect.fail(
+								new Error("OpenCode session requires an OpenCode account"),
+							),
+				),
+			);
 
 		const openCodeInstance = (yield* OpenCodeDriver.create({
 			client: options.client,
@@ -179,10 +183,14 @@ const createOrchestrationComponentsEffect = (
 				? { workspaceRoot: options.workspaceRoot }
 				: {}),
 			clientForSession,
+			clientForAccount: (account) => instances.use(account.id),
 			instanceIdForSession: (sessionId) =>
 				sessionBindingReadModel.getProviderForSession(sessionId),
-			hasWorktreeToolForSession: (sessionId) =>
-				sessionBindingReadModel.getProviderForSession(sessionId).pipe(
+			hasWorktreeToolForSession: (sessionId, account) =>
+				(account
+					? Effect.succeed(account.id)
+					: sessionBindingReadModel.getProviderForSession(sessionId)
+				).pipe(
 					Effect.flatMap((instanceId) =>
 						instanceManagement
 							? instanceManagement.list().pipe(
@@ -190,8 +198,7 @@ const createOrchestrationComponentsEffect = (
 										configured.some(
 											(instance) =>
 												instance.id ===
-													(instanceId ??
-														defaultInstanceIdForDriver("opencode")) &&
+													(instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID) &&
 												instance.managed,
 										),
 									),
@@ -274,13 +281,7 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
-			defaultClaudeLaunchConfig: () =>
-				resolveClaudeLaunchConfig(loadDaemonConfig(options.configDir)),
-			resolveProviderDriver: (providerId) =>
-				resolveProviderRoutingDriver(
-					loadDaemonConfig(options.configDir),
-					providerId,
-				),
+			accountDirectory,
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
 			...(durableCommands != null ? { durableCommands } : {}),
 		});
@@ -334,6 +335,7 @@ export const makeOrchestrationRuntimeLayer = (
 	| OpenCodeAPITag
 	| SqlClient.SqlClient
 	| PersistenceProjectTag
+	| AccountDirectory
 	| OpenCodeInstancesTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag

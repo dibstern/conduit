@@ -5,6 +5,7 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -32,6 +33,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -55,6 +57,7 @@ describe("relay automatic settlement sweep", () => {
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
 					Layer.succeed(OpenCodeAPITag, openCodeApi),
 					loggerLayer,

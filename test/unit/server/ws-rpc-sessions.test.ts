@@ -33,6 +33,7 @@ import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { PermissionId } from "../../../src/lib/shared-types.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
@@ -131,8 +132,10 @@ describe("WsRpcServerLayer ListSessions", () => {
 				sessionId: "session-new",
 			});
 			expect(createSession).toHaveBeenCalledWith(undefined, {
-				instanceId: "opencode",
-				providerId: "opencode",
+				account: expect.objectContaining({
+					id: "opencode",
+					driver: "opencode",
+				}),
 			});
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
@@ -212,6 +215,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 				},
 			);
 			const layer = makeTestHandlerLayer({
+				accountDirectory: makeMockAccountDirectory([
+					{
+						driver: "opencode",
+						id: AccountIdSchema.make("work-oc"),
+						name: "Work OpenCode",
+					},
+				]),
 				sessionManagerService: makeMockSessionManagerService({
 					createSession: () =>
 						Effect.fail(
@@ -440,7 +450,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 		"forks a Claude transcript using the $profile profile and binds its copied history",
 		({ instanceConfigDir, sessionConfigDir }) => {
 			const claudeConfigDir =
-				sessionConfigDir ?? instanceConfigDir ?? "/current-project-config";
+				instanceConfigDir ?? sessionConfigDir ?? "/current-project-config";
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-fork-rpc-"));
 			writeFileSync(
 				join(dir, "daemon.json"),
@@ -518,6 +528,15 @@ describe("WsRpcServerLayer ListSessions", () => {
 							wsHandler,
 							sessionManagerService,
 							persistenceLayer,
+							accountDirectory: makeMockAccountDirectory([
+								{
+									driver: "claude",
+									id: AccountIdSchema.make("my-claude"),
+									name: "Claude",
+									folder: configuredClaudeConfigDir(claudeConfigDir),
+									usageEligible: true,
+								},
+							]),
 							config: makeMockConfig({
 								configDir: dir,
 								projectDir: "/project",

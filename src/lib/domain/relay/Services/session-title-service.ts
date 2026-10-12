@@ -23,6 +23,7 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	type ClaudeTitleQueryFactory,
@@ -115,10 +116,12 @@ export const makeSessionTitleServiceLive = (
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| SqlClient.SqlClient
+	| AccountDirectory
 > =>
 	Layer.scoped(
 		SessionTitleServiceTag,
 		Effect.gen(function* () {
+			const accounts = yield* AccountDirectory;
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
 			const api = yield* OpenCodeAPITag;
@@ -204,6 +207,7 @@ export const makeSessionTitleServiceLive = (
 						{ source: AUTO_TITLE_SOURCE },
 					).pipe(
 						Effect.provideService(OpenCodeAPITag, api),
+						Effect.provideService(AccountDirectory, accounts),
 						Effect.provideService(LoggerTag, log),
 						Effect.provideService(ConfigTag, config),
 						Effect.provideService(ReadQueryEffectTag, readQuery),

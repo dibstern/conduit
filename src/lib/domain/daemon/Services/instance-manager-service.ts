@@ -57,6 +57,7 @@ import type {
 	OpenCodeInstance,
 } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
+import { AccountDirectory } from "./account-directory.js";
 
 export {
 	InstanceAlreadyExists,
@@ -507,7 +508,20 @@ export const getInstance = (instanceId: string) =>
 export const getInstances = Effect.gen(function* () {
 	const ref = yield* InstanceManagerStateTag;
 	const state = yield* Ref.get(ref);
-	return Array.from(HashMap.values(state.instances), instanceInfo);
+	const directory = yield* Effect.serviceOption(AccountDirectory);
+	const accounts = Option.isSome(directory)
+		? yield* directory.value.list
+		: undefined;
+	return Array.from(HashMap.values(state.instances), (instance) => ({
+		...instanceInfo(instance),
+		...(accounts === undefined
+			? {}
+			: {
+					isDefault: accounts.some(
+						(account) => account.id === instance.id && account.isDefault,
+					),
+				}),
+	}));
 }).pipe(Effect.withSpan("instance.getAll"));
 
 export const getManagedOpenCodeProcessEnv = (instanceId: string) =>

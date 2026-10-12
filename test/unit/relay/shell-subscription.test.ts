@@ -15,7 +15,10 @@ import {
 	Stream,
 } from "effect";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
@@ -71,9 +74,11 @@ import {
 	SessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -113,6 +118,13 @@ const makeShellTestLayer = (
 		),
 	);
 	return Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+		Layer.succeed(
+			OpenCodeInstancesTag,
+			makeOpenCodeInstancesStub({
+				opencode: handlerApi ?? makeMockOpenCodeAPI(),
+			}),
+		),
 		RelayStatusSnapshotLive,
 		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		persistenceLayer,
@@ -663,7 +675,15 @@ describe("subscribeShell", () => {
 					yield* commit([sessionCreated("parent")]);
 					const { q } = yield* openShell();
 					yield* takeN(q, 2);
-					yield* forkOpenCodeSession("parent", messageId);
+					yield* forkOpenCodeSession(
+						"parent",
+						{
+							driver: "opencode",
+							id: AccountIdSchema.make("opencode"),
+							name: "OpenCode",
+						},
+						messageId,
+					);
 					const envelope = yield* Queue.take(q);
 					expect(envelope).toMatchObject({
 						_tag: "upsert",

@@ -6,6 +6,7 @@ import { describe, it } from "@effect/vitest";
 import { Context, Deferred, Effect, Exit, Layer, Scope } from "effect";
 import { expect, vi } from "vitest";
 import { isPlaceholderTitle } from "../../../src/lib/contracts/session-title.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
 import {
@@ -28,6 +29,7 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -82,6 +84,7 @@ function makeTestLayer(input: {
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag, ws),
@@ -110,6 +113,7 @@ function makePersistenceTestLayer(input: {
 }) {
 	const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 	const deps = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 		Layer.succeed(WebSocketHandlerTag, ws),
@@ -253,6 +257,7 @@ const makeManualRenameRaceLayer = (input: {
 		};
 		const ws = input.wsHandler ?? makeWebSocketHandler().handler;
 		const deps = Layer.mergeAll(
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag, input.logger ?? makeMockLogger()),
 			Layer.succeed(WebSocketHandlerTag, ws),

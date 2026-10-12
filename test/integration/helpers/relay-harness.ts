@@ -40,6 +40,7 @@ export async function createRelayHarness(
 	options: {
 		/** Config directory holding daemon.json (named provider instances). */
 		readonly configDir?: string;
+		readonly daemonConfigContext?: ProjectRelayConfig["daemonConfigContext"];
 		/** Relay default model ("provider/model"); null leaves the native default in control. */
 		readonly defaultModel?: string | null;
 		readonly claudeSdk?: ProjectRelayConfig["claudeSdk"];
@@ -78,6 +79,9 @@ export async function createRelayHarness(
 		log: createSilentLogger(),
 		persistenceDbPath: eventsDbPath,
 		configDir: options.configDir ?? dbDir,
+		...(options.daemonConfigContext
+			? { daemonConfigContext: options.daemonConfigContext }
+			: {}),
 		...(options.claudeSdk ? { claudeSdk: options.claudeSdk } : {}),
 		// Stubbed session titles: no test makes a live title call.
 		titleQuery:

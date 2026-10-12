@@ -115,6 +115,9 @@ export function applyInstanceListResponse(
 		restartCount: instance.restartCount,
 		createdAt: instance.createdAt,
 		...(instance.driver != null ? { driver: instance.driver } : {}),
+		...(instance.isDefault !== undefined
+			? { isDefault: instance.isDefault }
+			: {}),
 		...(instance.capabilities != null
 			? { capabilities: instance.capabilities }
 			: {}),

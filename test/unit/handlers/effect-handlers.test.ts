@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
@@ -11,6 +12,7 @@ import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // Effect Handler Tests (Batch 1)
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
@@ -317,7 +319,7 @@ const persistentHandlerPersistence = Layer.merge(
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory, makeMockAccountDirectory()), AlertsLive, persistentHandlerPersistence, makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistentHandlerPersistence)), Layer.succeed(AgentServiceTag, makeMockAgentService()), Layer.succeed(SessionTitleServiceTag, makeMockSessionTitleService()), PendingInteractionServiceLive, Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry()), Layer.succeed(ConfigTag, mockConfig()), Layer.succeed(LoggerTag, mockLogger()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("GetAgents", () => {
 	it.effect(
 		"fetches agents via OpenCodeAPI and returns the filtered list",
@@ -1263,7 +1265,9 @@ function makeForkSessionLayer(options?: {
 	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")));
 
 	return Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		openCodeModelLayer(client),
+		Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub({ opencode: client })),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
@@ -1310,6 +1314,7 @@ function makeSessionLifecycleLayer(options?: {
 	const log = options?.log ?? mockLogger();
 
 	return Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
@@ -2234,7 +2239,7 @@ describe("handleNewSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(serviceCreateSession).toHaveBeenCalledWith("New Session");
+					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", { account: expect.objectContaining({ id: "claude", driver: "claude" }) });
 					expect(legacyCreateSession).not.toHaveBeenCalled();
 					expect(ws.setClientSession).toHaveBeenCalledWith(
 						"client-1",
@@ -2277,7 +2282,7 @@ describe("handleNewSession", () => {
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
-					providerId: "opencode",
+					account: expect.objectContaining({ id: "opencode", driver: "opencode" }),
 				});
 				expect(ws.setClientSession).toHaveBeenCalledWith(
 					"client-1",
@@ -2849,6 +2854,7 @@ describe("sendMessageToSession", () => {
 				const serviceLayer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
+						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 						Layer.succeed(OpenCodeAPITag, openCodeApi),
 						loggerLayer,
 						configLayer,
@@ -3618,7 +3624,7 @@ describe("handleMessage", () => {
 				expect(dispatchedSessionId).toBe("ses-opencode-created");
 
 				expect(serviceCreateSession).toHaveBeenCalledWith("Untitled", {
-					providerId: "opencode",
+					account: expect.objectContaining({ id: "opencode", driver: "opencode" }),
 				});
 				expect(engine.bindSession).toHaveBeenCalledWith(
 					"ses-opencode-created",

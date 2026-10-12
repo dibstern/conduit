@@ -1,3 +1,5 @@
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // Failure modes:
 // - A crash leaves a durable event ahead of its projection or cursor.
 // - A merged crash simulation omits the store's required project owner.
@@ -187,6 +189,7 @@ it.each([
 					Layer.mergeAll(
 						persistence,
 						bus,
+						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 						Layer.succeed(ConfigTag, makeMockConfig()),
 						Layer.succeed(LoggerTag, makeMockLogger()),
 						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),

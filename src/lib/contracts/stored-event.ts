@@ -1138,7 +1138,10 @@ const SessionProviderChangedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	oldProvider: Schema.String,
 	newProvider: Schema.String,
-	reason: Schema.optionalWith(ContinuationReasonSchema, { exact: true }),
+	reason: Schema.optionalWith(
+		Schema.suspend(() => ContinuationReasonSchema),
+		{ exact: true },
+	),
 });
 
 const SessionDeletedPayloadSchema = Schema.Struct({
@@ -1196,7 +1199,7 @@ const SessionCutOffDismissedPayloadSchema = Schema.Struct({
 });
 
 const SessionResumedPayloadSchema = Schema.Struct({
-	reason: ContinuationReasonSchema,
+	reason: Schema.suspend(() => ContinuationReasonSchema),
 	instanceId: Schema.String,
 	from: Schema.optionalWith(Schema.String, { exact: true }),
 });

@@ -12,6 +12,7 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -30,7 +31,10 @@ import type {
 	OpenCodeInstance,
 	ProjectInfo,
 } from "../../../src/lib/shared-types.js";
-import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 
 const createProjectRelayMock = vi.hoisted(() => vi.fn());
 
@@ -39,6 +43,7 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 }));
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
+	Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
 	Layer.succeed(PortScannerTag, {
@@ -273,6 +278,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		const layer = RelayFactoryLive(join(dir, "config")).pipe(
 			Layer.provide(
 				Layer.mergeAll(
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					InstanceHealthCheckLive,
 					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
@@ -420,6 +426,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						getKnownPorts: () => Effect.succeed(new Set([4321, 4322])),
 						scanNow: () => Effect.succeed(scanResult),
 					}),
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					Layer.succeed(PushManagerTag, {
 						subscribe: () => Effect.void,
 						unsubscribe: () => Effect.void,

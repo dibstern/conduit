@@ -8,12 +8,18 @@ import {
 	Effect,
 	Layer,
 	ManagedRuntime,
+	Option,
 	PubSub,
 	Queue,
 	Scope,
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
+import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -33,6 +39,7 @@ import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	wireMonitoring,
 	wireMonitoringEffect,
@@ -44,6 +51,34 @@ type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
 const flushPromises = () =>
 	new Promise<void>((resolve) => setImmediate(resolve));
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-monitor-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
+const accountDirectory = () =>
+	makeAccountDirectory(
+		Effect.succeed(
+			accountsStateFromInstances(
+				[
+					{
+						id: "personal",
+						name: "Personal",
+						driver: "claude",
+						configDir: join(isolatedRoot, "personal-login"),
+					},
+					{ id: "opencode", name: "OpenCode", driver: "opencode" },
+				],
+				configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+			),
+		),
+	);
 
 function createHarness(
 	parentMap = new Map<string, string>(),
@@ -60,8 +95,15 @@ function createHarness(
 	);
 	const startPolling = vi.fn();
 	const getClientsForSession = vi.fn((_sessionId: string): string[] => []);
+	const accounts = accountDirectory();
 
 	const result = wireMonitoring({
+		resolveAccount: (ref) =>
+			Effect.runPromise(
+				accounts
+					.resolve(ref)
+					.pipe(Effect.option, Effect.map(Option.getOrUndefined)),
+			),
 		client: {
 			session: { messages },
 		},
@@ -192,7 +234,10 @@ describe("wireMonitoring shutdown", () => {
 	});
 
 	it("synchronous wiring clears Claude idle state", async () => {
-		const harness = createHarness(new Map(), new Map([["claude-1", "claude"]]));
+		const harness = createHarness(
+			new Map(),
+			new Map([["claude-1", "claude-sdk"]]),
+		);
 		await harness.emitStatus({ "claude-1": { type: "busy" } });
 		await harness.emitStatus({ "claude-1": { type: "busy" } });
 		await harness.emitStatus({ "claude-1": { type: "idle" } });
@@ -592,7 +637,7 @@ describe("wireMonitoring shutdown", () => {
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
-						VALUES ('claude-1', 'c', 'claude', 1, 1)`;
+						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1)`;
 				}),
 			);
 			// OpenCode answers 404 for sessions it does not own (live: NotFoundError).
@@ -755,6 +800,7 @@ async function createEffectHarness(
 		SessionStatusPollerService["getSessionProviders"]
 	>(() => Effect.succeed(new Map()));
 	const layer = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, accountDirectory()),
 		Layer.succeed(AlertsTag, alerts),
 		Layer.succeed(SessionManagerServiceTag, {
 			initialize: unused,

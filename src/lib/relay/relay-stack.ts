@@ -31,6 +31,7 @@ import {
 } from "effect";
 import { AuthManager } from "../auth.js";
 import { type GlobalSettingTag, WsRpcError } from "../contracts/ws-rpc.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
@@ -455,6 +456,8 @@ export interface RelayStackConfig {
 	pushManager?: PushNotificationSender;
 	/** Config directory for cache storage (default: projectDir/.conduit) */
 	configDir?: string;
+	/** Tests may share the daemon's live account registry without a listener. */
+	daemonConfigContext?: ProjectRelayConfig["daemonConfigContext"];
 	/**
 	 * Override the default poller gating config (SSE grace period, staleness
 	 * threshold, max concurrent pollers). Forwarded to createProjectRelay.
@@ -481,6 +484,7 @@ export interface RelayStack {
 	translator: ReturnType<typeof createTranslator>;
 	/** Initial project relay's orchestration view (provider instances/engine). */
 	orchestration: OrchestrationLayer;
+	readonly effectRuntime: ProjectRelay["effectRuntime"];
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
 
@@ -832,6 +836,7 @@ export async function createRelayStack(
 				daemonConfigContext: Context.pick(
 					DaemonConfigRefTag,
 					ConfigPersistenceTag,
+					AccountDirectory,
 				)((await relay.effectRuntime.runtime.runtime()).context),
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
@@ -877,6 +882,9 @@ export async function createRelayStack(
 
 	const relay = await createProjectRelay({
 		httpServer,
+		...(config.daemonConfigContext === undefined
+			? {}
+			: { daemonConfigContext: config.daemonConfigContext }),
 		opencodeUrl: config.opencodeUrl,
 		projectDir: config.projectDir,
 		...(config.extraFolders != null && { extraFolders: config.extraFolders }),
@@ -987,6 +995,7 @@ export async function createRelayStack(
 
 	return {
 		server,
+		effectRuntime: relay.effectRuntime,
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,

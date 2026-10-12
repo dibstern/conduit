@@ -1,4 +1,6 @@
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // Tests the @effect/sql migration of projectors, event-store, cursor repo,
 // and projection runner using file-backed SQLite via @effect/sql-sqlite-node.
 
@@ -3622,6 +3624,7 @@ describe("ProjectionRunnerEffect", () => {
 						Effect.provide(
 							Layer.mergeAll(
 								Layer.succeed(ReadQueryEffectTag, readQuery),
+								Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 								Layer.succeed(ConfigTag, makeMockConfig()),
 								Layer.succeed(LoggerTag, makeMockLogger()),
 								Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
@@ -3630,7 +3633,7 @@ describe("ProjectionRunnerEffect", () => {
 					),
 				);
 				expect(result._tag).toBe("Left");
-				if (result._tag === "Left")
+				if (result._tag === "Left" && "operation" in result.left)
 					// Append and project are one transaction now, so the failure is named
 					// for the commit that rolled back, not for a separate project step.
 					expect(result.left.operation).toBe("session.deleted.commit");

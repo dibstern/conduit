@@ -36,6 +36,7 @@ import type {
 } from "../../../shared-types.js";
 import type { ProjectRelayConfig, StoredProject } from "../../../types.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
+import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
@@ -142,6 +143,7 @@ export const RelayFactoryLive = (
 	RelayFactoryTag | HttpServerRefTag,
 	never,
 	| DaemonConfigRefTag
+	| AccountDirectory
 	| ProjectRegistryTag
 	| InstanceManagerStateTag
 	| PollerFibersTag
@@ -155,6 +157,7 @@ export const RelayFactoryLive = (
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
+			const accounts = yield* AccountDirectory;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -221,6 +224,7 @@ export const RelayFactoryLive = (
 					getEffectInstances.pipe(
 						Effect.map((instances) => Array.from(instances)),
 						Effect.provideService(InstanceManagerStateTag, instanceState),
+						Effect.provideService(AccountDirectory, accounts),
 					),
 				);
 
@@ -383,7 +387,10 @@ export const RelayFactoryLive = (
 									daemonConfigContext: Context.make(
 										DaemonConfigRefTag,
 										configRef,
-									).pipe(Context.add(ConfigPersistenceTag, configPersistence)),
+									).pipe(
+										Context.add(ConfigPersistenceTag, configPersistence),
+										Context.add(AccountDirectory, accounts),
+									),
 									openCodeInstances,
 									...(Option.isSome(worktreeService)
 										? {

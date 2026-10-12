@@ -1,9 +1,18 @@
+// Failure modes: settings read stale on-disk accounts or the inherited login;
+// a directory update while resolving the workspace changes the selected login;
+// unknown and non-Claude accounts reach the settings child.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
+import { accountsStateFromConfig } from "../../../../src/lib/daemon/account-directory.js";
+import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../../../../src/lib/domain/relay/Services/session-workspace.js";
 import { resolveClaudeSettingsForInstance } from "../../../../src/lib/handlers/claude-settings.js";
@@ -13,6 +22,17 @@ import {
 	resolveClaudeSettingsFromDisk,
 } from "../../../../src/lib/provider/claude/claude-settings-resolver.js";
 import { makeMockConfig } from "../../../helpers/mock-factories.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-settings-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
 
 vi.mock("node:child_process", async (importOriginal) => ({
 	...(await importOriginal<typeof import("node:child_process")>()),
@@ -113,40 +133,55 @@ describe("resolveClaudeSettingsFromDisk", () => {
 		);
 	});
 
-	it("resolves the selected Claude instance config directory", async () => {
+	it("keeps the resolved account folder when the directory changes during workspace resolution", async () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-claude-resolver-"));
-		writeFileSync(
-			join(configDir, "daemon.json"),
-			JSON.stringify({
-				pid: 123,
-				port: 2633,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: [],
-				instances: [
-					{
-						id: "work-claude",
-						name: "Work Claude",
-						port: 0,
-						managed: false,
-						driver: "claude",
-						configDir: "/profiles/work",
-					},
-				],
-			}),
+		writeFileSync(join(configDir, "daemon.json"), "not valid JSON");
+		const accountFolder = join(isolatedRoot, "work-login");
+		const launchLogin = configuredClaudeConfigDir(
+			join(isolatedRoot, "launch-login"),
 		);
+		const stateForFolder = (folder: string) =>
+			accountsStateFromConfig(
+				{
+					pid: 123,
+					port: 2633,
+					pinHash: null,
+					tls: false,
+					debug: false,
+					keepAwake: false,
+					projects: [],
+					instances: [
+						{
+							id: "work-claude",
+							name: "Work Claude",
+							port: 0,
+							managed: false,
+							driver: "claude",
+							configDir: folder,
+						},
+					],
+				},
+				launchLogin,
+			);
+		let accounts = stateForFolder(accountFolder);
 		const runner = vi.fn<ClaudeSettingsChildRunner>(async () => successResult);
 
 		await Effect.runPromise(
 			resolveClaudeSettingsForInstance(
-				{ instanceId: "work-claude" },
+				{
+					instanceId: "work-claude",
+					accountRef: { _tag: "Id", id: "work-claude" },
+					sessionId: "session-1",
+				},
 				runner,
 			).pipe(
 				Effect.provideService(SessionWorkspaceTag, {
 					renameBranch: () => Effect.die("unused"),
-					get: () => Effect.succeed("/workspace/project"),
+					get: () =>
+						Effect.sync(() => {
+							accounts = stateForFolder(join(isolatedRoot, "changed-login"));
+							return "/workspace/project";
+						}),
 					move: () => Effect.succeed("/workspace/project"),
 					inherit: () => Effect.die("unused"),
 					resolve: () => Effect.die("unused"),
@@ -154,6 +189,10 @@ describe("resolveClaudeSettingsFromDisk", () => {
 					claudeWorktreeState: () => Effect.die("unused"),
 					withLaunch: (effect) => effect,
 				}),
+				Effect.provideService(
+					AccountDirectory,
+					makeAccountDirectory(Effect.sync(() => accounts)),
+				),
 				Effect.provideService(
 					ConfigTag,
 					makeMockConfig({
@@ -167,10 +206,60 @@ describe("resolveClaudeSettingsFromDisk", () => {
 		expect(runner).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cwd: "/workspace/project",
-				env: expect.objectContaining({ CLAUDE_CONFIG_DIR: "/profiles/work" }),
+				env: expect.objectContaining({ CLAUDE_CONFIG_DIR: accountFolder }),
 			}),
 		);
 		rmSync(configDir, { recursive: true, force: true });
+	});
+
+	it.each([
+		{ instanceId: "unknown-account", tag: "AccountUnroutable" },
+		{ instanceId: "opencode", tag: "ClaudeSettingsInstanceError" },
+	])("rejects $instanceId before starting the settings child", async ({
+		instanceId,
+		tag,
+	}) => {
+		const runner = vi.fn<ClaudeSettingsChildRunner>(async () => successResult);
+		const failure = await Effect.runPromise(
+			resolveClaudeSettingsForInstance(
+				{
+					instanceId,
+					accountRef: { _tag: "Id", id: instanceId },
+				},
+				runner,
+			).pipe(
+				Effect.provideService(SessionWorkspaceTag, {
+					renameBranch: () =>
+						Effect.die("Account refusal must not change workspace"),
+					get: () => Effect.die("Account refusal must not read workspace"),
+					move: () => Effect.die("Account refusal must not change workspace"),
+					inherit: () => Effect.die("unused"),
+					resolve: () => Effect.die("unused"),
+					record: () => Effect.die("unused"),
+					claudeWorktreeState: () => Effect.die("unused"),
+					withLaunch: (effect) => effect,
+				}),
+				Effect.provideService(
+					AccountDirectory,
+					makeAccountDirectory(
+						Effect.succeed(
+							accountsStateFromConfig(
+								defaultDaemonConfig(),
+								configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+							),
+						),
+					),
+				),
+				Effect.provideService(
+					ConfigTag,
+					makeMockConfig({ configDir: isolatedRoot }),
+				),
+				Effect.flip,
+			),
+		);
+		expect(failure._tag).toBe(tag);
+		expect(failure.message).toContain(instanceId);
+		expect(runner).not.toHaveBeenCalled();
 	});
 
 	it.each([

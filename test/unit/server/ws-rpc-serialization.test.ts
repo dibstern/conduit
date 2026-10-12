@@ -11,7 +11,7 @@ import {
 	RpcSerialization,
 	RpcServer,
 } from "@effect/rpc";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import * as Contracts from "../../../src/lib/contracts/ws-rpc.js";
 import { PermissionId } from "../../../src/lib/shared-types.js";
@@ -315,6 +315,7 @@ const handlers = group.toLayer({
 			_tag: "ResolveClaudeSettings",
 			projectSlug: "project",
 			instanceId: "claude-1",
+			accountRef: { _tag: "Id", id: "claude-1" },
 		});
 		return Effect.succeed(resolvedSettings);
 	},
@@ -540,16 +541,66 @@ it("SetClaudeSettings round trips nested overrides in the request and response",
 });
 
 it("ResolveClaudeSettings preserves display values and provenance", async () => {
+	// A supplied Id must win over a stale wire field. These explicit-account
+	// requests cannot represent a driver default without changing its meaning.
+	const requests = [
+		new Contracts.ResolveClaudeSettings({
+			projectSlug: "project",
+			instanceId: "stale-account",
+			accountRef: { _tag: "Id", id: "claude-1" },
+		}),
+		new Contracts.ContinueSession({
+			projectSlug: "project",
+			sessionId: "session-1",
+			instanceId: "stale-account",
+			expectedInstanceId: "source-account",
+			accountRef: { _tag: "Id", id: "claude-1" },
+		}),
+		new Contracts.PreviewContinuation({
+			projectSlug: "project",
+			sessionId: "session-1",
+			instanceId: "stale-account",
+			accountRef: { _tag: "Id", id: "claude-1" },
+		}),
+	];
+	const wireRequests = requests.map((request) =>
+		Schema.encodeSync(Contracts.WsRpcRequest)(request),
+	);
+	expect(
+		wireRequests.map((request) =>
+			"instanceId" in request ? request.instanceId : undefined,
+		),
+	).toEqual(["claude-1", "claude-1", "claude-1"]);
+	for (const request of requests) {
+		expect(() =>
+			Schema.encodeSync(Contracts.WsRpcRequest)({
+				...request,
+				accountRef: { _tag: "DriverDefault", driver: "claude" },
+			}),
+		).toThrow(/requires an explicit account Id/);
+	}
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
-				const { client } = yield* connect;
+				const { client, clientFrames } = yield* connect;
 				expect(
 					yield* client.ResolveClaudeSettings({
 						projectSlug: "project",
-						instanceId: "claude-1",
+						instanceId: "stale-account",
+						accountRef: { _tag: "Id", id: "claude-1" },
 					}),
 				).toEqual(resolvedSettings);
+				expect(clientFrames.map((frame) => JSON.parse(frame))).toContainEqual(
+					expect.objectContaining({
+						_tag: "Request",
+						tag: "ResolveClaudeSettings",
+						payload: {
+							_tag: "ResolveClaudeSettings",
+							projectSlug: "project",
+							instanceId: "claude-1",
+						},
+					}),
+				);
 			}),
 		).pipe(Effect.timeout("3 seconds")),
 	);

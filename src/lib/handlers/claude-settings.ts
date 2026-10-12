@@ -1,14 +1,11 @@
 import { Data, Effect } from "effect";
+import type { AccountRef } from "../contracts/account.js";
 import {
 	CLAUDE_TRUST_TIERED_SETTINGS_KEYS,
 	type ClaudeSettingsOverrides,
 	ClaudeSettingsTrustBoundaryError,
 } from "../contracts/claude-settings.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
@@ -72,16 +69,17 @@ export const setClaudeSettingsForRelay = (input: {
 export const resolveClaudeSettingsForInstance = (
 	input: {
 		readonly instanceId: string;
+		readonly accountRef?: AccountRef | undefined;
 		readonly sessionId?: string | undefined;
 	},
 	runChild?: ClaudeSettingsChildRunner,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const daemonConfig = loadDaemonConfig(config.configDir);
-		if (
-			resolveProviderRoutingDriver(daemonConfig, input.instanceId) !== "claude"
-		) {
+		const account = yield* (yield* AccountDirectory).resolve(
+			input.accountRef ?? { _tag: "Id", id: input.instanceId },
+		);
+		if (account.driver !== "claude") {
 			return yield* new ClaudeSettingsInstanceError({
 				instanceId: input.instanceId,
 				message: `Provider instance "${input.instanceId}" is not a Claude instance`,
@@ -95,11 +93,7 @@ export const resolveClaudeSettingsForInstance = (
 		return yield* resolveClaudeSettingsFromDisk(
 			{
 				workspaceRoot,
-				...resolveClaudeLaunchConfig(
-					daemonConfig,
-					input.instanceId,
-					config.shellEnv?.(workspaceRoot),
-				),
+				configDir: account.folder,
 			},
 			runChild,
 		);

@@ -3,11 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
+import * as configPersistence from "../../../../src/lib/daemon/config-persistence.js";
 import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	Query,
 	SDKMessage,
@@ -90,6 +93,70 @@ function makeBlockingQuery(
 }
 
 describe("Claude provider runtime boundary", () => {
+	// Sends and warm-ups must use the admitted account even with conflicting
+	// native, project and process folders; neither may reread daemon accounts.
+	it.each([
+		"send",
+		"prewarm",
+	] as const)("launches %s from its carried account without disk account reads", async (operation) => {
+		const capturedOptions: SDKOptions[] = [];
+		vi.stubEnv("HOME", "/tmp/g4zp-test-home");
+		vi.stubEnv("CLAUDE_CONFIG_DIR", "/tmp/g4zp-test-process-folder");
+		const account = {
+			id: AccountIdSchema.make("selected-account"),
+			name: "Selected account",
+			driver: "claude" as const,
+			folder: configuredClaudeConfigDir("/tmp/g4zp-test-account-folder"),
+			env: { ANTHROPIC_API_KEY: "test-account-key" },
+			usageEligible: false,
+		};
+		const loadConfig = vi
+			.spyOn(configPersistence, "loadDaemonConfig")
+			.mockImplementation(() => {
+				throw new Error("Account launch must not reread daemon config");
+			});
+		try {
+			const instance = makeTestClaudeProviderInstance({
+				workspaceRoot: "/tmp/g4zp-test-project",
+				shellEnv: () => ({
+					HOME: "/tmp/g4zp-test-home",
+					CLAUDE_CONFIG_DIR: "/tmp/g4zp-test-project-folder",
+					ANTHROPIC_API_KEY: "test-project-key",
+				}),
+				queryFactory: ({ options }) => {
+					if (options) capturedOptions.push(options);
+					return createMockQuery([makeSuccessResult()]);
+				},
+			});
+			const input = makeBaseSendTurnInput({
+				account,
+				instanceId: "historical-account",
+				configDir: undefined,
+				model: { providerId: "claude", modelId: "sonnet" },
+			});
+			if (operation === "send") {
+				await Effect.runPromise(instance.sendTurnEffect(input));
+				expect(
+					await Effect.runPromise(instance.getNativeSessionEffect("session-1")),
+				).toMatchObject({
+					instanceId: account.id,
+					configDir: account.folder,
+				});
+			} else {
+				await Effect.runPromise(instance.preWarmSessionEffect(input));
+			}
+			expect(capturedOptions).toHaveLength(1);
+			expect(capturedOptions[0]?.env).toMatchObject({
+				CLAUDE_CONFIG_DIR: account.folder.path,
+				ANTHROPIC_API_KEY: "test-account-key",
+			});
+			expect(loadConfig).not.toHaveBeenCalled();
+		} finally {
+			loadConfig.mockRestore();
+			vi.unstubAllEnvs();
+		}
+	});
+
 	it("wires the persisted override getter into the scoped constructor", () => {
 		const wiring = source("src/lib/provider/orchestration-wiring.ts");
 		const getters = wiring.match(

@@ -1,11 +1,7 @@
 import { Effect } from "effect";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	BackgroundLivenessTag,
-	ConfigTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
 import { ProviderInstanceFailure } from "../provider/errors.js";
@@ -20,12 +16,16 @@ export const stopBackgroundTaskById = (sessionId: string, taskId: string) =>
 		if (!isLive()) return;
 		const engine = yield* OrchestrationEngineTag;
 		const instanceId = yield* engine.getProviderForSessionEffect(sessionId);
-		const { configDir } = yield* ConfigTag;
-		const driver =
-			instanceId &&
-			resolveProviderRoutingDriver(loadDaemonConfig(configDir), instanceId);
+		const account =
+			instanceId === undefined
+				? undefined
+				: yield* (yield* AccountDirectory).resolve({
+						_tag: "Id",
+						id: instanceId,
+					});
 		const registry = yield* ProviderRegistryTag;
-		const provider = driver ? registry.getInstance(driver) : undefined;
+		const provider =
+			account === undefined ? undefined : registry.getInstance(account.driver);
 		if (!provider?.stopTaskEffect)
 			return yield* Effect.fail(
 				new ProviderInstanceFailure({

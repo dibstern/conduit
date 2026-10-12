@@ -12,15 +12,14 @@ import {
 	type Runtime,
 	Schema,
 } from "effect";
+import {
+	type Account,
+	accountRefFromSelection,
+} from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { MissingWorktreeError } from "../../../contracts/worktree.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -31,7 +30,6 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import type { ClaudeLaunchConfig } from "../../../provider/claude/claude-sdk-env.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
@@ -49,6 +47,7 @@ import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";
@@ -455,10 +454,10 @@ const handleDispatchResult = (
 
 const resolveClaudeModel = (
 	input: ProviderTurnServiceSendInput,
-	providerId: string,
-	driver: ProviderDriverKind,
+	account: Account,
 ) =>
 	Effect.gen(function* () {
+		const driver = account.driver;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 		let resolvedInput = input;
@@ -467,7 +466,8 @@ const resolveClaudeModel = (
 			const discovery = yield* Effect.either(
 				orchestrationEngine.dispatchEffect({
 					type: "discover",
-					providerId,
+					providerId: account.id,
+					account,
 				}),
 			);
 			const models =
@@ -522,12 +522,11 @@ const resolveClaudeModel = (
 
 const prepareEngineTurnInput = (
 	resolvedInput: ProviderTurnServiceSendInput,
-	providerId: string,
-	driver: ProviderDriverKind,
-	claudeLaunchConfig: ClaudeLaunchConfig | undefined,
+	account: Account,
 	discoveredCatalog: readonly ModelInfo[] | undefined,
 ) =>
 	Effect.gen(function* () {
+		const driver = account.driver;
 		// OpenCode keeps its own session model, so we only override it on an
 		// explicit pick. The Claude SDK has no such memory: omitting `model`
 		// makes it resolve the config dir's settings.json `model` instead, so a
@@ -698,10 +697,13 @@ const prepareEngineTurnInput = (
 				: {}),
 			history: [],
 			providerState,
-			instanceId: providerId,
+			account,
+			instanceId: account.id,
 			...(sendModel && settings ? { model: settings.model } : {}),
 			...folders,
-			...(claudeLaunchConfig ?? {}),
+			...(account.driver === "claude"
+				? { configDir: account.folder, folderSource: "account" as const }
+				: {}),
 			...(isClaudeDriver(driver) && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),
@@ -726,11 +728,12 @@ const prepareEngineTurnInput = (
 const dispatchEngineTurn = (
 	resolvedInput: ProviderTurnServiceSendInput,
 	providerId: string,
-	driver: ProviderDriverKind,
+	account: Account,
 	sendTurnInput: SendTurnInput,
 	workspaceMoveSequence: number | undefined,
 ) =>
 	Effect.gen(function* () {
+		const driver = account.driver;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const dispatchFibers = yield* ProviderTurnDispatchFibersTag;
 		const previousProviderId =
@@ -854,32 +857,29 @@ const dispatchEngineTurn = (
 const sendViaEngine = (
 	input: ProviderTurnServiceSendInput,
 	providerId: string,
-	driver: ProviderDriverKind,
-	claudeLaunchConfig: ClaudeLaunchConfig | undefined,
+	account: Account,
 ) =>
 	Effect.gen(function* () {
-		const resolved = yield* resolveClaudeModel(input, providerId, driver);
+		const resolved = yield* resolveClaudeModel(input, account);
 		if (!resolved) return;
 		const { resolvedInput, catalog } = resolved;
 		const prepared = yield* prepareEngineTurnInput(
 			resolvedInput,
-			providerId,
-			driver,
-			claudeLaunchConfig,
+			account,
 			catalog,
 		).pipe(
 			Effect.catchIf(
 				(cause) =>
 					cause instanceof MissingWorktreeError ||
 					(cause instanceof RelayError && cause.code === "FILE_NOT_FOUND"),
-				(cause) => handleDispatchFailure(resolvedInput, cause, driver),
+				(cause) => handleDispatchFailure(resolvedInput, cause, account.driver),
 			),
 		);
 		if (!prepared) return;
 		yield* dispatchEngineTurn(
 			resolvedInput,
 			providerId,
-			driver,
+			account,
 			prepared.sendTurnInput,
 			prepared.workspaceMoveSequence,
 		);
@@ -914,33 +914,27 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 		const setup = yield* Effect.serviceOption(SessionSetupTag);
 		if (setup._tag === "Some") yield* setup.value.wait(input.sessionId);
 		if (!input.steer) yield* startProcessing(input);
-		const config = yield* ConfigTag;
 		const engine = yield* OrchestrationEngineTag;
-		const providerId =
-			(yield* engine.getProviderForSessionEffect(input.sessionId)) ??
-			harnessForModelProvider(input.model?.providerID ?? "");
-		const daemonConfig = loadDaemonConfig(config.configDir);
-		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
-		if (driver === undefined) {
-			yield* handleDispatchFailure(
-				input,
-				new Error(
-					`Cannot resolve provider instance for turn routing: ${providerId}`,
-				),
-				undefined,
-			);
+		const boundProviderId = yield* engine.getProviderForSessionEffect(
+			input.sessionId,
+		);
+		const resolved =
+			input.account === undefined
+				? yield* Effect.either(
+						(yield* AccountDirectory).resolve(
+							boundProviderId === undefined
+								? accountRefFromSelection({ model: input.model })
+								: { _tag: "Id", id: boundProviderId },
+						),
+					)
+				: Either.right(input.account);
+		if (Either.isLeft(resolved)) {
+			yield* handleDispatchFailure(input, resolved.left, undefined);
 			return;
 		}
 		yield* sendViaEngine(
 			input,
-			providerId,
-			driver,
-			driver === "claude"
-				? resolveClaudeLaunchConfig(
-						daemonConfig,
-						providerId,
-						config.shellEnv?.(config.projectDir),
-					)
-				: undefined,
+			boundProviderId ?? resolved.right.id,
+			resolved.right,
 		).pipe(Effect.provideService(OrchestrationEngineTag, engine));
 	});

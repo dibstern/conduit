@@ -10,14 +10,14 @@ import {
 	TestClock,
 } from "effect";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	type DaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../src/lib/daemon/config-persistence.js";
+import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
+import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	makeProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -75,6 +75,76 @@ function makeProvider(
 }
 
 describe("ProviderSideEffectReactor", () => {
+	// Replay must retain the admitted account snapshot when its old binding no
+	// longer resolves, and preparation/receipts must use the resolved account id.
+	it.effect(
+		"replays the carried account without resolving its historical binding",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const account = {
+					id: AccountIdSchema.make("current-account"),
+					name: "Current account",
+					driver: "claude" as const,
+					folder: configuredClaudeConfigDir("/tmp/test-claude-account"),
+					usageEligible: true,
+				};
+				yield* seedSendTurnOutbox(sql, {
+					providerId: "removed-account",
+					payloadJson: JSON.stringify({
+						sessionId: "session-1",
+						inputId: "turn-1",
+						prompt: "hello",
+						providerState: {},
+						workspaceRoot: "/tmp/test-project",
+						extraFolders: [],
+						account,
+						instanceId: account.id,
+						configDir: account.folder,
+						folderSource: "account",
+					}),
+				});
+				const sendTurn = vi.fn((_input: SendTurnInput) =>
+					Effect.succeed(completedTurn),
+				);
+				const accountDirectory = makeAccountDirectory(
+					Effect.succeed(
+						accountsStateFromInstances(
+							[],
+							configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+						),
+					),
+				);
+				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
+				const reactor = new ProviderSideEffectReactor({
+					sql,
+					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+					ingestion: { ingest: () => Effect.succeed(0) },
+					accountDirectory,
+				});
+
+				yield* reactor.drain();
+
+				expect(sendTurn).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({
+						account,
+						instanceId: account.id,
+						configDir: account.folder,
+						folderSource: "account",
+					}),
+				);
+				expect(resolveAccount).not.toHaveBeenCalled();
+				expect(
+					(yield* sql<{
+						provider_id: string;
+					}>`SELECT provider_id FROM provider_command_outbox WHERE command_id = 'cmd-1'`)[0]
+						?.provider_id,
+				).toBe("removed-account");
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+	);
+
 	it.effect("executes committed side effects once after commit", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -161,8 +231,17 @@ describe("ProviderSideEffectReactor", () => {
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
-					resolveProviderDriver: (providerId) =>
-						resolveProviderRoutingDriver(config, providerId),
+					accountDirectory: makeAccountDirectory(
+						Effect.succeed(
+							accountsStateFromInstances(
+								(config.instances ?? []).map((instance) => ({
+									...instance,
+									driver: instance.driver ?? "opencode",
+								})),
+								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+							),
+						),
+					),
 				});
 
 				yield* reactor.drain();
@@ -221,8 +300,20 @@ describe("ProviderSideEffectReactor", () => {
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion,
-					resolveProviderDriver: (instanceId) =>
-						instanceId === "work-claude" ? "claude" : undefined,
+					accountDirectory: makeAccountDirectory(
+						Effect.succeed(
+							accountsStateFromInstances(
+								[
+									{
+										id: "work-claude",
+										name: "Work",
+										driver: "claude",
+									},
+								],
+								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+							),
+						),
+					),
 				});
 
 				yield* reactor.drain();
@@ -496,6 +587,9 @@ describe("ProviderSideEffectReactor", () => {
 						history: [],
 						providerState: {},
 						workspaceRoot: "/repo",
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir("/tmp/g4zp-test-claude"),
+						folderSource: "account",
 					}),
 					attempt_count: 0,
 				};
@@ -939,6 +1033,9 @@ function seedSendTurnOutbox(
 						history: [],
 						providerState: {},
 						workspaceRoot: "/repo",
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir("/tmp/g4zp-test-claude"),
+						folderSource: "account",
 					}),
 				1000,
 				1000,

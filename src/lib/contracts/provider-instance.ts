@@ -1,5 +1,10 @@
 import { Schema } from "effect";
+import type { AccountId } from "./account.js";
+import { AccountIdSchema } from "./account.js";
 import { AgentInfoSchema, ModelInfoSchema } from "./ws-rpc.js";
+
+export type { AccountId } from "./account.js";
+export { AccountIdSchema, MANAGED_OPENCODE_ACCOUNT_ID } from "./account.js";
 
 export const KnownProviderDriverKindSchema = Schema.Literal(
 	"claude",
@@ -52,9 +57,6 @@ export const PROVIDER_SESSION_CAPABILITIES = {
 	KnownProviderDriverKind,
 	ProviderSessionCapabilities
 >;
-
-export const AccountIdSchema = Schema.String.pipe(Schema.brand("AccountId"));
-export type AccountId = typeof AccountIdSchema.Type;
 
 export function defaultInstanceIdForDriver(
 	kind: ProviderDriverKind,
@@ -116,35 +118,3 @@ export const ProviderInstanceSchema = Schema.Struct({
 	isNew: Schema.optional(Schema.Boolean),
 });
 export type ProviderInstance = typeof ProviderInstanceSchema.Type;
-
-const CurrentInstanceModelSelectionSchema = Schema.Struct({
-	instanceId: AccountIdSchema,
-	model: Schema.String,
-});
-
-const InstanceModelSelectionWireSchema = Schema.Struct({
-	instanceId: Schema.String,
-	model: Schema.String,
-});
-
-const LegacyModelSelectionSchema = Schema.Struct({
-	provider: ProviderDriverKindSchema,
-	model: Schema.String,
-});
-
-export const InstanceModelSelectionSchema = Schema.transform(
-	Schema.Union(InstanceModelSelectionWireSchema, LegacyModelSelectionSchema),
-	CurrentInstanceModelSelectionSchema,
-	{
-		strict: true,
-		decode: (selection) =>
-			"instanceId" in selection
-				? selection
-				: {
-						instanceId: defaultInstanceIdForDriver(selection.provider),
-						model: selection.model,
-					},
-		encode: (selection) => selection,
-	},
-);
-export type InstanceModelSelection = typeof InstanceModelSelectionSchema.Type;

@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -28,6 +29,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	makeMockAccountDirectory,
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
@@ -67,6 +69,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 					AlertsLive,
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
 					PendingInteractionServiceLive,
 					Layer.succeed(LoggerTag, createSilentLogger()),

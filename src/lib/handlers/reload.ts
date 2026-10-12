@@ -3,13 +3,9 @@
 // the command and model lists (GetCommands/GetModels) once this returns.
 
 import { Effect } from "effect";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
-	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
@@ -37,22 +33,23 @@ export const reloadProviderSessionForClient = (
 				const instanceId = yield* engine.getProviderForSessionEffect(
 					input.sessionId,
 				);
-				if (instanceId !== undefined) {
-					const config = yield* ConfigTag;
-					if (
-						resolveProviderRoutingDriver(
-							loadDaemonConfig(config.configDir),
-							instanceId,
-						) === "opencode"
-					) {
-						// Refresh is an explicit user action; its subsequent catalog reads are passive.
-						yield* (yield* OpenCodeInstancesTag).use(instanceId);
-					}
+				const account =
+					instanceId === undefined
+						? undefined
+						: yield* (yield* AccountDirectory).resolve({
+								_tag: "Id",
+								id: instanceId,
+							});
+				if (account?.driver === "opencode") {
+					// Refresh is an explicit user action; its subsequent catalog reads are passive.
+					yield* (yield* OpenCodeInstancesTag).use(account.id);
 				}
 				yield* engine.dispatchEffect({
 					type: "end_session",
 					commandId: input.commandId,
 					sessionId: input.sessionId,
+					...(instanceId === undefined ? {} : { targetProviderId: instanceId }),
+					...(account === undefined ? {} : { account }),
 				});
 			}).pipe(Effect.scoped),
 		);

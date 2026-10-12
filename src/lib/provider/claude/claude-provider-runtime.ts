@@ -593,19 +593,31 @@ export class ClaudeProviderRuntime {
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return Effect.gen(this, function* () {
 			const { eventSink, abortSignal, ...payload } = input;
-			const folder = input.configDir ?? input.nativeThread?.configDir;
+			const account = input.account;
+			if (account && account.driver !== "claude")
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "sendTurn",
+						cause: new Error("Claude turn requires a Claude account"),
+					}),
+				);
+			const folder = account?.folder ?? input.configDir;
+			if (folder === undefined)
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "sendTurn",
+						cause: new Error(
+							"Claude turn requires a resolved account or explicit config directory",
+						),
+					}),
+				);
 			const turn = {
 				...payload,
-				...(folder === undefined
-					? resolveClaudeLaunchConfig(
-							loadDaemonConfig(this.deps.daemonConfigDir),
-							input.instanceId,
-							this.deps.shellEnv?.(input.workspaceRoot),
-						)
-					: {
-							configDir: folder,
-							folderSource: input.folderSource ?? "account",
-						}),
+				configDir: folder,
+				folderSource: input.folderSource ?? "account",
+				...(account ? { instanceId: account.id } : {}),
 			};
 			const claudeSettingsOverrides = yield* Effect.try({
 				try: () => this.deps.claudeSettingsOverrides?.(),
@@ -736,6 +748,26 @@ export class ClaudeProviderRuntime {
 		input: PreWarmSessionInput,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const preWarm = Effect.gen(this, function* () {
+			const account = input.account;
+			if (account && account.driver !== "claude")
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "preWarmSession",
+						cause: new Error("Claude warm-up requires a Claude account"),
+					}),
+				);
+			const folder = account?.folder ?? input.configDir;
+			if (folder === undefined)
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: "preWarmSession",
+						cause: new Error(
+							"Claude warm-up requires a resolved account or explicit config directory",
+						),
+					}),
+				);
 			let model = input.model;
 			if (!model) {
 				// Discovery is shared with sends; cancellation only stops this waiter.
@@ -772,23 +804,15 @@ export class ClaudeProviderRuntime {
 						cause,
 					}),
 			});
-			const folder = input.configDir ?? input.nativeThread?.configDir;
 			yield* this.commandEffect({
 				type: "pre-warm",
 				sessionId: input.sessionId,
 				input: {
 					...input,
 					model,
-					...(folder === undefined
-						? resolveClaudeLaunchConfig(
-								loadDaemonConfig(this.deps.daemonConfigDir),
-								input.instanceId,
-								this.deps.shellEnv?.(input.workspaceRoot),
-							)
-						: {
-								configDir: folder,
-								folderSource: input.folderSource ?? "account",
-							}),
+					configDir: folder,
+					folderSource: input.folderSource ?? "account",
+					...(account ? { instanceId: account.id } : {}),
 				},
 				claudeSettingsOverrides,
 			});

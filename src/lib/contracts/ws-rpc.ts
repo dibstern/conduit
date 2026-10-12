@@ -1,5 +1,5 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
-import { Schema } from "effect";
+import { Effect, ParseResult, Schema } from "effect";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
@@ -24,6 +24,7 @@ import {
 export { SessionInfoSchema, SessionStatusSchema };
 export type { SessionInfo };
 
+import { AccountRefSchema, accountRefFromSelection } from "./account.js";
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,
@@ -31,6 +32,7 @@ import {
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
 import {
+	AccountUnroutable,
 	ContinuationErrorSchema,
 	HandoffSummarySchema,
 	UsageLimitsSettingSchema,
@@ -38,6 +40,7 @@ import {
 } from "./limit-recovery.js";
 import { type SessionMode, SessionModeSchema } from "./project-file.js";
 import {
+	AccountIdSchema,
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
@@ -264,6 +267,7 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	port: Schema.Number,
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
+	isDefault: Schema.optional(Schema.Boolean),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -1535,10 +1539,14 @@ export class SetClaudeSettings extends Schema.TaggedRequest<SetClaudeSettings>()
 	},
 ) {}
 
-export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSettings>()(
+class ResolveClaudeSettingsWire extends Schema.TaggedRequest<ResolveClaudeSettingsWire>()(
 	"ResolveClaudeSettings",
 	{
-		failure: Schema.Union(WsRpcError, ClaudeSettingsResolveError),
+		failure: Schema.Union(
+			WsRpcError,
+			ClaudeSettingsResolveError,
+			Schema.suspend(() => AccountUnroutable),
+		),
 		success: ResolveClaudeSettingsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
@@ -1547,6 +1555,36 @@ export class ResolveClaudeSettings extends Schema.TaggedRequest<ResolveClaudeSet
 		},
 	},
 ) {}
+
+export class ResolveClaudeSettings extends ResolveClaudeSettingsWire.transformOrFail<ResolveClaudeSettings>(
+	"ResolveClaudeSettings",
+)(
+	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
+	{
+		decode: (wire) =>
+			Effect.succeed({
+				...wire,
+				accountRef: { _tag: "Id" as const, id: wire.instanceId },
+			}),
+		encode: ({ accountRef, ...wire }, _options, ast) =>
+			accountRef?._tag === "DriverDefault"
+				? Effect.fail(
+						new ParseResult.Type(
+							ast,
+							accountRef,
+							"ResolveClaudeSettings requires an explicit account Id",
+						),
+					)
+				: Effect.succeed({
+						...wire,
+						instanceId: accountRef?.id ?? wire.instanceId,
+					}),
+	},
+) {
+	static readonly _tag = ResolveClaudeSettingsWire._tag;
+	static readonly success = ResolveClaudeSettingsWire.success;
+	static readonly failure = ResolveClaudeSettingsWire.failure;
+}
 
 export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSession>()(
 	"ReloadProviderSession",
@@ -1800,7 +1838,7 @@ export class DismissCutOff extends Schema.TaggedRequest<DismissCutOff>()(
 	},
 ) {}
 
-export class ContinueSession extends Schema.TaggedRequest<ContinueSession>()(
+class ContinueSessionWire extends Schema.TaggedRequest<ContinueSessionWire>()(
 	"ContinueSession",
 	{
 		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
@@ -1817,6 +1855,36 @@ export class ContinueSession extends Schema.TaggedRequest<ContinueSession>()(
 	},
 ) {}
 
+export class ContinueSession extends ContinueSessionWire.transformOrFail<ContinueSession>(
+	"ContinueSession",
+)(
+	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
+	{
+		decode: (wire) =>
+			Effect.succeed({
+				...wire,
+				accountRef: { _tag: "Id" as const, id: wire.instanceId },
+			}),
+		encode: ({ accountRef, ...wire }, _options, ast) =>
+			accountRef?._tag === "DriverDefault"
+				? Effect.fail(
+						new ParseResult.Type(
+							ast,
+							accountRef,
+							"ContinueSession requires an explicit account Id",
+						),
+					)
+				: Effect.succeed({
+						...wire,
+						instanceId: accountRef?.id ?? wire.instanceId,
+					}),
+	},
+) {
+	static readonly _tag = ContinueSessionWire._tag;
+	static readonly success = ContinueSessionWire.success;
+	static readonly failure = ContinueSessionWire.failure;
+}
+
 export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>()(
 	"CancelContinuation",
 	{
@@ -1832,7 +1900,7 @@ export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>
 
 export type PreviewContinuationResponse = typeof HandoffSummarySchema.Type;
 
-export class PreviewContinuation extends Schema.TaggedRequest<PreviewContinuation>()(
+class PreviewContinuationWire extends Schema.TaggedRequest<PreviewContinuationWire>()(
 	"PreviewContinuation",
 	{
 		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
@@ -1845,6 +1913,36 @@ export class PreviewContinuation extends Schema.TaggedRequest<PreviewContinuatio
 		},
 	},
 ) {}
+
+export class PreviewContinuation extends PreviewContinuationWire.transformOrFail<PreviewContinuation>(
+	"PreviewContinuation",
+)(
+	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
+	{
+		decode: (wire) =>
+			Effect.succeed({
+				...wire,
+				accountRef: { _tag: "Id" as const, id: wire.instanceId },
+			}),
+		encode: ({ accountRef, ...wire }, _options, ast) =>
+			accountRef?._tag === "DriverDefault"
+				? Effect.fail(
+						new ParseResult.Type(
+							ast,
+							accountRef,
+							"PreviewContinuation requires an explicit account Id",
+						),
+					)
+				: Effect.succeed({
+						...wire,
+						instanceId: accountRef?.id ?? wire.instanceId,
+					}),
+	},
+) {
+	static readonly _tag = PreviewContinuationWire._tag;
+	static readonly success = PreviewContinuationWire.success;
+	static readonly failure = PreviewContinuationWire.failure;
+}
 
 export const QuotaForAccountsResponseSchema = Schema.Array(UsageReadingSchema);
 export type QuotaForAccountsResponse =
@@ -2038,11 +2136,12 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 	},
 ) {}
 
-export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
+class CreateSessionWire extends Schema.TaggedRequest<CreateSessionWire>()(
 	"CreateSession",
 	{
 		failure: Schema.Union(
 			WsRpcError,
+			Schema.suspend(() => AccountUnroutable),
 			WorkspaceMoveError,
 			WorktreeCreationError,
 		),
@@ -2072,6 +2171,39 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 		},
 	},
 ) {}
+
+export class CreateSession extends CreateSessionWire.transformOrFail<CreateSession>(
+	"CreateSession",
+)(
+	{ accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)) },
+	{
+		decode: (wire) =>
+			Effect.succeed({
+				...wire,
+				accountRef: accountRefFromSelection({
+					instanceId: wire.instanceId,
+					providerId: wire.providerId,
+					model:
+						wire.model === undefined
+							? undefined
+							: { providerID: wire.model.providerId },
+				}),
+			}),
+		encode: ({ accountRef, ...wire }) =>
+			Effect.succeed({
+				...wire,
+				...(accountRef?._tag === "Id"
+					? { instanceId: AccountIdSchema.make(accountRef.id) }
+					: accountRef?._tag === "DriverDefault"
+						? { providerId: accountRef.driver, instanceId: undefined }
+						: {}),
+			}),
+	},
+) {
+	static readonly _tag = CreateSessionWire._tag;
+	static readonly success = CreateSessionWire.success;
+	static readonly failure = CreateSessionWire.failure;
+}
 
 export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 	"ViewSession",
@@ -2134,7 +2266,10 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 	"ForkSession",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountUnroutable),
+		),
 		success: ForkSessionResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
@@ -2148,7 +2283,10 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 	"StartSideThread",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountUnroutable),
+		),
 		success: Schema.Struct({ sessionId: Schema.String }),
 		payload: {
 			projectSlug: NonEmptyString,
@@ -2264,7 +2402,10 @@ export class UndoRewind extends Schema.TaggedRequest<UndoRewind>()(
 export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
 	"input.submit",
 	{
-		failure: WsRpcError,
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountUnroutable),
+		),
 		success: SubmitInputResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,

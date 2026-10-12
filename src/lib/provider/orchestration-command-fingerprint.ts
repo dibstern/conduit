@@ -57,7 +57,7 @@ function effectiveModel(
 	options: EffectiveDispatchFingerprintOptions,
 ): unknown {
 	const { providerId, input } = command;
-	if (providerId === "claude") {
+	if ((input.account?.driver ?? providerId) === "claude") {
 		const modelId = input.model?.modelId ?? options.activeSessionModelId;
 		return claudeApiModelId(modelId, input.contextWindow) ?? null;
 	}
@@ -70,19 +70,20 @@ export function effectiveDispatchFingerprint(
 	options: EffectiveDispatchFingerprintOptions = {},
 ): DurableCommandFingerprint {
 	const { providerId, input } = command;
+	const driver = input.account?.driver ?? providerId;
 	const providerOptions = normalizeOptions({
 		variant: input.variant,
 		agent: input.agent,
 		rewind: input.rewind,
 		// contextWindow folds into effectiveModel for Claude; keep it as a raw
 		// option for providers that treat it independently.
-		...(providerId === "claude" ? {} : { contextWindow: input.contextWindow }),
+		...(driver === "claude" ? {} : { contextWindow: input.contextWindow }),
 	});
 	const fields: Record<DurableCommandFingerprintField, unknown> = {
 		commandType: "send_turn",
 		sessionId: input.sessionId,
-		providerId,
-		providerInstanceId: providerId,
+		providerId: driver,
+		providerInstanceId: input.account?.id ?? providerId,
 		runtimeMode: null,
 		interactionMode: null,
 		workspaceRoot: input.workspaceRoot,
@@ -90,7 +91,11 @@ export function effectiveDispatchFingerprint(
 		imageDigests: (input.images ?? []).map(sha256Hex),
 		effectiveModel: effectiveModel(command, options),
 		providerOptions,
-		materialDefaults: null,
+		materialDefaults: input.account
+			? input.account.driver === "claude"
+				? { configDir: input.account.folder, env: input.account.env ?? null }
+				: { url: input.account.url ?? null }
+			: null,
 	};
 	return { version: DURABLE_COMMAND_FINGERPRINT_VERSION, fields };
 }

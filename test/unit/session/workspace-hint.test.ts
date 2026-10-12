@@ -18,6 +18,7 @@ import { SqlClient } from "@effect/sql";
 import { SqlError } from "@effect/sql/SqlError";
 import { Deferred, Effect, Fiber, Layer, Logger, ManagedRuntime } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import {
@@ -58,6 +59,7 @@ import {
 	resolveWorkspaceHint,
 } from "../../../src/lib/session/workspace-hint.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -415,6 +417,7 @@ describe("workspace hint resolution against real worktrees", () => {
 		initialize(folders.nestedRepo);
 		initialize(folders.otherRepo);
 		const dependencies = Layer.mergeAll(
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 			makePersistenceEffectLayer(join(root, "events.db"), "test-project").pipe(
 				Layer.provideMerge(SessionWorkspaceHintStateLive),
 			),

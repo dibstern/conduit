@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import type { ClaudeProviderInstanceDeps } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import {
 	configuredClaudeConfigDir,
@@ -146,6 +147,16 @@ describe("project shell environment", () => {
 		const input = makeBaseSendTurnInput({
 			workspaceRoot: project,
 			model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
+			account: {
+				id: AccountIdSchema.make("claude"),
+				name: "Claude",
+				driver: "claude",
+				folder:
+					source === "default"
+						? sdkDefaultClaudeConfigDir(configDir)
+						: configuredClaudeConfigDir(configDir),
+				usageEligible: true,
+			},
 		});
 		const result = await Effect.runPromise(instance.sendTurnEffect(input));
 		if (source !== "default")
@@ -174,7 +185,7 @@ describe("project shell environment", () => {
 			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
-		await Effect.runPromise(
+		const resumedResult = await Effect.runPromise(
 			resumed.sendTurnEffect({
 				...input,
 				nativeThread: { ...nativeThread, projectId: "test-project" },
@@ -184,6 +195,10 @@ describe("project shell environment", () => {
 				),
 			}),
 		);
+		expect(resumedResult.providerStateUpdates).toContainEqual({
+			key: "nativeThread:claude",
+			value: JSON.stringify(nativeThread),
+		});
 		expect(queryFactory.mock.calls[1]?.[0]?.options).toMatchObject({
 			resume: "sdk-session-1",
 		});
@@ -207,6 +222,13 @@ describe("project shell environment", () => {
 		const namedResult = await Effect.runPromise(
 			namedInstance.sendTurnEffect({
 				...input,
+				account: {
+					id: AccountIdSchema.make("claude"),
+					name: "Claude",
+					driver: "claude",
+					folder: configuredClaudeConfigDir(namedConfigDir),
+					usageEligible: true,
+				},
 				configDir: configuredClaudeConfigDir(namedConfigDir),
 				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,

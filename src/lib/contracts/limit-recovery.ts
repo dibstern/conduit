@@ -1,4 +1,15 @@
 import { Schema } from "effect";
+import { AccountRefSchema } from "./account.js";
+
+export class AccountUnroutable extends Schema.TaggedError<AccountUnroutable>()(
+	"AccountUnroutable",
+	{ ref: Schema.suspend(() => AccountRefSchema) },
+) {
+	get message() {
+		const name = this.ref._tag === "Id" ? this.ref.id : this.ref.driver;
+		return `Cannot route account reference "${name}".`;
+	}
+}
 
 export const ContinuationReasonSchema = Schema.Literal(
 	"user",
@@ -65,6 +76,7 @@ export class HandoffTooLarge extends Schema.TaggedError<HandoffTooLarge>()(
 }
 
 export const ContinuationErrorSchema = Schema.Union(
+	AccountUnroutable,
 	SessionBusy,
 	StaleSwitch,
 	AccountUnavailable,

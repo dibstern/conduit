@@ -5,6 +5,8 @@ import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, Queue, Stream } from "effect";
 import { expect, vi } from "vitest";
+import type { ClaudeAccount } from "../../../src/lib/contracts/account.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type ProjectSettingsEnvelope,
 	WsRpcGroup,
@@ -26,6 +28,7 @@ import {
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../src/lib/provider/claude/claude-capabilities-service.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -279,6 +282,13 @@ describe("WsRpcServerLayer GetModels", () => {
 		"carries runtime model resolution through persistence into GetModels",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-rpc-model-execution-"));
+			const account: ClaudeAccount = {
+				driver: "claude",
+				id: AccountIdSchema.make("claude"),
+				name: "Claude",
+				folder: configuredClaudeConfigDir(join(dir, "claude-login")),
+				usageEligible: true,
+			};
 			const persistenceLayer = makePersistenceEffectLayer(
 				join(dir, "events.db"),
 				"test-project",
@@ -387,6 +397,9 @@ describe("WsRpcServerLayer GetModels", () => {
 						),
 					});
 					yield* instance.sendTurnEffect({
+						account,
+						configDir: account.folder,
+						folderSource: "account",
 						sessionId,
 						inputId: `${sessionId}-turn`,
 						prompt: "Use Sonnet with a 1M context window",

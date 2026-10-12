@@ -5,6 +5,7 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
 import {
@@ -23,6 +24,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -93,6 +95,7 @@ const makeTitleServiceLayer = (input: {
 	Layer.provideMerge(
 		makeSessionTitleServiceLive({ queryFactory: input.queryFactory }),
 		Layer.mergeAll(
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag, makeMockLogger()),
 			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),

@@ -5,7 +5,8 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -37,6 +38,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -106,7 +108,7 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 
 				yield* service.establishOpenCodeSession(
 					session,
-					defaultInstanceIdForDriver("opencode"),
+					AccountIdSchema.make("opencode"),
 				);
 
 				expect(yield* readQuery.getSession(session.id)).toEqual(
@@ -127,7 +129,13 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				);
 				vi.mocked(api.session.create).mockResolvedValueOnce(created);
 
-				yield* service.createSession(created.title, { providerId: "opencode" });
+				yield* service.createSession(created.title, {
+					account: {
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					},
+				});
 
 				expect(yield* service.listSessions()).toEqual([
 					expect.objectContaining({ id: created.id, title: created.title }),
@@ -314,6 +322,7 @@ describe("SessionManager read-your-writes parity", () => {
 				const layer = Layer.provideMerge(
 					SessionManagerServiceLive,
 					Layer.mergeAll(
+						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 						makeSessionManagerStateLive(),
 						Layer.succeed(OpenCodeAPITag, api),
 						loggerLayer,

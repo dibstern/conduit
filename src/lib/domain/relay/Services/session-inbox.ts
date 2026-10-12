@@ -17,6 +17,7 @@ import {
 	Schema,
 	Stream,
 } from "effect";
+import type { Account } from "../../../contracts/account.js";
 import {
 	type InputAdmittedPayload,
 	type InputCancelledPayload,
@@ -28,10 +29,6 @@ import {
 	type SteerBlocker,
 } from "../../../contracts/stored-event.js";
 import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
-import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -40,14 +37,14 @@ import {
 	type ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../provider/provider-registry.js";
-import type { ProjectRelayConfig } from "../../../types.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag } from "./services.js";
+import { LoggerTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
 
@@ -58,17 +55,12 @@ import { OverridesStateTag } from "./session-overrides-state.js";
  */
 export const providerSteers = (
 	registry: Option.Option<ProviderRegistry>,
-	config: Option.Option<ProjectRelayConfig>,
-	provider: string,
+	account: Account | undefined,
 ): boolean => {
 	if (Option.isNone(registry)) return false;
-	const driver = resolveProviderRoutingDriver(
-		Option.isSome(config) ? loadDaemonConfig(config.value.configDir) : null,
-		provider,
-	);
 	return (
-		driver !== undefined &&
-		registry.value.getInstance(driver)?.steering === true
+		account !== undefined &&
+		registry.value.getInstance(account.driver)?.steering === true
 	);
 };
 
@@ -374,6 +366,7 @@ const decodeRequest = Schema.decodeUnknown(
 export const SessionInboxLive = Layer.scoped(
 	SessionInboxTag,
 	Effect.gen(function* () {
+		const accounts = yield* AccountDirectory;
 		const sql = yield* SqlClient.SqlClient;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
@@ -387,7 +380,6 @@ export const SessionInboxLive = Layer.scoped(
 				Effect.Effect.Context<ReturnType<Continuation["requestContinuation"]>>
 			>();
 		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
-		const config = yield* Effect.serviceOption(ConfigTag);
 		const permits = new Map<string, Effect.Semaphore>();
 		const serialised = (sessionId: string) => {
 			let permit = permits.get(sessionId);
@@ -488,8 +480,13 @@ export const SessionInboxLive = Layer.scoped(
 					facts?.running == null
 						? undefined
 						: yield* decodeRequest(facts.running).pipe(Effect.orDie);
-				const reading = facts?.provider
-					? yield* usage.latest(facts.provider)
+				const account = facts?.provider
+					? yield* accounts
+							.resolve({ _tag: "Id", id: facts.provider })
+							.pipe(Effect.option)
+					: Option.none<Account>();
+				const reading = Option.isSome(account)
+					? yield* usage.latest(account.value.id)
 					: undefined;
 				const now = (yield* Clock.currentTimeMillis) / 1000;
 				const resets =
@@ -523,9 +520,10 @@ export const SessionInboxLive = Layer.scoped(
 					usageResetsAt: resets.length > 0 ? Math.max(...resets) : undefined,
 					scheduled: facts?.scheduled === 1,
 					known,
-					providerSteers:
-						facts?.provider != null &&
-						providerSteers(registry, config, facts.provider),
+					providerSteers: providerSteers(
+						registry,
+						Option.getOrUndefined(account),
+					),
 					promptOpen: (facts?.open_prompts ?? 0) > 0,
 					running,
 				} satisfies InboxView;

@@ -35,8 +35,14 @@ import {
 	Stream,
 	TestClock,
 } from "effect";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UsageReading } from "../../../../src/lib/contracts/limit-recovery.js";
+import { accountsStateFromConfig } from "../../../../src/lib/daemon/account-directory.js";
+import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
@@ -67,6 +73,7 @@ import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/even
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import {
 	ProviderRegistry,
@@ -77,6 +84,19 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
 import { usageReading } from "../../../helpers/usage.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-continuation-sweep-"));
+	config.configDir = isolatedRoot;
+	config.projectDir = isolatedRoot;
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
 
 const seed = (at = 10) =>
 	Effect.gen(function* () {
@@ -134,14 +154,34 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 			shutdownEffect: () => Effect.void,
 		},
 	]);
+	const accountDirectory = makeAccountDirectory(
+		Effect.sync(() =>
+			accountsStateFromConfig(
+				{
+					...defaultDaemonConfig(),
+					instances: [
+						{
+							id: "target",
+							name: "Target",
+							driver: "claude",
+							port: 0,
+							managed: false,
+						},
+					],
+				},
+				configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+			),
+		),
+	);
 	return effect.pipe(
+		Effect.provideService(AccountDirectory, accountDirectory),
 		Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 		Effect.provideService(LoggerTag, makeMockLogger()),
 		Effect.provideService(
 			OrchestrationEngineTag,
 			new OrchestrationEngine({
 				registry,
-				resolveProviderDriver: () => "claude",
+				accountDirectory,
 			}),
 		),
 		Effect.provideService(ProviderRegistryTag, registry),

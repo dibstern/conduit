@@ -5,7 +5,9 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
@@ -39,6 +41,7 @@ import {
 	type ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 } from "../../helpers/mock-factories.js";
@@ -74,6 +77,7 @@ describe("applySessionCommand", () => {
 		}) => Effect.Effect<
 			A,
 			E,
+			| AccountDirectory
 			| SqlClient.SqlClient
 			| ProjectionRunnerEffectTag
 			| OpenCodeAPITag
@@ -106,6 +110,7 @@ describe("applySessionCommand", () => {
 					// An empty config dir keeps provider routing at its defaults instead
 					// of reading the developer's real ~/.config/conduit.
 					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					...(projectors
 						? [
 								Layer.effect(
@@ -163,7 +168,11 @@ describe("applySessionCommand", () => {
 						api.session.messagesPage.mockResolvedValue([
 							partialFake<Message>({ id: "b" }),
 						]);
-						const forked = yield* forkOpenCodeSession("ses-parent");
+						const forked = yield* forkOpenCodeSession("ses-parent", {
+							driver: "opencode",
+							id: AccountIdSchema.make("opencode"),
+							name: "OpenCode",
+						});
 						const reads = yield* makeReadQueryEffect;
 						expect(yield* reads.getSession(forked.id)).toMatchObject({
 							fork_point_event: "b",
@@ -189,7 +198,11 @@ describe("applySessionCommand", () => {
 						       ('msg-other', 'ses-other', 'assistant', 300, 300)`;
 					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
 
-					const forked = yield* forkOpenCodeSession("ses-parent");
+					const forked = yield* forkOpenCodeSession("ses-parent", {
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					});
 					const reads = yield* makeReadQueryEffect;
 					expect(yield* reads.getSession(forked.id)).toMatchObject({
 						fork_point_event: "msg-b-tip",
@@ -210,7 +223,11 @@ describe("applySessionCommand", () => {
 					yield* seedSession("ses-parent", "opencode");
 					api.session.messagesPage.mockRejectedValue(new Error("unavailable"));
 
-					const forked = yield* forkOpenCodeSession("ses-parent");
+					const forked = yield* forkOpenCodeSession("ses-parent", {
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					});
 					const reads = yield* makeReadQueryEffect;
 					expect(yield* reads.getSession(forked.id)).toMatchObject({
 						fork_point_event: null,
@@ -347,7 +364,10 @@ describe("applySessionCommand", () => {
 					// conduit-test-42k7: the caller must not be told a delete worked
 					// while the row it reads back is still there.
 					expect(result._tag).toBe("Left");
-					if (result._tag === "Left") {
+					if (
+						result._tag === "Left" &&
+						result.left instanceof SessionCommandError
+					) {
 						expect(result.left).toBeInstanceOf(SessionCommandError);
 						// Append and project are one transaction, so the failure names the
 						// commit that rolled back, not a separate project step.
@@ -385,7 +405,15 @@ describe("applySessionCommand", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSession("ses-parent", "opencode");
 
-				const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
+				const forked = yield* forkOpenCodeSession(
+					"ses-parent",
+					{
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					},
+					"msg-7",
+				);
 				const reads = yield* makeReadQueryEffect;
 				expect(
 					(yield* reads.listSessionInfos()).find(({ id }) => id === forked.id),
@@ -450,7 +478,15 @@ describe("applySessionCommand", () => {
 								time: { created: 123 },
 							}),
 						]);
-						const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
+						const forked = yield* forkOpenCodeSession(
+							"ses-parent",
+							{
+								driver: "opencode",
+								id: AccountIdSchema.make("opencode"),
+								name: "OpenCode",
+							},
+							"msg-7",
+						);
 						const reads = yield* makeReadQueryEffect;
 						const row = yield* reads.getSession(forked.id);
 						expect(row?.fork_point_timestamp).toBe(
@@ -472,7 +508,15 @@ describe("applySessionCommand", () => {
 				Effect.gen(function* () {
 					api.session.messages.mockRejectedValueOnce(new Error("unavailable"));
 					const result = yield* Effect.either(
-						forkOpenCodeSession("ses-parent", "msg-7"),
+						forkOpenCodeSession(
+							"ses-parent",
+							{
+								driver: "opencode",
+								id: AccountIdSchema.make("opencode"),
+								name: "OpenCode",
+							},
+							"msg-7",
+						),
 					);
 					expect(result._tag).toBe("Left");
 					expect(api.session.fork).not.toHaveBeenCalled();

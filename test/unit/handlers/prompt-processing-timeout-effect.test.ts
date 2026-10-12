@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
@@ -30,6 +31,7 @@ import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	MOCK_PROJECT_DIR,
+	makeMockAccountDirectory,
 	makeMockAgentService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
@@ -72,6 +74,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
 				Layer.succeed(
 					SessionManagerServiceTag,
@@ -100,6 +103,7 @@ describe("prompt processing timeouts through Effect state", () => {
 		);
 
 		return Effect.gen(function* () {
+			(yield* OrchestrationEngineTag).bindSession("session-1", "opencode");
 			yield* handleMessage("client-1", {
 				text: "hello",
 				commandId: "cmd-timeout-send",
@@ -127,6 +131,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(OpenCodeAPITag, client),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
 				Layer.succeed(
 					SessionManagerServiceTag,

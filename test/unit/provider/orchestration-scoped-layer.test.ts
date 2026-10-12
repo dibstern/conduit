@@ -1,5 +1,10 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -7,6 +12,7 @@ import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/s
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
@@ -47,6 +53,20 @@ describe("orchestration scoped layer", () => {
 			makeOrchestrationRuntimeLayer().pipe(
 				Layer.provide(
 					Layer.mergeAll(
+						Layer.succeed(
+							AccountDirectory,
+							makeAccountDirectory(
+								Effect.succeed(
+									accountsStateFromInstances(
+										[
+											{ id: "opencode", name: "OpenCode", driver: "opencode" },
+											{ id: "claude", name: "Claude", driver: "claude" },
+										],
+										configuredClaudeConfigDir("/tmp/g4zp-test-claude"),
+									),
+								),
+							),
+						),
 						Layer.succeed(OpenCodeAPITag, openCodeApi),
 						persistence,
 						Layer.succeed(

@@ -4,6 +4,7 @@
 
 import { Effect } from "effect";
 import { vi } from "vitest";
+import { configuredClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	Query,
 	SDKMessage,
@@ -129,6 +130,8 @@ export function makeBaseSendTurnInput(
 		providerState: {},
 		workspaceRoot: "/tmp/ws",
 		extraFolders: [],
+		configDir: configuredClaudeConfigDir("/tmp/conduit-test-claude-config"),
+		folderSource: "account",
 		eventSink: createMockEventSink(),
 		abortSignal: new AbortController().signal,
 		...overrides,

@@ -1,3 +1,5 @@
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // The append sites that never published anything of their own. Each test drives
 // the real site against a real SQLite file with the real projectors and a real
 // SessionEventBus, and asks the two questions a subscriber cares about: did the
@@ -103,6 +105,7 @@ const makeStatusPollerLayer = (dbPath: string) => {
 				createAllEffectProjectors(),
 				bus,
 			),
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 			Layer.succeed(ConfigTag, makeMockConfig({ persistenceDbPath: dbPath })),
 			Layer.succeed(LoggerTag, makeMockLogger()),
 			makePollerStateLive(),
@@ -333,6 +336,7 @@ it("the auto-title rename advances the version of the session it renames", async
 					createAllEffectProjectors(),
 					bus,
 				),
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag, makeMockConfig()),
 				Layer.succeed(LoggerTag, makeMockLogger()),
 			),

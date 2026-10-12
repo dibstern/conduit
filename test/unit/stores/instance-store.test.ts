@@ -61,6 +61,7 @@ describe("Instance Store", () => {
 					managed: false,
 					status: "healthy",
 					driver: "claude",
+					isDefault: true,
 					configDir: "/profiles/work",
 					restartCount: 0,
 					createdAt: 1,
@@ -81,6 +82,7 @@ describe("Instance Store", () => {
 
 		expect(getInstanceById("work-claude")).toMatchObject({
 			driver: "claude",
+			isDefault: true,
 			configDir: "/profiles/work",
 		});
 		expect(getInstanceById("remote-opencode")).toMatchObject({

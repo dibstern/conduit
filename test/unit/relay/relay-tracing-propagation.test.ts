@@ -17,6 +17,7 @@ import {
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { makeDaemonTracingLive } from "../../../src/lib/domain/daemon/Layers/tracing.js";
 import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -30,7 +31,10 @@ import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
-import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 
 describe("relay tracing propagation", () => {
 	it.scoped(
@@ -47,6 +51,7 @@ describe("relay tracing propagation", () => {
 				.mockRejectedValue(new DOMException("test timeout", "AbortError"));
 
 			const dependencies = Layer.mergeAll(
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				makeDaemonTracingLive({
 					enabled: false,
 					filePath: join(dir, "unused.trace.ndjson"),

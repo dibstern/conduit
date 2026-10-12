@@ -1,3 +1,5 @@
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // Auto-settle runs from the daemon's sweep fiber, which does not carry the
 // project's SessionEventBus. A settle committed there must still reach the
 // sidebar's shell subscription; otherwise the row stays live in the browser,
@@ -103,6 +105,7 @@ describe("SessionManagerService settle signal", () => {
 			const layer = Layer.provideMerge(
 				SessionManagerServiceLive,
 				Layer.mergeAll(
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
 					Layer.succeed(OpenCodeAPITag, openCodeApi),
 					loggerLayer,

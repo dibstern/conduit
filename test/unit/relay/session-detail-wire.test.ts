@@ -1,14 +1,21 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Queue, Schema, Stream } from "effect";
-import { expect } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	SessionDetailEnvelopeSchema,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
 	type SessionDetailItem,
@@ -26,6 +33,18 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-detail-wire-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
 
 const wireRoundTrip = (
 	envelope: SessionDetailEnvelope,
@@ -47,6 +66,17 @@ const row = (text: string): SessionDetailItem => part("p", text);
 const testLayer = () => {
 	const dir = mkdtempSync(join(process.cwd(), ".suffix-test-"));
 	return Layer.mergeAll(
+		Layer.succeed(
+			AccountDirectory,
+			makeAccountDirectory(
+				Effect.succeed(
+					accountsStateFromConfig(
+						defaultDaemonConfig(),
+						configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+					),
+				),
+			),
+		),
 		makePersistenceEffectLayer(
 			join(dir, "events.db"),
 			"test-project",
@@ -366,7 +396,7 @@ describe("session detail wire", () => {
 				]);
 				const issued: (number | undefined)[] = [];
 				const context = yield* Effect.context<
-					ReadQueryEffectTag | SessionEventBusTag
+					ReadQueryEffectTag | SessionEventBusTag | AccountDirectory
 				>();
 				let corrupt = true;
 				const output = yield* Queue.unbounded<SessionDetailEnvelope>();

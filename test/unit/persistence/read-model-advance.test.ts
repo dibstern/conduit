@@ -1,3 +1,5 @@
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // The projection path is the only thing that announces a read-model change.
 // Each test drives a real producer against a real SQLite file with the real
 // projectors, and observes what reached the bus — never a projector directly.
@@ -52,7 +54,11 @@ const withPersistence = async <A>(
 	) => Effect.Effect<
 		A,
 		unknown,
-		PersistenceEffectContext | ConfigTag | LoggerTag | OpenCodeAPITag
+		| PersistenceEffectContext
+		| ConfigTag
+		| LoggerTag
+		| OpenCodeAPITag
+		| AccountDirectory
 	>,
 ): Promise<A> => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-read-model-advance-"));
@@ -71,6 +77,7 @@ const withPersistence = async <A>(
 					Layer.mergeAll(
 						persistence,
 						bus,
+						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 						Layer.succeed(ConfigTag, makeMockConfig()),
 						Layer.succeed(LoggerTag, makeMockLogger()),
 						Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),

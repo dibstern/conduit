@@ -1,14 +1,11 @@
 import { SqlClient } from "@effect/sql";
 import { Data, Effect } from "effect";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
-import { ConfigTag, LoggerTag } from "./services.js";
+import { LoggerTag } from "./services.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import { hasActiveProcessingTimeout } from "./session-overrides-state.js";
 
@@ -55,17 +52,11 @@ const readRewindSession = (sessionId: string) =>
 				message:
 					"Stop the current turn and clear queued inputs or pending continuations before rewinding",
 			});
-		const config = yield* ConfigTag;
-		const driver = resolveProviderRoutingDriver(
-			loadDaemonConfig(config.configDir),
-			row.provider,
-		);
-		if (driver !== "opencode" && driver !== "claude")
-			return yield* new RewindUnavailable({
-				sessionId,
-				message: "This provider does not support rewind",
-			});
-		return { row, driver };
+		const account = yield* (yield* AccountDirectory).resolve({
+			_tag: "Id",
+			id: row.provider,
+		});
+		return { row, account };
 	});
 
 export const rewindSessionToMessage = ({
@@ -82,7 +73,7 @@ export const rewindSessionToMessage = ({
 		yield* inbox.withSession(
 			sessionId,
 			Effect.gen(function* () {
-				const { row, driver } = yield* readRewindSession(sessionId);
+				const { row, account } = yield* readRewindSession(sessionId);
 				const sql = yield* SqlClient.SqlClient;
 				const [target] = yield* sql<{ id: string }>`SELECT id FROM messages
 				WHERE session_id = ${sessionId} AND id = ${messageId}`;
@@ -93,7 +84,7 @@ export const rewindSessionToMessage = ({
 						message: `Rewind target ${messageId} not found in session ${sessionId}`,
 					});
 				if (row.pending_rewind_message_id === messageId) return;
-				if (driver === "opencode") {
+				if (account.driver === "opencode") {
 					const client = yield* OpenCodeAPITag;
 					yield* Effect.tryPromise(() =>
 						client.session.revert(sessionId, { messageID: messageId }),
@@ -131,13 +122,13 @@ export const undoSessionRewind = ({
 		yield* inbox.withSession(
 			sessionId,
 			Effect.gen(function* () {
-				const { row, driver } = yield* readRewindSession(sessionId);
+				const { row, account } = yield* readRewindSession(sessionId);
 				if (!row.pending_rewind_message_id)
 					return yield* new RewindUnavailable({
 						sessionId,
 						message: "There is no pending rewind to undo",
 					});
-				if (driver === "opencode") {
+				if (account.driver === "opencode") {
 					const client = yield* OpenCodeAPITag;
 					yield* Effect.tryPromise(() => client.session.unrevert(sessionId));
 				}

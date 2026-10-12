@@ -169,6 +169,7 @@ export interface ProjectRelayConfig {
 	daemonConfigContext?: import("effect").Context.Context<
 		| import("./domain/daemon/Services/daemon-config-ref.js").DaemonConfigRefTag
 		| import("./domain/daemon/Services/config-persistence-service.js").ConfigPersistenceTag
+		| import("./domain/daemon/Services/account-directory.js").AccountDirectory
 	>;
 	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
 	openCodeInstanceId?: string;

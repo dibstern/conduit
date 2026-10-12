@@ -1,12 +1,12 @@
 import { Effect } from "effect";
 import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
+	type Account,
+	accountRefFromSelection,
+} from "../../../contracts/account.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
-import { harnessForModelProvider } from "../../../provider/turn-settings.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	PendingInteractionServiceTag,
@@ -15,16 +15,13 @@ import {
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
 import {
 	CLAUDE_PROVIDER_ID,
-	isClaudeDriver,
 	isProviderTurnInterruptProvider,
-	OPENCODE_PROVIDER_ID,
 } from "./provider-turn-dispatch.js";
 import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
 } from "./provider-turn-service.js";
 import {
-	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
@@ -132,7 +129,7 @@ const resolvePendingClaudeQuestions = (
 
 const materializeOpenCodeSession = (
 	input: ProviderTurnServicePrepareInput,
-	daemonConfig: ReturnType<typeof loadDaemonConfig>,
+	account: Account,
 	providerId: string,
 ) =>
 	Effect.gen(function* () {
@@ -153,22 +150,21 @@ const materializeOpenCodeSession = (
 		}
 
 		const row = rowResult.right;
-		if (
-			!row ||
-			resolveProviderRoutingDriver(daemonConfig, row.provider) ===
-				OPENCODE_PROVIDER_ID
-		) {
+		if (!row || row.provider === providerId) {
 			return input.sessionId;
 		}
-
-		const targetProvider = input.model?.providerID ?? providerId;
+		const source = yield* (yield* AccountDirectory).resolve({
+			_tag: "Id",
+			id: row.provider,
+		});
+		if (source.driver === "opencode") return input.sessionId;
 		const session = yield* sessionManagerService.createSession(row.title, {
-			providerId: targetProvider,
+			account,
 		});
 		if (input.model && input.modelUserSelected) {
 			yield* selectSessionModel(session.id, input.model);
 		}
-		orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
+		orchestrationEngine.bindSession(session.id, account.id);
 		wsHandler.setClientSession(input.clientId, session.id);
 		log.info(
 			`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
@@ -178,24 +174,24 @@ const materializeOpenCodeSession = (
 
 export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
-		const providerId =
-			(yield* orchestrationEngine.getProviderForSessionEffect(
-				input.sessionId,
-			)) ?? harnessForModelProvider(input.model?.providerID ?? "");
-		const daemonConfig = loadDaemonConfig(config.configDir);
-		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
-		if (driver === undefined) return input.sessionId;
-		if (isClaudeDriver(driver)) {
+		const providerId = yield* orchestrationEngine.getProviderForSessionEffect(
+			input.sessionId,
+		);
+		const account = yield* (yield* AccountDirectory).resolve(
+			providerId === undefined
+				? accountRefFromSelection({ model: input.model })
+				: { _tag: "Id", id: providerId },
+		);
+		if (account.driver === "claude") {
 			if (input.delivery !== "steer")
 				yield* resolvePendingClaudeQuestions(input);
 			return input.sessionId;
 		}
 		return yield* materializeOpenCodeSession(
 			input,
-			daemonConfig,
-			providerId,
+			account,
+			providerId ?? account.id,
 		).pipe(Effect.provideService(OrchestrationEngineTag, orchestrationEngine));
 	});
 
@@ -217,7 +213,6 @@ const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
 export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		const config = yield* ConfigTag;
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
 		yield* clearProcessingTimeout(input.sessionId);
 
@@ -229,17 +224,11 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			yield* interruptLegacyTurn(input);
 			return;
 		}
-		const driver = resolveProviderRoutingDriver(
-			loadDaemonConfig(config.configDir),
-			providerId,
-		);
-		if (driver === undefined) {
-			log.warn(
-				`client=${input.clientId} session=${input.sessionId} Cannot resolve provider instance for interrupt routing: ${providerId}`,
-			);
-			return;
-		}
-		if (!isProviderTurnInterruptProvider(driver)) {
+		const account = yield* (yield* AccountDirectory).resolve({
+			_tag: "Id",
+			id: providerId,
+		});
+		if (!isProviderTurnInterruptProvider(account.driver)) {
 			yield* interruptLegacyTurn(input);
 			return;
 		}

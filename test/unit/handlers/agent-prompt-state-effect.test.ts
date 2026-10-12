@@ -34,6 +34,8 @@ describe("agent selection state", () => {
 			})),
 		});
 
+		engine.bindSession("session-1", "opencode");
+
 		return Effect.gen(function* () {
 			const agentService = yield* AgentServiceTag;
 			yield* agentService.switchAgent({
@@ -86,6 +88,8 @@ describe("agent selection state", () => {
 				providerStateUpdates: [],
 			})),
 		});
+
+		engine.bindSession("session-1", "opencode");
 
 		return Effect.gen(function* () {
 			yield* setDefaultAgent("plan");

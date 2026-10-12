@@ -32,6 +32,7 @@ import { formatErrorDetail } from "../../../errors.js";
 import { setLogFormat, setLogLevel } from "../../../logger.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
+import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -213,6 +214,10 @@ export async function startForegroundDaemon(
 	if (options.logFormat) setLogFormat(options.logFormat);
 
 	const configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
+	const launchLogin = captureClaudeLaunchLogin(
+		process.env,
+		options.claudeConfigDir,
+	);
 	const loaded = loadDaemonConfigResult(configDir);
 	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound") {
 		throw loaded.left;
@@ -386,6 +391,7 @@ export async function startForegroundDaemon(
 		};
 	};
 	const liveOptions: DaemonLiveOptions = {
+		launchLogin,
 		configDir,
 		socketPath,
 		staticDir: options.staticDir ?? resolveDefaultStaticDir(),

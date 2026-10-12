@@ -4,6 +4,7 @@
 // Conduit owns all state. Instances turn prompts into event streams.
 
 import type { Effect, Scope } from "effect";
+import type { Account } from "../contracts/account.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type {
@@ -212,6 +213,8 @@ export interface SendTurnInput {
 	readonly handoff?: SessionHandoffDeliveredPayload;
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
+	/** Resolved once at admission and retained for this turn, including replay. */
+	readonly account?: Account | undefined;
 	readonly instanceId?: string;
 	readonly nativeThread?: NativeThread | undefined;
 	/** Server-resolved cursor; Claude adapters never infer it from history/state. */
@@ -258,6 +261,7 @@ export type PreWarmSessionInput = Pick<
 	| "workspaceRoot"
 	| "extraFolders"
 	| "providerState"
+	| "account"
 	| "instanceId"
 	| "nativeThread"
 	| "resumeSessionId"

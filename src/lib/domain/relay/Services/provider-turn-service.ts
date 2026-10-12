@@ -1,5 +1,6 @@
 import type { SqlClient } from "@effect/sql";
 import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
+import type { Account } from "../../../contracts/account.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
 import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -7,6 +8,7 @@ import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/proj
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
+import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
@@ -40,6 +42,8 @@ import type { SessionTitleServiceTag } from "./session-title-service.js";
 export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
 
 export interface ProviderTurnServiceSendInput {
+	/** Continuation admission may already have resolved this immutable snapshot. */
+	readonly account?: Account;
 	readonly clientId: string;
 	readonly commandId: string;
 	readonly sessionId: string;
@@ -120,6 +124,7 @@ export class ProviderTurnServiceTag extends Context.Tag("ProviderTurnService")<
 
 const makeProviderTurnService = Effect.gen(function* () {
 	const context = yield* Effect.context<
+		| AccountDirectory
 		| OpenCodeAPITag
 		| WebSocketHandlerTag
 		| LoggerTag
@@ -222,6 +227,7 @@ const ProviderTurnDispatchFibersLive = Layer.scoped(
 export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
+	| AccountDirectory
 	| OpenCodeAPITag
 	| WebSocketHandlerTag
 	| LoggerTag

@@ -2,11 +2,12 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { expect, vi } from "vitest";
-import {
-	type DaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../src/lib/daemon/config-persistence.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
+import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	OrchestrationEngine,
 	type SendTurnCommand,
@@ -103,6 +104,59 @@ function seedProjectedSessionBinding(
 }
 
 describe("OrchestrationEngine dispatchEffect", () => {
+	// A fallback account must choose the driver without rewriting the historical
+	// binding or re-resolving an admitted account against a changed registry.
+	it.effect(
+		"routes a carried account while preserving the historical binding",
+		() =>
+			Effect.gen(function* () {
+				const registry = new ProviderRegistry();
+				const instance = makeStubInstance("claude");
+				registry.registerInstance(instance);
+				const accountDirectory = makeAccountDirectory(
+					Effect.succeed(
+						accountsStateFromInstances(
+							[],
+							configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+						),
+					),
+				);
+				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
+				const engine = new OrchestrationEngine({ registry, accountDirectory });
+				const account = {
+					id: AccountIdSchema.make("current-account"),
+					name: "Current account",
+					driver: "claude" as const,
+					folder: configuredClaudeConfigDir("/tmp/test-claude-account"),
+					usageEligible: true,
+				};
+				const command: SendTurnCommand = {
+					...sendTurnCommand(),
+					providerId: "removed-account",
+					input: {
+						...sendTurnCommand().input,
+						instanceId: "current-account",
+						account,
+					},
+				};
+
+				expect(yield* engine.dispatchEffect(command)).toMatchObject({
+					status: "completed",
+				});
+				expect(instance.sendTurnEffect).toHaveBeenCalledWith(command.input);
+				yield* engine.dispatchEffect({
+					type: "discover",
+					providerId: account.id,
+					account,
+				});
+				expect(instance.discoverEffect).toHaveBeenCalledOnce();
+				expect(resolveAccount).not.toHaveBeenCalled();
+				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
+					"removed-account",
+				);
+			}),
+	);
+
 	it.effect(
 		"recovers session provider bindings from the durable read model in a fresh engine",
 		() =>
@@ -230,8 +284,17 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					resolveProviderDriver: (providerId) =>
-						resolveProviderRoutingDriver(config, providerId),
+					accountDirectory: makeAccountDirectory(
+						Effect.succeed(
+							accountsStateFromInstances(
+								(config.instances ?? []).map((instance) => ({
+									...instance,
+									driver: instance.driver ?? "opencode",
+								})),
+								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+							),
+						),
+					),
 				});
 				const command = {
 					...sendTurnCommand(),
@@ -276,8 +339,17 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				registry.registerInstance(instance);
 				const engine = new OrchestrationEngine({
 					registry,
-					resolveProviderDriver: (providerId) =>
-						resolveProviderRoutingDriver(config, providerId),
+					accountDirectory: makeAccountDirectory(
+						Effect.succeed(
+							accountsStateFromInstances(
+								(config.instances ?? []).map((instance) => ({
+									...instance,
+									driver: instance.driver ?? "opencode",
+								})),
+								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+							),
+						),
+					),
 				});
 				const command = {
 					...sendTurnCommand(),
@@ -313,8 +385,17 @@ describe("OrchestrationEngine dispatchEffect", () => {
 				registry.registerInstance(openCodeInstance);
 				const engine = new OrchestrationEngine({
 					registry,
-					resolveProviderDriver: (providerId) =>
-						resolveProviderRoutingDriver(config, providerId),
+					accountDirectory: makeAccountDirectory(
+						Effect.succeed(
+							accountsStateFromInstances(
+								(config.instances ?? []).map((instance) => ({
+									...instance,
+									driver: instance.driver ?? "opencode",
+								})),
+								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
+							),
+						),
+					),
 				});
 				const command = {
 					...sendTurnCommand(),

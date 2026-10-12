@@ -3,6 +3,7 @@ import { SqlClient } from "@effect/sql";
 import {
 	Context,
 	Effect,
+	Either,
 	Layer,
 	ManagedRuntime,
 	Option,
@@ -10,11 +11,14 @@ import {
 	Stream,
 } from "effect";
 import { defaultInstanceIdForDriver } from "../contracts/provider-instance.js";
+import { accountsStateFromConfig } from "../daemon/account-directory.js";
 import {
+	type DaemonConfigLoadError,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
 	getConfigDir,
 	loadDaemonConfig,
+	loadDaemonConfigResult,
 	resolveClaudeInstanceConfigDir,
 	resolveConfiguredInstances,
 } from "../daemon/config-persistence.js";
@@ -25,6 +29,10 @@ import {
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../domain/daemon/Services/account-directory.js";
 import type { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -108,12 +116,15 @@ import {
 import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-service.js";
 import { realWorkspacePath } from "../git/worktrees.js";
 import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
+import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectError,
 } from "../persistence/effect/live.js";
+import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
 import {
@@ -180,6 +191,12 @@ const relayOpenCodeInstances = (
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
+	| AccountDirectory
+	| ConfigTag
+	| LoggerTag
+	| OpenCodeAPITag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
 	| SessionSetupTag
 	| OverridesStateTag
 	| DaemonConfigRefTag
@@ -198,7 +215,7 @@ export const TranslatorTag =
 export interface RelayRuntime {
 	runtime: ManagedRuntime.ManagedRuntime<
 		RelayRuntimeServices,
-		PersistenceEffectError
+		PersistenceEffectError | DaemonConfigLoadError
 	>;
 	dispose: () => Promise<void>;
 }
@@ -265,7 +282,14 @@ export function createProjectRelayLayers({
 		: Layer.unwrapEffect(
 				Effect.gen(function* () {
 					const configDir = config.configDir ?? getConfigDir();
-					const saved = loadDaemonConfig(configDir) ?? defaultDaemonConfig();
+					const loaded = loadDaemonConfigResult(configDir);
+					if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound")
+						return yield* loaded.left;
+					const saved = Either.getOrElse(loaded, defaultDaemonConfig);
+					const accounts = accountsStateFromConfig(
+						saved,
+						captureClaudeLaunchLogin(process.env),
+					);
 					const { pinHash, tls, ...initial } = saved;
 					const configRefLayer = DaemonConfigRefLive(
 						makeDaemonConfigFromOptions({
@@ -299,6 +323,11 @@ export function createProjectRelayLayers({
 					return ConfigPersistenceLive.pipe(
 						Layer.provideMerge(snapshot),
 						Layer.provide(makeConfigWriterLive(configDir)),
+						Layer.provideMerge(
+							Layer.sync(AccountDirectory, () =>
+								makeAccountDirectory(Effect.succeed(accounts)),
+							),
+						),
 					);
 				}),
 			);
@@ -381,6 +410,7 @@ export function createProjectRelayLayers({
 	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
+				daemonConfigLayer,
 				persistenceEffectLayer,
 				configLayer,
 				loggerLayer,
@@ -512,6 +542,7 @@ export function createProjectRelayLayers({
 		? InstanceManagementServiceFromConfigLive.pipe(Layer.provide(configLayer))
 		: Layer.empty;
 	const providerOrchestrationDeps = Layer.mergeAll(
+		daemonConfigLayer,
 		openCodeApiLayer,
 		persistenceEffectLayer,
 		// The engine commits input.sent through commit-and-signal, which

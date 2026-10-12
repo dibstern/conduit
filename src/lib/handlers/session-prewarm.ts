@@ -1,15 +1,9 @@
 import { Effect } from "effect";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
-} from "../daemon/config-persistence.js";
+import type { Account } from "../contracts/account.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { resolveSessionFolders } from "../domain/relay/Services/provider-turn-dispatch.js";
-import {
-	ConfigTag,
-	OrchestrationEngineTag,
-} from "../domain/relay/Services/services.js";
+import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import {
 	getContextWindow,
 	getModel,
@@ -23,19 +17,22 @@ import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { harnessForModelProvider } from "../provider/turn-settings.js";
 
 /** Resolve the same launch inputs as a send without admitting a turn. */
-export const preWarmSession = (sessionId: string) =>
+export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 	Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
 		if (!(yield* readQuery.getSession(sessionId))) return;
-		const config = yield* ConfigTag;
 		const engine = yield* OrchestrationEngineTag;
 		const registry = yield* ProviderRegistryTag;
 		const providerId = yield* engine.getProviderForSessionEffect(sessionId);
 		if (!providerId) return;
-		const daemonConfig = loadDaemonConfig(config.configDir);
-		const driverId = resolveProviderRoutingDriver(daemonConfig, providerId);
-		if (driverId !== "claude") return;
-		const instance = registry.getInstance(driverId);
+		const account =
+			resolvedAccount ??
+			(yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: providerId,
+			}));
+		if (account.driver !== "claude") return;
+		const instance = registry.getInstance(account.driver);
 		if (!instance?.preWarmSessionEffect) return;
 
 		const model = yield* getModel(sessionId);
@@ -45,14 +42,13 @@ export const preWarmSession = (sessionId: string) =>
 		const agent = yield* agentService.getActiveAgent(sessionId);
 		const variant = yield* getVariant(sessionId);
 		const contextWindow = yield* getContextWindow(sessionId);
-		const launch = resolveClaudeLaunchConfig(
-			daemonConfig,
-			providerId,
-			config.shellEnv?.(config.projectDir),
-		);
 		const state = yield* providerState.getState(sessionId);
-		const prepareTurn = yield* makePrepareTurn({ ...launch, agent });
-		const prepared = yield* prepareTurn(sessionId, providerId);
+		const prepareTurn = yield* makePrepareTurn({
+			configDir: account.folder,
+			folderSource: "account",
+			agent,
+		});
+		const prepared = yield* prepareTurn(sessionId, account.id);
 		const permissionMode = yield* getPermissionMode(sessionId);
 		// Skip preparation if the session disappeared or changed provider.
 		const session = yield* readQuery.getSession(sessionId);
@@ -66,7 +62,7 @@ export const preWarmSession = (sessionId: string) =>
 			sessionId,
 			...folders,
 			providerState: state,
-			instanceId: providerId,
+			instanceId: account.id,
 			nativeThread: prepared.nativeThread,
 			resumeSessionId: prepared.resumeSessionId,
 			...(model
@@ -74,6 +70,7 @@ export const preWarmSession = (sessionId: string) =>
 				: {}),
 			permissionMode,
 			configDir: prepared.configDir,
+			folderSource: "account",
 			...(agent ? { agent } : {}),
 			...(variant ? { variant } : {}),
 			...(contextWindow ? { contextWindow } : {}),

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { Clock, Context, Effect, Layer, Queue, Ref, Schema } from "effect";
+import type { AccountRef, ClaudeAccount } from "../../../contracts/account.js";
 import {
 	AccountUnavailable,
 	type ContinuationError,
@@ -12,11 +13,7 @@ import {
 	SessionBusy,
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
+import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
 	type CommitAndSignalFailure,
@@ -32,7 +29,9 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../persistence/events.js";
+import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import {
@@ -56,23 +55,12 @@ type UsageLimitedEvent = Extract<
 	{ readonly type: "session.usage_limited" }
 >;
 
-/** The confirmation uses the same planner as delivery, without a live runner. */
-export const previewContinuation = (sessionId: string, instanceId: string) =>
+const previewContinuationForAccount = (
+	session: Pick<SessionRow, "id" | "provider" | "limit_recovery">,
+	account: ClaudeAccount,
+) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
-		const read = yield* ReadQueryEffectTag;
-		const session = yield* read.getSession(sessionId);
-		const daemonConfig = loadDaemonConfig(config.configDir);
-		if (!session)
-			return yield* new StaleSwitch({
-				sessionId,
-				expectedInstanceId: instanceId,
-			});
-		if (
-			resolveProviderRoutingDriver(daemonConfig, instanceId) !== "claude" ||
-			resolveProviderRoutingDriver(daemonConfig, session.provider) !== "claude"
-		)
-			return yield* new DriverMismatch({ sessionId, instanceId });
+		const sessionId = session.id;
 		const recovery =
 			session.limit_recovery === null
 				? null
@@ -81,17 +69,14 @@ export const previewContinuation = (sessionId: string, instanceId: string) =>
 					);
 		const contextWindow = yield* getContextWindow(sessionId);
 		const prepare = yield* makePrepareTurn({
-			...resolveClaudeLaunchConfig(
-				daemonConfig,
-				instanceId,
-				config.shellEnv?.(config.projectDir),
-			),
+			configDir: account.folder,
+			folderSource: "account",
 			agent: yield* getAgent(sessionId),
 			modelContextWindow: contextWindow === "1m" ? 1000000 : undefined,
 			continuation:
-				instanceId !== session.provider && !!recovery?.cutOffMessageId,
+				account.id !== session.provider && !!recovery?.cutOffMessageId,
 		});
-		const prepared = yield* prepare(sessionId, instanceId);
+		const prepared = yield* prepare(sessionId, account.id);
 		return (
 			prepared.handoff ??
 			({
@@ -103,11 +88,37 @@ export const previewContinuation = (sessionId: string, instanceId: string) =>
 		);
 	});
 
+/** The confirmation uses the same planner as delivery, without a live runner. */
+export const previewContinuation = (
+	sessionId: string,
+	instanceId: string,
+	accountRef: AccountRef = { _tag: "Id", id: instanceId },
+) =>
+	Effect.gen(function* () {
+		const read = yield* ReadQueryEffectTag;
+		const session = yield* read.getSession(sessionId);
+		if (!session)
+			return yield* new StaleSwitch({
+				sessionId,
+				expectedInstanceId: instanceId,
+			});
+		const directory = yield* AccountDirectory;
+		const account = yield* directory.resolve(accountRef);
+		const source =
+			accountRef._tag === "Id" && session.provider === accountRef.id
+				? account
+				: yield* directory.resolve({ _tag: "Id", id: session.provider });
+		if (account.driver !== "claude" || source.driver !== "claude")
+			return yield* new DriverMismatch({ sessionId, instanceId });
+		return yield* previewContinuationForAccount(session, account);
+	});
+
 export interface Continuation {
 	readonly requestContinuation: (
 		sessionId: string,
 		options: {
 			readonly instanceId: string;
+			readonly accountRef?: AccountRef | undefined;
 			readonly expectedInstanceId: string;
 			readonly reason: ContinuationReason;
 			/** Unix seconds. A scheduled continuation stays on the same account. */
@@ -234,26 +245,34 @@ export const makeContinuation = Effect.gen(function* () {
 		} = {},
 	): ReturnType<Continuation["requestContinuation"]> =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
 			const read = yield* ReadQueryEffectTag;
+			const initialSession = yield* read.getSession(sessionId);
+			if (!initialSession)
+				return yield* new StaleSwitch({
+					sessionId,
+					expectedInstanceId: options.expectedInstanceId,
+				});
+			const directory = yield* AccountDirectory;
+			const accountRef: AccountRef = options.accountRef ?? {
+				_tag: "Id",
+				id: options.instanceId,
+			};
+			const account = yield* directory.resolve(accountRef);
+			const source =
+				accountRef._tag === "Id" && initialSession.provider === accountRef.id
+					? account
+					: yield* directory.resolve({
+							_tag: "Id",
+							id: initialSession.provider,
+						});
+			if (account.driver !== "claude" || source.driver !== "claude")
+				return yield* new DriverMismatch({
+					sessionId,
+					instanceId: options.instanceId,
+				});
 			const checkSession = (ownRequest = false) =>
 				Effect.gen(function* () {
 					const session = yield* read.getSession(sessionId);
-					const daemonConfig = loadDaemonConfig(config.configDir);
-					const targetDriver = resolveProviderRoutingDriver(
-						daemonConfig,
-						options.instanceId,
-					);
-					if (
-						session &&
-						(targetDriver !== "claude" ||
-							resolveProviderRoutingDriver(daemonConfig, session.provider) !==
-								targetDriver)
-					)
-						return yield* new DriverMismatch({
-							sessionId,
-							instanceId: options.instanceId,
-						});
 					if (!session || session.provider !== options.expectedInstanceId)
 						return yield* new StaleSwitch({
 							sessionId,
@@ -318,7 +337,7 @@ export const makeContinuation = Effect.gen(function* () {
 									? yield* restore(
 											Effect.flatMap(Usage, (usage) =>
 												usage
-													.refresh([options.instanceId])
+													.refresh([account.id])
 													.pipe(Effect.map((readings) => readings[0])),
 											),
 										)
@@ -347,7 +366,7 @@ export const makeContinuation = Effect.gen(function* () {
 								resetTimes.length > 0 &&
 								resetTimes.every((at) => Number.isFinite(at) && at <= due.now);
 							const turns = yield* ProviderTurnServiceTag;
-							if (options.instanceId !== options.expectedInstanceId)
+							if (source.id !== account.id)
 								yield* turns.holdUserTurnsForAccountSwitch(sessionId);
 							const continued = yield* commit.write((project) =>
 								Effect.gen(function* () {
@@ -361,7 +380,7 @@ export const makeContinuation = Effect.gen(function* () {
 											decision.status === "unavailable")
 									)
 										return yield* new AccountUnavailable({
-											instanceId: options.instanceId,
+											instanceId: account.id,
 											reason:
 												decision.status === "unavailable"
 													? (decision.reason ?? "Claude account is unavailable")
@@ -384,13 +403,13 @@ export const makeContinuation = Effect.gen(function* () {
 											return;
 										}
 									}
-									const switched = session.provider !== options.instanceId;
+									const switched = source.id !== account.id;
 									if (options.at !== undefined) {
 										// A schedule resumes the limited account; it never switches.
 										if (
 											switched ||
 											(recovery &&
-												recovery.instanceId !== options.instanceId) ||
+												recovery.instanceId !== options.expectedInstanceId) ||
 											(options.onlyIfUnscheduled &&
 												recovery?.scheduledAt !== undefined)
 										)
@@ -401,7 +420,7 @@ export const makeContinuation = Effect.gen(function* () {
 													"session.resume_scheduled",
 													sessionId,
 													{
-														instanceId: options.instanceId,
+														instanceId: session.provider,
 														at: options.at,
 													},
 													{
@@ -429,7 +448,7 @@ export const makeContinuation = Effect.gen(function* () {
 														"session.resume_scheduled",
 														sessionId,
 														{
-															instanceId: options.instanceId,
+															instanceId: recovery.instanceId,
 															at: resetsAt ?? due.now + 300,
 														},
 														{
@@ -443,14 +462,14 @@ export const makeContinuation = Effect.gen(function* () {
 									}
 									if (switched) {
 										// Complete every refusal decision before any canonical write.
-										yield* previewContinuation(sessionId, options.instanceId);
+										yield* previewContinuationForAccount(session, account);
 										yield* applySessionCommand(
 											{
 												type: "session.provider_changed",
 												data: {
 													sessionId,
 													oldProvider: session.provider,
-													newProvider: options.instanceId,
+													newProvider: account.id,
 													reason: options.reason,
 												},
 											},
@@ -464,7 +483,7 @@ export const makeContinuation = Effect.gen(function* () {
 													sessionId,
 													{
 														reason: options.reason,
-														instanceId: options.instanceId,
+														instanceId: session.provider,
 													},
 													{ provider: "claude" },
 												),
@@ -483,15 +502,16 @@ export const makeContinuation = Effect.gen(function* () {
 								// The durable binding is projected by provider_changed; replace
 								// the engine's transient binding from the previous send too.
 								yield* Effect.sync(() =>
-									engine.bindSession(sessionId, options.instanceId),
+									engine.bindSession(sessionId, account.id),
 								);
 								yield* engine.dispatchEffect({
 									type: "end_session",
 									commandId: randomUUID(),
 									sessionId,
 									targetProviderId: continued.previousInstanceId,
+									account: source,
 								});
-								yield* preWarmSession(sessionId).pipe(
+								yield* preWarmSession(sessionId, account).pipe(
 									Effect.catchAll((error) =>
 										Effect.flatMap(LoggerTag, (log) =>
 											Effect.sync(() =>
@@ -509,7 +529,7 @@ export const makeContinuation = Effect.gen(function* () {
 										sessionId,
 										{
 											reason: options.reason,
-											instanceId: options.instanceId,
+											instanceId: account.id,
 											from: continued.previousInstanceId,
 										},
 										{ provider: "claude" },
@@ -522,6 +542,7 @@ export const makeContinuation = Effect.gen(function* () {
 							const variant = yield* getVariant(sessionId);
 							const contextWindow = yield* getContextWindow(sessionId);
 							yield* turns.sendTurn({
+								account,
 								clientId: "continuation",
 								commandId: randomUUID(),
 								sessionId,
@@ -558,6 +579,7 @@ export const makeContinuation = Effect.gen(function* () {
 					{ due: { recovery, now: currentTime } },
 				).pipe(
 					Effect.catchTags({
+						AccountUnroutable: cancel,
 						DriverMismatch: cancel,
 						StaleSwitch: cancel,
 						SessionBusy: cancel,
@@ -568,14 +590,21 @@ export const makeContinuation = Effect.gen(function* () {
 				);
 			}
 		});
+	const readUsageLimits = Effect.gen(function* () {
+		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
+		if (configRef._tag === "Some")
+			return (yield* Ref.get(configRef.value)).usageLimits;
+		const config = yield* ConfigTag;
+		return yield* Effect.suspend(() =>
+			loadDaemonConfigResult(config.configDir),
+		).pipe(
+			Effect.map((loaded) => loaded.usageLimits),
+			Effect.catchTag("NotFound", () => Effect.succeed(undefined)),
+		);
+	});
 	const tryAutoSwitch = (sessionId: string) =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-			const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
-			const usageLimits =
-				configRef._tag === "Some"
-					? (yield* Ref.get(configRef.value)).usageLimits
-					: loadDaemonConfig(config.configDir)?.usageLimits;
+			const usageLimits = yield* readUsageLimits;
 			if (!usageLimits?.autoSwitch) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
@@ -610,12 +639,7 @@ export const makeContinuation = Effect.gen(function* () {
 		});
 	const tryAutoResume = (sessionId: string) =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-			const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
-			const usageLimits =
-				configRef._tag === "Some"
-					? (yield* Ref.get(configRef.value)).usageLimits
-					: loadDaemonConfig(config.configDir)?.usageLimits;
+			const usageLimits = yield* readUsageLimits;
 			if (!usageLimits?.autoResume) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;

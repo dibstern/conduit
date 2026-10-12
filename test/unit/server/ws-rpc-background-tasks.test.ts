@@ -1,15 +1,29 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { expect, vi } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
-import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
+import {
+	makeMockConfig,
+	makeTestHandlerLayer,
+} from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-background-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
 
 describe("StopBackgroundTask RPC", () => {
 	const request = {
@@ -17,7 +31,7 @@ describe("StopBackgroundTask RPC", () => {
 		sessionId: "session-1",
 		taskId: "shell",
 	};
-	const setup = (providerId = "claude") => {
+	const setup = (providerId = "claude", boundId = providerId) => {
 		const stopTaskEffect = vi.fn(
 			(
 				_sessionId: string,
@@ -38,7 +52,7 @@ describe("StopBackgroundTask RPC", () => {
 			...(providerId === "claude" ? { stopTaskEffect } : {}),
 		};
 		const engine = withDispatchEffect({
-			getProviderForSessionEffect: () => Effect.succeed(providerId),
+			getProviderForSessionEffect: () => Effect.succeed(boundId),
 			dispatch: vi.fn(async () => undefined),
 		});
 		let live = true;
@@ -46,6 +60,10 @@ describe("StopBackgroundTask RPC", () => {
 			Layer.provideMerge(
 				Layer.merge(
 					makeTestHandlerLayer({
+						config: makeMockConfig({
+							configDir: isolatedRoot,
+							projectDir: isolatedRoot,
+						}),
 						providerRegistry: new ProviderRegistry([provider]),
 						orchestrationEngine: engine,
 					}),
@@ -79,7 +97,7 @@ describe("StopBackgroundTask RPC", () => {
 	};
 
 	it.effect("stops the bound task without changing turn orchestration", () => {
-		const state = setup();
+		const state = setup("claude", "claude-sdk");
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.StopBackgroundTask(request);
@@ -144,3 +162,9 @@ describe("StopBackgroundTask RPC", () => {
 		},
 	);
 });
+
+// Failure modes: a legacy binding misses its live adapter; an account lookup
+// reads developer configuration while stopping a background task.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";

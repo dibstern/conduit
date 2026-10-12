@@ -2,6 +2,20 @@
 // in JSON log lines or console noise. Only "error" remains visible so
 // critical failures are still surfaced.
 
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll } from "vitest";
+
+// Startup capture and legacy SDK/config readers must never inherit a real
+// daemon.json, account folder or home from the reviewer's shell.
+const testEnvironment = mkdtempSync(join(tmpdir(), "conduit-test-env-"));
+process.env["HOME"] = join(testEnvironment, "home");
+process.env["CONDUIT_CONFIG_DIR"] = join(testEnvironment, "conduit");
+delete process.env["CLAUDE_CONFIG_DIR"];
+mkdirSync(process.env["HOME"], { recursive: true });
+afterAll(() => rmSync(testEnvironment, { recursive: true, force: true }));
+
 // 0. Git hooks (lefthook pre-commit runs the suite) export GIT_DIR,
 //    GIT_INDEX_FILE and friends. A test that inherits them and runs `git init`
 //    or `git commit` in a temp dir acts on the committing repo instead: it
@@ -12,7 +26,7 @@ for (const key of Object.keys(process.env)) {
 }
 
 // 1. Backend (pino) — set minimum level to "error".
-import { setLogLevel } from "../src/lib/logger.js";
+const { setLogLevel } = await import("../src/lib/logger.js");
 
 setLogLevel("error");
 

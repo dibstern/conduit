@@ -16,12 +16,18 @@ import {
 	Scope,
 	Stream,
 } from "effect";
-import { expect } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
@@ -58,7 +64,31 @@ import {
 	canonicalEvent,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-detail-login-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
+const detailAccountsLayer = () =>
+	Layer.succeed(
+		AccountDirectory,
+		makeAccountDirectory(
+			Effect.succeed(
+				accountsStateFromConfig(
+					defaultDaemonConfig(),
+					configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+				),
+			),
+		),
+	);
 
 // A fresh temp-file persistence stack + the real SessionEventBus per test. The
 // detail subscription reads the projected transcript and nothing else, so the
@@ -84,6 +114,7 @@ const makeDetailTestLayer = (options?: {
 		),
 	);
 	return Layer.mergeAll(
+		detailAccountsLayer(),
 		makePersistenceEffectLayer(
 			filename,
 			"test-project",
@@ -716,7 +747,7 @@ describe("subscribeSessionDetail", () => {
 					yield* recoverProjections;
 					yield* commit([sessionCreated(SID)]);
 					const context = yield* Effect.context<
-						ReadQueryEffectTag | SessionEventBusTag
+						ReadQueryEffectTag | SessionEventBusTag | AccountDirectory
 					>();
 					const requests: (number | undefined)[] = [];
 					const dropped = yield* Deferred.make<void>();
@@ -805,7 +836,7 @@ describe("subscribeSessionDetail", () => {
 					expect(requests).toEqual([undefined, 1]);
 				}).pipe(
 					Effect.provide(
-						Layer.merge(
+						Layer.mergeAll(
 							makePersistenceEffectLayer(
 								":memory:",
 								"test-project",
@@ -813,6 +844,7 @@ describe("subscribeSessionDetail", () => {
 								SessionEventBusLive,
 							),
 							SessionEventBusLive,
+							detailAccountsLayer(),
 						),
 					),
 				),

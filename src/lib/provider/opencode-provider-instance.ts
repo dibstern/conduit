@@ -6,9 +6,11 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { Deferred, Effect, type Scope } from "effect";
 import {
-	defaultInstanceIdForDriver,
-	PROVIDER_SESSION_CAPABILITIES,
-} from "../contracts/provider-instance.js";
+	type Account,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+	type OpenCodeAccount,
+} from "../contracts/account.js";
+import { PROVIDER_SESSION_CAPABILITIES } from "../contracts/provider-instance.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type {
@@ -72,6 +74,9 @@ function sendFailedTurnResult(message: string): TurnResult {
 export interface OpenCodeProviderInstanceOptions {
 	readonly client: OpenCodeAPI;
 	readonly workspaceRoot?: string;
+	readonly clientForAccount?: (
+		account: OpenCodeAccount,
+	) => Effect.Effect<OpenCodeAPI, Error, Scope.Scope>;
 	/**
 	 * Resolve the scoped API client for the OpenCode instance that owns a
 	 * session (OpenCode Instances `use`). Resolving to undefined means the
@@ -89,6 +94,7 @@ export interface OpenCodeProviderInstanceOptions {
 	) => Effect.Effect<string | undefined>;
 	readonly hasWorktreeToolForSession?: (
 		sessionId: string,
+		account?: OpenCodeAccount,
 	) => Effect.Effect<boolean>;
 }
 
@@ -104,6 +110,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		  ) => Effect.Effect<OpenCodeAPI | undefined, Error, Scope.Scope>)
 		| undefined;
 	private readonly instanceIdForSession: OpenCodeProviderInstanceOptions["instanceIdForSession"];
+	private readonly clientForAccount: OpenCodeProviderInstanceOptions["clientForAccount"];
 	private readonly hasWorktreeToolForSession: OpenCodeProviderInstanceOptions["hasWorktreeToolForSession"];
 	private readonly pendingTurns = new Map<
 		string,
@@ -122,6 +129,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		this.client = options.client;
 		this.workspaceRoot = options.workspaceRoot;
 		this.clientForSession = options.clientForSession;
+		this.clientForAccount = options.clientForAccount;
 		this.instanceIdForSession = options.instanceIdForSession;
 		this.hasWorktreeToolForSession = options.hasWorktreeToolForSession;
 	}
@@ -146,12 +154,25 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	}
 
 	/**
-	 * Resolve the client that owns this session: the named instance's client
-	 * when the session is bound to one, otherwise the project-default client.
+	 * Sends retain their admitted account. Other operations resolve the session
+	 * binding; legacy direct callers may use the project-default client.
 	 */
 	private resolveClientEffect(
 		sessionId: string,
+		account?: Account,
 	): Effect.Effect<OpenCodeAPI, Error, Scope.Scope> {
+		if (account) {
+			if (account.driver !== "opencode")
+				return Effect.fail(
+					new Error("OpenCode turn requires an OpenCode account"),
+				);
+			if (this.clientForAccount) return this.clientForAccount(account);
+			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID)
+				return Effect.succeed(this.client);
+			return Effect.fail(
+				new Error(`OpenCode account "${account.id}" has no client route`),
+			);
+		}
 		const resolve = this.clientForSession;
 		if (resolve === undefined) return Effect.succeed(this.client);
 		return resolve(sessionId).pipe(
@@ -279,7 +300,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			// send failure — never a hang or a silent fall-through to the
 			// default server.
 			const clientResult = yield* Effect.either(
-				this.resolveClientEffect(sessionId),
+				this.resolveClientEffect(sessionId, input.account),
 			);
 			if (clientResult._tag === "Left") {
 				const message = clientResult.left.message;
@@ -292,7 +313,10 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			if (
 				!isCompaction &&
 				this.hasWorktreeToolForSession &&
-				(yield* this.hasWorktreeToolForSession(sessionId))
+				(yield* this.hasWorktreeToolForSession(
+					sessionId,
+					input.account?.driver === "opencode" ? input.account : undefined,
+				))
 			) {
 				promptOptions.system = [
 					promptOptions.system,
@@ -458,11 +482,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 					const baseMessage =
 						cause instanceof Error ? cause.message : String(cause);
 					const boundInstanceId =
-						cause instanceof OpenCodeApiError &&
+						input.account?.id ??
+						(cause instanceof OpenCodeApiError &&
 						cause.responseStatus === 404 &&
 						this.instanceIdForSession
 							? yield* this.instanceIdForSession(sessionId)
-							: undefined;
+							: undefined);
 					// Migration guard: a session bound to a named
 					// OpenCode instance BEFORE per-instance routing physically
 					// lives on the project-default server, so the named server
@@ -472,7 +497,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 						cause instanceof OpenCodeApiError &&
 						cause.responseStatus === 404 &&
 						boundInstanceId !== undefined &&
-						boundInstanceId !== defaultInstanceIdForDriver("opencode")
+						boundInstanceId !== MANAGED_OPENCODE_ACCOUNT_ID
 							? `${baseMessage} — this session does not exist on its bound OpenCode instance (it may predate named-instance routing); create a new session on that instance`
 							: baseMessage;
 					log.error(`sendTurn failed for session ${sessionId}: ${message}`);

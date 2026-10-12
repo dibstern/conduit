@@ -12,15 +12,11 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
+import type { OpenCodeAccount } from "../../../contracts/account.js";
 import {
 	type AutoTitleSource,
 	UNTITLED_SESSION_TITLE,
 } from "../../../contracts/session-title.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import {
 	type CommitAndSignalProject,
@@ -29,7 +25,6 @@ import {
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import {
-	type NativeThread,
 	nativeThreadKey,
 	ProviderStateEffectTag,
 } from "../../../persistence/effect/provider-state-effect.js";
@@ -42,9 +37,10 @@ import {
 	copyForkHistory,
 	midTurnForkBoundary,
 } from "../../../persistence/fork-history.js";
-import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
@@ -52,8 +48,6 @@ import { markSeen } from "./session-attention.js";
 import { setPermissionMode } from "./session-overrides-state.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 
-const CLAUDE_PROVIDER_ID = "claude";
-const CLAUDE_SDK_PROVIDER_ID = "claude-sdk";
 export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
 
 const sideThreadTitle = (question: string) =>
@@ -178,14 +172,6 @@ export const claudeUpstreamAdapter: SessionUpstreamAdapter = {
 	sync: () => Effect.void,
 };
 
-export const isClaudeSessionRow = (
-	row: SessionRow,
-	configDir?: string,
-): boolean =>
-	row.provider === CLAUDE_SDK_PROVIDER_ID ||
-	resolveProviderRoutingDriver(loadDaemonConfig(configDir), row.provider) ===
-		CLAUDE_PROVIDER_ID;
-
 /**
  * Apply a session mutation: append, project, sync.
  *
@@ -201,7 +187,6 @@ export const applySessionCommand = (
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const log = yield* LoggerTag;
-		const config = yield* ConfigTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
@@ -286,11 +271,18 @@ export const applySessionCommand = (
 		}
 
 		const adapter =
-			options.upstreamAdapter === undefined
-				? row !== undefined && isClaudeSessionRow(row, config.configDir)
-					? claudeUpstreamAdapter
-					: openCodeUpstreamAdapter(api)
-				: options.upstreamAdapter;
+			options.upstreamAdapter !== undefined
+				? options.upstreamAdapter
+				: command.type === "session.renamed" ||
+						command.type === "session.deleted"
+					? (yield* (yield* AccountDirectory).resolve(
+							row === undefined
+								? { _tag: "DriverDefault", driver: "opencode" }
+								: { _tag: "Id", id: row.provider },
+						)).driver === "claude"
+						? claudeUpstreamAdapter
+						: openCodeUpstreamAdapter(api)
+					: null;
 
 		if (adapter !== null)
 			yield* adapter.sync(command).pipe(
@@ -387,6 +379,7 @@ export const createOpenCodeSession = (
  */
 export const forkOpenCodeSession = (
 	parentSessionId: string,
+	account: OpenCodeAccount,
 	messageId?: string,
 	side?: { title: string },
 ) =>
@@ -462,15 +455,6 @@ export const forkOpenCodeSession = (
 			);
 		}
 
-		// A fork inherits its parent's provider. Forking is an OpenCode
-		// operation, so an unreadable parent can only mean the read model is not
-		// wired here at all — in which case nothing is projected anyway.
-		const parent =
-			readQueryOption._tag === "Some"
-				? yield* readQueryOption.value
-						.getSession(parentSessionId)
-						.pipe(Effect.orElseSucceed(() => undefined))
-				: undefined;
 		// The fork's newest message is its copy of the boundary. Its id, not the
 		// parent's, orders the fork's own transcript at that boundary.
 		const forkTip = yield* Effect.tryPromise(() =>
@@ -498,7 +482,7 @@ export const forkOpenCodeSession = (
 			data: {
 				sessionId: session.id,
 				title,
-				provider: parent?.provider ?? "opencode",
+				provider: account.id,
 				parentId: parentSessionId,
 				...(side ? { sideThread: true, permissionMode: "ask" as const } : {}),
 				...(forkPointEvent === undefined ? {} : { forkPointEvent }),
@@ -537,6 +521,12 @@ const forkSessionInWorkspace = (
 			readOption._tag === "Some"
 				? yield* readOption.value.getSession(parentSessionId)
 				: undefined;
+		const accounts = yield* AccountDirectory;
+		const account = yield* accounts.resolve(
+			parent === undefined
+				? { _tag: "DriverDefault", driver: "opencode" }
+				: { _tag: "Id", id: parent.provider },
+		);
 		if (options?.side) {
 			if (!parent) {
 				return yield* new SessionCommandError({
@@ -574,25 +564,23 @@ const forkSessionInWorkspace = (
 		}
 		// Both providers fork up to and including this message.
 		const messageId = options?.messageId ?? midTurn?.lastCompleted;
-		if (
-			!parent ||
-			!isClaudeSessionRow(
-				parent,
-				config._tag === "Some" ? config.value.configDir : undefined,
-			)
-		) {
-			const api = yield* Effect.serviceOption(OpenCodeAPITag);
-			if (api._tag === "None") {
-				return yield* new SessionCommandError({
-					operation: "session.forked.opencode",
-					cause: "OpenCode API is unavailable",
-				});
-			}
+		if (account.driver === "opencode") {
+			const instances = yield* OpenCodeInstancesTag;
+			const api = yield* instances.use(account.id).pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionCommandError({
+							operation: "session.forked.opencode",
+							cause,
+						}),
+				),
+			);
 			const fork = forkOpenCodeSession(
 				parentSessionId,
+				account,
 				messageId,
 				options?.side,
-			).pipe(Effect.provideService(OpenCodeAPITag, api.value));
+			).pipe(Effect.provideService(OpenCodeAPITag, api));
 			const creationGate = yield* Effect.serviceOption(
 				OpenCodeSessionCreationGateTag,
 			);
@@ -610,6 +598,12 @@ const forkSessionInWorkspace = (
 				provider: "opencode" as const,
 			};
 		}
+		if (!parent)
+			return yield* new SessionCommandError({
+				operation: "session.forked.parent_not_found",
+				cause: parentSessionId,
+				message: `Parent session ${parentSessionId} was not found`,
+			});
 		// Claude forks through the turn holding the given message.
 		const stateOption = yield* Effect.serviceOption(ProviderStateEffectTag);
 		const projections = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
@@ -693,44 +687,19 @@ const forkSessionInWorkspace = (
 				message: `Fork point ${messageId} was not found in the session history`,
 			});
 		}
-		const instanceIds = new Set([parent.provider]);
-		for (const event of parentEvents) {
-			if (event.type === "session.created")
-				instanceIds.add(event.data.provider);
-			if (event.type === "session.provider_changed") {
-				instanceIds.add(event.data.oldProvider);
-				instanceIds.add(event.data.newProvider);
-			}
-		}
-		let selected: { instanceId: string; thread: NativeThread } | undefined;
-		for (const instanceId of instanceIds) {
-			const thread = yield* state.nativeThread(parentSessionId, instanceId);
-			if (
-				thread &&
-				thread.firstSequence <= forkPointSequence &&
-				forkPointSequence <= thread.deliveredThrough &&
-				(!selected || thread.firstSequence > selected.thread.firstSequence)
-			)
-				selected = { instanceId, thread };
-		}
-		// Prefer the thread that began closest to the point when an older
-		// account has since returned and received a catch-up covering that range.
-		const provider = selected?.instanceId ?? parent.provider;
-		// Pending cuts leave Claude's native tail intact. An older receipt after
-		// a committed cut may still point at that tail too. A fresh child's
-		// first turn hands off its kept canonical history instead of forking it.
+		const provider = account.id;
+		const thread = yield* state.nativeThread(parentSessionId, account.id);
+		// A receipt belongs to the resolved account. A fork point outside its
+		// delivered range starts with canonical history on that account.
 		const parentThread =
-			parent.pending_rewind_message_id != null ||
-			(selected && lastRewindCommitSequence > selected.thread.deliveredThrough)
-				? undefined
-				: selected?.thread;
-		const launchConfig = resolveClaudeLaunchConfig(
-			loadDaemonConfig(config.value.configDir),
-			provider,
-			config.value.shellEnv?.(config.value.projectDir),
-		);
-		const claudeConfigDir =
-			selected?.thread.configDir ?? launchConfig.configDir;
+			thread &&
+			thread.firstSequence <= forkPointSequence &&
+			forkPointSequence <= thread.deliveredThrough &&
+			parent.pending_rewind_message_id == null &&
+			lastRewindCommitSequence <= thread.deliveredThrough
+				? thread
+				: undefined;
+		const claudeConfigDir = account.folder;
 		// The next launch workspace can differ from the native transcript's folder.
 		// Find the SDK id across the selected account's project directories.
 		const forked = parentThread
@@ -868,4 +837,4 @@ export const forkSession = (
 		return yield* workspace._tag === "Some"
 			? workspace.value.withLaunch(fork)
 			: fork;
-	});
+	}).pipe(Effect.scoped);

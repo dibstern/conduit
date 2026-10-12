@@ -10,6 +10,10 @@ import {
 	PartVersion,
 } from "../../../../src/lib/contracts/tool-wire.js";
 import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	AccountDirectoryFromConfigLive,
+} from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
 import {
@@ -80,6 +84,7 @@ import type {
 } from "../../../../src/lib/provider/types.js";
 import {
 	MOCK_PROJECT_DIR,
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -320,6 +325,12 @@ const serviceLayer = (input: {
 	const sessionManagerService = makeMockSessionManagerService();
 	const ingestion = input.ingestion ?? makeIngestion();
 	let baseLayer = Layer.mergeAll(
+		input.configDir === undefined
+			? Layer.succeed(AccountDirectory, makeMockAccountDirectory())
+			: AccountDirectoryFromConfigLive(
+					input.configDir,
+					configuredClaudeConfigDir("/isolated-provider-home/.claude"),
+				),
 		Layer.succeed(OpenCodeAPITag, input.api ?? makeMockOpenCodeAPI()),
 		Layer.succeed(WebSocketHandlerTag, wsHandler),
 		Layer.succeed(LoggerTag, log),
@@ -538,6 +549,7 @@ describe("ProviderTurnService", () => {
 				expect(dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					account: expect.objectContaining({ id: "claude", driver: "claude" }),
 				});
 				const sendCommand = vi
 					.mocked(dispatchEffect)
@@ -597,6 +609,7 @@ describe("ProviderTurnService", () => {
 				expect(dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					account: expect.objectContaining({ id: "claude", driver: "claude" }),
 				});
 				const sendCommand = vi
 					.mocked(dispatchEffect)

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	effectiveDispatchFingerprint,
 	fingerprintHash,
@@ -36,6 +38,51 @@ const hashOf = (command: SendTurnCommand): string =>
 	fingerprintHash(effectiveDispatchFingerprint(command));
 
 describe("effectiveDispatchFingerprint", () => {
+	// Admitted account/folder changes alter the actual dispatch even when a
+	// deleted or legacy historical binding stays byte-identical.
+	it("fingerprints the carried account driver, identity and launch values", () => {
+		const account = {
+			id: AccountIdSchema.make("current-account"),
+			name: "Current account",
+			driver: "claude" as const,
+			folder: configuredClaudeConfigDir("/tmp/g4zp-test-account"),
+			env: { ANTHROPIC_API_KEY: "test-key" },
+			usageEligible: false,
+		};
+		const command = sendTurn({
+			providerId: "removed-account",
+			input: {
+				account,
+				model: { providerId: "claude", modelId: "sonnet" },
+				contextWindow: "1m",
+			},
+		});
+		const fingerprint = effectiveDispatchFingerprint(command);
+		expect(fingerprint.fields).toMatchObject({
+			providerId: "claude",
+			providerInstanceId: account.id,
+			effectiveModel: "sonnet[1m]",
+		});
+		for (const changed of [
+			{ ...account, id: AccountIdSchema.make("other-account") },
+			{
+				...account,
+				folder: configuredClaudeConfigDir("/tmp/g4zp-test-other-account"),
+			},
+			{ ...account, env: { ANTHROPIC_API_KEY: "other-test-key" } },
+		]) {
+			expect(
+				hashOf({ ...command, input: { ...command.input, account: changed } }),
+			).not.toBe(hashOf(command));
+		}
+		expect(
+			hashOf({
+				...command,
+				input: { ...command.input, account: { ...account, name: "Renamed" } },
+			}),
+		).toBe(hashOf(command));
+	});
+
 	it("is deterministic for the same effective dispatch request", () => {
 		expect(hashOf(sendTurn())).toBe(hashOf(sendTurn()));
 	});

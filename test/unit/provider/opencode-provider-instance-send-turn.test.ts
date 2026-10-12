@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	AccountIdSchema,
+	defaultInstanceIdForDriver,
+} from "../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -541,6 +544,42 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			"s1",
 			expect.objectContaining({ text: "Write hello world" }),
 		);
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	// A resolved default may differ from a deleted session binding. Never look
+	// that binding up again or silently prompt the project-default server.
+	it("routes the prompt through the carried OpenCode account", async () => {
+		const account = {
+			id: AccountIdSchema.make("current-opencode"),
+			name: "Current OpenCode",
+			driver: "opencode" as const,
+			url: "http://test.invalid:4096",
+		};
+		const namedClient = makeStubClient();
+		const clientForAccount = vi.fn(() => Effect.succeed(namedClient));
+		const clientForSession = vi.fn(() =>
+			Effect.fail(new Error("Historical binding must not be resolved")),
+		);
+		instance = new OpenCodeProviderInstance({
+			client,
+			clientForAccount,
+			clientForSession,
+		});
+		const resultPromise = Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput({ account })),
+		);
+		instance.notifyTurnCompleted("s1", {
+			status: "completed",
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		});
+		expect((await resultPromise).status).toBe("completed");
+		expect(clientForAccount).toHaveBeenCalledExactlyOnceWith(account);
+		expect(clientForSession).not.toHaveBeenCalled();
+		expect(namedClient.session.prompt).toHaveBeenCalledOnce();
 		expect(client.session.prompt).not.toHaveBeenCalled();
 	});
 

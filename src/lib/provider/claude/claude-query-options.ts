@@ -36,6 +36,8 @@ export function buildClaudeQueryOptions(
 		env: makeClaudeSdkEnv({
 			configDir: input.configDir,
 			baseEnv: shellEnv,
+			accountEnv:
+				input.account?.driver === "claude" ? input.account.env : undefined,
 		}),
 		includePartialMessages: true,
 		forwardSubagentText: true,

@@ -35,6 +35,10 @@ import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
+import {
+	type ClaudeConfigDir,
+	captureClaudeLaunchLogin,
+} from "../../../provider/claude/claude-sdk-env.js";
 import { ServerBuildUpdateLive } from "../../../server/build-update.js";
 import {
 	BrowserRpcConnectionsLive,
@@ -52,6 +56,7 @@ import {
 	WebSocketRoutingLive,
 } from "../../server/Layers/ws-routing-layer.js";
 import { PushNotificationManagerLive } from "../../server/Services/push-service.js";
+import { AccountDirectoryLive } from "../Services/account-directory.js";
 import {
 	commitDaemonRuntimeConfig,
 	type DaemonConfigMirror,
@@ -588,6 +593,8 @@ export const makeOnboardingServerLive = (
  * and optional background service configs remain.
  */
 export interface DaemonLiveOptions {
+	/** Launch login captured before the legacy startup environment mutation. */
+	launchLogin?: ClaudeConfigDir;
 	// Server lifecycle (still partially imperative — AP-38 deferred)
 	staticDir: string;
 
@@ -631,6 +638,8 @@ export interface DaemonLiveOptions {
  */
 export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const { configDir, socketPath } = options;
+	const launchLogin =
+		options.launchLogin ?? captureClaudeLaunchLogin(process.env);
 
 	// Tier 0: Foundation (no inter-dependencies)
 	// These Layers have zero dependencies on other Tags. They form the base
@@ -791,7 +800,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	).pipe(Layer.provideMerge(withConfigPersistence));
 
 	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
-		Layer.provideMerge(withManagedOpenCodeServers),
+		Layer.provideMerge(
+			AccountDirectoryLive(launchLogin).pipe(
+				Layer.provideMerge(withManagedOpenCodeServers),
+			),
+		),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(

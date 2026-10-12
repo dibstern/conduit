@@ -5,6 +5,11 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	AccountDirectory,
+	AccountDirectoryFromConfigLive,
+} from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -59,9 +64,11 @@ import {
 	ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockWebSocketHandler,
@@ -94,6 +101,12 @@ describe("SessionManager Effect", () => {
 		);
 		const loggerLayer = Layer.succeed(LoggerTag, makeMockLogger());
 		return Layer.mergeAll(
+			configDir === undefined
+				? Layer.succeed(AccountDirectory, makeMockAccountDirectory())
+				: AccountDirectoryFromConfigLive(
+						configDir,
+						configuredClaudeConfigDir(join(configDir, "login")),
+					),
 			makeSessionManagerStateLive(),
 			Layer.succeed(OpenCodeAPITag, mockApi),
 			makePersistenceEffectLayer(":memory:", "test-project"),
@@ -488,7 +501,11 @@ describe("SessionManager Effect", () => {
 				const service = yield* SessionManagerServiceTag;
 
 				const session = yield* service.createSession("New", {
-					providerId: "opencode",
+					account: {
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					},
 				});
 
 				// conduit-test-48mo.1: create used to INSERT the sessions row directly

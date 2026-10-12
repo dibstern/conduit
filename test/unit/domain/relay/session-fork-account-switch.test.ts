@@ -1,3 +1,10 @@
+import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
+import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeMockAccountDirectory,
+	makeOpenCodeInstancesStub,
+} from "../../../helpers/mock-factories.js";
 // Failure modes: choosing only the current account; accepting a receipt before
 // firstSequence or after deliveredThrough; losing an intermediate account after
 // switching back; rejecting an uncovered point; copying history past the point;
@@ -147,12 +154,15 @@ it.each([
 			expect(history.some((row) => row.text.includes("Future history"))).toBe(
 				false,
 			);
-			const expectedAccount = point === "before" ? "claude" : "claude-sdk";
+			const expectedAccount = point === "returned" ? "claude" : "claude-sdk";
+			expect((yield* read.getSession("parent"))?.provider).toBe(
+				expectedAccount,
+			);
 			expect(childRow?.provider).toBe(expectedAccount);
 			const prepare = yield* makePrepareTurn({
 				folderSource: "account",
 				configDir: configuredClaudeConfigDir(
-					point === "before" ? "/source" : "/target",
+					point === "returned" ? "/source" : "/target",
 				),
 			});
 			const prepared = yield* prepare(
@@ -160,41 +170,30 @@ it.each([
 				expectedAccount,
 				"Continue the child",
 			);
-			if (point === "uncovered") {
+			if (point !== "after") {
 				expect(forkNative).not.toHaveBeenCalled();
 				expect(readTranscript).not.toHaveBeenCalled();
 				expect(
 					yield* state.nativeThread(child.id, expectedAccount),
 				).toBeUndefined();
 				expect(prepared.resumeSessionId).toBeUndefined();
-				expect(prepared.handoff).toMatchObject({
-					firstMessageIncluded: true,
-					omitted: 1,
-				});
+				expect(prepared.handoff).toMatchObject({ firstMessageIncluded: true });
 				expect(prepared.handoff?.tokens).toBeLessThanOrEqual(16_000);
 				expect(prepared.prompt).toContain("Original constraints");
-				expect(prepared.prompt).toContain("An undelivered request");
+				if (point !== "before")
+					expect(prepared.prompt).toContain("An undelivered request");
 				expect(prepared.prompt).not.toContain("OVERSIZED-");
-				expect(prepared.prompt).not.toContain("After switching");
+				if (point !== "returned")
+					expect(prepared.prompt).not.toContain("After switching");
 			} else {
-				expect(readTranscript).toHaveBeenCalledWith(
-					point === "before" ? "source-sdk" : "target-sdk",
-					{
-						configDir: configuredClaudeConfigDir(
-							point === "before" ? "/source" : "/target",
-						),
-					},
-				);
-				expect(forkNative).toHaveBeenCalledWith(
-					point === "before" ? "source-sdk" : "target-sdk",
-					{
-						configDir: configuredClaudeConfigDir(
-							point === "before" ? "/source" : "/target",
-						),
-						title: "Parent (fork)",
-						upToMessageId: boundary,
-					},
-				);
+				expect(readTranscript).toHaveBeenCalledWith("target-sdk", {
+					configDir: configuredClaudeConfigDir("/target"),
+				});
+				expect(forkNative).toHaveBeenCalledWith("target-sdk", {
+					configDir: configuredClaudeConfigDir("/target"),
+					title: "Parent (fork)",
+					upToMessageId: boundary,
+				});
 				expect(prepared.resumeSessionId).toBe("child-sdk");
 				expect(prepared.prompt).toBe("Continue the child");
 			}
@@ -211,6 +210,29 @@ it.each([
 				}),
 			),
 			Effect.provideService(LoggerTag, makeMockLogger()),
+			Effect.provideService(
+				AccountDirectory,
+				makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude"),
+						name: "Source",
+						folder: configuredClaudeConfigDir("/source"),
+						usageEligible: true,
+					},
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-sdk"),
+						name: "Target",
+						folder: configuredClaudeConfigDir("/target"),
+						usageEligible: true,
+					},
+				]),
+			),
+			Effect.provideService(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({}),
+			),
 			Effect.provide(makeOverridesStateLive()),
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),
@@ -321,6 +343,29 @@ it.each([
 				}),
 			),
 			Effect.provideService(LoggerTag, makeMockLogger()),
+			Effect.provideService(
+				AccountDirectory,
+				makeMockAccountDirectory([
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude"),
+						name: "Source",
+						folder: configuredClaudeConfigDir("/source"),
+						usageEligible: true,
+					},
+					{
+						driver: "claude",
+						id: AccountIdSchema.make("claude-sdk"),
+						name: "Target",
+						folder: configuredClaudeConfigDir("/target"),
+						usageEligible: true,
+					},
+				]),
+			),
+			Effect.provideService(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({}),
+			),
 			Effect.provide(makeOverridesStateLive()),
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),

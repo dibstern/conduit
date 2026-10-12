@@ -28,10 +28,6 @@ import {
 	type SessionDetailItemSchema,
 } from "../../../contracts/ws-rpc.js";
 import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
-import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
 	type TranscriptPageCursorNotFoundError,
@@ -44,9 +40,9 @@ import {
 	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { stream } from "./read-model-subscription.js";
-import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { providerSteers } from "./session-inbox.js";
 
@@ -169,29 +165,30 @@ export const subscribeSessionDetail = (options: {
 }): Stream.Stream<
 	SessionDetailEnvelope,
 	SessionDetailSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag
+	ReadQueryEffectTag | SessionEventBusTag | AccountDirectory
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const registry = yield* Effect.serviceOption(ProviderRegistryTag);
-			const config = yield* Effect.serviceOption(ConfigTag);
+			const directory = yield* AccountDirectory;
 			const sessionRow = yield* Effect.either(
 				readQuery.getSession(options.sessionId),
 			);
+			let boundId =
+				sessionRow._tag === "Right" ? sessionRow.right?.provider : undefined;
+			let account =
+				boundId === undefined
+					? undefined
+					: yield* directory
+							.resolve({ _tag: "Id", id: boundId })
+							.pipe(Effect.option, Effect.map(Option.getOrUndefined));
 			if (
 				sessionRow._tag === "Right" &&
 				sessionRow.right?.history_complete === 0
 			) {
-				if (
-					resolveProviderRoutingDriver(
-						loadDaemonConfig(
-							config._tag === "Some" ? config.value.configDir : undefined,
-						),
-						sessionRow.right.provider,
-					) === "opencode"
-				) {
+				if (account?.driver === "opencode") {
 					const ingress = yield* Effect.serviceOption(
 						OpenCodeHistoryReconcileTag,
 					);
@@ -278,6 +275,18 @@ export const subscribeSessionDetail = (options: {
 									const inbox = yield* readQuery.readInboxState(
 										options.sessionId,
 									);
+									if (inbox && inbox.provider !== boundId) {
+										boundId = inbox.provider;
+										account =
+											boundId === undefined
+												? undefined
+												: yield* directory
+														.resolve({ _tag: "Id", id: boundId })
+														.pipe(
+															Effect.option,
+															Effect.map(Option.getOrUndefined),
+														);
+									}
 									const inboxRows =
 										inbox && moved(inbox.version)
 											? [
@@ -287,11 +296,7 @@ export const subscribeSessionDetail = (options: {
 															inbox: {
 																paused: inbox.paused,
 																// Only the reasons that do not depend on the draft.
-																steer: providerSteers(
-																	registry,
-																	config,
-																	inbox.provider,
-																)
+																steer: providerSteers(registry, account)
 																	? inbox.promptOpen
 																		? "prompt_open"
 																		: null

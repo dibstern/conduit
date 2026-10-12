@@ -83,6 +83,8 @@ function sendTurnCommand(
 			providerState: {},
 			workspaceRoot: "/tmp/project",
 			extraFolders: [],
+			configDir: configuredClaudeConfigDir("/tmp/g4zp-test-claude"),
+			folderSource: "account",
 			...(overrides.configDir === undefined
 				? {}
 				: { configDir: overrides.configDir }),

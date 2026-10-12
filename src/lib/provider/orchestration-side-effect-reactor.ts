@@ -1,10 +1,7 @@
 import { SqlClient } from "@effect/sql";
-import { Clock, Data, Duration, Effect } from "effect";
-import type { ProviderDriverKind } from "../contracts/provider-instance.js";
-import {
-	loadDaemonConfig,
-	resolveClaudeLaunchConfig,
-} from "../daemon/config-persistence.js";
+import { Clock, Data, Duration, Effect, Option, Schema } from "effect";
+import { AccountSchema } from "../contracts/account.js";
+import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -136,9 +133,10 @@ export interface ProviderSideEffectReactorOptions {
 	readonly retryBackoff?: (failureCount: number) => Duration.DurationInput;
 	readonly outcomePollInterval?: Duration.DurationInput;
 	readonly outcomePollTimeout?: Duration.DurationInput;
-	readonly resolveProviderDriver?: (
-		providerId: string,
-	) => ProviderDriverKind | undefined;
+	readonly accountDirectory?: Pick<
+		AccountDirectory["Type"],
+		"resolve" | "defaultFor"
+	>;
 }
 
 const defaultRetryBackoff = (failureCount: number): Duration.DurationInput =>
@@ -380,29 +378,37 @@ export class ProviderSideEffectReactor {
 		| ProviderCommandStoreFailure
 	> {
 		return Effect.gen(this, function* () {
-			const driver = this.options.resolveProviderDriver
-				? this.options.resolveProviderDriver(row.provider_id)
-				: row.provider_id;
-			if (driver === undefined) {
-				return yield* Effect.fail(
-					new ProviderNotRegistered({ providerId: row.provider_id }),
-				);
-			}
-			const instance = yield* this.options.registry.getInstanceEffect(driver);
-
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
+				const account =
+					payload.account ??
+					(this.options.accountDirectory
+						? yield* this.options.accountDirectory
+								.resolve({
+									_tag: "Id",
+									id: payload.instanceId ?? row.provider_id,
+								})
+								.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
+						: undefined);
+				const driver = account?.driver ?? row.provider_id;
+				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
+				const instance = yield* this.options.registry.getInstanceEffect(driver);
 				const send = (
 					prepared: PreparedTurn | undefined,
 					nativeResumeFallback: boolean,
 				) =>
 					instance.sendTurnEffect({
 						...payload,
+						account:
+							payload.account ??
+							(account?.driver === "claude" && prepared
+								? { ...account, folder: prepared.configDir }
+								: account),
+						instanceId,
 						history: payload.history ?? [],
 						...(driver === "claude"
 							? {
 									commandAttempt,
-									instanceId: payload.instanceId ?? row.provider_id,
 									prompt: prepared?.prompt ?? payload.prompt,
 									text: payload.prompt,
 									configDir: prepared?.configDir,
@@ -427,18 +433,52 @@ export class ProviderSideEffectReactor {
 									}),
 								);
 								const read = yield* makeReadQueryEffect;
+								let legacyDefault: ClaudeLaunchConfig | undefined;
+								if (
+									!payload.account &&
+									payload.configDir === undefined &&
+									this.options.accountDirectory
+								) {
+									const defaultAccount =
+										yield* this.options.accountDirectory.defaultFor("claude");
+									if (
+										Option.isNone(defaultAccount) ||
+										defaultAccount.value.driver !== "claude"
+									)
+										return yield* Effect.fail(
+											storeFailure("decodeClaudeLaunch")(
+												"Claude replay requires a Claude default account",
+											),
+										);
+									legacyDefault = {
+										configDir: defaultAccount.value.folder,
+										folderSource: "legacyDefault",
+									};
+								}
 								const launch = yield* Effect.try({
 									try: () =>
 										normalizeClaudeLaunchInput(
-											payload,
-											this.options.defaultClaudeLaunchConfig ??
-												(() => resolveClaudeLaunchConfig(loadDaemonConfig())),
+											payload.account?.driver === "claude"
+												? {
+														...payload,
+														configDir: payload.account.folder,
+														folderSource: "account",
+													}
+												: payload,
+											() => {
+												if (legacyDefault) return legacyDefault;
+												if (this.options.defaultClaudeLaunchConfig)
+													return this.options.defaultClaudeLaunchConfig();
+												throw storeFailure("decodeClaudeLaunch")(
+													"Claude replay requires a resolved default account or explicit config directory",
+												);
+											},
 										),
 									catch: storeFailure("decodeClaudeLaunch"),
 								});
 								return yield* sendPreparedClaudeTurn({
 									sessionId: payload.sessionId,
-									instanceId: payload.instanceId ?? row.provider_id,
+									instanceId,
 									commandId: row.command_id,
 									userText: payload.prompt,
 									options: {
@@ -481,7 +521,7 @@ export class ProviderSideEffectReactor {
 							payload.sessionId,
 							{
 								...result.handoff,
-								instanceId: payload.instanceId ?? row.provider_id,
+								instanceId,
 							},
 							row.command_id,
 						)
@@ -512,6 +552,14 @@ export class ProviderSideEffectReactor {
 				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {
+				const account = this.options.accountDirectory
+					? yield* this.options.accountDirectory
+							.resolve({ _tag: "Id", id: row.provider_id })
+							.pipe(Effect.mapError(storeFailure("resolveReplayAccount")))
+					: undefined;
+				const instance = yield* this.options.registry.getInstanceEffect(
+					account?.driver ?? row.provider_id,
+				);
 				yield* instance.interruptTurnEffect(row.session_id);
 				return REACTOR_COMPLETED_RESULT;
 			}
@@ -793,6 +841,8 @@ function isSendTurnOutboxPayload(
 				(value["rewind"]["targetMessageId"] === undefined ||
 					typeof value["rewind"]["targetMessageId"] === "string"))) &&
 		isRecord(value["providerState"]) &&
+		(value["account"] === undefined ||
+			Schema.is(AccountSchema)(value["account"])) &&
 		typeof value["workspaceRoot"] === "string"
 	);
 }

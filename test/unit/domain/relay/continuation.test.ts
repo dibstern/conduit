@@ -2,10 +2,26 @@
 // loses to busy/quota; a busy session probes or appends; a fresh refusal writes
 // recovery/events; a session moves or starts a turn while the probe is pending.
 // All refusals must leave the event stream untouched and never dispatch a turn.
+// Account-routing failures: a legacy binding selects the wrong receipt/login;
+// prewarm rereads stale or invalid disk config; an unknown account is ignored;
+// revalidation re-resolves an account instead of keeping the admitted snapshot.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Stream } from "effect";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { Account } from "../../../../src/lib/contracts/account.js";
+import {
+	accountsStateFromConfig,
+	accountsStateFromInstances,
+} from "../../../../src/lib/daemon/account-directory.js";
+import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
+import {
+	AccountDirectory,
+	makeAccountDirectory,
+} from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
@@ -18,21 +34,39 @@ import {
 	OrchestrationEngineTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { preWarmSession } from "../../../../src/lib/handlers/session-prewarm.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import {
+	nativeThreadKey,
+	ProviderStateEffectTag,
+} from "../../../../src/lib/persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
+import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../../src/lib/provider/provider-registry.js";
+import type { PreWarmSessionInput } from "../../../../src/lib/provider/types.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
 import { usageReading } from "../../../helpers/usage.js";
+
+let isolatedRoot: string;
+beforeEach(() => {
+	isolatedRoot = mkdtempSync(join(tmpdir(), "conduit-continuation-"));
+	vi.stubEnv("HOME", isolatedRoot);
+	vi.stubEnv("CLAUDE_CONFIG_DIR", join(isolatedRoot, "inherited-login"));
+});
+afterEach(() => {
+	vi.unstubAllEnvs();
+	rmSync(isolatedRoot, { recursive: true, force: true });
+});
 
 // Failure modes and agreed seams are recorded in the account-switch report.
 it("records one limit per user turn, closes only the cut-off on Dismiss, and clears recovery on a reply", async () => {
@@ -174,6 +208,18 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 
 for (const scenario of [
 	{
+		name: "unknown target before quota",
+		instanceId: "unknown-account",
+		result: "AccountUnroutable",
+		probes: 0,
+	},
+	{
+		name: "keeps the selected account snapshot through quota revalidation",
+		duringProbe: "account",
+		result: "Right",
+		probes: 1,
+	},
+	{
 		name: "driver before stale/busy/quota",
 		provider: "opencode",
 		expected: "wrong",
@@ -204,7 +250,7 @@ for (const scenario of [
 	{
 		name: "driver changed during probe",
 		duringProbe: "provider",
-		result: "DriverMismatch",
+		result: "StaleSwitch",
 		probes: 1,
 	},
 	{
@@ -217,6 +263,14 @@ for (const scenario of [
 	it(`continuation gate: ${scenario.name}`, async () => {
 		let probes = 0;
 		let dispatches = 0;
+		const dispatchedAccounts: Account[] = [];
+		const launchLogin = configuredClaudeConfigDir(
+			join(isolatedRoot, "launch-login"),
+		);
+		let accountState = accountsStateFromConfig(
+			defaultDaemonConfig(),
+			launchLogin,
+		);
 		const registry = new ProviderRegistry();
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -241,7 +295,8 @@ for (const scenario of [
 				const before = yield* store.readAllBySession("s1");
 				const result = yield* continuation
 					.requestContinuation("s1", {
-						instanceId: "claude",
+						instanceId:
+							"instanceId" in scenario ? scenario.instanceId : "claude",
 						reason: "user",
 						expectedInstanceId:
 							"expected" in scenario ? scenario.expected : "claude",
@@ -257,8 +312,20 @@ for (const scenario of [
 									if ("duringProbe" in scenario) {
 										if (scenario.duringProbe === "provider")
 											yield* sql`UPDATE sessions SET provider = 'other' WHERE id = 's1'`;
-										else
+										else if (scenario.duringProbe === "busy")
 											yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`;
+										else
+											accountState = accountsStateFromInstances(
+												[
+													{
+														id: "claude",
+														name: "Claude",
+														driver: "claude",
+														configDir: join(isolatedRoot, "changed-login"),
+													},
+												],
+												launchLogin,
+											);
 									}
 									return "quota" in scenario && scenario.quota === "Unavailable"
 										? [
@@ -280,12 +347,20 @@ for (const scenario of [
 						}),
 						Effect.either,
 					);
-				expect(result._tag).toBe("Left");
+				expect(result._tag).toBe(
+					scenario.result === "Right" ? "Right" : "Left",
+				);
 				if (result._tag === "Left")
 					expect(result.left._tag).toBe(scenario.result);
 				expect(probes).toBe(scenario.probes);
-				expect(dispatches).toBe(0);
-				expect(yield* store.readAllBySession("s1")).toEqual(before);
+				expect(dispatches).toBe(scenario.result === "Right" ? 1 : 0);
+				if (scenario.result === "Right") {
+					expect(dispatchedAccounts).toHaveLength(1);
+					expect(dispatchedAccounts[0]).toMatchObject({
+						id: "claude",
+						folder: launchLogin,
+					});
+				} else expect(yield* store.readAllBySession("s1")).toEqual(before);
 			}).pipe(
 				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 				Effect.provideService(LoggerTag, makeMockLogger()),
@@ -294,6 +369,10 @@ for (const scenario of [
 					new OrchestrationEngine({ registry }),
 				),
 				Effect.provideService(ProviderRegistryTag, registry),
+				Effect.provideService(
+					AccountDirectory,
+					makeAccountDirectory(Effect.sync(() => accountState)),
+				),
 				Effect.provideService(AgentServiceTag, {
 					getActiveAgent: () => Effect.succeed(undefined),
 					listAgents: () => Effect.die("A refusal must not discover agents"),
@@ -302,20 +381,133 @@ for (const scenario of [
 				Effect.provide(AlertsLive),
 				Effect.provideService(ConfigTag, {
 					httpServer: createServer(),
-					projectDir: "/tmp",
+					projectDir: isolatedRoot,
 					slug: "gate-test",
-					configDir: "/tmp/conduit-eon2-no-config",
+					configDir: isolatedRoot,
 					persistenceDbPath: ":memory:",
 					publishGlobalSetting: () => Effect.void,
 				}),
 				Effect.provideService(ProviderTurnServiceTag, {
 					holdUserTurnsForAccountSwitch: () => Effect.void,
 					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
-					sendTurn: () =>
+					sendTurn: (input) =>
 						Effect.sync(() => {
 							dispatches++;
+							if (input.account) dispatchedAccounts.push(input.account);
 						}),
 					interruptTurn: () => Effect.void,
+				}),
+				Effect.provide(makeOverridesStateLive()),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		);
+	});
+}
+
+for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
+	it(`prewarm routes the stored ${boundId} binding through the account directory`, async () => {
+		writeFileSync(join(isolatedRoot, "daemon.json"), "not valid JSON");
+		const folder = configuredClaudeConfigDir(
+			join(isolatedRoot, "personal-login"),
+		);
+		const accounts = makeAccountDirectory(
+			Effect.succeed(
+				accountsStateFromInstances(
+					[
+						{
+							id: "personal",
+							name: "Personal",
+							driver: "claude",
+							configDir: folder.path,
+						},
+						{ id: "opencode", name: "OpenCode", driver: "opencode" },
+					],
+					configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
+				),
+			),
+		);
+		const warmed: PreWarmSessionInput[] = [];
+		const registry = new ProviderRegistry([
+			{
+				providerId: "claude",
+				steering: false,
+				discoverEffect: () => Effect.die("Prewarm must not discover"),
+				sendTurnEffect: () => Effect.die("Prewarm must not send a turn"),
+				preWarmSessionEffect: (input) =>
+					Effect.sync(() => {
+						warmed.push(input);
+					}),
+				interruptTurnEffect: () => Effect.void,
+				resolvePermissionEffect: () => Effect.void,
+				resolveQuestionEffect: () => Effect.void,
+				endSessionEffect: () => Effect.void,
+				shutdownEffect: () => Effect.void,
+			},
+		]);
+		const engine = new OrchestrationEngine({ registry });
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				const state = yield* ProviderStateEffectTag;
+				yield* commit([
+					canonicalEvent("session.created", "s1", {
+						sessionId: "s1",
+						title: "Warm",
+						provider: boundId,
+					}),
+				]);
+				yield* state.saveUpdates("s1", [
+					{
+						key: nativeThreadKey("personal"),
+						value: JSON.stringify({
+							configDir: folder,
+							resumeSessionId: "personal-native",
+							firstSequence: 1,
+							deliveredThrough: 1,
+						}),
+					},
+				]);
+				engine.bindSession("s1", boundId);
+				const result = yield* preWarmSession("s1").pipe(Effect.either);
+				if (boundId === "unknown-account") {
+					expect(result._tag).toBe("Left");
+					if (result._tag === "Left") {
+						expect(result.left._tag).toBe("AccountUnroutable");
+						expect(result.left.message).toContain(boundId);
+					}
+					expect(warmed).toEqual([]);
+				} else if (boundId === "opencode") {
+					expect(result._tag).toBe("Right");
+					expect(warmed).toEqual([]);
+				} else {
+					expect(result._tag).toBe("Right");
+					expect(warmed).toHaveLength(1);
+					expect(warmed[0]).toMatchObject({
+						instanceId: "personal",
+						configDir: folder,
+						resumeSessionId: "personal-native",
+					});
+				}
+				expect((yield* read.getSession("s1"))?.provider).toBe(boundId);
+			}).pipe(
+				Effect.provideService(AccountDirectory, accounts),
+				Effect.provideService(LoggerTag, makeMockLogger()),
+				Effect.provide(AlertsLive),
+				Effect.provideService(ProviderRegistryTag, registry),
+				Effect.provideService(OrchestrationEngineTag, engine),
+				Effect.provideService(AgentServiceTag, {
+					getActiveAgent: () => Effect.succeed(undefined),
+					listAgents: () => Effect.die("Prewarm must not discover agents"),
+					switchAgent: () => Effect.die("Prewarm must not change agents"),
+				}),
+				Effect.provideService(ConfigTag, {
+					httpServer: createServer(),
+					projectDir: isolatedRoot,
+					slug: "prewarm-test",
+					configDir: isolatedRoot,
+					persistenceDbPath: ":memory:",
+					publishGlobalSetting: () => Effect.void,
 				}),
 				Effect.provide(makeOverridesStateLive()),
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),

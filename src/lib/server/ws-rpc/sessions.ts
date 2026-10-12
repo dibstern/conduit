@@ -1,13 +1,12 @@
 import { SqlClient } from "@effect/sql";
-import { Effect, Ref, Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { accountRefFromSelection } from "../../contracts/account.js";
 import {
+	AccountUnroutable,
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
-import {
-	isKnownDriverKind,
-	PROVIDER_SESSION_CAPABILITIES,
-} from "../../contracts/provider-instance.js";
+import { PROVIDER_SESSION_CAPABILITIES } from "../../contracts/provider-instance.js";
 import {
 	SessionWorkspaceSchema,
 	WorkspaceMoveError,
@@ -19,10 +18,7 @@ import {
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../daemon/config-persistence.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
 import {
@@ -37,7 +33,6 @@ import {
 	createLocalSessionId,
 	SessionManagerServiceTag,
 } from "../../domain/relay/Services/session-manager-service.js";
-import { OverridesStateTag } from "../../domain/relay/Services/session-overrides-state.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
@@ -224,7 +219,6 @@ export const sessionsHandlers = {
 		),
 	GetGoalDetails: (request) =>
 		Effect.gen(function* () {
-			const config = yield* ConfigTag;
 			const read = yield* ReadQueryEffectTag;
 			const session = yield* read.getSession(request.sessionId);
 			if (!session) {
@@ -232,12 +226,11 @@ export const sessionsHandlers = {
 					message: `Session ${request.sessionId} not found`,
 				});
 			}
-			if (
-				resolveProviderRoutingDriver(
-					loadDaemonConfig(config.configDir),
-					session.provider,
-				) !== "claude"
-			) {
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: session.provider,
+			});
+			if (account.driver !== "claude") {
 				return yield* new WsRpcError({
 					message: "Goal details are available only for Claude sessions",
 				});
@@ -367,6 +360,9 @@ export const sessionsHandlers = {
 			const continuation = yield* ContinuationTag;
 			yield* continuation.requestContinuation(request.sessionId, {
 				instanceId: request.instanceId,
+				...(request.accountRef === undefined
+					? {}
+					: { accountRef: request.accountRef }),
 				expectedInstanceId: request.expectedInstanceId,
 				reason: request.at === undefined ? "user" : "reset",
 				...(request.at === undefined ? {} : { at: request.at }),
@@ -388,7 +384,11 @@ export const sessionsHandlers = {
 			Effect.catchAll(mapRpcFailure("CancelContinuation")),
 		),
 	PreviewContinuation: (request) =>
-		previewContinuation(request.sessionId, request.instanceId).pipe(
+		previewContinuation(
+			request.sessionId,
+			request.instanceId,
+			request.accountRef,
+		).pipe(
 			Effect.catchAll(
 				(error): Effect.Effect<never, WsRpcError | ContinuationError> =>
 					Schema.is(ContinuationErrorSchema)(error)
@@ -494,15 +494,21 @@ export const sessionsHandlers = {
 				});
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
+			const account = yield* (yield* AccountDirectory).resolve(
+				request.accountRef ??
+					accountRefFromSelection({
+						instanceId: request.instanceId,
+						providerId: request.providerId,
+						model:
+							request.model === undefined
+								? undefined
+								: { providerID: request.model.providerId },
+					}),
+			);
 			const options = {
 				clientId: request.originId,
+				account,
 				...(request.title != null ? { title: request.title } : {}),
-				...(request.instanceId != null
-					? { instanceId: request.instanceId }
-					: {}),
-				...(request.providerId != null
-					? { providerId: request.providerId }
-					: {}),
 				...(request.model != null ? { model: request.model } : {}),
 			};
 			if (request.newWorktree) {
@@ -511,21 +517,7 @@ export const sessionsHandlers = {
 						message: "Choose either a new worktree or an existing worktree.",
 					});
 				const config = yield* ConfigTag;
-				const overrides = yield* Ref.get(yield* OverridesStateTag);
-				const provider =
-					request.instanceId ??
-					request.providerId ??
-					overrides.defaultModel?.providerID ??
-					"claude";
-				const driver = resolveProviderRoutingDriver(
-					loadDaemonConfig(config.configDir),
-					provider === "claude-sdk" ? "claude" : provider,
-				);
-				if (
-					!driver ||
-					!isKnownDriverKind(driver) ||
-					!PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree
-				)
+				if (!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsNewWorktree)
 					return yield* new WorkspaceMoveError({
 						path: config.projectDir,
 						reason: "unsupported-provider",
@@ -610,8 +602,12 @@ export const sessionsHandlers = {
 					error,
 				): Effect.Effect<
 					never,
-					WorkspaceMoveError | WorktreeCreationError | WsRpcError
+					| WorkspaceMoveError
+					| WorktreeCreationError
+					| AccountUnroutable
+					| WsRpcError
 				> =>
+					error instanceof AccountUnroutable ||
 					error instanceof WorkspaceMoveError ||
 					error instanceof WorktreeCreationError
 						? Effect.fail(error)
@@ -688,7 +684,7 @@ export const sessionsHandlers = {
 					const log = yield* LoggerTag;
 					log.warn("ForkSession failed", { cause: error });
 					return yield* Effect.fail(
-						error instanceof WsRpcError
+						error instanceof WsRpcError || error instanceof AccountUnroutable
 							? error
 							: new WsRpcError({
 									message: `ForkSession failed: ${String(error)}`,
@@ -713,7 +709,12 @@ export const sessionsHandlers = {
 					new WsRpcError({ message: error.message ?? String(error.cause) }),
 				),
 			),
-			Effect.catchAll(mapRpcFailure("StartSideThread")),
+			Effect.catchAll(
+				(error): Effect.Effect<never, AccountUnroutable | WsRpcError> =>
+					error instanceof AccountUnroutable
+						? Effect.fail(error)
+						: mapRpcFailure("StartSideThread")(error),
+			),
 		),
 	LoadMoreHistory: (request) =>
 		loadMoreHistoryForSession({

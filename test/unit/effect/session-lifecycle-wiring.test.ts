@@ -6,8 +6,9 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Option, PubSub } from "effect";
 import { expect, vi } from "vitest";
-import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { makePinoLoggerLive } from "../../../src/lib/domain/daemon/Layers/pino-logger-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	DaemonEvent,
 	DaemonEventBusLive,
@@ -45,6 +46,7 @@ import {
 	SessionLifecycleHistoryRebuildError,
 } from "../../../src/lib/relay/session-lifecycle-wiring.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -147,6 +149,7 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	});
 
 	const baseLayer = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(ConfigTag, makeMockConfig()),
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		makeOverridesStateLive(),
@@ -254,7 +257,12 @@ describe("SessionLifecycleWiringLive", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				yield* flushSubscribers;
-				yield* service.createSession("Claude", { providerId: "claude" });
+				yield* service.createSession("Claude", {
+					account: yield* (yield* AccountDirectory).resolve({
+						_tag: "DriverDefault",
+						driver: "claude",
+					}),
+				});
 				yield* waitForAssertion(() =>
 					expect(instances.ifRunning).toHaveBeenCalledOnce(),
 				);
@@ -264,8 +272,11 @@ describe("SessionLifecycleWiringLive", () => {
 				expect(services.pollerManager.startPolling).not.toHaveBeenCalled();
 
 				const session = yield* service.createSession("OpenCode", {
-					instanceId: defaultInstanceIdForDriver("opencode"),
-					providerId: "opencode",
+					account: {
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					},
 				});
 				yield* waitForAssertion(() =>
 					expect(services.pollerManager.startPolling).toHaveBeenCalledWith(
@@ -352,7 +363,11 @@ describe("SessionLifecycleWiringLive", () => {
 				const service = yield* SessionManagerServiceTag;
 				yield* flushSubscribers;
 				yield* service.createSession("Service Created", {
-					providerId: "opencode",
+					account: {
+						driver: "opencode",
+						id: AccountIdSchema.make("opencode"),
+						name: "OpenCode",
+					},
 				});
 				yield* waitForAssertion(() =>
 					expect(services.pollerManager.startPolling).toHaveBeenCalled(),
