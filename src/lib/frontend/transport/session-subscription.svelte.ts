@@ -18,6 +18,7 @@ import {
 } from "../stores/discovery.svelte.js";
 import { hydrateSessionGoal, sessionGoals } from "../stores/goal.svelte.js";
 import { followSessionResumes } from "../stores/handoff-review.svelte.js";
+import type { SavedShell } from "../stores/saved-shell.js";
 import {
 	forgetSession,
 	leaveDeletedSession,
@@ -59,6 +60,29 @@ export const turnEnded = (
 // mutates it, so a deep proxy would cost work to track writes that cannot
 // happen.
 let applied = $state.raw<SubscriptionState<SessionInfo>>(emptySubscription());
+let savedShell = $state.raw<{
+	project: string;
+	rows: ReadonlyMap<string, SessionInfo>;
+} | null>(null);
+
+/** Provisional rows only: no versions, synchronization or live row side effects. */
+export function drawSavedShell(record: SavedShell): void {
+	if (
+		applied.floor !== undefined ||
+		applied.versions.size > 0 ||
+		applied.settled
+	)
+		return;
+	savedShell = {
+		project: record.project,
+		rows: new Map(record.rows.map((row) => [row.id, row])),
+	};
+}
+
+/** An attachment confirms which project's provisional rows may stay on screen. */
+export function discardForeignSavedShell(project: string): void {
+	if (savedShell?.project !== project) savedShell = null;
+}
 
 let feedStatus = $state<FeedStatus>({ _tag: "cold" });
 let transportFailureSince = $state<number | null>(null);
@@ -74,9 +98,9 @@ export function noteTransportDrop(): void {
 
 /** Settled reactive state. Envelope vocabulary does not travel past here. */
 export const sessionSubscription = {
-	/** Every session the server has told us about, keyed by id. */
+	/** Live rows, or the device's provisional rows before the first snapshot. */
 	get rows(): ReadonlyMap<string, SessionInfo> {
-		return applied.rows;
+		return savedShell?.rows ?? applied.rows;
 	},
 	/** Whether the server has said we hold everything. ni8.5.20/T-11 keys the
 	 *  switching state off this. */
@@ -156,6 +180,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 		}
 	}
 	applied = next;
+	savedShell = null;
 	settleReadMarks(next.rows);
 }
 
@@ -163,6 +188,7 @@ export function applySessionChange(change: Change<SessionInfo>): void {
 export function resetSessionSubscription(): void {
 	sessionGoals.clear();
 	applied = emptySubscription();
+	savedShell = null;
 	feedStatus = { _tag: "cold" };
 	transportFailureSince = null;
 }

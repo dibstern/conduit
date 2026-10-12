@@ -583,6 +583,8 @@ describe("SessionManager Effect", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),

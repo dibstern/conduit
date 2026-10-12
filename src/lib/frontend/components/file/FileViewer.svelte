@@ -9,7 +9,7 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { getFileContentRpc } from "../../transport/ws-rpc-client.js";
-	import hljs from "highlight.js";
+	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 
@@ -133,19 +133,21 @@
 	}
 
 	$effect(() => {
-		if (content && codeEl && !binary) {
-			const lang = mapExtToLanguage(fileExt);
-			// Reset element before highlighting
-			codeEl.textContent = content;
-			if (lang) {
-				codeEl.className = `language-${lang}`;
-				hljs.highlightElement(codeEl);
-			} else {
-				codeEl.className = "";
-				// Try auto-detection for unknown extensions
-				hljs.highlightElement(codeEl);
-			}
-		}
+		if (!visible || !content || !codeEl || binary) return;
+		const el = codeEl;
+		const text = content;
+		const lang = mapExtToLanguage(fileExt);
+		// Reset the marker as well as the markup when the file content changes.
+		el.textContent = text;
+		el.className = lang ? `language-${lang}` : "";
+		delete el.dataset["highlighted"];
+		let active = true;
+		void (async () => {
+			const hljs = await loadHighlighter();
+			if (!active || !visible || binary || content !== text || codeEl !== el || !el.isConnected || el.dataset["highlighted"]) return;
+			hljs.highlightElement(el);
+		})();
+		return () => { active = false; };
 	});
 
 	// The tree behind the preview goes inert, so focus moves into the preview.

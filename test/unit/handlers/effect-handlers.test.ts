@@ -854,6 +854,8 @@ describe("switchModelForSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2377,6 +2379,8 @@ describe("handleNewSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2478,6 +2482,8 @@ describe("handleNewSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2772,6 +2778,8 @@ describe("loadMoreHistoryForSession", () => {
 			getStrandedChildren: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
+			listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+			getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
@@ -3337,6 +3345,8 @@ describe("handleMessage", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -3610,6 +3620,8 @@ describe("handleMessage", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),

@@ -1,12 +1,33 @@
 import type { GetSessionSkillsResponse } from "../contracts/ws-rpc.js";
-import type { MessageWithParts } from "../persistence/read-model-types.js";
+import type {
+	MessagePartRow,
+	MessageRow,
+} from "../persistence/read-model-types.js";
 import { normalizeToolInput } from "../provider/opencode/normalize-tool-input.js";
 import { skillNameFromTool, tokenizeSkills } from "../skill-recognition.js";
 
 export type SessionSkillLoad = GetSessionSkillsResponse["loads"][number];
 
+export type SessionSkillMessage = Pick<
+	MessageRow,
+	"id" | "role" | "created_at"
+> & {
+	readonly text: string | null;
+	readonly parts: readonly Pick<
+		MessagePartRow,
+		| "id"
+		| "message_id"
+		| "type"
+		| "tool_name"
+		| "input"
+		| "result"
+		| "status"
+		| "created_at"
+	>[];
+};
+
 export function collectSessionSkillLoads(
-	messages: readonly MessageWithParts[],
+	messages: readonly SessionSkillMessage[],
 	skillNames: ReadonlySet<string>,
 ): SessionSkillLoad[] {
 	const loads: SessionSkillLoad[] = [];
@@ -14,10 +35,11 @@ export function collectSessionSkillLoads(
 	for (const message of messages) {
 		if (message.role === "user") {
 			userMessages += 1;
-			const match = message.text.match(
+			const messageText = message.text ?? "";
+			const match = messageText.match(
 				/<user-message>\n([\s\S]*?)\n<\/user-message>/,
 			);
-			const text = match?.[1] ?? message.text;
+			const text = match?.[1] ?? messageText;
 			for (const segment of tokenizeSkills(text, skillNames)) {
 				if (segment.kind !== "skill") continue;
 				loads.push({

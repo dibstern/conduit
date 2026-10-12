@@ -86,10 +86,9 @@ const config = defineConfig({
 		emptyOutDir: true,
 		sourcemap: true,
 		target: "es2022",
-		// The main chunk deliberately carries every highlight.js language
-		// (~1 MB) and sits near 2.1 MB. The limit sits just above that so the
-		// warning still flags regressions; mermaid and xterm load on demand.
-		chunkSizeWarningLimit: 2500,
+		// highlight.js (all languages), mermaid, and xterm load on demand.
+		// The main chunk is ~1.34 MB; keep the warning just above that.
+		chunkSizeWarningLimit: 1400,
 		rollupOptions: {
 			input: {
 				index: resolve(import.meta.dirname, "src/lib/frontend/index.html"),

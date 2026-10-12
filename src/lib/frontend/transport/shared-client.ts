@@ -25,9 +25,11 @@ import {
 	ExecutionStrategy,
 	Exit,
 	Layer,
+	Mailbox,
 	Ref,
 	Schedule,
 	Scope,
+	Stream,
 } from "effect";
 import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
 import {
@@ -111,19 +113,32 @@ const makeSubscriptions = (
 		readonly ledger?: ResumeLedger;
 		/** A snapshot saved by an earlier page load, delivered first. */
 		readonly saved?: SessionDetailEnvelope | undefined;
+		/** Called after starting the detail RPC, before its first envelope. */
+		readonly onSubscribe?: () => void;
 	}) =>
 		resumeStream(
 			(resumeFromSequence, resumeBase, resumePoint) =>
-				sockets.stream
-					.SubscribeSessionDetail({
-						projectSlug,
-						sessionId: options.sessionId,
-						textSuffixes: true,
-						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
-						...(resumeBase === undefined ? {} : { resumeBase }),
-						...(resumePoint === undefined ? {} : { resumePoint }),
-					})
-					.pipe(decodeSessionDetail),
+				Stream.unwrapScoped(
+					Effect.map(
+						sockets.stream.SubscribeSessionDetail(
+							{
+								projectSlug,
+								sessionId: options.sessionId,
+								textSuffixes: true,
+								...(resumeFromSequence === undefined
+									? {}
+									: { resumeFromSequence }),
+								...(resumeBase === undefined ? {} : { resumeBase }),
+								...(resumePoint === undefined ? {} : { resumePoint }),
+							},
+							{ asMailbox: true },
+						),
+						(mailbox) => {
+							options.onSubscribe?.();
+							return Mailbox.toStream(mailbox);
+						},
+					),
+				).pipe(decodeSessionDetail),
 			{
 				from: options.resumeFromSequence,
 				ledger: options.ledger ?? makeResumeLedger(),

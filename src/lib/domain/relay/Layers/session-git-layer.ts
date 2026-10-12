@@ -138,7 +138,10 @@ export const SessionGitLive = Layer.effect(
 								// become one follow-up; the other permit waiters then have no work.
 								const request = queued;
 								queued = undefined;
-								const sessions = yield* read.listSessionInfos();
+								const sessions = yield* read.listSessionGitRefreshTargets({
+									sessionIds: [...request.sessionIds],
+									all: request.all,
+								});
 								const projectFolders = [
 									config.projectDir,
 									...(config.extraFolders ?? []),
@@ -153,15 +156,6 @@ export const SessionGitLive = Layer.effect(
 								);
 								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
-									if (
-										!request.sessionIds.has(session.id) &&
-										!(
-											request.all &&
-											(session.settledAt == null ||
-												session.workspace?.origin === "conduit")
-										)
-									)
-										continue;
 									const workspaceDirectory = effectiveWorkingDirectory(
 										config.projectDir,
 										session.workspace,

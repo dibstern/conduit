@@ -22,10 +22,7 @@
 	import Banners from "../overlays/Banners.svelte";
 	import NotificationStack from "../overlays/NotificationStack.svelte";
 	import ImageLightbox from "../overlays/ImageLightbox.svelte";
-	import QrModal from "../overlays/QrModal.svelte";
-	import SettingsPanel from "../overlays/SettingsPanel.svelte";
 	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
-	import DebugPanel from "../debug/DebugPanel.svelte";
 	import InfoPanels from "../overlays/InfoPanels.svelte";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
 	import TodoOverlay from "../todo/TodoOverlay.svelte";
@@ -49,15 +46,16 @@
 	} from "../../stores/ws-notifications.js";
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
+	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSlug, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
 	import { clearMessages } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, setAttachedProject, switchToSession } from "../../stores/session.svelte.js";
-	import { attachSessionList, detachSessionList, onShellSynchronized } from "../../stores/session-list.svelte.js";
+	import { attachSessionList, detachSessionList, drawSavedShell, onShellSynchronized } from "../../stores/session-list.svelte.js";
 	import { viewFamily } from "../../stores/session-family-feed.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { drawSavedTranscript, leaveSavedDraw, placedSessionId, placeSavedDraw, savedDraw, viewTranscript } from "../../stores/transcript.svelte.js";
 	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
+	import { openSavedShell } from "../../stores/saved-shell.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId, viewDraftModels } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
@@ -78,7 +76,9 @@
 	import DeepSearch from "../session/DeepSearch.svelte";
 
 	let qrVisible = $state(false);
+	let qrEverOpened = $state(false);
 	let settingsVisible = $state(false);
+	let settingsEverOpened = $state(false);
 	let settingsInitialTab = $state<SettingsSection | undefined>();
 	let settingsInitialAnchor = $state<SettingsOpenDetail["anchor"]>();
 	let debugPanelVisible = $state(false);
@@ -87,6 +87,7 @@
 	const TERMINAL_MAX_RATIO = 0.7; // 70% of parent height
 	const TERMINAL_DEFAULT_HEIGHT = 300;
 	const TERMINAL_STORAGE_KEY = "terminal-panel-height";
+	const LAST_PROJECT_STORAGE_KEY = "conduit:last-attached-project";
 
 	let terminalHeight = $state(
 		Number(
@@ -386,19 +387,41 @@
 	// Each mount attaches once: a remount keeps the previous mount's slug.
 	let attachedThisMount = false;
 	onMount(() => {
+		let attachGeneration = 0;
+		const loadPath = routerState.path;
+		const loadSearch = routerState.search;
+		const loadProject = getCurrentSlug() ?? getDraftProject();
+		let lastProject: string | null = null;
+		try {
+			lastProject = localStorage.getItem(LAST_PROJECT_STORAGE_KEY);
+		} catch { /* device storage is optional */ }
 		// A page load draws the session's saved page, if any, before any reply.
 		const loadSessionId = getCurrentSessionId();
+		const savedTranscript = loadSessionId
+			? openSavedTranscript(loadSessionId)
+			: Promise.resolve(undefined);
 		if (loadSessionId)
-			void openSavedTranscript(loadSessionId).then((record) => {
+			void savedTranscript.then((record) => {
 				if (record && sessionState.currentId === null && getCurrentSessionId() === loadSessionId)
 					drawSavedTranscript(record);
 			});
+		void savedTranscript.then((transcript) => {
+			if (attachGeneration !== 0) return;
+			const project = transcript?.project ?? loadProject ?? lastProject;
+			if (!project) return;
+			void openSavedShell(project).then((record) => {
+				if (record && attachGeneration === 0 && routerState.path === loadPath && routerState.search === loadSearch)
+					drawSavedShell(record);
+			});
+		});
 		// A page load starts clean; only a change of project clears state.
 		let previousSlug = attachedProjectState.slug;
-		let attachGeneration = 0;
 		const unsubscribe = onProjectAttached((slug) => {
 			if (requestedProject === slug) requestedProject = null;
 			attachGeneration++;
+			try {
+				localStorage.setItem(LAST_PROJECT_STORAGE_KEY, slug);
+			} catch { /* device storage is optional */ }
 			if (previousSlug !== null && slug !== previousSlug) {
 				clearMessages();
 				clearSessionState();
@@ -691,6 +714,7 @@
 
 	$effect(() => {
 		function onQrShow() {
+			qrEverOpened = true;
 			qrVisible = true;
 		}
 		window.addEventListener("qr:show", onQrShow);
@@ -705,6 +729,7 @@
 			// A generic open leaves this undefined: phone then starts on the section list.
 			settingsInitialTab = detail?.section;
 			settingsInitialAnchor = detail?.anchor;
+			settingsEverOpened = true;
 			settingsVisible = true;
 		}
 		window.addEventListener("settings:open", onSettingsOpen);
@@ -923,8 +948,18 @@
 <ImageLightbox />
 <NotificationStack />
 <DeepSearch />
-<QrModal visible={qrVisible} onClose={handleQrClose} />
-<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} initialAnchor={settingsInitialAnchor} onClose={() => (settingsVisible = false)} />
+{#if qrEverOpened}
+	{#await import("../overlays/QrModal.svelte") then { default: QrModal }}
+		<QrModal visible={qrVisible} onClose={handleQrClose} />
+	{/await}
+{/if}
+{#if settingsEverOpened}
+	{#await import("../overlays/SettingsPanel.svelte") then { default: SettingsPanel }}
+		<SettingsPanel visible={settingsVisible} initialTab={settingsInitialTab} initialAnchor={settingsInitialAnchor} onClose={() => (settingsVisible = false)} />
+	{/await}
+{/if}
 {#if featureFlags.debug}
-	<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
+	{#await import("../debug/DebugPanel.svelte") then { default: DebugPanel }}
+		<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
+	{/await}
 {/if}
