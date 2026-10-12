@@ -10,7 +10,7 @@
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
-	import { dragToDismiss } from "./actions/drag-to-dismiss.js";
+	import { dragToDismiss } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FLOATING_POSITIONING_DEFAULTS,

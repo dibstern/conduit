@@ -346,6 +346,29 @@ export function getSettleVerb(session: SessionInfo, now: number): SessionVerb {
 	};
 }
 
+export function getPinVerb(session: SessionInfo): SessionVerb {
+	const pinned = session.pinnedAt != null;
+	return {
+		testId: pinned ? "session-ctx-unpin" : "session-ctx-pin",
+		label: pinned ? "Unpin" : "Pin to top",
+		icon: pinned ? "star-off" : "star",
+		keys: sessionVerbKeys.pin,
+		run: () => {
+			void pin(session, !pinned);
+		},
+	};
+}
+
+/**
+ * The one verb that moves this session along: Unpin while it is pinned (a
+ * pinned session can't be settled), otherwise Settle or Un-settle.
+ */
+export function getPrimaryVerb(session: SessionInfo, now: number): SessionVerb {
+	return session.pinnedAt != null
+		? getPinVerb(session)
+		: getSettleVerb(session, now);
+}
+
 export function getSessionVerbs(
 	session: SessionInfo,
 	now: number,
@@ -383,15 +406,7 @@ export function getSessionVerbs(
 				},
 			});
 	}
-	items.push({
-		testId: session.pinnedAt != null ? "session-ctx-unpin" : "session-ctx-pin",
-		label: session.pinnedAt != null ? "Unpin" : "Pin to top",
-		icon: session.pinnedAt != null ? "star-off" : "star",
-		keys: sessionVerbKeys.pin,
-		run: () => {
-			void pin(session, !actions.pinned);
-		},
-	});
+	items.push(getPinVerb(session));
 	if (!actions.settled && !actions.snoozed)
 		items.push({
 			testId: session.unread
