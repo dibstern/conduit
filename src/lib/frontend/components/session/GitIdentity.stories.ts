@@ -775,14 +775,21 @@ export const LongNames: Story = {
 		git: { branch: "docs/architecture-deepening-design", dirty: true },
 	},
 	play: async ({ canvasElement }) => {
-		const project = within(canvasElement)
-			.getByTestId("composer-checkout")
-			.querySelector('[data-part="project"]');
+		const identity = within(canvasElement).getByTestId("composer-checkout");
+		const project = identity.querySelector('[data-part="project"]');
+		const branch = identity.querySelector('[data-part="branch"]');
+		const container = identity.parentElement;
 		expect(project).not.toBeNull();
-		if (!project) return;
-		expect(project.getBoundingClientRect().width).toBeCloseTo(
-			Number.parseFloat(getComputedStyle(project).minWidth),
-			0,
-		);
+		expect(branch).not.toBeNull();
+		expect(container).not.toBeNull();
+		if (!project || !branch || !container) return;
+		// The control has no width cap of its own, so take away exactly the
+		// project's slack: the project must give all of it up before the branch
+		// loses a character. Size the story's own wrapper, as Narrow does.
+		const floor = Number.parseFloat(getComputedStyle(project).minWidth);
+		const slack = project.getBoundingClientRect().width - floor;
+		container.style.width = `${identity.getBoundingClientRect().width - slack}px`;
+		expect(project.getBoundingClientRect().width).toBeCloseTo(floor, 0);
+		expect(branch.scrollWidth).toBe(branch.clientWidth);
 	},
 };
