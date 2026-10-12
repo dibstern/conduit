@@ -80,7 +80,7 @@ test("row rename commits on Enter, ignores empty titles, and cancels on Escape",
 	const id = await rows.first().getAttribute("data-session-id");
 	if (!id) throw new Error("missing session id");
 	const row = page.locator(`#session-list [data-session-id="${id}"]`);
-	// The title, not the row centre: that can land on a hover verb (e5b2819b).
+	// The title, not the row centre: that can land on a hover command (e5b2819b).
 	await row.locator(".session-item-title").dblclick();
 	let input = row.getByRole("textbox", { name: "Session name" });
 	await expect(input).toBeFocused();
@@ -237,7 +237,7 @@ test("scope digits, shortcut sheet and text-field guards", async ({
 	}
 });
 
-test("each row verb has pointer and touch controls", async ({
+test("each row command has pointer and touch controls", async ({
 	page,
 	relayUrl,
 }) => {

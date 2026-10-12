@@ -86,9 +86,9 @@ export const makeTracingLive = (
 		return Layer.empty;
 	}
 
-	// NodeSdk.layer registers the OTel TracerProvider globally and provides
-	// the @effect/opentelemetry Resource tag. Effect's Tracer picks it up
-	// via the global OTel API so Effect.withSpan calls emit real spans.
+	// NodeSdk.layer scopes a NodeTracerProvider, provides it through the
+	// OtelTracerProvider tag, and installs @effect/opentelemetry's Effect tracer.
+	// It does not register the provider through OpenTelemetry's global API.
 	const sdkLayer = NodeSdk.layer(() => ({
 		spanProcessor:
 			processors.length === 1 ? (processors[0] ?? processors) : processors,

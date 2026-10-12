@@ -3,29 +3,29 @@
 	import MenuCheckboxItem from "../ui/MenuCheckboxItem.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
-	import { sessionVerbKeysHint, type SessionVerb, type SessionVerbEntry } from "./session-verbs.js";
+	import { sessionCommandKeysHint, type SessionCommand, type SessionCommandEntry } from "./session-commands.js";
 
 	let {
-		verbs,
+		commands,
 		presentation,
 		onselect,
 	}: {
-		verbs: readonly SessionVerbEntry[];
+		commands: readonly SessionCommandEntry[];
 		presentation: "menu" | "sheet";
-		onselect: (run: SessionVerb["run"]) => void;
+		onselect: (run: SessionCommand["run"]) => void;
 	} = $props();
 </script>
 
-{#snippet verbDetails(item: SessionVerb)}
+{#snippet commandDetails(item: SessionCommand)}
 	{#if presentation !== "sheet"}
 		{#if item.icon}<Icon name={item.icon} size={13} />{:else if item.checked !== undefined}<span class="w-[13px] shrink-0" aria-hidden="true"></span>{/if}
 	{/if}
 	<span>{item.label}</span>
-	{#if item.keys}<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{sessionVerbKeysHint(item.keys)}</span>{/if}
+	{#if item.keys}<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{sessionCommandKeysHint(item.keys)}</span>{/if}
 	{#if item.disabledReason}<span class="ml-auto text-xs text-text-dimmer">{item.disabledReason}</span>{/if}
 {/snippet}
 
-{#each verbs as item, index (index)}
+{#each commands as item, index (index)}
 	{#if "divider" in item}
 		<MenuSeparator />
 	{:else if item.checked !== undefined}
@@ -37,7 +37,7 @@
 			disabled={item.disabledReason != null}
 			onselect={() => onselect(item.run)}
 		>
-			{@render verbDetails(item)}
+			{@render commandDetails(item)}
 		</MenuCheckboxItem>
 	{:else if item.danger}
 		<MenuItem
@@ -48,7 +48,7 @@
 			disabled={item.disabledReason != null}
 			onselect={() => onselect(item.run)}
 		>
-			{@render verbDetails(item)}
+			{@render commandDetails(item)}
 		</MenuItem>
 	{:else}
 		<MenuItem
@@ -59,7 +59,7 @@
 			disabled={item.disabledReason != null}
 			onselect={() => onselect(item.run)}
 		>
-			{@render verbDetails(item)}
+			{@render commandDetails(item)}
 		</MenuItem>
 	{/if}
 {/each}

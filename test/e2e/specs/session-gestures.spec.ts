@@ -112,7 +112,7 @@ async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 	});
 	await recorded.click();
 	await expect(recorded.getByTestId("session-unread-dot")).toHaveCount(0);
-	// The recording holds one session; the verbs need a second to move around.
+	// The recording holds one session; the commands need a second to move around.
 	await new SidebarPage(page).createNewSession();
 	await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2);
 	const id = await rows.nth(1).getAttribute("data-session-id");
@@ -121,7 +121,7 @@ async function setUp(page: Page, relayUrl: string, harness: ReplayHarness) {
 	return { row, title };
 }
 
-test("desktop: hover and Tab reach the row's verbs, and the menu returns focus", async ({
+test("desktop: hover and Tab reach the row's commands, and the menu returns focus", async ({
 	page,
 	relayUrl,
 	harness,
@@ -213,7 +213,7 @@ test("desktop: a settled row un-settles from the shelf by menu and by hover", as
 	await expect(toggle).toHaveCount(0);
 	await expect(row).toBeVisible();
 
-	// The hover verb flips the same way.
+	// The hover command flips the same way.
 	await row.hover();
 	await row.getByTestId("session-act-settle").click();
 	await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -490,7 +490,7 @@ test.describe("phone", () => {
 		await expect(row).toBeVisible();
 	});
 
-	test("phone: title sheet shares sidebar verbs and works without the list mounted", async ({
+	test("phone: title sheet shares sidebar commands and works without the list mounted", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -500,7 +500,7 @@ test.describe("phone", () => {
 		await expect(row).toBeVisible();
 		await longPress(page, row);
 		const listMenu = page.getByTestId("session-action-sheet");
-		const listVerbs = await listMenu
+		const listCommands = await listMenu
 			.locator(
 				'[data-testid^="session-ctx-"]:is([role="menuitem"], [role="menuitemcheckbox"])',
 			)
@@ -520,15 +520,15 @@ test.describe("phone", () => {
 		expect(box?.width).toBe(393);
 		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
 		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
-		const titleVerbs = await sheet
+		const titleCommands = await sheet
 			.locator(
 				'[data-testid^="session-ctx-"]:is([role="menuitem"], [role="menuitemcheckbox"])',
 			)
 			.evaluateAll((items) =>
 				items.map((item) => item.getAttribute("data-testid")),
 			);
-		expect(titleVerbs).toEqual(
-			listVerbs.filter((id) => id !== "session-ctx-select"),
+		expect(titleCommands).toEqual(
+			listCommands.filter((id) => id !== "session-ctx-select"),
 		);
 		await page.keyboard.press("Escape");
 		await expect(trigger).toBeFocused();

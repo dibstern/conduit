@@ -441,8 +441,14 @@ export class SSEStream implements SSEStreamPort {
 			while (this.running) {
 				this.connectedAt = null;
 				this.staleTeardown = false;
-				yield* Effect.catchAll(singleConnection, () => Effect.void);
+				const result = yield* Effect.either(singleConnection);
 				if (!this.running) return;
+				// The AbortError rejection path above can resume successfully without
+				// clearing running. Treat that Right as a retryable anomaly, not shutdown.
+				const failureReason =
+					result._tag === "Left"
+						? result.left.message
+						: "connection ended without an error";
 
 				// Reset the backoff only after a connection that stayed healthy
 				// for at least maxDelay — not on a mere successful subscribe(),
@@ -468,7 +474,18 @@ export class SSEStream implements SSEStreamPort {
 				attempt++;
 				this.reconnectCount++;
 				this.notify("reconnecting", { attempt, delay });
-				yield* Effect.sleep(Duration.millis(delay));
+				// This span measures the wait, not the failed network operation.
+				// failureReason may contain high-cardinality provider text.
+				// SSEStream has no project slug, so these root spans lack project identity.
+				yield* Effect.sleep(Duration.millis(delay)).pipe(
+					Effect.withSpan("relay.connection.attempt", {
+						attributes: {
+							attempt,
+							delayMs: delay,
+							failureReason,
+						},
+					}),
+				);
 			}
 		});
 

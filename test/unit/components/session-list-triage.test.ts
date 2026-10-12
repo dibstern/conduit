@@ -324,15 +324,16 @@ describe("session triage list", () => {
 	it.each([
 		"settle",
 		"pin",
-	] as const)("calls %s with the row project and offers Undo", async (verb) => {
+	] as const)("calls %s with the row project and offers Undo", async (command) => {
 		render(SessionList);
 		render(Toast);
 		const row = screen.getByText("Idle work").closest("a");
 		if (!row) throw new Error("Missing row");
 		await fireEvent.contextMenu(row);
-		await fireEvent.click(await screen.findByTestId(`session-ctx-${verb}`));
-		const rpc = verb === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
-		const key = verb === "settle" ? "settled" : "pinned";
+		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
+		const rpc =
+			command === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
+		const key = command === "settle" ? "settled" : "pinned";
 		await waitFor(() =>
 			expect(rpc).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -344,7 +345,7 @@ describe("session triage list", () => {
 		);
 		expect(screen.getAllByRole("status")).toHaveLength(1);
 		expect(screen.getByRole("status").textContent).toContain(
-			verb === "settle"
+			command === "settle"
 				? "Moved “Idle work” to Settled"
 				: "Pinned “Idle work” to the top",
 		);
@@ -361,8 +362,9 @@ describe("session triage list", () => {
 	it.each([
 		"settle",
 		"pin",
-	] as const)("reports a failed %s without a success toast", async (verb) => {
-		const rpc = verb === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
+	] as const)("reports a failed %s without a success toast", async (command) => {
+		const rpc =
+			command === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
 		vi.mocked(rpc).mockRejectedValueOnce(new Error("offline"));
 		render(SessionList);
 		render(Toast);
@@ -372,9 +374,9 @@ describe("session triage list", () => {
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);
-		await fireEvent.click(await screen.findByTestId(`session-ctx-${verb}`));
+		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
 		expect((await screen.findByRole("alert")).textContent).toContain(
-			`Couldn't ${verb} session`,
+			`Couldn't ${command} session`,
 		);
 		expect(screen.queryByRole("status")).toBeNull();
 	});
@@ -413,23 +415,23 @@ describe("session triage list", () => {
 	it.each([
 		"unsettle",
 		"unpin",
-	] as const)("%s sends false without a toast", async (verb) => {
+	] as const)("%s sends false without a toast", async (command) => {
 		uiState.settledShelfOpen = true;
 		render(SessionList);
-		const title = verb === "unsettle" ? "Finished work" : "Pinned work";
+		const title = command === "unsettle" ? "Finished work" : "Pinned work";
 		const row = screen.getByText(title).closest("a");
 		if (!row) throw new Error("Missing row");
 		await fireEvent.mouseOver(row);
 		await fireEvent.click(
 			screen.getByRole("button", { name: `More options for ${title}` }),
 		);
-		await fireEvent.click(await screen.findByTestId(`session-ctx-${verb}`));
+		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
 		const rpc =
-			verb === "unsettle" ? setSessionSettledRpc : setSessionPinnedRpc;
+			command === "unsettle" ? setSessionSettledRpc : setSessionPinnedRpc;
 		await waitFor(() =>
 			expect(rpc).toHaveBeenCalledWith(
 				expect.objectContaining(
-					verb === "unsettle" ? { settled: false } : { pinned: false },
+					command === "unsettle" ? { settled: false } : { pinned: false },
 				),
 			),
 		);

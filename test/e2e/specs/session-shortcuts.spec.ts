@@ -101,21 +101,21 @@ for (const mode of [
 			).toBeVisible();
 			await expect(page.getByTestId("session-bar-state-chip")).toHaveCount(0);
 
-			const headerVerb = page.getByTestId("session-bar-settle");
-			await expect(headerVerb).toHaveAccessibleName("Unpin");
+			const headerCommand = page.getByTestId("session-bar-settle");
+			await expect(headerCommand).toHaveAccessibleName("Unpin");
 			await page
 				.getByTestId("session-bar")
 				.screenshot({ path: testInfo.outputPath("header-unpin.png") });
-			await headerVerb.click();
+			await headerCommand.click();
 			await expect(
 				page.locator('#session-list [title="Pinned session"]'),
 			).toHaveCount(0);
-			await expect(headerVerb).toHaveAccessibleName("Settle");
-			await headerVerb.click();
+			await expect(headerCommand).toHaveAccessibleName("Settle");
+			await headerCommand.click();
 			await expect(page.getByTestId("session-bar-state-chip")).toBeVisible();
 		});
 
-		test("transcript verbs target the open session while composer letters remain text", async ({
+		test("transcript commands target the open session while composer letters remain text", async ({
 			page,
 			relayUrl,
 		}) => {
@@ -151,7 +151,7 @@ for (const mode of [
 			await expect(page.getByTestId("session-bar-state-chip")).toHaveCount(0);
 		});
 
-		test("plain verbs still act on the focused list row", async ({
+		test("plain commands still act on the focused list row", async ({
 			page,
 			relayUrl,
 		}) => {
