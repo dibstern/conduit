@@ -4,7 +4,7 @@
 	import { projectState } from "../../stores/project.svelte.js";
 	import type { SessionProjection } from "../../stores/session.svelte.js";
 	import { isSessionSnoozed, isSessionWoken, sessionState, switchToSession } from "../../stores/session.svelte.js";
-	import { getCurrentSlug, getSessionHref } from "../../stores/router.svelte.js";
+	import { getSessionHref } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { unsnoozeSessionRpc } from "../../transport/ws-rpc-client.js";
 	import { showToast } from "../../stores/ui.svelte.js";
@@ -51,7 +51,7 @@
 
 	function handleSwitchSession(session: SessionInfo) {
 		touch(session, "sidebar-pick");
-		const projectSlug = session.projectSlug ?? getCurrentSlug();
+		const projectSlug = session.projectSlug;
 		if (projectSlug && isSessionWoken(session, sessionState.now)) {
 			unsnoozeSessionRpc({ projectSlug, sessionId: session.id, originId: getBrowserClientId() })
 				.catch(() => showToast("Couldn't clear the wake", { variant: "error" }));
@@ -73,7 +73,7 @@
 	{#snippet sessionRow(s: SessionInfo)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
-		{@const primary = projectState.projects.find((project) => project.slug === (s.projectSlug ?? getCurrentSlug()))?.folders[0]}
+		{@const primary = projectState.projects.find((project) => project.slug === s.projectSlug)?.folders[0]}
 		<SessionItem
 			session={s}
 			pinned={s.pinnedAt != null}
@@ -109,7 +109,19 @@
 
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-2 py-0.5" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
-		{#if isEmpty}
+		{#if isEmpty && !sessionState.settled}
+			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
+			<div class="flex flex-col gap-px pt-1" aria-hidden="true" data-testid="session-list-skeleton">
+				{#each [[78, 52], [64, 40], [86, 58], [58, 34], [72, 48], [66, 55], [80, 38], [60, 46]] as [title, context], i}
+					<div class="session-skeleton-row grid grid-cols-[20px_minmax(0,1fr)_auto] grid-rows-2 items-center gap-x-[9px] gap-y-[7px] rounded-panel px-2 py-[9px]" style:--i={i}>
+						<div class="row-span-2 size-[14px] justify-self-center rounded-full bg-border-subtle"></div>
+						<div class="h-[9px] rounded bg-border-subtle" style:width="{title}%"></div>
+						<div class="row-span-2 h-[7px] w-[22px] rounded bg-border-subtle"></div>
+						<div class="h-[7px] rounded bg-border-subtle opacity-70" style:width="{context}%"></div>
+					</div>
+				{/each}
+			</div>
+		{:else if isEmpty}
 			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
 				{#if statusFilter !== null && (!searching || filteredLength > 0)}
@@ -184,7 +196,7 @@
 				class="px-3.5 py-2 text-center text-xs text-text-dimmer font-brand"
 				data-testid="session-list-loading-more"
 			>
-				Loading…
+				<span class="inline-flex items-center gap-2"><span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>Loading</span>
 			</div>
 		{/if}
 
@@ -202,3 +214,18 @@
 			</div>
 		{/if}
 	</div>
+
+<style>
+	/* A wave down the list reads as rows arriving; staggered by --i per row. */
+	.session-skeleton-row {
+		animation: session-skeleton-wave 1.8s ease-in-out infinite;
+		animation-delay: calc(var(--i) * 110ms);
+	}
+	@keyframes session-skeleton-wave {
+		0%, 100% { opacity: 0.35; transform: translateX(0); }
+		40% { opacity: 1; transform: translateX(2px); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.session-skeleton-row { animation: none; }
+	}
+</style>

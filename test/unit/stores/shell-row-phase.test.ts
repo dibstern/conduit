@@ -17,6 +17,7 @@ import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import { applySessionChange } from "./session-fixtures.js";
 
 const row = (status: SessionInfo["status"]): SessionInfo => ({
+	projectSlug: "project-a",
 	id: "s",
 	title: "s",
 	status,
@@ -103,8 +104,14 @@ it("a child session, which has no shell row, starts from its family row", () => 
 		_tag: "snapshot",
 		sequence: 1,
 		rows: [
-			{ id: "root", title: "Root", status: "busy" },
-			{ id: "child", title: "Child", status: "busy", parentID: "root" },
+			{ projectSlug: "project-a", id: "root", title: "Root", status: "busy" },
+			{
+				projectSlug: "project-a",
+				id: "child",
+				title: "Child",
+				status: "busy",
+				parentID: "root",
+			},
 		],
 	});
 	expect(slot.phase).toBe("processing");

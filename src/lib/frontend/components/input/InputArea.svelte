@@ -67,7 +67,9 @@
 	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { placedSessionId } from "../../stores/transcript.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { connectionState } from "../../transport/connection-status.svelte.js";
+	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
@@ -216,16 +218,25 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(getCurrentSlug(), sessionState.currentId);
+		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
 	});
-	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug ?? getCurrentSlug() ?? "" : getDraftProject() ?? getCurrentSlug() ?? "");
+	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === (accountId ?? getEffectiveInstanceId())));
+	// The settings row appears in one go. Until the daemon answers, models load
+	// and a session link resolves, each control would fill in on its own and
+	// guess (an empty store reads as OpenCode). "" is the undialled state, which
+	// only Storybook stays in.
+	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
+	const routeSessionId = $derived(getCurrentSessionId());
+	const settingsPending = $derived(
+		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+	);
 	const composerDriver = $derived(composerInstance?.driver ?? (currentSession ? getSessionInstanceId(currentSession.id) : getEffectiveInstanceId()));
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
@@ -563,7 +574,7 @@
 
 	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return Promise.resolve();
 		return syncInputDraftRpc({
 			projectSlug,
@@ -676,7 +687,7 @@
 	async function startSideThread(question: string | undefined): Promise<boolean> {
 		if (startingSideThread) return false;
 		const parentSessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
 		if (!parentSessionId || !projectSlug) {
 			showToast("Open a session to start a Side Thread", { variant: "error" });
 			return false;
@@ -752,7 +763,7 @@
 			text = toProviderCommands(text, providerBuiltinNameSet);
 		}
 
-		const messageText = textOverride === undefined ? await withReferences(text, getCurrentSlug()) : text;
+		const messageText = textOverride === undefined ? await withReferences(text, composerProjectSlug) : text;
 
 		// Collect image data URLs from pending images
 		const imageUrls = textOverride === undefined && pendingImages.length > 0
@@ -764,7 +775,7 @@
 		let sid = sessionState.currentId;
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
-		const projectSlug = sid ? getCurrentSlug() : getDraftProject();
+		const projectSlug = sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject();
 		if (!projectSlug) {
 			showToast("No active project", { variant: "error" });
 			return false;
@@ -900,7 +911,7 @@
 		const offer = taskStopToast;
 		if (!offer) return;
 		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId && getCurrentSlug() === offer.projectSlug;
+		const active = sessionState.currentId === offer.sessionId && currentSession?.projectSlug === offer.projectSlug;
 		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
 		untrack(() => {
 			if (!active || count === 0 || !toast) {
@@ -916,7 +927,7 @@
 
 	function handleStop() {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
 		const instanceId = currentSession?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId];
 		const driver = getInstanceById(instanceId ?? "")?.driver ?? discoveryState.sessionProviderIds[sessionId];
@@ -929,14 +940,14 @@
 			// An interrupt can end a turn the row never reported busy for, so
 			// nothing else would end it. A still-busy row ends it on idle.
 			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || getCurrentSlug() !== projectSlug) return;
+			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || currentSession?.projectSlug !== projectSlug) return;
 			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
 			if (count === 0) return;
 			if (taskStopToast) dismissToast(taskStopToast.id);
 			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
 				duration: 6000,
 				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
+					if (sessionState.currentId === sessionId && currentSession?.projectSlug === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
 				} },
 			});
 			taskStopToast = { id, sessionId, projectSlug };
@@ -1142,6 +1153,13 @@
 	}
 </script>
 
+{#snippet settingsStatus()}
+	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-brand whitespace-nowrap">
+		<span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+		{offline && discoveryState.modelsLoaded ? "Reconnecting to daemon" : "Connecting"}
+	</div>
+{/snippet}
+
 <!-- File Menu (above input when "@" is typed) -->
 {#if fileMenuVisible}
 	<div id="file-menu-wrap" class="relative w-full max-w-[760px] mx-auto px-4">
@@ -1220,7 +1238,7 @@
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
-		{#if !sessionState.currentId && sessionViewState.compact}
+		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 
@@ -1260,7 +1278,7 @@
 		{/if}
 
 		{#if currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
-			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug ?? getCurrentSlug() ?? ""} />
+			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 
 		<PendingInputTray
@@ -1357,7 +1375,7 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
-								onfocus={() => requestSessionPreWarm(getCurrentSlug(), sessionState.currentId)}
+								onfocus={() => requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId)}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}
@@ -1396,8 +1414,11 @@
 					</div>
 				{/snippet}
 				{#snippet controls()}
-					{#if composerPreferences.controls === "icons"}
+					{#if composerPreferences.controls === "icons" && settingsPending}
+						{@render settingsStatus()}
+					{:else if composerPreferences.controls === "icons"}
 						<div
+							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
 							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
 							class="flex items-center min-w-0 {sessionViewState.composerTier === 'phone' ? 'gap-1' : 'shrink-0 gap-[2px]'}"
@@ -1441,7 +1462,7 @@
 					{/if}
 				{/snippet}
 				{#snippet send()}
-					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && currentSession && composerDirectory}
+					{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
 						{@const session = currentSession}
 						{#key session.id}
 							<GitIdentity
@@ -1572,14 +1593,17 @@
 				data-testid="composer-words-row"
 				class="flex h-[24px] items-center justify-between gap-[14px] px-[6px] pt-[3px] text-[11.5px] text-text-muted whitespace-nowrap"
 			>
-				<div data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
+				{#if settingsPending}
+					{@render settingsStatus()}
+				{:else}
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
 					<InstanceModelPicker variant="words" />
 					{#if composerDriver !== "opencode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				<div data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
+				<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-0 shrink items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
 						{#if composerDirectory}
@@ -1606,6 +1630,7 @@
 						{/if}
 					{/if}
 				</div>
+				{/if}
 			</div>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
@@ -1616,7 +1641,7 @@
 				{/each}
 			</div>
 		{/if}
-		{#if !sessionState.currentId && !sessionViewState.compact}
+		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
 		{/if}
 	</div>

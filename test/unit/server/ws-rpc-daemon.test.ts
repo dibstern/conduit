@@ -4,7 +4,11 @@ import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
 import { afterEach, expect, vi } from "vitest";
-import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	CreateSession,
+	WsRpcError,
+	WsRpcGroup,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -17,6 +21,39 @@ afterEach(() => {
 });
 
 describe("daemon RPC handlers", () => {
+	it.scoped(
+		"rejects session creation without a project even with a daemon default",
+		() =>
+			Effect.gen(function* () {
+				const handlers = yield* DaemonWsRpcHandlersTag;
+				const resolve = vi.fn(() =>
+					Effect.fail(
+						new WsRpcError({ message: "unexpected relay resolution" }),
+					),
+				);
+				const createSession = yield* WsRpcGroup.accessHandler(
+					"CreateSession",
+				).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve, handlers, "conduit"),
+					),
+				);
+				const malformed = new CreateSession(
+					// @ts-expect-error CreateSession requires an explicit projectSlug.
+					{ originId: "daemon-client" },
+					{ disableValidation: true },
+				);
+				const result = yield* Effect.either(
+					createSession(malformed, Headers.empty),
+				);
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: { message: "projectSlug is required" },
+				});
+				expect(resolve).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(makeDaemonRpcTestLayer())),
+	);
+
 	it.scoped(
 		"serves daemon operations without a project or relay context",
 		() => {
@@ -232,3 +269,5 @@ describe("daemon RPC handlers", () => {
 		},
 	);
 });
+
+import { Headers } from "@effect/platform";

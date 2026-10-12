@@ -50,6 +50,10 @@ import {
 	sessionActivity,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	attachedProjectState,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
+import {
 	clearSessionState,
 	followFork,
 	getFilteredSessions,
@@ -66,6 +70,8 @@ const decodeServerHalf = (): readonly (typeof SessionInfoSchema.Type)[] =>
 
 beforeEach(() => {
 	clearSessionState();
+	attachedProjectState.slug = "p";
+	routerState.search = "";
 });
 
 describe("the server half holds only rows the server sent", () => {
@@ -81,7 +87,7 @@ describe("the server half holds only rows the server sent", () => {
 
 	it("keeps a listed row unchanged while exposing announced parent lineage", () => {
 		applySessionSnapshot(
-			[{ id: "ses_child", title: "Child", status: "idle" }],
+			[{ projectSlug: "p", id: "ses_child", title: "Child", status: "idle" }],
 			"complete",
 		);
 		sessionState.currentId = "ses_child";
@@ -93,6 +99,7 @@ describe("the server half holds only rows the server sent", () => {
 
 		expect(sessionState.sessions.get("ses_child")).toEqual({
 			id: "ses_child",
+			projectSlug: "p",
 			title: "Child",
 			status: "idle",
 		});
@@ -103,11 +110,11 @@ describe("the server half holds only rows the server sent", () => {
 describe("the server half is one representation", () => {
 	it("shows a rename delivered by a new root snapshot", () => {
 		applySessionSnapshot(
-			[{ id: "a", title: "Old", status: "idle" }],
+			[{ projectSlug: "p", id: "a", title: "Old", status: "idle" }],
 			"complete",
 		);
 		applySessionSnapshot(
-			[{ id: "a", title: "New", status: "idle" }],
+			[{ projectSlug: "p", id: "a", title: "New", status: "idle" }],
 			"complete",
 		);
 
@@ -117,11 +124,16 @@ describe("the server half is one representation", () => {
 
 	it("reads search hits through the server half, so a rename follows", () => {
 		applySessionSnapshot(
-			[{ id: "a", title: "Old", status: "idle" }],
+			[{ projectSlug: "p", id: "a", title: "Old", status: "idle" }],
 			"complete",
 		);
-		seedSearchResults([{ id: "a", title: "Old" }]);
-		applySessionUpsert({ id: "a", title: "Renamed", status: "idle" });
+		seedSearchResults([{ id: "a", title: "Old", projectSlug: "p" }]);
+		applySessionUpsert({
+			projectSlug: "p",
+			id: "a",
+			title: "Renamed",
+			status: "idle",
+		});
 
 		expect(getFilteredSessions().map((s) => s.title)).toEqual(["Renamed"]);
 	});
@@ -129,8 +141,8 @@ describe("the server half is one representation", () => {
 	it("drops a removed session out of an active search", () => {
 		applySessionSnapshot(
 			[
-				{ id: "a", title: "A", status: "idle" },
-				{ id: "b", title: "B", status: "idle" },
+				{ projectSlug: "p", id: "a", title: "A", status: "idle" },
+				{ projectSlug: "p", id: "b", title: "B", status: "idle" },
 			],
 			"complete",
 		);
@@ -148,14 +160,27 @@ describe("sidebar order", () => {
 	it("moves a session to the top when the server reports it as newer", () => {
 		applySessionSnapshot(
 			[
-				{ id: "a", title: "A", status: "idle", updatedAt: 1000 },
-				{ id: "b", title: "B", status: "idle", updatedAt: 2000 },
+				{
+					projectSlug: "p",
+					id: "a",
+					title: "A",
+					status: "idle",
+					updatedAt: 1000,
+				},
+				{
+					projectSlug: "p",
+					id: "b",
+					title: "B",
+					status: "idle",
+					updatedAt: 2000,
+				},
 			],
 			"complete",
 		);
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["b", "a"]);
 
 		applySessionUpsert({
+			projectSlug: "p",
 			id: "a",
 			title: "A",
 			status: "idle",
@@ -167,8 +192,20 @@ describe("sidebar order", () => {
 	it("falls back to createdAt when the server sends no updatedAt", () => {
 		applySessionSnapshot(
 			[
-				{ id: "a", title: "A", status: "idle", createdAt: 1000 },
-				{ id: "b", title: "B", status: "idle", createdAt: 3000 },
+				{
+					projectSlug: "p",
+					id: "a",
+					title: "A",
+					status: "idle",
+					createdAt: 1000,
+				},
+				{
+					projectSlug: "p",
+					id: "b",
+					title: "B",
+					status: "idle",
+					createdAt: 3000,
+				},
 			],
 			"complete",
 		);
@@ -178,8 +215,15 @@ describe("sidebar order", () => {
 
 describe("every mutation path leaves the server half wire-valid", () => {
 	const ROWS: SessionInfo[] = [
-		{ id: "root", title: "Root", status: "idle", updatedAt: 3000 },
 		{
+			projectSlug: "p",
+			id: "root",
+			title: "Root",
+			status: "idle",
+			updatedAt: 3000,
+		},
+		{
+			projectSlug: "p",
 			id: "child",
 			title: "Child",
 			status: "busy",
@@ -246,10 +290,15 @@ describe("applying server rows never touches the client half", () => {
 		sessionState.searchQuery = "roo";
 
 		applySessionSnapshot(
-			[{ id: "root", title: "Root", status: "idle" }],
+			[{ projectSlug: "p", id: "root", title: "Root", status: "idle" }],
 			"complete",
 		);
-		applySessionUpsert({ id: "other", title: "Other", status: "idle" });
+		applySessionUpsert({
+			projectSlug: "p",
+			id: "other",
+			title: "Other",
+			status: "idle",
+		});
 		applySessionRemoved("other");
 
 		expect(sessionState.currentId).toBe("root");
@@ -261,7 +310,12 @@ describe("deleting the session being viewed", () => {
 	it("does not let a later event rebuild the chat state deletion threw away", async () => {
 		vi.useFakeTimers();
 		try {
-			applySessionUpsert({ id: "ses_doomed", title: "Doomed", status: "idle" });
+			applySessionUpsert({
+				projectSlug: "p",
+				id: "ses_doomed",
+				title: "Doomed",
+				status: "idle",
+			});
 			sessionState.currentId = "ses_doomed";
 			getOrCreateSessionSlot("ses_doomed");
 			expect(sessionActivity.has("ses_doomed")).toBe(true);

@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
           "title": "New session - 2026-03-27T04:01:34.140Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
           "title": "New session - 2026-03-27T04:01:34.140Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -634,6 +642,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -652,6 +661,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -665,6 +675,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -678,6 +689,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -713,6 +725,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -726,6 +739,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -739,6 +753,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -752,6 +767,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -765,6 +781,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -784,6 +801,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -853,6 +871,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -871,6 +890,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -884,6 +904,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -897,6 +918,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -932,6 +954,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -941,6 +964,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -954,6 +978,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -963,6 +988,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -976,6 +1002,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -985,6 +1012,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -998,6 +1026,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1007,6 +1036,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1020,6 +1050,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "busy",
@@ -1030,6 +1061,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1048,6 +1080,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "busy",
@@ -1058,6 +1091,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1126,6 +1160,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1135,6 +1170,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1153,6 +1189,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1162,6 +1199,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1175,6 +1213,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1184,6 +1223,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1197,6 +1237,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1206,6 +1247,7 @@
               "forkMessageId": "msg_d2d74772d0017teZa3B45AAK1C"
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",

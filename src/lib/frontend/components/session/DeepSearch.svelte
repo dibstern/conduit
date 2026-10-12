@@ -142,7 +142,7 @@
 		close();
 		// Viewing a shelf session needs no unsnooze or
 		// unsettle mutation, so preserve its shelf state when navigating.
-		switchToSession(result.id, result.projectSlug ?? getCurrentSlug() ?? undefined);
+		switchToSession(result.id, result.projectSlug);
 	}
 
 	function handleInputKeydown(event: KeyboardEvent): void {
@@ -189,7 +189,7 @@
 		</div>
 		<div id="deep-search-results" role="listbox" aria-label="Sessions" class="max-h-[55vh] overflow-y-auto">
 			{#each results as result, index (result.id)}
-				{@const slug = result.projectSlug ?? getCurrentSlug() ?? ""}
+				{@const slug = result.projectSlug}
 				{@const name = projectName(slug)}
 				{@const location = shelf(result)}
 				<Button

@@ -24,6 +24,7 @@ type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 function seedSessions(rows: readonly Row[]): void {
 	const sessions: SessionInfo[] = rows.map((row) => ({
 		status: "idle",
+		projectSlug: "conduit",
 		...row,
 	}));
 	applySessionChange({

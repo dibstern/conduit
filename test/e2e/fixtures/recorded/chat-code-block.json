@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
           "title": "New session - 2026-03-27T04:02:33.721Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
           "title": "New session - 2026-03-27T04:02:33.721Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "busy",
@@ -646,6 +654,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "New session - 2026-03-27T04:02:33.721Z",
               "status": "idle",
@@ -664,6 +673,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
               "status": "idle",
@@ -677,6 +687,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
               "status": "idle",
@@ -690,6 +701,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
               "status": "idle",
@@ -703,6 +715,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
               "status": "idle",
@@ -716,6 +729,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ab986ffe1JF6tCd8IXTRgq",
               "title": "JavaScript greet function request title",
               "status": "idle",

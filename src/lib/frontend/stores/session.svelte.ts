@@ -852,7 +852,9 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 	return (
 		serverSessions.get(id) ??
 		familySessions.find((row) => row.id === id) ??
-		rootSessions.find((row) => row.id === id)
+		rootSessions.find((row) => row.id === id) ??
+		sessionState.daemonSessions.find((row) => row.id === id) ??
+		sessionState.searchResults?.find((row) => row.id === id)
 	);
 }
 
@@ -921,15 +923,13 @@ export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
 	const groupKey = getScopeGroupKey(scope);
 	const currentSlug = getCurrentSlug();
-	// Local rows carry no projectSlug: they belong to the project this socket
-	// is attached to.
 	const inScope = (session: SessionInfo) => {
-		const slug = session.projectSlug ?? currentSlug;
+		const slug = session.projectSlug;
 		return (
 			scope === null ||
 			(groupKey === null
 				? slug === scope
-				: slug != null && getProjectGroup(slug)?.key === groupKey)
+				: getProjectGroup(slug)?.key === groupKey)
 		);
 	};
 	if (sessionState.searchResults !== null) {
@@ -942,7 +942,7 @@ export function getFilteredSessions(): SessionInfo[] {
 		return sessionState.searchResults.flatMap((session) => {
 			if (session.parentID || session.sideThread || !inScope(session))
 				return [];
-			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
+			if (session.projectSlug !== searchSlug) {
 				return [withReadMark(session)];
 			}
 			const liveSession = liveRoots.get(session.id);
@@ -957,7 +957,6 @@ export function getFilteredSessions(): SessionInfo[] {
 	// why these no longer have to stand down to avoid flashing in and out.
 	const foreignSessions = sessionState.daemonSessions.filter(
 		(session) =>
-			session.projectSlug != null &&
 			session.projectSlug !== currentSlug &&
 			!session.parentID &&
 			!session.sideThread,

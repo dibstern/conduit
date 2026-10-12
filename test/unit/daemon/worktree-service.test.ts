@@ -462,6 +462,216 @@ process.exit(result.status ?? 1);`,
 		assertUnchanged(before);
 	});
 
+	it.each([
+		"main",
+		"master",
+	])("inspects a merge into local %s while origin is stale, with and without an upstream", async (local) => {
+		git("update-ref", "refs/remotes/origin/main", "HEAD");
+		git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+		git("branch", "published");
+		if (local === "master") git("branch", "master");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		const inspect = Effect.flatMap(WorktreeServiceTag, (service) =>
+			service.inspectRemoval(folder, owned),
+		).pipe(Effect.provide(makeWorktreeLive(configDir)));
+		const unmerged = [
+			"Unpushed commits",
+			"Commits not merged into the default branch",
+		];
+		expect(await Effect.runPromise(inspect)).toEqual(unmerged);
+		git("branch", "--set-upstream-to=published", "owned");
+		expect(await Effect.runPromise(inspect)).toEqual(unmerged);
+		git("checkout", "-q", local);
+		git("merge", "--ff-only", "-q", "owned");
+		expect(git("rev-parse", "origin/main")).toBe(owned.head);
+		expect(await Effect.runPromise(inspect)).toEqual([]);
+		git("branch", "--unset-upstream", "owned");
+		expect(await Effect.runPromise(inspect)).toEqual([]);
+		git("reset", "--hard", owned.head);
+		expect(await Effect.runPromise(inspect)).toEqual(unmerged);
+	});
+
+	it.each([
+		true,
+		false,
+	])("ignores a dangling origin HEAD during removal inspection when a local default exists: %s", async (hasLocal) => {
+		git(
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/missing",
+		);
+		if (!hasLocal) git("branch", "-m", "topic");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		if (hasLocal) git("merge", "--ff-only", "-q", "owned");
+		const reasons = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.inspectRemoval(folder, owned),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(reasons).toEqual(
+			hasLocal ? [] : ["Unpushed commits", "Unknown default branch"],
+		);
+	});
+
+	it.each([
+		["main", false],
+		["main", true],
+		["master", false],
+		["master", true],
+	] as const)("removes a worktree merged only into local %s and deletes its branch when detached is %s", async (local, detached) => {
+		git("update-ref", "refs/remotes/origin/main", "HEAD");
+		git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+		if (local === "master") git("branch", "master");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		const tip = git("rev-parse", "owned");
+		git("checkout", "-q", local);
+		git("merge", "--ff-only", "-q", "owned");
+		if (detached) git("-C", owned.path, "checkout", "-q", "--detach");
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(folder, owned),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(existsSync(owned.path)).toBe(false);
+		expect(git("for-each-ref", "--format=%(refname)", "refs/heads/owned")).toBe(
+			"",
+		);
+		expect(git("rev-parse", local)).toBe(tip);
+		expect(git("rev-parse", "origin/main")).toBe(owned.head);
+	});
+
+	it.each([
+		false,
+		true,
+	])("preserves unmerged commits during removal when detached is %s", async (detached) => {
+		git("update-ref", "refs/remotes/origin/main", "HEAD");
+		git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		const tip = git("rev-parse", "owned");
+		if (detached) git("-C", owned.path, "checkout", "-q", "--detach");
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(folder, owned),
+			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(Either.isLeft(result)).toBe(detached);
+		expect(existsSync(owned.path)).toBe(detached);
+		expect(git("rev-parse", "owned")).toBe(tip);
+	});
+
+	it.each([
+		"dirty",
+		"in-use",
+	])("keeps a locally merged worktree when it is %s", async (protection) => {
+		git("update-ref", "refs/remotes/origin/main", "HEAD");
+		git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		git("merge", "--ff-only", "-q", "owned");
+		if (protection === "dirty")
+			writeFileSync(join(owned.path, "tracked.txt"), "dirty\n");
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(folder, owned, Effect.succeed(protection === "in-use")),
+			).pipe(Effect.either, Effect.provide(makeWorktreeLive(configDir))),
+		);
+		if (Either.isRight(result)) throw new Error("Expected removal to fail");
+		expect(result.left.message).toContain(
+			protection === "dirty" ? "uncommitted changes" : "another session",
+		);
+		expect(existsSync(owned.path)).toBe(true);
+		expect(git("rev-parse", "owned")).toBe(git("rev-parse", "main"));
+	});
+
+	it.each([
+		"main",
+		"master",
+		"trunk",
+	])("preserves a session branch renamed to default branch %s during removal", async (branch) => {
+		git("branch", "-m", "topic");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		git("-C", owned.path, "branch", "-m", branch);
+		const tip = git("rev-parse", branch);
+		git("update-ref", "refs/remotes/origin/trunk", tip);
+		git(
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/trunk",
+		);
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(folder, { ...owned, branchName: branch }),
+			).pipe(Effect.provide(makeWorktreeLive(configDir))),
+		);
+		expect(existsSync(owned.path)).toBe(false);
+		expect(git("rev-parse", branch)).toBe(tip);
+	});
+
+	it("preserves the session branch if local main resets after the merge proof", async () => {
+		git("update-ref", "refs/remotes/origin/main", "HEAD");
+		git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		const tip = git("rev-parse", "owned");
+		git("merge", "--ff-only", "-q", "owned");
+		const resettingGit = gitWrapper(`
+if (args.includes("update-ref") && args.includes("--stdin")) {
+  spawnSync(${JSON.stringify(actualGit)}, ["-C", ${JSON.stringify(repository)}, "update-ref", "refs/heads/main", ${JSON.stringify(owned.head)}]);
+}
+${runRealGit}
+process.exit(result.status ?? 1);
+`);
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(folder, owned),
+			).pipe(
+				Effect.either,
+				Effect.provide(
+					makeWorktreeLive(configDir, { gitExecutable: resettingGit }),
+				),
+			),
+		);
+		if (Either.isRight(result))
+			throw new Error("Expected deletion transaction to fail");
+		expect(result.left.message).toContain("refs/heads/main");
+		expect(existsSync(owned.path)).toBe(false);
+		expect(git("rev-parse", "owned")).toBe(tip);
+		expect(git("rev-parse", "main")).toBe(owned.head);
+	});
+
 	it("uses the explicit local base only for its folder", async () => {
 		const baseHead = git("rev-parse", "HEAD");
 		git("branch", "feature/base");

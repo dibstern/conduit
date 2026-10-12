@@ -89,12 +89,14 @@ export const SelectMode: Story = {
 	beforeEach: () => {
 		const sessions: SessionInfo[] = [
 			{
+				projectSlug: "conduit",
 				id: "select-one",
 				title: "Review build logs",
 				attention: "idle",
 				status: "idle",
 			},
 			{
+				projectSlug: "conduit",
 				id: "select-two",
 				title: "Prepare release",
 				attention: "idle",
@@ -127,13 +129,19 @@ export const SnoozedShelfCollapsed: Story = {
 		sessionState.now = SNOOZE_STORY_NOW;
 		seedSessions([
 			{
+				projectSlug: "conduit",
 				id: "sleeping",
 				title: "Review build logs",
 				attention: "idle",
 				snoozedAt: SNOOZE_STORY_NOW,
 				snoozedUntil: new Date(2030, 9, 8, 9).getTime(),
 			},
-			{ id: "working", title: "Prepare release", attention: "working" },
+			{
+				id: "working",
+				title: "Prepare release",
+				attention: "working",
+				projectSlug: "conduit",
+			},
 		]);
 	},
 	play: async ({ canvasElement }) => {
@@ -155,6 +163,7 @@ export const SnoozedShelfOpen: Story = {
 		sessionState.now = SNOOZE_STORY_NOW;
 		seedSessions([
 			{
+				projectSlug: "conduit",
 				id: "sleeping",
 				title: "Review build logs",
 				attention: "idle",
@@ -162,6 +171,7 @@ export const SnoozedShelfOpen: Story = {
 				snoozedUntil: new Date(2030, 9, 8, 9).getTime(),
 			},
 			{
+				projectSlug: "conduit",
 				id: "untimed",
 				title: "Wait for update",
 				attention: "idle",
@@ -186,12 +196,14 @@ export const PinnedAndSettledShelfCollapsed: Story = {
 		seedSessions([
 			...mockSessionsAllGroups,
 			{
+				projectSlug: "conduit",
 				id: "pinned",
 				title: "Review authentication",
 				attention: "needs-approval",
 				pinnedAt: Date.now() - 300_000,
 			},
 			{
+				projectSlug: "conduit",
 				id: "settled",
 				title: "Fix navigation",
 				attention: "done-unread",
@@ -216,12 +228,14 @@ export const PinnedAndSettledShelfOpen: Story = {
 		seedSessions([
 			...mockSessionsAllGroups,
 			{
+				projectSlug: "conduit",
 				id: "pinned",
 				title: "Review authentication",
 				attention: "needs-approval",
 				pinnedAt: Date.now() - 300_000,
 			},
 			{
+				projectSlug: "conduit",
 				id: "settled",
 				title: "Fix navigation",
 				attention: "done-unread",
@@ -256,6 +270,7 @@ export const FilteredToNeedsYou: Story = {
 		seedSessions([
 			...mockSessionsAllGroups,
 			{
+				projectSlug: "conduit",
 				id: "approval",
 				title: "Approve deployment",
 				attention: "needs-approval",
@@ -275,7 +290,14 @@ export const FilteredToNeedsYou: Story = {
 export const FilterMatchesNothing: Story = {
 	name: "Filter matches nothing",
 	beforeEach: () => {
-		seedSessions([{ id: "idle", title: "Plan release", attention: "idle" }]);
+		seedSessions([
+			{
+				id: "idle",
+				title: "Plan release",
+				attention: "idle",
+				projectSlug: "conduit",
+			},
+		]);
 		routerState.search = "?status=unread";
 	},
 	play: async ({ canvasElement }) => {
@@ -291,7 +313,12 @@ export const GroupedByProject: Story = {
 	name: "Grouped by project",
 	beforeEach: () => {
 		seedSessions([
-			{ id: "local", title: "Build sidebar", attention: "working" },
+			{
+				id: "local",
+				title: "Build sidebar",
+				attention: "working",
+				projectSlug: "conduit",
+			},
 		]);
 		seedDaemonSessions([
 			{
@@ -403,6 +430,7 @@ function seedRepositoryScope(projectOnly: boolean) {
 	];
 	seedSessions([
 		{
+			projectSlug: "conduit",
 			id: "scope-main",
 			title: "Implement repository scope",
 			attention: "working",

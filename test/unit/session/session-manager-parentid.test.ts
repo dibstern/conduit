@@ -25,7 +25,10 @@ describe("toSessionInfoList parentID propagation (ticket 5.3)", () => {
 			}),
 		});
 
-		const mgr = new SessionManager({ client: mockClient });
+		const mgr = new SessionManager({
+			projectSlug: "test-project",
+			client: mockClient,
+		});
 		const sessions = await mgr.listSessions();
 
 		const child = sessions.find((s) => s.id === "ses_child");

@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
           "title": "New session - 2026-03-27T04:03:05.069Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
           "title": "New session - 2026-03-27T04:03:05.069Z",
           "status": "idle",
@@ -494,6 +496,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
               "status": "idle",
@@ -507,6 +510,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
               "status": "idle",
@@ -520,6 +524,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
               "status": "idle",
@@ -533,6 +538,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
               "status": "idle",
@@ -546,6 +552,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
               "status": "busy",
@@ -565,6 +572,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "New session - 2026-03-27T04:03:05.069Z",
               "status": "busy",
@@ -579,6 +587,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "busy",
@@ -593,6 +602,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "busy",
@@ -674,6 +684,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -692,6 +703,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -705,6 +717,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -718,6 +731,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -753,6 +767,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -766,6 +781,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -779,6 +795,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -792,6 +809,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -805,6 +823,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "busy",
@@ -824,6 +843,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "busy",
@@ -899,6 +919,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -917,6 +938,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -930,6 +952,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",
@@ -943,6 +966,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28a3f12ffePM9bfTFkvTa2y6",
               "title": "Task: Remember the word banana",
               "status": "idle",

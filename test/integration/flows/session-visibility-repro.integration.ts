@@ -320,6 +320,7 @@ async function runPaginationDifferential(count: number) {
 		await client2.viewSession(sessionId);
 		const served = await client2.loadMoreHistory(sessionId);
 		const providerHistory = new SessionManager({
+			projectSlug: "test-project",
 			client: paginationHarness.stack.client,
 		});
 		const rest = await providerHistory.loadPreRenderedHistory(sessionId);
@@ -869,6 +870,7 @@ describe("Integration: Session Visibility Repros", () => {
 			await client2.viewSession(sessionId);
 			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
+				projectSlug: "test-project",
 				client: metadataHarness.stack.client,
 			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);
@@ -996,6 +998,7 @@ describe("Integration: Session Visibility Repros", () => {
 			await client2.viewSession(sessionId);
 			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
+				projectSlug: "test-project",
 				client: fileHarness.stack.client,
 			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(dbPath, sessionId);

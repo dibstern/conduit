@@ -149,8 +149,18 @@ describe("shell snapshot omission", () => {
 		applySessionChange({
 			_tag: "snapshot",
 			rows: [
-				{ id: "session-A", title: "A", status: "idle" },
-				{ id: "session-C", title: "C", status: "idle" },
+				{
+					projectSlug: "project-a",
+					id: "session-A",
+					title: "A",
+					status: "idle",
+				},
+				{
+					projectSlug: "project-a",
+					id: "session-C",
+					title: "C",
+					status: "idle",
+				},
 			],
 		});
 
@@ -223,7 +233,14 @@ describe("shell snapshot omission", () => {
 
 		applySessionChange({
 			_tag: "snapshot",
-			rows: [{ id: "session-A", title: "A", status: "idle" }],
+			rows: [
+				{
+					projectSlug: "project-a",
+					id: "session-A",
+					title: "A",
+					status: "idle",
+				},
+			],
 		});
 
 		expect(sessionActivity.has("session-B")).toBe(false);
