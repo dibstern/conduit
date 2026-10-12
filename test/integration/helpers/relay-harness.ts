@@ -13,6 +13,7 @@ import {
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
+import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import { TestWsClient } from "./test-ws-client.js";
 
@@ -42,6 +43,9 @@ export async function createRelayHarness(
 		/** Relay default model ("provider/model"); null leaves the native default in control. */
 		readonly defaultModel?: string | null;
 		readonly claudeSdk?: ProjectRelayConfig["claudeSdk"];
+		readonly titleQuery?: ProjectRelayConfig["titleQuery"];
+		/** A real OpenCode server to use instead of the recording's mock. */
+		readonly opencodeUrl?: string;
 	} = {},
 ): Promise<RelayHarness> {
 	const recording =
@@ -67,7 +71,7 @@ export async function createRelayHarness(
 	const stack = await createRelayStack({
 		port: 0,
 		host: "127.0.0.1",
-		opencodeUrl: mock.url,
+		opencodeUrl: options.opencodeUrl ?? mock.url,
 		projectDir: process.cwd(),
 		slug: "integration-test",
 		sessionTitle: "Integration Test Session",
@@ -75,6 +79,11 @@ export async function createRelayHarness(
 		persistenceDbPath: eventsDbPath,
 		configDir: options.configDir ?? dbDir,
 		...(options.claudeSdk ? { claudeSdk: options.claudeSdk } : {}),
+		// Stubbed session titles: no test makes a live title call.
+		titleQuery:
+			options.titleQuery ??
+			options.claudeSdk?.titleQuery ??
+			fakeClaudeSdk.titleQuery,
 	});
 
 	const relayPort = stack.getPort();

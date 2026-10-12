@@ -5,6 +5,8 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import type { ClaudeTitleQueryFactory } from "../../../src/lib/domain/relay/Services/claude-title-generator.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -12,7 +14,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
-	type ClaudeTitleQueryFactory,
 	makeSessionTitleServiceLive,
 	SessionTitleServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-title-service.js";
@@ -24,6 +25,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
+	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 } from "../../helpers/mock-factories.js";
@@ -91,6 +93,7 @@ const makeTitleServiceLayer = (input: {
 	Layer.provideMerge(
 		makeSessionTitleServiceLive({ queryFactory: input.queryFactory }),
 		Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			Layer.succeed(LoggerTag, makeMockLogger()),
 			Layer.succeed(ConfigTag, makeMockConfig({ projectDir: process.cwd() })),
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
@@ -294,9 +297,9 @@ describe("Integration: Claude Session Titles", () => {
 				expect(messages).toHaveLength(1);
 				expect(queryFactory).not.toHaveBeenCalled();
 
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: SESSION_ID,
-					firstMessage: FIRST_MESSAGE,
+					message: FIRST_MESSAGE,
 				});
 				yield* waitForSessionTitle(SESSION_ID, GENERATED_TITLE);
 				expect(queryFactory).toHaveBeenCalledTimes(1);
@@ -342,9 +345,9 @@ describe("Integration: Claude Session Titles", () => {
 			});
 			yield* Effect.gen(function* () {
 				const service = yield* SessionTitleServiceTag;
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: SESSION_ID,
-					firstMessage: FIRST_MESSAGE,
+					message: FIRST_MESSAGE,
 				});
 				yield* awaitSignal("title query start", gatedTitle.started);
 
@@ -362,9 +365,9 @@ describe("Integration: Claude Session Titles", () => {
 				// post-query apply path and removed its in-flight guard.
 				yield* Effect.gen(function* () {
 					for (let attempt = 0; attempt < 100; attempt++) {
-						yield* service.startForFirstClaudeMessage({
+						yield* service.titleFromMessage({
 							sessionId: SESSION_ID,
-							firstMessage: FIRST_MESSAGE,
+							message: FIRST_MESSAGE,
 						});
 						if (queryFactory.mock.calls.length >= 2) return;
 						yield* sleepMillis(10);

@@ -29,6 +29,7 @@ import {
 	type RelayStack,
 } from "../../../src/lib/relay/relay-stack.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
+import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
 	isOpenCodeRunning,
@@ -90,6 +91,8 @@ export async function createE2EHarness(opts?: {
 			staticDir,
 			configDir: dbDir,
 			persistenceDbPath: path.join(dbDir, "events.db"),
+			// Stubbed session titles: no test makes a live title call.
+			titleQuery: fakeClaudeSdk.titleQuery,
 			log: createSilentLogger(),
 		});
 	const stack = await startStack(0);
@@ -276,7 +279,9 @@ export async function createReplayHarness(
 			staticDir,
 			configDir,
 			persistenceDbPath: eventsDbPath,
-			...(claudeReplayer ? { claudeSdk: claudeReplayer.sdk } : {}),
+			...(claudeReplayer
+				? { claudeSdk: claudeReplayer.sdk }
+				: { titleQuery: fakeClaudeSdk.titleQuery }),
 			log: createSilentLogger(),
 		});
 	let stack = await startStack(0);
