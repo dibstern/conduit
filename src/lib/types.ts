@@ -292,6 +292,8 @@ export interface ProjectRelayConfig {
 	messagePollerInterval?: number;
 	/** SQLite event-store path for Effect-native persistence services. */
 	persistenceDbPath: string;
+	/** Test seam: replaces only the session-title query. Overrides `claudeSdk.titleQuery`. */
+	titleQuery?: import("./domain/relay/Services/claude-title-generator.js").ClaudeTitleQueryFactory;
 	/**
 	 * Test seam: replaces Claude session queries, title generation and forks.
 	 * Directly supplied fakes run Claude sessions in-process.

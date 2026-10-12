@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -15,7 +15,7 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
-	formatClaudeTitleFallback,
+	formatTitleFallback,
 	makeSessionTitleServiceLive,
 	SessionTitleServiceTag,
 	sanitizeGeneratedTitle,
@@ -320,9 +320,9 @@ describe("session title helpers", () => {
 		expect(sanitizeGeneratedTitle("New session")).toBeUndefined();
 	});
 
-	it("formats Claude fallback titles with local date and minute precision", () => {
-		expect(formatClaudeTitleFallback(new Date(2026, 4, 17, 10, 11, 59))).toBe(
-			"Claude Session 2026-05-17 10:11",
+	it("formats fallback titles with local date and minute precision", () => {
+		expect(formatTitleFallback(new Date(2026, 4, 17, 10, 11, 59))).toBe(
+			"Session 2026-05-17 10:11",
 		);
 	});
 });
@@ -347,9 +347,9 @@ describe("SessionTitleService", () => {
 			yield* Effect.gen(function* () {
 				const service = yield* SessionTitleServiceTag;
 				const firstMessage = "Please fix the OAuth callback loop.";
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage,
+					message: firstMessage,
 				});
 				yield* Deferred.await(queryCalled);
 
@@ -364,7 +364,7 @@ describe("SessionTitleService", () => {
 				expect(params.prompt).toContain("Use at most six words.");
 				expect(params.prompt).toContain("Do not include quotes.");
 				expect(params.prompt).toContain(
-					'Do not use "Claude Session", "Untitled", or "New session".',
+					'Do not return a placeholder title such as "Untitled" or "New session".',
 				);
 				expect(params.prompt).toContain(
 					`<message>\n${firstMessage}\n</message>`,
@@ -414,9 +414,9 @@ describe("SessionTitleService", () => {
 			yield* Effect.gen(function* () {
 				yield* seedSessionRow();
 				const service = yield* SessionTitleServiceTag;
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "OAuth keeps redirecting after callback.",
+					message: "OAuth keeps redirecting after callback.",
 				});
 				yield* waitForSessionProjectorToReachLatestRename();
 
@@ -427,45 +427,23 @@ describe("SessionTitleService", () => {
 		}).pipe(Effect.ensuring(removeTempDir(dir)));
 	});
 
-	it.effect("applies the title to a session on a named Claude instance", () => {
-		const { dir, filename } = makeTempDbPath("conduit-title-instance-");
-		writeFileSync(
-			join(dir, "daemon.json"),
-			JSON.stringify({
-				pid: 1234,
-				port: 2633,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: [],
-				instances: [
-					{
-						id: "personal-claude",
-						name: "Personal Claude",
-						port: 0,
-						managed: false,
-						driver: "claude",
-					},
-				],
-			}),
-		);
+	it.effect("applies the title to an OpenCode session", () => {
+		const { dir, filename } = makeTempDbPath("conduit-title-opencode-");
 		return Effect.gen(function* () {
 			const layer = makePersistenceTestLayer({
 				queryFactory: () =>
 					makeQuery([assistantMessage("Fix Header Selector")]),
 				persistenceDbPath: filename,
-				config: makeMockConfig({ projectDir: process.cwd(), configDir: dir }),
 			});
 			yield* Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
 					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES ('session-1', 'personal-claude', 'Untitled', 'idle', 1000, 1000)`;
+					VALUES ('session-1', 'opencode', 'Untitled', 'idle', 1000, 1000)`;
 				const service = yield* SessionTitleServiceTag;
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "The instance header selector is broken.",
+					message: "The instance header selector is broken.",
 				});
 				yield* waitForSessionProjectorToReachLatestRename();
 
@@ -488,9 +466,9 @@ describe("SessionTitleService", () => {
 			yield* Effect.gen(function* () {
 				yield* seedSessionRow();
 				const service = yield* SessionTitleServiceTag;
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "Fix OAuth callback loop.",
+					message: "Fix OAuth callback loop.",
 				});
 				yield* waitForSessionProjectorToReachLatestRename();
 
@@ -517,13 +495,13 @@ describe("SessionTitleService", () => {
 			yield* Effect.gen(function* () {
 				yield* seedSessionRow();
 				const service = yield* SessionTitleServiceTag;
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "Create OAuth callback tests.",
+					message: "Create OAuth callback tests.",
 				});
 				yield* waitForSessionProjectorToReachLatestRename();
 
-				const fallbackTitle = "Claude Session 2026-05-17 10:11";
+				const fallbackTitle = "Session 2026-05-17 10:11";
 				expect(yield* getSessionTitle()).toBe(fallbackTitle);
 				// A background-task failure (fork 3.2): logged, never broadcast.
 				expect(log.warn).toHaveBeenCalledWith(
@@ -555,13 +533,13 @@ describe("SessionTitleService", () => {
 			yield* Effect.gen(function* () {
 				yield* seedSessionRow();
 				const service = yield* SessionTitleServiceTag;
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "Fix OAuth callback loop.",
+					message: "Fix OAuth callback loop.",
 				});
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "Fix OAuth callback loop again.",
+					message: "Fix OAuth callback loop again.",
 				});
 				yield* Deferred.await(queryStarted);
 				expect(queryFactory).toHaveBeenCalledTimes(1);
@@ -601,9 +579,9 @@ describe("SessionTitleService", () => {
 				const context = yield* Layer.buildWithScope(Layer.fresh(layer), scope);
 				const service = Context.get(context, SessionTitleServiceTag);
 
-				yield* service.startForFirstClaudeMessage({
+				yield* service.titleFromMessage({
 					sessionId: "session-1",
-					firstMessage: "Fix OAuth callback loop.",
+					message: "Fix OAuth callback loop.",
 				});
 				yield* Deferred.await(queryStarted);
 
@@ -638,9 +616,9 @@ describe("SessionTitleService", () => {
 					});
 					yield* Effect.gen(function* () {
 						const service = yield* SessionTitleServiceTag;
-						yield* service.startForFirstClaudeMessage({
+						yield* service.titleFromMessage({
 							sessionId: "session-1",
-							firstMessage: "Fix OAuth callback loop.",
+							message: "Fix OAuth callback loop.",
 						});
 
 						const manualRename = yield* Deferred.await(
@@ -695,9 +673,9 @@ describe("SessionTitleService", () => {
 					});
 					yield* Effect.gen(function* () {
 						const service = yield* SessionTitleServiceTag;
-						yield* service.startForFirstClaudeMessage({
+						yield* service.titleFromMessage({
 							sessionId: "session-1",
-							firstMessage: "Fix OAuth callback loop.",
+							message: "Fix OAuth callback loop.",
 						});
 
 						const manualRename = yield* Deferred.await(
@@ -713,7 +691,7 @@ describe("SessionTitleService", () => {
 						).toEqual([
 							{ title: "Manual OAuth Title", source: "relay" },
 							{
-								title: "Claude Session 2026-05-17 10:11",
+								title: "Session 2026-05-17 10:11",
 								source: "auto-title",
 							},
 						]);

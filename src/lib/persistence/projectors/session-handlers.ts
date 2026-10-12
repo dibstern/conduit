@@ -39,6 +39,7 @@
 
 import {
 	AUTO_TITLE_SOURCE,
+	isPlaceholderTitle,
 	placeholderTitleSql,
 } from "../../contracts/session-title.js";
 import {
@@ -314,6 +315,7 @@ export const sessionHandlers: {
 					       AND prior.type = 'session.renamed'
 					       AND prior.sequence < ?
 					       AND COALESCE(json_extract(prior.metadata, '$.source'), '') <> '${AUTO_TITLE_SOURCE}'
+					       AND NOT ${placeholderTitleSql("json_extract(prior.data, '$.title')")}
 					   )
 					   AND ${placeholderTitleSql("title")}`,
 					params: [
@@ -326,9 +328,13 @@ export const sessionHandlers: {
 				},
 			];
 		}
+		// A placeholder (e.g. OpenCode echoing "Untitled") never replaces a real title.
+		const keepRealTitle = isPlaceholderTitle(event.data.title)
+			? ` AND ${placeholderTitleSql("title")}`
+			: "";
 		return [
 			{
-				sql: "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+				sql: `UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?${keepRealTitle}`,
 				params: [event.data.title, event.createdAt, event.data.sessionId],
 			},
 		];

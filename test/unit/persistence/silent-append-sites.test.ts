@@ -349,9 +349,9 @@ it("the auto-title rename advances the version of the session it renames", async
 
 					const titles = yield* SessionTitleServiceTag;
 					const announced = yield* announcedDuring(
-						titles.startForFirstClaudeMessage({
+						titles.titleFromMessage({
 							sessionId: "titled",
-							firstMessage: "OAuth keeps redirecting after callback.",
+							message: "OAuth keeps redirecting after callback.",
 						}),
 					);
 

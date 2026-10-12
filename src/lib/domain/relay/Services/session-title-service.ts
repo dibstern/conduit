@@ -15,10 +15,6 @@ import {
 	type SessionTitleModel,
 } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import {
-	loadDaemonConfig,
-	resolveProviderRoutingDriver,
-} from "../../../daemon/config-persistence.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -61,19 +57,19 @@ export function sanitizeGeneratedTitle(raw: string): string | undefined {
 	return isPlaceholderTitle(title) ? undefined : title;
 }
 
-export function formatClaudeTitleFallback(now = new Date()): string {
+export function formatTitleFallback(now = new Date()): string {
 	const year = now.getFullYear();
 	const month = String(now.getMonth() + 1).padStart(2, "0");
 	const day = String(now.getDate()).padStart(2, "0");
 	const hour = String(now.getHours()).padStart(2, "0");
 	const minute = String(now.getMinutes()).padStart(2, "0");
-	return `Claude Session ${year}-${month}-${day} ${hour}:${minute}`;
+	return `Session ${year}-${month}-${day} ${hour}:${minute}`;
 }
 
 export interface SessionTitleService {
-	readonly startForFirstClaudeMessage: (input: {
+	readonly titleFromMessage: (input: {
 		readonly sessionId: string;
-		readonly firstMessage: string;
+		readonly message: string;
 	}) => Effect.Effect<void>;
 }
 
@@ -87,7 +83,7 @@ interface SessionTitleServiceLiveOptions {
 	readonly now?: () => Date;
 }
 
-function buildTitlePrompt(firstMessage: string): string {
+function buildTitlePrompt(message: string): string {
 	return `Create a concise sidebar title for this coding-assistant session.
 
 Rules:
@@ -95,11 +91,11 @@ Rules:
 - Return only the title.
 - Use at most six words.
 - Do not include quotes.
-- Do not use "Claude Session", "Untitled", or "New session".
+- Do not return a placeholder title such as "Untitled" or "New session".
 
 First message:
 <message>
-${firstMessage}
+${message}
 </message>`;
 }
 
@@ -130,16 +126,8 @@ export const makeSessionTitleServiceLive = (
 			const inFlight = yield* Ref.make(HashSet.empty<string>());
 			const now = options.now ?? (() => new Date());
 			const primaryFolder = config.projectDir;
-			// Named instances (e.g. "personal-claude") store their instance id as the
-			// session provider, so resolve the driver instead of matching the id.
-			const isClaudeSessionProvider = (provider: string) =>
-				provider === "claude-sdk" ||
-				resolveProviderRoutingDriver(
-					loadDaemonConfig(config.configDir),
-					provider,
-				) === "claude";
 
-			const generateTitle = (sessionId: string, firstMessage: string) =>
+			const generateTitle = (sessionId: string, message: string) =>
 				Effect.gen(function* () {
 					const session = yield* readQuery.getSession(sessionId);
 					const workspace =
@@ -164,14 +152,14 @@ export const makeSessionTitleServiceLive = (
 						Match.exhaustive,
 					);
 					const rawTitle = yield* generator({
-						prompt: buildTitlePrompt(firstMessage),
+						prompt: buildTitlePrompt(message),
 						cwd,
 					});
 
 					const title = sanitizeGeneratedTitle(rawTitle);
 					if (!title) {
 						return yield* new SessionTitleGenerationFailure({
-							reason: "Claude returned a default-equivalent title",
+							reason: "Generator returned a placeholder title",
 						});
 					}
 					return title;
@@ -193,7 +181,6 @@ export const makeSessionTitleServiceLive = (
 
 					const current = currentResult.right;
 					if (!current) return false;
-					if (!isClaudeSessionProvider(current.provider)) return false;
 					if (!isPlaceholderTitle(current.title)) return false;
 					const recovered = yield* projectionRunner.isRecovered();
 					if (!recovered) {
@@ -218,22 +205,18 @@ export const makeSessionTitleServiceLive = (
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);
 
-					const rows = yield* sql<{ title: string; provider: string }>`
-						SELECT title, provider FROM sessions WHERE id = ${sessionId}`;
-					const appliedRow = rows[0];
-					return (
-						appliedRow?.title === title &&
-						isClaudeSessionProvider(appliedRow.provider)
-					);
+					const rows = yield* sql<{ title: string }>`
+						SELECT title FROM sessions WHERE id = ${sessionId}`;
+					return rows[0]?.title === title;
 				});
 
 			const runTitleJob = (input: {
 				readonly sessionId: string;
-				readonly firstMessage: string;
+				readonly message: string;
 			}) =>
 				Effect.gen(function* () {
 					const titleResult = yield* Effect.either(
-						generateTitle(input.sessionId, input.firstMessage),
+						generateTitle(input.sessionId, input.message),
 					);
 					if (titleResult._tag === "Right") {
 						yield* applyTitleIfStillDefault(input.sessionId, titleResult.right);
@@ -241,7 +224,7 @@ export const makeSessionTitleServiceLive = (
 					}
 
 					const reason = titleResult.left.reason;
-					const fallbackTitle = formatClaudeTitleFallback(now());
+					const fallbackTitle = formatTitleFallback(now());
 					const applied = yield* applyTitleIfStillDefault(
 						input.sessionId,
 						fallbackTitle,
@@ -256,7 +239,7 @@ export const makeSessionTitleServiceLive = (
 				});
 
 			return {
-				startForFirstClaudeMessage: (input) =>
+				titleFromMessage: (input) =>
 					Effect.gen(function* () {
 						const shouldStart = yield* Ref.modify(inFlight, (sessions) => {
 							if (HashSet.has(sessions, input.sessionId)) {

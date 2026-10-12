@@ -468,6 +468,8 @@ export interface RelayStackConfig {
 	persistenceDbPath: string;
 	/** Test seam forwarded to createProjectRelay. */
 	claudeSdk?: ProjectRelayConfig["claudeSdk"];
+	/** Test seam forwarded to createProjectRelay. */
+	titleQuery?: ProjectRelayConfig["titleQuery"];
 }
 
 export interface RelayStack {
@@ -898,6 +900,7 @@ export async function createRelayStack(
 		}),
 		persistenceDbPath: config.persistenceDbPath,
 		...(config.claudeSdk != null && { claudeSdk: config.claudeSdk }),
+		...(config.titleQuery != null && { titleQuery: config.titleQuery }),
 	});
 	relays.set(config.slug, relay);
 	server.addProject({

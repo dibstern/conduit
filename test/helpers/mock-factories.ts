@@ -745,7 +745,7 @@ export function makeMockSessionTitleService(
 	overrides?: Partial<SessionTitleService>,
 ): SessionTitleService {
 	return {
-		startForFirstClaudeMessage: vi.fn(() => Effect.void),
+		titleFromMessage: vi.fn(() => Effect.void),
 		...overrides,
 	};
 }

@@ -340,8 +340,10 @@ export const createOpenCodeSession = (
 
 		// No retry: create is not idempotent — retrying could produce duplicates.
 		const session = yield* Effect.tryPromise(() =>
+			// "Untitled" keeps OpenCode's own titler, which only renames
+			// "New session - <ISO>" titles, off sessions Conduit titles itself.
 			api.session.create({
-				...(title ? { title } : {}),
+				title: normalizeSessionTitle(title),
 				...(reservedSessionId === undefined ? {} : { id: reservedSessionId }),
 			}),
 		).pipe(
