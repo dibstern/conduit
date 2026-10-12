@@ -25,6 +25,7 @@ import {
 	claudeWorkspaceMismatch,
 	decodeClaudeWorktreeState,
 } from "../../session/claude-worktree-state.js";
+import type { SessionSkillMessage } from "../../session/session-skills.js";
 import {
 	type SessionAttention,
 	type SessionInfo,
@@ -497,6 +498,13 @@ export interface ReadQueryEffect {
 		readonly (SessionProjection & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
 	>;
+	readonly listSessionGitRefreshTargets: (options: {
+		readonly sessionIds: readonly string[];
+		readonly all: boolean;
+	}) => Effect.Effect<
+		readonly Pick<SessionInfo, "id" | "workspace">[],
+		ReadQueryEffectError | SqlError
+	>;
 
 	readonly getSessionLineage: () => Effect.Effect<
 		{
@@ -543,6 +551,9 @@ export interface ReadQueryEffect {
 	readonly getSessionMessagesWithParts: (
 		sessionId: string,
 	) => Effect.Effect<MessageWithParts[], ReadQueryEffectError | SqlError>;
+	readonly getSessionSkillMessages: (
+		sessionId: string,
+	) => Effect.Effect<SessionSkillMessage[], ReadQueryEffectError | SqlError>;
 	readonly getSessionHistoryMetadata: (
 		sessionId: string,
 	) => Effect.Effect<
@@ -584,6 +595,8 @@ export interface ReadQueryEffect {
 		 * the sidebar: one row per top-level session, its family rolled up.
 		 */
 		readonly familyOf?: string;
+		/** Bound a family base to this member's view; ignored for windows. */
+		readonly viewed?: string;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
 		readonly backgroundOf?: (
 			sessionId: string,
@@ -1185,6 +1198,38 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
+	const listSessionGitRefreshTargets: ReadQueryEffect["listSessionGitRefreshTargets"] =
+		({ sessionIds, all }) =>
+			Effect.gen(function* () {
+				const requested = sql`id IN (SELECT value FROM json_each(${JSON.stringify(sessionIds)}))`;
+				const targets = all
+					? sql`(${requested} OR (workspace IS NOT NULL
+						AND (settled_at IS NULL OR json_extract(workspace, '$.origin') = 'conduit')))`
+					: requested;
+				const rows = yield* sql<Pick<SessionRow, "id" | "workspace">>`
+					SELECT id, workspace FROM sessions
+					WHERE ${targets}
+					ORDER BY updated_at DESC, id DESC`;
+				return rows.map((row) => ({
+					id: row.id,
+					...(row.workspace == null
+						? {}
+						: {
+								workspace: Schema.decodeUnknownSync(
+									Schema.parseJson(SessionWorkspaceSchema),
+								)(row.workspace),
+							}),
+				}));
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ReadQueryEffectError({
+							operation: "listSessionGitRefreshTargets",
+							cause,
+						}),
+				),
+			);
+
 	const countPendingApprovalsBySession = (): Effect.Effect<
 		readonly PendingApprovalCountRow[],
 		ReadQueryEffectError | SqlError
@@ -1335,6 +1380,52 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							operation: "getSessionMessagesWithParts",
 							cause: e,
 						}),
+			),
+		);
+
+	const getSessionSkillMessages: ReadQueryEffect["getSessionSkillMessages"] = (
+		sessionId,
+	) =>
+		Effect.gen(function* () {
+			const messages = yield* sql<Omit<SessionSkillMessage, "parts">>`
+				SELECT id, role, created_at, CASE WHEN role = 'user' THEN text END AS text
+				FROM messages
+				WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()}
+				ORDER BY created_at ASC, id ASC`;
+			if (messages.length === 0) return [];
+			const parts = yield* sql<SessionSkillMessage["parts"][number]>`
+				SELECT mp.id, mp.message_id, mp.type, mp.tool_name, mp.input,
+					mp.status, mp.created_at, substr(mp.result, 1, 2000) AS result
+				FROM message_parts mp JOIN messages m ON mp.message_id = m.id
+				WHERE m.session_id = ${sessionId} AND NOT ${pendingRewindHides("m")}
+					AND mp.type = 'tool' AND (
+						mp.tool_name IN ('Skill', 'skill')
+						OR substr(mp.result, 1, 14) = '<skill_content'
+						OR substr(mp.result, 1, 16) = 'Launching skill:'
+						OR substr(mp.result, 1, 17) = '"Launching skill:'
+						OR CASE WHEN json_valid(mp.input) THEN json_extract(mp.input, '$.tool') END = 'Skill'
+					)
+				ORDER BY mp.message_id, mp.sort_order`;
+			const byMessage = new Map<
+				string,
+				SessionSkillMessage["parts"][number][]
+			>();
+			for (const part of parts) {
+				const group = byMessage.get(part.message_id);
+				if (group) group.push(part);
+				else byMessage.set(part.message_id, [part]);
+			}
+			return messages.map((message) => ({
+				...message,
+				parts: byMessage.get(message.id) ?? [],
+			}));
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ReadQueryEffectError({
+						operation: "getSessionSkillMessages",
+						cause,
+					}),
 			),
 		);
 
@@ -1582,6 +1673,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly after?: number;
 		readonly through?: number;
 		readonly familyOf?: string;
+		readonly viewed?: string;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -1709,19 +1801,28 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							}),
 						};
 					}
-					const rows = yield* sql.unsafe<
-						SessionRow & { effective_version: number }
-					>(sessionFamilyWindowQuery, [range.familyOf, floor, ceiling]);
+					const viewed = range.viewed;
+					const bounded =
+						viewed !== undefined &&
+						range.after === undefined &&
+						range.through === undefined;
+					let rows = bounded
+						? []
+						: yield* sql.unsafe<SessionRow & { effective_version: number }>(
+								sessionFamilyWindowQuery,
+								[range.familyOf, floor, ceiling],
+							);
 					// A window no member moved in costs the window query alone. The
 					// roll-ups (busy, unread, pending counts) read only the family: a
 					// member's ancestors and descendants are all in it.
-					if (rows.length === 0) return { rows: [], version };
+					if (!bounded && rows.length === 0) return { rows: [], version };
 					const family = yield* sql.unsafe<{
 						id: string;
 						parent_id: string | null;
 						status: string;
 						unread: number;
 						side_thread: number;
+						version: number;
 					}>(sessionFamilyMembersQuery, [range.familyOf]);
 					const approvals = yield* sql<PendingApprovalCountRow>`
 						SELECT session_id, type, COUNT(*) AS pending_count
@@ -1730,6 +1831,55 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							AND session_id IN (SELECT value FROM json_each(${JSON.stringify(family.map((row) => row.id))}))
 						GROUP BY session_id, type`;
 					const pending = pendingApprovalCountsByType(approvals);
+					if (bounded) {
+						const members = new Map(family.map((row) => [row.id, row]));
+						const selected = new Set<string>();
+						const include = (id: string) => {
+							for (
+								let member = members.get(id);
+								member !== undefined && !selected.has(member.id);
+								member = members.get(member.parent_id ?? "")
+							) {
+								selected.add(member.id);
+							}
+						};
+						// Keep the anchor even if the viewed member was deleted.
+						include(range.familyOf);
+						include(viewed);
+						for (const member of family) {
+							if (
+								(member.side_thread === 1 && member.parent_id === viewed) ||
+								member.status === "busy" ||
+								member.status === "retry" ||
+								pending.questions.has(member.id) ||
+								pending.permissions.has(member.id)
+							) {
+								include(member.id);
+							}
+							// A live task can open an idle child in the task drawer.
+							for (const task of range.backgroundOf?.(member.id)?.tasks ?? []) {
+								if (task.childSessionId) include(task.childSessionId);
+							}
+						}
+						// Preserve subtree MAX(version), stopping once an ancestor
+						// already carries this version or a newer one.
+						const effectiveVersions = new Map<string, number>();
+						for (const member of family) {
+							let id: string | null = member.id;
+							while (id !== null) {
+								const previous = effectiveVersions.get(id);
+								if (previous !== undefined && previous >= member.version) break;
+								effectiveVersions.set(id, member.version);
+								id = members.get(id)?.parent_id ?? null;
+							}
+						}
+						rows = (yield* sql<SessionRow>`SELECT * FROM sessions
+								WHERE id IN (SELECT value FROM json_each(${JSON.stringify([...selected])}))
+								ORDER BY updated_at DESC, id DESC`).map((row) => ({
+							...row,
+							effective_version: effectiveVersions.get(row.id) ?? row.version,
+						}));
+					}
 					const items = sessionRowsToSessionInfoList(rows, {
 						sideThreadIds: new Set(
 							family.flatMap((row) => (row.side_thread === 1 ? [row.id] : [])),
@@ -2166,6 +2316,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getAllSessionStatusesWithProviders,
 		listSessions,
 		listSessionInfos,
+		listSessionGitRefreshTargets,
 		getSessionLineage,
 		getSessionsForReconciliation,
 		getStrandedChildren,
@@ -2174,6 +2325,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listPendingClaudeQuestionTools,
 		getPendingClaudeQuestionTool,
 		getSessionMessagesWithParts,
+		getSessionSkillMessages,
 		getSessionHistoryMetadata,
 		readSessionTranscriptPage,
 		readSessionList,

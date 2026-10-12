@@ -124,7 +124,7 @@ const seedTwoFamilies = commit([
 
 describe("subscribeSessionFamily", () => {
 	it.scoped(
-		"serves the whole family of any member, and nothing outside it",
+		"serves the viewed member and its ancestors, and nothing outside its family",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
@@ -193,7 +193,7 @@ describe("subscribeSessionFamily", () => {
 			Effect.gen(function* () {
 				yield* recoverProjections;
 				yield* seedTwoFamilies;
-				const q = yield* openFamily("root");
+				const q = yield* openFamily("grandchild");
 				yield* takeN(q, 2);
 				yield* commit([deleted("other-child")]);
 				yield* commit([deleted("grandchild")]);
@@ -223,7 +223,7 @@ describe("subscribeSessionFamily", () => {
 			}).pipe(Effect.provide(makeFamilyTestLayer())),
 	);
 
-	it.scoped("a resume is a fresh snapshot of the family", () =>
+	it.scoped("a resume is a fresh snapshot for the viewed member", () =>
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* seedTwoFamilies;
@@ -233,7 +233,6 @@ describe("subscribeSessionFamily", () => {
 			if (snapshot?._tag !== "snapshot") return;
 			expect(snapshot.rows.map((row) => row.id).sort()).toEqual([
 				"child",
-				"grandchild",
 				"root",
 			]);
 			expect(synchronized).toEqual({ _tag: "synchronized" });

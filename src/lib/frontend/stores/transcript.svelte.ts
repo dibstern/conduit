@@ -649,6 +649,10 @@ function transcriptView(): {
 		project: ProjectRef,
 		sessionId: string,
 	) => Promise<boolean> | undefined;
+	requested: (
+		project: ProjectRef,
+		sessionId: string,
+	) => Promise<void> | undefined;
 } {
 	let viewed: {
 		project: ProjectRef;
@@ -656,6 +660,8 @@ function transcriptView(): {
 		/** Settles true once the first load completes, false if left first. */
 		loaded: Promise<boolean>;
 		settle: (loaded: boolean) => void;
+		requested: Promise<void>;
+		issue: () => void;
 	} | null = null;
 	let generation = 0;
 	let fiber: RuntimeFiber<void, unknown> | null = null;
@@ -689,11 +695,16 @@ function transcriptView(): {
 		view: (project, sessionId) => {
 			if (viewed?.project === project && viewed.sessionId === sessionId) return;
 			viewed?.settle(false);
+			viewed?.issue();
 			let settle: (loaded: boolean) => void = () => {};
 			const loaded = new Promise<boolean>((resolve) => {
 				settle = resolve;
 			});
-			viewed = { project, sessionId, loaded, settle };
+			let issue: () => void = () => {};
+			const requested = new Promise<void>((resolve) => {
+				issue = resolve;
+			});
+			viewed = { project, sessionId, loaded, settle, requested, issue };
 			const currentGeneration = ++generation;
 			const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
 			// Only a session this page has not loaded yet opens from a saved page.
@@ -746,6 +757,7 @@ function transcriptView(): {
 											sessionId,
 											ledger,
 											saved: first,
+											onSubscribe: issue,
 										});
 									}),
 									(status) => {
@@ -850,6 +862,10 @@ function transcriptView(): {
 			viewed?.project === project && viewed.sessionId === sessionId
 				? viewed.loaded
 				: undefined,
+		requested: (project, sessionId) =>
+			viewed?.project === project && viewed.sessionId === sessionId
+				? viewed.requested
+				: undefined,
 	};
 }
 
@@ -858,6 +874,8 @@ const openView = transcriptView();
 export const viewTranscript = openView.view;
 /** The open session's view while it is open. */
 export const sessionViewLoaded = openView.loaded;
+/** Settles when the detail request starts, or the pending view is left. */
+export const sessionDetailRequested = openView.requested;
 /** The desktop task drawer's feed for the selected task's Child Session. */
 export const viewTaskTranscript = transcriptView().view;
 

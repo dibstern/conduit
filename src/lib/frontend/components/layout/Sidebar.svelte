@@ -5,7 +5,6 @@
 	import Button from "../ui/Button.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import SessionGroupMenu from "../session/SessionGroupMenu.svelte";
-	import ProjectDialog from "../project/ProjectDialog.svelte";
 	import {
 		uiState,
 		collapseSidebar,
@@ -265,13 +264,15 @@
 </div>
 
 {#if addProjectOpen}
-	<ProjectDialog
-		open
-		projects={projectState.projects}
-		onclose={() => { addProjectOpen = false; }}
-		onsaved={handleProjectAdded}
-		returnFocus={() => document.querySelector('[data-testid="session-scope-chip"]')}
-	/>
+	{#await import("../project/ProjectDialog.svelte") then { default: ProjectDialog }}
+		<ProjectDialog
+			open
+			projects={projectState.projects}
+			onclose={() => { addProjectOpen = false; }}
+			onsaved={handleProjectAdded}
+			returnFocus={() => document.querySelector('[data-testid="session-scope-chip"]')}
+		/>
+	{/await}
 {/if}
 
 <style>

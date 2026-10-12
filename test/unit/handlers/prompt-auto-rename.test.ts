@@ -84,6 +84,8 @@ const makeReadQuery = (
 	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
+	listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+	getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),

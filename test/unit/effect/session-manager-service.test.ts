@@ -153,6 +153,8 @@ function makeReadQueryEffect(
 		getSessionsForReconciliation: () => Effect.succeed([]),
 		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
+		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 		listSessionInfos: vi.fn((options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots
