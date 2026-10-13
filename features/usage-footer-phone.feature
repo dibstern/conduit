@@ -91,6 +91,15 @@ Scenario: the usage sheet rises under the finger pulling the dock
   Then the usage sheet follows my finger up the phone usage dock
   And the usage sheet is open
 
+Scenario: the usage sheet folds back into the dock in the dock's colour
+  Given the usage footer has several accounts with an unknown Claude reading
+  When I tap back to the session list
+  And I drag the phone usage dock up by 120 pixels
+  Then the usage sheet is open
+  And the usage sheet has the phone usage dock's background
+  And the usage sheet dragged down past the phone usage dock stops on it
+  And the usage sheet is closed
+
 Scenario Outline: one account uses inline windows without the sheet
   Given the usage footer has one Claude account in the <state> state
   When I tap back to the session list
