@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
-import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { Effect, Either, Schema } from "effect";
 import { BUILD_ID } from "../../build-id.js";
+import type { Account } from "../../contracts/account.js";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
@@ -20,9 +20,9 @@ import {
 	ClaudeConfigDirSchema,
 	ClaudeFolderSourceSchema,
 	type ClaudeLaunchConfig,
+	claudeLoginFromEnv,
 	configuredClaudeConfigDir,
 	makeClaudeSdkEnv,
-	sdkDefaultClaudeConfigDir,
 } from "./claude-sdk-env.js";
 import type {
 	ClaudeSessionCommand,
@@ -150,9 +150,10 @@ export type ClaudeRunnerMessage =
 			readonly preserveRole?: boolean;
 	  };
 
-/** Only absent legacy fields inherit the default; an explicit blank is invalid. */
+/** Missing legacy folders preserve the carried account, then use the default. Explicit blanks are invalid. */
 export function normalizeClaudeLaunchInput<
 	T extends {
+		readonly account?: Account | undefined;
 		readonly configDir?: ClaudeConfigDir | string | undefined;
 		readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 	},
@@ -169,7 +170,12 @@ export function normalizeClaudeLaunchInput<
 	const { configDir: folder, folderSource: source, ...payload } = input;
 	const launch =
 		folder === undefined
-			? { ...defaultFolder(), folderSource: "legacyDefault" }
+			? {
+					...(input.account?.driver === "claude"
+						? { configDir: input.account.folder }
+						: defaultFolder()),
+					folderSource: "legacyDefault",
+				}
 			: {
 					folderSource: source ?? "account",
 					configDir:
@@ -233,18 +239,11 @@ function normalizeClaudeSnapshotInput(
 ) {
 	return normalizeClaudeLaunchInput(snapshot.input, () => {
 		// A retained runner has already launched: preserve its recorded login.
-		const env = snapshot.options.env;
-		const configDir = env?.["CLAUDE_CONFIG_DIR"];
-		if (configDir !== undefined)
-			return {
-				configDir: configuredClaudeConfigDir(configDir),
-				folderSource: "legacyDefault",
-			};
-		const home = env?.["HOME"];
-		return home === undefined
+		const configDir = claudeLoginFromEnv(snapshot.options.env ?? {});
+		return configDir === undefined
 			? defaultFolder()
 			: {
-					configDir: sdkDefaultClaudeConfigDir(join(home, ".claude")),
+					configDir,
 					folderSource: "legacyDefault",
 				};
 	});

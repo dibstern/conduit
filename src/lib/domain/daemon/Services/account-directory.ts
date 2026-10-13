@@ -1,4 +1,13 @@
 import { Context, Effect, Either, Layer, Ref } from "effect";
+import {
+	type AccountChange,
+	type AccountsState,
+	accountsStateFromInstances,
+	apply,
+	defaultFor,
+	list,
+	resolve,
+} from "../../../account-directory.js";
 import type {
 	Account,
 	AccountListItem,
@@ -7,16 +16,7 @@ import type {
 import { AccountChangeRejected } from "../../../contracts/account.js";
 import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import type { KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
-import {
-	type AccountChange,
-	type AccountsState,
-	accountsStateFromInstances,
-	apply,
-	defaultFor,
-	list,
-	loadAccountsState,
-	resolve,
-} from "../../../daemon/account-directory.js";
+import { loadAccountsState } from "../../../daemon/config-persistence.js";
 import type { ClaudeConfigDir } from "../../../provider/claude/claude-sdk-env.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
 

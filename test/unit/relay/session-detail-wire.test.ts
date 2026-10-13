@@ -5,12 +5,12 @@ import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { describe, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Queue, Schema, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	SessionDetailEnvelopeSchema,
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	AccountDirectory,

@@ -10,12 +10,12 @@ import {
 	TestClock,
 } from "effect";
 import { expect, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {

@@ -22,6 +22,11 @@ import {
 	Schedule,
 	Scope,
 } from "effect";
+import {
+	type AccountChange,
+	type AccountsState,
+	accountsStateFromInstances,
+} from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
 	type Account,
@@ -32,11 +37,6 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
-import {
-	type AccountChange,
-	type AccountsState,
-	accountsStateFromInstances,
-} from "../../../daemon/account-directory.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
 	availableOpenCodePort,

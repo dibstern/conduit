@@ -16,8 +16,8 @@ import {
 	Runtime,
 	Stream,
 } from "effect";
+import { accountsStateFromConfig } from "../../../account-directory.js";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
-import { accountsStateFromConfig } from "../../../daemon/account-directory.js";
 import {
 	type DaemonConfig,
 	defaultDaemonConfig,

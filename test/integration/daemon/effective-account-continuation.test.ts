@@ -17,8 +17,8 @@ import { join } from "node:path";
 import { it } from "@effect/vitest";
 import { Effect, Either, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
-import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
 import {
 	AccountDirectory,
 	AccountDirectoryStateLive,

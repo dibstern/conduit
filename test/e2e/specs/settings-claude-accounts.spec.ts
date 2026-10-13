@@ -2,14 +2,14 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { Either } from "effect";
-import type { InstanceListResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type AccountChange,
 	accountsStateFromInstances,
 	apply,
 	list,
 	resolve as resolveAccount,
-} from "../../../src/lib/daemon/account-directory.js";
+} from "../../../src/lib/account-directory.js";
+import type { InstanceListResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { dualDriverProviders } from "../fixtures/mockup-state.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";

@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql";
 import { Effect, Schema } from "effect";
-import { accountRefFromSelection } from "../../contracts/account.js";
+import { accountRefFromSelection } from "../../account-directory.js";
 import {
 	AccountUnroutable,
 	type ContinuationError,

@@ -287,7 +287,7 @@ export async function probeClaudeCapabilities(
 					? "builtin"
 					: skillNames.has(command.name)
 						? "plugin-skill"
-						: "claude-sdk",
+						: "sdk",
 		}));
 		const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
 			id: agent.name,

@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import { appendFileSync, chmodSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
-import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	createSdkMcpServer,
@@ -47,7 +45,10 @@ import type {
 	ClaudeRunnerSettingsSnapshot,
 	ClaudeRunnerUpgradeState,
 } from "../lib/provider/claude/claude-runner-upgrade.js";
-import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
+import {
+	applyClaudeSdkProcessLogin,
+	makeClaudeSdkEnv,
+} from "../lib/provider/claude/claude-sdk-env.js";
 import { loadClaudeSdkTestModule } from "../lib/provider/claude/claude-sdk-module.js";
 import { buildClaudeFlagSettings } from "../lib/provider/claude/claude-sdk-settings.js";
 import type {
@@ -799,22 +800,10 @@ const main = Effect.gen(function* () {
 								if (!fileSettingsPreparation)
 									fileSettingsPreparation = (async () => {
 										try {
-											// The public resolver has no env parameter. Preserve the
-											// runner-local env workaround; the daemon's env is never read.
-											if (input.configDir._tag === "SdkDefault") {
-												delete process.env["CLAUDE_CONFIG_DIR"];
-												if (
-													resolve(input.configDir.path, "..") !==
-													resolve(homedir())
-												)
-													throw new Error(
-														"Claude settings HOME cannot match the SDK resolver; retaining the old runner",
-													);
-											} else
-												process.env["CLAUDE_CONFIG_DIR"] = resolve(
-													options.cwd ?? process.cwd(),
-													input.configDir.path,
-												);
+											applyClaudeSdkProcessLogin(
+												input.configDir,
+												options.cwd ?? process.cwd(),
+											);
 											if (frozenSnapshot)
 												replayedSettings = await replayClaudeRunnerFileSettings(
 													frozenSnapshot.fileSettings,

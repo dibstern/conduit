@@ -12,11 +12,11 @@ import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Stream } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Account } from "../../../../src/lib/contracts/account.js";
 import {
 	accountsStateFromConfig,
 	accountsStateFromInstances,
-} from "../../../../src/lib/daemon/account-directory.js";
+} from "../../../../src/lib/account-directory.js";
+import type { Account } from "../../../../src/lib/contracts/account.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import {
 	AccountDirectory,

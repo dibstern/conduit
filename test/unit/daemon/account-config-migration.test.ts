@@ -18,18 +18,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Either, Option, Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { accountRefFromSelection } from "../../../src/lib/contracts/account.js";
 import {
+	accountRefFromSelection,
 	accountsStateFromConfig,
 	defaultFor,
 	list,
-	loadAccountsState,
 	resolve,
-} from "../../../src/lib/daemon/account-directory.js";
+} from "../../../src/lib/account-directory.js";
 import {
 	CURRENT_CONFIG_VERSION,
 	DaemonConfigSchema,
 	defaultDaemonConfig,
+	loadAccountsState,
 	loadDaemonConfigStartupResult,
 	migrateDaemonConfig,
 	saveDaemonConfig,

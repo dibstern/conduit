@@ -190,8 +190,11 @@ describe("Claude session process runner", () => {
 					type: "tool",
 					state: expect.objectContaining({
 						status: "completed",
-						output:
-							decision === "allow" ? "harness-approved" : "harness-denied",
+						output: {
+							_tag: "whole",
+							text:
+								decision === "allow" ? "harness-approved" : "harness-denied",
+						},
 					}),
 				}),
 			]),
@@ -275,6 +278,64 @@ describe("Claude session process runner", () => {
 			timeout: 5000,
 		});
 	}, 60_000);
+
+	it("keeps prior replies out of the next turn when detail frames lag", async () => {
+		const harness = await ProcessHarness.start();
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Delayed detail frames");
+		const first = "before-detail-lag";
+		const second = "after-detail-lag";
+		expect((await browser.send(sessionId, first)).chunks.join("")).toBe(
+			responseChunks(first).join(""),
+		);
+		await settled(harness, sessionId, 1);
+		const previous = new Set(
+			(await browser.history(sessionId))
+				.filter((message) => message.role === "assistant")
+				.map((message) => message.id),
+		);
+		// Shell completion and history can arrive before these detail frames.
+		const isDelayed = (frame: (typeof browser.frames)[number]) =>
+			frame.message["type"] === "transcript_message" &&
+			previous.has(String(frame.message["id"]));
+		browser.frames.splice(
+			0,
+			browser.frames.length,
+			...browser.frames.filter((frame) => !isDelayed(frame)),
+		);
+		const record = browser.frames.push.bind(browser.frames);
+		const withheld = vi
+			.spyOn(browser.frames, "push")
+			.mockImplementation((...frames) =>
+				record(...frames.filter((frame) => !isDelayed(frame))),
+			);
+		try {
+			expect((await browser.send(sessionId, second)).chunks.join("")).toBe(
+				responseChunks(second).join(""),
+			);
+			await settled(harness, sessionId, 2);
+			expect(
+				(await browser.history(sessionId))
+					.filter((message) => message.role === "assistant")
+					.map((message) =>
+						(message.parts ?? []).map((part) => part.text ?? "").join(""),
+					),
+			).toEqual([
+				responseChunks(first).join(""),
+				responseChunks(second).join(""),
+			]);
+			await vi.waitFor(() =>
+				expect(
+					harness.marks
+						.filter((mark) => mark.kind === "enqueue")
+						.map((mark) => mark.prompt),
+				).toEqual([first, second]),
+			);
+		} finally {
+			withheld.mockRestore();
+		}
+	});
 
 	it("preserves history in a hidden handoff on an agent change in the default runner", async () => {
 		const harness = await ProcessHarness.start();

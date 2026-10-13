@@ -282,7 +282,7 @@ export type CommandSource =
 	| "user-skill"
 	| "project-skill"
 	| "plugin-skill"
-	| "claude-sdk";
+	| "sdk";
 
 export interface CommandInfo {
 	readonly name: string;

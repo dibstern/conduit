@@ -11,10 +11,10 @@ import {
 	Option,
 	Ref,
 } from "effect";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import type { AccountId } from "../../../contracts/provider-instance.js";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../daemon/account-directory.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
 	SessionDetail,

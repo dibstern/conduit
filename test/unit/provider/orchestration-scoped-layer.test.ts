@@ -1,6 +1,6 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,

@@ -32,13 +32,13 @@ import {
 	it,
 	vi,
 } from "vitest";
+import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	GetInstances,
 	RemoveInstance,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
 import {
 	type DaemonConfig,
 	defaultDaemonConfig,

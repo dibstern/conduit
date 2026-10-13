@@ -10,14 +10,19 @@ import { isDeepStrictEqual } from "node:util";
 
 import { Data, Effect, Either, Schema } from "effect";
 import {
+	type AccountsState,
+	accountsStateFromConfig,
+	migrateLegacyClaudeAccount,
+	normalizeAccountConfig,
+	resolve as resolveAccount,
+} from "../account-directory.js";
+import {
 	AccountUnroutable,
 	UsageLimitsSettingSchema,
 } from "../contracts/limit-recovery.js";
 import { ManagedOpenCodeProcessIdentitySchema } from "../contracts/managed-opencode.js";
 import { SessionModeSchema } from "../contracts/project-file.js";
-
 import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
-
 import {
 	AccountIdSchema,
 	KnownProviderDriverKindSchema,
@@ -27,6 +32,7 @@ import {
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import {
+	type ClaudeConfigDir,
 	type ClaudeLaunchConfig,
 	captureClaudeLaunchLogin,
 } from "../provider/claude/claude-sdk-env.js";
@@ -36,11 +42,6 @@ import {
 } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
-import {
-	accountsStateFromConfig,
-	normalizeAccountConfig,
-	resolve as resolveAccount,
-} from "./account-directory.js";
 import {
 	addRecent,
 	deserializeRecent,
@@ -215,51 +216,10 @@ export const DaemonConfigSchema = Schema.transform(
 	Schema.typeSchema(CurrentDaemonConfigSchema),
 	{
 		strict: true,
-		decode: ({ claudeConfigDir, ...config }): DaemonConfig => {
-			if (config.configVersion !== undefined)
-				return normalizeDaemonConfig(config);
-			const instances = config.instances ?? [];
-			const builtIn = instances.find(({ id }) => id === "claude");
-			if (
-				builtIn === undefined &&
-				!config.deletedAccounts?.some(({ id }) => id === "claude")
-			) {
-				return normalizeDaemonConfig({
-					...config,
-					instances: [
-						...instances,
-						{
-							id: "claude",
-							name: "Claude",
-							driver: "claude",
-							port: 0,
-							managed: false,
-							...(claudeConfigDir === undefined
-								? {}
-								: { configDir: claudeConfigDir }),
-						},
-					],
-					accountDefaults: { claude: AccountIdSchema.make("claude") },
-				});
-			}
-			if (builtIn !== undefined && (builtIn.driver ?? "claude") === "claude") {
-				const folder = builtIn.configDir ?? claudeConfigDir;
-				return normalizeDaemonConfig({
-					...config,
-					instances: instances.map((instance) =>
-						instance === builtIn
-							? {
-									...instance,
-									driver: "claude",
-									...(folder === undefined ? {} : { configDir: folder }),
-								}
-							: instance,
-					),
-					accountDefaults: { claude: AccountIdSchema.make("claude") },
-				});
-			}
-			return normalizeDaemonConfig(config);
-		},
+		decode: ({ claudeConfigDir, ...config }): DaemonConfig =>
+			normalizeDaemonConfig(
+				migrateLegacyClaudeAccount(config, claudeConfigDir),
+			),
 		encode: (config) => config,
 	},
 ).annotations({ identifier: "DaemonConfig" });
@@ -547,6 +507,21 @@ export function loadDaemonConfigResult(
 		loadDaemonConfigStartupResult(configDir),
 		({ config }) => config,
 	);
+}
+
+/** Daemonless relays use this once; only absence permits install defaults. */
+export function loadAccountsState(
+	configDir: string,
+	launchLogin: ClaudeConfigDir,
+): Either.Either<AccountsState, DaemonConfigLoadError> {
+	const loaded = loadDaemonConfigResult(configDir);
+	if (Either.isLeft(loaded))
+		return loaded.left._tag === "NotFound"
+			? Either.right(
+					accountsStateFromConfig(defaultDaemonConfig(), launchLogin),
+				)
+			: Either.left(loaded.left);
+	return Either.right(accountsStateFromConfig(loaded.right, launchLogin));
 }
 
 /** Atomic write: write to a unique tmp file then rename to daemon.json. */

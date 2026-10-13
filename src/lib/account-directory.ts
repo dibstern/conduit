@@ -6,9 +6,9 @@ import {
 	AccountChangeRejected,
 	type AccountListItem,
 	type AccountRef,
-	LEGACY_ACCOUNT_DRIVERS,
-} from "../contracts/account.js";
-import { AccountUnroutable } from "../contracts/limit-recovery.js";
+} from "./contracts/account.js";
+import type { ClaudeConfigDir } from "./contracts/claude-config-dir.js";
+import { AccountUnroutable } from "./contracts/limit-recovery.js";
 import {
 	type AccountId,
 	AccountIdSchema,
@@ -16,20 +16,51 @@ import {
 	type KnownProviderDriverKind,
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
-} from "../contracts/provider-instance.js";
-import {
-	type ClaudeConfigDir,
-	configuredClaudeConfigDir,
-} from "../provider/claude/claude-sdk-env.js";
-import {
-	type DaemonConfig,
-	type DaemonConfigLoadError,
-	defaultDaemonConfig,
-	loadDaemonConfigResult,
-} from "./config-persistence.js";
+} from "./contracts/provider-instance.js";
+import type { DaemonConfig } from "./daemon/config-persistence.js";
 
 export { MANAGED_OPENCODE_ACCOUNT_ID };
-export type { AccountChange } from "../contracts/account.js";
+export type { AccountChange } from "./contracts/account.js";
+
+const LEGACY_ACCOUNT_DRIVERS: Readonly<
+	Record<string, KnownProviderDriverKind | undefined>
+> = {
+	claude: "claude",
+	"claude-sdk": "claude",
+	opencode: "opencode",
+};
+
+/** Classify wire selections without looking up the current default pointer. */
+export function accountRefFromSelection(selection: {
+	readonly instanceId?: string | undefined;
+	readonly providerId?: string | undefined;
+	readonly provider?: string | undefined;
+	readonly model?: { readonly providerID: string } | string | undefined;
+}): AccountRef {
+	if (selection.instanceId !== undefined)
+		return { _tag: "Id", id: selection.instanceId };
+	const providerId = selection.providerId ?? selection.provider;
+	if (providerId !== undefined) {
+		const driver = Object.hasOwn(LEGACY_ACCOUNT_DRIVERS, providerId)
+			? LEGACY_ACCOUNT_DRIVERS[providerId]
+			: undefined;
+		return driver === undefined
+			? { _tag: "Id", id: providerId }
+			: { _tag: "DriverDefault", driver };
+	}
+	const provider =
+		typeof selection.model === "object"
+			? selection.model.providerID
+			: undefined;
+	const driver =
+		provider !== undefined && Object.hasOwn(LEGACY_ACCOUNT_DRIVERS, provider)
+			? LEGACY_ACCOUNT_DRIVERS[provider]
+			: undefined;
+	return {
+		_tag: "DriverDefault",
+		driver: provider === undefined ? "claude" : (driver ?? "opencode"),
+	};
+}
 
 export interface AccountsState {
 	readonly launchLogin: ClaudeConfigDir;
@@ -89,7 +120,7 @@ export function accountsStateFromInstances(
 			folder:
 				configuredFolder === undefined
 					? launchLogin
-					: configuredClaudeConfigDir(configuredFolder),
+					: { _tag: "Configured", path: configuredFolder },
 			...(configuredFolder === undefined ? {} : { configuredFolder }),
 			...(instance.env === undefined ? {} : { env: instance.env }),
 			usageEligible:
@@ -317,6 +348,54 @@ function accountInstancesFromConfig(config: DaemonConfig) {
 	];
 }
 
+/** Preserve the pre-pointer account once, including its retired server-wide folder. */
+export function migrateLegacyClaudeAccount(
+	config: DaemonConfig,
+	claudeConfigDir?: string,
+): DaemonConfig {
+	if (config.configVersion !== undefined) return config;
+	const instances = config.instances ?? [];
+	const builtIn = instances.find(({ id }) => id === "claude");
+	if (
+		builtIn === undefined &&
+		!config.deletedAccounts?.some(({ id }) => id === "claude")
+	) {
+		return {
+			...config,
+			instances: [
+				...instances,
+				{
+					id: "claude",
+					name: "Claude",
+					driver: "claude",
+					port: 0,
+					managed: false,
+					...(claudeConfigDir === undefined
+						? {}
+						: { configDir: claudeConfigDir }),
+				},
+			],
+			accountDefaults: { claude: AccountIdSchema.make("claude") },
+		};
+	}
+	if (builtIn === undefined || (builtIn.driver ?? "claude") !== "claude")
+		return config;
+	const folder = builtIn.configDir ?? claudeConfigDir;
+	return {
+		...config,
+		instances: instances.map((instance) =>
+			instance === builtIn
+				? {
+						...instance,
+						driver: "claude",
+						...(folder === undefined ? {} : { configDir: folder }),
+					}
+				: instance,
+		),
+		accountDefaults: { claude: AccountIdSchema.make("claude") },
+	};
+}
+
 /** Decode and save use the same pointer rules as runtime account changes. */
 export function normalizeAccountConfig(config: DaemonConfig): DaemonConfig {
 	const claude = materializeClaudeDefault(
@@ -401,19 +480,4 @@ export function resolve(
 		});
 	}
 	return Either.left(new AccountUnroutable({ ref }));
-}
-
-/** Daemonless relays use this once; only absence permits install defaults. */
-export function loadAccountsState(
-	configDir: string,
-	launchLogin: ClaudeConfigDir,
-): Either.Either<AccountsState, DaemonConfigLoadError> {
-	const loaded = loadDaemonConfigResult(configDir);
-	if (Either.isLeft(loaded))
-		return loaded.left._tag === "NotFound"
-			? Either.right(
-					accountsStateFromConfig(defaultDaemonConfig(), launchLogin),
-				)
-			: Either.left(loaded.left);
-	return Either.right(accountsStateFromConfig(loaded.right, launchLogin));
 }

@@ -24,7 +24,11 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import type { ClaudeConfigDir, ClaudeLaunchConfig } from "./claude-sdk-env.js";
+import {
+	type ClaudeConfigDir,
+	type ClaudeLaunchConfig,
+	sameClaudeLogin,
+} from "./claude-sdk-env.js";
 import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 import {
 	type ClaudeSessionForkSdk,
@@ -239,15 +243,18 @@ function planTurn(input: {
 					resumeSessionId,
 				}
 			: undefined;
-	// Changing folders can make a same-account receipt unresumable. Keep the
-	// ordinary catch-up/fallback path available without changing the launch login.
+	// A receipt from another or unknown folder may be unresumable on this login.
+	// Catch up so a rejected native resume can fall back to a fresh handoff.
+	const root = options.workspaceRoot ?? process.cwd();
 	const catchingUp =
 		!!resuming &&
 		!!nativeThread &&
 		(input.hasAccountSwitch ||
 			nativeThread.configDir === undefined ||
-			nativeThread.configDir._tag !== base.configDir._tag ||
-			nativeThread.configDir.path !== base.configDir.path);
+			!sameClaudeLogin(
+				{ configDir: nativeThread.configDir, root },
+				{ configDir: base.configDir, root },
+			));
 	if (resuming && !catchingUp) return resuming;
 	if (input.messages === undefined)
 		return {

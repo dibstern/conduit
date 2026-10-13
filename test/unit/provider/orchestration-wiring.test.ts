@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,

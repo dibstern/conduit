@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
-import { accountsStateFromConfig } from "../../../../src/lib/daemon/account-directory.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import {
 	AccountDirectory,

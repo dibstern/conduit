@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import { ClaudeConfigDirSchema } from "./claude-config-dir.js";
-import type { KnownProviderDriverKind } from "./provider-instance.js";
 
 export const AccountIdSchema = Schema.String.pipe(Schema.brand("AccountId"));
 export type AccountId = typeof AccountIdSchema.Type;
@@ -142,46 +141,6 @@ export const AccountRefSchema = Schema.Union(
 	}),
 );
 export type AccountRef = typeof AccountRefSchema.Type;
-
-export const LEGACY_ACCOUNT_DRIVERS: Readonly<
-	Record<string, KnownProviderDriverKind | undefined>
-> = {
-	claude: "claude",
-	"claude-sdk": "claude",
-	opencode: "opencode",
-};
-
-export function accountRefFromSelection(selection: {
-	readonly instanceId?: string | undefined;
-	readonly providerId?: string | undefined;
-	readonly provider?: string | undefined;
-	readonly model?: { readonly providerID: string } | string | undefined;
-}): AccountRef {
-	if (selection.instanceId !== undefined)
-		return { _tag: "Id", id: selection.instanceId };
-	const providerId = selection.providerId ?? selection.provider;
-	if (providerId !== undefined) {
-		const driver = Object.hasOwn(LEGACY_ACCOUNT_DRIVERS, providerId)
-			? LEGACY_ACCOUNT_DRIVERS[providerId]
-			: undefined;
-		return driver === undefined
-			? { _tag: "Id", id: providerId }
-			: { _tag: "DriverDefault", driver };
-	}
-	const provider =
-		typeof selection.model === "object"
-			? selection.model.providerID
-			: undefined;
-	return {
-		_tag: "DriverDefault",
-		driver:
-			provider === undefined ||
-			provider === "claude" ||
-			provider === "claude-sdk"
-				? "claude"
-				: "opencode",
-	};
-}
 
 export type AccountChange =
 	| {

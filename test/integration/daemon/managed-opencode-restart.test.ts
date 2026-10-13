@@ -448,35 +448,28 @@ describe("managed OpenCode survives server replacement", () => {
 		});
 	});
 
-	it("drops managed credentials and stops ownership when converting to Claude", async () => {
+	it("rejects converting to Claude and keeps the managed process and its credentials", async () => {
 		harness = await startManaged();
 		const before = await health();
 		const password = recorded().env?.["OPENCODE_SERVER_PASSWORD"];
 		expect(password).toBeTruthy();
 		const browser = await harness.connect();
-		await browser.updateInstance("managed-test", {
-			driver: "claude",
-			env: { KEEP_ENV: "retained" },
-		});
-		await harness.terminate();
-		await harness.restart();
-		const replacement = await harness.connect();
-		const instances = await replacement.instances();
-		expect(JSON.stringify(instances)).not.toContain(password);
-		expect(JSON.stringify(instances)).not.toContain("OPENCODE_SERVER_PASSWORD");
-		expect(recorded().driver).toBe("claude");
-		expect(recorded().env).toEqual({ KEEP_ENV: "retained" });
-		expect(recorded().processIdentity).toBeUndefined();
-		expect(
-			readFileSync(join(harness.root, "config", "daemon.json"), "utf8"),
-		).not.toContain(password);
-		expect(alive(before.pid)).toBe(false);
-		expect(alive(before.childPid)).toBe(false);
-		expect(alive(before.groupPid)).toBe(false);
+		await expect(
+			browser.updateInstance("managed-test", {
+				driver: "claude",
+				env: { KEEP_ENV: "retained" },
+			}),
+		).rejects.toThrow("An account's type can't be changed");
+		expect(recorded().driver).toBe("opencode");
+		expect(recorded().env?.["OPENCODE_SERVER_PASSWORD"]).toBe(password);
+		expect(recorded().processIdentity).toBeDefined();
+		expect(JSON.stringify(await browser.instances())).not.toContain(password);
+		expect((await health()).pid).toBe(before.pid);
+		expect(alive(before.groupPid)).toBe(true);
 		results.push({
-			scenario: "driver-conversion-credentials",
-			credentialsRemoved: true,
-			groupExited: true,
+			scenario: "driver-conversion-rejected",
+			credentialsKept: true,
+			groupAlive: true,
 		});
 	});
 

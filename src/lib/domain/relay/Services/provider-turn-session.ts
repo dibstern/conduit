@@ -1,8 +1,6 @@
 import { Effect } from "effect";
-import {
-	type Account,
-	accountRefFromSelection,
-} from "../../../contracts/account.js";
+import { accountRefFromSelection } from "../../../account-directory.js";
+import type { Account } from "../../../contracts/account.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";

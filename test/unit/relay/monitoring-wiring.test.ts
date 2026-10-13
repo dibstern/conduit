@@ -14,8 +14,8 @@ import {
 	Scope,
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
-import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,

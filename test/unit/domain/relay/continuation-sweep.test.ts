@@ -36,8 +36,8 @@ import {
 	TestClock,
 } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
 import type { UsageReading } from "../../../../src/lib/contracts/limit-recovery.js";
-import { accountsStateFromConfig } from "../../../../src/lib/daemon/account-directory.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import {
 	AccountDirectory,

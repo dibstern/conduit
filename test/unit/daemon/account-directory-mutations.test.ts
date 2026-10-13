@@ -15,7 +15,7 @@ import {
 	defaultFor,
 	list,
 	resolve,
-} from "../../../src/lib/daemon/account-directory.js";
+} from "../../../src/lib/account-directory.js";
 import {
 	configuredClaudeConfigDir,
 	sdkDefaultClaudeConfigDir,

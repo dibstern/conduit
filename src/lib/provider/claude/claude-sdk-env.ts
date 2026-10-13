@@ -3,6 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { Schema } from "effect";
 import type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
 import { ClaudeConfigDirSchema as ClaudeConfigDirWireSchema } from "../../contracts/claude-config-dir.js";
+import { ClaudeBoundaryError } from "../event-sink-errors.js";
 
 export type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
 
@@ -54,15 +55,27 @@ export const sameClaudeLogin = (
 	a.configDir._tag === b.configDir._tag &&
 	resolve(a.root, a.configDir.path) === resolve(b.root, b.configDir.path);
 
-/** Capture once at a composition root, before daemon startup edits its env. */
+/** Read a recorded login, leaving absent launch metadata to the caller. */
+export function claudeLoginFromEnv(
+	env: Readonly<Record<string, string | undefined>>,
+): ClaudeConfigDir | undefined {
+	const path = env["CLAUDE_CONFIG_DIR"];
+	if (path !== undefined) return configuredClaudeConfigDir(path);
+	const home = env["HOME"];
+	return home === undefined
+		? undefined
+		: sdkDefaultClaudeConfigDir(join(home, ".claude"));
+}
+
+/** Capture once at a composition root. */
 export function captureClaudeLaunchLogin(
 	baseEnv: Readonly<Record<string, string | undefined>>,
 	override?: string,
 ): ClaudeConfigDir {
-	const path = override ?? baseEnv["CLAUDE_CONFIG_DIR"];
-	return path === undefined
-		? sdkDefaultClaudeConfigDir(join(baseEnv["HOME"] ?? homedir(), ".claude"))
-		: configuredClaudeConfigDir(path);
+	return override === undefined
+		? (claudeLoginFromEnv(baseEnv) ??
+				sdkDefaultClaudeConfigDir(join(homedir(), ".claude")))
+		: configuredClaudeConfigDir(override);
 }
 
 export const ClaudeFolderSourceSchema = Schema.Literal(
@@ -114,4 +127,24 @@ export function makeClaudeTerminalEnv(opts: {
 		delete env["CLAUDE_CONFIG_DIR"];
 	} else env["CLAUDE_CONFIG_DIR"] = configDir.path;
 	return env;
+}
+
+/** The SDK settings resolver has no env option; call only inside its account's worker. */
+export function applyClaudeSdkProcessLogin(
+	configDir: ClaudeConfigDir,
+	cwd: string,
+): void {
+	const env = makeClaudeTerminalEnv({
+		configDir: { ...configDir, path: resolve(cwd, configDir.path) },
+	});
+	const path = env["CLAUDE_CONFIG_DIR"];
+	if (path === undefined) {
+		if (env["HOME"] !== resolve(homedir()))
+			throw new ClaudeBoundaryError({
+				operation: "resolveSettings",
+				cause:
+					"Claude settings HOME cannot match the SDK resolver; retaining the old runner",
+			});
+		delete process.env["CLAUDE_CONFIG_DIR"];
+	} else process.env["CLAUDE_CONFIG_DIR"] = path;
 }

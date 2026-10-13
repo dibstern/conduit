@@ -1,5 +1,6 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
 import { Effect, ParseResult, Schema } from "effect";
+import { accountRefFromSelection } from "../account-directory.js";
 import type { FolderIssue } from "../project-folders.js";
 import {
 	ApprovalSchema,
@@ -25,7 +26,7 @@ import {
 export { SessionInfoSchema, SessionStatusSchema };
 export type { SessionInfo };
 
-import { AccountRefSchema, accountRefFromSelection } from "./account.js";
+import { AccountRefSchema } from "./account.js";
 import {
 	ClaudeSettingsOverridesSchema,
 	ClaudeSettingsResolveError,

@@ -36,7 +36,7 @@ const capabilities: ProviderCapabilities = {
 		{ name: "compact", source: "builtin" },
 		{ name: "project-command", source: "project-command" },
 		{ name: "user-command", source: "user-command" },
-		{ name: "sdk", source: "claude-sdk" },
+		{ name: "sdk", source: "sdk" },
 		{ name: "my-plugin:my-skill", source: "plugin-skill" },
 		{ name: "anthropic-skills:pdf", source: "plugin-skill" },
 	],

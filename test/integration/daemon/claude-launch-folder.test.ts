@@ -1,5 +1,6 @@
 // Failure modes: login kind is lost on the wire, invalid paths inherit the
-// default, recovery duplicates a turn, or an old runner reads a tagged object.
+// default, recovery loses a carried account's folder or duplicates a turn,
+// or an old runner reads a tagged object.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";

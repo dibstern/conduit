@@ -231,11 +231,11 @@ describe("ClaudeProviderInstance.discoverEffect()", () => {
 				models: [],
 				agents: [],
 				commands: [
-					{ name: "init", description: "SDK init", source: "claude-sdk" },
+					{ name: "init", description: "SDK init", source: "sdk" },
 					{
 						name: "new-command",
 						description: "from SDK",
-						source: "claude-sdk",
+						source: "sdk",
 					},
 				],
 			}));

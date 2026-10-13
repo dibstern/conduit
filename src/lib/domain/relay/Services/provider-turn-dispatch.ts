@@ -12,11 +12,8 @@ import {
 	type Runtime,
 	Schema,
 } from "effect";
-import {
-	type Account,
-	AccountSchema,
-	accountRefFromSelection,
-} from "../../../contracts/account.js";
+import { accountRefFromSelection } from "../../../account-directory.js";
+import { type Account, AccountSchema } from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";

@@ -17,10 +17,10 @@ import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Either, Layer, Queue, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { AccountChangeRejected } from "../../../src/lib/contracts/account.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { accountsStateFromInstances } from "../../../src/lib/daemon/account-directory.js";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	ConfigPersistenceLive,

@@ -17,12 +17,12 @@ import {
 	Stream,
 } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
 } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
-import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import {
 	AccountDirectory,

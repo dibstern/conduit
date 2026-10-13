@@ -2,18 +2,18 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { expect, type Page } from "@playwright/test";
 import { Either, Schema } from "effect";
-import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
-import {
-	AccountIdSchema,
-	KnownProviderDriverKindSchema,
-} from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type AccountChange,
 	type AccountsState,
 	accountsStateFromInstances,
 	apply,
 	list,
-} from "../../../src/lib/daemon/account-directory.js";
+} from "../../../src/lib/account-directory.js";
+import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
+import {
+	AccountIdSchema,
+	KnownProviderDriverKindSchema,
+} from "../../../src/lib/contracts/provider-instance.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";

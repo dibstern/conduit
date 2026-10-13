@@ -1,9 +1,6 @@
 import { Cause, Effect, Either, Ref } from "effect";
-import {
-	type Account,
-	type AccountRef,
-	accountRefFromSelection,
-} from "../contracts/account.js";
+import { accountRefFromSelection } from "../account-directory.js";
+import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {

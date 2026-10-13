@@ -196,7 +196,7 @@ describe("probeClaudeCapabilities", () => {
 				name: "init",
 				description: "Init Claude",
 				args: "[path]",
-				source: "claude-sdk",
+				source: "sdk",
 			},
 		]);
 	});
@@ -228,7 +228,7 @@ describe("probeClaudeCapabilities", () => {
 				args: "[path]",
 				source: "plugin-skill",
 			},
-			{ name: "my-plugin:my-command", source: "claude-sdk" },
+			{ name: "my-plugin:my-command", source: "sdk" },
 			{ name: "compact", source: "builtin" },
 		]);
 	});
@@ -252,8 +252,8 @@ describe("probeClaudeCapabilities", () => {
 			}),
 		});
 		expect(result.commands).toEqual([
-			{ name: "my-plugin:my-skill", source: "claude-sdk" },
-			{ name: "my-plugin:my-command", source: "claude-sdk" },
+			{ name: "my-plugin:my-skill", source: "sdk" },
+			{ name: "my-plugin:my-command", source: "sdk" },
 		]);
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.stringContaining("stream closed early"),

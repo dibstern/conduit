@@ -2325,7 +2325,13 @@ export class ProcessBrowser {
 	}
 
 	async closePty(ptyId: string): Promise<void> {
+		const cursor = this.frames.length;
 		await this.run(this.rpc.ClosePty({ projectSlug: this.projectSlug, ptyId }));
+		// The RPC reply can precede the coalesced PTY subscription event.
+		await this.waitFor((message) => {
+			const envelope = ptyEnvelope(message);
+			return envelope?._tag === "remove" && envelope.id === ptyId;
+		}, cursor);
 	}
 
 	async view(sessionId: string): Promise<void> {
@@ -2359,8 +2365,13 @@ export class ProcessBrowser {
 	): Promise<{ chunks: string[]; done: Record<string, unknown> }> {
 		await this.followSession(sessionId);
 		await this.followFamily(sessionId);
-		const cursor = this.frames.length;
-		const knownMessages = new Map<string, Set<string>>();
+		// Shell completion can precede detail frames, so read prior IDs from history.
+		const knownMessages = new Map<string, Set<string>>([
+			[
+				sessionId,
+				new Set((await this.history(sessionId)).map((message) => message.id)),
+			],
+		]);
 		for (const { message } of this.frames) {
 			if (message["type"] !== "transcript_message") continue;
 			const owner = String(message["sessionId"]);
@@ -2368,6 +2379,7 @@ export class ProcessBrowser {
 			ids.add(String(message["id"]));
 			knownMessages.set(owner, ids);
 		}
+		const cursor = this.frames.length;
 		const result = await this.run(
 			this.rpc.input.submit({
 				projectSlug: this.projectSlug,
