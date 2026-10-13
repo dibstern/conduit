@@ -106,6 +106,8 @@ describe("Bound project provenance", () => {
 			"0053_store_identity",
 			"0054_events_unstamped_index",
 			"0055_events_session_type_index",
+			"0056_drop_activities",
+			"0057_session_pick_backfill",
 		]);
 	});
 

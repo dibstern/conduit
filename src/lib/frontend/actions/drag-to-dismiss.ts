@@ -4,11 +4,29 @@ type DragToDismissOptions = {
 	ondismiss: () => void;
 	/** 0 at rest, 1 fully dragged off; `settling` is true while the sheet animates on its own. */
 	onprogress?: (progress: number, settling: boolean) => void;
+	/** How far down the sheet travels to be put away: off screen unless it collapses into something. */
+	dismissOffset?: () => number;
 };
 
-const DISMISS_FRACTION = 0.25;
-const FLICK_PX_PER_MS = 0.5;
+/** A sheet released past this fraction of its height, or flicked faster, completes the move. */
+export const DISMISS_FRACTION = 0.25;
+export const FLICK_PX_PER_MS = 0.5;
 const SETTLE_MS = 220;
+
+export const settleMs = () =>
+	matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : SETTLE_MS;
+
+/** Offsets a sheet `offset` px below its resting place, gliding there when `settling`. */
+export function placeSheet(
+	node: HTMLElement,
+	offset: number,
+	settling: boolean,
+) {
+	node.style.transition = settling
+		? `transform ${settleMs()}ms cubic-bezier(0.32, 0.72, 0, 1)`
+		: "none";
+	node.style.transform = offset > 0 ? `translateY(${offset}px)` : "";
+}
 
 /**
  * Lets a bottom sheet be pulled down and dismissed by a finger. A downward pull
@@ -30,15 +48,11 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 	let velocity = 0;
 	let dismissTimer: ReturnType<typeof setTimeout> | undefined;
 
-	const settleMs = () =>
-		matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : SETTLE_MS;
+	const dismissOffset = () => options.dismissOffset?.() ?? node.offsetHeight;
 
 	function place(offset: number, settling: boolean) {
-		node.style.transition = settling
-			? `transform ${settleMs()}ms cubic-bezier(0.32, 0.72, 0, 1)`
-			: "none";
-		node.style.transform = offset > 0 ? `translateY(${offset}px)` : "";
-		options.onprogress?.(Math.min(offset / node.offsetHeight, 1), settling);
+		placeSheet(node, offset, settling);
+		options.onprogress?.(Math.min(offset / dismissOffset(), 1), settling);
 	}
 
 	function onStart(event: TouchEvent) {
@@ -72,7 +86,7 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		if (elapsed > 0) velocity = (touch.clientY - lastY) / elapsed;
 		lastY = touch.clientY;
 		lastTime = event.timeStamp;
-		place(Math.max(offset, 0), false);
+		place(Math.min(Math.max(offset, 0), dismissOffset()), false);
 	}
 
 	function onEnd() {
@@ -80,11 +94,9 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		tracking = dragging = false;
 		if (!wasDragging) return;
 		const offset = lastY - startY;
-		if (
-			offset > node.offsetHeight * DISMISS_FRACTION ||
-			velocity > FLICK_PX_PER_MS
-		) {
-			place(node.offsetHeight, true);
+		const away = dismissOffset();
+		if (offset > away * DISMISS_FRACTION || velocity > FLICK_PX_PER_MS) {
+			place(away, true);
 			dismissTimer = setTimeout(() => options.ondismiss(), settleMs());
 		} else {
 			place(0, true);

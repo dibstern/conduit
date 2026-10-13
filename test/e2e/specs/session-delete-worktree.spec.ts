@@ -1,6 +1,7 @@
 /*
  * Prompt failure cases, written before the UI implementation:
- * - Clean worktrees default to Remove; each unfinished-work reason defaults to Keep.
+ * - With onDelete on, ordinary confirmation leaves removal to background cleanup.
+ * - With onDelete off or unreadable, clean worktrees default to Remove and unfinished work to Keep.
  * - Explicit Keep/Remove reaches DeleteSession, including bulk and foreign rows.
  * - In-use checkouts say they are kept and cannot be selected for removal.
  * - Existing/non-worktree sessions retain the ordinary confirmation.
@@ -9,6 +10,7 @@
  */
 import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
@@ -40,6 +42,8 @@ async function setup(
 	inspection: Inspection,
 	options: {
 		failInspection?: boolean;
+		onDelete?: boolean;
+		failCleanupSetting?: boolean;
 		warnings?: string[];
 		bulk?: boolean;
 		foreign?: boolean;
@@ -84,6 +88,16 @@ async function setup(
 	const rpc = await mockWsRpc(page, {
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetWorktreeCleanupSetting: () => {
+				if (options.failCleanupSetting)
+					throw new WsRpcError({ message: "Could not read cleanup setting" });
+				return {
+					worktreeCleanup: {
+						...DEFAULT_WORKTREE_CLEANUP,
+						onDelete: options.onDelete ?? false,
+					},
+				};
+			},
 			ListDaemonSessions: () => ({
 				sessions: options.foreign ? sessions : [],
 				availability: [],
@@ -219,6 +233,56 @@ for (const mode of [
 ]) {
 	test.describe(mode.name, () => {
 		test.use({ viewport: mode.viewport, hasTouch: mode.mobile });
+
+		test("onDelete uses ordinary confirmation and leaves removal to background cleanup", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+				onDelete: true,
+			});
+			const prompt = await openDelete(page, mode.mobile);
+			await expect(prompt).toContainText(
+				"history will be permanently removed.",
+			);
+			await expect(prompt.getByRole("radio")).toHaveCount(0);
+			await expect(prompt).not.toContainText(worktree);
+			await page.screenshot({
+				path: test.info().outputPath("automatic-cleanup-prompt.png"),
+				animations: "disabled",
+			});
+			await page.getByTestId("confirm-modal-action").click();
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "DeleteSession")
+						.map(({ payload }) => payload["removeWorktrees"]),
+				)
+				.toEqual([false]);
+		});
+
+		test("an unreadable cleanup setting keeps the worktree choice and inspection default", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await setup(page, harness.relayBaseUrl, clean, {
+				failCleanupSetting: true,
+			});
+			const prompt = await openDelete(page, mode.mobile);
+			await expect(
+				prompt.getByRole("radio", { name: "Remove worktrees", exact: true }),
+			).toBeChecked();
+			await page.getByTestId("confirm-modal-action").click();
+			await expect
+				.poll(() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "DeleteSession")
+						.map(({ payload }) => payload["removeWorktrees"]),
+				)
+				.toEqual([true]);
+		});
 
 		test("clean worktrees default to Remove and send the chosen flag", async ({
 			page,

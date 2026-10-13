@@ -45,7 +45,7 @@
 	};
 
 	const props: ToggleProps | ControlProps = $props();
-	const padding = $derived(props.class ?? "px-3 py-2 min-h-10");
+	const padding = $derived(props.class ?? "px-[12px] py-[8px] min-h-[40px]");
 </script>
 
 {#snippet text()}
@@ -62,7 +62,7 @@
 		aria-checked={props.checked}
 		aria-label={props.ariaLabel ?? `Toggle ${props.label.toLowerCase()}`}
 		data-testid={props.testId}
-		class="flex items-center justify-between gap-3 w-full text-left select-none touch-manipulation cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {padding}"
+		class="flex items-center justify-between gap-[12px] w-full text-left select-none touch-manipulation cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {padding}"
 		disabled={props.disabled}
 		onclick={props.onchange}
 	>
@@ -76,7 +76,7 @@
 		</span>
 	</button>
 {:else}
-	<div data-testid={props.testId} class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 {padding}">
+	<div data-testid={props.testId} class="flex flex-wrap items-center justify-between gap-x-[12px] gap-y-1.5 {padding}">
 		{#if props.labelFor}
 			<label for={props.labelFor} class="min-w-0 flex-[1_1_12rem]">{@render text()}</label>
 		{:else}

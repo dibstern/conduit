@@ -10,6 +10,7 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	applyGetAgentsResponse,
+	choosePermissionMode,
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -551,26 +552,20 @@ describe("switchToSession", () => {
 		clearSessionChatState("child-subagent");
 	});
 
-	it("applies the returned draft and flushes a pending permission mode", async () => {
+	it("applies the returned draft without sending a session permission switch", async () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		const sendMode = vi
 			.spyOn(sessionRpc, "switchPermissionModeRpc")
 			.mockResolvedValue({ projectSlug: "project-a", mode: "acceptEdits" });
 		try {
-			discoveryState.pendingPermissionMode = "acceptEdits";
+			choosePermissionMode("acceptEdits");
 			switchToSession("draft-session", "project-a", () =>
 				Promise.resolve({ ok: true, draft: "saved text" }),
 			);
 			await Promise.resolve();
 			expect(inputSyncState.text).toBe("saved text");
-			expect(discoveryState.pendingPermissionMode).toBeNull();
-			expect(sendMode).toHaveBeenCalledWith(
-				expect.objectContaining({
-					sessionId: "draft-session",
-					projectSlug: "project-a",
-					mode: "acceptEdits",
-				}),
-			);
+			expect(sessionState.currentId).toBe("draft-session");
+			expect(sendMode).not.toHaveBeenCalled();
 		} finally {
 			sendMode.mockRestore();
 			vi.unstubAllGlobals();

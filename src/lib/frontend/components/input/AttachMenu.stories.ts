@@ -1,7 +1,33 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, within } from "storybook/test";
-import { handleModelInfo } from "../../stores/discovery.svelte.js";
+import {
+	applyGetModelsResponse,
+	chooseModel,
+	clearDiscoveryState,
+	handleModelList,
+	selectInstance,
+} from "../../stores/discovery.svelte.js";
+import { sessionState } from "../../stores/session.svelte.js";
 import AttachMenu from "./AttachMenu.svelte";
+
+function seedModel(provider: "claude" | "opencode"): void {
+	const providers = [
+		{
+			id: provider,
+			name: provider,
+			configured: true,
+			models: [{ id: "story-model", name: "Story model", provider }],
+		},
+	];
+	handleModelList({ providers });
+	selectInstance(provider);
+	applyGetModelsResponse({
+		projectSlug: "story",
+		instanceId: provider,
+		providers,
+	});
+	chooseModel({ modelId: "story-model", providerId: provider });
+}
 
 const meta = {
 	title: "Input/AttachMenu",
@@ -9,7 +35,14 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
 	beforeEach: () => {
-		handleModelInfo({ model: "", provider: "opencode" });
+		const previousSession = sessionState.currentId;
+		clearDiscoveryState();
+		sessionState.currentId = null;
+		seedModel("opencode");
+		return () => {
+			clearDiscoveryState();
+			sessionState.currentId = previousSession;
+		};
 	},
 	args: {
 		open: false,
@@ -33,7 +66,7 @@ export const Claude: Story = {
 	tags: ["viewport-capture"],
 	args: { open: true },
 	beforeEach: () => {
-		handleModelInfo({ model: "", provider: "claude" });
+		seedModel("claude");
 	},
 	play: async () => {
 		const entry = within(document.body).getByTestId("attach-set-goal");

@@ -48,6 +48,7 @@ import {
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { resumeStream } from "../../../src/lib/frontend/transport/resume.js";
+import { decodeSessionDetail } from "../../../src/lib/frontend/transport/session-detail-wire.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -241,6 +242,7 @@ const subscribeMessages = (
 	options: Parameters<typeof subscribeSessionDetail>[0],
 ) =>
 	subscribeSessionDetail(options).pipe(
+		decodeSessionDetail,
 		Stream.filter(
 			(envelope) =>
 				envelope._tag !== "upsert" || envelope.item._tag !== "rewind",
@@ -259,10 +261,7 @@ const subscribeMessages = (
 // The opening envelopes prove the advance subscription is already acquired — the
 // orchestrator acquires it before reading the base — so a commit landing after
 // that pull is guaranteed delivered, no sleeps.
-const openDetail = (options: {
-	readonly sessionId: string;
-	readonly resumeFromSequence?: number;
-}) =>
+const openDetail = (options: Parameters<typeof subscribeSessionDetail>[0]) =>
 	Effect.gen(function* () {
 		const q = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
 		const fiber = yield* Stream.runForEach(subscribeMessages(options), (env) =>
@@ -575,6 +574,74 @@ describe("subscribeSessionDetail", () => {
 				expect(message.id).toBe("m1");
 				expect(textOf(message)).toBe("Hello world");
 				expect(yield* Queue.size(q)).toBe(0);
+			}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	// Over-limit resumes must choose a snapshot before reading bodies; exactly
+	// the limit must still catch up. Saved pages have the smaller ten-message cap.
+	it.scoped.each([
+		{ saved: false, messages: 50, snapshot: false },
+		{ saved: false, messages: 51, snapshot: true },
+		{ saved: true, messages: 10, snapshot: false },
+		{ saved: true, messages: 11, snapshot: true },
+	])(
+		"resume with saved=$saved and $messages changes uses snapshot=$snapshot",
+		(scenario) =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated(SID)]);
+				const [base] = yield* subscribeSessionDetail({ sessionId: SID }).pipe(
+					Stream.take(2),
+					Stream.runCollect,
+					Effect.map(Chunk.toReadonlyArray),
+				);
+				if (base?._tag !== "snapshot") throw new Error("expected snapshot");
+				yield* commit(
+					Array.from({ length: scenario.messages }, (_, index) =>
+						messageCreated(SID, `m${index}`, "assistant"),
+					),
+				);
+				const envelopes = yield* subscribeMessages({
+					sessionId: SID,
+					resumeFromSequence: base.sequence,
+					resumeBase: { sequence: base.sequence },
+					...(scenario.saved && base.resumePoint
+						? { resumePoint: base.resumePoint }
+						: {}),
+				}).pipe(
+					Stream.takeUntil((envelope) => envelope._tag === "synchronized"),
+					Stream.runCollect,
+					Effect.map(Chunk.toReadonlyArray),
+				);
+				expect(envelopes.some((envelope) => envelope._tag === "snapshot")).toBe(
+					scenario.snapshot,
+				);
+				expect(envelopes.at(-1)?._tag).toBe("synchronized");
+			}).pipe(Effect.provide(makeDetailTestLayer())),
+	);
+
+	it.scoped.each([
+		{ parts: 1, snapshot: false },
+		{ parts: 200, snapshot: true },
+	])(
+		"one moved message with $parts parts requests snapshot=$snapshot",
+		(scenario) =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated(SID),
+					messageCreated(SID, "old", "assistant"),
+				]);
+				const after = yield* readModelVersion;
+				yield* commit(
+					Array.from({ length: scenario.parts }, (_, index) => [
+						toolStarted(SID, "old", `p${index}`),
+						toolCompleted(SID, "old", `p${index}`),
+					]).flat(),
+				);
+				const read = yield* ReadQueryEffectTag;
+				const result = yield* read.readSessionTranscriptCatchUp(SID, after, 50);
+				expect(result === "snapshot").toBe(scenario.snapshot);
 			}).pipe(Effect.provide(makeDetailTestLayer())),
 	);
 

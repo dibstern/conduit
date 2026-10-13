@@ -99,6 +99,7 @@ function makeHarness(options?: {
 					version: event.sequence,
 					sessionIds: [event.sessionId],
 					removedSessionIds: [],
+					collections: ["messages"] as const,
 				}),
 			);
 		}),
@@ -115,6 +116,7 @@ function makeHarness(options?: {
 				version: events[events.length - 1]?.sequence ?? 0,
 				sessionIds: [...new Set(events.map((event) => event.sessionId))],
 				removedSessionIds: [],
+				collections: ["messages"] as const,
 			}),
 		);
 	});

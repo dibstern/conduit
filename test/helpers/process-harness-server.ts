@@ -4,6 +4,7 @@ import {
 	existsSync,
 	readFileSync,
 	renameSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { Session } from "node:inspector/promises";
@@ -106,6 +107,7 @@ function recordServerMetrics(
 				sidebarReads,
 				gitRefreshes,
 				...(timed && { familyReads: timed.familyReads }),
+				...(timed && { streamingWrites: timed.streamingWrites }),
 			}),
 		);
 		renameSync(`${file}.tmp`, file);
@@ -124,7 +126,25 @@ function recordServerMetrics(
 function timeStatements(familyWindowSql: string): {
 	statements: { at: number; ms: number; method: string; sql: string }[];
 	familyReads: { at: number; changed: boolean; fullSessionScans: number }[];
+	streamingWrites: {
+		messageId: string;
+		chunkChars: number;
+		textChars: number;
+		walBytes: number;
+	}[];
 } {
+	const streamingWrites: {
+		messageId: string;
+		chunkChars: number;
+		textChars: number;
+		walBytes: number;
+	}[] = [];
+	const textLengths = new Map<string, number>();
+	const measured = new WeakSet<object>();
+	const walSize = (database: import("better-sqlite3").Database) => {
+		const file = `${database.name}-wal`;
+		return existsSync(file) ? statSync(file).size : 0;
+	};
 	const statements: { at: number; ms: number; method: string; sql: string }[] =
 		[];
 	const familyReads: {
@@ -136,7 +156,12 @@ function timeStatements(familyWindowSql: string): {
 	const familyWindow = normalize(familyWindowSql);
 	const transactions = new WeakMap<
 		object,
-		{ changed?: boolean; fullSessionScans: number }
+		{
+			changed?: boolean;
+			fullSessionScans: number;
+			walBefore: number;
+			deltas: { messageId: string; chars: number }[];
+		}
 	>();
 	const sqlite = createRequire(
 		createRequire(import.meta.url).resolve("@effect/sql-sqlite-node"),
@@ -145,7 +170,7 @@ function timeStatements(familyWindowSql: string): {
 	const prototype = Object.getPrototypeOf(probe.prepare("select 1")) as Record<
 		"all" | "get" | "run",
 		(
-			this: { source: string; database: object },
+			this: { source: string; database: import("better-sqlite3").Database },
 			...params: unknown[]
 		) => unknown
 	>;
@@ -153,6 +178,12 @@ function timeStatements(familyWindowSql: string): {
 	for (const method of ["all", "get", "run"] as const) {
 		const original = prototype[method];
 		prototype[method] = function (...params) {
+			if (!measured.has(this.database)) {
+				measured.add(this.database);
+				// This hook only runs in an isolated profiling harness. File growth
+				// measures committed WAL frames only when automatic checkpoints are off.
+				this.database.pragma("wal_autocheckpoint = 0");
+			}
 			const started = performance.now();
 			let result: unknown;
 			try {
@@ -169,14 +200,66 @@ function timeStatements(familyWindowSql: string): {
 						sql: sql.slice(0, 160),
 					});
 				if (sql === "BEGIN")
-					transactions.set(this.database, { fullSessionScans: 0 });
+					transactions.set(this.database, {
+						fullSessionScans: 0,
+						walBefore: walSize(this.database),
+						deltas: [],
+					});
 				const open = transactions.get(this.database);
+				if (
+					open &&
+					/INSERT(?: OR IGNORE)? INTO events/i.test(sql) &&
+					Array.isArray(result)
+				) {
+					for (const row of result) {
+						if (
+							row === null ||
+							typeof row !== "object" ||
+							!("type" in row) ||
+							row.type !== "text.delta" ||
+							!("data" in row) ||
+							typeof row.data !== "string"
+						)
+							continue;
+						const data: unknown = JSON.parse(row.data);
+						if (
+							data !== null &&
+							typeof data === "object" &&
+							"messageId" in data &&
+							typeof data.messageId === "string" &&
+							"text" in data &&
+							typeof data.text === "string"
+						)
+							open.deltas.push({
+								messageId: data.messageId,
+								chars: data.text.length,
+							});
+					}
+				}
 				if (open && sql === familyWindow)
 					open.changed = Array.isArray(result) && result.length > 0;
 				else if (open && /^SELECT [^;]* FROM sessions$/i.test(sql))
 					open.fullSessionScans += 1;
 				else if (open && (sql === "COMMIT" || sql === "ROLLBACK")) {
 					transactions.delete(this.database);
+					const firstDelta = open.deltas[0];
+					if (sql === "COMMIT" && firstDelta) {
+						const chunkChars = open.deltas.reduce(
+							(sum, delta) => sum + delta.chars,
+							0,
+						);
+						let textChars = 0;
+						for (const delta of open.deltas) {
+							textChars = (textLengths.get(delta.messageId) ?? 0) + delta.chars;
+							textLengths.set(delta.messageId, textChars);
+						}
+						streamingWrites.push({
+							messageId: firstDelta.messageId,
+							chunkChars,
+							textChars,
+							walBytes: walSize(this.database) - open.walBefore,
+						});
+					}
 					if (open.changed !== undefined)
 						familyReads.push({
 							at: Date.now(),
@@ -187,7 +270,7 @@ function timeStatements(familyWindowSql: string): {
 			}
 		};
 	}
-	return { statements, familyReads };
+	return { statements, familyReads, streamingWrites };
 }
 
 // A CPU profile from `<file>.start` to `<file>.stop`, both written by the spec

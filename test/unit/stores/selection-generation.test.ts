@@ -78,9 +78,11 @@ beforeEach(() => {
 	vi.mocked(getCommandsRpc)
 		.mockReset()
 		.mockResolvedValue({ projectSlug: "project-a", commands: [] });
-	vi.mocked(getModelsRpc)
-		.mockReset()
-		.mockResolvedValue({ projectSlug: "project-a", providers: [] });
+	vi.mocked(getModelsRpc).mockReset().mockResolvedValue({
+		projectSlug: "project-a",
+		instanceId: "opencode",
+		providers: [],
+	});
 	clearSessionState();
 	clearDiscoveryState();
 	resetSessionSubscription();
@@ -108,6 +110,7 @@ it("applies discovery RPCs only for the selection that requested them, including
 	});
 	vi.mocked(getModelsRpc).mockResolvedValueOnce({
 		projectSlug: "project-a",
+		instanceId: "opencode",
 		providers: [],
 		active: { model: "new-model", provider: "new-provider" },
 	});
@@ -129,6 +132,7 @@ it("applies discovery RPCs only for the selection that requested them, including
 	});
 	models.resolve({
 		projectSlug: "project-a",
+		instanceId: "opencode",
 		providers: [],
 		active: { model: "old-model", provider: "old-provider" },
 	});
@@ -152,8 +156,17 @@ it("ignores a draft returned after the selection moves on", async () => {
 	expect(inputSyncState.text).toBe("B draft");
 });
 
-it("keeps B's model when A's row changes model last", () => {
+it("keeps B's GetModels pick when A's row changes model last", async () => {
+	vi.mocked(getModelsRpc).mockResolvedValueOnce({
+		projectSlug: "project-a",
+		instanceId: "opencode",
+		providers: [],
+		active: { model: "model-b0", provider: "provider-b" },
+	});
 	select("B");
+	await Promise.resolve();
+	const refresh = deferred<GetModelsResponse>();
+	vi.mocked(getModelsRpc).mockReturnValueOnce(refresh.promise);
 	const row = (id: string, model: string, provider: string) => ({
 		projectSlug: "project-a",
 		accountId: null,
@@ -180,6 +193,19 @@ it("keeps B's model when A's row changes model last", () => {
 		sequence: 3,
 		item: row("A", "model-a", "provider-a"),
 	});
+	expect(discoveryState.currentModelId).toBe("model-b0");
+	expect(getModelsRpc).toHaveBeenCalledTimes(2);
+	expect(getModelsRpc).toHaveBeenLastCalledWith({
+		projectSlug: "project-a",
+		sessionId: "B",
+	});
+	refresh.resolve({
+		projectSlug: "project-a",
+		instanceId: "opencode",
+		providers: [],
+		active: { model: "model-b", provider: "provider-b" },
+	});
+	await Promise.resolve();
 	expect(discoveryState.currentModelId).toBe("model-b");
 	expect(discoveryState.currentProviderId).toBe("provider-b");
 });

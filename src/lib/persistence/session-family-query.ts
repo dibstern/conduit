@@ -40,4 +40,4 @@ ORDER BY s.updated_at DESC, s.id DESC`;
 // What the family's roll-ups read (`?` family member): every member's lineage
 // and status, and no other session's.
 export const sessionFamilyMembersQuery = `${sessionFamilyCte}
-SELECT id, parent_id, status, unread, side_thread FROM sessions JOIN family USING (id)`;
+SELECT id, parent_id, status, unread, side_thread, version FROM sessions JOIN family USING (id)`;

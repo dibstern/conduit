@@ -49,6 +49,10 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import {
+	bindTurnTimelineSink,
+	observeTurnTimelineFrame,
+} from "../../domain/daemon/Services/turn-timeline.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestionError,
@@ -706,6 +710,10 @@ export class ClaudeProviderRuntime {
 							input.nativeResumeFallback,
 						);
 						this.sinks.set(sinkId, eventSink);
+						bindTurnTimelineSink(sinkId, {
+							sessionId,
+							inputId: input.inputId,
+						});
 						this.reportSinkForTesting("allocated", sinkId, sessionId);
 						const aborted = Effect.async<void>((resume) => {
 							const onAbort = () => resume(Effect.void);
@@ -991,6 +999,7 @@ export class ClaudeProviderRuntime {
 		recoveredSessionId?: string,
 	): Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> {
 		return Effect.gen(this, function* () {
+			observeTurnTimelineFrame(output);
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;
@@ -2086,7 +2095,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
-					...(input.variant ? { currentVariant: input.variant } : {}),
+					...(input.variant === undefined
+						? {}
+						: { currentVariant: input.variant }),
 					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
@@ -2255,7 +2266,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				if (settings.variant) {
+				if (settings.variant !== undefined) {
 					ctx.currentVariant = settings.variant;
 				} else {
 					delete ctx.currentVariant;

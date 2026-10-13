@@ -352,7 +352,7 @@ export const Link: Story = {
  * a consumer `class="text-text-muted"` on a `secondary` button emits TWO
  * `text-*` utilities, and which one wins is decided by their byte offsets in
  * the built stylesheet -- not by the order they appear in the class attribute.
- * Here `secondary`'s own `text-text` is never emitted at all.
+ * Here `secondary`'s own `text-text-secondary` is never emitted at all.
  *
  * The baseline is worth having anyway: it is the visible proof that the colour
  * actually changed, which an assertion on class names alone cannot give.

@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Banners from "../../../src/lib/frontend/components/overlays/Banners.svelte";
 import {
 	applyGetAgentsResponse,
+	applyGetModelsResponse,
+	chooseModel,
 	clearDiscoveryState,
 	handleModelInfo,
 	handleModelList,
+	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
 	applyInstanceListResponse,
@@ -106,9 +109,17 @@ describe("Banners", () => {
 	});
 
 	it("shows the OpenCode health warning when the active provider needs OpenCode", async () => {
-		instanceState.instances = [unhealthyInstance];
-		handleModelList({ providers: [claudeProvider, opencodeProvider] });
-		handleModelInfo({ model: "", provider: "openai" });
+		instanceState.instances = [
+			{ ...unhealthyInstance, id: "opencode", driver: "opencode" },
+		];
+		handleModelList({ providers: [claudeProvider] });
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers: [opencodeProvider],
+		});
+		selectInstance("opencode");
+		chooseModel({ modelId: "gpt-4.1", providerId: "openai" });
 
 		await renderBanners();
 
@@ -139,6 +150,17 @@ describe("Banners", () => {
 			},
 		]);
 		sessionState.currentId = "session-work";
+		applyGetModelsResponse(
+			{
+				projectSlug: "work",
+				instanceId: "work-oc",
+				providers: [],
+				active: { model: "gpt-4.1", provider: "openai" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
+			},
+			"session-work",
+		);
 		uiState.opencodeConnections = { "work-oc": status, opencode: "failed" };
 
 		await renderBanners();
@@ -172,6 +194,17 @@ describe("Banners", () => {
 			},
 		]);
 		sessionState.currentId = "session-work";
+		applyGetModelsResponse(
+			{
+				projectSlug: "work",
+				instanceId: "work-oc",
+				providers: [],
+				active: { model: "gpt-4.1", provider: "openai" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
+			},
+			"session-work",
+		);
 		uiState.opencodeConnections = { opencode: "reconnecting" };
 
 		await renderBanners();
@@ -190,10 +223,7 @@ describe("Banners", () => {
 				id: "session-work",
 				title: "Work session",
 				accountId: "work-claude",
-				resumes: [
-					{ at: 1, instanceId: "opencode", reason: "user" },
-					{ at: 2, instanceId: "work-claude", reason: "auto-switch" },
-				],
+				resumes: [{ at: 1, instanceId: "opencode", reason: "user" }],
 			},
 		]);
 		sessionState.currentId = "session-work";
@@ -202,6 +232,17 @@ describe("Banners", () => {
 				projectSlug: "work",
 				providerScope: { id: "opencode", name: "OpenCode" },
 				agents: [],
+			},
+			"session-work",
+		);
+		applyGetModelsResponse(
+			{
+				projectSlug: "work",
+				instanceId: "work-claude",
+				providers: [],
+				active: { model: "sonnet", provider: "claude" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
 			},
 			"session-work",
 		);
@@ -214,20 +255,33 @@ describe("Banners", () => {
 		).toBeNull();
 	});
 
-	it("does not infer an unroutable session account from discovery", async () => {
+	it.each([
+		"work-oc",
+		null,
+	])("uses published account %s without resume metadata", async (accountId) => {
 		applyInstanceListResponse({
-			instances: [{ ...unhealthyInstance, id: "work-oc", status: "healthy" }],
+			instances: [
+				{
+					...unhealthyInstance,
+					id: "healthy-oc",
+					driver: "opencode",
+					status: "healthy",
+				},
+				{ ...unhealthyInstance, id: "work-oc", driver: "opencode" },
+			],
 		});
 		seedRootSessions([
-			{ id: "session-work", title: "Work session", accountId: null },
+			{ id: "session-work", title: "Work session", accountId },
 		]);
 		sessionState.currentId = "session-work";
-		applyGetAgentsResponse(
+		applyGetModelsResponse(
 			{
 				projectSlug: "work",
 				instanceId: "work-oc",
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: [],
+				providers: [],
+				active: { model: "gpt-4.1", provider: "openai" },
+				variant: { variant: "", variants: [] },
+				contextWindow: { contextWindow: "", options: [] },
 			},
 			"session-work",
 		);
@@ -238,7 +292,9 @@ describe("Banners", () => {
 
 		await renderBanners();
 
-		expect(screen.queryByText("Reconnecting to OpenCode…")).toBeNull();
+		if (accountId === null)
+			expect(screen.queryByText("Reconnecting to OpenCode…")).toBeNull();
+		else expect(screen.getByText("Reconnecting to OpenCode…")).toBeTruthy();
 		expect(screen.queryByText("OpenCode failed to start")).toBeNull();
 	});
 

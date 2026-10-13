@@ -4,6 +4,7 @@ import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { LoggerTag } from "./services.js";
 import { SessionInboxTag } from "./session-inbox.js";
@@ -85,9 +86,18 @@ export const rewindSessionToMessage = ({
 					});
 				if (row.pending_rewind_message_id === messageId) return;
 				if (account.driver === "opencode") {
-					const client = yield* OpenCodeAPITag;
-					yield* Effect.tryPromise(() =>
-						client.session.revert(sessionId, { messageID: messageId }),
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							const instances =
+								yield* Effect.serviceOption(OpenCodeInstancesTag);
+							const client =
+								instances._tag === "Some"
+									? yield* instances.value.use(account.id)
+									: yield* OpenCodeAPITag;
+							yield* Effect.tryPromise(() =>
+								client.session.revert(sessionId, { messageID: messageId }),
+							);
+						}),
 					);
 				}
 				const persist = yield* ClaudeEventPersistEffectTag;
@@ -129,8 +139,19 @@ export const undoSessionRewind = ({
 						message: "There is no pending rewind to undo",
 					});
 				if (account.driver === "opencode") {
-					const client = yield* OpenCodeAPITag;
-					yield* Effect.tryPromise(() => client.session.unrevert(sessionId));
+					yield* Effect.scoped(
+						Effect.gen(function* () {
+							const instances =
+								yield* Effect.serviceOption(OpenCodeInstancesTag);
+							const client =
+								instances._tag === "Some"
+									? yield* instances.value.use(account.id)
+									: yield* OpenCodeAPITag;
+							yield* Effect.tryPromise(() =>
+								client.session.unrevert(sessionId),
+							);
+						}),
+					);
 				}
 				const persist = yield* ClaudeEventPersistEffectTag;
 				yield* persist.persistEvent(

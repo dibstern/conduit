@@ -143,6 +143,7 @@ describe("repository scope through the built daemon", () => {
 				const name = `${prefix} ${title}`;
 				const created = await Effect.runPromise(
 					client.rpc.CreateSession({
+						permissionMode: "ask",
 						projectSlug: slug,
 						originId: "repository-scope-test",
 						providerId: "claude",

@@ -235,6 +235,7 @@ describe("Draft worktree launches through the built daemon", () => {
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "draft-worktree-test",
 					providerId: "claude",
@@ -313,6 +314,7 @@ describe("Draft worktree launches through the built daemon", () => {
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: browser.originId,
 					providerId: "claude",
@@ -358,6 +360,7 @@ describe("Draft worktree launches through the built daemon", () => {
 		const creating = Effect.runPromise(
 			Effect.exit(
 				browser.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: browser.originId,
 					providerId: "claude",
@@ -399,6 +402,7 @@ describe("Draft worktree launches through the built daemon", () => {
 		const creating = Effect.runPromise(
 			Effect.exit(
 				browser.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: browser.originId,
 					providerId: "claude",
@@ -444,6 +448,7 @@ describe("Draft worktree launches through the built daemon", () => {
 		const creating = Effect.runPromise(
 			Effect.exit(
 				creator.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: creator.originId,
 					providerId: "claude",
@@ -513,6 +518,7 @@ describe("Draft worktree launches through the built daemon", () => {
 				sendRpcRequest(
 					socket,
 					new CreateSession({
+						permissionMode: "ask",
 						projectSlug: "process-test",
 						originId: "draft-worktree-test",
 						providerId: "claude",
@@ -550,6 +556,7 @@ describe("Draft worktree launches through the built daemon", () => {
 			sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "draft-worktree-test",
 					providerId: "opencode",

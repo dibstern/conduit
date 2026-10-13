@@ -43,20 +43,9 @@ export const subscribeSessionTodos = (options: {
 				bus,
 				source: {
 					name: `todos/${options.sessionId}`,
-					read: (range) =>
-						Effect.gen(function* () {
-							const answer = yield* readQuery.readSessionTodos(
-								options.sessionId,
-								range,
-							);
-							const row = answer.rows[0];
-							if (row === undefined) return answer;
-							const next = JSON.stringify(row.item.items);
-							const previous = yield* Ref.getAndSet(held, next);
-							return range !== undefined && previous === next
-								? { rows: [], version: answer.version }
-								: answer;
-						}),
+					collections: ["messages", "sessions"],
+					shareReads: true,
+					read: (range) => readQuery.readSessionTodos(options.sessionId, range),
 					route: (advance) => ({
 						moved: advance.sessionIds.includes(options.sessionId),
 						removed: [],
@@ -66,6 +55,19 @@ export const subscribeSessionTodos = (options: {
 				...(options.resumeFromSequence === undefined
 					? {}
 					: { resumeFromSequence: options.resumeFromSequence }),
-			});
+			}).pipe(
+				Stream.filterEffect((envelope) => {
+					if (envelope._tag === "snapshot")
+						return Ref.set(
+							held,
+							JSON.stringify(envelope.rows[0]?.items ?? []),
+						).pipe(Effect.as(true));
+					if (envelope._tag !== "upsert") return Effect.succeed(true);
+					const next = JSON.stringify(envelope.item.items);
+					return Ref.getAndSet(held, next).pipe(
+						Effect.map((previous) => previous !== next),
+					);
+				}),
+			);
 		}),
 	);

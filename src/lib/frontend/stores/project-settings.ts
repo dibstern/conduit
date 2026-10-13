@@ -18,21 +18,14 @@ import {
 	handleHarnessDefaults,
 	handleModelList,
 	handleVisibilityInfo,
-	hydrateModelSettings,
 } from "./discovery.svelte.js";
 import { projectState } from "./project-state.svelte.js";
-import { findSession, sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
-import { composerAccountId } from "./usage.svelte.js";
 
 export const applyProjectSetting = (setting: ProjectSetting): void => {
 	switch (setting._tag) {
 		case "defaultModel":
 			handleDefaultModelInfo(setting);
-			if (!sessionState.currentId && setting.model && setting.provider)
-				hydrateModelSettings({
-					active: { model: setting.model, provider: setting.provider },
-				});
 			break;
 		case "harnessDefaults":
 			handleHarnessDefaults(setting);
@@ -60,17 +53,10 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			uiState.opencodeConnections[setting.instanceId] = setting.status;
 			break;
 		case "providerModels":
-			if (
-				setting.accountId !== undefined &&
-				setting.accountId !==
-					composerAccountId(
-						sessionState.currentId
-							? findSession(sessionState.currentId)
-							: undefined,
-					)
-			)
-				break;
 			handleModelList({
+				...(setting.accountId === undefined
+					? {}
+					: { accountId: setting.accountId }),
 				providers: [
 					...discoveryState.providers.filter(
 						(provider) => provider.id !== "claude",

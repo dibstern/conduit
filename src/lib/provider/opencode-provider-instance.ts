@@ -20,7 +20,6 @@ import type {
 import { createLogger } from "../logger.js";
 import { createEventId } from "../persistence/events.js";
 import type { SessionPermissionMode } from "../shared-types.js";
-import { isRecord } from "../utils.js";
 import { ProviderInstanceFailure } from "./errors.js";
 import type {
 	CommandInfo,
@@ -375,33 +374,11 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 						try: async () => {
 							if (isCompaction) {
 								if (!abortSignal.aborted) {
-									let compactModel = promptOptions.model;
-									if (!compactModel) {
-										// Native session history owns the inherited model, not
-										// Conduit's global default (which may belong to Claude).
-										const messages = await client.session.messages(sessionId, {
-											signal: abortSignal,
-										});
-										const lastUser = messages
-											.slice()
-											.reverse()
-											.find((message) => message.role === "user");
-										const nativeModel = lastUser?.["model"];
-										if (
-											isRecord(nativeModel) &&
-											typeof nativeModel["providerID"] === "string" &&
-											typeof nativeModel["modelID"] === "string"
-										) {
-											compactModel = {
-												providerID: nativeModel["providerID"],
-												modelID: nativeModel["modelID"],
-											};
-										}
-									}
+									const compactModel = promptOptions.model;
 									if (!compactModel)
 										throw this.providerFailure(
 											"summarize",
-											"Nothing to compact yet",
+											"A session model pick is required before compacting.",
 										);
 									if (abortSignal.aborted) return;
 									const queue = this.unechoedInputs.get(sessionId) ?? [];

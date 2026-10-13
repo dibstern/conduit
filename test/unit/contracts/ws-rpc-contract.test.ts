@@ -8,6 +8,7 @@ import {
 	PartVersion,
 	ToolCallId,
 } from "../../../src/lib/contracts/tool-wire.js";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	AnswerQuestion,
 	CancelSession,
@@ -141,6 +142,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeProjectSettings: () => Stream.empty,
 				SubscribeAlerts: () => Stream.empty,
 				SubscribeInputDraft: () => Stream.empty,
+				SubscribeDraftModels: () => Stream.empty,
 				SubscribeInstances: () => Stream.empty,
 				SubscribeUsage: () =>
 					Stream.fromIterable(usageSnapshots).pipe(
@@ -148,7 +150,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					),
 				SubscribeServerStatus: () => Stream.empty,
 				SubscribeProjects: () => Stream.empty,
-				AttachProject: () => Effect.succeed({ projectSlug: null }),
+				AttachProject: () =>
+					Effect.succeed({ projectSlug: null, sessionSlug: null }),
 				ResolveSession: () => Effect.succeed({ projectSlug: null }),
 				GetGoalDetails: () =>
 					Effect.succeed({ checks: [], tokensSinceStart: null }),
@@ -508,6 +511,12 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetAutoSettleSetting: () => Effect.succeed({ autoSettleAfterDays: 3 }),
 				SetAutoSettleSetting: (request) =>
 					Effect.succeed({ autoSettleAfterDays: request.autoSettleAfterDays }),
+				GetWorktreeCleanupSetting: () =>
+					Effect.succeed({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP }),
+				SetWorktreeCleanupSetting: (request) =>
+					Effect.succeed({ worktreeCleanup: request.worktreeCleanup }),
+				CleanUpWorktreesNow: () =>
+					Effect.succeed({ removed: [], kept: [], failed: [] }),
 				GetUsageLimitsSetting: () =>
 					Effect.succeed({
 						usageLimits: {
@@ -1334,6 +1343,7 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const created = yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "demo",
 					originId: "browser-tab-a",
 				});
@@ -1549,6 +1559,7 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("Left");
 		expect(
 			new CreateSession({
+				permissionMode: "ask",
 				projectSlug: "demo",
 				originId: "browser-tab-a",
 			})._tag,

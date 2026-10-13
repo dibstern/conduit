@@ -17,6 +17,8 @@ import {
 import { AccountChangeRejected } from "./account.js";
 import {
 	WorktreeBranchRenameError,
+	WorktreeCleanupReportSchema,
+	WorktreeCleanupSchema,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "./worktree.js";
@@ -466,6 +468,7 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
+	defaultOpenCodeInstanceId: Schema.optional(Schema.String),
 	/** OpenCode catalog; Claude's shared catalog follows providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
@@ -488,6 +491,7 @@ export const SwitchModelResponseSchema = Schema.Struct({
 	provider: Schema.String,
 	variant: Schema.String,
 	variants: Schema.Array(Schema.String),
+	contextWindow: Schema.optional(ContextWindowInfoSchema),
 });
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
@@ -654,6 +658,7 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	sessionId: Schema.String,
 	messages: Schema.Array(HistoryMessageSchema),
 	hasMore: Schema.Boolean,
+	cursor: Schema.optional(NonEmptyString),
 });
 
 export const ForkSessionResponseSchema = Schema.Struct({
@@ -1276,6 +1281,37 @@ export class SetDefault extends Schema.TaggedRequest<SetDefault>()(
 	},
 ) {}
 
+const WorktreeCleanupSettingResponseSchema = Schema.Struct({
+	worktreeCleanup: WorktreeCleanupSchema,
+});
+
+export class GetWorktreeCleanupSetting extends Schema.TaggedRequest<GetWorktreeCleanupSetting>()(
+	"GetWorktreeCleanupSetting",
+	{
+		failure: WsRpcError,
+		success: WorktreeCleanupSettingResponseSchema,
+		payload: {},
+	},
+) {}
+
+export class SetWorktreeCleanupSetting extends Schema.TaggedRequest<SetWorktreeCleanupSetting>()(
+	"SetWorktreeCleanupSetting",
+	{
+		failure: WsRpcError,
+		success: WorktreeCleanupSettingResponseSchema,
+		payload: { worktreeCleanup: WorktreeCleanupSchema },
+	},
+) {}
+
+export class CleanUpWorktreesNow extends Schema.TaggedRequest<CleanUpWorktreesNow>()(
+	"CleanUpWorktreesNow",
+	{
+		failure: WsRpcError,
+		success: WorktreeCleanupReportSchema,
+		payload: { projectSlug: Schema.optional(NonEmptyString) },
+	},
+) {}
+
 const AutoSettleSettingResponseSchema = Schema.Struct({
 	autoSettleAfterDays: Schema.NullOr(Schema.Number),
 });
@@ -1440,8 +1476,7 @@ export class SwitchModel extends Schema.TaggedRequest<SwitchModel>()(
 		success: SwitchModelResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			// A draft has no session yet: it asks only for the model's efforts.
-			sessionId: Schema.optional(NonEmptyString),
+			sessionId: NonEmptyString,
 			modelId: NonEmptyString,
 			providerId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -2188,14 +2223,14 @@ class CreateSessionWire extends Schema.TaggedRequest<CreateSessionWire>()(
 			newWorktree: Schema.optional(Schema.Boolean),
 			// Local base for the primary folder; requires newWorktree.
 			worktreeBase: Schema.optional(NonEmptyString),
-			// The draft composer's model, and its effort if one was picked.
-			// Recorded as the session's own choice so the first turn runs them
-			// instead of the relay default.
+			// The composer's displayed pick. The handler requires a real model.
+			permissionMode: SessionPermissionModeSchema,
 			model: Schema.optional(
 				Schema.Struct({
-					modelId: NonEmptyString,
-					providerId: NonEmptyString,
+					modelId: Schema.String,
+					providerId: Schema.String,
 					variant: Schema.optional(Schema.String),
+					contextWindow: Schema.optional(Schema.String),
 				}),
 			),
 		},
@@ -2265,7 +2300,12 @@ export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
 	{
 		failure: WsRpcError,
 		// The project this tab is now attached to; null when none is registered.
-		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
+		success: Schema.Struct({
+			projectSlug: Schema.NullOr(Schema.String),
+			// Null means the requested session was not found, even if a fallback
+			// project was attached. Omitted requests also have no session location.
+			sessionSlug: Schema.NullOr(Schema.String),
+		}),
 		payload: {
 			// Hints, in priority order: the session's project, then projectSlug.
 			// The server falls back to its default project when neither resolves.
@@ -2310,6 +2350,9 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 	},
 ) {}
 
+/** Fork a Side Thread and submit its first input there, so a reply lost to a
+ *  dropped socket cannot lose the prompt. A retry with the same input id
+ *  returns the Side Thread that input already reached. */
 export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 	"StartSideThread",
 	{
@@ -2322,6 +2365,10 @@ export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 			projectSlug: NonEmptyString,
 			parentSessionId: NonEmptyString,
 			title: NonEmptyString,
+			inputId: NonEmptyString,
+			text: NonEmptyString,
+			images: Schema.optional(Schema.Array(Schema.String)),
+			originId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -2643,6 +2690,9 @@ export const WsRpcRequest = Schema.Union(
 	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetWorktreeCleanupSetting,
+	SetWorktreeCleanupSetting,
+	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
 	ScanNow,
@@ -2695,8 +2745,6 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		resumeBase: Schema.optional(ResumeBase),
 		// From a saved snapshot: the server resumes from this, not resumeBase.
 		resumePoint: Schema.optional(ResumePoint),
-		// Only clients that decode textSuffix may opt into compressed live parts.
-		textSuffixes: Schema.optional(Schema.Boolean),
 	},
 	success: SessionDetailEnvelopeSchema,
 	error: WsRpcError,
@@ -2943,6 +2991,14 @@ export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
 	stream: true,
 });
 
+/** Borrow OpenCode while this browser has its draft open; never binds it. */
+export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
+	payload: { projectSlug: NonEmptyString, instanceId: NonEmptyString },
+	success: GetModelsResponseSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 /** A session finished or failed in this project while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
@@ -2999,6 +3055,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,
+	SubscribeDraftModels,
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,
@@ -3081,6 +3138,9 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetDefault),
 	Rpc.fromTaggedRequest(GetAutoSettleSetting),
 	Rpc.fromTaggedRequest(SetAutoSettleSetting),
+	Rpc.fromTaggedRequest(GetWorktreeCleanupSetting),
+	Rpc.fromTaggedRequest(SetWorktreeCleanupSetting),
+	Rpc.fromTaggedRequest(CleanUpWorktreesNow),
 	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
 	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
 	Rpc.fromTaggedRequest(ScanNow),

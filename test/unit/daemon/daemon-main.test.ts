@@ -5,6 +5,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/management-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import type { Logger } from "../../../src/lib/logger.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 // TDD tests for daemon-main.ts: the top-level Effect entry point that replaces
@@ -68,14 +69,17 @@ function makeTestLayer() {
 			peek: () => Effect.succeed(Option.none()),
 			invalidate: () => Effect.die("not implemented in test"),
 		}),
-		Layer.succeed(ConfigTag, {
-			httpServer: {} as import("node:http").Server,
-			opencodeUrl: "http://localhost:4096",
-			projectDir: "/tmp/test",
-			slug: "test-project",
-			persistenceDbPath: tempEventsDbPath(),
-			publishGlobalSetting: () => Effect.void,
-		}),
+		Layer.succeed(
+			ConfigTag,
+			makeMockConfig({
+				httpServer: {} as import("node:http").Server,
+				opencodeUrl: "http://localhost:4096",
+				projectDir: "/tmp/test",
+				slug: "test-project",
+				persistenceDbPath: tempEventsDbPath(),
+				publishGlobalSetting: () => Effect.void,
+			}),
+		),
 		Layer.succeed(
 			LoggerTag,
 			partialFake<Logger>({

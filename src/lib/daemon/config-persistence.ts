@@ -29,6 +29,10 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
 } from "../contracts/provider-instance.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	WorktreeCleanupSchema,
+} from "../contracts/worktree.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
 import {
@@ -164,6 +168,7 @@ const DaemonConfigFields = {
 		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
 		{ exact: true },
 	),
+	worktreeCleanup: Schema.optionalWith(WorktreeCleanupSchema, { exact: true }),
 	usageLimits: Schema.optionalWith(UsageLimitsSettingSchema, { exact: true }),
 	keepAwakeCommand: Schema.optionalWith(Schema.String, { exact: true }),
 	keepAwakeArgs: Schema.optionalWith(
@@ -349,6 +354,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		debug: false,
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
+		worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		projects: [],
 		instances: [
 			{
@@ -487,6 +493,7 @@ function normalizeDaemonConfig(decoded: DaemonConfig): DaemonConfig {
 	return {
 		...normalizeAccountConfig(migrateLegacyInstanceIds(decoded)),
 		configVersion: CURRENT_CONFIG_VERSION,
+		worktreeCleanup: decoded.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 		autoSettleAfterDays:
 			decoded.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS

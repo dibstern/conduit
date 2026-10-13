@@ -30,7 +30,6 @@ export {
 export {
 	createAllEffectProjectors,
 	type EffectProjector,
-	makeActivityProjector,
 	makeApprovalProjector,
 	makeMessageProjector,
 	makeProviderProjector,

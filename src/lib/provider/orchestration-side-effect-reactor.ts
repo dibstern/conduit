@@ -2,6 +2,7 @@ import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect, Option, Schema } from "effect";
 import { AccountSchema } from "../contracts/account.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -393,36 +394,44 @@ export class ProviderSideEffectReactor {
 				const driver = account?.driver ?? row.provider_id;
 				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
 				const instance = yield* this.options.registry.getInstanceEffect(driver);
+				const turnKey = {
+					sessionId: payload.sessionId,
+					inputId: payload.inputId,
+				};
+				mark(turnKey, "reactor-start");
 				const send = (
 					prepared: PreparedTurn | undefined,
 					nativeResumeFallback: boolean,
 				) =>
-					instance.sendTurnEffect({
-						...payload,
-						account:
-							payload.account ??
-							(account?.driver === "claude" && prepared
-								? { ...account, folder: prepared.configDir }
-								: account),
-						instanceId,
-						history: payload.history ?? [],
-						...(driver === "claude"
-							? {
-									commandAttempt,
-									prompt: prepared?.prompt ?? payload.prompt,
-									text: payload.prompt,
-									configDir: prepared?.configDir,
-									resumeSessionId: prepared?.resumeSessionId,
-									startFreshNativeSession:
-										prepared?.resumeSessionId === undefined ||
-										payload.rewind !== undefined,
-									nativeResumeFallback,
-									nativeThread: prepared?.nativeThread,
-									...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
-								}
-							: {}),
-						eventSink: this.makeReactorEventSink(interactions),
-						abortSignal: new AbortController().signal,
+					Effect.suspend(() => {
+						mark(turnKey, "history-ready");
+						return instance.sendTurnEffect({
+							...payload,
+							account:
+								payload.account ??
+								(account?.driver === "claude" && prepared
+									? { ...account, folder: prepared.configDir }
+									: account),
+							instanceId,
+							history: payload.history ?? [],
+							...(driver === "claude"
+								? {
+										commandAttempt,
+										prompt: prepared?.prompt ?? payload.prompt,
+										text: payload.prompt,
+										configDir: prepared?.configDir,
+										resumeSessionId: prepared?.resumeSessionId,
+										startFreshNativeSession:
+											prepared?.resumeSessionId === undefined ||
+											payload.rewind !== undefined,
+										nativeResumeFallback,
+										nativeThread: prepared?.nativeThread,
+										...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
+									}
+								: {}),
+							eventSink: this.makeReactorEventSink(interactions),
+							abortSignal: new AbortController().signal,
+						});
 					});
 				const result =
 					driver === "claude"

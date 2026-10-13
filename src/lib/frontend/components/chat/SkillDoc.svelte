@@ -1,5 +1,5 @@
 <script lang="ts">
-	import hljs from "highlight.js";
+	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { getSkillContentRpc } from "../../transport/ws-rpc-client.js";
@@ -10,6 +10,21 @@
 	let skillState = $state<"loading" | "idle" | "missing">("loading");
 	const sessionId = $derived(getCurrentSessionId());
 	const workspace = $derived(JSON.stringify(sessionId ? findSession(sessionId)?.workspace ?? null : null));
+
+	function highlightCodeBlocks(el: HTMLElement) {
+		const blocks = el.querySelectorAll<HTMLElement>("pre code");
+		if (!blocks.length) return;
+		let active = true;
+		void (async () => {
+			const hljs = await loadHighlighter();
+			if (!active || !el.isConnected) return;
+			for (const block of blocks) {
+				if (!block.isConnected || block.dataset["highlighted"] || block.classList.contains("hljs")) continue;
+				hljs.highlightElement(block);
+			}
+		})();
+		return () => { active = false; };
+	}
 
 	$effect(() => {
 		const projectSlug = getCurrentSlug();
@@ -43,7 +58,7 @@
 	{#if skillDoc}
 		<div
 			class="md-content text-xs leading-[1.6] text-text-secondary"
-			{@attach (el) => el.querySelectorAll<HTMLElement>("pre code").forEach((c) => hljs.highlightElement(c))}
+			{@attach highlightCodeBlocks}
 		>{@html renderMarkdown(skillDoc)}</div>
 	{:else}
 		<span class="font-mono text-xs text-text-muted">

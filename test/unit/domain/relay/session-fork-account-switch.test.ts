@@ -15,9 +15,11 @@ import { expect, it, vi } from "vitest";
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
 import { forkSession } from "../../../../src/lib/domain/relay/Services/session-command.js";
 import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
@@ -31,6 +33,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 } from "../../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../../helpers/orchestration-engine-test-double.js";
 
 const message = (id: string, role: "user" | "assistant", text: string) => [
 	canonicalEvent(
@@ -91,6 +94,19 @@ it.each([
 					title: "Parent",
 					provider: "claude",
 				}),
+				canonicalEvent("session.model_changed", "parent", {
+					sessionId: "parent",
+					providerId: "claude",
+					modelId: "sonnet",
+				}),
+				canonicalEvent("session.variant_changed", "parent", {
+					sessionId: "parent",
+					variant: "high",
+				}),
+				canonicalEvent("session.context_window_changed", "parent", {
+					sessionId: "parent",
+					contextWindow: "200k",
+				}),
 				...message("first", "user", "Original constraints"),
 				...message("before", "assistant", "Before switching"),
 				...message("oversized", "assistant", `OVERSIZED-${"x".repeat(20_000)}`),
@@ -100,7 +116,7 @@ it.each([
 					key: "nativeThread:claude",
 					value: JSON.stringify({
 						resumeSessionId: "source-sdk",
-						configDir: "/source",
+						configDir: configuredClaudeConfigDir("/source"),
 						firstSequence: 0,
 						deliveredThrough: 0,
 					}),
@@ -120,7 +136,7 @@ it.each([
 					key: "nativeThread:claude-sdk",
 					value: JSON.stringify({
 						resumeSessionId: "target-sdk",
-						configDir: "/target",
+						configDir: configuredClaudeConfigDir("/target"),
 						firstSequence: 0,
 						deliveredThrough: 0,
 					}),
@@ -147,6 +163,12 @@ it.each([
 			const boundary = point === "returned" ? "after" : point;
 			const child = yield* forkSession("parent", { messageId: boundary });
 			const childRow = yield* read.getSession(child.id);
+			expect(childRow).toMatchObject({
+				model_provider: "claude",
+				model_id: "sonnet",
+				variant: "high",
+				context_window: "200k",
+			});
 			expect(childRow?.parent_id).toBe("parent");
 			expect(childRow?.fork_point_message_id).toBe(boundary);
 			const history = yield* read.getSessionMessagesWithParts(child.id);
@@ -154,15 +176,17 @@ it.each([
 			expect(history.some((row) => row.text.includes("Future history"))).toBe(
 				false,
 			);
-			const expectedAccount = point === "returned" ? "claude" : "claude-sdk";
+			const expectedParentAccount =
+				point === "returned" ? "claude" : "claude-sdk";
 			expect((yield* read.getSession("parent"))?.provider).toBe(
-				expectedAccount,
+				expectedParentAccount,
 			);
+			const expectedAccount = point === "before" ? "claude" : "claude-sdk";
 			expect(childRow?.provider).toBe(expectedAccount);
 			const prepare = yield* makePrepareTurn({
 				folderSource: "account",
 				configDir: configuredClaudeConfigDir(
-					point === "returned" ? "/source" : "/target",
+					point === "before" ? "/source" : "/target",
 				),
 			});
 			const prepared = yield* prepare(
@@ -170,27 +194,32 @@ it.each([
 				expectedAccount,
 				"Continue the child",
 			);
-			if (point !== "after") {
+			if (point === "uncovered") {
 				expect(forkNative).not.toHaveBeenCalled();
 				expect(readTranscript).not.toHaveBeenCalled();
 				expect(
 					yield* state.nativeThread(child.id, expectedAccount),
 				).toBeUndefined();
 				expect(prepared.resumeSessionId).toBeUndefined();
-				expect(prepared.handoff).toMatchObject({ firstMessageIncluded: true });
+				expect(prepared.handoff).toMatchObject({
+					firstMessageIncluded: true,
+					omitted: 1,
+				});
 				expect(prepared.handoff?.tokens).toBeLessThanOrEqual(16_000);
 				expect(prepared.prompt).toContain("Original constraints");
-				if (point !== "before")
-					expect(prepared.prompt).toContain("An undelivered request");
+				expect(prepared.prompt).toContain("An undelivered request");
 				expect(prepared.prompt).not.toContain("OVERSIZED-");
-				if (point !== "returned")
-					expect(prepared.prompt).not.toContain("After switching");
+				expect(prepared.prompt).not.toContain("After switching");
 			} else {
-				expect(readTranscript).toHaveBeenCalledWith("target-sdk", {
-					configDir: configuredClaudeConfigDir("/target"),
+				const nativeId = point === "before" ? "source-sdk" : "target-sdk";
+				const nativeFolder = configuredClaudeConfigDir(
+					point === "before" ? "/source" : "/target",
+				);
+				expect(readTranscript).toHaveBeenCalledWith(nativeId, {
+					configDir: nativeFolder,
 				});
-				expect(forkNative).toHaveBeenCalledWith("target-sdk", {
-					configDir: configuredClaudeConfigDir("/target"),
+				expect(forkNative).toHaveBeenCalledWith(nativeId, {
+					configDir: nativeFolder,
 					title: "Parent (fork)",
 					upToMessageId: boundary,
 				});
@@ -198,6 +227,32 @@ it.each([
 				expect(prepared.prompt).toBe("Continue the child");
 			}
 		}).pipe(
+			Effect.provideService(
+				OrchestrationEngineTag,
+				withDispatchEffect({
+					dispatchEffect: vi.fn(() =>
+						Effect.succeed({
+							models: [
+								{
+									id: "sonnet",
+									name: "Sonnet",
+									providerId: "claude",
+									variants: { high: {} },
+									contextWindowOptions: [{ value: "200k", label: "200k" }],
+								},
+							],
+							supportsTools: true,
+							supportsThinking: true,
+							supportsPermissions: true,
+							supportsQuestions: true,
+							supportsAttachments: true,
+							supportsFork: true,
+							supportsRevert: false,
+							commands: [],
+						}),
+					),
+				}),
+			),
 			Effect.provideService(
 				ConfigTag,
 				makeMockConfig({
@@ -273,6 +328,12 @@ it.each([
 					title: "Parent",
 					provider: "claude",
 				}),
+				...sessionPickEvents("parent", {
+					harness: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
+					effort: "high",
+					contextWindow: "200k",
+				}),
 				...message("first", "user", "Kept request"),
 				...message("before", "assistant", "Kept response"),
 				...message("uncovered", "user", "Discarded request"),
@@ -331,6 +392,24 @@ it.each([
 			expect.soft(prepared.prompt).toContain("Kept response");
 			expect.soft(prepared.prompt).not.toContain("Discarded");
 		}).pipe(
+			Effect.provideService(
+				OrchestrationEngineTag,
+				withDispatchEffect({
+					dispatchEffect: vi.fn(() =>
+						Effect.succeed({
+							models: [
+								{
+									id: "sonnet",
+									name: "Sonnet",
+									providerId: "claude",
+									variants: { high: {} },
+									contextWindowOptions: [{ value: "200k", label: "200k" }],
+								},
+							],
+						}),
+					),
+				}),
+			),
 			Effect.provideService(
 				ConfigTag,
 				makeMockConfig({

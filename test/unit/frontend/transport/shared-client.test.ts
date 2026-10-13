@@ -12,8 +12,8 @@
 
 import { RpcClient, type RpcMessage } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Schedule } from "effect";
-import { afterAll, beforeAll, beforeEach, expect } from "vitest";
+import { Deferred, Effect, Exit, Fiber, Schedule, TestClock } from "effect";
+import { afterAll, beforeAll, beforeEach, expect, vi } from "vitest";
 import { connectionState } from "../../../../src/lib/frontend/transport/connection-status.svelte.js";
 import {
 	disposeRuntime,
@@ -381,6 +381,109 @@ describe("shared two-socket RPC client over WebSockets", () => {
 				),
 			).toHaveLength(1);
 		}).pipe(Effect.provide(WsRpcClientsLayer), Effect.scoped, Effect.orDie),
+	);
+
+	// Wake must reach both sockets, ignore hidden tabs and healthy sockets, and
+	// work even when a close has not yet entered its retry delay.
+	it.scoped.each(["navigation", "visible", "online", "registration"] as const)(
+		"%s wakes both socket retries immediately",
+		(reason) =>
+			Effect.gen(function* () {
+				const document = Object.assign(new EventTarget(), {
+					visibilityState: "hidden",
+				});
+				const window = new EventTarget();
+				vi.stubGlobal("document", document);
+				vi.stubGlobal("window", window);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => vi.unstubAllGlobals()),
+				);
+				yield* Effect.gen(function* () {
+					const opened = yield* Deferred.make<void>();
+					const redialed = yield* Deferred.make<void>();
+					onFrame = () => {
+						if (
+							fakeSockets.length === 2 &&
+							fakeSockets.every((socket) =>
+								socket.sent.some((frame) => frame.includes("SetLogLevel")),
+							)
+						)
+							Deferred.unsafeDone(opened, Effect.void);
+					};
+					dial = (socket) => {
+						socket.open();
+						if (fakeSockets.length === 4)
+							Deferred.unsafeDone(redialed, Effect.void);
+					};
+					const clients = yield* WsRpcClients;
+					const { control, stream } = yield* clients.forProject("alpha");
+					// A raw open precedes the protocol installing its close listener.
+					// Wait for real requests on both transports before dropping them.
+					yield* Effect.forkScoped(
+						Effect.all(
+							[
+								control.SetLogLevel({ projectSlug: "alpha", level: "debug" }),
+								stream.SetLogLevel({ projectSlug: "alpha", level: "debug" }),
+							],
+							{ concurrency: 2 },
+						).pipe(Effect.ignore),
+					);
+					yield* Deferred.await(opened);
+					expect(fakeSockets).toHaveLength(2);
+					yield* clients.wake;
+					expect(fakeSockets).toHaveLength(2);
+					if (reason === "registration") {
+						let armed = true;
+						const add = EventTarget.prototype.addEventListener;
+						const registration = vi
+							.spyOn(EventTarget.prototype, "addEventListener")
+							.mockImplementation(function (
+								this: EventTarget,
+								type,
+								listener,
+								options,
+							) {
+								if (type === "wake" && armed) {
+									armed = false;
+									// Deliver a real wake after the version check, before
+									// the waiting child registers its listener.
+									Effect.runSync(clients.wake);
+								}
+								add.call(this, type, listener, options);
+							});
+						yield* Effect.addFinalizer(() =>
+							Effect.sync(() => registration.mockRestore()),
+						);
+					}
+					if (reason === "visible") {
+						// WebSocket.close starts CLOSING now and emits close later.
+						// The existing visibility listener can initiate that close.
+						for (const socket of fakeSockets) socket.readyState = 2;
+					} else {
+						for (const socket of fakeSockets) socket.close(1006);
+					}
+					yield* Effect.yieldNow();
+					document.dispatchEvent(new Event("visibilitychange"));
+					yield* Effect.yieldNow();
+					expect(fakeSockets).toHaveLength(2);
+					if (reason === "navigation") yield* clients.wake;
+					else if (reason === "online")
+						window.dispatchEvent(new Event("online"));
+					else if (reason === "visible") {
+						document.visibilityState = "visible";
+						document.dispatchEvent(new Event("visibilitychange"));
+						for (const socket of fakeSockets) socket.close(1006);
+					}
+					yield* Deferred.await(redialed);
+					expect(fakeSockets).toHaveLength(4);
+					// Ordinary retries still wait; a wake must not leave a latched signal.
+					for (const socket of fakeSockets.slice(2)) socket.close(1006);
+					yield* Effect.yieldNow();
+					expect(fakeSockets).toHaveLength(4);
+					yield* TestClock.adjust("1 second");
+					expect(fakeSockets).toHaveLength(6);
+				}).pipe(Effect.provide(WsRpcClientsLayer));
+			}),
 	);
 
 	// Live clock: the protocol's redial waits on a real schedule.

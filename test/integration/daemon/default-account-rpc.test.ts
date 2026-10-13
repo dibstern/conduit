@@ -330,7 +330,7 @@ describe("default Claude account through daemon RPC", () => {
 						(yield* Queue.take(list))
 							.filter((item) => item.isDefault)
 							.map((item) => item.id),
-					).toEqual(["claude", "opencode"]);
+					).toEqual(["opencode", "claude"]);
 				}
 				const statuses = yield* Queue.unbounded<void>();
 				yield* Stream.runForEach(second.SubscribeServerStatus({}), () =>
@@ -349,7 +349,7 @@ describe("default Claude account through daemon RPC", () => {
 						(yield* Queue.take(list))
 							.filter((item) => item.isDefault)
 							.map((item) => item.id),
-					).toEqual(["personal", "opencode"]);
+					).toEqual(["opencode", "personal"]);
 				}
 				yield* Queue.take(statuses);
 				const stored = Either.getOrThrowWith(

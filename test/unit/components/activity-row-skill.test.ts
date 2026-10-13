@@ -63,7 +63,14 @@ describe("ActivityRow skill content", () => {
 		await fireEvent.click(row());
 		await screen.findByText("Body");
 
-		const code = container.querySelector("pre code.language-yaml.hljs");
+		// Highlighting waits for the on-demand highlight.js chunk.
+		const code = await vi.waitFor(() => {
+			const highlighted = container.querySelector(
+				"pre code.language-yaml.hljs",
+			);
+			expect(highlighted).not.toBeNull();
+			return highlighted;
+		});
 		expect(code?.textContent?.trim()).toBe(
 			"name: brainstorm\ndescription: Explore ideas",
 		);

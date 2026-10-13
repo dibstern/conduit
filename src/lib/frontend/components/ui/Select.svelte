@@ -2,9 +2,9 @@
 	import type { Snippet } from "svelte";
 	import type { HTMLSelectAttributes } from "svelte/elements";
 	import {
-		CONTROL_SIZE_CLASSES,
 		FIELD_BASE_CLASSES,
-		FIELD_CHROME_CLASSES,
+		SELECT_CHROME_CLASSES,
+		SELECT_SIZE_CLASSES,
 		type FieldSize,
 	} from "./field-styles";
 	import { getFieldContext } from "./field-context";
@@ -51,8 +51,8 @@
 	const selectClass = $derived(
 		[
 			FIELD_BASE_CLASSES,
-			FIELD_CHROME_CLASSES.bordered,
-			CONTROL_SIZE_CLASSES[size],
+			SELECT_CHROME_CLASSES,
+			SELECT_SIZE_CLASSES[size],
 			touchTarget ? "max-md:min-h-[44px]" : "",
 			className,
 		]

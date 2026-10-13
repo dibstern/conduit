@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Exit, Option, Runtime } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
+import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
@@ -11,24 +12,26 @@ import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resol
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
 	ConfigTag,
+	type LoggerTag,
+	type OrchestrationEngineTag,
 	PollerManagerTag,
 	StatusPollerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
-import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import { restoreSessionModelSettings } from "../domain/relay/Services/session-model-settings.js";
+import { restoreSessionSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
 	type OverridesStateTag,
-	setContextWindow,
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
-	setModel,
-	setVariant,
 } from "../domain/relay/Services/session-overrides-state.js";
+import {
+	backfillSessionPicks,
+	loadServerSessionPick,
+} from "../domain/relay/Services/session-pick.js";
 import { SessionSetupTag } from "../domain/relay/Services/session-setup.js";
 import {
 	PollerPubSubTag,
@@ -38,8 +41,8 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
+import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { latestTurnSettingsQuery } from "../persistence/startup-restore-queries.js";
 import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
@@ -93,9 +96,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
-		// Relay startup never contacts OpenCode, so the default model comes from
-		// relay settings only. Before initialize: it picks the first session's
-		// provider.
+		// Defaults come from settings; legacy pick repair uses only stored history.
 		if (initialDefaultModel) {
 			yield* setDefaultModel(initialDefaultModel);
 		}
@@ -111,82 +112,36 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const instance = yield* orchestration.registry.getInstanceEffect("claude");
 		if (instance instanceof ClaudeProviderInstance)
 			yield* instance.recoverEffect();
-		const restoredPermissionModes = yield* restoreSessionPermissionModes();
-		if (restoredPermissionModes > 0) {
-			yield* Effect.sync(() =>
-				log.info(
-					`Restored permission modes for ${restoredPermissionModes} session(s)`,
-				),
-			);
-		}
-		// Model choices live in memory, so after a restart a Claude session would
-		// fall back to the global default (possibly another harness) for both the
-		// picker and its next turn. Its latest turn is the durable record.
-		yield* sql<{ session_id: string; requested_model: string }>`
-			SELECT t.session_id, t.requested_model, MAX(t.requested_at)
-			FROM turns t JOIN sessions s ON s.id = t.session_id
-			WHERE s.provider = 'claude' AND t.requested_model IS NOT NULL
-			GROUP BY t.session_id`.pipe(
-			Effect.flatMap((rows) =>
-				Effect.forEach(rows, (row) =>
-					setModel(row.session_id, {
-						providerID: "claude",
-						modelID: row.requested_model,
-					}),
-				),
-			),
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		if (!(yield* projectionRunner.isRecovered()))
+			yield* projectionRunner.recover();
+		const backfilled = yield* backfillSessionPicks().pipe(
 			Effect.catchAll((error) =>
-				Effect.sync(() =>
+				Effect.sync(() => {
 					log.warn(
-						`Could not restore session models: ${formatErrorDetail(error)}`,
-					),
-				),
+						`Could not backfill session picks: ${formatErrorDetail(error)}`,
+					);
+					return 0;
+				}),
 			),
 		);
-		// Effort and context window are in-memory too; the latest sent turn's
-		// command payload is their durable record. A choice changed after that
-		// turn was never sent, so it is not restored.
-		// The driver is synchronous and payloads run to megabytes, so the query
-		// reads the latest turn per session from receipts and both settings from
-		// an index, never the payloads themselves.
-		yield* sql
-			.unsafe<{
-				session_id: string;
-				variant: string | null;
-				context_window: string | null;
-			}>(latestTurnSettingsQuery)
-			.pipe(
-				Effect.flatMap((rows) =>
-					Effect.forEach(rows, (row) =>
-						Effect.all([
-							row.variant
-								? setVariant(row.session_id, row.variant)
-								: Effect.void,
-							row.context_window
-								? setContextWindow(row.session_id, row.context_window)
-								: Effect.void,
-						]),
-					),
-				),
-				Effect.catchAll((error) =>
-					Effect.sync(() =>
-						log.warn(
-							`Could not restore session effort and context window: ${formatErrorDetail(error)}`,
-						),
-					),
-				),
-			);
-		// Settings recorded on the session row postdate the last turn that
-		// carried them, so they win over the turns-table restore above.
-		yield* restoreSessionModelSettings().pipe(
+		if (backfilled > 0)
+			log.info(`Backfilled picks for ${backfilled} session(s)`);
+		// Restore only the durable pick; past turns never override it.
+		const restored = yield* restoreSessionSettings().pipe(
 			Effect.catchAll((error) =>
-				Effect.sync(() =>
+				Effect.sync(() => {
 					log.warn(
-						`Could not restore session model settings: ${formatErrorDetail(error)}`,
-					),
-				),
+						`Could not restore session settings: ${formatErrorDetail(error)}`,
+					);
+					return { modelSettings: 0, permissionModes: 0 };
+				}),
 			),
 		);
+		if (restored.permissionModes > 0)
+			log.info(
+				`Restored permission modes for ${restored.permissionModes} session(s)`,
+			);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {
@@ -214,24 +169,40 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
-		const sessionsResult = yield* Effect.either(readQueryEffect.listSessions());
-		if (sessionsResult._tag === "Right" && sessionsResult.right.length > 0)
-			yield* statusSnapshot.setSessionCount(sessionsResult.right.length);
+		const sessionsResult = yield* Effect.either(
+			Effect.all({
+				count: sql<{
+					count: number;
+				}>`SELECT COUNT(*) AS count FROM sessions`.pipe(
+					Effect.map((rows) => rows[0]?.count ?? 0),
+				),
+				sessionId: sql<{ id: string | null }>`SELECT COALESCE(
+					(SELECT id FROM sessions WHERE parent_id IS NULL OR parent_id = ''
+						ORDER BY updated_at DESC, id DESC LIMIT 1),
+					(SELECT id FROM sessions ORDER BY updated_at DESC, id DESC LIMIT 1)
+				) AS id`.pipe(Effect.map((rows) => rows[0]?.id ?? undefined)),
+			}),
+		);
+		if (sessionsResult._tag === "Right" && sessionsResult.right.count > 0)
+			yield* statusSnapshot.setSessionCount(sessionsResult.right.count);
 		if (sessionsResult._tag === "Left")
 			yield* Effect.sync(() =>
 				log.warn(
 					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.left)}`,
 				),
 			);
-		const sessions =
-			sessionsResult._tag === "Right" ? sessionsResult.right : [];
 		const sessionId =
-			(sessions.find((session) => !session.parent_id) ?? sessions[0])?.id ?? "";
+			(sessionsResult._tag === "Right"
+				? sessionsResult.right.sessionId
+				: undefined) ?? "";
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;
 		const pollerManager = yield* PollerManagerTag;
 		const instances = yield* OpenCodeInstancesTag;
+		const pickContext = yield* Effect.context<
+			AccountDirectory | ConfigTag | LoggerTag | OrchestrationEngineTag
+		>();
 		const opencodeRuntimeIngress = yield* makeEffectOpenCodeRuntimeIngress(
 			log.child("opencode-runtime-ingress"),
 			(sessionId, instanceId, signal) =>
@@ -249,6 +220,27 @@ function acquireStartupServices(inputs: StartupInputs) {
 				}).pipe(Effect.scoped),
 			(sessionId, messageId) =>
 				orchestration.openCodeInstance.inputIdForUserEcho(sessionId, messageId),
+			(instanceId, parentId) =>
+				Effect.gen(function* () {
+					const parent = parentId
+						? yield* readQueryEffect.getSession(parentId)
+						: undefined;
+					return yield* loadServerSessionPick("opencode", instanceId, parent, {
+						startIfStopped: false,
+					});
+				}).pipe(
+					Effect.provide(pickContext),
+					Effect.catchAll((cause) =>
+						Effect.sync(() => {
+							log.warn("Could not resolve native OpenCode session pick", {
+								instanceId,
+								parentId,
+								cause: formatErrorDetail(cause),
+							});
+							return undefined;
+						}),
+					),
+				),
 		);
 		layers.setHistoryIngress(opencodeRuntimeIngress);
 		if (config.signal?.aborted) {

@@ -222,6 +222,33 @@ export const Advanced: Story = {
 	},
 };
 
+/** Worktree cleanup expanded at its defaults, which warn that ignored files are lost. */
+export const WorktreeCleanup: Story = {
+	args: { initialTab: "general" },
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		const disclosure = body.getByRole("button", {
+			name: /^Worktree cleanup.*Settled and merged$/,
+		});
+		await userEvent.click(disclosure);
+		await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+		disclosure.scrollIntoView({ block: "start" });
+		await expect(body.getByTestId("settings-cleanup-on-settle")).toHaveValue(
+			"merged",
+		);
+		await expect(body.getByTestId("settings-cleanup-idle")).toHaveValue(
+			"never",
+		);
+		await expect(body.getByTestId("settings-cleanup-keep-when")).toHaveValue(
+			"uncommitted-changes",
+		);
+		await expect(
+			body.getByTestId("settings-cleanup-keep-warning"),
+		).toHaveTextContent(/^Ignored files, like \.env/);
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
+
 export const VisibilityEmpty: Story = {
 	args: { initialTab: "models" },
 };

@@ -198,13 +198,13 @@ describe("handleSSEEventEffect", () => {
 					() => Effect.void,
 				);
 				const ref = yield* OverridesStateTag;
-				const before = (yield* Ref.get(ref)).sessions.get(
+				const before = (yield* Ref.get(ref)).processingTimeouts.get(
 					timeoutSessionId,
-				)?.processingTimeoutToken;
+				)?.token;
 				yield* handleSSEEventEffect(deps, event);
-				const after = (yield* Ref.get(ref)).sessions.get(
+				const after = (yield* Ref.get(ref)).processingTimeouts.get(
 					timeoutSessionId,
-				)?.processingTimeoutToken;
+				)?.token;
 				expect(before).toBeDefined();
 				if (expected === "clear") expect(after).toBeUndefined();
 				else if (expected === "reset") expect(after).not.toBe(before);

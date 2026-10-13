@@ -1,5 +1,5 @@
 // The viewed session's family feed (ni8.28): one SubscribeSessionFamily
-// subscription per tab, keyed by project and family, feeding the session
+// subscription per tab, keyed by project and viewed session, feeding the session
 // store's family list through `applyFamilyChange`, its only writer.
 
 import { Effect, Fiber, Stream } from "effect";
@@ -7,11 +7,8 @@ import type { RuntimeFiber } from "effect/Fiber";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
-import {
-	applyFamilyChange,
-	resetSessionFamily,
-	sessionState,
-} from "./session.svelte.js";
+import { applyFamilyChange, resetSessionFamily } from "./session.svelte.js";
+import { sessionDetailRequested } from "./transcript.svelte.js";
 import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
 let viewed: { project: string; sessionId: string } | null = null;
@@ -23,10 +20,9 @@ accountSnapshotChangedListeners.add(() => {
 
 /**
  * Follow the family of `sessionId` in `project`, an explicit argument rather
- * than the ambient selection. Moving between members of the family already
- * held keeps the subscription; another family or project resubscribes, and
- * the old feed's envelopes are dropped by generation, so a late one from the
- * previous project cannot land in this one. `null` stops following.
+ * than the ambient selection. Each viewed member needs its own bounded base,
+ * so changing the session or project resubscribes. The old feed's envelopes
+ * are dropped by generation. `null` stops following.
  */
 export function viewFamily(
 	project: string,
@@ -38,8 +34,7 @@ export function viewFamily(
 		viewed !== null &&
 		sessionId !== null &&
 		viewed.project === project &&
-		(viewed.sessionId === sessionId ||
-			sessionState.familySessions.some((row) => row.id === sessionId))
+		viewed.sessionId === sessionId
 	) {
 		viewed = { project, sessionId };
 		return;
@@ -54,10 +49,13 @@ export function viewFamily(
 		.catch(() => undefined)
 		.then(async () => {
 			if (currentGeneration !== generation || sessionId === null) return;
+			const detailRequested = sessionDetailRequested(project, sessionId);
+			if (detailRequested) await detailRequested;
+			if (currentGeneration !== generation) return;
 			const runtime = await getRuntime();
 			if (currentGeneration !== generation) return;
-			// A new family's snapshot can carry the same read-model version the
-			// last family's floor holds, so it starts from empty, not on top.
+			// A new view's snapshot can carry the same read-model version as the
+			// previous view's floor, so it starts from empty.
 			let fresh = true;
 			const next = runtime.runFork(
 				Effect.flatMap(WsRpcClients, (clients) =>

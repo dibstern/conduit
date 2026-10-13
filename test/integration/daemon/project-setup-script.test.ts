@@ -154,6 +154,7 @@ describe("Project setup scripts through the built daemon", () => {
 			const created = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "project-setup-test",
 					providerId: "claude",

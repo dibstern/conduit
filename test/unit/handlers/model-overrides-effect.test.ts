@@ -123,6 +123,7 @@ describe("model handlers with Effect override state", () => {
 					provider: "openai",
 					variant: "fast",
 					variants: ["standard", "fast"],
+					contextWindow: { contextWindow: "", options: [] },
 				});
 			}).pipe(Effect.provide(layer));
 		},

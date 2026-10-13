@@ -180,7 +180,10 @@ export class MockOpenCodeServer {
 		| Map<string, { promise: Promise<void>; resolve: () => void }>
 		| undefined;
 
-	constructor(recording: OpenCodeRecording) {
+	constructor(
+		recording: OpenCodeRecording,
+		private readonly idleBeforeFirstPrompt = false,
+	) {
 		this.recording = recording;
 		this.buildQueues();
 	}
@@ -1088,6 +1091,13 @@ export class MockOpenCodeServer {
 		// this, the status poller consumes stale "busy" queue entries and
 		// re-injects processing state after SSE already delivered "done".
 		if (method === "GET" && basePath === "/session/status") {
+			// A fresh-server recording can first sample status mid-turn. Inventory
+			// must not make that future busy sample queue the turn that starts replay.
+			if (this.idleBeforeFirstPrompt && this.promptsFired === 0) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end("{}");
+				return;
+			}
 			const statusQueue =
 				this.getActiveQueue(this.exactQueues, exact) ??
 				this.getActiveQueue(this.normalizedQueues, normalized);

@@ -46,12 +46,32 @@ type Member = "SubscribeShell" | "SubscribeSessionDetail";
 const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 	member === "SubscribeShell"
 		? [
-				{ version: 1, sessionIds: [], removedSessionIds: ["session-1"] },
-				{ version: 2, sessionIds: [], removedSessionIds: ["session-2"] },
+				{
+					version: 1,
+					sessionIds: [],
+					removedSessionIds: ["session-1"],
+					collections: ["sidebar"],
+				},
+				{
+					version: 2,
+					sessionIds: [],
+					removedSessionIds: ["session-2"],
+					collections: ["sidebar"],
+				},
 			]
 		: [
-				{ version: 1, sessionIds: ["session-1"], removedSessionIds: [] },
-				{ version: 2, sessionIds: ["session-1"], removedSessionIds: [] },
+				{
+					version: 1,
+					sessionIds: ["session-1"],
+					removedSessionIds: [],
+					collections: ["messages"],
+				},
+				{
+					version: 2,
+					sessionIds: ["session-1"],
+					removedSessionIds: [],
+					collections: ["messages"],
+				},
 			];
 
 const messageRow = (id: string, version = 0): MessageWithParts => ({
@@ -105,6 +125,8 @@ const makeLayer = (options: {
 					getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 					listSessions: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
+					listSessionGitRefreshTargets: () => Effect.succeed([]),
+					getSessionSkillMessages: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),
 					getStrandedChildren: () => Effect.succeed([]),
 					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
@@ -123,6 +145,13 @@ const makeLayer = (options: {
 					// The catch-up read answers from its floor, so the version it
 					// reports is the one the caller will next carry — stateless, and
 					// identical for every subscriber that asks the same question.
+					readSessionTranscriptCatchUp: (_sessionId: string, after: number) =>
+						options.failRead
+							? Effect.fail(readFailure)
+							: Effect.succeed({
+									messages: [messageRow(`message-${after + 1}`, after + 1)],
+									version: after + 1,
+								}),
 					readSessionTranscript: (
 						_sessionId: string,
 						range?: { readonly after?: number; readonly through?: number },

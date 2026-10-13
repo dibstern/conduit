@@ -1,27 +1,28 @@
 import { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Effect, Ref, Schema } from "effect";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
-import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import {
 	type CanonicalEventType,
 	canonicalEvent,
 	type EventPayloadMap,
 } from "../../../persistence/events.js";
+import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { SessionPermissionModeSchema } from "../../../shared-types.js";
 import { SessionManagerError } from "./session-manager-error.js";
 import {
 	type ModelOverride,
+	OverridesStateTag,
+	type SessionState,
 	setContextWindow,
 	setModel,
-	setModelDefault,
 	setVariant,
 } from "./session-overrides-state.js";
 
 // A session's model, effort and context window live in OverridesState for the
-// turn path, and on the session row for every tab (ni8.55). Each write goes
-// through here so the two cannot drift: memory first, then the canonical event
-// whose projection bumps the row version and reaches peers as a shell upsert.
+// picker, and on the session row for dispatch and every tab (ni8.55). The
+// canonical event bumps the row version and reaches peers as a shell upsert.
 // Child sessions are not shell rows; the same version bump reaches their
 // viewers as a family-feed upsert (ni8.28).
 
@@ -61,17 +62,11 @@ const commitModel = (sessionId: string, model: ModelOverride) =>
 
 /** A model the user picked for this session. */
 export const selectSessionModel = (sessionId: string, model: ModelOverride) =>
-	setModel(sessionId, model).pipe(
-		Effect.andThen(commitModel(sessionId, model)),
+	commitModel(sessionId, model).pipe(
+		Effect.andThen(setModel(sessionId, model)),
 	);
 
-/** A model the relay chose for this session; the user did not pick it. */
-export const inferSessionModel = (sessionId: string, model: ModelOverride) =>
-	setModelDefault(sessionId, model).pipe(
-		Effect.andThen(commitModel(sessionId, model)),
-	);
-
-/** "" clears the session's effort back to the default. */
+/** "" explicitly chooses the model's default effort. */
 export const selectSessionVariant = (sessionId: string, variant: string) =>
 	setVariant(sessionId, variant).pipe(
 		Effect.andThen(
@@ -82,7 +77,7 @@ export const selectSessionVariant = (sessionId: string, variant: string) =>
 		),
 	);
 
-/** "" clears the session's context window back to the default. */
+/** "" explicitly chooses the model's default context window. */
 export const selectSessionContextWindow = (
 	sessionId: string,
 	contextWindow: string,
@@ -97,37 +92,83 @@ export const selectSessionContextWindow = (
 	);
 
 /**
- * Load the projected settings back into memory after a restart. Runs after the
- * turns-table restore, so a setting changed since the last turn wins.
+ * Load the projected settings back into memory after a restart. The session row
+ * is the durable pick, including choices changed after the last turn.
  */
-export const restoreSessionModelSettings = () =>
+export const restoreSessionSettings = () =>
 	Effect.gen(function* () {
-		const readQuery = yield* ReadQueryEffectTag;
-		const rows = yield* readQuery.listSessions().pipe(
+		const sql = yield* SqlClient.SqlClient;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		if (!(yield* projectionRunner.isRecovered()))
+			yield* projectionRunner.recover().pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "restoreSessionSettings.recover",
+							cause,
+						}),
+				),
+			);
+		const rows = yield* sql<
+			Pick<
+				SessionRow,
+				| "id"
+				| "model_id"
+				| "model_provider"
+				| "variant"
+				| "context_window"
+				| "permission_mode"
+			>
+		>`SELECT id, model_id, model_provider, variant, context_window, permission_mode
+			FROM sessions WHERE model_id IS NOT NULL OR model_provider IS NOT NULL
+				OR variant IS NOT NULL OR context_window IS NOT NULL OR permission_mode IS NOT NULL`.pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({
-						operation: "restoreModelSettings.listSessions",
+						operation: "restoreSessionSettings.read",
 						cause,
 					}),
 			),
 		);
-		let restored = 0;
-		for (const row of rows) {
-			if (row.model_id != null && row.model_provider != null)
-				yield* setModel(row.id, {
-					modelID: row.model_id,
-					providerID: row.model_provider,
-				});
-			if (row.variant != null) yield* setVariant(row.id, row.variant);
-			if (row.context_window != null)
-				yield* setContextWindow(row.id, row.context_window);
-			if (
-				row.model_id != null ||
-				row.variant != null ||
-				row.context_window != null
-			)
-				restored += 1;
-		}
-		return restored;
+		const isPermissionMode = Schema.is(SessionPermissionModeSchema);
+		const ref = yield* OverridesStateTag;
+		return yield* Ref.modify(ref, (state) => {
+			const sessions = new Map(state.sessions);
+			let modelSettings = 0;
+			let permissionModes = 0;
+			for (const row of rows) {
+				const hasModel = row.model_id != null && row.model_provider != null;
+				const hasPermissionMode = isPermissionMode(row.permission_mode);
+				if (
+					row.model_id != null ||
+					row.variant != null ||
+					row.context_window != null
+				)
+					modelSettings += 1;
+				if (hasPermissionMode) permissionModes += 1;
+				if (
+					!hasModel &&
+					row.variant == null &&
+					row.context_window == null &&
+					!hasPermissionMode
+				)
+					continue;
+				const entry: SessionState = { ...sessions.get(row.id) };
+				if (row.model_id != null && row.model_provider != null)
+					entry.model = {
+						modelID: row.model_id,
+						providerID: row.model_provider,
+					};
+				if (row.variant != null) entry.variant = row.variant;
+				if (row.context_window != null)
+					entry.contextWindow = row.context_window;
+				if (isPermissionMode(row.permission_mode))
+					entry.permissionMode = row.permission_mode;
+				sessions.set(row.id, entry);
+			}
+			return [
+				{ modelSettings, permissionModes },
+				{ ...state, sessions },
+			] as const;
+		});
 	});

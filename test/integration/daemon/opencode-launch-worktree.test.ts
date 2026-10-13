@@ -299,6 +299,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 			instances.find(({ id }) => id === "managed-test")?.capabilities,
 		).toMatchObject({ supportsWorktree: false, supportsNewWorktree: true });
 		const launch = new CreateSession({
+			permissionMode: "ask",
 			projectSlug: "process-test",
 			originId: "cwd-test",
 			title: "Workspace probe",
@@ -325,6 +326,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 				const local = await sendRpcRequest(
 					socket,
 					new CreateSession({
+						permissionMode: "ask",
 						projectSlug: "process-test",
 						originId: "cwd-test",
 						title: "Cross-repository probe",

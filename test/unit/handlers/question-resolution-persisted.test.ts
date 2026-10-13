@@ -56,10 +56,10 @@ import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
+	makeMockConfig,
 	makeMockSessionManagerService,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
@@ -129,7 +129,7 @@ const withHandlerStack = async (
 	const layer = Layer.mergeAll(
 		persistence,
 		bus,
-		Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
 		PendingInteractionServiceLive,
 		Layer.succeed(OpenCodeAPITag, client),
 		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
@@ -207,6 +207,7 @@ it("answering an OpenCode question resolves the row and announces the advance", 
 				version: rows[0]?.version,
 				sessionIds: [SESSION],
 				removedSessionIds: [],
+				collections: ["sessions", "approvals", "sidebar"],
 			});
 		}),
 	);
@@ -231,6 +232,7 @@ it("skipping an OpenCode question resolves the row and announces the advance", a
 				version: rows[0]?.version,
 				sessionIds: [SESSION],
 				removedSessionIds: [],
+				collections: ["sessions", "approvals", "sidebar"],
 			});
 		}),
 	);

@@ -13,7 +13,6 @@
 		takeScopeToken,
 	} from "../../stores/session-scope.js";
 	import type { ProjectInfo } from "../../types.js";
-	import ProjectDialog from "../project/ProjectDialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -364,12 +363,14 @@
 {/snippet}
 
 {#if editing}
-	<ProjectDialog
-		open
-		project={editing}
-		projects={projectState.projects}
-		onclose={() => { editing = null; }}
-		onsaved={applyProjectList}
-		returnFocus={() => scopeChip ?? null}
-	/>
+	{#await import("../project/ProjectDialog.svelte") then { default: ProjectDialog }}
+		<ProjectDialog
+			open
+			project={editing}
+			projects={projectState.projects}
+			onclose={() => { editing = null; }}
+			onsaved={applyProjectList}
+			returnFocus={() => scopeChip ?? null}
+		/>
+	{/await}
 {/if}

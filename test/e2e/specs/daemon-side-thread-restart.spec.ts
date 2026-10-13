@@ -2,6 +2,7 @@
 // still shows Plan and OpenCode still holds the read-only session rules.
 // Spawns its own ephemeral OpenCode, so no live instance or password is needed.
 
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -20,6 +21,7 @@ import { spawnOpenCode } from "../helpers/opencode-spawner.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 const staticDir = resolve(import.meta.dirname, "../../../dist/frontend");
+const modelPick = "opencode/mimo-v2.6-flash-free";
 
 function startDaemon(configDir: string, opencodeUrl: string) {
 	return startForegroundDaemon({
@@ -65,10 +67,13 @@ async function rpc<A>(
 test("a Side Thread keeps Plan and its read-only rules after a daemon restart", async ({
 	page,
 	isMobile,
-}) => {
+}, testInfo) => {
 	test.skip(isMobile, "One viewport proves the restart path");
 	test.setTimeout(120_000);
-	const opencode = await spawnOpenCode({ timeoutMs: 60_000 });
+	const opencode = await spawnOpenCode({
+		timeoutMs: 60_000,
+		env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: modelPick }) },
+	});
 	const configDir = mkdtempSync(join(tmpdir(), "e2e-side-restart-"));
 	const projectDir = mkdtempSync(join(tmpdir(), "e2e-side-restart-project-"));
 	let daemon: ForegroundDaemonHandle | undefined;
@@ -78,24 +83,56 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		const sideId = await rpc(daemon, (client) =>
 			Effect.gen(function* () {
 				const parent = yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug,
 					originId: "daemon-side-thread-restart",
 					providerId: "opencode",
 					title: "Parent",
+					model: {
+						providerId: "opencode",
+						modelId: "mimo-v2.6-flash-free",
+						variant: "",
+						contextWindow: "",
+					},
 				});
 				const side = yield* client.StartSideThread({
 					projectSlug,
 					parentSessionId: parent.sessionId,
 					title: "What is in this project?",
-				});
-				// Side Threads start in Ask; Plan proves a chosen mode is persisted
-				// rather than re-derived from the default.
-				yield* client.SwitchPermissionMode({
-					projectSlug,
-					sessionId: side.sessionId,
-					mode: "plan",
+					inputId: randomUUID(),
+					text: "Reply with exactly READY. Do not use tools.",
 				});
 				return side.sessionId;
+			}),
+		);
+		const sideMessages = async () => {
+			const response = await fetch(
+				`${opencode.url}/session/${sideId}/message?directory=${encodeURIComponent(projectDir)}`,
+			);
+			return (await response.json()) as Array<{
+				info: { role: string; agent?: string; time: { completed?: number } };
+			}>;
+		};
+		// The first prompt rides on the start; let its turn finish so the
+		// restart below does not interrupt it.
+		await expect
+			.poll(
+				async () =>
+					(await sideMessages()).some(
+						(message) =>
+							message.info.role === "assistant" &&
+							message.info.time.completed !== undefined,
+					),
+				{ timeout: 60_000 },
+			)
+			.toBe(true);
+		// Side Threads start in Ask; Plan proves a chosen mode is persisted
+		// rather than re-derived from the default.
+		await rpc(daemon, (client) =>
+			client.SwitchPermissionMode({
+				projectSlug,
+				sessionId: sideId,
+				mode: "plan",
 			}),
 		);
 
@@ -108,6 +145,10 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 			client.GetModels({ projectSlug, sessionId: sideId }),
 		);
 		expect(restored.permissionMode).toBe("plan");
+		expect(restored.active).toMatchObject({
+			provider: "opencode",
+			model: "mimo-v2.6-flash-free",
+		});
 
 		const app = new AppPage(page);
 		await page.goto(`http://127.0.0.1:${daemon.port}/s/${sideId}`);
@@ -117,20 +158,13 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		);
 
 		await app.sendMessage("List the files here.");
-		const agents = async () => {
-			const response = await fetch(
-				`${opencode.url}/session/${sideId}/message?directory=${encodeURIComponent(projectDir)}`,
-			);
-			const messages = (await response.json()) as Array<{
-				info: { role: string; agent?: string };
-			}>;
-			return messages
+		const agents = async () =>
+			(await sideMessages())
 				.filter((message) => message.info.role === "user")
 				.map((message) => message.info.agent);
-		};
 		// Side Threads keep the chosen agent in Plan; the session rules below
 		// are what make it read-only.
-		await expect.poll(agents, { timeout: 30_000 }).toEqual(["build"]);
+		await expect.poll(agents, { timeout: 30_000 }).toEqual(["build", "build"]);
 		const session = (await (
 			await fetch(
 				`${opencode.url}/session/${sideId}?directory=${encodeURIComponent(projectDir)}`,
@@ -146,6 +180,19 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 			{ permission: "bash", pattern: "*", action: "ask" },
 			{ permission: "task", pattern: "*", action: "deny" },
 		]);
+		await testInfo.attach("side-thread-restart-proof.json", {
+			body: JSON.stringify(
+				{
+					sideId,
+					restoredPick: restored,
+					agents: await agents(),
+					rules: session.permission,
+				},
+				null,
+				2,
+			),
+			contentType: "application/json",
+		});
 	} finally {
 		await daemon?.stop();
 		await stopPtyHost({ configDir, force: true });

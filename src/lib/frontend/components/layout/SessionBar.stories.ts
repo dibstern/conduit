@@ -8,8 +8,8 @@ import {
 } from "../../stores/chat.svelte.js";
 import {
 	applyGetAgentsResponse,
-	discoveryState,
-	handleModelInfo,
+	applyGetModelsResponse,
+	clearDiscoveryState,
 } from "../../stores/discovery.svelte.js";
 import {
 	goalDetails,
@@ -107,6 +107,7 @@ const meta = {
 		const now = sessionState.now;
 		goalDetails.open = false;
 		getGoalDetails.mockClear();
+		clearDiscoveryState();
 		clearSessionState();
 		// Layout/Header seeds this same module-level store, and Storybook shares
 		// it across story files. Reset or the badge appears in every story.
@@ -143,6 +144,7 @@ const meta = {
 				? Promise.resolve(Response.json({ status: "ready" }))
 				: guardedFetch(input, init);
 		return () => {
+			clearDiscoveryState();
 			globalThis.fetch = guardedFetch;
 			attachedProjectState.slug = null;
 			goalDetails.open = detailsOpen;
@@ -185,9 +187,27 @@ function setupGoal(
 	state: "checking" | "not_yet" | "paused" | "met" | "cleared",
 ) {
 	const previous = sessionGoals.get(mockSession.id);
-	const model = discoveryState.currentModelId;
-	const provider = discoveryState.currentProviderId;
-	handleModelInfo({ model, provider: "claude" });
+	applyGetModelsResponse(
+		{
+			projectSlug: "conduit",
+			instanceId: "claude",
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{ id: "story-model", name: "Story model", provider: "claude" },
+					],
+				},
+			],
+			active: { model: "story-model", provider: "claude" },
+			variant: { variant: "", variants: [] },
+			contextWindow: { contextWindow: "", options: [] },
+			permissionMode: "ask",
+		},
+		mockSession.id,
+	);
 	phaseToIdle(getOrCreateSessionActivity(mockSession.id));
 	goalStorySetAt = Math.max(
 		goalStorySetAt + 1,
@@ -225,7 +245,6 @@ function setupGoal(
 	return () => {
 		if (previous) handleGoalChanged(previous);
 		else sessionGoals.delete(mockSession.id);
-		handleModelInfo({ model, provider });
 	};
 }
 

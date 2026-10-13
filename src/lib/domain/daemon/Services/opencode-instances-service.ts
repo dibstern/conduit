@@ -83,6 +83,11 @@ export interface OpenCodeInstances {
 		instanceId: string,
 		directory?: string,
 	) => Effect.Effect<OpenCodeClient, OpenCodeUnavailable, Scope.Scope>;
+	/** Inventory hold. A server started only by borrowers gets a short idle grace. */
+	readonly borrow: (
+		instanceId: string,
+		directory?: string,
+	) => Effect.Effect<OpenCodeClient, OpenCodeUnavailable, Scope.Scope>;
 	/** Client when the instance is running; None otherwise. Makes no request. */
 	readonly ifRunning: (
 		instanceId: string,

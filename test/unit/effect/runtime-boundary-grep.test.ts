@@ -2249,7 +2249,8 @@ describe("Effect runtime boundary grep", () => {
 				reason: "provider-state load/save belongs to ProviderTurnService",
 			},
 			{
-				pattern: /\bReadQueryEffectTag\b/,
+				pattern:
+					/\b(getClaudeHistoryMetadata|getMessages|loadClaudeHistoryMetadata)\b/,
 				reason: "Claude prior-history reads belong to ProviderTurnService",
 			},
 			{

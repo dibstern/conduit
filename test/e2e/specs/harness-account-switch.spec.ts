@@ -69,6 +69,7 @@ test("a just-added Claude account can run a session immediately", async ({
 	if (!addedInstanceId) throw new Error("No immediate account ID");
 	const { sessionId } = await Effect.runPromise(
 		browser.rpc.CreateSession({
+			permissionMode: "ask",
 			projectSlug: "process-test",
 			instanceId: Schema.decodeUnknownSync(
 				Schema.String.pipe(Schema.brand("AccountId")),
@@ -209,6 +210,7 @@ for (const stale of [false, true]) {
 				.toBe(true);
 			const { sessionId } = await Effect.runPromise(
 				browser.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug,
 					instanceId: Schema.decodeUnknownSync(
 						Schema.String.pipe(Schema.brand("AccountId")),
@@ -710,6 +712,7 @@ for (const decision of [
 			.toBe(true);
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug,
 				originId: browser.originId,
 				instanceId,
@@ -1117,6 +1120,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			.toEqual({ listed: true, usageLimits });
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug,
 				instanceId: Schema.decodeUnknownSync(
 					Schema.String.pipe(Schema.brand("AccountId")),
@@ -1480,6 +1484,7 @@ for (const scenario of [
 			.toBe(true);
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug,
 				originId: browser.originId,
 				instanceId,
@@ -1881,6 +1886,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 		}
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug,
 				originId: browser.originId,
 				instanceId,
@@ -2516,6 +2522,7 @@ for (const behavior of [
 			.toBe(true);
 		const { sessionId } = await Effect.runPromise(
 			browser.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug,
 				instanceId: Schema.decodeUnknownSync(
 					Schema.String.pipe(Schema.brand("AccountId")),
@@ -3190,6 +3197,7 @@ test("story 16: composer account cards switch the session, not the project", asy
 		.toBe(true);
 	const { sessionId } = await Effect.runPromise(
 		browser.rpc.CreateSession({
+			permissionMode: "ask",
 			projectSlug,
 			instanceId: Schema.decodeUnknownSync(
 				Schema.String.pipe(Schema.brand("AccountId")),

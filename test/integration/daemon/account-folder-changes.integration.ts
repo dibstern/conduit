@@ -8,6 +8,8 @@
  * - Missing native history in the new folder must use the canonical handoff.
  * - A shared transcript may resume, but its old receipt cannot pick the folder.
  * - Legacy receipts without a folder must also fall back when resume is missing.
+ * - Forking before the next turn after a folder edit must copy bounded canonical
+ *   history without reading the old native transcript from the new login.
  * All logins, daemon state and child processes belong to the process harness.
  */
 import { randomUUID } from "node:crypto";
@@ -25,6 +27,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	AddInstance,
+	ForkSession,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -60,6 +63,7 @@ describe("Account folder changes without daemon restart", () => {
 			inputs: unknown[];
 			commands: unknown[];
 			events: unknown[];
+			forkEvents: unknown[];
 		};
 		try {
 			persisted = {
@@ -76,6 +80,11 @@ describe("Account folder changes without daemon restart", () => {
 				events: db
 					.prepare(
 						"SELECT type, json_extract(data, '$.inputId') AS inputId, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.status') AS status FROM events WHERE type IN ('input.admitted', 'input.sent', 'input.started', 'turn.started', 'turn.end', 'turn.error', 'session.status') ORDER BY sequence",
+					)
+					.all(),
+				forkEvents: db
+					.prepare(
+						"SELECT session_id, type, data FROM events WHERE type IN ('session.created', 'session.forked') ORDER BY sequence",
 					)
 					.all(),
 			};
@@ -119,6 +128,92 @@ describe("Account folder changes without daemon restart", () => {
 		);
 		return folder;
 	}
+
+	it("forks bounded canonical history after a folder edit before the next parent turn", async () => {
+		const { daemon, browser } = await start();
+		const original = login(daemon, "original-fork");
+		const edited = login(daemon, "edited-fork");
+		const accountId = AccountIdSchema.make("claude");
+		await daemon.requestRpc(
+			new UpdateInstance({ instanceId: accountId, configDir: original }),
+		);
+		const parentId = await browser.createSession(
+			"Fork after login edit",
+			accountId,
+		);
+		const retained = "history-before-fork-boundary";
+		expect((await browser.send(parentId, retained)).chunks.join("")).toBe(
+			responseChunks(retained).join(""),
+		);
+		const boundary = (await browser.history(parentId)).find(
+			(message) => message.role === "assistant",
+		);
+		if (!boundary) throw new Error("Missing completed assistant fork boundary");
+		const excluded = "history-after-fork-boundary";
+		await browser.send(parentId, excluded);
+		const originalQuery = daemon.marks.find((mark) => mark.kind === "query");
+		if (originalQuery?.kind !== "query")
+			throw new Error("Missing original-folder query");
+		expect(
+			existsSync(
+				join(
+					original,
+					`conduit-test-transcript-${originalQuery.sessionId}.ndjson`,
+				),
+			),
+		).toBe(true);
+		expect(
+			existsSync(
+				join(
+					edited,
+					`conduit-test-transcript-${originalQuery.sessionId}.ndjson`,
+				),
+			),
+		).toBe(false);
+		await daemon.requestRpc(
+			new UpdateInstance({ instanceId: accountId, configDir: edited }),
+		);
+		const fork = await daemon.requestRpc(
+			new ForkSession({
+				projectSlug: "process-test",
+				originId: browser.originId,
+				sessionId: parentId,
+				messageId: boundary.id,
+			}),
+		);
+		expect(fork.sessionId).not.toBe(parentId);
+		expect(daemon.marks.filter((mark) => mark.kind === "native-fork")).toEqual(
+			[],
+		);
+		const forkText = (await browser.history(fork.sessionId)).flatMap(
+			(message) =>
+				message.parts?.flatMap((part) =>
+					part.type === "text" ? [part.text] : [],
+				) ?? [],
+		);
+		expect(forkText).toContain(retained);
+		expect(forkText).toContain(responseChunks(retained).join(""));
+		expect(forkText).not.toContain(excluded);
+		expect(forkText).not.toContain(responseChunks(excluded).join(""));
+		const next = "first-turn-in-edited-fork";
+		expect((await browser.send(fork.sessionId, next)).chunks.join("")).toBe(
+			responseChunks(next).join(""),
+		);
+		expect(launches().at(-1)).toMatchObject({
+			configDir: edited,
+			resumeId: null,
+		});
+		expect(launches().at(-1)?.prompt).toContain("[Conduit context handoff]");
+		expect(launches().at(-1)?.prompt).toContain(retained);
+		expect(launches().at(-1)?.prompt).toContain(
+			responseChunks(retained).join(""),
+		);
+		expect(launches().at(-1)?.prompt).not.toContain(excluded);
+		expect(daemon.marks.filter((mark) => mark.kind === "native-fork")).toEqual(
+			[],
+		);
+		expect(daemon.generations).toHaveLength(1);
+	});
 
 	it.each([
 		false,

@@ -167,17 +167,35 @@ export async function createSession(
 		Effect.scoped(
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(WsRpcGroup);
+				const modelCatalog = yield* client.GetModels({
+					projectSlug: "e2e-replay",
+					instanceId:
+						instanceId === undefined
+							? providerId === "opencode"
+								? MANAGED_OPENCODE_ACCOUNT_ID
+								: AccountIdSchema.make("claude-sdk")
+							: AccountIdSchema.make(instanceId),
+				});
+				if (!modelCatalog.active)
+					throw new Error(
+						"The replay fixture needs a valid harness model pick",
+					);
 				return yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "e2e-replay",
 					originId: `e2e-${providerId}-replay`,
 					providerId,
+					model: {
+						providerId: modelCatalog.active.provider,
+						modelId: modelCatalog.active.model,
+						variant: modelCatalog.variant?.variant ?? "",
+						contextWindow: modelCatalog.contextWindow?.contextWindow ?? "",
+					},
 					// Naming the instance routes creation through OpenCode Instances
 					// `use`, which opens the event stream replayed turns arrive on.
-					...(providerId === "opencode"
-						? { instanceId: MANAGED_OPENCODE_ACCOUNT_ID }
-						: instanceId === undefined
-							? {}
-							: { instanceId: AccountIdSchema.make(instanceId) }),
+					...(modelCatalog.instanceId === undefined
+						? {}
+						: { instanceId: AccountIdSchema.make(modelCatalog.instanceId) }),
 				});
 			}),
 		).pipe(

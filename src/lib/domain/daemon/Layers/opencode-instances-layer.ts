@@ -72,6 +72,8 @@ const decodeEnvelope = Schema.decodeUnknownEither(
 );
 
 export type OpenCodeEndpoint = {
+	/** Registered identity, including when the caller used the default alias. */
+	readonly instanceId?: string;
 	readonly url: string;
 	readonly auth?: { readonly username: string; readonly password: string };
 	/** Unknown (treated as running) when the resolver has no process state. */
@@ -128,6 +130,22 @@ const NO_STREAM_HEALTH: ConnectionHealth = {
 
 const CONNECT_TIMEOUT = "4 seconds";
 
+const OPENCODE_BORROW_IDLE_TIMEOUT_MS = 30_000;
+
+/** Test harness override; ordinary instance idle policy is independent. */
+const borrowIdleTimeoutFromEnv = Effect.sync(() => {
+	const configured =
+		process.env["CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS"];
+	return configured === undefined
+		? OPENCODE_BORROW_IDLE_TIMEOUT_MS
+		: Number(configured);
+}).pipe(
+	Effect.filterOrDieMessage(
+		(ms) => Number.isInteger(ms) && ms > 0 && ms <= 2_147_483_647,
+		"CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS must be an integer from 1 to 2147483647",
+	),
+);
+
 /** Grace before an instance without demand stops, like the PTY host's idle timeout. */
 const idleTimeoutFromEnv = Effect.sync(() => {
 	const configured = process.env["CONDUIT_OPENCODE_IDLE_TIMEOUT_MS"];
@@ -157,6 +175,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				options;
 			const idleTimeoutMs =
 				options.idleTimeoutMs ?? (yield* idleTimeoutFromEnv);
+			const borrowIdleTimeoutMs = yield* borrowIdleTimeoutFromEnv;
 			const context = yield* Effect.context<R | Start | Stop>();
 			const scope = yield* Effect.scope;
 			const gate = yield* Effect.makeSemaphore(1);
@@ -175,6 +194,8 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			// prompts the stream's reconciler sees. Guarded by `gate`.
 			const streams = new Map<string, InstanceStream>();
 			const holds = new Map<string, number>();
+			// Removed permanently for this start when real use joins it.
+			const borrowedStarts = new Set<string>();
 			const graces = new Map<
 				string,
 				{ readonly token: number; readonly fiber: Fiber.RuntimeFiber<void> }
@@ -218,6 +239,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			};
 			const resolveIn = (instanceId: string) =>
 				resolveEndpoint(instanceId).pipe(Effect.provide(context));
+			const resolveId = (instanceId: string) =>
+				Effect.map(
+					resolveIn(instanceId),
+					(endpoint) => endpoint?.instanceId ?? instanceId,
+				);
 			const setState = (
 				instanceId: string,
 				state: OpenCodeConnectionStatus,
@@ -433,21 +459,26 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			const settle = (instanceId: string): Effect.Effect<void> =>
 				Effect.suspend(() => {
 					const stream = streams.get(instanceId);
+					if (stream?.reconciler.active()) borrowedStarts.delete(instanceId);
 					const idle =
-						stream !== undefined &&
+						(stream !== undefined ||
+							(borrowedStarts.has(instanceId) && !starts.has(instanceId))) &&
 						!stopping.has(instanceId) &&
 						!holds.has(instanceId) &&
-						!stream.reconciler.active();
+						!stream?.reconciler.active();
 					if (!idle) return cancelGrace(instanceId);
 					if (graces.has(instanceId)) return Effect.void;
 					const token = ++graceTokens;
+					const timeoutMs = borrowedStarts.has(instanceId)
+						? borrowIdleTimeoutMs
+						: idleTimeoutMs;
 					log.debug("OpenCode instance idle; grace timer armed", {
 						instanceId,
-						idleTimeoutMs,
+						idleTimeoutMs: timeoutMs,
 					});
 					// `use` settles from acquire/release, which are uninterruptible;
 					// the timer must stay cancellable.
-					return Effect.sleep(idleTimeoutMs).pipe(
+					return Effect.sleep(timeoutMs).pipe(
 						Effect.zipRight(expire(instanceId, token)),
 						Effect.interruptible,
 						Effect.forkIn(scope),
@@ -467,6 +498,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				Effect.gen(function* () {
 					const done = yield* Deferred.make<void>();
 					stopping.set(instanceId, done);
+					borrowedStarts.delete(instanceId);
 					yield* cancelGrace(instanceId);
 					yield* Effect.forEach(
 						[...streams].filter(
@@ -546,7 +578,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 									endpoint?.managed
 										? "Stopping idle OpenCode instance"
 										: "Closing idle OpenCode instance stream",
-									{ instanceId, idleTimeoutMs },
+									{
+										instanceId,
+										idleTimeoutMs: borrowedStarts.has(instanceId)
+											? borrowIdleTimeoutMs
+											: idleTimeoutMs,
+									},
 								);
 								return beginStop(instanceId);
 							}),
@@ -641,7 +678,26 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 									.withPermits(1)(
 										Effect.gen(function* () {
 											starts.delete(instanceId);
-											if (Exit.isSuccess(exit)) return;
+											if (Exit.isSuccess(exit)) {
+												const endpoint = yield* resolveIn(instanceId);
+												// A lazy Default resolving to an external server was
+												// never started by this borrow.
+												if (!endpoint?.managed)
+													borrowedStarts.delete(instanceId);
+												// Every orphaned success settles, including a borrow
+												// promoted by ordinary use before both callers cancel.
+												if (
+													!holds.has(instanceId) &&
+													!stopping.has(instanceId) &&
+													endpoint &&
+													endpoint.status !== "stopped"
+												) {
+													yield* ensureStream(instanceId, endpoint);
+													yield* settle(instanceId);
+												}
+												return;
+											}
+											borrowedStarts.delete(instanceId);
 											// A stop that won the race already settled the state.
 											if (states.get(instanceId)?.state !== "stopped") {
 												setState(instanceId, "failed", terminated);
@@ -660,20 +716,33 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				});
 
 			/** Counts a `use` scope as demand, first waiting out a stop in progress. */
-			const hold = (instanceId: string): Effect.Effect<void> =>
+			const hold = (instanceId: string, borrow = false): Effect.Effect<void> =>
 				gate
 					.withPermits(1)(
-						Effect.suspend(() => {
+						Effect.gen(function* () {
 							const stop = stopping.get(instanceId);
-							if (stop) return Effect.succeed(stop);
+							if (stop) return stop;
+							if (!borrow) borrowedStarts.delete(instanceId);
+							else if (!holds.has(instanceId) && !starts.has(instanceId)) {
+								const endpoint = yield* resolveIn(instanceId);
+								if (
+									endpoint &&
+									(endpoint.status === "stopped" ||
+										(endpoint.managed && endpoint.status !== "healthy"))
+								)
+									borrowedStarts.add(instanceId);
+							}
 							holds.set(instanceId, (holds.get(instanceId) ?? 0) + 1);
-							return Effect.as(settle(instanceId), undefined);
+							yield* settle(instanceId);
+							return undefined;
 						}),
 					)
 					.pipe(
 						Effect.flatMap((stop) =>
 							stop
-								? Deferred.await(stop).pipe(Effect.zipRight(hold(instanceId)))
+								? Deferred.await(stop).pipe(
+										Effect.zipRight(hold(instanceId, borrow)),
+									)
 								: Effect.void,
 						),
 					);
@@ -688,9 +757,9 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					}),
 				);
 
-			const use = (instanceId: string, directory?: string) =>
+			const use = (instanceId: string, directory?: string, borrow = false) =>
 				Effect.gen(function* () {
-					yield* Effect.acquireRelease(hold(instanceId), () =>
+					yield* Effect.acquireRelease(hold(instanceId, borrow), () =>
 						release(instanceId),
 					);
 					let endpoint = yield* resolveIn(instanceId);
@@ -731,7 +800,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						// A freshly opened stream must be live before the caller acts,
 						// or events for that action could be missed.
 						Effect.zipRight(
-							opened && stream
+							stream
 								? Deferred.await(stream.connected).pipe(
 										Effect.timeoutFail({
 											duration: CONNECT_TIMEOUT,
@@ -902,6 +971,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							gate
 								.withPermits(1)(
 									Effect.gen(function* () {
+										const subscribedId = yield* resolveId(instanceId);
 										const subscriber = yield* Effect.acquireRelease(
 											Effect.sync(() => {
 												const member = {
@@ -932,9 +1002,9 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 													}),
 												),
 										);
-										const stream = streams.get(instanceId);
+										const stream = streams.get(subscribedId);
 										for (const [id, { state, managedStopped }] of states) {
-											if (id !== instanceId && !managedStopped) continue;
+											if (id !== subscribedId && !managedStopped) continue;
 											subscriber.send({
 												_tag: "connection",
 												instanceId: id,
@@ -948,7 +1018,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 										if (stream?.source.isConnected())
 											subscriber.send({
 												_tag: "connected",
-												instanceId,
+												instanceId: subscribedId,
 												health: stream.source.getHealth(),
 											});
 										// Recover every already-open instance, including sessions
@@ -977,41 +1047,50 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								.pipe(Effect.uninterruptible),
 						"unbounded",
 					),
-				use,
+				use: (instanceId, directory) =>
+					Effect.flatMap(resolveId(instanceId), (id) => use(id, directory)),
+				borrow: (instanceId, directory) =>
+					Effect.flatMap(resolveId(instanceId), (id) =>
+						use(id, directory, true),
+					),
 				useIfRunning: (instanceId, directory) =>
-					gate.withPermits(1)(
-						Effect.gen(function* () {
-							const endpoint = yield* resolveIn(instanceId);
-							if (
-								!endpoint ||
-								endpoint.status === "stopped" ||
-								(endpoint.managed && endpoint.status !== "healthy") ||
-								stopping.has(instanceId)
-							)
-								return Option.none();
-							// Check and retain under the stop/idle gate. Register release
-							// before opening transport, so interruption cannot leak demand.
-							yield* Effect.acquireRelease(
-								Effect.sync(() =>
-									holds.set(instanceId, (holds.get(instanceId) ?? 0) + 1),
-								),
-								() => release(instanceId),
-							);
-							yield* settle(instanceId);
-							yield* ensureStream(instanceId, endpoint);
-							return Option.some(clientFor(endpoint, directory));
-						}),
+					Effect.flatMap(resolveId(instanceId), (instanceId) =>
+						gate.withPermits(1)(
+							Effect.gen(function* () {
+								const endpoint = yield* resolveIn(instanceId);
+								if (
+									!endpoint ||
+									endpoint.status === "stopped" ||
+									(endpoint.managed && endpoint.status !== "healthy") ||
+									stopping.has(instanceId)
+								)
+									return Option.none();
+								// Check and retain under the stop/idle gate. Register release
+								// before opening transport, so interruption cannot leak demand.
+								yield* Effect.acquireRelease(
+									Effect.sync(() =>
+										holds.set(instanceId, (holds.get(instanceId) ?? 0) + 1),
+									),
+									() => release(instanceId),
+								);
+								yield* settle(instanceId);
+								yield* ensureStream(instanceId, endpoint);
+								return Option.some(clientFor(endpoint, directory));
+							}),
+						),
 					),
 				// Reads process state only: no request, no stream, never a start.
 				ifRunning: (instanceId: string, directory?: string) =>
-					Effect.map(resolveIn(instanceId), (endpoint) =>
-						endpoint &&
-						endpoint.status !== "stopped" &&
-						!stopping.has(instanceId)
-							? Option.some(clientFor(endpoint, directory))
-							: Option.none(),
+					Effect.flatMap(resolveId(instanceId), (instanceId) =>
+						Effect.map(resolveIn(instanceId), (endpoint) =>
+							endpoint &&
+							endpoint.status !== "stopped" &&
+							!stopping.has(instanceId)
+								? Option.some(clientFor(endpoint, directory))
+								: Option.none(),
+						),
 					),
-				stop,
+				stop: (instanceId) => Effect.flatMap(resolveId(instanceId), stop),
 			};
 		}),
 	);
@@ -1035,6 +1114,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 					: instance.env,
 			);
 			return {
+				instanceId: instance.id,
 				url,
 				status: instance.status,
 				managed: instance.managed,

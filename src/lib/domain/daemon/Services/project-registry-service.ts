@@ -805,10 +805,25 @@ export const replaceRelay = (slug: string) =>
 		Effect.withSpan("projectRegistry.replaceRelay"),
 	);
 
-/** The first OpenCode instance drives the relay's default sessions. */
-export const openCodeInstanceFor = <I extends { id: string; driver?: string }>(
+/** The first configured OpenCode endpoint drives the relay's default sessions. */
+export const openCodeInstanceFor = <
+	I extends {
+		id: string;
+		driver?: string;
+		managed?: boolean;
+		port?: number;
+		url?: string;
+	},
+>(
 	instances: readonly I[],
-): I | undefined => instances.find((i) => i.driver !== "claude");
+): I | undefined =>
+	instances.find((instance) => {
+		if (instance.driver === "claude") return false;
+		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
+		if (instance.url !== undefined)
+			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";
+		return instance.port === undefined;
+	});
 
 /**
  * Check if a project is currently in Registering state

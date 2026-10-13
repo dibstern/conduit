@@ -286,13 +286,13 @@
 		<MenuSeparator />
 		{#if missingFolders.length}
 			<div class="px-[8px] py-[6px] text-[10px] text-warning">
-				<p>Missing worktrees:</p>
+				<p>{workspaceMissing.canRecreate ? "These worktrees are missing. They will be recreated from their branches on your next message:" : "Missing worktrees:"}</p>
 				{#each missingFolders as folder, index (folder.folder)}
 					<p class="mt-[4px] break-all" data-testid="workspace-missing-folder">{missingFolderLabels[index]?.label ?? folder.folder}<span class="block text-text-muted">{folder.path}</span>{#if folder.reason === "branch-missing"}<span class="block">Its branch no longer exists.</span>{/if}</p>
 				{/each}
 			</div>
 		{:else}
-			<p class="px-[8px] py-[6px] text-[10px] text-warning">The session's worktree is missing.{#if workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}</p>
+			<p class="px-[8px] py-[6px] text-[10px] text-warning">{#if workspaceMissing.canRecreate}This worktree is missing. It will be recreated from its branch on your next message.{:else}The session's worktree is missing.{#if workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}{/if}</p>
 		{/if}
 		{#if workspaceMissing.canRecreate && onrecreate}<MenuItem disabled={moving || dismissing} data-testid="workspace-recreate" onselect={() => void recover("recreate")}>Recreate worktree</MenuItem>{/if}
 		{#if oncontinue}<MenuItem disabled={moving || dismissing} data-testid="workspace-continue-main" onselect={() => void recover("continue")}>Continue in main folder</MenuItem>{/if}

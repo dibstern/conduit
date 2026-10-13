@@ -4,7 +4,12 @@
 
 import { Option, Schema } from "effect";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
-import { Utf8Bytes } from "../contracts/tool-wire.js";
+import {
+	type MessageVersion,
+	type PartVersion,
+	Utf8Bytes,
+} from "../contracts/tool-wire.js";
+import type { SessionDetailItemSchema } from "../contracts/ws-rpc.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import type {
 	HistoryMessage,
@@ -395,21 +400,70 @@ export const PAGE_FRAME_BUDGET = Utf8Bytes.make(256 * 1024);
 
 // What a frame holds besides its rows: the RPC wrapper and the page's
 // sequence, cursor and paging flags.
-const FRAME_ENVELOPE_BYTES = 1_024;
+export const FRAME_ENVELOPE_BYTES = 1_024;
+
+type SessionDetailItem = typeof SessionDetailItemSchema.Type;
+
+/** Each row at the version its own table carries: a part's is never its message's. */
+export type DetailRow =
+	| {
+			readonly item: Extract<SessionDetailItem, { _tag: "message" }>;
+			readonly version: MessageVersion;
+	  }
+	| {
+			readonly item: Extract<SessionDetailItem, { _tag: "part" }>;
+			readonly version: PartVersion;
+	  };
 
 /**
- * The newest of `rows` that fit one frame of `budget`, oldest first. A row is
- * weighed whole, as its JSON, so a page never splits a message; the newest row
- * stays however large it is, so a page always holds one whole message.
+ * Split each projected message into its rows: a row for each part the read
+ * returned, then a message row when `moved` says its own version is in the
+ * window. The header comes last so a client that declines it (a message below
+ * its held page) can drop the parts it has just queued along with it.
+ * One group per message, so a page can keep or drop a message whole. The
+ * adapter gets exactly these messages, so index `i` is still message `i`.
  */
-export function newestRowsWithin<T>(
-	rows: readonly T[],
-	budget: Utf8Bytes,
-): readonly T[] {
-	let bytes = FRAME_ENVELOPE_BYTES;
-	for (let index = rows.length - 1; index >= 0; index--) {
-		bytes += Buffer.byteLength(JSON.stringify(rows[index]), "utf8") + 1;
-		if (bytes > budget && index < rows.length - 1) return rows.slice(index + 1);
-	}
-	return rows;
-}
+export const messageRowGroups = (
+	messages: MessageWithParts[],
+	moved: (version: MessageVersion) => boolean,
+	projectedMessages: readonly HistoryMessage[] = messageRowsToHistory(
+		messages,
+		{
+			pageSize: messages.length,
+		},
+	).messages,
+): DetailRow[][] =>
+	projectedMessages.map((message, index): DetailRow[] => {
+		const stored = messages[index];
+		if (stored === undefined) return [];
+		// The parts travel as rows; text is theirs, joined.
+		const { parts = [], text: _text, ...header } = message;
+		// A REST snapshot's parts come from its payload, stored under the same ids.
+		const projected = new Map(parts.map((part) => [part.id, part]));
+		return [
+			...stored.parts.flatMap((row): DetailRow[] => {
+				const part = projected.get(row.id);
+				return part === undefined
+					? []
+					: [
+							{
+								item: {
+									_tag: "part",
+									messageId: stored.id,
+									sortOrder: row.sort_order,
+									part,
+								},
+								version: row.version,
+							},
+						];
+			}),
+			...(moved(stored.version)
+				? [
+						{
+							item: { _tag: "message" as const, message: header },
+							version: stored.version,
+						},
+					]
+				: []),
+		];
+	});

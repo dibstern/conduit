@@ -90,6 +90,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	type OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
+	openCodeInstanceTarget,
 	SessionCompactionsTag,
 	SessionRetriesTag,
 	type WebSocketHandlerTag,
@@ -154,8 +155,7 @@ const relayOpenCodeInstances = (
 ): OpenCodeInstances => {
 	const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
 	const selectedId = config.openCodeInstanceId ?? defaultId;
-	const target = (instanceId: string) =>
-		instanceId === defaultId ? selectedId : instanceId;
+	const target = openCodeInstanceTarget(selectedId);
 	const scope = config.noServer ? config.projectDir : undefined;
 	// Restored sessions receive events before the relay first uses their instance.
 	const used = new Set(persistedInstanceIds.map(target));
@@ -179,6 +179,12 @@ const relayOpenCodeInstances = (
 					),
 				),
 		use,
+		borrow: (instanceId, directory = scope) =>
+			instances.borrow(target(instanceId), directory).pipe(
+				Effect.tap(() => {
+					used.add(target(instanceId));
+				}),
+			),
 		useIfRunning: (instanceId, directory = scope) =>
 			instances.useIfRunning(target(instanceId), directory),
 		ifRunning: (instanceId, directory = scope) =>
@@ -321,6 +327,9 @@ export function createProjectRelayLayers({
 											current.autoSettleAfterDays === undefined
 												? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 												: current.autoSettleAfterDays,
+										...(current.worktreeCleanup !== undefined && {
+											worktreeCleanup: current.worktreeCleanup,
+										}),
 										...(current.usageLimits !== undefined && {
 											usageLimits: current.usageLimits,
 										}),
@@ -619,6 +628,9 @@ export function createProjectRelayLayers({
 			Layer.mergeAll(openCodeInstancesLayer, configLayer, loggerLayer),
 		),
 	);
+	const localPtyServiceLayer = LocalPtyServiceLive.pipe(
+		Layer.provide(Layer.merge(configLayer, loggerLayer)),
+	);
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -627,9 +639,7 @@ export function createProjectRelayLayers({
 				loggerLayer,
 				configLayer,
 				ptyRuntimeLayer,
-				LocalPtyServiceLive.pipe(
-					Layer.provide(Layer.merge(configLayer, loggerLayer)),
-				),
+				localPtyServiceLayer,
 			),
 		),
 	);
@@ -661,6 +671,7 @@ export function createProjectRelayLayers({
 		DirectoryListingServiceLive.pipe(Layer.provide(configLayer)),
 		scanServiceLayer,
 		openCodeTerminalServiceLayer,
+		localPtyServiceLayer,
 		pendingInteractionServiceLayer,
 		toolContentServiceLayer,
 		webSocketHandlerLayer,

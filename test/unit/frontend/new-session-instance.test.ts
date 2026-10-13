@@ -27,9 +27,11 @@ import {
 	chooseVariant,
 	clearDiscoveryState,
 	discoveryState,
-	getChosenModel,
+	getDraftPick,
 	getEffectiveInstanceId,
 	handleDefaultModelInfo,
+	handleHarnessDefaults,
+	handleModelList,
 	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
@@ -58,7 +60,14 @@ const defaults = {
 			id: "claude",
 			name: "Claude",
 			configured: true,
-			models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
+			models: [
+				{
+					id: "sonnet",
+					name: "Sonnet",
+					provider: "claude",
+					variants: ["high"],
+				},
+			],
 		},
 		{
 			id: "openai",
@@ -67,6 +76,7 @@ const defaults = {
 			models: [{ id: "gpt", name: "GPT", provider: "openai" }],
 		},
 	],
+	instanceId: "claude",
 	active: { model: "sonnet", provider: "claude" },
 };
 
@@ -76,37 +86,78 @@ beforeEach(() => {
 	attachedProjectState.slug = "conduit";
 	applyInstanceListResponse({ instances, providerCapabilities: {} });
 	handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
+	handleModelList({ providers: defaults.providers });
+	applyGetModelsResponse({
+		projectSlug: "conduit",
+		instanceId: "opencode",
+		providers: defaults.providers.filter(
+			(provider) => provider.id !== "claude",
+		),
+	});
+	handleHarnessDefaults({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				modelId: "sonnet",
+				providerId: "claude",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				modelId: "gpt",
+				providerId: "openai",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
 	applyGetModelsResponse(defaults);
 });
 
 describe("new session instance", () => {
-	it("uses the global default until the draft picks an instance", () => {
+	it("uses the project default harness until the draft picks an instance", () => {
 		expect(getEffectiveInstanceId()).toBe("claude");
 		selectInstance("claude-2");
 		expect(getEffectiveInstanceId()).toBe("claude-2");
+		expect(getDraftPick()).toBeUndefined();
+		handleModelList({
+			accountId: "claude-2",
+			providers: defaults.providers.filter(
+				(provider) => provider.id === "claude",
+			),
+		});
 		expect(discoveryState.currentProviderId).toBe("claude");
 	});
 
-	it("re-aims the model when the draft selects another harness", () => {
+	it("loads that harness's default when the draft selects another harness", () => {
 		selectInstance("opencode");
 		expect(getEffectiveInstanceId()).toBe("opencode");
-		expect(getChosenModel("opencode")).toMatchObject({
-			modelId: "gpt",
-			providerId: "openai",
+		expect(getDraftPick()).toMatchObject({
+			instanceId: "opencode",
+			model: { modelId: "gpt", providerId: "openai" },
 		});
 		expect(discoveryState.defaultProviderId).toBe("claude");
 	});
 
 	it("keeps a draft pick when default discovery is refreshed", () => {
 		selectInstance("claude-2");
+		handleModelList({
+			accountId: "claude-2",
+			providers: defaults.providers.filter(
+				(provider) => provider.id === "claude",
+			),
+		});
 		applyGetModelsResponse(defaults);
 		expect(getEffectiveInstanceId()).toBe("claude-2");
 		chooseVariant("high");
 		handleDefaultModelInfo({ model: "gpt", provider: "openai" });
-		expect(getChosenModel("claude-2")).toMatchObject({
-			modelId: "sonnet",
-			providerId: "claude",
-			variant: "high",
+		expect(getDraftPick()).toMatchObject({
+			instanceId: "claude-2",
+			model: { modelId: "sonnet", providerId: "claude", variant: "high" },
 		});
 	});
 
@@ -117,6 +168,7 @@ describe("new session instance", () => {
 			providerCapabilities: {},
 		});
 		expect(getEffectiveInstanceId()).toBe("claude");
+		expect(getDraftPick()?.instanceId).toBe("claude");
 	});
 
 	it("follows a promoted default and never falls back to another driver", () => {
@@ -151,17 +203,17 @@ describe("new session instance", () => {
 		});
 		sessionState.currentId = null;
 		expect(getEffectiveInstanceId()).toBe("claude");
+		applyGetModelsResponse(defaults);
 		chooseVariant("high");
 		expect(getEffectiveInstanceId()).toBe("claude");
-		expect(getChosenModel("claude")).toMatchObject({
-			modelId: "sonnet",
-			providerId: "claude",
-			variant: "high",
+		expect(getDraftPick()).toMatchObject({
+			instanceId: "claude",
+			model: { modelId: "sonnet", providerId: "claude", variant: "high" },
 		});
 		selectInstance("opencode");
-		expect(getChosenModel("opencode")).toMatchObject({
-			modelId: "gpt",
-			providerId: "openai",
+		expect(getDraftPick()).toMatchObject({
+			instanceId: "opencode",
+			model: { modelId: "gpt", providerId: "openai" },
 		});
 	});
 
@@ -178,14 +230,43 @@ describe("new session instance", () => {
 		const reloaded = await import(
 			"../../../src/lib/frontend/stores/discovery.svelte.js"
 		);
-		const reloadedInstances = await import(
+		const { applyInstanceListResponse: applyReloadedInstances } = await import(
 			"../../../src/lib/frontend/stores/instance.svelte.js"
 		);
-		reloadedInstances.applyInstanceListResponse({ instances });
+		applyReloadedInstances({ instances });
 		reloaded.handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
+		reloaded.handleModelList({ providers: defaults.providers });
+		reloaded.applyGetModelsResponse({
+			projectSlug: "conduit",
+			instanceId: "opencode",
+			providers: defaults.providers.filter(
+				(provider) => provider.id !== "claude",
+			),
+		});
+		reloaded.handleHarnessDefaults({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "ok",
+				pick: {
+					modelId: "sonnet",
+					providerId: "claude",
+					effort: "",
+					contextWindow: "",
+				},
+			},
+			opencode: {
+				status: "ok",
+				pick: {
+					modelId: "gpt",
+					providerId: "openai",
+					effort: "",
+					contextWindow: "",
+				},
+			},
+		});
 		reloaded.applyGetModelsResponse(defaults);
-		expect(reloaded.discoveryState.hasInstanceChoice).toBe(false);
 		expect(reloaded.getEffectiveInstanceId()).toBe("claude");
+		expect(reloaded.getDraftPick()?.instanceId).toBe("claude");
 		vi.unstubAllGlobals();
 	});
 });

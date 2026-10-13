@@ -262,6 +262,12 @@ describe("SessionLifecycleWiringLive", () => {
 						_tag: "DriverDefault",
 						driver: "claude",
 					}),
+					pick: {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "opus" },
+						effort: "high",
+						contextWindow: "200k",
+					},
 				});
 				yield* waitForAssertion(() =>
 					expect(instances.ifRunning).toHaveBeenCalledOnce(),
@@ -276,6 +282,12 @@ describe("SessionLifecycleWiringLive", () => {
 						driver: "opencode",
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
+					},
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "",
+						contextWindow: "",
 					},
 				});
 				yield* waitForAssertion(() =>
@@ -367,6 +379,12 @@ describe("SessionLifecycleWiringLive", () => {
 						driver: "opencode",
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
+					},
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "",
+						contextWindow: "",
 					},
 				});
 				yield* waitForAssertion(() =>

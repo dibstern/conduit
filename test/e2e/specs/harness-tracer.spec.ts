@@ -45,11 +45,19 @@ async function sendFromAddedProject(
 	await openPickerRoot(page, picker);
 	if ((await picker.getAttribute("data-instance-id")) !== driver)
 		await page.getByTestId(`picker-harness-${driver}`).click();
+	await page.getByTestId("picker-row-model").click();
+	await page
+		.getByTestId("model-picker-list")
+		.locator("[data-model-id]")
+		.first()
+		.click();
 	await page.keyboard.press("Escape");
 	await expect(page.getByTestId("model-picker")).toBeHidden();
 	await expect(picker).toHaveAttribute("data-instance-id", driver);
 	// New session opens a draft. Its first send creates the bound session.
-	await app.sendMessage(prompt);
+	await app.input.fill(prompt);
+	await expect(app.sendBtn).toBeEnabled();
+	await app.sendBtn.click();
 	await expect(page).toHaveURL(/\/s\/[^/?]+/);
 	await expect(chat.userMessages.last()).toContainText(prompt);
 	const assistant = chat.assistantMessages.last().locator(".md-content");

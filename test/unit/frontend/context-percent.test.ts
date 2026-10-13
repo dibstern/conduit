@@ -16,10 +16,11 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	applyGetModelsResponse,
 	clearDiscoveryState,
-	handleModelInfo,
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilities } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
@@ -44,7 +45,17 @@ function setClaudeProvider(
 }
 
 function selectModel(model: string): void {
-	handleModelInfo({ model, provider: "claude" });
+	applyGetModelsResponse(
+		{
+			projectSlug: "project-a",
+			instanceId: "claude",
+			providers: [],
+			active: { model, provider: "claude" },
+			variant: { variant: "", variants: [] },
+			contextWindow: { contextWindow: "", options: [] },
+		},
+		"history-session",
+	);
 }
 
 describe("context percent computation", () => {
@@ -55,10 +66,12 @@ describe("context percent computation", () => {
 		_activity = testActivity();
 		messages = testMessages();
 		clearDiscoveryState();
+		sessionState.currentId = "history-session";
 	});
 
 	afterEach(() => {
 		clearDiscoveryState();
+		sessionState.currentId = null;
 	});
 
 	it("restores percent from the last result message in history", () => {

@@ -93,10 +93,14 @@ describe("Integration: SSE to RPC Pipeline", () => {
 			text += delta;
 			const message = await client.waitForTranscriptMessage(
 				(message) =>
-					message.id === "msg-incremental-rpc" && message.text === text,
+					message.id === "msg-incremental-rpc" &&
+					message.parts?.find((part) => part.id === "part-incremental-rpc")
+						?.text === text,
 				sessionId,
 			);
-			expect(message.text).toBe(text);
+			expect(
+				message.parts?.find((part) => part.id === "part-incremental-rpc")?.text,
+			).toBe(text);
 		}
 
 		await client.close();
@@ -148,8 +152,12 @@ describe("Integration: SSE to RPC Pipeline", () => {
 			client1.waitForAssistantText(sessionId, 10_000),
 			client2.waitForAssistantText(sessionId, 10_000),
 		]);
-		expect(message1.text).toBeTruthy();
-		expect(message2.text).toBeTruthy();
+		expect(
+			message1.parts?.find((part) => part.type === "text")?.text,
+		).toBeTruthy();
+		expect(
+			message2.parts?.find((part) => part.type === "text")?.text,
+		).toBeTruthy();
 
 		await Promise.all([
 			client1.waitForTurnEnd(sessionId, 10_000),

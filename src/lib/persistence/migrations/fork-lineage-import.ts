@@ -113,6 +113,13 @@ export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
 		const { path, archive, archiveText, hasSidecar, entries, projects } =
 			source;
 		const remaining = new Set(entries.keys());
+		const sessionIds = JSON.stringify([
+			...new Set(
+				[...entries].flatMap(([id, entry]) =>
+					typeof entry === "string" ? [id] : [id, entry.parentID],
+				),
+			),
+		]);
 		for (const project of projects.values()) {
 			const filename = projectEventsDbPath({ configDir, ...project });
 			if (!existsSync(filename)) continue;
@@ -121,6 +128,22 @@ export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
 			);
 			const imported = yield* Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				// Missing archived ids need one probe per store, without taking a writer.
+				const rows = yield* sql<{
+					id: string;
+					parent_id: string | null;
+					fork_point_event: string | null;
+				}>`SELECT id, parent_id, fork_point_event FROM sessions
+					WHERE id IN (SELECT value FROM json_each(${sessionIds}))`;
+				const sessions = new Map(rows.map((row) => [row.id, row] as const));
+				const eligible = [...entries].filter(
+					([id, entry]) =>
+						sessions.has(id) &&
+						(typeof entry === "string" ||
+							!entry.parentID ||
+							sessions.has(entry.parentID)),
+				);
+				if (eligible.length === 0) return [];
 				return yield* sql.withTransaction(
 					Effect.gen(function* () {
 						const columns = yield* sql<{
@@ -133,21 +156,11 @@ export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
 							(column) => column.name === "root_id",
 						);
 						const ids: string[] = [];
-						for (const [id, entry] of entries) {
-							const [row] = yield* sql<{
-								parent_id: string | null;
-								fork_point_event: string | null;
-							}>`
-							SELECT parent_id, fork_point_event FROM sessions WHERE id = ${id}`;
+						for (const [id, entry] of eligible) {
+							const row = sessions.get(id);
 							if (!row) continue;
 							const parent =
 								typeof entry === "string" ? null : entry.parentID || null;
-							if (parent) {
-								const parentRows = yield* sql<{
-									id: string;
-								}>`SELECT id FROM sessions WHERE id = ${parent}`;
-								if (parentRows.length === 0) continue;
-							}
 							const point =
 								typeof entry === "string" ? entry : entry.forkMessageId;
 							let needsTimestamp = false;

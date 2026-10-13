@@ -58,7 +58,7 @@ describe("Badge", () => {
 	});
 
 	it.each([
-		["xs", "text-xs"],
+		["xs", "text-[10px]"],
 		["sm", "text-sm"],
 		["count", "h-[18px]"],
 	] as const)("applies the %s size", (size, expectedClass) => {

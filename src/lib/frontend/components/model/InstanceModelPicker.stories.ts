@@ -5,12 +5,13 @@ import {
 	getOrCreateSessionMessages,
 } from "../../stores/chat.svelte.js";
 import {
+	applyGetModelsResponse,
+	chooseContextWindow,
+	chooseModel,
+	chooseVariant,
 	clearDiscoveryState,
-	handleContextWindowInfo,
 	handleDefaultModelInfo,
-	handleModelInfo,
 	handleModelList,
-	handleVariantInfo,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
@@ -18,6 +19,7 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../stores/session.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { OpenCodeInstance, ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
@@ -60,12 +62,14 @@ const anthropic: ProviderInfo = {
 			id: "claude-sonnet-4-5",
 			name: "Claude Sonnet 4.5",
 			provider: "claude",
+			variants,
 			contextWindowOptions: contextWindows,
 		},
 		{
 			id: "claude-opus-4-1",
 			name: "Claude Opus 4.1",
 			provider: "claude",
+			variants,
 			contextWindowOptions: contextWindows,
 		},
 	],
@@ -95,23 +99,32 @@ function bottomRightFrame(): () => void {
 }
 
 /** Seed a single configured Anthropic provider with Sonnet selected. */
-function seedClaude(): void {
+function seedClaude(
+	availableVariants = variants,
+	options = contextWindows,
+): void {
 	instanceState.instances = [claudeAccount];
-	handleModelList({ providers: [anthropic] });
-	handleModelInfo({
-		model: "claude-sonnet-4-5",
-		provider: "claude",
+	handleModelList({
+		providers: [
+			{
+				...anthropic,
+				models: anthropic.models.map((model) => ({
+					...model,
+					variants: availableVariants,
+					contextWindowOptions: options,
+				})),
+			},
+		],
 	});
+	selectInstance("claude");
+	chooseModel({ modelId: "claude-sonnet-4-5", providerId: "claude" });
+	chooseVariant("high");
+	chooseContextWindow(options.find((option) => option.isDefault)?.value ?? "");
 	handleDefaultModelInfo({
 		model: "claude-sonnet-4-5",
 		provider: "claude",
 		variant: "",
 	});
-	handleContextWindowInfo({
-		contextWindow: "",
-		options: contextWindows,
-	});
-	handleVariantInfo({ variant: "high", variants });
 }
 
 /**
@@ -121,9 +134,13 @@ function seedClaude(): void {
  */
 async function openPicker(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	const trigger = await canvas.findByTestId("model-picker-trigger");
+	const modelTrigger = await canvas.findByTestId("model-picker-trigger");
+	const trigger =
+		canvas.queryByTestId("composer-harness-trigger") ?? modelTrigger;
 	await userEvent.click(trigger);
 	const picker = await canvas.findByTestId("model-picker");
+	if (within(picker).queryByRole("heading", { name: "Model" }))
+		await userEvent.click(within(picker).getByTestId("picker-back"));
 	await expect(
 		within(picker).getByRole("heading", { name: "Harness & model" }),
 	).toBeVisible();
@@ -208,12 +225,20 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "padded", docs: { story: { inline: false } } },
 	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		const composerWidth = sessionViewState.composerWidth;
+		sessionViewState.compact = window.innerWidth < 768;
+		sessionViewState.composerWidth = window.innerWidth;
 		// Reset state for each story.
 		clearDiscoveryState();
 		clearSessionState();
 		instanceState.instances = [];
 		// An active session locks the harness selection.
 		sessionState.currentId = null;
+		return () => {
+			sessionViewState.compact = compact;
+			sessionViewState.composerWidth = composerWidth;
+		};
 	},
 } satisfies Meta<typeof InstanceModelPicker>;
 
@@ -222,7 +247,18 @@ type Story = StoryObj<typeof meta>;
 
 /** Trigger only — the popover is closed. */
 export const Closed: Story = {
-	beforeEach: seedClaude,
+	beforeEach: () => seedClaude(),
+	play: async ({ canvasElement }) => {
+		const trigger = within(canvasElement).getByTestId("model-picker-trigger");
+		await expect(trigger).toHaveAttribute("data-shown-provider", "claude");
+		await expect(trigger).toHaveAttribute(
+			"data-shown-model",
+			"claude-sonnet-4-5",
+		);
+		await expect(trigger).toHaveAttribute("data-shown-effort", "high");
+		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
+		await expect(trigger).toHaveAttribute("data-shown-permission-mode", "ask");
+	},
 };
 
 /** Root view, with in-place context and effort choices. */
@@ -263,7 +299,7 @@ export const DefaultEffort: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
-		handleVariantInfo({ variant: "", variants });
+		chooseVariant("");
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -288,9 +324,15 @@ export const SingleContextWindow: Story = {
 	beforeEach: () => {
 		instanceState.instances = [opencodeAccount];
 		handleModelList({ providers: [opencode] });
-		handleModelInfo({
-			model: "gpt-5",
-			provider: "opencode",
+		selectInstance("opencode");
+		applyGetModelsResponse({
+			projectSlug: "story",
+			instanceId: "opencode",
+			providers: [opencode],
+			active: { model: "gpt-5", provider: "opencode" },
+			variant: { variant: "", variants: [] },
+			contextWindow: { contextWindow: "", options: [] },
+			permissionMode: "ask",
 		});
 		handleDefaultModelInfo({
 			model: "gpt-5",
@@ -321,26 +363,11 @@ export const PremiumContextDefault: Story = {
 	// Storybook reads tags statically; a spread does not carry them.
 	tags: ["viewport-capture"],
 	beforeEach: () => {
-		seedClaude();
 		const premiumOptions = contextWindows.map((option) => ({
 			...option,
 			isDefault: option.value === "1m",
 		}));
-		handleModelList({
-			providers: [
-				{
-					...anthropic,
-					models: anthropic.models.map((model) => ({
-						...model,
-						contextWindowOptions: premiumOptions,
-					})),
-				},
-			],
-		});
-		handleContextWindowInfo({
-			contextWindow: "",
-			options: premiumOptions,
-		});
+		seedClaude(variants, premiumOptions);
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -378,6 +405,23 @@ export const ContextUsage: Story = {
 		getOrCreateSessionActivity(id);
 		getOrCreateSessionMessages(id).contextPercent = 37;
 		sessionState.currentId = id;
+		applyGetModelsResponse(
+			{
+				projectSlug: "story",
+				instanceId: "claude",
+				providers: [
+					{
+						...anthropic,
+						models: anthropic.models.map((model) => ({ ...model, variants })),
+					},
+				],
+				active: { model: "claude-sonnet-4-5", provider: "claude" },
+				variant: { variant: "high", variants },
+				contextWindow: { contextWindow: "200k", options: contextWindows },
+				permissionMode: "ask",
+			},
+			id,
+		);
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -395,7 +439,20 @@ export const UnlockedHarnesses: Story = {
 	beforeEach: () => {
 		seedClaude();
 		instanceState.instances = [claudeAccount, opencodeAccount];
-		handleModelList({ providers: [anthropic, opencode] });
+		handleModelList({
+			providers: [
+				{
+					...anthropic,
+					models: anthropic.models.map((model) => ({ ...model, variants })),
+				},
+				opencode,
+			],
+		});
+		applyGetModelsResponse({
+			projectSlug: "story",
+			instanceId: "opencode",
+			providers: [opencode],
+		});
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -409,11 +466,7 @@ export const UnlockedHarnesses: Story = {
 /** Thinking-level variants available, with "high" selected. */
 export const WithVariants: Story = {
 	beforeEach: () => {
-		seedClaude();
-		handleVariantInfo({
-			variant: "high",
-			variants: ["low", "medium", "high"],
-		});
+		seedClaude(["low", "medium", "high"]);
 	},
 };
 
@@ -466,10 +519,8 @@ export const RoutingOptions: Story = {
 				},
 			],
 		});
-		handleModelInfo({
-			provider: "claude",
-			model: "claude-sonnet-4-5-eu",
-		});
+		selectInstance("claude");
+		chooseModel({ providerId: "claude", modelId: "claude-sonnet-4-5-eu" });
 		handleDefaultModelInfo({
 			provider: "claude",
 			model: "claude-sonnet-4-5",
@@ -529,6 +580,24 @@ export const Locked: Story = {
 			],
 		});
 		sessionState.currentId = "session-1";
+		applyGetModelsResponse(
+			{
+				projectSlug: "story",
+				instanceId: "claude",
+				providers: [
+					{
+						...anthropic,
+						models: anthropic.models.map((model) => ({ ...model, variants })),
+					},
+					opencode,
+				],
+				active: { model: "claude-sonnet-4-5", provider: "claude" },
+				variant: { variant: "high", variants },
+				contextWindow: { contextWindow: "200k", options: contextWindows },
+				permissionMode: "ask",
+			},
+			"session-1",
+		);
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {
@@ -586,6 +655,28 @@ export const UnconfiguredProvider: Story = {
 			],
 		});
 		selectInstance("opencode");
+		applyGetModelsResponse({
+			projectSlug: "story",
+			instanceId: "opencode",
+			providers: [
+				{
+					id: "google",
+					name: "Google",
+					configured: true,
+					models: [{ id: "gemini-3", name: "Gemini 3", provider: "google" }],
+				},
+				{
+					id: "openai",
+					name: "OpenAI",
+					configured: false,
+					models: [{ id: "gpt-5", name: "GPT-5", provider: "openai" }],
+				},
+			],
+			active: { model: "gemini-3", provider: "google" },
+			variant: { variant: "", variants: [] },
+			contextWindow: { contextWindow: "", options: [] },
+			permissionMode: "ask",
+		});
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {

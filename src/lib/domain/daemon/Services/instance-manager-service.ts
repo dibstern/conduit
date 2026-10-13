@@ -555,43 +555,55 @@ export const getInstances = Effect.gen(function* () {
 	const directory = yield* AccountDirectory;
 	const accounts = yield* directory.list;
 	const state = yield* Ref.get(yield* InstanceManagerStateTag);
-	return accounts.map((account): OpenCodeInstance => {
-		const runtime = Option.getOrUndefined(
-			HashMap.get(state.instances, account.id),
+	const runtimeOrder = new Map(
+		Array.from(
+			HashMap.keys(state.instances),
+			(id, index) => [id, index] as const,
+		),
+	);
+	return accounts
+		.map((account): OpenCodeInstance => {
+			const runtime = Option.getOrUndefined(
+				HashMap.get(state.instances, account.id),
+			);
+			return instanceInfo({
+				...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
+				id: account.id,
+				name: account.name,
+				driver: account.driver,
+				port:
+					account.driver === "opencode"
+						? (runtime?.port ?? account.port ?? 0)
+						: 0,
+				managed:
+					account.driver === "opencode" &&
+					(runtime?.managed ?? account.managed ?? false),
+				...(account.configuredFolder === undefined
+					? {}
+					: { configDir: account.configuredFolder }),
+				...(runtime?.url !== undefined
+					? { url: runtime.url }
+					: account.driver === "opencode" && account.url !== undefined
+						? { url: account.url }
+						: {}),
+				...(account.env === undefined
+					? {}
+					: {
+							env:
+								account.driver === "opencode" &&
+								(runtime?.managed ?? account.managed)
+									? publicManagedOpenCodeEnv(account.env)
+									: { ...account.env },
+						}),
+				isDefault: account.isDefault,
+				usageEligible: account.driver === "claude" && account.usageEligible,
+			});
+		})
+		.sort(
+			(left, right) =>
+				(runtimeOrder.get(left.id) ?? runtimeOrder.size) -
+				(runtimeOrder.get(right.id) ?? runtimeOrder.size),
 		);
-		return instanceInfo({
-			...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
-			id: account.id,
-			name: account.name,
-			driver: account.driver,
-			port:
-				account.driver === "opencode"
-					? (runtime?.port ?? account.port ?? 0)
-					: 0,
-			managed:
-				account.driver === "opencode" &&
-				(runtime?.managed ?? account.managed ?? false),
-			...(account.configuredFolder === undefined
-				? {}
-				: { configDir: account.configuredFolder }),
-			...(runtime?.url !== undefined
-				? { url: runtime.url }
-				: account.driver === "opencode" && account.url !== undefined
-					? { url: account.url }
-					: {}),
-			...(account.env === undefined
-				? {}
-				: {
-						env:
-							account.driver === "opencode" &&
-							(runtime?.managed ?? account.managed)
-								? publicManagedOpenCodeEnv(account.env)
-								: { ...account.env },
-					}),
-			isDefault: account.isDefault,
-			usageEligible: account.driver === "claude" && account.usageEligible,
-		});
-	});
 }).pipe(Effect.withSpan("instance.getAll"));
 
 /** Get a live account's read model; status reads never apply routing fallbacks. */

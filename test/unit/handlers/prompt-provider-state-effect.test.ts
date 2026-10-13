@@ -72,15 +72,28 @@ const establishClaudeSession = (sessionId: string) =>
 		const eventStore = yield* EventStoreEffectTag;
 		const runner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* runner.isRecovered())) yield* runner.recover();
-		const creation = yield* eventStore.append(
+		const creation = yield* eventStore.appendBatch([
 			canonicalEvent(
 				"session.created",
 				sessionId,
 				{ sessionId, title: "Claude Session", provider: "claude" },
 				{ provider: "claude" },
 			),
-		);
-		yield* runner.projectEvent(creation);
+			canonicalEvent("session.model_changed", sessionId, {
+				sessionId,
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+			}),
+			canonicalEvent("session.variant_changed", sessionId, {
+				sessionId,
+				variant: "",
+			}),
+			canonicalEvent("session.context_window_changed", sessionId, {
+				sessionId,
+				contextWindow: "",
+			}),
+		]);
+		for (const event of creation) yield* runner.projectEvent(event);
 	});
 
 // Mirror relay-stack production wiring: cev.3 makes ProviderRuntimeIngestion the
@@ -144,6 +157,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "provider-state-test",
+						configDir: dir,
 						persistenceDbPath: filename,
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
@@ -249,6 +263,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					opencodeUrl: "http://127.0.0.1:1",
 					projectDir: MOCK_PROJECT_DIR,
 					slug: "history-test",
+					configDir: dir,
 					persistenceDbPath: filename,
 					publishGlobalSetting: () => Effect.void,
 				} satisfies ProjectRelayConfig),
@@ -359,6 +374,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-user-effect-test",
+						configDir: dir,
 						persistenceDbPath: filename,
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),
@@ -491,6 +507,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 						opencodeUrl: "http://127.0.0.1:1",
 						projectDir: MOCK_PROJECT_DIR,
 						slug: "claude-sink-effect-test",
+						configDir: dir,
 						persistenceDbPath: filename,
 						publishGlobalSetting: () => Effect.void,
 					} satisfies ProjectRelayConfig),

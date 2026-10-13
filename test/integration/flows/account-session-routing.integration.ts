@@ -9,6 +9,7 @@
  * - A deleted default or non-default binding must launch in the default folder.
  * - With no native transcript in that folder, the handoff must preserve history.
  * - With zero Claude accounts, creates/sends must fail despite OpenCode existing.
+ * - Local session renames must persist after the last Claude account is removed.
  * - Adding after the last removal must restore the old session on a fresh ID.
  * - SetDefault through daemon RPC must change the next draft's launch folder,
  *   including model-only picks, while an explicit account pick still wins.
@@ -81,6 +82,7 @@ describe("Integration: account session routing", () => {
 			restoredId?: string;
 			prompts: string[];
 			resumeIds: Array<string | undefined>;
+			renamedTitle?: string;
 		};
 	}> = [];
 	let root: string;
@@ -221,9 +223,17 @@ describe("Integration: account session routing", () => {
 			},
 		});
 		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		await client.waitFor("shell", {
+			predicate: (message) => message["_tag"] === "synchronized",
+		});
 		const created = await client.createSession("Deleted account history", {
 			instanceId: removedId,
+			model: {
+				providerId: "claude",
+				modelId: "sonnet",
+				variant: "",
+				contextWindow: "200k",
+			},
 		});
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
@@ -277,6 +287,15 @@ describe("Integration: account session routing", () => {
 		deletedAccount = { withHistory, removedId, prompts, resumeIds };
 		if (removeDefault && withHistory) {
 			await runtime.runPromise(removeInstance(promotedId));
+			const renamedTitle = "Retained history without a Claude account";
+			await client.renameSession(sessionId, renamedTitle);
+			const renamed = await harness.stack.effectRuntime.runtime.runPromise(
+				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
+					readQuery.getSession(sessionId),
+				),
+			);
+			expect(renamed?.title).toBe(renamedTitle);
+			deletedAccount.renamedTitle = renamedTitle;
 			const launchesBefore = launchFolders.length;
 			await expect(
 				client.createSession("No Claude account", { providerId: "claude" }),
@@ -335,15 +354,30 @@ describe("Integration: account session routing", () => {
 			claudeSdk: { ...claudeSdk, query },
 		});
 		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		await client.waitFor("shell", {
+			predicate: (message) => message["_tag"] === "synchronized",
+		});
 		const createsBefore = harness.mock.diagnostics.filter(
 			(entry) => entry.event === "request" && entry.detail === "POST /session",
 		).length;
 
 		await expect(
-			client.createSession("Unknown account", {
-				providerId: "missing-account",
-			}),
+			client.rpcCall((rpc) =>
+				rpc.CreateSession({
+					permissionMode: "ask",
+					projectSlug: "integration-test",
+					originId: "unknown-account-fixture",
+					title: "Unknown account",
+					instanceId: AccountIdSchema.make("missing-account"),
+					providerId: "claude",
+					model: {
+						providerId: "claude",
+						modelId: "sonnet",
+						variant: "",
+						contextWindow: "200k",
+					},
+				}),
+			),
 		).rejects.toThrow(/missing-account/);
 		expect(
 			harness.mock.diagnostics.filter(
@@ -354,14 +388,24 @@ describe("Integration: account session routing", () => {
 
 		const sessionId = "ses-missing-account";
 		await harness.stack.effectRuntime.runtime.runPromise(
-			applySessionCommand({
-				type: "session.created",
-				data: {
-					sessionId,
-					title: "Unavailable account",
-					provider: "missing-account",
+			applySessionCommand(
+				{
+					type: "session.created",
+					data: {
+						sessionId,
+						title: "Unavailable account",
+						provider: "missing-account",
+					},
 				},
-			}),
+				{
+					pick: {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
+						effort: "",
+						contextWindow: "200k",
+					},
+				},
+			),
 		);
 		const sendError = await client.rpcCall((rpc) =>
 			rpc.input
@@ -470,9 +514,17 @@ describe("Integration: account session routing", () => {
 		);
 		expect(existsSync(join(root, "daemon.json"))).toBe(false);
 		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		await client.waitFor("shell", {
+			predicate: (message) => message["_tag"] === "synchronized",
+		});
 		const created = await client.createSession("Fresh account", {
 			instanceId: "fresh-claude",
+			model: {
+				providerId: "claude",
+				modelId: "sonnet",
+				variant: "",
+				contextWindow: "200k",
+			},
 		});
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
@@ -554,25 +606,50 @@ describe("Integration: account session routing", () => {
 			},
 		});
 		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		await client.waitFor("shell", {
+			predicate: (message) => message["_tag"] === "synchronized",
+		});
 		let sessionId: string;
 		if (selection === "legacy-binding") {
 			sessionId = "ses-legacy-claude-binding";
 			await harness.stack.effectRuntime.runtime.runPromise(
-				applySessionCommand({
-					type: "session.created",
-					data: { sessionId, title: "Legacy binding", provider: "claude" },
-				}),
+				applySessionCommand(
+					{
+						type: "session.created",
+						data: { sessionId, title: "Legacy binding", provider: "claude" },
+					},
+					{
+						pick: {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "",
+							contextWindow: "200k",
+						},
+					},
+				),
 			);
 			await client.viewSession(sessionId);
 		} else {
-			const created = await client.createSession("Personal default", {
-				providerId: selection === "legacy-alias" ? "claude-sdk" : "claude",
-			});
-			const id = created["id"];
+			const created = await client.rpcCall((rpc) =>
+				rpc.CreateSession({
+					permissionMode: "ask",
+					projectSlug: "integration-test",
+					originId: "legacy-account-fixture",
+					title: "Personal default",
+					providerId: selection === "legacy-alias" ? "claude-sdk" : "claude",
+					model: {
+						providerId: "claude",
+						modelId: "sonnet",
+						variant: "",
+						contextWindow: "200k",
+					},
+				}),
+			);
+			const id = created.sessionId;
 			if (typeof id !== "string")
 				throw new Error("CreateSession returned no session id");
 			sessionId = id;
+			await client.viewSession(sessionId);
 		}
 		const completed = client.waitForTurnEnd(sessionId, 10_000);
 		await client.sendMessage("Reply with pong", { sessionId });
@@ -647,7 +724,9 @@ describe("Integration: account session routing", () => {
 				},
 			});
 			const client = await harness.connectWsClient();
-			await client.waitForInitialState();
+			await client.waitFor("shell", {
+				predicate: (message) => message["_tag"] === "synchronized",
+			});
 			await runtime.runPromise(
 				Effect.flatMap(DaemonWsRpcHandlersTag, (handlers) =>
 					handlers.SetDefault(new SetDefault({ instanceId: "personal" })),
@@ -655,6 +734,7 @@ describe("Integration: account session routing", () => {
 			);
 			const result = await client.rpcCall((rpc) =>
 				rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "integration-test",
 					originId: "g4zp8-first-turn",
 					...(selection === "explicit"
@@ -662,9 +742,12 @@ describe("Integration: account session routing", () => {
 						: selection === "default"
 							? { providerId: "claude" }
 							: {}),
-					...(selection === "model-only"
-						? { model: { providerId: "claude", modelId: "shared" } }
-						: {}),
+					model: {
+						providerId: "claude",
+						modelId: "shared",
+						variant: "",
+						contextWindow: "",
+					},
 				}),
 			);
 			await client.viewSession(result.sessionId);

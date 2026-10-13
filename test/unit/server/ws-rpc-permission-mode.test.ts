@@ -8,7 +8,7 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { restoreSessionPermissionModes } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
+import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
 import {
 	getDefaultPermissionMode,
 	getPermissionMode,
@@ -160,7 +160,7 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 
 			const restoredMode = yield* Effect.gen(function* () {
 				expect(yield* getPermissionMode(sessionId)).toBe("ask");
-				yield* restoreSessionPermissionModes();
+				yield* restoreSessionSettings();
 				return yield* getPermissionMode(sessionId);
 			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive())));
 

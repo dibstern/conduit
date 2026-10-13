@@ -21,10 +21,12 @@
 	} from "../../stores/composer-settings.svelte.js";
 	import {
 		applyDefaultModelSet,
-		applyGetModelsResponse,
+		followModelsRead,
+		applyGetAgentsResponse,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
+		draftModelInventory,
 		formatAgentLabel,
 		getActiveAgent,
 		getActiveModel,
@@ -33,10 +35,13 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getProviderGroupsForInstance,
+		getSessionDriver,
+		getSessionPick,
 		formatModelName,
 		type InstanceOption,
 		isProviderConfigured,
 		selectInstance,
+		viewDraftModels,
 	} from "../../stores/discovery.svelte.js";
 	import { currentChat } from "../../stores/chat.svelte.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
@@ -52,6 +57,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import {
+		getAgentsRpc,
 		getModelsRpc,
 		setDefaultModelRpc,
 		switchAgentRpc,
@@ -75,7 +81,6 @@
 	let triggerEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let pickerTriggerEl: HTMLElement | undefined = $state();
 	let backEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
-	const draftChosen = $derived(discoveryState.hasModelChoice);
 
 	// Prefix for the per-provider heading ids that each group's
 	// `aria-labelledby` points at. One base id per component instance, suffixed
@@ -93,13 +98,15 @@
 		sessionState.currentId ? findSession(sessionState.currentId)?.accountId ?? undefined : undefined,
 	);
 	const locked = $derived(sessionState.currentId !== null);
+	const sessionLoading = $derived(!!sessionState.currentId && getSessionPick(sessionState.currentId) === undefined);
 	const selectedId = $derived(locked ? boundInstanceId : getEffectiveInstanceId());
+	const draftModelLoading = $derived(!locked && draftModelInventory.instanceId === selectedId && draftModelInventory.loading);
 	const selectedInstance = $derived(
 		instances.find((i) => i.id === selectedId) ?? null,
 	);
 	const selectedDriver = $derived(
-		selectedInstance?.driver ??
-			(discoveryState.currentProviderId === "claude" ? "claude" : discoveryState.currentProviderId ? "opencode" : ""),
+		selectedInstance?.driver ?? (sessionState.currentId ? getSessionDriver(sessionState.currentId) : undefined) ??
+			((discoveryState.currentProviderId || discoveryState.defaultProviderId) === "claude" ? "claude" : discoveryState.currentProviderId || discoveryState.defaultProviderId ? "opencode" : ""),
 	);
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
@@ -169,33 +176,16 @@
 			.filter((g) => g.models.length > 0);
 	});
 
-	const activeModelId = $derived(
-		sessionState.currentId || draftChosen
-			? discoveryState.currentModelId
-			: discoveryState.defaultModelId,
-	);
-	const activeProviderId = $derived(
-		sessionState.currentId || draftChosen
-			? discoveryState.currentProviderId
-			: discoveryState.defaultProviderId,
-	);
+	const activeModelId = $derived(discoveryState.currentModelId);
+	const activeProviderId = $derived(discoveryState.currentProviderId);
 	const activeModel = $derived(
 		getActiveModel(activeModelId, activeProviderId),
 	);
 	const hasModel = $derived(!!activeModelId);
-	// A draft model change has no server context-info refresh. Prefer its catalog
-	// so the new harness cannot inherit the previous model's window choices.
-	const contextOptions = $derived(
-		selectedDriver === "claude"
-			? (activeModel?.contextWindowOptions ?? [])
-			: activeModel?.contextWindowOptions ??
-				(!sessionState.currentId && draftChosen && activeModel?.limit?.context ? [] : contextWindow.options),
-	);
-	const selectedContext = $derived(
-		contextOptions.find((option) => option.value === contextWindow.current?.value) ??
-			contextOptions.find((option) => option.isDefault) ?? contextOptions[0] ?? null,
-	);
-	const contextLabel = $derived(selectedContext?.label ?? modelContextLabel(activeModel));
+	const contextOptions = $derived(contextWindow.options);
+	const selectedContext = $derived(contextWindow.current);
+	const contextLabel = $derived(sessionLoading ? "" : selectedContext?.label ??
+		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
 	const showContextWord = $derived(!!contextLabel && (!phone || (selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
@@ -218,10 +208,11 @@
 		const sessionId = sessionState.currentId;
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
+		const applyModels = followModelsRead(sessionId);
 		void getModelsRpc({ projectSlug, sessionId })
 			.then((response) => {
 				if (sessionState.currentId === sessionId) {
-					applyGetModelsResponse(response);
+					applyModels(response);
 				}
 			})
 			.catch(() => undefined);
@@ -230,6 +221,7 @@
 	/** Display name for the trigger button, with date suffix stripped.
 	 *  Grouped models (Bedrock geo routing) append the active scope label. */
 	const displayName = $derived.by(() => {
+		if (draftModelLoading) return "Loading…";
 		if (activeModel) {
 			const base = stripDateSuffix(formatModelName(activeModel));
 			const scope = activeModel.routingOptions?.find(
@@ -240,13 +232,13 @@
 		if (activeModelId) {
 			return stripDateSuffix(activeModelId);
 		}
-		return "Select model";
+		return sessionLoading ? "Loading…" : "Select model";
 	});
 
 	/** The phone button's two-or-three letter model tag: "Sonnet 5" → S5, "GPT-6 Sol" → Sol. */
 	const shortModelLabel = $derived.by(() => {
 		const name = activeModel ? stripDateSuffix(formatModelName(activeModel)) : stripDateSuffix(activeModelId ?? "");
-		if (!name) return "—";
+		if (!name) return sessionLoading ? "Loading…" : "Select model";
 		const words = (/\s/.test(name) ? name.split(/\s+/) : name.split("-")).filter((word) => !/^claude$/i.test(word));
 		const index = words.findIndex((word, i) => /^[a-z]+$/i.test(word) && /^\d+(\.\d+)?$/.test(words[i + 1] ?? ""));
 		const word = words[index];
@@ -282,10 +274,11 @@
 		}
 	}
 
-	function driverLabel(driver: ProviderDriverKind): string {
-		if (driver === "claude") return "Claude";
-		if (driver === "opencode") return "OpenCode";
-		return driver.charAt(0).toUpperCase() + driver.slice(1);
+	function driverLabel(id: ProviderDriverKind | undefined): string {
+		if (!id) return "Loading…";
+		if (id === "claude") return "Claude";
+		if (id === "opencode") return "OpenCode";
+		return id.charAt(0).toUpperCase() + id.slice(1);
 	}
 
 	function instanceForDriver(driver: ProviderDriverKind): InstanceOption | undefined {
@@ -377,6 +370,17 @@
 		view = "root";
 		if (instance.id === selectedId && discoveryState.hasInstanceChoice) return;
 		selectInstance(instance.id);
+		const projectSlug = getDraftProject();
+		const applyModels = followModelsRead();
+		if (projectSlug) void getModelsRpc({ projectSlug, instanceId: instance.id })
+			.then(applyModels)
+			.catch(() => undefined);
+		if (projectSlug) void getAgentsRpc({ projectSlug, instanceId: instance.id })
+			.then((response) => {
+				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
+					applyGetAgentsResponse(response);
+			})
+			.catch(() => undefined);
 		searchQuery = "";
 	}
 
@@ -444,6 +448,8 @@
 		const request = composerPickerState.request;
 		if (!request) return;
 		untrack(() => {
+			if (!locked && selectedDriver === "opencode")
+				viewDraftModels(getDraftProject(), selectedId, true);
 			void accounts.refreshQuotas();
 			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
 			variantRef?.close();
@@ -536,7 +542,7 @@
 						</div>
 						<OptionRow
 							options={harnesses}
-							value={selectedDriver}
+							value={selectedDriver ?? ""}
 							onChange={handleHarnessSelect}
 							label="Harness"
 							lockedReason="Harness is fixed for this session"
@@ -657,15 +663,19 @@
 						{/if}
 					</div>
 				{/if}
-				{#if effortSegments.length > 0}
-					<div data-testid="picker-row-effort" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
+				{#if effortSegments.length > 0 || (sessionState.currentId && effort.current)}
+					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
-						<SegmentedControl
-							bind:value={() => effort.current ?? "", (value) => effort.select(value)}
-							options={effortSegments}
-							variant="picker"
-							label="Effort"
-						/>
+						{#if effortSegments.length > 0}
+							<SegmentedControl
+								bind:value={() => effort.current ?? "", (value) => effort.select(value)}
+								options={effortSegments}
+								variant="picker"
+								label="Effort"
+							/>
+						{:else}
+							<span class="min-w-0 flex-1 text-[13px] text-text">{effort.current}</span>
+						{/if}
 					</div>
 				{/if}
 				{#if planLocked}
@@ -744,14 +754,16 @@
 						onclick={() => { favoritesOnly = !favoritesOnly; }}
 					/>
 				</div>
-				<div data-testid="model-picker-list" class="py-1.5">
+				<div data-testid="model-picker-list" class="py-1.5" aria-busy={draftModelLoading}>
 					{#if locked}
 						<div class="my-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] leading-[1.4] text-text-dimmer">
 							<Icon name="lock" size={12} class="shrink-0" />
 							<span>Harness fixed at creation — showing <b class="font-semibold text-text-secondary">{selectedLabel}</b> only. Model switching within it is allowed.</span>
 						</div>
 					{/if}
-					{#if filteredGroups.length === 0}
+					{#if draftModelLoading}
+						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">Loading models…</div>
+					{:else if filteredGroups.length === 0}
 						<div class="model-empty px-1 py-4 text-center text-base text-text-dimmer">{searchQuery.trim() ? "No models match" : "No models available"}</div>
 					{:else}
 						{#each filteredGroups as group (group.provider.id)}
@@ -867,7 +879,7 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "account")}
 		>
-			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={12} surface="page" />
+			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={12} surface="page" />{/if}
 		</Button>
 		{#if hasAccountWord}
 			<Button
@@ -892,11 +904,13 @@
 			hoverFill="none"
 			data-testid="composer-word-model"
 			data-instance-id={selectedId}
-			data-shown-harness={selectedDriver}
+			data-shown-harness={selectedDriver ?? ""}
 			data-shown-provider={activeProviderId ?? ""}
 			data-shown-model={activeModelId ?? ""}
 			data-shown-effort={effort.current ?? ""}
 			data-shown-context-window={selectedContext?.value ?? ""}
+			data-shown-permission-mode={discoveryState.permissionMode}
+			disabled={sessionLoading}
 			class="shrink-0 text-[11.5px] font-normal font-brand"
 			title="Switch model"
 			ariaLabel={`Model: ${displayName}. Open model options`}
@@ -925,7 +939,7 @@
 				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
 			</Button>
 		{/if}
-		{#if effort.options.length > 0}
+		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
 			<span aria-hidden="true" class="text-border-chip">·</span>
 		{/if}
 	{:else if !phone}
@@ -944,7 +958,7 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "harness")}
 		>
-			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />
+			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />{/if}
 			{#if sessionViewState.composerTier === "wide"}
 				<span data-testid="composer-harness-label">{driverLabel(selectedDriver)}</span>
 				{#if wordAccountName !== driverLabel(selectedDriver)}
@@ -962,11 +976,13 @@
 			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
-			data-shown-harness={selectedDriver}
+			data-shown-harness={selectedDriver ?? ""}
 			data-shown-provider={activeProviderId ?? ""}
 			data-shown-model={activeModelId ?? ""}
 			data-shown-effort={effort.current ?? ""}
 			data-shown-context-window={selectedContext?.value ?? ""}
+			data-shown-permission-mode={discoveryState.permissionMode}
+			disabled={sessionLoading}
 			class="model-btn h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7 {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Model: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}. Open model options`}
@@ -989,11 +1005,13 @@
 			hoverFill="none"
 			data-testid="model-picker-trigger"
 			data-instance-id={selectedId}
-			data-shown-harness={selectedDriver}
+			data-shown-harness={selectedDriver ?? ""}
 			data-shown-provider={activeProviderId ?? ""}
 			data-shown-model={activeModelId ?? ""}
 			data-shown-effort={effort.current ?? ""}
 			data-shown-context-window={selectedContext?.value ?? ""}
+			data-shown-permission-mode={discoveryState.permissionMode}
+			disabled={sessionLoading}
 			class="model-btn min-w-0 h-[26px] text-[11.5px] font-normal text-text-secondary font-brand hover:bg-text/7 gap-[5px] px-[6px] rounded-[7px] {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
@@ -1002,7 +1020,7 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "model")}
 		>
-			<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />
+			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={13} surface="box" />{/if}
 			<span class="model-label text-[11.5px] font-normal whitespace-nowrap">{shortModelLabel}</span>
 		</Button>
 	{/if}
@@ -1022,7 +1040,7 @@
 						onclick={(event) => togglePicker(event, "harness")}
 					>
 						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Harness</span>
-						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold"><HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" /><span class="min-w-0 truncate">{driverLabel(selectedDriver)}{wordAccountName !== driverLabel(selectedDriver) ? ` · ${wordAccountName}` : ""}{switchingTo ? "…" : ""}</span></span>
+						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} surface="surface" />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}{wordAccountName !== driverLabel(selectedDriver) ? ` · ${wordAccountName}` : ""}{switchingTo ? "…" : ""}</span></span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button

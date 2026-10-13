@@ -30,6 +30,7 @@
 				bind:value={() => composerPreferences.controls, (controls) => setComposerPreferences({ controls })}
 				options={controls}
 				label="Controls"
+				variant="joined"
 			/>
 		{/snippet}
 	</SettingsRow>
@@ -42,6 +43,7 @@
 				bind:value={() => String(composerPreferences.contextWarning), (value) => setComposerPreferences({ contextWarning: value === "never" ? "never" : Number(value) as 60 | 70 | 80 | 90 })}
 				options={contextWarnings}
 				label="Context warning"
+				variant="joined"
 			/>
 		{/snippet}
 	</SettingsRow>

@@ -15,6 +15,7 @@ import {
 	Queue,
 	Ref,
 } from "effect";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../contracts/worktree.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -82,6 +83,7 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			runtime.autoSettleAfterDays === undefined
 				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
 				: runtime.autoSettleAfterDays,
+		worktreeCleanup: runtime.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
 		...(runtime.usageLimits !== undefined && {
 			usageLimits: runtime.usageLimits,
 		}),

@@ -8,7 +8,7 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
-	import { applyGetAgentsResponse, applyGetModelsResponse, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
+	import { applyGetAgentsResponse, followModelsRead, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
@@ -119,19 +119,20 @@
 			// Scoped, so the reply describes the open session's model, not the
 			// project default.
 			const sessionId = sessionState.currentId;
+			const applyModels = followModelsRead(sessionId ?? undefined);
 			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
 				.then((response) => {
-					if (sessionState.currentId === sessionId) applyGetModelsResponse(response);
+					if (sessionState.currentId === sessionId) applyModels(response);
 				})
 				.catch((err) => log.warn("Visibility models fetch failed:", err))
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-		if (discoveryState.agents.length === 0) {
-			void getAgentsRpc({ projectSlug })
-				.then(applyGetAgentsResponse)
+			void getAgentsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+				.then((response) => {
+					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
+				})
 				.catch((err) => log.warn("Visibility agents fetch failed:", err));
-		}
 		});
 	});
 

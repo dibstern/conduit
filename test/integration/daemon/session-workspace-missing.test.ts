@@ -12,6 +12,7 @@ import Database from "better-sqlite3";
 import { Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	CreateSession,
 	ListDaemonSessions,
 	MoveSessionWorkspace,
 	OpenCodeUseWorktree,
@@ -27,6 +28,8 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // Failure modes: fallback outside turn start or for another origin; losing the
 // missing cause on the browser row; computing the directive before the move;
 // repeating it after acknowledgement; recording a move when main is missing.
+// Owned recovery must wait for a turn, use the kept branch and refuse a deleted
+// branch without prompting the provider or creating a replacement branch.
 // OpenCode ignores a request directory for an existing native session, so the
 // fallback must also move that session before prompting it.
 const gitEnv = { ...process.env };
@@ -469,6 +472,114 @@ describe("Missing session worktrees through the built daemon", () => {
 		},
 		60_000,
 	);
+
+	it.each([
+		"directory",
+		"registration",
+	] as const)("recreates a removed owned worktree from its kept branch before the next turn (%s removed)", async (removal) => {
+		const { fixture, main, socket, list } = await start(
+			`owned-kept-branch-${removal}`,
+		);
+		const browser = await fixture.connect();
+		const { sessionId } = await sendRpcRequest(
+			socket,
+			new CreateSession({
+				projectSlug: "process-test",
+				originId: "missing-worktree-test",
+				providerId: "claude",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title: "Removed owned worktree",
+				newWorktree: true,
+			}),
+		);
+		const session = (await list()).sessions.find(({ id }) => id === sessionId);
+		expect(session?.workspace?.origin).toBe("conduit");
+		const directory = session?.workspace?.worktrees[main];
+		if (!directory) throw new Error("Owned checkout was not recorded");
+		const branch = git(directory, "branch", "--show-current").trim();
+		const head = git(directory, "rev-parse", "HEAD").trim();
+		evidence["owned"] = { directory, branch, head };
+		if (removal === "directory")
+			rmSync(directory, { recursive: true, force: true });
+		else git(main, "worktree", "remove", "--force", directory);
+		expect(existsSync(directory)).toBe(false);
+		expect(
+			git(main, "branch", "--list", "--format=%(refname:short)", branch).trim(),
+		).toBe(branch);
+		evidence["missingBeforeTurn"] = (await list()).sessions.find(
+			({ id }) => id === sessionId,
+		)?.workspaceMissing;
+		await browser.preWarmSession(sessionId).catch(() => {});
+		expect(existsSync(directory)).toBe(false);
+		await browser.send(sessionId, "Continue in the kept branch.");
+		expect(existsSync(directory)).toBe(true);
+		expect(git(directory, "branch", "--show-current").trim()).toBe(branch);
+		expect(git(directory, "rev-parse", "HEAD").trim()).toBe(head);
+		expect(
+			fixture
+				.claudeOptions()
+				.filter(({ prompt }) => prompt !== undefined)
+				.at(-1),
+		).toMatchObject({
+			prompt: "Continue in the kept branch.",
+			options: { cwd: directory },
+		});
+		expect(
+			events(fixture, sessionId).filter(
+				({ type, data }) =>
+					type === "turn.error" && data["code"] === "WORKTREE_MISSING",
+			),
+		).toEqual([]);
+	}, 60_000);
+
+	it("rejects a removed owned worktree whose branch no longer exists", async () => {
+		const { fixture, main, socket, list } = await start("owned-deleted-branch");
+		const browser = await fixture.connect();
+		const { sessionId } = await sendRpcRequest(
+			socket,
+			new CreateSession({
+				projectSlug: "process-test",
+				originId: "missing-worktree-test",
+				providerId: "claude",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
+				title: "Deleted owned branch",
+				newWorktree: true,
+			}),
+		);
+		const session = (await list()).sessions.find(({ id }) => id === sessionId);
+		expect(session?.workspace?.origin).toBe("conduit");
+		const directory = session?.workspace?.worktrees[main];
+		if (!directory) throw new Error("Owned checkout was not recorded");
+		const branch = git(directory, "branch", "--show-current").trim();
+		evidence["owned"] = { directory, branch };
+		git(main, "worktree", "remove", "--force", directory);
+		git(main, "branch", "-D", branch);
+		const branches = git(
+			main,
+			"for-each-ref",
+			"--format=%(refname)",
+			"refs/heads",
+		);
+		await browser.send(sessionId, "Cannot recreate a deleted branch.");
+		expect(
+			events(fixture, sessionId)
+				.filter(({ type }) => type === "turn.error")
+				.at(-1)?.data,
+		).toMatchObject({
+			code: "WORKTREE_MISSING",
+			error: `Worktree missing: ${directory}. Branch ${branch} no longer exists, so it cannot be recreated. Continue in main folder before sending another message.`,
+		});
+		expect(
+			fixture.claudeOptions().filter(({ prompt }) => prompt !== undefined),
+		).toEqual([]);
+		expect(existsSync(directory)).toBe(false);
+		expect(git(main, "branch", "--list", branch).trim()).toBe("");
+		expect(git(main, "for-each-ref", "--format=%(refname)", "refs/heads")).toBe(
+			branches,
+		);
+	}, 60_000);
 
 	it("reports a missing conduit workspace without automatically falling back", async () => {
 		const { fixture, main, worktree, socket } = await start(

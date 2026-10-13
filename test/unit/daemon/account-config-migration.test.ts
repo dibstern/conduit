@@ -25,6 +25,7 @@ import {
 	list,
 	resolve,
 } from "../../../src/lib/account-directory.js";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	CURRENT_CONFIG_VERSION,
 	DaemonConfigSchema,
@@ -51,6 +52,7 @@ const legacy = () => {
 		configVersion: _version,
 		instances: _instances,
 		accountDefaults: _defaults,
+		worktreeCleanup: _cleanup,
 		...config
 	} = defaultDaemonConfig();
 	return {
@@ -115,6 +117,7 @@ describe("account config migration", () => {
 		const accounts = accountsStateFromConfig(config, launch);
 		expect(config).not.toHaveProperty("claudeConfigDir");
 		expect(config.configVersion).toBe(CURRENT_CONFIG_VERSION);
+		expect(config.worktreeCleanup).toEqual(DEFAULT_WORKTREE_CLEANUP);
 		expect(config.projects).toEqual(input.projects);
 		expect(
 			list(accounts).filter((account) => account.driver === "claude"),
@@ -245,8 +248,9 @@ describe("account config migration", () => {
 	});
 
 	it("routes legacy driver-only selections to Personal while the ordinary claude account remains live", () => {
+		const { worktreeCleanup: _cleanup, ...current } = defaultDaemonConfig();
 		const config = decode({
-			...defaultDaemonConfig(),
+			...current,
 			accountDefaults: { claude: "personal" },
 			instances: [
 				{
@@ -268,6 +272,7 @@ describe("account config migration", () => {
 			],
 		});
 		const accounts = accountsStateFromConfig(config, launch);
+		expect(config.worktreeCleanup).toEqual(DEFAULT_WORKTREE_CLEANUP);
 		for (const selection of [
 			{ provider: "claude", model: "sonnet" },
 			{ provider: "claude-sdk", model: "sonnet" },

@@ -7,6 +7,7 @@ import {
 	AccountUnroutable,
 	DEFAULT_USAGE_LIMITS,
 } from "../../contracts/limit-recovery.js";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { ConfigPersistenceTag } from "../../domain/daemon/Services/config-persistence-service.js";
@@ -14,6 +15,10 @@ import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../../domain/daemon/Services/daemon-config-ref.js";
+import {
+	cleanUpWorktreesNow,
+	requestWorktreeCleanup,
+} from "../../domain/daemon/Services/worktree-cleanup-service.js";
 import { publishGlobalProjectSetting } from "../../domain/relay/Services/project-settings.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import {
@@ -28,6 +33,26 @@ import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 export const settingsHandlers = {
+	GetWorktreeCleanupSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			return {
+				worktreeCleanup: config.worktreeCleanup ?? DEFAULT_WORKTREE_CLEANUP,
+			};
+		}),
+	SetWorktreeCleanupSetting: ({ worktreeCleanup }) =>
+		Effect.gen(function* () {
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				worktreeCleanup,
+			}));
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.requestSave;
+			yield* persistence.flush;
+			yield* requestWorktreeCleanup();
+			return { worktreeCleanup };
+		}).pipe(Effect.catchAll(mapRpcFailure("SetWorktreeCleanupSetting"))),
+	CleanUpWorktreesNow: ({ projectSlug }) => cleanUpWorktreesNow(projectSlug),
 	GetAutoSettleSetting: (_request) =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(yield* DaemonConfigRefTag);
@@ -173,6 +198,9 @@ export const settingsHandlers = {
 	WsRpcHandlerMap,
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetWorktreeCleanupSetting"
+	| "SetWorktreeCleanupSetting"
+	| "CleanUpWorktreesNow"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
 	| "SetDefaultPermissionMode"

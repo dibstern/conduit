@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Layer, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Queue, Schema, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { AccountSchema } from "../../../src/lib/contracts/account.js";
 import {
@@ -203,15 +203,14 @@ describe("account catalogue refresh through browser RPC", () => {
 					root,
 				);
 				const { project, daemon, started, published } = yield* clients(pending);
-				yield* project.GetModels({
-					projectSlug: "myapp",
-					instanceId: "claude",
-				});
+				const firstRead = yield* project
+					.GetModels({ projectSlug: "myapp", instanceId: "claude" })
+					.pipe(Effect.forkScoped);
 				expect(yield* Queue.take(started)).toBe("claude");
-				yield* project.GetModels({
-					projectSlug: "myapp",
-					instanceId: "claude",
-				});
+				const repeatedRead = yield* project
+					.GetModels({ projectSlug: "myapp", instanceId: "claude" })
+					.pipe(Effect.forkScoped);
+				yield* Effect.yieldNow();
 				expect(yield* Queue.size(started)).toBe(0);
 				yield* daemon.SetDefault({ instanceId: "personal" });
 				yield* project.GetModels({ projectSlug: "myapp" });
@@ -221,6 +220,9 @@ describe("account catalogue refresh through browser RPC", () => {
 					providers: [{ id: "claude", models: [{ id: "personal-model" }] }],
 				});
 				yield* Deferred.succeed(pending, capabilities("claude"));
+				yield* Fiber.join(firstRead);
+				yield* Fiber.join(repeatedRead);
+				expect(yield* Queue.size(started)).toBe(0);
 				expect(yield* Queue.take(published)).toMatchObject({
 					accountId: "claude",
 					providers: [{ id: "claude", models: [{ id: "claude-model" }] }],
@@ -248,6 +250,7 @@ describe("account catalogue refresh through browser RPC", () => {
 				const { project, daemon, published } = yield* clients();
 				yield* daemon.SetDefault({ instanceId: "personal" });
 				const session = yield* project.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "myapp",
 					originId: "g4zp8-catalogue-client",
 					model: { providerId: "claude", modelId: "personal-model" },

@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { Either } from "effect";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	CURRENT_CONFIG_VERSION,
 	clearDaemonConfig,
@@ -269,6 +270,7 @@ describe("saveDaemonConfig", () => {
 			...config,
 			accountDefaults: {},
 			deletedAccounts: [],
+			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		});
 	});
 

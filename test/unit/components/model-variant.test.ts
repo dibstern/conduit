@@ -2,9 +2,9 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelVariant from "../../../src/lib/frontend/components/model/ModelVariant.svelte";
 import {
+	applyGetModelsResponse,
 	clearDiscoveryState,
 	discoveryState,
-	handleVariantInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -37,10 +37,17 @@ describe("ModelVariant", () => {
 	beforeEach(() => {
 		switchVariantRpcSpy.mockClear();
 		clearDiscoveryState();
-		handleVariantInfo({
-			variant: "",
-			variants: ["low", "medium", "high", "max"],
-		});
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				instanceId: "claude",
+				providers: [],
+				active: { model: "sonnet", provider: "claude" },
+				variant: { variant: "", variants: ["low", "medium", "high", "max"] },
+				contextWindow: { contextWindow: "", options: [] },
+			},
+			"session-1",
+		);
 		sessionState.currentId = "session-1";
 	});
 

@@ -60,6 +60,7 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 		runTransportEffect: <A, E>(effect: Effect.Effect<A, E, WsRpcClients>) =>
 			Effect.runPromise(
 				Effect.provideService(effect, WsRpcClients, {
+					wake: Effect.void,
 					forProject: () => {
 						const control: Pick<WsRpcClient, "RestartWithConfig"> = {
 							RestartWithConfig:

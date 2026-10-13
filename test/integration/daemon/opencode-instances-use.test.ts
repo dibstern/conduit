@@ -363,7 +363,7 @@ describe("OpenCode Instances use", () => {
 		);
 	}, 90_000);
 
-	it("surfaces use on an unreachable instance as a browser error", async () => {
+	it("surfaces start on an unreachable instance as a browser error", async () => {
 		const fixture = await start("unreachable");
 		const socket = join(fixture.configDir, "relay.sock");
 		const closedPort = await new Promise<number>((done, fail) => {
@@ -391,12 +391,10 @@ describe("OpenCode Instances use", () => {
 		if (!unreachable) throw new Error("Unreachable instance was not added");
 		const a = await fixture.connect();
 		const startedAt = Date.now();
-		const error = await a
-			.createSession("Unreachable", unreachable.id, "opencode")
-			.then(
-				() => undefined,
-				(cause: unknown) => cause,
-			);
+		const error = await a.startInstance(unreachable.id).then(
+			() => undefined,
+			(cause: unknown) => cause,
+		);
 		const elapsedMs = Date.now() - startedAt;
 		const message =
 			error instanceof Error
@@ -409,8 +407,7 @@ describe("OpenCode Instances use", () => {
 			message,
 		};
 		expect(error).toBeDefined();
-		// The browser retains the actionable cause through SessionManagerError.
-		expect(message).toContain("CreateSession failed");
+		// Explicit start preserves the connection's actionable cause.
 		expect(message).toContain(unreachable.id);
 		expect(message).toContain(`http://127.0.0.1:${closedPort}`);
 		expect(message).toContain("unreachable");

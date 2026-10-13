@@ -13,7 +13,7 @@ import {
 // project's prompt leaks into another, a reconnect re-delivers a prompt once
 // per subscriber, a relay joining a live stream misses state, and a dropped
 // idle event leaves a session busy forever, or recovered prompts duplicate
-// canonical events and activities across reconnects and daemon restarts.
+// canonical events across reconnects and daemon restarts.
 describe("OpenCode Instances recovery and reconciliation", () => {
 	let harness: ProcessHarness | undefined;
 	let scenario = "reconnect";
@@ -216,19 +216,6 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 						WHERE session_id = ? AND type IN ('permission.asked', 'question.asked')
 						AND json_extract(data, '$.id') IN (?, ?) ORDER BY type, sequence`)
 						.all(sessionId, permissionId, questionId),
-					activities: db
-						.prepare<
-							[string, string, string],
-							{
-								kind: string;
-								requestId: string;
-								sequence: number;
-							}
-						>(`SELECT kind, json_extract(payload, '$.id') AS requestId, sequence
-						FROM activities WHERE session_id = ?
-						AND kind IN ('permission.asked', 'question.asked')
-						AND json_extract(payload, '$.id') IN (?, ?) ORDER BY kind, sequence`)
-						.all(sessionId, permissionId, questionId),
 				};
 			} finally {
 				db.close();
@@ -257,9 +244,6 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		];
 		expect(
 			initial.canonical.map(({ kind, requestId }) => ({ kind, requestId })),
-		).toEqual(expected);
-		expect(
-			initial.activities.map(({ kind, requestId }) => ({ kind, requestId })),
 		).toEqual(expected);
 		evidence["initial"] = initial;
 

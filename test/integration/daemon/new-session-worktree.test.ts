@@ -138,6 +138,7 @@ process.exit(result.status ?? 1);
 			const result = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
@@ -381,6 +382,7 @@ process.exit(result.status ?? 1);
 				sendRpcRequest(
 					socket,
 					new CreateSession({
+						permissionMode: "ask",
 						projectSlug: "process-test",
 						originId: "base-test",
 						providerId: "claude",
@@ -397,6 +399,7 @@ process.exit(result.status ?? 1);
 			sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "base-test",
 					providerId: "claude",
@@ -552,6 +555,7 @@ process.exit(result.status ?? 1);
 		const { sessionId } = await sendRpcRequest(
 			socket,
 			new CreateSession({
+				permissionMode: "ask",
 				projectSlug: "process-test",
 				originId: "new-worktree-test",
 				providerId: "claude",
@@ -605,6 +609,7 @@ process.exit(result.status ?? 1);
 				sendRpcRequest(
 					socket,
 					new CreateSession({
+						permissionMode: "ask",
 						projectSlug: "process-test",
 						originId: "new-worktree-test",
 						providerId: "claude",
@@ -655,6 +660,7 @@ process.exit(result.status ?? 1);
 			sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "unsupported-provider",
@@ -669,6 +675,7 @@ process.exit(result.status ?? 1);
 			sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
@@ -695,6 +702,7 @@ process.exit(result.status ?? 1);
 			sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: "new-worktree-test",
 					providerId: "claude",
@@ -789,6 +797,7 @@ process.exit(result.status ?? 1);
 		const creating = Effect.runPromise(
 			Effect.exit(
 				browser.rpc.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "process-test",
 					originId: browser.originId,
 					providerId: "claude",

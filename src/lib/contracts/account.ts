@@ -87,7 +87,7 @@ export const AccountAddInputSchema = Schema.Union(
 		...addFields,
 		driver: Schema.Literal("opencode"),
 		managed: Schema.optional(Schema.Boolean),
-		port: Schema.optional(validPort),
+		port: Schema.optional(Schema.Union(validPort, Schema.Literal(0))),
 		url: Schema.optional(
 			Schema.String.pipe(
 				Schema.filter(
@@ -107,6 +107,10 @@ export const AccountAddInputSchema = Schema.Union(
 			),
 		),
 	}).pipe(
+		Schema.filter((input) => input.port !== 0 || input.managed === true, {
+			message: () =>
+				"InstanceAdd requires a valid 'port' (1-65535), or port 0 with managed: true",
+		}),
 		Schema.filter(
 			(input) =>
 				!(input.managed ?? input.url === undefined) || input.port !== undefined,

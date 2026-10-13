@@ -12,16 +12,13 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import {
-	applyContextWindowSwitched,
 	applyGetAgentsResponse,
-	applyModelSwitched,
-	applyVariantSwitched,
 	chooseContextWindow,
 	chooseModel,
 	choosePermissionMode,
 	chooseVariant,
 	discoveryState,
-	followDraftModelPick,
+	followSessionPickChange,
 	getActiveContextWindowOptions,
 	getActiveModelVariants,
 	getEffectiveInstanceId,
@@ -122,12 +119,16 @@ export const effort: ComposerSetting<string> = {
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (!projectSlug || !sessionId) return;
+		const apply = followSessionPickChange(sessionId, undo);
 		switchSetting(
 			"effort",
 			undo,
 			() =>
-				switchVariantRpc({ projectSlug, sessionId, variant }).then(
-					applyVariantSwitched,
+				switchVariantRpc({ projectSlug, sessionId, variant }).then((response) =>
+					apply({
+						variant: response.variant,
+						variants: [...response.variants],
+					}),
 				),
 			`Couldn't switch thinking level to "${variant || "default"}"`,
 		);
@@ -161,11 +162,7 @@ export const approvals: ComposerSetting<ApprovalOption> = {
 		const undo = choosePermissionMode(mode);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (!projectSlug || !sessionId) {
-			discoveryState.pendingPermissionMode = mode;
-			return;
-		}
-		discoveryState.pendingPermissionMode = null;
+		if (!projectSlug || !sessionId) return;
 		switchSetting(
 			"approvals",
 			undo,
@@ -189,16 +186,10 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 	},
 	get current() {
 		const options = contextWindow.options;
-		const selectedValue =
-			discoveryState.currentContextWindow ||
-			(options.find((option) => option.isDefault)?.value ??
-				options[0]?.value ??
-				"");
+		const selectedValue = discoveryState.currentContextWindow;
 		return (
 			options.find((option) => option.value === selectedValue) ??
-			options.find((option) => option.isDefault) ??
-			options[0] ??
-			null
+			(selectedValue ? { value: selectedValue, label: selectedValue } : null)
 		);
 	},
 	get pending() {
@@ -209,18 +200,27 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 		const undo = chooseContextWindow(contextWindowValue);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (!projectSlug || !sessionId) return;
-		switchSetting(
-			"contextWindow",
-			undo,
-			() =>
-				switchContextWindowRpc({
-					projectSlug,
-					sessionId,
-					contextWindow: contextWindowValue,
-				}).then(applyContextWindowSwitched),
-			`Couldn't switch context window to "${value?.label ?? "default"}"`,
-		);
+		if (projectSlug && sessionId) {
+			const apply = followSessionPickChange(sessionId, undo);
+			switchSetting(
+				"contextWindow",
+				undo,
+				() =>
+					switchContextWindowRpc({
+						projectSlug,
+						sessionId,
+						contextWindow: contextWindowValue,
+					}).then((response) =>
+						apply({
+							contextWindow: response.contextWindow,
+							contextWindowOptions: response.options.map((option) => ({
+								...option,
+							})),
+						}),
+					),
+				`Couldn't switch context window to "${value?.label ?? "default"}"`,
+			);
+		}
 	},
 	cycle() {
 		const options = contextWindow.options;
@@ -262,27 +262,42 @@ export const model: ComposerSetting<ComposerModel> = {
 		const undo = chooseModel(value);
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (!projectSlug) return;
+		if (!projectSlug || !sessionId) return;
+		const apply = followSessionPickChange(sessionId, undo);
 		switchSetting(
 			"model",
 			undo,
 			() =>
-				sessionId
-					? switchModelRpc({ projectSlug, sessionId, ...value }).then(
-							(response) => {
-								applyModelSwitched(response);
-								void getAgentsRpc({ projectSlug, sessionId })
-									.then((response) =>
-										applyGetAgentsResponse(response, sessionId),
-									)
-									.catch(() => undefined);
-							},
-						)
-					: // A draft has no session to switch. This reads the efforts and
-						// saved effort of the model its first turn will run.
-						switchModelRpc({ projectSlug, ...value }).then(
-							followDraftModelPick(),
-						),
+				switchModelRpc({ projectSlug, sessionId, ...value }).then(
+					(response) => {
+						apply({
+							modelId: response.model,
+							providerId: response.provider,
+							variant: response.variant,
+							variants: [...response.variants],
+							...(response.contextWindow
+								? {
+										contextWindow: response.contextWindow.contextWindow,
+										contextWindowOptions: response.contextWindow.options.map(
+											(option) => ({
+												...option,
+											}),
+										),
+									}
+								: {}),
+						});
+						void getAgentsRpc({ projectSlug, sessionId })
+							.then((response) => {
+								// Agents are shared composer state, unlike the per-session pick.
+								if (
+									sessionState.currentId === sessionId &&
+									getCurrentSlug() === projectSlug
+								)
+									applyGetAgentsResponse(response, sessionId);
+							})
+							.catch(() => undefined);
+					},
+				),
 			`Couldn't switch model to "${value.modelId}"`,
 		);
 	},

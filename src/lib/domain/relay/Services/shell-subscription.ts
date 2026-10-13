@@ -96,6 +96,7 @@ export const subscribeShell = (
 				bus,
 				source: {
 					name: "shell",
+					collections: ["sidebar"],
 					shareReads: true,
 					// The sidebar is never paged, so a resume base is the whole list.
 					read: (range, base) =>
@@ -154,16 +155,6 @@ export const subscribeShell = (
 									}),
 								),
 							),
-					// A descendant advance can change its root summary, and a
-					// deletion can end a family. The projectors move the root's
-					// sidebar row, or leave its tombstone, so the read finds either
-					// by version.
-					route: (advance) => ({
-						moved:
-							advance.sessionIds.length > 0 ||
-							advance.removedSessionIds.length > 0,
-						removed: [],
-					}),
 					resume: "catchUp",
 				},
 				...(options.resumeFromSequence === undefined

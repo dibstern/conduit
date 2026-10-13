@@ -6,7 +6,7 @@ import type {
 } from "../../../src/lib/contracts/limit-recovery.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
-import { requireRpcControl } from "./shared.js";
+import { mockInstances, requireRpcControl } from "./shared.js";
 import { themeColour } from "./usageFooterMeter.js";
 
 const clockTimes = new WeakMap<Page, number>();
@@ -1234,12 +1234,17 @@ export const usageSettingsHandlers: StepHandler[] = [
 			rpc.setHandler("QuotaForAccounts", () => {
 				const previous = snapshot(world.page);
 				const now = clockTimes.get(world.page) ?? Date.now();
+				const accountId = mockInstances
+					.get(world.page)
+					?.find(
+						(account) => account["driver"] === "claude" && account["isDefault"],
+					)?.["id"];
 				rpc.setUsageReadings(
 					previous.map((reading) =>
-						reading.accountId === "claude"
+						reading.accountId === accountId
 							? {
 									...accountReading(
-										"claude",
+										reading.accountId,
 										reading.planLabel ?? "Claude Max",
 										usageValues[match[1] as keyof typeof usageValues],
 										now,

@@ -30,6 +30,7 @@ import {
 	type OpenCodeClient,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
+import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import {
 	ConfigTag,
 	ConnectPtyUpstreamTag,
@@ -37,6 +38,7 @@ import {
 	PtyManagerTag,
 	WebSocketHandlerTag,
 } from "./services.js";
+import { SessionWorkspaceTag } from "./session-workspace.js";
 
 type TerminalOperation =
 	| "create"
@@ -96,6 +98,7 @@ export interface LocalPtySession {
 export interface LocalPtyService {
 	list(
 		cwd: string,
+		allProjects?: boolean,
 	): Effect.Effect<ReadonlyArray<PtyInfo>, TerminalServiceError>;
 	attach(
 		ptyId: string,
@@ -170,7 +173,7 @@ export const LocalPtyServiceLive: Layer.Layer<
 					catch: (cause) =>
 						new TerminalServiceError({ operation: "create", cause }),
 				}),
-			list: (cwd) =>
+			list: (cwd, allProjects = false) =>
 				Effect.tryPromise({
 					try: async () => {
 						let host: PtyHostClient;
@@ -185,7 +188,7 @@ export const LocalPtyServiceLive: Layer.Layer<
 							throw error;
 						}
 						// A failed exchange is not an authoritative empty terminal list.
-						return (await host.list(cwd)).map(({ pty }) => pty);
+						return (await host.list(cwd, allProjects)).map(({ pty }) => pty);
 					},
 					catch: (cause) =>
 						new TerminalServiceError({ operation: "list", cause }),
@@ -458,7 +461,21 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 						`client=${clientId} session=${session} Created: ${pty.id} (pid=${pty.pid})`,
 					);
 					registerLocalSession(createResult.right, false);
-				}).pipe(terminalLock.withPermits(1)),
+				}).pipe(Effect.uninterruptible, terminalLock.withPermits(1), (create) =>
+					Effect.gen(function* () {
+						// Match cleanup's launch lock so a successful spawn is visible
+						// to its final host read before the directory can be removed.
+						const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+						const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
+						const spawn =
+							worktrees._tag === "Some"
+								? worktrees.value.withCheckoutUse(create)
+								: create;
+						return yield* workspace._tag === "Some"
+							? workspace.value.withLaunch(spawn)
+							: spawn;
+					}),
+				),
 			list: () =>
 				Effect.gen(function* () {
 					const batch = completed;

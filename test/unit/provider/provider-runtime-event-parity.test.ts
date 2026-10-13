@@ -9,6 +9,7 @@ import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
+import { makeEffectProjectionHarness } from "../../helpers/effect-projection-harness.js";
 
 const BASE_EVENT = {
 	providerId: "claude",
@@ -62,6 +63,128 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 }
 
 describe("translateProviderRuntimeEventToDomain", () => {
+	it.each([
+		"text.delta",
+		"thinking.delta",
+	])("emits the first empty %s to open its part and drops later empty deltas", (type) => {
+		const event = runtimeEvent({
+			eventId: "first-empty-delta",
+			type,
+			data: { messageId: "message-1", partId: "part-1", text: "" },
+		});
+		const first = translateProviderRuntimeEventToDomain(event);
+		expect(first.events).toMatchObject([
+			{
+				type,
+				data: { messageId: "message-1", partId: "part-1", text: "" },
+			},
+		]);
+		const repeated = translateProviderRuntimeEventToDomain(event, first.state);
+		expect(repeated.events).toEqual([]);
+		expect(repeated.state).toBe(first.state);
+	});
+
+	it("preserves projected part order when initially empty text grows after thinking", async () => {
+		const harness = makeEffectProjectionHarness();
+		try {
+			await harness.ingestBatch([
+				runtimeEvent({
+					eventId: "session-created",
+					type: "session.created",
+					data: { title: "Child", providerSessionId: "sdk-child" },
+				}),
+				runtimeEvent({
+					eventId: "message-created",
+					type: "message.created",
+					data: { messageId: "message-1", role: "assistant" },
+				}),
+				runtimeEvent({
+					eventId: "empty-text",
+					type: "text.delta",
+					data: { messageId: "message-1", partId: "text-1", text: "" },
+				}),
+				runtimeEvent({
+					eventId: "thinking-start",
+					type: "thinking.start",
+					data: { messageId: "message-1", partId: "thinking-1" },
+				}),
+				runtimeEvent({
+					eventId: "thinking-delta",
+					type: "thinking.delta",
+					data: {
+						messageId: "message-1",
+						partId: "thinking-1",
+						text: "Reasoning",
+					},
+				}),
+				runtimeEvent({
+					eventId: "thinking-end",
+					type: "thinking.end",
+					data: { messageId: "message-1", partId: "thinking-1" },
+				}),
+			]);
+			await harness.ingest(
+				runtimeEvent({
+					eventId: "grown-text",
+					type: "text.delta",
+					data: { messageId: "message-1", partId: "text-1", text: "Visible" },
+				}),
+			);
+			const messages = await harness.sessionMessagesWithParts(
+				BASE_EVENT.sessionId,
+			);
+			expect(
+				messages[0]?.parts.map(({ type, text }) => ({ type, text })),
+			).toEqual([
+				{ type: "text", text: "Visible" },
+				{ type: "thinking", text: "Reasoning" },
+			]);
+		} finally {
+			await harness.dispose();
+		}
+	});
+
+	it.each([
+		{ type: "text.delta", label: "empty", data: { text: "" } },
+		{ type: "text.delta", label: "missing", data: {} },
+		{ type: "thinking.delta", label: "empty", data: { text: "" } },
+		{ type: "thinking.delta", label: "missing", data: {} },
+	])("drops $label $type without changing mapper state", ({ type, data }) => {
+		const state: ProviderRuntimeDomainMapperState = {
+			currentAssistantMessageIds: new Map([
+				["session-123:turn-1", "message-1"],
+			]),
+			itemMessageIds: new Map([["session-123::part-1", "message-1"]]),
+			startedToolPartIds: new Set(["session-123:tool-1"]),
+		};
+		const result = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "empty-delta",
+				type,
+				data: { messageId: "message-1", partId: "part-1", ...data },
+			}),
+			state,
+		);
+		expect(result.state).toBe(state);
+		expect(result.events).toEqual([]);
+
+		const whitespace = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "whitespace-delta",
+				type,
+				data: { messageId: "message-1", partId: "part-1", text: " \n" },
+			}),
+			result.state,
+		);
+		expect(whitespace.events).toMatchObject([
+			{
+				type,
+				data: { messageId: "message-1", partId: "part-1", text: " \n" },
+			},
+		]);
+		expect(whitespace.state).toBe(state);
+	});
+
 	it("maps runtime message.created to durable message.created with runtime metadata", () => {
 		const { events, state } = translateProviderRuntimeEventToDomain(
 			runtimeEvent({

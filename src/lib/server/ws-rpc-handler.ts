@@ -11,6 +11,10 @@ import {
 	withRpcShutdownResponse,
 } from "../daemon/daemon-rpc-server.js";
 import {
+	observeTurnTimelineSocketWrite,
+	turnTimelineAwaitsSocketWrite,
+} from "../domain/daemon/Services/turn-timeline.js";
+import {
 	makeWsTransportLive,
 	type WsTransport,
 	WsTransportTag,
@@ -101,6 +105,35 @@ const runRpcWebSocketConnection = <R>(
 					// A committed change must revoke other sockets even if its caller left.
 					for (const revoke of pendingPinChanges.values()) revoke();
 					pendingPinChanges.clear();
+				}),
+			);
+			// Protocol sends can be no-ops after disconnect, so measure native writes.
+			const originalSend = ws.send;
+			const send = originalSend.bind(ws);
+			ws.send = (
+				data: Parameters<WebSocket["send"]>[0],
+				options?: Parameters<WebSocket["send"]>[1] | ((error?: Error) => void),
+				callback?: (error?: Error) => void,
+			) => {
+				// Idle tracing keeps the native send path: no callback per frame.
+				if (!turnTimelineAwaitsSocketWrite()) {
+					Reflect.apply(originalSend, ws, [data, options, callback]);
+					return;
+				}
+				const complete = (error?: Error) => {
+					if (
+						!error &&
+						(typeof data === "string" || data instanceof Uint8Array)
+					)
+						observeTurnTimelineSocketWrite(data);
+					(typeof options === "function" ? options : callback)?.(error);
+				};
+				if (typeof options === "object") send(data, options, complete);
+				else send(data, complete);
+			};
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => {
+					ws.send = originalSend;
 				}),
 			);
 			// The `ws` package is EventTarget-compatible at runtime, but its

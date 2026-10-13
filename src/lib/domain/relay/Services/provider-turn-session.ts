@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import { accountRefFromSelection } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -25,7 +24,6 @@ import {
 	WebSocketHandlerTag,
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
-import { selectSessionModel } from "./session-model-settings.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
 
 export const completeRecoveredQuestion = (
@@ -158,10 +156,8 @@ const materializeOpenCodeSession = (
 		if (source.driver === "opencode") return input.sessionId;
 		const session = yield* sessionManagerService.createSession(row.title, {
 			account,
+			sourceSessionId: row.id,
 		});
-		if (input.model && input.modelUserSelected) {
-			yield* selectSessionModel(session.id, input.model);
-		}
 		orchestrationEngine.bindSession(session.id, account.id);
 		wsHandler.setClientSession(input.clientId, session.id);
 		log.info(
@@ -173,14 +169,16 @@ const materializeOpenCodeSession = (
 export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
-		const providerId = yield* orchestrationEngine.getProviderForSessionEffect(
-			input.sessionId,
-		);
-		const account = yield* (yield* AccountDirectory).resolve(
-			providerId === undefined
-				? accountRefFromSelection({ model: input.model })
-				: { _tag: "Id", id: providerId },
-		);
+		const read = yield* ReadQueryEffectTag;
+		const session = yield* read.getSession(input.sessionId);
+		const providerId =
+			session?.provider ??
+			(yield* orchestrationEngine.getProviderForSessionEffect(input.sessionId));
+		if (!providerId) return input.sessionId;
+		const account = yield* (yield* AccountDirectory).resolve({
+			_tag: "Id",
+			id: providerId,
+		});
 		if (account.driver === "claude") {
 			if (input.delivery !== "steer")
 				yield* resolvePendingClaudeQuestions(input);

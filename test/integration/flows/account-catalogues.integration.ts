@@ -47,7 +47,7 @@ describe("Integration: account catalogues", () => {
 		vi.stubEnv("CONDUIT_CONFIG_DIR", root);
 		// The separate capability-probe ticket owns SDK catalogue account scoping.
 		__setProbeOverrideForTesting(async () => ({
-			models: [],
+			models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }],
 			commands: [],
 			agents: [],
 		}));
@@ -181,9 +181,17 @@ describe("Integration: account catalogues", () => {
 			}),
 		);
 		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		await client.waitFor("shell", {
+			predicate: (message) => message["_tag"] === "synchronized",
+		});
 		const created = await client.createSession("Personal commands", {
 			instanceId: "personal-account",
+			model: {
+				providerId: "claude",
+				modelId: "sonnet",
+				variant: "",
+				contextWindow: "",
+			},
 		});
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")

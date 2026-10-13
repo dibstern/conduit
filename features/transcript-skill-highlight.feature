@@ -4,6 +4,7 @@ Background:
   Given the conduit app is served with the connected mockup
 
 Scenario Outline: a sent message renders recognised skills as pills and leaves other slash tokens plain
+  Given the composer picker has the OpenCode catalog
   When I type <message> into the composer
   And I send the composer message
   And the mock relay replays the sent message for the selected session

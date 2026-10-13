@@ -525,18 +525,13 @@ test.describe("OpenCode child family idle", () => {
 			page.locator(`#session-list [data-session-id="${childId}"]`),
 		).toHaveCount(0);
 		await expect(chat.assistantMessages.last()).toContainText(answer);
+		// A saved transcript resumes with synchronization rather than another
+		// snapshot. Both opens must settle the live feed around the rendered text.
 		await expect
 			.poll(() =>
 				pushes.detail
 					.slice(detailBeforeOpen)
-					.some(
-						(envelope) =>
-							envelope._tag === "snapshot" &&
-							envelope.rows.some(
-								(item) =>
-									item._tag === "message" && item.message.id === messageId,
-							),
-					),
+					.some((envelope) => envelope._tag === "synchronized"),
 			)
 			.toBe(true);
 		await expect(chat.stopBtn).toBeVisible();

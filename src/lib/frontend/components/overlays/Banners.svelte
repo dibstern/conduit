@@ -7,7 +7,7 @@
 <script module lang="ts">
 	import type { BannerConfig } from "../../types.js";
 	import { uiState } from "../../stores/ui.svelte.js";
-	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { getEffectiveInstanceId, getSessionDriver } from "../../stores/discovery.svelte.js";
 	import { getCachedInstances, instanceState } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
@@ -34,6 +34,7 @@
 		const instances = instanceState.instances.filter((instance) => instance.driver === "opencode");
 		if (instances.length === 0) return false;
 		if (!instances.every((i) => i.status === "unhealthy")) return false;
+		if (sessionState.currentId) return getSessionDriver(sessionState.currentId) === "opencode";
 
 		const accountId = sessionState.currentId
 			? findSession(sessionState.currentId)?.accountId

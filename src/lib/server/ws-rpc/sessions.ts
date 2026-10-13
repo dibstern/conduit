@@ -7,10 +7,7 @@ import {
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../contracts/provider-instance.js";
-import {
-	SessionWorkspaceSchema,
-	WorkspaceMoveError,
-} from "../../contracts/session-workspace.js";
+import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
 	WorktreeBranchRenameError,
@@ -34,7 +31,10 @@ import {
 	SessionManagerServiceTag,
 } from "../../domain/relay/Services/session-manager-service.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
-import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import {
+	recreateSessionWorktrees,
+	SessionWorkspaceTag,
+} from "../../domain/relay/Services/session-workspace.js";
 import { dismissWorkspaceHint } from "../../domain/relay/Services/session-workspace-hint.js";
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { formatErrorDetail } from "../../errors.js";
@@ -45,6 +45,7 @@ import {
 } from "../../git/worktrees.js";
 import {
 	rewindSessionToMessage,
+	sendMessageToSession,
 	undoSessionRewind,
 } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
@@ -66,9 +67,10 @@ import {
 } from "../../handlers/session.js";
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
-import { isPickRejection } from "../../provider/turn-settings.js";
-import { effectiveWorkingDirectory } from "../../session/session-workspace.js";
+import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+
+const sideThreadStarts = Effect.unsafeMakeSemaphore(1);
 
 export const sessionsHandlers = {
 	ListBranches: (_request) =>
@@ -146,48 +148,7 @@ export const sessionsHandlers = {
 			),
 		),
 	RecreateSessionWorktree: (request) =>
-		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-			const workspace = yield* SessionWorkspaceTag;
-			const worktrees = yield* WorktreeServiceTag;
-			const read = yield* ReadQueryEffectTag;
-			const result = yield* workspace.withLaunch(
-				Effect.gen(function* () {
-					const row = yield* read.getSession(request.sessionId);
-					const state =
-						row?.workspace == null
-							? null
-							: yield* Schema.decodeUnknown(
-									Schema.parseJson(SessionWorkspaceSchema),
-								)(row.workspace);
-					const directory = effectiveWorkingDirectory(config.projectDir, state);
-					const folders =
-						state?.origin === "conduit" ? Object.entries(state.worktrees) : [];
-					if (folders.length === 0)
-						return yield* new WorktreeRecoveryError({
-							path: directory,
-							reason: "not-owned",
-							message:
-								"Could not recreate worktree: the session has no Conduit-owned worktree.",
-						});
-					yield* worktrees.recreateAll(
-						folders.map(([path, directory]) => ({
-							folder: {
-								path,
-								projectSlug: config.slug,
-								sessionId: request.sessionId,
-							},
-							directory,
-						})),
-					);
-					return { directory };
-				}),
-			);
-			const git = yield* Effect.serviceOption(SessionGitServiceTag);
-			if (git._tag === "Some")
-				yield* git.value.refresh({ sessionId: request.sessionId });
-			return result;
-		}).pipe(
+		recreateSessionWorktrees(request.sessionId).pipe(
 			Effect.catchAll(
 				(error): Effect.Effect<never, WorktreeRecoveryError | WsRpcError> =>
 					error instanceof WorktreeRecoveryError
@@ -492,6 +453,12 @@ export const sessionsHandlers = {
 				return yield* new WsRpcError({
 					message: "worktreeBase requires newWorktree: true.",
 				});
+			if (
+				request.permissionMode == null ||
+				!request.model?.modelId.trim() ||
+				!request.model.providerId.trim()
+			)
+				return yield* new PickRequired();
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
 			const account = yield* (yield* AccountDirectory).resolve(
@@ -510,6 +477,7 @@ export const sessionsHandlers = {
 				account,
 				...(request.title != null ? { title: request.title } : {}),
 				...(request.model != null ? { model: request.model } : {}),
+				permissionMode: request.permissionMode,
 			};
 			if (request.newWorktree) {
 				if (path !== undefined)
@@ -695,14 +663,35 @@ export const sessionsHandlers = {
 		),
 	StartSideThread: (request) =>
 		Effect.gen(function* () {
-			const session = yield* forkSession(request.parentSessionId, {
-				side: { title: request.title },
-			});
-			// Refresh now rather than on the next projection burst: the side
-			// thread's first turn must not read as activity on its parent.
-			const sessionManager = yield* SessionManagerServiceTag;
-			yield* sessionManager.refreshSessionLineage();
-			return { sessionId: session.id };
+			// A retry (lost reply, crash before admission) resumes the thread its
+			// input already started; serialized so a concurrent duplicate cannot
+			// fork a second one.
+			const sql = yield* SqlClient.SqlClient;
+			const sessionId = yield* Effect.gen(function* () {
+				const [started] = yield* sql<{ session_id: string }>`
+					SELECT session_id FROM events
+					WHERE type = 'session.created'
+						AND json_extract(data, '$.startInputId') = ${request.inputId}
+					LIMIT 1`;
+				if (started) return started.session_id;
+				const session = yield* forkSession(request.parentSessionId, {
+					side: { title: request.title, inputId: request.inputId },
+				});
+				// Refresh now rather than on the next projection burst: the side
+				// thread's first turn must not read as activity on its parent.
+				const sessionManager = yield* SessionManagerServiceTag;
+				yield* sessionManager.refreshSessionLineage();
+				return session.id;
+			}).pipe(sideThreadStarts.withPermits(1));
+			// Idempotent per input id, so a retry re-admits only a lost prompt.
+			yield* sendMessageToSession({
+				clientId: request.originId ?? "rpc",
+				sessionId,
+				text: request.text,
+				commandId: request.inputId,
+				...(request.images ? { images: request.images } : {}),
+			}).pipe(Effect.catchAll(mapRpcFailure("StartSideThread")));
+			return { sessionId };
 		}).pipe(
 			Effect.catchTag("SessionCommandError", (error) =>
 				Effect.fail(

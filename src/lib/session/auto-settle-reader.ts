@@ -27,7 +27,7 @@ export const readPersistedAutoSettleFacts = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const rows = yield* sql<SessionRow>`SELECT * FROM sessions
-			WHERE parent_id IS NULL AND ${sessionId === undefined ? sql`1 = 1` : sql`id = ${sessionId}`}`;
+			WHERE ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;
 		if (rows.length === 0) return new Map<string, AutoSettleFacts>();
 		const ids = rows.map((row) => row.id);
 		const placeholders = ids.map(() => "?").join(",");

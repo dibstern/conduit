@@ -22,6 +22,7 @@ import {
 	Layer,
 	Option,
 	PubSub,
+	Queue,
 	Ref,
 	Runtime,
 } from "effect";
@@ -61,6 +62,7 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { Usage } from "../Services/usage.js";
+import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
@@ -166,6 +168,7 @@ export const RelayFactoryLive = (
 			const pollerFibers = yield* PollerFibersTag;
 			const healthCheck = yield* InstanceHealthCheckTag;
 			const eventBus = yield* DaemonEventBusTag;
+			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
 			const pushManager = yield* PushManagerTag;
@@ -432,6 +435,12 @@ export const RelayFactoryLive = (
 											),
 										),
 									broadcastSessionListChanged,
+									requestWorktreeCleanup: () =>
+										cleanupQueue._tag === "Some"
+											? Queue.offer(cleanupQueue.value, {
+													projectSlug: project.slug,
+												}).pipe(Effect.asVoid)
+											: Effect.void,
 									publishGlobalSetting: (tag) =>
 										PubSub.publish(
 											eventBus,

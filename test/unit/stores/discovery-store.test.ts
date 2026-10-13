@@ -8,13 +8,12 @@ import {
 	discoveryState,
 	extractCommandQuery,
 	filterCommands,
-	flushPendingPermissionMode,
 	formatAgentLabel,
 	formatModelName,
 	getActiveContextWindowOptions,
 	getActiveModel,
 	getActiveModelVariants,
-	getChosenModel,
+	getDraftPick,
 	getEffectiveInstanceId,
 	getModelDisplayName,
 	getProviderGroups,
@@ -23,15 +22,18 @@ import {
 	handleCommandList,
 	handleContextWindowInfo,
 	handleDefaultModelInfo,
+	handleHarnessDefaults,
 	handleModelInfo,
 	handleModelList,
 	handlePermissionModeInfo,
+	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
 	applyInstanceListResponse,
 	clearInstanceState,
 } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
 import type {
 	AgentInfo,
@@ -39,11 +41,25 @@ import type {
 	ModelInfo,
 	ProviderInfo,
 } from "../../../src/lib/frontend/types.js";
-import type { SessionPermissionMode } from "../../../src/lib/shared-types.js";
+
+const defaultInstances = (["claude", "opencode"] as const).map((driver) => ({
+	id: driver,
+	name: driver,
+	driver,
+	isDefault: true,
+	port: driver === "opencode" ? 4096 : 0,
+	managed: driver === "opencode",
+	status: "healthy" as const,
+	restartCount: 0,
+	createdAt: 0,
+}));
 
 beforeEach(() => {
 	clearDiscoveryState();
 	clearInstanceState();
+	applyInstanceListResponse({ instances: [] });
+	handleDefaultModelInfo({});
+	sessionState.currentId = null;
 });
 
 describe("formatAgentLabel", () => {
@@ -237,7 +253,20 @@ describe("applyGetModelsResponse", () => {
 		"update-first",
 		"response-first",
 	])("keeps live Claude models when an older GetModels response arrives %s", (order) => {
-		handleModelInfo({ model: "sonnet", provider: "claude" });
+		applyInstanceListResponse({ instances: defaultInstances });
+		handleHarnessDefaults({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "ok",
+				pick: {
+					modelId: "sonnet",
+					providerId: "claude",
+					effort: "high",
+					contextWindow: "1m",
+				},
+			},
+			opencode: { status: "missing" },
+		});
 		const applyResponse = () =>
 			applyGetModelsResponse({
 				projectSlug: "project-a",
@@ -264,6 +293,7 @@ describe("applyGetModelsResponse", () => {
 		const applyUpdate = () =>
 			applyProjectSetting({
 				_tag: "providerModels",
+				accountId: "claude",
 				providers: [
 					{
 						id: "claude",
@@ -288,6 +318,7 @@ describe("applyGetModelsResponse", () => {
 			applyResponse();
 			applyUpdate();
 		}
+		selectInstance("claude");
 		expect(discoveryState.providers.map(({ id }) => id)).toEqual([
 			"anthropic",
 			"claude",
@@ -301,7 +332,7 @@ describe("applyGetModelsResponse", () => {
 		]);
 	});
 
-	it("uses one live Claude catalog for configured default and named account choices", () => {
+	it("uses each account's Claude catalog for configured default and named account choices", () => {
 		applyInstanceListResponse({
 			instances: [
 				{
@@ -328,35 +359,101 @@ describe("applyGetModelsResponse", () => {
 				},
 			],
 		});
-		applyProjectSetting({
-			_tag: "providerModels",
-			providers: [
-				{
-					id: "claude",
-					name: "Claude",
-					configured: true,
-					models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
-				},
-			],
-		});
-		chooseModel({ modelId: "sonnet", providerId: "claude" });
 		expect(getEffectiveInstanceId()).toBe("personal");
 		expect(getProviderGroupsForInstance("claude")).toEqual([]);
-		expect(getChosenModel("claude")).toBeUndefined();
-		for (const instanceId of ["personal", "claude-work"]) {
+		expect(getDraftPick()).toBeUndefined();
+		for (const [instanceId, modelId] of [
+			["personal", "sonnet"],
+			["claude-work", "opus"],
+		] as const) {
+			selectInstance(instanceId);
+			chooseModel({ modelId, providerId: "claude" });
+			expect(getProviderGroupsForInstance(instanceId)).toEqual([]);
+			expect(getDraftPick()).toBeUndefined();
+			applyProjectSetting({
+				_tag: "providerModels",
+				accountId: instanceId,
+				providers: [
+					{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [{ id: modelId, name: modelId, provider: "claude" }],
+					},
+				],
+			});
+			chooseModel({ modelId, providerId: "claude" });
 			expect(
 				getProviderGroupsForInstance(instanceId).map(
 					({ provider }) => provider.id,
 				),
 			).toEqual(["claude"]);
-			expect(getChosenModel(instanceId)).toEqual({
-				modelId: "sonnet",
-				providerId: "claude",
+			expect(getDraftPick()).toEqual({
+				instanceId,
+				model: {
+					modelId,
+					providerId: "claude",
+					variant: "",
+					contextWindow: "",
+				},
+				permissionMode: "ask",
 			});
 		}
 		expect(getProviderGroups().map(({ provider }) => provider.id)).toEqual([
 			"claude",
 		]);
+	});
+
+	it("keeps an unknown draft account unroutable across account snapshots", () => {
+		applyInstanceListResponse({ instances: defaultInstances });
+		selectInstance("missing-account");
+		expect(getEffectiveInstanceId()).toBeUndefined();
+		expect(getDraftPick()).toBeUndefined();
+		applyInstanceListResponse({
+			instances: defaultInstances.map((account) =>
+				account.driver === "claude" ? { ...account, id: "personal" } : account,
+			),
+		});
+		expect(getEffectiveInstanceId()).toBeUndefined();
+		expect(getDraftPick()).toBeUndefined();
+	});
+
+	it.each([
+		"claude",
+		"opencode",
+	] as const)("falls back to the %s default when a live held account is removed", (driver) => {
+		const account = defaultInstances.find(
+			(account) => account.driver === driver,
+		);
+		assert.exists(account);
+		applyInstanceListResponse({
+			instances: [
+				...defaultInstances,
+				{ ...account, id: "work", isDefault: false },
+			],
+		});
+		selectInstance("work");
+		expect(getEffectiveInstanceId()).toBe("work");
+		applyInstanceListResponse({ instances: defaultInstances });
+		expect(getEffectiveInstanceId()).toBe(driver);
+	});
+
+	it.each([
+		{ id: "claude", driver: "claude" },
+		{ id: "claude-sdk", driver: "claude" },
+		{ id: "opencode", driver: "opencode" },
+	])("resolves the legacy $id draft ref through its driver default", ({
+		id,
+		driver,
+	}) => {
+		applyInstanceListResponse({
+			instances: defaultInstances.map((account) => ({
+				...account,
+				id: `${account.driver}-default`,
+			})),
+		});
+		selectInstance(id);
+		expect(getEffectiveInstanceId()).toBe(`${driver}-default`);
 	});
 
 	it("keeps the global catalog when a scoped model response arrives", () => {
@@ -412,13 +509,17 @@ describe("applyGetModelsResponse", () => {
 				options: [{ value: "1m", label: "1M" }],
 			},
 		});
+		selectInstance("claude");
+		chooseModel({ modelId: "sonnet", providerId: "claude" });
 		expect(getActiveModelVariants()).toEqual([]);
 		expect(getActiveContextWindowOptions()).toEqual([]);
 	});
 
 	it("updates model discovery state from one RPC response", () => {
+		applyInstanceListResponse({ instances: defaultInstances });
 		const response: GetModelsResponse = {
 			projectSlug: "project-a",
+			instanceId: "opencode",
 			providers: [
 				{
 					id: "anthropic",
@@ -429,6 +530,10 @@ describe("applyGetModelsResponse", () => {
 							id: "claude-sonnet",
 							name: "Claude Sonnet",
 							provider: "anthropic",
+							variants: ["fast", "careful"],
+							contextWindowOptions: [
+								{ value: "200k", label: "200K", isDefault: true },
+							],
 						},
 					],
 				},
@@ -448,9 +553,10 @@ describe("applyGetModelsResponse", () => {
 			},
 		};
 
+		selectInstance("opencode");
 		applyGetModelsResponse(response);
 
-		expect(discoveryState.providers).toHaveLength(1);
+		expect(getProviderGroupsForInstance("opencode")).toHaveLength(1);
 		expect(discoveryState.currentModelId).toBe("claude-sonnet");
 		expect(discoveryState.currentProviderId).toBe("anthropic");
 		expect(discoveryState.currentVariant).toBe("careful");
@@ -469,43 +575,25 @@ describe("applyGetModelsResponse", () => {
 
 describe("handlePermissionModeInfo", () => {
 	it("sets the session permission mode", () => {
+		sessionState.currentId = "session-permission";
 		handlePermissionModeInfo({ mode: "auto" });
 		expect(discoveryState.permissionMode).toBe("auto");
 	});
 });
 
-describe("flushPendingPermissionMode", () => {
-	it("sends the pre-bind selection to the server", async () => {
-		const sent: SessionPermissionMode[] = [];
-		discoveryState.pendingPermissionMode = "acceptEdits";
-
-		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
-			sent.push(mode);
-		});
-
-		expect(sent).toEqual(["acceptEdits"]);
-		expect(discoveryState.permissionMode).toBe("acceptEdits");
-		expect(discoveryState.pendingPermissionMode).toBeNull();
-	});
-
-	// "ask" used to be skipped as "the server default". It is only the default
-	// for a brand-new session, and this runs on binding to any session -- so
-	// binding to one already on "full" left the server on full access while the
-	// pill read "Ask". Restricting a session must never be the silent case.
-	it("sends a pre-bind selection of ask rather than assuming the server default", () => {
-		const sent: SessionPermissionMode[] = [];
-		handlePermissionModeInfo({ mode: "full" });
-		discoveryState.pendingPermissionMode = "ask";
-
-		flushPendingPermissionMode("proj", "ses-1", async ({ mode }) => {
-			sent.push(mode);
-		});
-
-		expect(sent).toEqual(["ask"]);
-	});
-});
-
 describe("an undo only undoes its own choice", () => {
+	beforeEach(() => {
+		sessionState.currentId = "session-undo";
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				instanceId: "opencode",
+				providers: [],
+				active: { model: "server-model", provider: "server-provider" },
+			},
+			"session-undo",
+		);
+	});
 	it("leaves a newer choice alone when an older request fails", () => {
 		handlePermissionModeInfo({ mode: "full" });
 
@@ -578,22 +666,47 @@ describe("an undo only undoes its own choice", () => {
 	});
 });
 
-describe("handleModelInfo", () => {
-	it("sets current model and provider IDs (server sends 'model' and 'provider')", () => {
-		handleModelInfo({
-			model: "claude-4",
-			provider: "anthropic",
+describe("draft model reads", () => {
+	beforeEach(() => {
+		applyInstanceListResponse({ instances: defaultInstances });
+		selectInstance("opencode");
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{ id: "claude-4", name: "Claude 4", provider: "anthropic" },
+						{ id: "existing", name: "Existing", provider: "anthropic" },
+					],
+				},
+			],
+		});
+	});
+
+	it("sets current model and provider IDs from a local draft pick", () => {
+		chooseModel({
+			modelId: "claude-4",
+			providerId: "anthropic",
 		});
 		expect(discoveryState.currentModelId).toBe("claude-4");
 		expect(discoveryState.currentProviderId).toBe("anthropic");
 	});
 
-	it("does not overwrite if fields are empty", () => {
-		handleModelInfo({
-			model: "existing",
-			provider: "existing",
+	it("keeps a held model when a scoped response has empty active fields", () => {
+		chooseModel({
+			modelId: "existing",
+			providerId: "anthropic",
 		});
-		handleModelInfo({ model: "", provider: "" });
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
+			providers: [],
+			active: { model: "", provider: "" },
+		});
 		expect(discoveryState.currentModelId).toBe("existing");
 	});
 });
@@ -611,7 +724,10 @@ describe("handleCommandList", () => {
 
 describe("getActiveModel", () => {
 	it("resolves a grouped model when the active id is a routing option", () => {
-		handleModelList({
+		applyInstanceListResponse({ instances: defaultInstances });
+		applyGetModelsResponse({
+			projectSlug: "project-a",
+			instanceId: "opencode",
 			providers: [
 				{
 					id: "amazon-bedrock",
@@ -635,9 +751,10 @@ describe("getActiveModel", () => {
 				},
 			],
 		});
-		handleModelInfo({
-			model: "us.anthropic.claude-fable-5",
-			provider: "amazon-bedrock",
+		selectInstance("opencode");
+		chooseModel({
+			modelId: "us.anthropic.claude-fable-5",
+			providerId: "amazon-bedrock",
 		});
 		expect(getActiveModel()?.name).toBe("Claude Fable 5");
 	});
@@ -688,15 +805,26 @@ describe("handleDefaultModelInfo", () => {
 	});
 });
 
-describe("handleContextWindowInfo", () => {
-	it("sets the current context window and options from the server", () => {
-		handleContextWindowInfo({
-			contextWindow: "1m",
-			options: [
-				{ value: "200k", label: "200K" },
-				{ value: "1m", label: "1M (beta)", isDefault: true },
-			],
-		});
+describe("session context-window reads", () => {
+	beforeEach(() => {
+		sessionState.currentId = "session-context";
+	});
+
+	it("sets the session context window and options from its response", () => {
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				providers: [],
+				contextWindow: {
+					contextWindow: "1m",
+					options: [
+						{ value: "200k", label: "200K" },
+						{ value: "1m", label: "1M (beta)", isDefault: true },
+					],
+				},
+			},
+			"session-context",
+		);
 
 		expect(discoveryState.currentContextWindow).toBe("1m");
 		expect(discoveryState.availableContextWindowOptions).toEqual([
@@ -705,17 +833,22 @@ describe("handleContextWindowInfo", () => {
 		]);
 	});
 
-	it("falls back to empty state when the server sends no options", () => {
-		handleContextWindowInfo({
-			contextWindow: "1m",
-			options: [{ value: "200k", label: "200K" }],
-		});
-
-		// Deliberately incomplete, to verify defensive handling.
-		handleContextWindowInfo({
-			contextWindow: "",
-			options: undefined,
-		} as unknown as Parameters<typeof handleContextWindowInfo>[0]);
+	it("clears session context-window state when its response omits the options", () => {
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				providers: [],
+				contextWindow: {
+					contextWindow: "1m",
+					options: [{ value: "200k", label: "200K" }],
+				},
+			},
+			"session-context",
+		);
+		applyGetModelsResponse(
+			{ projectSlug: "project-a", providers: [] },
+			"session-context",
+		);
 
 		expect(discoveryState.currentContextWindow).toBe("");
 		expect(discoveryState.availableContextWindowOptions).toEqual([]);
@@ -723,14 +856,23 @@ describe("handleContextWindowInfo", () => {
 });
 
 describe("getActiveContextWindowOptions", () => {
+	beforeEach(() => applyInstanceListResponse({ instances: defaultInstances }));
 	it("returns the server-provided context window options", () => {
-		handleContextWindowInfo({
-			contextWindow: "",
-			options: [
-				{ value: "200k", label: "200K", isDefault: true },
-				{ value: "1m", label: "1M (beta)" },
-			],
-		});
+		sessionState.currentId = "session-context";
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				providers: [],
+				contextWindow: {
+					contextWindow: "",
+					options: [
+						{ value: "200k", label: "200K", isDefault: true },
+						{ value: "1m", label: "1M (beta)" },
+					],
+				},
+			},
+			"session-context",
+		);
 
 		expect(getActiveContextWindowOptions()).toEqual([
 			{ value: "200k", label: "200K", isDefault: true },
@@ -760,9 +902,10 @@ describe("getActiveContextWindowOptions", () => {
 				},
 			],
 		});
-		handleModelInfo({
-			model: "claude-opus-5",
-			provider: "claude",
+		selectInstance("claude");
+		chooseModel({
+			modelId: "claude-opus-5",
+			providerId: "claude",
 		});
 		// Stale server list from a previously-selected model must not win.
 		handleContextWindowInfo({
@@ -786,9 +929,10 @@ describe("getActiveContextWindowOptions", () => {
 				},
 			],
 		});
-		handleModelInfo({
-			model: "claude-haiku-4-5",
-			provider: "claude",
+		selectInstance("claude");
+		chooseModel({
+			modelId: "claude-haiku-4-5",
+			providerId: "claude",
 		});
 		handleContextWindowInfo({
 			contextWindow: "",

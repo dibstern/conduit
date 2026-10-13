@@ -77,18 +77,37 @@ export const SessionGitLive = Layer.effect(
 		const startupDirectories = new Map(
 			[...published.keys()].map((directory) => [directory, 3]),
 		);
-		const settleStartup = (next: typeof published) =>
+		// Returns the startup folders that are gone and that nothing in this
+		// refresh still reads, so their records can be dropped and later
+		// restarts skip them.
+		const settleStartup = (
+			next: typeof published,
+			referenced: ReadonlySet<string>,
+		) =>
 			Effect.gen(function* () {
+				const forgotten: string[] = [];
 				for (const [directory, attempts] of startupDirectories) {
 					const gone = yield* Effect.tryPromise(() => lstat(directory)).pipe(
 						Effect.as(false),
 						Effect.orElseSucceed(() => true),
 					);
+					if (gone && !referenced.has(directory)) forgotten.push(directory);
 					if (next.get(directory)?.git !== undefined || gone || attempts <= 1)
 						startupDirectories.delete(directory);
 					else startupDirectories.set(directory, attempts - 1);
 				}
+				return forgotten;
 			});
+		// Runs after any stamp for the same pass, so a crash can only leave a
+		// record behind, never drop one whose change was not yet sent.
+		const forget = (directories: readonly string[]) =>
+			directories.length === 0
+				? Effect.void
+				: sql`DELETE FROM session_git_published WHERE directory IN ${sql.in(directories)}`.pipe(
+						Effect.tap(() => {
+							for (const directory of directories) published.delete(directory);
+						}),
+					);
 		let queued:
 			| {
 					all: boolean;
@@ -119,7 +138,10 @@ export const SessionGitLive = Layer.effect(
 								// become one follow-up; the other permit waiters then have no work.
 								const request = queued;
 								queued = undefined;
-								const sessions = yield* read.listSessionInfos();
+								const sessions = yield* read.listSessionGitRefreshTargets({
+									sessionIds: [...request.sessionIds],
+									all: request.all,
+								});
 								const projectFolders = [
 									config.projectDir,
 									...(config.extraFolders ?? []),
@@ -132,20 +154,8 @@ export const SessionGitLive = Layer.effect(
 											])
 										: [],
 								);
-								if (request.all)
-									for (const directory of startupDirectories.keys())
-										directories.set(directory, true);
 								const missing = new Map<string, WorkspaceMissing>();
 								for (const session of sessions) {
-									if (
-										!request.sessionIds.has(session.id) &&
-										!(
-											request.all &&
-											(session.settledAt == null ||
-												session.workspace?.origin === "conduit")
-										)
-									)
-										continue;
 									const workspaceDirectory = effectiveWorkingDirectory(
 										config.projectDir,
 										session.workspace,
@@ -174,23 +184,37 @@ export const SessionGitLive = Layer.effect(
 												request.forceSessionIds.has(session.id),
 										);
 								}
+								const referenced = new Set(directories.keys());
+								if (request.all)
+									for (const directory of startupDirectories.keys())
+										directories.set(directory, true);
 								const next = new Map(published);
 								let fromDisk = 0;
-								for (const [directory, force] of directories) {
-									const workspaceMissing = missing.get(directory);
-									const stale =
-										force || daemonSessionGitCache.isStale(directory);
-									if (stale) fromDisk++;
-									const git = stale
-										? yield* Effect.tryPromise(() =>
-												daemonSessionGitCache.refresh(directory),
-											)
-										: daemonSessionGitCache.peek(directory);
-									next.set(directory, {
-										git: workspaceMissing ? undefined : git,
-										workspaceMissing,
-									});
-								}
+								// Current folders precede settled-only startup folders in this map.
+								yield* Effect.forEach(
+									directories,
+									([directory, force]) =>
+										Effect.gen(function* () {
+											const workspaceMissing = missing.get(directory);
+											const stale =
+												force || daemonSessionGitCache.isStale(directory);
+											if (stale) fromDisk++;
+											const git = stale
+												? yield* Effect.tryPromise(() =>
+														daemonSessionGitCache.refresh(directory),
+													).pipe(
+														Effect.withSpan("sessionGit.refreshDirectory", {
+															attributes: { directory },
+														}),
+													)
+												: daemonSessionGitCache.peek(directory);
+											next.set(directory, {
+												git: workspaceMissing ? undefined : git,
+												workspaceMissing,
+											});
+										}),
+									{ concurrency: 4, discard: true },
+								);
 								const changed = new Set(
 									[...directories.keys()].filter(
 										(directory) =>
@@ -206,8 +230,13 @@ export const SessionGitLive = Layer.effect(
 										read: fromDisk,
 										changed: changed.size,
 									} satisfies SessionGitRefresh);
-								if (request.all) yield* settleStartup(next);
-								if (changed.size === 0) continue;
+								const forgotten = request.all
+									? yield* settleStartup(next, referenced)
+									: [];
+								if (changed.size === 0) {
+									yield* forget(forgotten);
+									continue;
+								}
 								// Git lives in the cache, so version both the session and its sidebar
 								// row without changing recency or storing the branch. Recheck workspace
 								// membership in the transaction: a move may have landed during git IO.
@@ -259,6 +288,7 @@ export const SessionGitLive = Layer.effect(
 									await config.broadcastSessionListChanged?.();
 								});
 								published = next;
+								yield* forget(forgotten);
 							}
 						}),
 					);

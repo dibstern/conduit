@@ -121,7 +121,7 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 			}),
 	},
 	createSession: {
-		run: ({ api, service }) =>
+		run: ({ api, service, readQuery }) =>
 			Effect.gen(function* () {
 				const created = createdSession(
 					"ses-created",
@@ -135,11 +135,23 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "high",
+						contextWindow: "",
+					},
 				});
 
 				expect(yield* service.listSessions()).toEqual([
 					expect.objectContaining({ id: created.id, title: created.title }),
 				]);
+				expect(yield* readQuery.getSession(created.id)).toMatchObject({
+					model_id: "gpt-4",
+					model_provider: "openai",
+					variant: "high",
+					context_window: "",
+				});
 			}),
 	},
 	deleteSession: {

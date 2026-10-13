@@ -3,6 +3,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import type { ReadModelCollection } from "../../contracts/read-model-advance.js";
 import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
@@ -53,6 +54,7 @@ export interface ProjectionContext {
 export interface ProjectionTouch {
 	readonly stamped: readonly string[];
 	readonly removed: readonly string[];
+	readonly collections: readonly ReadModelCollection[];
 	/**
 	 * Sessions whose family's sidebar row this projection may have changed,
 	 * or that held a row before it. The runner refreshes them all once per
@@ -77,14 +79,18 @@ export const mergeTouches = (
 ): ProjectionTouch => {
 	const live = new Map<string, boolean>();
 	const sidebar = new Set<string>();
+	const collections = new Set<ReadModelCollection>();
 	for (const touch of touches) {
 		for (const sessionId of touch.stamped) live.set(sessionId, true);
 		for (const sessionId of touch.removed) live.set(sessionId, false);
 		for (const sessionId of touch.sidebar ?? []) sidebar.add(sessionId);
+		for (const collection of touch.collections) collections.add(collection);
 	}
+	if (sidebar.size > 0) collections.add("sidebar");
 	return {
 		stamped: [...live].filter(([, alive]) => alive).map(([id]) => id),
 		removed: [...live].filter(([, alive]) => !alive).map(([id]) => id),
+		collections: [...collections],
 		...(sidebar.size > 0 ? { sidebar: [...sidebar] } : {}),
 	};
 };
@@ -113,7 +119,7 @@ function isEventType<K extends CanonicalEventType>(
 	return event.type === type;
 }
 
-// A child-table row naming the session row it belongs to. `turns`, `activities`,
+// A child-table row naming the session row it belongs to. `turns`,
 // `pending_approvals` and `session_providers` move the session row that owns
 // them (pending_approvals also has a version, for its own subscription), and
 // the owner is whatever the write itself put in `session_id`, not what the
@@ -158,7 +164,11 @@ const stampSessions = (
 			if (rows.length === 0) removed.push(sessionId);
 			else stamped.push(...rows.map((row) => row.id));
 		}
-		return { stamped, removed };
+		return {
+			stamped,
+			removed,
+			collections: stamped.length > 0 || removed.length > 0 ? ["sessions"] : [],
+		};
 	});
 
 // Takes the messages the handler reported writing, not the id in the event
@@ -176,6 +186,7 @@ const stampMessage = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const stamped: string[] = [];
+		const changedSessions: string[] = [];
 		for (const messageId of new Set(messageIds)) {
 			const rows = yield* sql<OwnedRow & { readonly created_at: number }>`
 				UPDATE messages SET version = ${version}
@@ -184,10 +195,16 @@ const stampMessage = (
 			// The fork split uses the copy's stored clock, including when a
 			// snapshot replaces a streamed row with a provider timestamp.
 			for (const row of rows) {
-				yield* sql`UPDATE sessions SET fork_point_timestamp = ${row.created_at},
+				changedSessions.push(
+					...ids(
+						yield* sql<{
+							id: string;
+						}>`UPDATE sessions SET fork_point_timestamp = ${row.created_at},
 					version = ${version}
 					WHERE id = ${row.session_id} AND fork_point_event = ${messageId}
-					AND fork_point_timestamp IS NOT ${row.created_at}`;
+					AND fork_point_timestamp IS NOT ${row.created_at} RETURNING id`,
+					),
+				);
 			}
 			stamped.push(...owners(rows));
 		}
@@ -195,7 +212,15 @@ const stampMessage = (
 		// that owned it, and the session projector reports that removal by name.
 		// Nothing to add here: the missing id is a message id, and the advance
 		// speaks in sessions.
-		return { stamped, removed: [] };
+		const collections: ReadModelCollection[] = [];
+		if (stamped.length > 0) collections.push("messages");
+		if (changedSessions.length > 0) collections.push("sessions");
+		return {
+			stamped,
+			removed: [],
+			collections,
+			...(changedSessions.length > 0 ? { sidebar: changedSessions } : {}),
+		};
 	});
 
 interface RewindCut {
@@ -352,6 +377,15 @@ export const makeSessionProjector = (): EffectProjector => ({
 			// A removed session, child or root, leaves a deleted tombstone.
 			return {
 				...touch,
+				collections:
+					touch.removed.length > 0
+						? ([
+								...touch.collections,
+								"messages",
+								"approvals",
+								"inputs",
+							] as const)
+						: touch.collections,
 				sidebar: [...touch.stamped, ...touch.removed, ...left],
 			};
 		}).pipe(
@@ -1020,14 +1054,21 @@ export const makeMessageProjector = (): EffectProjector => ({
 			),
 			Effect.flatMap((written) =>
 				isEventType(event, "message.removed")
-					? stampSessions([event.sessionId], ctx.version)
+					? stampSessions([event.sessionId], ctx.version).pipe(
+							Effect.map((touch) => ({
+								...touch,
+								collections: [...touch.collections, "messages"] as const,
+							})),
+						)
 					: Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
 							for (const messageId of new Set(written)) {
 								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
 								// Likewise a part written now, a snapshot's kept parts included.
+								// A bulk batch (a fork's copied history) stamps every part with
+								// one version, so SQLite's pick of the version index scans them all.
 								yield* sql`DELETE FROM message_part_tombstones WHERE part_id IN (
-									SELECT id FROM message_parts
+									SELECT id FROM message_parts INDEXED BY idx_message_parts_message
 									WHERE message_id = ${messageId} AND version = ${ctx.version})`;
 							}
 							return yield* stampMessage(written, ctx.version);
@@ -1414,115 +1455,6 @@ export const makeTurnProjector = (): EffectProjector => ({
 		),
 });
 
-export const makeActivityProjector = (): EffectProjector => ({
-	name: "activity",
-	handles: [
-		"tool.started",
-		"tool.running",
-		"tool.completed",
-		"permission.asked",
-		"permission.resolved",
-		"question.asked",
-		"question.resolved",
-		"turn.error",
-	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-
-			// OR IGNORE returns no row when the activity is already there, so a
-			// re-applied event announces nothing it did not actually write.
-			const insert = (
-				tone: string,
-				kind: string,
-				summary: string,
-				payload: unknown,
-			) => {
-				const id = `${event.sessionId}:${event.sequence}:${kind}`;
-				const payloadJson = encodeJson(payload);
-				return sql<OwnedRow>`
-					INSERT OR IGNORE INTO activities
-					(id, session_id, tone, kind, summary, payload, sequence, created_at)
-					VALUES (${id}, ${event.sessionId}, ${tone}, ${kind}, ${summary}, ${payloadJson}, ${event.sequence}, ${event.createdAt})
-					RETURNING session_id`;
-			};
-
-			if (isEventType(event, "tool.started")) {
-				return owners(
-					yield* insert(
-						"tool",
-						"tool.started",
-						event.data.toolName,
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "tool.running")) {
-				return owners(
-					yield* insert("tool", "tool.running", event.data.partId, event.data),
-				);
-			}
-			if (isEventType(event, "tool.completed")) {
-				const summary = `${event.data.partId} (${event.data.duration}ms)`;
-				return owners(
-					yield* insert("tool", "tool.completed", summary, event.data),
-				);
-			}
-			if (isEventType(event, "permission.asked")) {
-				return owners(
-					yield* insert(
-						"approval",
-						"permission.asked",
-						event.data.toolName,
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "permission.resolved")) {
-				return owners(
-					yield* insert(
-						"approval",
-						"permission.resolved",
-						event.data.decision,
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "question.asked")) {
-				return owners(
-					yield* insert("info", "question.asked", "Question asked", event.data),
-				);
-			}
-			if (isEventType(event, "question.resolved")) {
-				return owners(
-					yield* insert(
-						"info",
-						"question.resolved",
-						"Question answered",
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "turn.error")) {
-				return owners(
-					yield* insert("error", "turn.error", event.data.error, event.data),
-				);
-			}
-			return [];
-		}).pipe(
-			Effect.mapError((e) =>
-				e instanceof ProjectionError
-					? e
-					: new ProjectionError({
-							projector: "activity",
-							operation: "project",
-							cause: e,
-						}),
-			),
-			Effect.flatMap((written) => stampSessions(written, ctx.version)),
-		),
-});
-
 export const makeApprovalProjector = (): EffectProjector => ({
 	name: "approval",
 	handles: [
@@ -1604,7 +1536,14 @@ export const makeApprovalProjector = (): EffectProjector => ({
 					return mergeTouches([
 						yield* stampMessage(messageIds, ctx.version),
 						// The pending counts roll up into the family's row.
-						{ ...sessions, sidebar: sessions.stamped },
+						{
+							...sessions,
+							collections:
+								written.length > 0
+									? [...sessions.collections, "approvals"]
+									: sessions.collections,
+							sidebar: sessions.stamped,
+						},
 					]);
 				}),
 			),
@@ -1735,6 +1674,13 @@ export const makeInputProjector = (): EffectProjector => ({
 						}),
 			),
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
+			Effect.map((touch) => ({
+				...touch,
+				collections:
+					touch.stamped.length > 0 && event.type !== "input.interrupt_requested"
+						? ([...touch.collections, "inputs"] as const)
+						: touch.collections,
+			})),
 		),
 });
 
@@ -1770,7 +1716,6 @@ export function createAllEffectProjectors(): EffectProjector[] {
 		makeTurnProjector(),
 		makeProviderProjector(),
 		makeApprovalProjector(),
-		makeActivityProjector(),
 		makeInputProjector(),
 	];
 }

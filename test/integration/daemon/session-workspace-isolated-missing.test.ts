@@ -1,8 +1,9 @@
 /*
  * Failure modes:
  * - An isolated session silently falls back to the main checkout after removal.
+ * - Prewarm recreates a missing owned checkout before a provider turn starts.
  * - A fresh read, shell publication, poll, or restart drops the missing state.
- * - A deleted branch or pruned registration is incorrectly offered for recreation.
+ * - A deleted branch is offered for recreation, or a pruned registration loses its recorded branch.
  * - Recreation overwrites an occupied path or accepts a symlink to the main checkout.
  * - A turn racing recreation starts before the owned worktree is restored.
  * - Continue in main folder races a pending turn without recording the user move.
@@ -23,7 +24,6 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ContinueSessionInMainFolder,
@@ -31,10 +31,10 @@ import {
 	ListDaemonSessions,
 	MoveSessionWorkspace,
 	RecreateSessionWorktree,
+	RenameSessionBranch,
 	SubmitInput,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
-import { SessionInfoSchema } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const gitOverrides = [
@@ -102,18 +102,6 @@ function sessionQueries(fixture: ProcessHarness, sessionId: string) {
 	return fixture
 		.claudeOptions()
 		.filter(({ pid, prompt }) => pids.has(pid) && prompt !== undefined);
-}
-
-function shellRows(
-	browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
-	sessionId: string,
-	cursor = 0,
-) {
-	return browser.frames.slice(cursor).flatMap(({ message }) => {
-		if (message["type"] !== "shell" || message["_tag"] !== "upsert") return [];
-		const row = Schema.decodeUnknownSync(SessionInfoSchema)(message["item"]);
-		return row.id === sessionId ? [row] : [];
-	});
 }
 
 describe("Missing isolated worktrees through the built daemon", () => {
@@ -201,6 +189,8 @@ const gate = ${JSON.stringify(gate)};
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
+					model: { providerId: "claude", modelId: "sonnet" },
 					projectSlug: "process-test",
 					originId: "missing-worktree-test",
 					providerId: "claude",
@@ -419,7 +409,7 @@ const gate = ${JSON.stringify(gate)};
 		}
 	});
 
-	it("reports external removal, blocks the provider, and recreates the same branch after restart", async () => {
+	it("reports external removal, leaves prewarm read-only, and recreates the same branch after restart", async () => {
 		const { fixture, create, row, recreate } = await start("recreate-restart");
 		const isolated = await create("isolated");
 		const local = await create("main-reader", false);
@@ -447,29 +437,14 @@ const gate = ${JSON.stringify(gate)};
 		rmSync(isolated.path, { recursive: true, force: true });
 		const missing = { path: isolated.path, branch, canRecreate: true };
 		expect((await row(isolated.id)).workspaceMissing).toEqual(missing);
-		const cursor = browser.frames.length;
-		await browser.send(
-			isolated.id,
-			"workspace-isolation-write blocked",
-			120_000,
-		);
+		await browser.preWarmSession(isolated.id).catch(() => {});
+		expect(existsSync(isolated.path)).toBe(false);
 		expect(
-			workspaceEvents(fixture, isolated.id)
-				.filter(({ type }) => type === "turn.error")
-				.at(-1)?.data,
-		).toMatchObject({
-			code: "WORKTREE_MISSING",
-			error: expect.stringContaining("Worktree missing"),
-		});
+			workspaceEvents(fixture, isolated.id).filter(
+				({ type }) => type === "turn.error",
+			),
+		).toEqual([]);
 		expect(sessionQueries(fixture, isolated.id)).toHaveLength(1);
-		await vi.waitFor(() =>
-			expect(
-				shellRows(browser, isolated.id, cursor).at(-1)?.workspaceMissing,
-			).toEqual(missing),
-		);
-		evidence["missingPublication"] = shellRows(browser, isolated.id, cursor).at(
-			-1,
-		)?.workspaceMissing;
 		expect((await row(isolated.id)).workspaceMissing).toEqual(missing);
 		expect(recordedWorkspace(fixture, isolated.id)).toEqual(recorded);
 		expect(
@@ -489,7 +464,7 @@ const gate = ${JSON.stringify(gate)};
 			).chunks.join(""),
 		).toBe("absent");
 		evidence["reportedMissing"] = missing;
-		capture("missing-blocked", fixture);
+		capture("missing-prewarm", fixture);
 		await fixture.shutdown();
 		await fixture.restart({
 			startupTimeoutMs: 120_000,
@@ -627,26 +602,55 @@ const gate = ${JSON.stringify(gate)};
 	}, 300_000);
 
 	it.each([
-		"deleted",
-		"pruned",
-	] as const)("refuses recreation when the branch is %s and still allows an explicit move to main", async (loss) => {
-		const { fixture, create, row, recreate, continueInMain } = await start(
-			`branch-${loss}`,
+		false,
+		true,
+	])("recreates a pruned registration from its recorded branch (renamed: %s)", async (renamed) => {
+		const { fixture, socket, create, row, recreate } = await start(
+			`pruned-${renamed}`,
 		);
-		const isolated = await create(loss);
+		const isolated = await create("pruned");
+		if (renamed)
+			await sendRpcRequest(
+				socket,
+				new RenameSessionBranch({
+					projectSlug: "process-test",
+					sessionId: isolated.id,
+					branchName: "renamed-recovery",
+				}),
+			);
+		const branch = git(isolated.path, "branch", "--show-current");
+		const head = git(isolated.path, "rev-parse", "HEAD");
+		const recorded = recordedWorkspace(fixture, isolated.id);
+		rmSync(isolated.path, { recursive: true, force: true });
+		git(fixture.projectDir, "worktree", "prune");
+		expect((await row(isolated.id)).workspaceMissing).toMatchObject({
+			path: isolated.path,
+			canRecreate: true,
+			branch,
+		});
+		expect(await recreate(isolated.id)).toEqual({ directory: isolated.path });
+		expect(git(isolated.path, "branch", "--show-current")).toBe(branch);
+		expect(git(isolated.path, "rev-parse", "HEAD")).toBe(head);
+		expect(recordedWorkspace(fixture, isolated.id)).toEqual(recorded);
+		expect((await row(isolated.id)).workspaceMissing).toBeUndefined();
+		capture("pruned-registration-recreated", fixture);
+	}, 300_000);
+
+	it("refuses recreation when the branch is deleted and still allows an explicit move to main", async () => {
+		const { fixture, create, row, recreate, continueInMain } =
+			await start("branch-deleted");
+		const isolated = await create("deleted");
 		const branch = git(isolated.path, "branch", "--show-current");
 		rmSync(isolated.path, { recursive: true, force: true });
-		if (loss === "deleted")
-			git(fixture.projectDir, "update-ref", "-d", `refs/heads/${branch}`);
-		else git(fixture.projectDir, "worktree", "prune");
-		const reason = loss === "deleted" ? "branch-missing" : "branch-unknown";
+		git(fixture.projectDir, "update-ref", "-d", `refs/heads/${branch}`);
+		const reason = "branch-missing";
 		const missing = (await row(isolated.id)).workspaceMissing;
 		expect(missing).toMatchObject({
 			path: isolated.path,
 			canRecreate: false,
 			reason,
 		});
-		expect(missing?.branch).toBe(loss === "deleted" ? branch : undefined);
+		expect(missing?.branch).toBe(branch);
 		evidence["reportedMissing"] = missing;
 		const recorded = recordedWorkspace(fixture, isolated.id);
 		await expect(recreate(isolated.id)).rejects.toMatchObject({

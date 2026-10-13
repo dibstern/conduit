@@ -19,7 +19,7 @@ export interface SessionWorktreeDeletionPlan {
 	readonly removeWorktrees: boolean;
 }
 
-const containsPath = (root: string, path: string) => {
+export const containsPath = (root: string, path: string) => {
 	const child = relative(root, path);
 	return (
 		child === "" ||
@@ -28,16 +28,26 @@ const containsPath = (root: string, path: string) => {
 };
 
 /** Read every live row before the canonical delete can cascade away its forks. */
-const worktreeUsers = (sessionId: string) =>
+export const worktreeUsers = (sessionId: string) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const sql = yield* SqlClient.SqlClient;
 		const local = yield* sql<{
+			id: string;
 			workspace: string;
-		}>`SELECT workspace FROM sessions WHERE id != ${sessionId} AND workspace IS NOT NULL`;
-		const paths = (yield* Effect.forEach(local, ({ workspace }) =>
-			Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(workspace),
-		)).flatMap((workspace) => Object.values(workspace.worktrees));
+		}>`SELECT id, workspace FROM sessions WHERE id != ${sessionId} AND workspace IS NOT NULL`;
+		const uses = (yield* Effect.forEach(local, ({ id, workspace }) =>
+			Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
+				workspace,
+			).pipe(
+				Effect.map((value) =>
+					Object.values(value.worktrees).map((path) => ({
+						key: `${config.slug}:${id}`,
+						path,
+					})),
+				),
+			),
+		)).flat();
 		let unknown = false;
 		const daemon = yield* Effect.serviceOption(DaemonSessionQueryServiceTag);
 		if (daemon._tag === "Some") {
@@ -51,16 +61,24 @@ const worktreeUsers = (sessionId: string) =>
 						session.id !== sessionId ||
 						(session.projectSlug != null && session.projectSlug !== config.slug)
 					)
-						paths.push(...Object.values(session.workspace?.worktrees ?? {}));
+						uses.push(
+							...Object.values(session.workspace?.worktrees ?? {}).map(
+								(path) => ({
+									key: `${session.projectSlug ?? config.slug}:${session.id}`,
+									path,
+								}),
+							),
+						);
 			} else if (result.left._tag !== "DaemonSessionQueryNotSupported")
 				unknown = true;
 		}
-		return {
-			unknown,
-			paths: yield* Effect.forEach(paths, (path) =>
-				realWorkspacePath(path).pipe(Effect.orElseSucceed(() => resolve(path))),
+		const users = yield* Effect.forEach(uses, (use) =>
+			realWorkspacePath(use.path).pipe(
+				Effect.orElseSucceed(() => resolve(use.path)),
+				Effect.map((path) => ({ ...use, path })),
 			),
-		};
+		);
+		return { unknown, users, paths: users.map(({ path }) => path) };
 	});
 
 /** Launch checkout identity is immutable; canonical renames update only its owned branch. */
@@ -69,7 +87,6 @@ export const readSessionWorktreeOwnership = (
 	includeLegacy = true,
 ) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
 		const sql = yield* SqlClient.SqlClient;
 		const events = yield* sql<{
 			data: string;
@@ -126,9 +143,15 @@ export const readSessionWorktreeOwnership = (
 		launches.every((launch) => launch.ownership === undefined)
 			? legacy
 			: []) {
+			const config = yield* Effect.serviceOption(ConfigTag);
+			if (config._tag === "None")
+				return yield* new SessionCommandError({
+					operation: "worktree.inspect",
+					cause: "Legacy worktree inspection requires project configuration.",
+				});
 			const owned = yield* service.value
 				.legacyOwnership(
-					{ path: folder, projectSlug: config.slug, sessionId },
+					{ path: folder, projectSlug: config.value.slug, sessionId },
 					path,
 				)
 				.pipe(

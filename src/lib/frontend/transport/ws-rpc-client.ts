@@ -5,6 +5,10 @@ import type { SessionMode } from "../../contracts/project-file.js";
 import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
+import type {
+	WorktreeCleanup,
+	WorktreeCleanupReport,
+} from "../../contracts/worktree.js";
 import {
 	type GetSessionSkillsResponse,
 	type GetSkillContentResponse,
@@ -184,12 +188,13 @@ export interface CreateSessionRpcInput {
 	readonly worktreePath?: string;
 	readonly newWorktree?: boolean;
 	readonly worktreeBase?: string;
-	/** The draft composer's model and effort, so the first turn runs what the
-	 *  user picked. */
+	readonly permissionMode: SessionPermissionMode;
+	/** The draft composer's displayed pick, including an untouched default. */
 	readonly model?: {
 		readonly modelId: string;
 		readonly providerId: string;
 		readonly variant?: string;
+		readonly contextWindow?: string;
 	};
 }
 
@@ -228,6 +233,10 @@ export interface StartSideThreadRpcInput {
 	readonly projectSlug: string;
 	readonly parentSessionId: string;
 	readonly title: string;
+	readonly inputId: string;
+	readonly text: string;
+	readonly images?: readonly string[];
+	readonly originId?: string;
 }
 
 export interface RespondPermissionRpcInput {
@@ -313,7 +322,7 @@ export interface SwitchContextWindowRpcInput {
 
 export interface SwitchModelRpcInput {
 	readonly projectSlug: string;
-	readonly sessionId?: string;
+	readonly sessionId: string;
 	readonly modelId: string;
 	readonly providerId: string;
 	readonly originId?: string;
@@ -807,6 +816,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 				: {}),
 			...(input.providerId != null ? { providerId: input.providerId } : {}),
 			...(input.model != null ? { model: input.model } : {}),
+			permissionMode: input.permissionMode,
 			...(input.worktreePath != null
 				? { worktreePath: input.worktreePath }
 				: {}),
@@ -945,7 +955,7 @@ const callSwitchModel = (input: SwitchModelRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client.SwitchModel({
 			projectSlug: input.projectSlug,
-			...(input.sessionId ? { sessionId: input.sessionId } : {}),
+			sessionId: input.sessionId,
 			modelId: input.modelId,
 			providerId: input.providerId,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1291,9 +1301,10 @@ export async function preWarmSessionRpc(
 	await runTransportEffect(callPreWarmSession(input));
 }
 
-export function attachProjectRpc(
-	input: AttachProjectRpcInput,
-): Promise<{ readonly projectSlug: string | null }> {
+export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
+	readonly projectSlug: string | null;
+	readonly sessionSlug: string | null;
+}> {
 	return runTransportEffect(callAttachProject(input));
 }
 
@@ -1523,6 +1534,36 @@ export async function getAutoSettleSettingRpc(): Promise<number | null> {
 		callControl(undefined, (client) => client.GetAutoSettleSetting({})),
 	);
 	return result.autoSettleAfterDays;
+}
+
+export async function getWorktreeCleanupSettingRpc(): Promise<WorktreeCleanup> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) => client.GetWorktreeCleanupSetting({})),
+	);
+	return result.worktreeCleanup;
+}
+
+export async function setWorktreeCleanupSettingRpc(
+	worktreeCleanup: WorktreeCleanup,
+): Promise<WorktreeCleanup> {
+	const result = await runTransportEffect(
+		callControl(undefined, (client) =>
+			client.SetWorktreeCleanupSetting({ worktreeCleanup }),
+		),
+	);
+	return result.worktreeCleanup;
+}
+
+export async function cleanUpWorktreesNowRpc(
+	projectSlug?: string,
+): Promise<WorktreeCleanupReport> {
+	return runTransportEffect(
+		callControl(undefined, (client) =>
+			client.CleanUpWorktreesNow({
+				...(projectSlug !== undefined && { projectSlug }),
+			}),
+		),
+	);
 }
 
 export async function setAutoSettleSettingRpc(

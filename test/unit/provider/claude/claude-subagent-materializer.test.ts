@@ -9,6 +9,7 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
@@ -37,6 +38,7 @@ import {
 	stageSessionMessagesToEvents,
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type { SessionMessage } from "../../../../src/lib/provider/claude/types.js";
+import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -156,7 +158,7 @@ function establishCanonicalSession(sessionId: string, provider: string) {
 		if (!(yield* projectionRunner.isRecovered())) {
 			yield* projectionRunner.recover();
 		}
-		const stored = yield* eventStore.append(
+		const stored = yield* eventStore.appendBatch([
 			canonicalEvent(
 				"session.created",
 				sessionId,
@@ -168,12 +170,94 @@ function establishCanonicalSession(sessionId: string, provider: string) {
 				},
 				{ provider },
 			),
-		);
-		yield* projectionRunner.projectEvent(stored);
+			...sessionPickEvents(sessionId, {
+				harness: "claude",
+				model: { providerId: "claude", modelId: "sonnet" },
+				effort: "high",
+				contextWindow: "1m",
+			}),
+		]);
+		yield* projectionRunner.projectBatch(stored);
 	});
 }
 
 describe("Claude subagent transcripts and session establishment", () => {
+	it("skips repeated empty deltas while preserving whitespace and nonempty transcript content", () => {
+		const cursor = newCursor();
+		const messages = [
+			contentMessage("assistant", "sub-assistant-1", [
+				{ type: "text", text: "" },
+				{ type: "thinking", thinking: "" },
+				{ type: "text", text: " " },
+				{ type: "thinking", thinking: " " },
+				{ type: "text", text: "Visible" },
+				{ type: "thinking", thinking: "Reasoning" },
+			]),
+		];
+		const stage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages,
+			cursor,
+		});
+		expect(
+			stage.events
+				.filter(
+					(event) =>
+						event.type === "text.delta" || event.type === "thinking.delta",
+				)
+				.map((event) => ({ type: event.type, text: dataOf(event)["text"] })),
+		).toEqual([
+			{ type: "text.delta", text: "" },
+			{ type: "text.delta", text: " " },
+			{ type: "thinking.delta", text: " " },
+			{ type: "text.delta", text: "Visible" },
+			{ type: "thinking.delta", text: "Reasoning" },
+		]);
+		commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
+		expect(
+			stageSessionMessagesToEvents({
+				childSessionId: "child-session",
+				messages,
+				cursor,
+			}).events,
+		).toEqual([]);
+	});
+
+	it("preserves projected part order when initially empty text grows after thinking", async () => {
+		const harness = makeEffectProjectionHarness();
+		const cursor = newCursor();
+		const sessionId = "child-session";
+		try {
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				[sessionId, "claude", "Child", "idle", 1, 1],
+			);
+			for (const text of ["", "", "Visible", "Visible"]) {
+				const stage = stageSessionMessagesToEvents({
+					childSessionId: sessionId,
+					messages: [
+						contentMessage("assistant", "sub-assistant-1", [
+							{ type: "text", text },
+							{ type: "thinking", thinking: "Reasoning" },
+						]),
+					],
+					cursor,
+				});
+				await harness.ingestBatch(stage.events);
+				commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
+			}
+			const messages = await harness.sessionMessagesWithParts(sessionId);
+			expect(
+				messages[0]?.parts.map(({ type, text }) => ({ type, text })),
+			).toEqual([
+				{ type: "text", text: "Visible" },
+				{ type: "thinking", text: "Reasoning" },
+			]);
+		} finally {
+			await harness.dispose();
+		}
+	});
+
 	it("diffs repeated subagent snapshots by text cursor", () => {
 		const cursor = newCursor();
 		const firstEvents = diffSessionMessagesToEvents({
@@ -466,7 +550,7 @@ describe("Claude subagent transcripts and session establishment", () => {
 		try {
 			const result = await Effect.runPromise(
 				Effect.gen(function* () {
-					yield* establishCanonicalSession("parent-session", "opencode");
+					yield* establishCanonicalSession("parent-session", "claude");
 					const persist = yield* ClaudeEventPersistEffectTag;
 					const input = {
 						childSessionId: "child-session",
@@ -519,6 +603,22 @@ describe("Claude subagent transcripts and session establishment", () => {
 					}>`SELECT title FROM sessions WHERE id = ${preexisting.childSessionId}`;
 					const parentRows = yield* sql<{ id: string; provider: string }>`
 						SELECT id, provider FROM sessions WHERE id = ${input.parentSessionId}`;
+					const childPicks = yield* sql<{
+						id: string;
+						model_provider: string | null;
+						model_id: string | null;
+						variant: string | null;
+						context_window: string | null;
+					}>`SELECT id, model_provider, model_id, variant, context_window FROM sessions
+						WHERE parent_id = 'parent-session' ORDER BY id`;
+					const pickEvents = yield* sql<{
+						session_id: string;
+						type: string;
+						count: number;
+					}>`SELECT session_id, type, COUNT(*) AS count FROM events
+						WHERE session_id IN (${input.childSessionId}, ${preexisting.childSessionId}, ${concurrent.childSessionId})
+						AND type IN ('session.model_changed', 'session.variant_changed', 'session.context_window_changed')
+						GROUP BY session_id, type ORDER BY session_id, type`;
 					return {
 						sessionCreatedCount: sessionCreatedEvents[0]?.count,
 						preexistingSessionCreatedCount:
@@ -528,6 +628,8 @@ describe("Claude subagent transcripts and session establishment", () => {
 						child: childRows[0],
 						preexisting: preexistingRows[0],
 						parent: parentRows[0],
+						childPicks,
+						pickEvents,
 					};
 				}).pipe(Effect.provide(makePersistenceLayer(filename))),
 			);
@@ -543,14 +645,37 @@ describe("Claude subagent transcripts and session establishment", () => {
 			expect(result.preexisting).toEqual({ title: "Preexisting Agent" });
 			expect(result.parent).toEqual({
 				id: "parent-session",
-				provider: "opencode",
+				provider: "claude",
 			});
+			const childIds = [
+				"child-session",
+				"child-session-concurrent",
+				"child-session-preexisting",
+			];
+			expect(result.childPicks).toEqual(
+				childIds.map((id) => ({
+					id,
+					model_provider: "claude",
+					model_id: "sonnet",
+					variant: "high",
+					context_window: "1m",
+				})),
+			);
+			expect(result.pickEvents).toEqual(
+				childIds.flatMap((session_id) =>
+					[
+						"session.context_window_changed",
+						"session.model_changed",
+						"session.variant_changed",
+					].map((type) => ({ session_id, type, count: 1 })),
+				),
+			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
-	it("rejects subagent establishment when the parent session is missing", async () => {
+	it("rejects subagent establishment when the parent session is missing or has no pick", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-subagent-parent-"));
 		const filename = join(dir, "events.db");
 		try {
@@ -572,10 +697,36 @@ describe("Claude subagent transcripts and session establishment", () => {
 					const events = yield* sql<{ count: number }>`
 						SELECT COUNT(*) AS count FROM events
 						WHERE session_id IN ('missing-parent', 'missing-parent-child')`;
+					const store = yield* EventStoreEffectTag;
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.projectEvent(
+						yield* store.append(
+							canonicalEvent("session.created", "legacy-parent", {
+								sessionId: "legacy-parent",
+								provider: "claude",
+								title: "Legacy parent",
+							}),
+						),
+					);
+					const missingPickOutcome = yield* Effect.either(
+						persist.ensureClaudeSubagentSession({
+							childSessionId: "legacy-parent-child",
+							parentSessionId: "legacy-parent",
+							providerSessionId: "agent-legacy-parent",
+							title: "Explore Agent",
+						}),
+					);
+					const legacyChildSessions = yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM sessions WHERE id = 'legacy-parent-child'`;
+					const legacyChildEvents = yield* sql<{ count: number }>`
+						SELECT COUNT(*) AS count FROM events WHERE session_id = 'legacy-parent-child'`;
 					return {
 						outcome,
 						sessions: sessions[0]?.count,
 						events: events[0]?.count,
+						missingPickOutcome,
+						legacyChildSessions: legacyChildSessions[0]?.count,
+						legacyChildEvents: legacyChildEvents[0]?.count,
 					};
 				}).pipe(Effect.provide(makePersistenceLayer(filename))),
 			);
@@ -592,6 +743,12 @@ describe("Claude subagent transcripts and session establishment", () => {
 			});
 			expect(result.sessions).toBe(0);
 			expect(result.events).toBe(0);
+			expect(result.missingPickOutcome).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "PickRequired" },
+			});
+			expect(result.legacyChildSessions).toBe(0);
+			expect(result.legacyChildEvents).toBe(0);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -605,7 +762,7 @@ describe("Claude subagent transcripts and session establishment", () => {
 		try {
 			const result = await Effect.runPromise(
 				Effect.gen(function* () {
-					yield* establishCanonicalSession("parent-session", "opencode");
+					yield* establishCanonicalSession("parent-session", "claude");
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`
 						INSERT INTO sessions (

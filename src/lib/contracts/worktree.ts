@@ -1,5 +1,49 @@
 import { Schema } from "effect";
 
+export const WorktreeCleanupSchema = Schema.Struct({
+	onSettle: Schema.optionalWith(Schema.Literal("off", "merged", "any"), {
+		default: () => "merged" as const,
+	}),
+	onDelete: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+	afterInactiveDays: Schema.optionalWith(
+		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 3650))),
+		{ default: () => null },
+	),
+	whenMerged: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+	noCommitsBeyondDefault: Schema.optionalWith(Schema.Boolean, {
+		default: () => false,
+	}),
+	keepWhen: Schema.optionalWith(
+		Schema.Literal("any-local-files", "uncommitted-changes", "tracked-changes"),
+		{ default: () => "uncommitted-changes" as const },
+	),
+});
+export type WorktreeCleanup = typeof WorktreeCleanupSchema.Type;
+
+export const DEFAULT_WORKTREE_CLEANUP: WorktreeCleanup = {
+	onSettle: "merged",
+	onDelete: false,
+	afterInactiveDays: null,
+	whenMerged: false,
+	noCommitsBeyondDefault: false,
+	keepWhen: "uncommitted-changes",
+};
+
+const WorktreeCleanupEntrySchema = Schema.Struct({
+	projectSlug: Schema.String,
+	sessionId: Schema.String,
+	path: Schema.String,
+	reason: Schema.String,
+});
+export type WorktreeCleanupEntry = typeof WorktreeCleanupEntrySchema.Type;
+
+export const WorktreeCleanupReportSchema = Schema.Struct({
+	removed: Schema.Array(WorktreeCleanupEntrySchema),
+	kept: Schema.Array(WorktreeCleanupEntrySchema),
+	failed: Schema.Array(WorktreeCleanupEntrySchema),
+});
+export type WorktreeCleanupReport = typeof WorktreeCleanupReportSchema.Type;
+
 export class WorktreeBranchRenameError extends Schema.TaggedError<WorktreeBranchRenameError>()(
 	"WorktreeBranchRenameError",
 	{

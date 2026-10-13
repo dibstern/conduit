@@ -13,12 +13,17 @@
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, Option, Stream } from "effect";
-import { vi } from "vitest";
+import { Effect, Either, Layer, Option, Stream } from "effect";
+import { afterAll, vi } from "vitest";
 import type { Account } from "../../src/lib/contracts/account.js";
 import { AccountIdSchema } from "../../src/lib/contracts/provider-instance.js";
+import {
+	defaultDaemonConfig,
+	loadDaemonConfigResult,
+} from "../../src/lib/daemon/config-persistence.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,
@@ -72,7 +77,10 @@ import {
 	ConnectPtyUpstreamTag,
 	LoggerTag,
 	OpenCodeFileServiceLive,
+	type OpenCodeModelService,
 	OpenCodeModelServiceLive,
+	OpenCodeModelServiceTag,
+	type OpenCodeProviderList,
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 	type PollerManagerShape,
@@ -291,15 +299,16 @@ function createMockPtyManager(): HandlerDeps["ptyManager"] {
 /** Turns refuse a missing main folder, so mock projects use a real directory. */
 export const MOCK_PROJECT_DIR = tmpdir();
 
+const mockConfigRoot = mkdtempSync(join(tmpdir(), "conduit-test-config-"));
+afterAll(() => rmSync(mockConfigRoot, { recursive: true, force: true }));
+
 function createMockConfig(): HandlerDeps["config"] {
 	return {
 		httpServer: {} as HandlerDeps["config"]["httpServer"],
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
-		configDir:
-			process.env["CONDUIT_CONFIG_DIR"] ??
-			join(tmpdir(), "conduit-test-config"),
 		slug: "test-project",
+		configDir: mkdtempSync(join(mockConfigRoot, "config-")),
 		persistenceDbPath: "/test/config/projects/test-project/events.db",
 		publishGlobalSetting: () => Effect.void,
 	} satisfies HandlerDeps["config"];
@@ -517,6 +526,7 @@ export function makeOpenCodeInstancesStub(
 	return {
 		events: () => Stream.empty,
 		use,
+		borrow: use,
 		ifRunning: (instanceId) => Effect.option(use(instanceId)),
 		useIfRunning: (instanceId) => Effect.option(use(instanceId)),
 		stop: () => Effect.void,
@@ -741,6 +751,28 @@ export function makeMockStatusPoller(
 	};
 }
 
+export const MOCK_OPENCODE_GPT4_CATALOG: OpenCodeProviderList = {
+	providers: [
+		{
+			id: "openai",
+			name: "OpenAI",
+			models: [{ id: "gpt-4", name: "GPT-4" }],
+		},
+	],
+	defaults: {},
+	connected: ["openai"],
+};
+
+export function makeMockOpenCodeModelService(
+	catalog: OpenCodeProviderList,
+): OpenCodeModelService {
+	return {
+		listProviders: vi.fn(() => Effect.succeed(catalog)),
+		cachedProviders: vi.fn(() => Effect.succeed(Option.some(catalog))),
+		persistDefaultModel: vi.fn(() => Effect.void),
+	};
+}
+
 /** Create a mock SessionTitleService for Effect-native handler tests. */
 export function makeMockAgentService(): AgentService {
 	return {
@@ -772,12 +804,11 @@ export function makeMockConfig(
 		httpServer: {} as ProjectRelayConfig["httpServer"],
 		opencodeUrl: "http://localhost:4096",
 		projectDir: MOCK_PROJECT_DIR,
-		configDir:
-			process.env["CONDUIT_CONFIG_DIR"] ??
-			join(tmpdir(), "conduit-test-config"),
 		slug: "test-project",
 		publishGlobalSetting: () => Effect.void,
 		...overrides,
+		configDir:
+			overrides?.configDir ?? mkdtempSync(join(mockConfigRoot, "config-")),
 	} as unknown as ProjectRelayConfig;
 }
 
@@ -820,6 +851,7 @@ export function makeMockAccountDirectory(
 export interface TestHandlerLayerOptions {
 	accountDirectory?: AccountDirectory["Type"];
 	api?: OpenCodeAPI;
+	openCodeModelService?: OpenCodeModelService;
 	wsHandler?: WebSocketHandlerShape;
 	sessionMgr?: SessionManagerShape;
 	sessionManagerService?: SessionManagerService;
@@ -954,9 +986,24 @@ export function makeTestHandlerLayer(
 			new OrchestrationEngine({ registry: new ProviderRegistry() }),
 	);
 	const wsHandlerLayer = Layer.succeed(WebSocketHandlerTag, wsHandler);
+	const configured =
+		config.configDir === undefined
+			? Either.right(defaultDaemonConfig())
+			: loadDaemonConfigResult(config.configDir);
+	const configuredInstances =
+		Either.isLeft(configured) && configured.left._tag === "NotFound"
+			? []
+			: (Either.getOrThrow(configured).instances ?? []);
 	const openCodeInstancesLayer = Layer.succeed(
 		OpenCodeInstancesTag,
-		makeOpenCodeInstancesStub({ opencode: api }),
+		makeOpenCodeInstancesStub({
+			opencode: api,
+			...Object.fromEntries(
+				configuredInstances
+					.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+					.map((instance) => [instance.id, api]),
+			),
+		}),
 	);
 	const ptyManagerLayer = Layer.succeed(PtyManagerTag, ptyManager);
 	const connectPtyUpstreamLayer = Layer.succeed(
@@ -971,16 +1018,18 @@ export function makeTestHandlerLayer(
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
-	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				openCodeApiLayer,
-				openCodeInstancesLayer,
-				configLayer,
-				loggerLayer,
-			),
-		),
-	);
+	const openCodeModelServiceLayer = opts?.openCodeModelService
+		? Layer.succeed(OpenCodeModelServiceTag, opts.openCodeModelService)
+		: OpenCodeModelServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						openCodeApiLayer,
+						openCodeInstancesLayer,
+						configLayer,
+						loggerLayer,
+					),
+				),
+			);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
@@ -1049,6 +1098,7 @@ export function makeTestHandlerLayer(
 		Layer.provide(
 			Layer.mergeAll(
 				openCodeApiLayer,
+				openCodeModelServiceLayer,
 				wsHandlerLayer,
 				loggerLayer,
 				configLayer,

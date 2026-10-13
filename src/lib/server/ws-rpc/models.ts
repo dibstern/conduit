@@ -1,5 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Sink, Stream } from "effect";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../account-directory.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../domain/daemon/Services/opencode-instances-service.js";
 import { AgentServiceTag } from "../../domain/relay/Services/agent-service.js";
 import { ConfigTag } from "../../domain/relay/Services/services.js";
 import { switchContextWindowForSession } from "../../handlers/context-window.js";
@@ -200,3 +203,67 @@ export const modelsHandlers = {
 	| "SwitchVariant"
 	| "GetModels"
 >;
+
+export const subscribeDraftModels = (request: {
+	readonly projectSlug: string;
+	readonly instanceId: string;
+}) =>
+	Stream.unwrapScoped(
+		Effect.gen(function* () {
+			const config = yield* ConfigTag;
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: request.instanceId,
+			});
+			if (account.driver !== "opencode")
+				return yield* new WsRpcError({
+					message: "Draft model borrowing requires OpenCode",
+				});
+			const instances = yield* OpenCodeInstancesTag;
+			yield* instances.borrow(account.id, config.projectDir);
+			// The passive event subscription replays an already-connected stream.
+			// Its scope retains the borrow until cancellation or browser disconnect.
+			const eventInstanceId =
+				account.id === config.openCodeInstanceId
+					? MANAGED_OPENCODE_ACCOUNT_ID
+					: account.id;
+			const inventories = instances
+				.events([config.projectDir], account.id)
+				.pipe(
+					Stream.filter(
+						(event) =>
+							event._tag === "connected" &&
+							event.instanceId === eventInstanceId,
+					),
+					Stream.mapEffect(() =>
+						getModelsResponse({
+							...request,
+							instanceId: account.id,
+							requireCatalog: true,
+						}).pipe(
+							Effect.map((response) => ({
+								...response,
+								hiddenModels: getHiddenEntries(config.configDir).hiddenModels,
+							})),
+						),
+					),
+				);
+			const [first, rest] = yield* Stream.peel(inventories, Sink.take(1)).pipe(
+				Effect.timeoutFail({
+					duration: "10 seconds",
+					onTimeout: () =>
+						new WsRpcError({
+							message: "Timed out waiting for OpenCode models",
+						}),
+				}),
+			);
+			return Stream.concat(Stream.fromChunk(first), rest);
+		}),
+	).pipe(
+		Stream.mapError(
+			(error) =>
+				new WsRpcError({
+					message: `OpenCode model discovery failed: ${String(error)}`,
+				}),
+		),
+	);

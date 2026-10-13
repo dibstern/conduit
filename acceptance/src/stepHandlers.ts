@@ -35,6 +35,7 @@ import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
 import { usageWarningStripHandlers } from "./steps/usageWarningStrip.js";
 import { visualHandlers } from "./steps/visual.js";
+import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings.js";
 
 const driver = new PlaywrightDriver();
 
@@ -69,6 +70,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerWordsHandlers,
 	...composerContextWarningHandlers,
 	...settingsGeneralHandlers,
+	...worktreeCleanupSettingsHandlers,
 	...composerHandlers,
 	...composerEffortHandlers,
 	...composerSetGoalHandlers,

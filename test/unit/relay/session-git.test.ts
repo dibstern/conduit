@@ -80,12 +80,13 @@ describe("Session git refresh", () => {
 	it("refreshes attached effective directories and versions sessions on secondary-only changes", async () => {
 		const { refresh, runtime } = await fixture(["/attached"]);
 		let dirty = false;
+		let held: Promise<void> | undefined;
 		const read = vi
 			.spyOn(daemonSessionGitCache, "refresh")
-			.mockImplementation(async (directory) => ({
-				branch: "main",
-				dirty: directory === "/attached" && dirty,
-			}));
+			.mockImplementation(async (directory) => {
+				if (directory === "/attached") await held;
+				return { branch: "main", dirty: directory === "/attached" && dirty };
+			});
 		await refresh();
 		expect(read.mock.calls.map(([directory]) => directory)).toContain(
 			"/attached",
@@ -98,7 +99,21 @@ describe("Session git refresh", () => {
 		);
 		dirty = true;
 		read.mockClear();
-		await refresh({ sessionId: "one" });
+		let release!: () => void;
+		held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const updating = refresh({ sessionId: "one" });
+		try {
+			await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+			const during = await runtime.runPromise(
+				Effect.flatMap(ReadQueryEffectTag, (query) => query.getSession("one")),
+			);
+			expect(during?.version).toBe(before?.version);
+		} finally {
+			release();
+			await updating;
+		}
 		expect(read.mock.calls.map(([directory]) => directory)).toEqual([
 			"/one",
 			"/attached",
@@ -117,33 +132,40 @@ describe("Session git refresh", () => {
 		);
 	});
 
-	it("coalesces a burst into one follow-up instead of repeating git for every request", async () => {
-		const { refresh } = await fixture();
-		let started!: () => void;
-		const reading = new Promise<void>((resolve) => {
-			started = resolve;
-		});
+	it("bounds directory reads at four and coalesces a burst into one follow-up", async () => {
+		const { refresh } = await fixture([
+			"/attached-a",
+			"/attached-b",
+			"/attached-c",
+			"/attached-d",
+		]);
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => {
 			release = resolve;
 		});
-		let blocked = true;
+		let concurrent = 0;
+		let maximum = 0;
 		const read = vi
 			.spyOn(daemonSessionGitCache, "refresh")
 			.mockImplementation(async () => {
-				if (blocked) {
-					blocked = false;
-					started();
-					await held;
-				}
+				concurrent++;
+				maximum = Math.max(maximum, concurrent);
+				await held;
+				concurrent--;
 				return { branch: "main" };
 			});
 		const first = refresh();
-		await reading;
-		const queued = Array.from({ length: 5 }, () => refresh());
-		await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
-		release();
-		await Promise.all([first, ...queued]);
+		try {
+			await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+			const queued = Array.from({ length: 5 }, () => refresh());
+			await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+			release();
+			await Promise.all([first, ...queued]);
+		} finally {
+			release();
+			await first;
+		}
+		expect(maximum).toBe(4);
 		const directories = read.mock.calls.map(([directory]) => directory);
 		expect(
 			directories.filter((directory) => directory === "/one"),

@@ -713,7 +713,7 @@ Examples:
   | desktop | usage-settings-forecast-secondary-limited-desktop | 98 |
   | phone | usage-settings-forecast-secondary-limited-phone | 98 |
 
-Scenario Outline: an unconfigured session account falls back to the fullest account
+Scenario Outline: an unconfigured session account does not select another account's forecast
   Given the viewport is a <viewport>
   And Usage settings have several Claude accounts in the normal state
   And the Claude accounts are work as Work, spare as Spare
@@ -721,13 +721,13 @@ Scenario Outline: an unconfigured session account falls back to the fullest acco
   And the Usage account work five_hour forecast is under at 35% resetting at 2026-01-01T17:30:00Z
   And the Usage account spare seven_day forecast is under at 98% resetting at 2026-01-08T09:00:00Z
   When I open settings to the Usage section
-  Then the Usage forecast <primary> is unframed
-  And the Usage account <primary> pace line reads absent
-  And the Usage forecast <secondary> is absent
-  And the Usage account <secondary> pace line reads <pace>
-  And the usage-settings-card-<primary> region visually matches <baseline> at <threshold> percent
+  Then the Usage forecast spare is absent
+  And the Usage account spare pace line reads No 5h window open · week ~98% by Thu
+  And the Usage forecast work is absent
+  And the Usage account work pace line reads 5h on pace for ~35%
+  And the usage-settings-card-spare region visually matches <baseline> at <threshold> percent
 
 Examples:
-  | viewport | primary | secondary | pace | baseline | threshold |
-  | desktop | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-desktop | 98 |
-  | phone | spare | work | 5h on pace for ~35% | usage-settings-forecast-fullest-fallback-phone | 98 |
+  | viewport | baseline | threshold |
+  | desktop | usage-settings-forecast-unconfigured-desktop | 98 |
+  | phone | usage-settings-forecast-unconfigured-phone | 98 |

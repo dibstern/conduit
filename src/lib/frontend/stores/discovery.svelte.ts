@@ -1,11 +1,22 @@
 // Agents, models, providers, and commands.
 
+import { Effect, Either, Fiber, Stream } from "effect";
+import type { RuntimeFiber } from "effect/Fiber";
+import { untrack } from "svelte";
+import { accountRefFromSelection } from "../../account-directory.js";
 import type { SessionMode } from "../../contracts/project-file.js";
 import type {
 	ProviderDriverKind,
 	ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
-
+import {
+	catalogFromProviderList,
+	findCatalogModel,
+	offeredOptions,
+	resolveTurnSettings,
+} from "../../provider/turn-settings.js";
+import { getRuntime, runTransportEffect } from "../transport/runtime.js";
+import { WsRpcClients } from "../transport/shared-client.js";
 import type {
 	GetAgentsResponse,
 	GetCommandsResponse,
@@ -19,6 +30,7 @@ import type {
 	SwitchModelResponse,
 	SwitchVariantResponse,
 } from "../transport/ws-rpc.js";
+import { getModelsRpc } from "../transport/ws-rpc-client.js";
 import type {
 	AgentInfo,
 	AgentProviderScope,
@@ -33,7 +45,10 @@ import type {
 	SessionPermissionMode,
 } from "../types.js";
 import { instanceState } from "./instance.svelte.js";
+import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
+import { showToast } from "./ui.svelte.js";
+import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
 export const conduitCommands = [
 	{
@@ -153,6 +168,8 @@ const serverDiscovery = $state({
 	defaultModelId: "" as string,
 	defaultProviderId: "" as string,
 	defaultVariant: "" as string,
+	defaultsLoaded: false,
+	defaultOpenCodeInstanceId: null as string | null,
 	harnessDefaults: {
 		claude: { status: "missing" },
 		opencode: { status: "missing" },
@@ -182,12 +199,7 @@ const serverDiscovery = $state({
 // `if (state.x === mine) state.x = previous` dance was written to dodge.
 
 const choice = $state({
-	instanceId: null as string | null,
 	agentId: null as string | null,
-	modelId: null as string | null,
-	providerId: null as string | null,
-	variant: null as string | null,
-	contextWindow: null as string | null,
 	permissionMode: null as SessionPermissionMode | null,
 	hiddenModels: null as string[] | null,
 	hiddenAgents: null as string[] | null,
@@ -196,10 +208,292 @@ const choice = $state({
 	defaultPermissionMode: null as SessionPermissionMode | null,
 });
 
-const clientDiscovery = $state({
-	/** Mode selected while no session was bound — flushed on session bind. */
-	pendingPermissionMode: null as SessionPermissionMode | null,
+interface DraftPick {
+	instanceId: string;
+	model: {
+		modelId: string;
+		providerId: string;
+		variant: string;
+		contextWindow: string;
+	};
+	permissionMode: SessionPermissionMode;
+}
+
+const draft = $state<{
+	instanceId: string | null;
+	driver: "claude" | "opencode" | null;
+	model: DraftPick["model"] | null;
+	permissionMode: SessionPermissionMode;
+}>({ instanceId: null, driver: null, model: null, permissionMode: "ask" });
+let draftPermissionChosen = false;
+const instanceCatalogs = $state<Record<string, ProviderInfo[]>>({});
+const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
+accountSnapshotChangedListeners.add(() => {
+	if (
+		draft.instanceId &&
+		draft.driver !== null &&
+		!getAvailableInstances().some((account) => account.id === draft.instanceId)
+	) {
+		draft.instanceId = null;
+		draft.model = null;
+	}
+	fillDraftDefault();
 });
+
+export const draftModelInventory = $state({
+	instanceId: null as string | null,
+	loading: false,
+	error: null as string | null,
+});
+let inventoryTarget: { projectSlug: string; instanceId: string } | null = null;
+let inventoryGeneration = 0;
+let inventoryFiber: RuntimeFiber<void, never> | null = null;
+
+/** The open browser draft owns one cancellable inventory subscription. */
+export function viewDraftModels(
+	projectSlug: string | null,
+	instanceId?: string,
+	retry = false,
+): void {
+	if (projectSlug) fillDraftDefault();
+	const target =
+		projectSlug &&
+		instanceId &&
+		instanceState.loaded &&
+		draftDriver(instanceId) === "opencode"
+			? { projectSlug, instanceId }
+			: null;
+	if (
+		inventoryTarget?.projectSlug === target?.projectSlug &&
+		inventoryTarget?.instanceId === target?.instanceId &&
+		(!retry || !draftModelInventory.error)
+	)
+		return;
+	inventoryTarget = target;
+	const generation = ++inventoryGeneration;
+	const previous = inventoryFiber;
+	inventoryFiber = null;
+	draftModelInventory.instanceId = target?.instanceId ?? null;
+	draftModelInventory.loading = target !== null;
+	draftModelInventory.error = null;
+	const fail = (message: string) => {
+		if (generation !== inventoryGeneration) return;
+		draftModelInventory.loading = false;
+		draftModelInventory.error = message;
+		serverDiscovery.modelsLoaded = true;
+		if (
+			!sessionState.currentId &&
+			getEffectiveInstanceId() === target?.instanceId
+		)
+			draft.model = null;
+		showToast(message, { variant: "error" });
+	};
+	void (
+		previous ? runTransportEffect(Fiber.interrupt(previous)) : Promise.resolve()
+	)
+		.catch(() => undefined)
+		.then(async () => {
+			if (!target || generation !== inventoryGeneration) return;
+			const runtime = await getRuntime();
+			if (generation !== inventoryGeneration) return;
+			const applyModels = followModelsRead();
+			const next = runtime.runFork(
+				Effect.flatMap(WsRpcClients, (clients) =>
+					Effect.flatMap(
+						clients.forProject(target.projectSlug),
+						({ subscriptions }) =>
+							Stream.runForEach(
+								subscriptions.draftModels(target.instanceId),
+								(response) =>
+									Effect.sync(() => {
+										if (generation !== inventoryGeneration) return;
+										draftModelInventory.loading = false;
+										draftModelInventory.error = null;
+										applyModels(response);
+									}),
+							),
+					),
+				).pipe(
+					Effect.catchAll((error) => Effect.sync(() => fail(error.message))),
+				),
+			);
+			if (generation === inventoryGeneration) inventoryFiber = next;
+			else runtime.runFork(Fiber.interrupt(next));
+		})
+		.catch((error: unknown) =>
+			fail(`OpenCode model discovery failed: ${String(error)}`),
+		);
+}
+
+/** Creation copies the held draft; it does not resolve another pick. */
+export function getDraftPick(): Immutable<DraftPick> | undefined {
+	if (
+		draftModelInventory.instanceId === getEffectiveInstanceId() &&
+		(draftModelInventory.loading || draftModelInventory.error)
+	)
+		return undefined;
+	if (
+		!draft.model ||
+		!draft.instanceId ||
+		draft.instanceId !== getEffectiveInstanceId()
+	)
+		return undefined;
+	if (
+		Either.isLeft(
+			resolveTurnSettings(
+				{
+					harness: draftDriver(draft.instanceId),
+					model: draft.model,
+					effort: draft.model.variant,
+					contextWindow: draft.model.contextWindow,
+				},
+				catalogFromProviderList(instanceCatalogs[draft.instanceId] ?? []),
+			),
+		)
+	)
+		return undefined;
+	return {
+		instanceId: draft.instanceId,
+		model: { ...draft.model },
+		permissionMode: draft.permissionMode,
+	};
+}
+
+interface SessionPick {
+	instanceId: string;
+	modelId: string;
+	providerId: string;
+	variant: string;
+	contextWindow: string;
+	variants: readonly string[];
+	contextWindowOptions: readonly ContextWindowOption[];
+	modelExecution: GetModelsResponse["modelExecution"] | null;
+}
+
+// A session has no pick here until its own GetModels reply arrives. Its
+// confirmed value and pending clicks live together, never in draft state.
+const sessionPicks = $state<
+	Record<
+		string,
+		{
+			pick: SessionPick | undefined;
+			choice: {
+				[Field in keyof SessionPick]?: {
+					value: SessionPick[Field];
+					clickId: symbol;
+				};
+			};
+			readSeq: number;
+			appliedReadSeq: number;
+			ackedAtReadSeq: Partial<Record<keyof SessionPick, number>>;
+		}
+	>
+>({});
+let discoveryGeneration = 0;
+
+function sessionPickState(sessionId: string) {
+	return (sessionPicks[sessionId] ??= {
+		pick: undefined,
+		choice: {},
+		readSeq: 0,
+		appliedReadSeq: 0,
+		ackedAtReadSeq: {},
+	});
+}
+
+export function getSessionPick(
+	sessionId: string,
+): Immutable<SessionPick> | undefined {
+	const state = sessionPicks[sessionId];
+	if (!state?.pick) return undefined;
+	const pick = { ...state.pick, instanceId: getSessionInstanceId(sessionId) };
+	for (const field of Object.keys(state.choice) as (keyof SessionPick)[]) {
+		const selected = state.choice[field];
+		if (selected) Object.assign(pick, { [field]: selected.value });
+	}
+	return pick;
+}
+
+export function getSessionDriver(
+	sessionId: string,
+): ProviderDriverKind | undefined {
+	const instanceId = getSessionInstanceId(sessionId);
+	const driver = instanceState.instances.find(
+		(instance) => instance.id === instanceId,
+	)?.driver;
+	if (driver) return driver;
+	const provider =
+		serverDiscovery.sessionProviderIds[sessionId] ??
+		getSessionPick(sessionId)?.providerId;
+	return provider ? (provider === "claude" ? "claude" : "opencode") : undefined;
+}
+
+/** Order reads at dispatch independently of clicks and their acknowledgements. */
+export function followModelsRead(
+	sessionId?: string,
+): (response: GetModelsResponse) => void {
+	const generation = discoveryGeneration;
+	const readSeq = untrack(() =>
+		sessionId ? ++sessionPickState(sessionId).readSeq : undefined,
+	);
+	return (response) => {
+		if (generation !== discoveryGeneration) return;
+		applyGetModelsResponse(response, sessionId, readSeq);
+	};
+}
+
+/** Confirm replies beneath newer clicks; acknowledge only the owned overlay. */
+export function followSessionPickChange(
+	sessionId: string,
+	click: UndoChoice,
+): (patch: Partial<SessionPick>) => void {
+	const state = sessionPicks[sessionId];
+	const clickId = click.clickId;
+	return (patch) => {
+		if (!state?.pick || !clickId || sessionPicks[sessionId] !== state) return;
+		for (const field of Object.keys(patch) as (keyof SessionPick)[]) {
+			Object.assign(state.pick, { [field]: patch[field] });
+			state.ackedAtReadSeq[field] = state.readSeq;
+		}
+		for (const field of Object.keys(state.choice) as (keyof SessionPick)[]) {
+			if (state.choice[field]?.clickId === clickId) delete state.choice[field];
+		}
+	};
+}
+
+function refreshSessionPick(projectSlug: string, sessionId: string): void {
+	const apply = followModelsRead(sessionId);
+	void getModelsRpc({ projectSlug, sessionId })
+		.then(apply)
+		.catch(() => undefined);
+}
+
+function chooseSessionPick(
+	sessionId: string,
+	patch: Partial<SessionPick>,
+): UndoChoice {
+	const state = sessionPicks[sessionId];
+	if (!state?.pick) return () => {};
+	const projectSlug = getCurrentSlug();
+	const clickId = Symbol();
+	const fields = Object.keys(patch) as (keyof SessionPick)[];
+	for (const field of fields) {
+		Object.assign(state.choice, {
+			[field]: { value: patch[field], clickId },
+		});
+	}
+	return Object.assign(
+		() => {
+			if (sessionPicks[sessionId] !== state) return;
+			for (const field of fields) {
+				if (state.choice[field]?.clickId === clickId)
+					delete state.choice[field];
+			}
+			if (projectSlug) refreshSessionPick(projectSlug, sessionId);
+		},
+		{ clickId },
+	);
+}
 
 /** Read view over both halves. Server-owned fields have no setter: write them
  *  by applying a wire message or an RPC response. Fields the user can pick
@@ -240,53 +534,56 @@ export const discoveryState = {
 		return serverDiscovery.harnessDefaults;
 	},
 	get availableVariants(): readonly string[] {
-		return serverDiscovery.availableVariants;
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.variants ?? [];
+		return getActiveModel()?.variants ?? [];
 	},
 	get availableContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
-		return serverDiscovery.availableContextWindowOptions;
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.contextWindowOptions ?? [];
+		return getActiveModel()?.contextWindowOptions ?? [];
 	},
 	get modelExecution(): Immutable<GetModelsResponse["modelExecution"]> | null {
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.modelExecution ?? null;
 		return serverDiscovery.modelExecution;
 	},
 
 	// Server-owned, with this tab's unconfirmed click read first.
 	get hasInstanceChoice(): boolean {
-		return choice.instanceId !== null;
+		return draft.instanceId !== null;
+	},
+	get defaultsLoaded(): boolean {
+		return serverDiscovery.defaultsLoaded;
 	},
 	get hasModelChoice(): boolean {
-		return choice.modelId !== null || choice.variant !== null;
+		if (sessionState.currentId) return false;
+		return draft.model !== null;
 	},
 	get currentModelId(): string {
-		return (
-			choice.modelId ??
-			(sessionState.currentId
-				? serverDiscovery.currentModelId
-				: discoveryState.defaultModelId || serverDiscovery.currentModelId)
-		);
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.modelId ?? "";
+		return draft.model?.modelId ?? "";
 	},
 	get currentProviderId(): string {
-		return (
-			choice.providerId ??
-			(sessionState.currentId
-				? serverDiscovery.currentProviderId
-				: discoveryState.defaultProviderId || serverDiscovery.currentProviderId)
-		);
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.providerId ?? "";
+		return draft.model?.providerId ?? "";
 	},
 	get currentVariant(): string {
-		return (
-			choice.variant ??
-			(!sessionState.currentId &&
-			choice.modelId === null &&
-			discoveryState.defaultModelId
-				? serverDiscovery.defaultVariant
-				: serverDiscovery.currentVariant)
-		);
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.variant ?? "";
+		return draft.model?.variant ?? "";
 	},
 	get currentContextWindow(): string {
-		return choice.contextWindow ?? serverDiscovery.currentContextWindow;
+		if (sessionState.currentId)
+			return getSessionPick(sessionState.currentId)?.contextWindow ?? "";
+		return draft.model?.contextWindow ?? "";
 	},
 	get permissionMode(): SessionPermissionMode {
-		return choice.permissionMode ?? serverDiscovery.permissionMode;
+		return sessionState.currentId
+			? (choice.permissionMode ?? serverDiscovery.permissionMode)
+			: draft.permissionMode;
 	},
 	get defaultModelId(): string {
 		return choice.defaultModelId ?? serverDiscovery.defaultModelId;
@@ -307,14 +604,6 @@ export const discoveryState = {
 	},
 	get hiddenAgents(): readonly string[] {
 		return choice.hiddenAgents ?? serverDiscovery.hiddenAgents;
-	},
-
-	// Client-owned.
-	get pendingPermissionMode(): SessionPermissionMode | null {
-		return clientDiscovery.pendingPermissionMode;
-	},
-	set pendingPermissionMode(mode: SessionPermissionMode | null) {
-		clientDiscovery.pendingPermissionMode = mode;
 	},
 };
 
@@ -338,7 +627,15 @@ export function getActiveModel(
 	currentId = discoveryState.currentModelId,
 	providerId = discoveryState.currentProviderId,
 ): Immutable<ModelInfo> | undefined {
-	return discoveryState.providers
+	const instanceId = sessionState.currentId
+		? getSessionInstanceId(sessionState.currentId)
+		: getEffectiveInstanceId();
+	const providers = sessionState.currentId
+		? serverDiscovery.providers
+		: instanceId
+			? (instanceCatalogs[instanceId] ?? [])
+			: [];
+	return providers
 		.find((provider) => provider.id === providerId)
 		?.models.find((model) => modelMatchesId(model, currentId));
 }
@@ -426,77 +723,211 @@ export function getAvailableInstances(): InstanceOption[] {
 export function getProviderGroupsForInstance(
 	instanceId: string | null | undefined,
 ): readonly Immutable<ProviderGroup>[] {
-	const instance = instanceState.instances.find(
-		(item) => item.id === instanceId,
-	);
-	if (!instance) return [];
+	if (!instanceId) return [];
+	const driver = instanceState.instances.find(
+		(instance) => instance.id === instanceId,
+	)?.driver;
+	if (!driver) return [];
+	const claude = driver === "claude";
+	const cached = !sessionState.currentId && instanceCatalogs[instanceId];
+	if (cached) {
+		const groups = cached.map((provider) => ({
+			provider,
+			models: provider.models,
+		}));
+		const hidden = new Set(discoveryState.hiddenModels);
+		const visible = groups
+			.map((group) => ({
+				...group,
+				models: group.models.filter(
+					(model) => !hidden.has(`${group.provider.id}/${model.id}`),
+				),
+			}))
+			.filter((group) => group.models.length > 0);
+		return visible.length
+			? visible
+			: groups.filter((group) => group.models.length > 0);
+	}
+	if (!sessionState.currentId) return [];
 	return getVisibleProviderGroups().filter((g) =>
 		g.provider.id === "claude"
-			? instance.driver === "claude"
-			: instance.driver !== "claude" &&
-				(g.provider.instanceId === undefined ||
-					g.provider.instanceId === instanceId),
+			? claude
+			: g.provider.instanceId === instanceId ||
+				(driver === "opencode" && g.provider.instanceId === undefined),
 	);
 }
 
-/** A draft's explicit live pick wins; otherwise use the server's driver default. */
+/** Hold a live draft account; removed accounts fall back to their driver's default. */
 export function getEffectiveInstanceId(): string | undefined {
 	const available = getAvailableInstances();
+	if (draft.instanceId !== null)
+		return available.find((account) => account.id === draft.instanceId)?.id;
+	const provider = discoveryState.defaultProviderId;
+	const driver =
+		draft.driver ??
+		(provider ? (provider === "claude" ? "claude" : "opencode") : undefined);
 	if (
-		choice.instanceId !== null &&
-		available.some((i) => i.id === choice.instanceId)
+		driver === "opencode" &&
+		serverDiscovery.defaultOpenCodeInstanceId &&
+		available.some(
+			(account) =>
+				account.id === serverDiscovery.defaultOpenCodeInstanceId &&
+				account.driver === driver,
+		)
 	)
-		return choice.instanceId;
-	const provider =
-		discoveryState.currentProviderId || discoveryState.defaultProviderId;
-	const driver = provider
-		? provider === "claude"
-			? "claude"
-			: "opencode"
-		: undefined;
-	const defaultInstance = available.find(
-		(instance) =>
-			instance.isDefault &&
-			(driver === undefined || instance.driver === driver),
-	);
-	return defaultInstance?.id;
+		return serverDiscovery.defaultOpenCodeInstanceId;
+	return available.find(
+		(account) =>
+			account.isDefault && (driver === undefined || account.driver === driver),
+	)?.id;
 }
 
-/** Pick this draft's instance and re-aim its model if it belongs to another harness. */
-export function selectInstance(instanceId: string): void {
-	choice.instanceId = instanceId;
-	const groups = getProviderGroupsForInstance(instanceId);
-	const models = groups.flatMap((g) => g.models);
-	// Match the provider too: both harnesses list ids like claude-sonnet-4-6,
-	// and the other harness's provider id would reach this one on first send.
-	const currentInScope = models.some(
-		(m) =>
-			m.provider === discoveryState.currentProviderId &&
-			modelMatchesId(m, discoveryState.currentModelId),
+/** The server's session snapshot publishes the directory's effective account. */
+export function getSessionInstanceId(sessionId: string): string {
+	return findSession(sessionId)?.accountId ?? "";
+}
+
+function draftDriver(instanceId: string | undefined): "claude" | "opencode" {
+	return instanceState.instances.find((instance) => instance.id === instanceId)
+		?.driver === "claude"
+		? "claude"
+		: "opencode";
+}
+
+/** Fill only an empty draft from the selected harness's resolved default. */
+function fillDraftDefault(): void {
+	if (
+		!serverDiscovery.defaultsLoaded ||
+		(!instanceState.loaded && draft.instanceId === null) ||
+		sessionState.currentId ||
+		draft.model
+	)
+		return;
+	const instanceId = getEffectiveInstanceId();
+	if (!instanceId) return;
+	const defaults = serverDiscovery.harnessDefaults[draftDriver(instanceId)];
+	if (
+		draft.instanceId === null &&
+		draftDriver(instanceId) === "opencode" &&
+		serverDiscovery.defaultOpenCodeInstanceId === null
+	)
+		return;
+	if (defaults.status !== "ok" || !defaults.pick) return;
+	const catalog = catalogFromProviderList(instanceCatalogs[instanceId] ?? []);
+	const resolved = resolveTurnSettings(
+		{
+			harness: draftDriver(instanceId),
+			model: defaults.pick,
+			effort: defaults.pick.effort,
+			contextWindow: defaults.pick.contextWindow,
+		},
+		catalog,
 	);
-	if (currentInScope) return;
-	const preferred =
-		models.find(
-			(m) =>
-				m.id === discoveryState.defaultModelId &&
-				m.provider === discoveryState.defaultProviderId,
-		) ?? models[0];
-	if (preferred) {
-		// A local re-aim, not a server fact: the harness switch has not been
-		// sent anywhere yet.
-		chooseModel({ modelId: preferred.id, providerId: preferred.provider });
+	if (Either.isLeft(resolved)) return;
+	if (!draftPermissionChosen)
+		draft.permissionMode = serverDiscovery.defaultPermissionMode;
+	setDraftModel(
+		defaults.pick,
+		defaults.pick.effort,
+		defaults.pick.contextWindow,
+	);
+}
+
+function rememberDraftModel(): void {
+	if (!draft.instanceId || !draft.model) return;
+	let models = modelMemory.get(draft.instanceId);
+	if (!models) modelMemory.set(draft.instanceId, (models = new Map()));
+	models.set(`${draft.model.providerId}/${draft.model.modelId}`, {
+		...draft.model,
+	});
+}
+
+function setDraftModel(
+	model: { modelId: string; providerId: string },
+	effort?: string,
+	contextWindow?: string,
+): void {
+	const instanceId = getEffectiveInstanceId();
+	if (!instanceId) return;
+	if (
+		draftModelInventory.instanceId === instanceId &&
+		draftModelInventory.error
+	)
+		return;
+	const harness = draftDriver(instanceId);
+	const catalog = catalogFromProviderList(instanceCatalogs[instanceId] ?? []);
+	const entry = findCatalogModel(harness, model, catalog);
+	if (!entry) return;
+	const options = offeredOptions(entry);
+	const remembered = modelMemory
+		.get(instanceId)
+		?.get(`${model.providerId}/${model.modelId}`);
+	const variant = effort ?? remembered?.variant ?? "";
+	const selectedWindow = contextWindow ?? remembered?.contextWindow ?? "";
+	const resolved = resolveTurnSettings(
+		{
+			harness,
+			model,
+			effort: options.efforts.includes(variant) ? variant : "",
+			contextWindow: options.contextWindows.some(
+				(option) => option.value === selectedWindow,
+			)
+				? selectedWindow
+				: (options.contextWindows.find((option) => option.isDefault)?.value ??
+					""),
+		},
+		catalog,
+	);
+	if (Either.isLeft(resolved)) return;
+	draft.instanceId = instanceId;
+	draft.driver = harness;
+	draft.model = {
+		...resolved.right.model,
+		variant: resolved.right.effort,
+		contextWindow: resolved.right.contextWindow,
+	};
+	// Prefilling a harness default must not erase this model's browser memory.
+	if ((effort === undefined && contextWindow === undefined) || !remembered)
+		rememberDraftModel();
+}
+
+/** A different instance starts with its own default, never a neighboring model. */
+export function selectInstance(instanceId: string): void {
+	const available = getAvailableInstances();
+	const ref = accountRefFromSelection({ providerId: instanceId });
+	const selected =
+		available.find((account) => account.id === instanceId) ??
+		(ref._tag === "DriverDefault"
+			? available.find(
+					(account) => account.driver === ref.driver && account.isDefault,
+				)
+			: undefined);
+	if (!selected) {
+		draft.instanceId = ref._tag === "Id" ? instanceId : null;
+		draft.driver = ref._tag === "DriverDefault" ? ref.driver : null;
+		draft.model = null;
+		return;
 	}
+	if (selected.driver !== "claude" && selected.driver !== "opencode") return;
+	if (draft.instanceId === selected.id) return;
+	draft.instanceId = selected.id;
+	draft.driver = selected.driver;
+	draft.model = null;
+	if (
+		selected.driver !== "claude" &&
+		["plan", "auto", "dontAsk"].includes(draft.permissionMode)
+	)
+		draft.permissionMode = "ask";
+	fillDraftDefault();
 }
 
 /** A created or viewed session consumes the draft's harness and model picks. */
 export function clearDraftSelection(): void {
-	choice.instanceId = null;
-	choice.modelId = null;
-	choice.providerId = null;
-	choice.variant = null;
-	delete owner.modelId;
-	delete owner.providerId;
-	delete owner.variant;
+	draft.instanceId = null;
+	draft.driver = null;
+	draft.model = null;
+	draft.permissionMode = serverDiscovery.defaultPermissionMode;
+	draftPermissionChosen = false;
 }
 
 /** Format agent label for display. */
@@ -623,82 +1054,159 @@ export function applyGetAgentsResponse(
 
 export function handleModelList({
 	providers,
+	accountId,
 }: {
 	readonly providers: GetModelsResponse["providers"];
+	readonly accountId?: string;
 }): void {
-	serverDiscovery.providers = providersFromGetModelsResponse(providers);
+	const catalog = providersFromGetModelsResponse(providers);
+	const catalogAccountId =
+		accountId ??
+		(catalog.some((provider) => provider.id === "claude")
+			? getAvailableInstances().find(
+					(account) => account.driver === "claude" && account.isDefault,
+				)?.id
+			: undefined);
+	// Project settings can arrive before the daemon's account snapshot.
+	if (
+		catalogAccountId &&
+		!instanceState.instances.some(
+			(account) =>
+				account.id === catalogAccountId && account.driver !== "claude",
+		)
+	) {
+		instanceCatalogs[catalogAccountId] = catalog.filter(
+			(provider) => provider.id === "claude",
+		);
+		if (
+			!sessionState.currentId &&
+			getEffectiveInstanceId() === catalogAccountId &&
+			draft.model
+		) {
+			const selected = draft.model;
+			draft.model = null;
+			setDraftModel(selected, selected.variant, selected.contextWindow);
+		}
+	}
+	const composerAccountId = sessionState.currentId
+		? getSessionInstanceId(sessionState.currentId)
+		: getEffectiveInstanceId();
+	if (accountId !== undefined && accountId !== composerAccountId) return;
+	serverDiscovery.providers = catalog;
 	serverDiscovery.modelsLoaded = true;
 	if (serverDiscovery.providers.some((provider) => provider.id === "claude")) {
 		for (const provider of serverDiscovery.providers)
 			if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
 	}
+	fillDraftDefault();
 }
 
-export function applyGetModelsResponse(response: GetModelsResponse): void {
-	// A matching draft read supplies its OpenCode models. Claude models arrive
-	// on the account-scoped providerModels stream, including empty catalogues.
+export function applyGetModelsResponse(
+	response: GetModelsResponse,
+	sessionId?: string,
+	readSeq?: number,
+): void {
+	if (sessionId) {
+		const state = sessionPickState(sessionId);
+		const seq = readSeq ?? ++state.readSeq;
+		if (seq <= state.appliedReadSeq) return;
+		state.appliedReadSeq = seq;
+		const pick: SessionPick = {
+			instanceId: response.instanceId ?? "",
+			modelId: response.active?.model ?? "",
+			providerId: response.active?.provider ?? "",
+			variant: response.variant?.variant ?? "",
+			contextWindow: response.contextWindow?.contextWindow ?? "",
+			variants: [...(response.variant?.variants ?? [])],
+			contextWindowOptions:
+				cloneContextWindowOptions(response.contextWindow?.options) ?? [],
+			modelExecution: response.modelExecution
+				? { ...response.modelExecution }
+				: null,
+		};
+		if (!state.pick) state.pick = pick;
+		else {
+			for (const field of Object.keys(pick) as (keyof SessionPick)[]) {
+				if (seq > (state.ackedAtReadSeq[field] ?? 0)) {
+					Object.assign(state.pick, { [field]: pick[field] });
+				}
+			}
+		}
+		// Cache off-screen picks without hydrating the open composer's shared state.
+		if (sessionState.currentId !== sessionId) return;
+	}
+	if (response.defaultOpenCodeInstanceId !== undefined)
+		serverDiscovery.defaultOpenCodeInstanceId =
+			response.defaultOpenCodeInstanceId;
+	serverDiscovery.modelsLoaded = true;
+	// Account-scoped Claude catalogues arrive on the providerModels stream.
 	const scopedDraft =
 		response.instanceId !== undefined &&
 		!sessionState.currentId &&
 		response.instanceId === getEffectiveInstanceId();
 	const claudeScope = instanceState.instances.some(
-		(instance) =>
-			instance.id === response.instanceId && instance.driver === "claude",
+		(account) =>
+			account.id === response.instanceId && account.driver === "claude",
 	);
-	if (response.instanceId === undefined || (scopedDraft && !claudeScope))
+	if (
+		sessionId ||
+		response.instanceId === undefined ||
+		(scopedDraft && !claudeScope)
+	) {
+		// The retained shared Claude tail is display data, not this reply's catalog.
+		const cachedClaude = serverDiscovery.providers.filter(
+			(provider) =>
+				provider.id === "claude" &&
+				!response.providers.some((next) => next.id === "claude"),
+		);
 		handleModelList({
-			providers: [
-				...response.providers,
-				// Keep the cached Claude provider unless the reply carries its own;
-				// a duplicate id crashes every keyed list of providers.
-				...serverDiscovery.providers.filter(
-					(provider) =>
-						provider.id === "claude" &&
-						!response.providers.some((next) => next.id === "claude"),
-				),
-			],
+			providers: response.providers,
+			...(response.instanceId !== undefined &&
+			response.providers.some((provider) => provider.id === "claude")
+				? { accountId: response.instanceId }
+				: {}),
 		});
-	hydrateModelSettings(response);
-	serverDiscovery.modelExecution = response.modelExecution
-		? { ...response.modelExecution }
-		: null;
-	if (response.permissionMode) {
+		serverDiscovery.providers = [...serverDiscovery.providers, ...cachedClaude];
+		if (cachedClaude.length)
+			for (const provider of serverDiscovery.providers)
+				if (provider.id === "anthropic") provider.name = "Anthropic - opencode";
+	}
+	if (!sessionId) {
+		if (response.instanceId !== undefined) {
+			if (draftDriver(response.instanceId) === "opencode")
+				instanceCatalogs[response.instanceId] = providersFromGetModelsResponse(
+					response.providers,
+				);
+			if (
+				!sessionState.currentId &&
+				(instanceState.loaded || draft.instanceId !== null) &&
+				(serverDiscovery.defaultsLoaded || draft.instanceId !== null) &&
+				response.instanceId === getEffectiveInstanceId() &&
+				!draft.model
+			) {
+				if (!draftPermissionChosen && response.permissionMode)
+					draft.permissionMode = response.permissionMode;
+				if (response.active)
+					setDraftModel(
+						{
+							modelId: response.active.model,
+							providerId: response.active.provider,
+						},
+						response.variant?.variant ?? "",
+						response.contextWindow?.contextWindow ?? "",
+					);
+				else fillDraftDefault();
+			}
+		}
+		serverDiscovery.modelExecution = response.modelExecution
+			? { ...response.modelExecution }
+			: null;
+	}
+	if (sessionId && response.permissionMode) {
 		handlePermissionModeInfo({ mode: response.permissionMode });
 	}
 	if (response.hiddenModels) {
 		serverDiscovery.hiddenModels = [...response.hiddenModels];
-	}
-}
-
-/** Default hydration cannot acknowledge a model or effort picked for a draft. */
-export function hydrateModelSettings(
-	response: Pick<GetModelsResponse, "active" | "variant" | "contextWindow">,
-): void {
-	if (!sessionState.currentId && discoveryState.hasModelChoice) return;
-	if (response.active) {
-		handleModelInfo(response.active);
-	} else {
-		// The harness picks its own model, so drop the last session's.
-		serverDiscovery.currentModelId = "";
-		serverDiscovery.currentProviderId = "";
-		choice.modelId = null;
-		choice.providerId = null;
-	}
-	if (response.variant) {
-		handleVariantInfo({
-			...(response.variant.variant != null
-				? { variant: response.variant.variant }
-				: {}),
-			...(response.variant.variants
-				? { variants: [...response.variant.variants] }
-				: {}),
-		});
-	}
-	if (response.contextWindow) {
-		handleContextWindowInfo({
-			contextWindow: response.contextWindow.contextWindow,
-			options: cloneContextWindowOptions(response.contextWindow.options) ?? [],
-		});
 	}
 }
 
@@ -709,8 +1217,6 @@ export function handleModelInfo(msg: {
 	const { model, provider } = msg;
 	if (model) serverDiscovery.currentModelId = model;
 	if (provider) serverDiscovery.currentProviderId = provider;
-	choice.modelId = null;
-	choice.providerId = null;
 }
 
 export function handleCommandList({
@@ -743,8 +1249,10 @@ export function handleDefaultModelInfo(msg: {
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
+	serverDiscovery.defaultsLoaded = true;
 	choice.defaultModelId = null;
 	choice.defaultProviderId = null;
+	fillDraftDefault();
 }
 
 export function handleHarnessDefaults(
@@ -754,20 +1262,20 @@ export function handleHarnessDefaults(
 		claude: setting.claude,
 		opencode: setting.opencode,
 	};
+	fillDraftDefault();
 }
 
 export function applyHarnessDefaultSet(
 	response: SetHarnessDefaultResponse,
 ): void {
 	serverDiscovery.harnessDefaults[response.harness] = response.state;
+	fillDraftDefault();
 }
 
 /** Get the available variants for the currently active model. */
 export function getActiveModelVariants(): readonly string[] {
-	const model = getActiveModel();
-	return discoveryState.currentProviderId === "claude"
-		? (model?.variants ?? [])
-		: (model?.variants ?? discoveryState.availableVariants);
+	if (sessionState.currentId) return discoveryState.availableVariants;
+	return getActiveModel()?.variants ?? [];
 }
 
 /** Get the available context-window options for the currently active model.
@@ -775,10 +1283,9 @@ export function getActiveModelVariants(): readonly string[] {
  *  supporting model is picked, without waiting for a server round-trip; fall
  *  back to the last server-provided list otherwise. */
 export function getActiveContextWindowOptions(): readonly Immutable<ContextWindowOption>[] {
-	const modelOptions = getActiveModel()?.contextWindowOptions;
-	if (discoveryState.currentProviderId === "claude") return modelOptions ?? [];
-	if (modelOptions && modelOptions.length > 0) return modelOptions;
-	return discoveryState.availableContextWindowOptions;
+	if (sessionState.currentId)
+		return discoveryState.availableContextWindowOptions;
+	return getActiveModel()?.contextWindowOptions ?? [];
 }
 
 export function handleVariantInfo(msg: {
@@ -787,7 +1294,6 @@ export function handleVariantInfo(msg: {
 }): void {
 	serverDiscovery.currentVariant = msg.variant ?? "";
 	serverDiscovery.availableVariants = [...(msg.variants ?? [])];
-	choice.variant = null;
 }
 
 export function handleContextWindowInfo(msg: {
@@ -796,48 +1302,32 @@ export function handleContextWindowInfo(msg: {
 }): void {
 	serverDiscovery.currentContextWindow = msg.contextWindow ?? "";
 	serverDiscovery.availableContextWindowOptions = msg.options ?? [];
-	choice.contextWindow = null;
 }
 
 type SessionModelSettings = Pick<
 	SessionInfo,
-	"model" | "variant" | "contextWindow"
+	"model" | "variant" | "contextWindow" | "resumes" | "accountId"
 >;
 
-/**
- * The viewed session's model, effort and context window follow its row, so a
- * change made in another tab, or by the relay, lands in this tab's pickers.
- * Only a change between two rows counts: the first sight of a row is GetModels'
- * job, which resolves defaults the row leaves blank.
- */
+/** Rows invalidate a read; they never hydrate a session's displayed pick. */
 export function followSessionModelSettings(
 	row: SessionModelSettings,
 	previous: SessionModelSettings | undefined,
 ): void {
 	if (!previous) return;
 	if (
-		row.model &&
-		(row.model.model !== previous.model?.model ||
-			row.model.provider !== previous.model?.provider)
-	) {
-		handleModelInfo(row.model);
-		// The row carries no catalog, so take the new model's own lists.
-		const catalogModel = getActiveModel(row.model.model, row.model.provider);
-		serverDiscovery.availableVariants = [...(catalogModel?.variants ?? [])];
-		serverDiscovery.availableContextWindowOptions =
-			cloneContextWindowOptions(catalogModel?.contextWindowOptions) ?? [];
-	}
-	if (row.variant !== undefined && row.variant !== previous.variant) {
-		serverDiscovery.currentVariant = row.variant;
-		choice.variant = null;
-	}
-	if (
-		row.contextWindow !== undefined &&
-		row.contextWindow !== previous.contextWindow
-	) {
-		serverDiscovery.currentContextWindow = row.contextWindow;
-		choice.contextWindow = null;
-	}
+		row.model?.model === previous.model?.model &&
+		row.model?.provider === previous.model?.provider &&
+		row.variant === previous.variant &&
+		row.contextWindow === previous.contextWindow &&
+		row.accountId === previous.accountId &&
+		row.resumes?.at(-1)?.instanceId === previous.resumes?.at(-1)?.instanceId
+	)
+		return;
+	const projectSlug = getCurrentSlug();
+	const sessionId = sessionState.currentId;
+	if (!projectSlug || !sessionId) return;
+	refreshSessionPick(projectSlug, sessionId);
 }
 
 export function handlePermissionModeInfo(msg: {
@@ -857,41 +1347,13 @@ export function handleVisibilityInfo(msg: {
 	choice.hiddenAgents = null;
 }
 
-/**
- * Flush a permission mode that was selected while no session was bound
- * (e.g. cold start before a session is selected). Called when a session binds so
- * the user's pre-bind selection actually reaches the server instead of being
- * silently dropped (the first turn would still ask, and any re-sync would
- * flip the pill back to "Ask").
- */
-export function flushPendingPermissionMode(
-	projectSlug: string,
-	sessionId: string,
-	send: (input: {
-		projectSlug: string;
-		sessionId: string;
-		mode: SessionPermissionMode;
-	}) => Promise<unknown>,
-): void {
-	const mode = discoveryState.pendingPermissionMode;
-	if (mode == null) return;
-	clientDiscovery.pendingPermissionMode = null;
-	const undo = choosePermissionMode(mode);
-	// Send even for "ask". It is only the server's default for a *brand-new*
-	// session, and this runs on binding to any session -- skipping it left a
-	// session already on "full" running with full access while the pill read
-	// "Ask". Restricting a session must never be the silent case.
-	// On failure, stop claiming a mode the server is not in.
-	void send({ projectSlug, sessionId, mode }).catch(undo);
-}
-
 // A picker writes the user's click here, sends the RPC, and applies the
 // response. Each `choose*` hands back the undo for *that* click; call it when
 // the server refuses. No component keeps a `previous…` variable any more: the
 // server's value was never overwritten, so there is nothing to restore.
 
 /** Drops the click it came from, unless a later one has taken the field over. */
-type UndoChoice = () => void;
+type UndoChoice = (() => void) & { readonly clickId?: symbol };
 
 type ChoiceField = keyof typeof choice;
 
@@ -934,78 +1396,64 @@ export function chooseModel(model: {
 	modelId: string;
 	providerId: string;
 }): UndoChoice {
-	return undoAll([
-		propose("modelId", model.modelId),
-		propose("providerId", model.providerId),
-	]);
-}
-
-/** Call right after a draft's model pick. Returns how to apply what that pick
- *  reads back: the model's efforts and saved effort. Nothing changes once the
- *  draft has moved on, to a session, another pick or another project. An
- *  effort picked while the read was in flight stays picked; one picked before
- *  belonged to the previous model. */
-export function followDraftModelPick(): (msg: {
-	readonly variant?: string;
-	readonly variants?: readonly string[];
-}) => void {
-	const modelClick = owner.modelId;
-	const effortClick = owner.variant;
-	return (msg) => {
-		if (sessionState.currentId || owner.modelId !== modelClick) return;
-		serverDiscovery.currentVariant = msg.variant ?? "";
-		serverDiscovery.availableVariants = [...(msg.variants ?? [])];
-		if (owner.variant === effortClick) choice.variant = null;
-	};
-}
-
-/** This tab's model and effort picks, if `instanceId` lists the model.
- *  Nothing without a pick: the server's default applies then. An effort pick
- *  commits the model it was picked for, which may be the one the server
- *  reported. Drops a model carried over from another harness, which
- *  `selectInstance` keeps when the new harness has no models yet. */
-export function getChosenModel(instanceId: string | undefined):
-	| {
-			readonly modelId: string;
-			readonly providerId: string;
-			readonly variant?: string;
-	  }
-	| undefined {
-	if (!discoveryState.hasModelChoice) return undefined;
-	const { currentModelId: modelId, currentProviderId: providerId } =
-		discoveryState;
-	const listed = getProviderGroupsForInstance(instanceId).some((group) =>
-		group.models.some(
-			(model) =>
-				model.provider === providerId && modelMatchesId(model, modelId),
-		),
-	);
-	if (!listed) return undefined;
-	return {
-		modelId,
-		providerId,
-		...(choice.variant == null ? {} : { variant: choice.variant }),
-	};
+	if (sessionState.currentId) {
+		const current = getSessionPick(sessionState.currentId);
+		const catalog = getActiveModel(model.modelId, model.providerId);
+		const variants = catalog?.variants ?? [];
+		const options = catalog?.contextWindowOptions ?? [];
+		return chooseSessionPick(sessionState.currentId, {
+			...model,
+			variants,
+			contextWindowOptions: options,
+			variant: variants.includes(current?.variant ?? "")
+				? (current?.variant ?? "")
+				: "",
+			contextWindow: options.some(
+				(option) => option.value === current?.contextWindow,
+			)
+				? (current?.contextWindow ?? "")
+				: "",
+		});
+	}
+	setDraftModel(model);
+	return () => {};
 }
 
 export function chooseVariant(variant: string): UndoChoice {
-	if (!sessionState.currentId && choice.modelId === null) {
-		return undoAll([
-			chooseModel({
-				modelId: discoveryState.currentModelId,
-				providerId: discoveryState.currentProviderId,
-			}),
-			propose("variant", variant),
-		]);
+	if (sessionState.currentId)
+		return chooseSessionPick(sessionState.currentId, { variant });
+	if (
+		draft.model &&
+		(variant === "" || getActiveModelVariants().includes(variant))
+	) {
+		draft.model.variant = variant;
+		rememberDraftModel();
 	}
-	return propose("variant", variant);
+	return () => {};
 }
 
 export function chooseContextWindow(contextWindow: string): UndoChoice {
-	return propose("contextWindow", contextWindow);
+	if (sessionState.currentId)
+		return chooseSessionPick(sessionState.currentId, { contextWindow });
+	if (
+		draft.model &&
+		(contextWindow === "" ||
+			getActiveContextWindowOptions().some(
+				(option) => option.value === contextWindow,
+			))
+	) {
+		draft.model.contextWindow = contextWindow;
+		rememberDraftModel();
+	}
+	return () => {};
 }
 
 export function choosePermissionMode(mode: SessionPermissionMode): UndoChoice {
+	if (!sessionState.currentId) {
+		draft.permissionMode = mode;
+		draftPermissionChosen = true;
+		return () => {};
+	}
 	return propose("permissionMode", mode);
 }
 
@@ -1081,6 +1529,7 @@ export function applyHiddenEntriesSet(
 export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	serverDiscovery.defaultPermissionMode = mode;
 	choice.defaultPermissionMode = null;
+	if (!draft.model && !draftPermissionChosen) draft.permissionMode = mode;
 }
 
 export function applyDefaultSessionMode(mode: SessionMode): void {
@@ -1089,6 +1538,8 @@ export function applyDefaultSessionMode(mode: SessionMode): void {
 
 /** Clear all discovery state (for project switch). */
 export function clearDiscoveryState(): void {
+	discoveryGeneration++;
+	for (const id of Object.keys(sessionPicks)) delete sessionPicks[id];
 	serverDiscovery.agents = [];
 	serverDiscovery.agentProviderScope = null;
 	serverDiscovery.activeAgentId = null;
@@ -1102,6 +1553,8 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultModelId = "";
 	serverDiscovery.defaultProviderId = "";
 	serverDiscovery.defaultVariant = "";
+	serverDiscovery.defaultsLoaded = false;
+	serverDiscovery.defaultOpenCodeInstanceId = null;
 	serverDiscovery.harnessDefaults = {
 		claude: { status: "missing" },
 		opencode: { status: "missing" },
@@ -1115,7 +1568,8 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultPermissionMode = "ask";
 	serverDiscovery.hiddenModels = [];
 	serverDiscovery.hiddenAgents = [];
-	clientDiscovery.pendingPermissionMode = null;
+	clearDraftSelection();
+	for (const id of Object.keys(instanceCatalogs)) delete instanceCatalogs[id];
 	for (const field of Object.keys(choice) as ChoiceField[]) {
 		choice[field] = null;
 		delete owner[field];

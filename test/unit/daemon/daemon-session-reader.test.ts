@@ -5,8 +5,8 @@ import { basename, dirname, join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
-import { afterEach, describe, expect } from "vitest";
+import { Effect, Fiber, Option } from "effect";
+import { afterEach, describe, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -97,6 +97,72 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	it.effect(
+		"awaits fresh foreign git with at most four directory reads per project",
+		() => {
+			const root = makeTemporaryRoot();
+			const project = join(root, "project");
+			const folders: [string, ...string[]] = [
+				project,
+				...Array.from({ length: 6 }, (_, index) =>
+					join(root, `extra-${index}`),
+				),
+			];
+			for (const folder of folders) mkdirSync(folder);
+			makeProjectStore(project, [
+				{ id: "session", title: "Session", updatedAt: 1 },
+			]);
+			let release!: () => void;
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let concurrent = 0;
+			let maximum = 0;
+			const read = vi.fn(async () => {
+				concurrent++;
+				maximum = Math.max(maximum, concurrent);
+				await held;
+				concurrent--;
+				return { branch: "fresh" };
+			});
+			const cache = createSessionGitCache(read);
+			for (const folder of folders) cache.seed(folder, { branch: "cached" });
+			return Effect.scoped(
+				Effect.gen(function* () {
+					const unusedGit = vi.fn(async () => undefined);
+					const empty = yield* listDaemonSessions(
+						root,
+						{ search: "absent" },
+						createSessionGitCache(unusedGit),
+					);
+					expect(empty.sessions).toEqual([]);
+					expect(unusedGit).not.toHaveBeenCalled();
+					const listing = yield* Effect.fork(
+						listDaemonSessions(root, {}, cache),
+					);
+					yield* Effect.tryPromise(() =>
+						vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4)),
+					);
+					expect(Option.isNone(yield* Fiber.poll(listing))).toBe(true);
+					expect(cache.peek(project)?.branch).toBe("cached");
+					release();
+					const result = yield* Fiber.join(listing);
+					expect(maximum).toBe(4);
+					expect(read).toHaveBeenCalledTimes(folders.length);
+					expect(result.sessions[0]?.git?.branch).toBe("fresh");
+				}),
+			).pipe(
+				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(
+					makeProjectRegistryLive([
+						{ slug: "project", title: "Project", folders },
+					]),
+				),
+				Effect.ensuring(Effect.sync(release)),
+			);
+		},
+	);
+
 	it.effect("stamps cached git context only on git project sessions", () => {
 		const root = makeTemporaryRoot();
 		const gitProject = join(root, "git-project");

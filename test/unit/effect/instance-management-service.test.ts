@@ -11,7 +11,7 @@ import {
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import type { InstanceManagementDeps } from "../../../src/lib/handlers/types.js";
 import type { OpenCodeInstance } from "../../../src/lib/shared-types.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 
 const makeInstance = (
@@ -67,21 +67,24 @@ const makeLayer = (instanceMgmt: InstanceManagementDeps) =>
 const makeConfigLayer = (instanceMgmt: InstanceManagementDeps) =>
 	InstanceManagementServiceFromConfigLive.pipe(
 		Layer.provide(
-			Layer.succeed(ConfigTag, {
-				httpServer: createServer(),
-				opencodeUrl: "http://127.0.0.1:4096",
-				projectDir: process.cwd(),
-				slug: "test-project",
-				persistenceDbPath: tempEventsDbPath(),
-				publishGlobalSetting: () => Effect.void,
-				getInstances: instanceMgmt.getInstances,
-				addInstance: instanceMgmt.addInstance,
-				removeInstance: instanceMgmt.removeInstance,
-				startInstance: instanceMgmt.startInstance,
-				stopInstance: instanceMgmt.stopInstance,
-				updateInstance: instanceMgmt.updateInstance,
-				persistConfig: instanceMgmt.persistConfig,
-			} satisfies ProjectRelayConfig),
+			Layer.succeed(
+				ConfigTag,
+				makeMockConfig({
+					httpServer: createServer(),
+					opencodeUrl: "http://127.0.0.1:4096",
+					projectDir: process.cwd(),
+					slug: "test-project",
+					persistenceDbPath: tempEventsDbPath(),
+					publishGlobalSetting: () => Effect.void,
+					getInstances: instanceMgmt.getInstances,
+					addInstance: instanceMgmt.addInstance,
+					removeInstance: instanceMgmt.removeInstance,
+					startInstance: instanceMgmt.startInstance,
+					stopInstance: instanceMgmt.stopInstance,
+					updateInstance: instanceMgmt.updateInstance,
+					persistConfig: instanceMgmt.persistConfig,
+				}),
+			),
 		),
 	);
 

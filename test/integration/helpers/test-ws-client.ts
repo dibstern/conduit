@@ -29,6 +29,8 @@ import {
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { decodeSessionDetail } from "../../../src/lib/frontend/transport/session-detail-wire.js";
+import { harnessForModelProvider } from "../../../src/lib/provider/turn-settings.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
@@ -225,18 +227,62 @@ export class TestWsClient {
 
 	async createSession(
 		title?: string,
-		opts: { readonly providerId?: string; readonly instanceId?: string } = {},
+		opts: {
+			readonly providerId?: string;
+			readonly instanceId?: string;
+			readonly model?: {
+				readonly providerId: string;
+				readonly modelId: string;
+				readonly variant: string;
+				readonly contextWindow: string;
+			};
+		} = {},
 	): Promise<ReceivedMessage> {
 		const clientId = this.clientId;
+		const instanceId =
+			opts.instanceId ??
+			(opts.providerId ? harnessForModelProvider(opts.providerId) : undefined);
+		const models = await this.rpcCall((client) =>
+			client.GetModels({
+				projectSlug: this.projectSlug,
+				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+			}),
+		);
+		const firstProvider = models.providers.find(
+			(provider) => provider.models.length > 0,
+		);
+		const firstModel = firstProvider?.models[0];
+		const model =
+			opts.model ??
+			(models.active
+				? {
+						providerId: models.active.provider,
+						modelId: models.active.model,
+						variant: models.variant?.variant ?? "",
+						contextWindow: models.contextWindow?.contextWindow ?? "",
+					}
+				: firstProvider && firstModel
+					? {
+							providerId: firstProvider.id,
+							modelId: firstModel.id,
+							variant: firstModel.variants?.[0] ?? "",
+							contextWindow:
+								firstModel.contextWindowOptions?.find(
+									(option) => option.isDefault,
+								)?.value ?? "",
+						}
+					: undefined);
+		if (!model)
+			throw new Error("The session fixture needs a valid harness model pick");
 		const result = await this.rpcCall((client) =>
 			client.CreateSession({
+				permissionMode: "ask",
 				projectSlug: this.projectSlug,
 				originId: clientId,
+				model,
 				...(title != null ? { title } : {}),
 				...(opts.providerId ? { providerId: opts.providerId } : {}),
-				...(opts.instanceId
-					? { instanceId: AccountIdSchema.make(opts.instanceId) }
-					: {}),
+				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
 			}),
 		);
 		this.activeSessionId = result.sessionId;
@@ -746,7 +792,10 @@ export class TestWsClient {
 		const assemble = assembleDetailRows();
 		await this.follow(
 			"session_detail",
-			(client) => client.SubscribeSessionDetail({ projectSlug, sessionId }),
+			(client) =>
+				client
+					.SubscribeSessionDetail({ projectSlug, sessionId })
+					.pipe(decodeSessionDetail),
 			scope,
 			(envelope) => {
 				const items =

@@ -27,6 +27,8 @@ describe("Schema Migration", () => {
 				);
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[55, "events_session_type_index"],
+					[56, "drop_activities"],
+					[57, "session_pick_backfill"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -52,7 +54,6 @@ describe("Schema Migration", () => {
 						AND name != 'effect_sql_migrations'
 					ORDER BY name`).map((r) => r.name);
 			expect(tables).toEqual([
-				"activities",
 				"command_receipts",
 				"events",
 				"message_part_tombstones",
@@ -74,6 +75,8 @@ describe("Schema Migration", () => {
 				"sent_alerts",
 				"session_git_published",
 				"session_goal_checks",
+				"session_pick_backfill",
+				"session_pick_backfill_state",
 				"session_providers",
 				"session_sidebar",
 				"session_sidebar_horizon",
@@ -102,18 +105,6 @@ describe("Schema Migration", () => {
 				unique: row.sql?.startsWith("CREATE UNIQUE INDEX") ?? false,
 			}));
 			expect(indexes).toEqual([
-				{
-					name: "idx_activities_session_created",
-					table: "activities",
-					unique: false,
-				},
-				{
-					name: "idx_activities_session_kind",
-					table: "activities",
-					unique: false,
-				},
-				{ name: "idx_activities_tone", table: "activities", unique: false },
-				{ name: "idx_activities_turn", table: "activities", unique: false },
 				{
 					name: "idx_command_receipts_project",
 					table: "command_receipts",

@@ -14,8 +14,9 @@
 // the member it was opened on (a finished subagent) does not orphan it, and
 // every device viewing any member of one family asks the same question: the
 // source is named by that root and shares its window reads (y7eo.15). The read
-// is therefore a pure function of the window and the store; the ids served are
-// tracked from the envelopes each subscriber is sent.
+// is therefore a pure function of the window and the store. The base depends
+// on the viewed session; windows do not. The ids served are tracked from the
+// envelopes each subscriber is sent.
 // Resume is a rebase for the same reason as the shell: the query can only
 // report rows that still exist.
 
@@ -61,10 +62,16 @@ export const subscribeSessionFamily = (options: {
 				bus,
 				source: {
 					name: `session-family/${anchor}`,
+					collections: ["sessions"],
 					shareReads: true,
 					read: (range) =>
 						readQuery
-							.readSessionList({ ...range, familyOf: anchor, backgroundOf })
+							.readSessionList({
+								...range,
+								familyOf: anchor,
+								...(range === undefined ? { viewed: options.sessionId } : {}),
+								backgroundOf,
+							})
 							.pipe(
 								Effect.flatMap((list) =>
 									Effect.gen(function* () {
@@ -102,7 +109,7 @@ export const subscribeSessionFamily = (options: {
 						const removed = advance.removedSessionIds.filter((id) =>
 							held.delete(id),
 						);
-						return { moved: advance.sessionIds.length > 0, removed };
+						return { moved: true, removed };
 					},
 					resume: "rebase",
 				},

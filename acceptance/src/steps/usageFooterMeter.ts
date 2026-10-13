@@ -14,25 +14,42 @@ const states = {
 	limit: [100, 71],
 } as const;
 
-/** A real finger drag: CDP touch events, which the page also sees as pointer events. */
-async function touchDrag(page: Page, x: number, y: number, dy: number) {
+/** A real finger: CDP touch events, which the page also sees as pointer events. */
+async function touchFinger(page: Page, x: number, y: number) {
 	const touch = await page.context().newCDPSession(page);
+	let at = y;
+	await touch.send("Input.dispatchTouchEvent", {
+		type: "touchStart",
+		touchPoints: [{ x, y }],
+	});
+	return {
+		async move(dy: number) {
+			for (let step = 1; step <= 12; step++)
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchMove",
+					touchPoints: [{ x, y: at + (dy * step) / 12 }],
+				});
+			at += dy;
+		},
+		async lift() {
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+			} finally {
+				await touch.detach();
+			}
+		},
+	};
+}
+
+async function touchDrag(page: Page, x: number, y: number, dy: number) {
+	const finger = await touchFinger(page, x, y);
 	try {
-		await touch.send("Input.dispatchTouchEvent", {
-			type: "touchStart",
-			touchPoints: [{ x, y }],
-		});
-		for (let step = 1; step <= 12; step++)
-			await touch.send("Input.dispatchTouchEvent", {
-				type: "touchMove",
-				touchPoints: [{ x, y: y + (dy * step) / 12 }],
-			});
-		await touch.send("Input.dispatchTouchEvent", {
-			type: "touchEnd",
-			touchPoints: [],
-		});
+		await finger.move(dy);
 	} finally {
-		await touch.detach();
+		await finger.lift();
 	}
 }
 
@@ -724,6 +741,89 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				box.x + box.width / 2,
 				box.y + box.height / 2,
 				-Number(match[1]),
+			);
+		},
+	},
+	{
+		name: "the usage sheet rises one for one with a finger on the dock",
+		match: /^the usage sheet follows my finger up the phone usage dock$/,
+		run: async ({ world }) => {
+			const box = await world.page
+				.getByTestId("usage-phone-dock")
+				.boundingBox();
+			if (!box) throw new Error("Missing phone usage dock");
+			const sheet = world.page.getByTestId("usage-sheet");
+			// Touch moves reach the page frame-aligned, so measure once two frames have passed.
+			const settledTop = async () => {
+				await world.page.evaluate(
+					() =>
+						new Promise((done) =>
+							requestAnimationFrame(() => requestAnimationFrame(done)),
+						),
+				);
+				return (await sheet.boundingBox())?.y ?? Number.NaN;
+			};
+			const finger = await touchFinger(
+				world.page,
+				box.x + box.width / 2,
+				box.y + box.height / 2,
+			);
+			try {
+				await finger.move(-60);
+				const before = await settledTop();
+				await finger.move(-40);
+				const after = await settledTop();
+				expect(before - after).toBeCloseTo(40, 0);
+			} finally {
+				await finger.lift();
+			}
+		},
+	},
+	{
+		name: "the usage sheet folds into the dock rather than off screen",
+		match:
+			/^the usage sheet dragged down past the phone usage dock stops on it$/,
+		run: async ({ world }) => {
+			const sheet = world.page.getByTestId("usage-sheet");
+			// A drag moves the sheet from where it rests, so let the opening glide finish first.
+			await sheet.evaluate((node) =>
+				Promise.all(
+					(node.parentElement?.getAnimations() ?? []).map((a) => a.finished),
+				),
+			);
+			const box = await sheet.boundingBox();
+			const dock = await world.page
+				.getByTestId("usage-footer-phone")
+				.boundingBox();
+			const viewport = world.page.viewportSize();
+			if (!box || !dock || !viewport) throw new Error("Missing usage sheet");
+			const startY = box.y + 10;
+			const finger = await touchFinger(
+				world.page,
+				box.x + box.width / 2,
+				startY,
+			);
+			try {
+				// To the screen's edge: far past the dock even if the sheet was still rising.
+				await finger.move(viewport.height - 2 - startY);
+				await expect
+					.poll(async () => (await sheet.boundingBox())?.y)
+					.toBeCloseTo(dock.y, 0);
+			} finally {
+				await finger.lift();
+			}
+		},
+	},
+	{
+		name: "the usage sheet wears the dock's background",
+		match: /^the usage sheet has the phone usage dock's background$/,
+		run: async ({ world }) => {
+			const background = (testId: string) =>
+				world.page
+					.getByTestId(testId)
+					.evaluate((node) => getComputedStyle(node).backgroundColor);
+			expect(await background("usage-sheet")).toBe(
+				await background("usage-footer-phone"),
 			);
 		},
 	},

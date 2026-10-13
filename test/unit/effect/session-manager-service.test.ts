@@ -74,6 +74,7 @@ import {
 import { OpenCodeApiError } from "../../../src/lib/errors.js";
 import type { SessionStatus } from "../../../src/lib/instance/sdk-types.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -100,6 +101,7 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../../../src/lib/provider/provider-session-binding-read-model.js";
+import type { TurnSettings } from "../../../src/lib/provider/turn-settings.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
@@ -114,6 +116,20 @@ import {
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
+
+const openCodePick: TurnSettings = {
+	harness: "opencode",
+	model: { providerId: "openai", modelId: "gpt-5" },
+	effort: "",
+	contextWindow: "",
+};
+
+const claudePick: TurnSettings = {
+	harness: "claude",
+	model: { providerId: "claude", modelId: "claude-sonnet-4-7" },
+	effort: "",
+	contextWindow: "",
+};
 
 function makeRow(id: string, overrides?: Partial<SessionRow>): SessionRow {
 	return {
@@ -158,6 +174,8 @@ function makeReadQueryEffect(
 		getSessionsForReconciliation: () => Effect.succeed([]),
 		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
+		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 		listSessionInfos: vi.fn((options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots
@@ -186,6 +204,8 @@ function makeReadQueryEffect(
 				version: 0,
 			}),
 		),
+		readSessionTranscriptCatchUp: () =>
+			Effect.succeed({ messages: [], version: 0 }),
 		readSessionTranscript: vi.fn(() =>
 			Effect.succeed({ messages: [], version: 0 }),
 		),
@@ -528,6 +548,7 @@ describe("SessionManagerService", () => {
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
+					pick: openCodePick,
 				});
 
 				expect(session.id).toBe("created-session");
@@ -579,7 +600,9 @@ describe("SessionManagerService", () => {
 				});
 				const service = yield* SessionManagerServiceTag;
 
-				const session = yield* service.createSession("Local Claude");
+				const session = yield* service.createSession("Local Claude", {
+					pick: claudePick,
+				});
 				const sessions = yield* service.listSessions();
 
 				expect(session.id).toMatch(/^ses_/);
@@ -647,6 +670,7 @@ describe("SessionManagerService", () => {
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
+					pick: openCodePick,
 				});
 				const sessions = yield* service.listSessions();
 				const persisted = yield* Effect.sync(() => {
@@ -747,6 +771,7 @@ describe("SessionManagerService", () => {
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
+						pick: openCodePick,
 					}),
 				);
 
@@ -1001,6 +1026,7 @@ describe("SessionManagerService", () => {
 						_tag: "DriverDefault",
 						driver: "claude",
 					}),
+					pick: claudePick,
 				});
 				yield* persist.persistUserMessage(session.id, "First message");
 				const eventStore = yield* EventStoreEffectTag;
@@ -1093,6 +1119,7 @@ describe("SessionManagerService", () => {
 							_tag: "Id",
 							id: claudeInstanceId,
 						}),
+						pick: claudePick,
 					},
 				);
 				const openCodeSession = yield* service.createSession(
@@ -1103,6 +1130,7 @@ describe("SessionManagerService", () => {
 							id: openCodeInstanceId,
 							name: "OpenCode",
 						},
+						pick: openCodePick,
 					},
 				);
 
@@ -1179,6 +1207,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1217,6 +1246,7 @@ describe("SessionManagerService", () => {
 						id: AccountIdSchema.make("work-oc"),
 						name: "Work OpenCode",
 					},
+					pick: openCodePick,
 				});
 				const bindings = yield* Effect.sync(() => {
 					const db = openFixtureDb(dbFile);
@@ -1304,6 +1334,7 @@ describe("SessionManagerService", () => {
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
+						pick: openCodePick,
 					}),
 				);
 				const sessions = yield* service.listSessions();
@@ -1321,7 +1352,7 @@ describe("SessionManagerService", () => {
 	);
 
 	it.scoped(
-		"live service creates a local Claude session before model discovery sets a default provider",
+		"rejects creation with PickRequired before model discovery provides a harness default",
 		() => {
 			const dbFile = join(
 				tmpdir(),
@@ -1354,12 +1385,20 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 
-				const session = yield* service.createSession("Local before models");
+				const result = yield* Effect.either(
+					service.createSession("Local before models"),
+				);
 
-				expect(session.id).toMatch(/^ses_/);
-				expect(session.providerID).toBe("claude");
+				expect(result).toMatchObject({
+					_tag: "Left",
+					left: expect.objectContaining({
+						_tag: "PickRequired",
+						message: expect.stringMatching(/^PickRequired/),
+					}),
+				});
 				expect(api.session.create).not.toHaveBeenCalled();
-				expect(bindSession).toHaveBeenCalledWith(session.id, "claude");
+				expect(bindSession).not.toHaveBeenCalled();
+				expect(yield* service.listSessions()).toEqual([]);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(Effect.sync(() => rmSync(dbFile, { force: true }))),
@@ -1392,6 +1431,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1693,6 +1733,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1797,6 +1838,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use: vi.fn(() => Effect.succeed(namedApi)),
+				borrow: () => Effect.succeed(namedApi),
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -1873,6 +1915,7 @@ describe("SessionManagerService", () => {
 		const instanceClients = {
 			events: () => Stream.empty,
 			use: vi.fn(() => Effect.succeed(namedApi)),
+			borrow: () => Effect.succeed(namedApi),
 			ifRunning: () => Effect.succeedNone,
 			useIfRunning: () => Effect.succeedNone,
 			stop: () => Effect.void,
@@ -2083,6 +2126,7 @@ describe("SessionManagerService", () => {
 			const instanceClients = {
 				events: () => Stream.empty,
 				use,
+				borrow: use,
 				ifRunning: () => Effect.succeedNone,
 				useIfRunning: () => Effect.succeedNone,
 				stop: () => Effect.void,
@@ -2163,6 +2207,7 @@ describe("SessionManagerService", () => {
 				const instanceClients = {
 					events: () => Stream.empty,
 					use,
+					borrow: use,
 					ifRunning: () => Effect.succeedNone,
 					useIfRunning: () => Effect.succeedNone,
 					stop: () => Effect.void,
@@ -2326,6 +2371,7 @@ describe("SessionManagerService", () => {
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
+					pick: openCodePick,
 				});
 				expect(snapshot.getSnapshot().sessionCount).toBe(3);
 
@@ -2373,14 +2419,31 @@ describe("SessionManagerService", () => {
 	it.effect("renames a session through the provider API", () => {
 		const api = makeMockOpenCodeAPI();
 		const update = vi.spyOn(api.session, "update").mockResolvedValue(undefined);
-		const layer = Layer.succeed(OpenCodeAPITag, api);
+		const layer = Layer.mergeAll(
+			Layer.succeed(OpenCodeAPITag, api),
+			Layer.succeed(
+				OpenCodeInstancesTag,
+				makeOpenCodeInstancesStub({ opencode: api }),
+			),
+		);
 
 		return Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			yield* commit([
+				canonicalEvent("session.created", "session-1", {
+					sessionId: "session-1",
+					title: "Old Title",
+					provider: "opencode",
+				}),
+			]);
 			yield* renameSession("session-1", "New Title");
 
 			expect(update).toHaveBeenCalledWith("session-1", {
 				title: "New Title",
 			});
+			expect(
+				(yield* (yield* ReadQueryEffectTag).getSession("session-1"))?.title,
+			).toBe("New Title");
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
 

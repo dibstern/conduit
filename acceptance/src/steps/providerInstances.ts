@@ -301,7 +301,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 	},
 	{
 		name: "seed an explicitly empty configured account list",
-		match: /^no provider accounts are configured$/,
+		match: /^no provider (?:accounts|instances) are configured$/,
 		run: ({ world }) => {
 			mockInstances.set(world.page, []);
 			accountDirectories.delete(world.page);

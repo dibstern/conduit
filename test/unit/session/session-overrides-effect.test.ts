@@ -27,7 +27,6 @@ import {
 	getPermissionMode,
 	getVariant,
 	hasActiveProcessingTimeout,
-	isModelUserSelected,
 	makeOverridesStateLive,
 	OverridesStateTag,
 	resetProcessingTimeout,
@@ -39,7 +38,6 @@ import {
 	setDefaultPermissionMode,
 	setDefaultVariant,
 	setModel,
-	setModelDefault,
 	setPermissionMode,
 	setVariant,
 	startProcessingTimeout,
@@ -48,76 +46,39 @@ import {
 const TIMEOUT_MS = 120_000;
 
 describe("SessionOverrides Effect", () => {
-	it.effect("setModel stores model and marks userSelected", () =>
+	it.effect("setModel stores the session model", () =>
 		Effect.gen(function* () {
 			yield* setModel("sess-1", {
 				providerID: "anthropic",
 				modelID: "claude-4",
 			});
 			const model = yield* getModel("sess-1");
-			const selected = yield* isModelUserSelected("sess-1");
 
 			expect(model).toEqual({
 				providerID: "anthropic",
 				modelID: "claude-4",
 			});
-			expect(selected).toBe(true);
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.effect("setModelDefault stores model without changing userSelected", () =>
+	it.effect("getModel returns only the session model", () =>
 		Effect.gen(function* () {
-			yield* setModelDefault("sess-1", {
+			yield* setDefaultModel({
 				providerID: "anthropic",
 				modelID: "claude-4",
 			});
-			const model = yield* getModel("sess-1");
-			const selected = yield* isModelUserSelected("sess-1");
 
-			expect(model?.modelID).toBe("claude-4");
-			expect(selected).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
-	);
+			expect(yield* getModel("sess-1")).toBeUndefined();
 
-	it.effect("setModelDefault preserves existing userSelected flag", () =>
-		Effect.gen(function* () {
+			// Per-session model takes priority
 			yield* setModel("sess-1", {
-				providerID: "anthropic",
-				modelID: "claude-4",
-			});
-			expect(yield* isModelUserSelected("sess-1")).toBe(true);
-
-			yield* setModelDefault("sess-1", {
 				providerID: "openai",
 				modelID: "gpt-5",
 			});
 			expect((yield* getModel("sess-1"))?.modelID).toBe("gpt-5");
-			expect(yield* isModelUserSelected("sess-1")).toBe(true);
+
+			expect(yield* getModel("sess-2")).toBeUndefined();
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
-	);
-
-	it.effect(
-		"getModel returns per-session model or falls back to defaultModel",
-		() =>
-			Effect.gen(function* () {
-				yield* setDefaultModel({
-					providerID: "anthropic",
-					modelID: "claude-4",
-				});
-
-				// No per-session model — returns default
-				expect((yield* getModel("sess-1"))?.modelID).toBe("claude-4");
-
-				// Per-session model takes priority
-				yield* setModel("sess-1", {
-					providerID: "openai",
-					modelID: "gpt-5",
-				});
-				expect((yield* getModel("sess-1"))?.modelID).toBe("gpt-5");
-
-				// Other sessions still get default
-				expect((yield* getModel("sess-2"))?.modelID).toBe("claude-4");
-			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect(
@@ -127,12 +88,6 @@ describe("SessionOverrides Effect", () => {
 				const model = yield* getModel("unknown");
 				expect(model).toBeUndefined();
 			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
-	);
-
-	it.effect("isModelUserSelected returns false for unknown session", () =>
-		Effect.gen(function* () {
-			expect(yield* isModelUserSelected("unknown")).toBe(false);
-		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
 	it.effect("setAgent/getAgent stores and retrieves agent", () =>
@@ -194,19 +149,17 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.effect("setVariant/getVariant with fallback to defaultVariant", () =>
+	it.effect("setVariant/getVariant reads only the session effort", () =>
 		Effect.gen(function* () {
 			yield* setDefaultVariant("low");
 
-			// Falls back to defaultVariant
-			expect(yield* getVariant("sess-1")).toBe("low");
+			expect(yield* getVariant("sess-1")).toBe("");
 
 			// Per-session takes precedence
 			yield* setVariant("sess-1", "max");
 			expect(yield* getVariant("sess-1")).toBe("max");
 
-			// Other sessions still get default
-			expect(yield* getVariant("sess-2")).toBe("low");
+			expect(yield* getVariant("sess-2")).toBe("");
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
@@ -289,20 +242,18 @@ describe("SessionOverrides Effect", () => {
 	);
 
 	it.effect(
-		"setContextWindow/getContextWindow with fallback to defaultContextWindow",
+		"setContextWindow/getContextWindow reads only the session window",
 		() =>
 			Effect.gen(function* () {
 				yield* setDefaultContextWindow("200k");
 
-				// Falls back to defaultContextWindow
-				expect(yield* getContextWindow("sess-1")).toBe("200k");
+				expect(yield* getContextWindow("sess-1")).toBe("");
 
 				// Per-session takes precedence
 				yield* setContextWindow("sess-1", "1m");
 				expect(yield* getContextWindow("sess-1")).toBe("1m");
 
-				// Other sessions still get default
-				expect(yield* getContextWindow("sess-2")).toBe("200k");
+				expect(yield* getContextWindow("sess-2")).toBe("");
 			}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
@@ -362,7 +313,7 @@ describe("SessionOverrides Effect", () => {
 
 			// Agent and model cleared
 			expect(yield* getAgent("sess-1")).toBeUndefined();
-			expect(yield* isModelUserSelected("sess-1")).toBe(false);
+			expect(yield* getModel("sess-1")).toBeUndefined();
 
 			// Timeout fiber was interrupted — callback should not fire
 			yield* TestClock.adjust(Duration.millis(TIMEOUT_MS + 1000));
@@ -370,7 +321,7 @@ describe("SessionOverrides Effect", () => {
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
-	it.effect("clearSession with defaultModel — getModel falls back", () =>
+	it.effect("clearSession does not inherit defaultModel", () =>
 		Effect.gen(function* () {
 			yield* setDefaultModel({
 				providerID: "anthropic",
@@ -381,7 +332,7 @@ describe("SessionOverrides Effect", () => {
 				modelID: "gpt-5",
 			});
 			yield* clearSession("sess-1");
-			expect((yield* getModel("sess-1"))?.modelID).toBe("claude-4");
+			expect(yield* getModel("sess-1")).toBeUndefined();
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 
@@ -526,11 +477,15 @@ describe("SessionOverrides Effect", () => {
 	it.scoped("resetProcessingTimeout restarts with same callback", () =>
 		Effect.gen(function* () {
 			const called = { value: false };
+			yield* setVariant("historical", "high");
+			const ref = yield* OverridesStateTag;
+			const settings = (yield* Ref.get(ref)).sessions;
 			yield* startProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS), () =>
 				Effect.sync(() => {
 					called.value = true;
 				}),
 			);
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
 
 			// Advance 100s
 			yield* TestClock.adjust(Duration.millis(100_000));
@@ -538,6 +493,7 @@ describe("SessionOverrides Effect", () => {
 
 			// Reset — timer restarts from 120s
 			yield* resetProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS));
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
 
 			// Advance another 100s (would have fired without reset)
 			yield* TestClock.adjust(Duration.millis(100_000));
@@ -546,6 +502,16 @@ describe("SessionOverrides Effect", () => {
 			// Advance to the new 120s mark
 			yield* TestClock.adjust(Duration.millis(20_001));
 			expect(called.value).toBe(true);
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
+			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(0);
+			yield* startProcessingTimeout(
+				"sess-1",
+				Duration.millis(TIMEOUT_MS),
+				() => Effect.void,
+			);
+			yield* clearProcessingTimeout("sess-1");
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
+			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 

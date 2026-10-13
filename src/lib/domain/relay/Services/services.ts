@@ -5,7 +5,7 @@
 // For importable classes/interfaces the concrete type is used directly.
 // For inline/structural types a Shape interface is defined here.
 
-import { type Cause, Context, Effect, Layer, Option } from "effect";
+import { Cause, Context, Effect, Layer, Option } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 
 import type {
@@ -193,13 +193,22 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 	}),
 );
 
+/** The canonical id names this relay's configured OpenCode default. */
+export const openCodeInstanceTarget =
+	(defaultInstanceId: string) => (instanceId: string) =>
+		instanceId === MANAGED_OPENCODE_ACCOUNT_ID ? defaultInstanceId : instanceId;
+
 export interface OpenCodeModelService {
 	/** Uses cached/empty data while stopped unless an interactive caller opts in. */
 	listProviders(options?: {
 		readonly startIfStopped?: boolean;
+		readonly instanceId?: string;
+		readonly requireFresh?: boolean;
 	}): Effect.Effect<OpenCodeProviderList, Cause.UnknownException>;
 	/** The last catalog listProviders returned. Never contacts OpenCode. */
-	cachedProviders(): Effect.Effect<Option.Option<OpenCodeProviderList>>;
+	cachedProviders(
+		instanceId?: string,
+	): Effect.Effect<Option.Option<OpenCodeProviderList>>;
 	persistDefaultModel(
 		providerID: string,
 		modelID: string,
@@ -221,10 +230,17 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
-		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
-		let catalog: OpenCodeProviderList | undefined;
-		const refresh = (opencode: OpenCodeAPI) =>
+		const defaultInstanceId =
+			config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+		const target = openCodeInstanceTarget(defaultInstanceId);
+		const catalogs = new Map<string, OpenCodeProviderList>();
+		const refresh = (
+			opencode: OpenCodeAPI,
+			instanceId: string,
+			requireFresh: boolean,
+		) =>
 			Effect.gen(function* () {
+				const cached = catalogs.get(instanceId);
 				const list = yield* Effect.tryPromise(() => opencode.provider.list());
 				const nativeConfig = yield* Effect.either(
 					Effect.tryPromise(() => opencode.config.get()),
@@ -234,29 +250,60 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 						? typeof nativeConfig.right["model"] === "string"
 							? nativeConfig.right["model"]
 							: undefined
-						: catalog?.nativeDefaultModel;
+						: cached?.nativeDefaultModel;
 				if (nativeConfig._tag === "Left")
 					log.warn("Failed to read OpenCode's native default model");
-				catalog = {
+				const catalog = {
 					...list,
 					...(nativeDefaultModel === undefined ? {} : { nativeDefaultModel }),
 				};
+				catalogs.set(instanceId, catalog);
 				return catalog;
 			}).pipe(
-				Effect.catchAll((error) =>
-					catalog ? Effect.succeed(catalog) : Effect.fail(error),
-				),
+				Effect.catchAll((error) => {
+					const cached = catalogs.get(instanceId);
+					return cached && !requireFresh
+						? Effect.succeed(cached)
+						: Effect.fail(error);
+				}),
 			);
 		return {
-			listProviders: ({ startIfStopped = false } = {}) =>
+			listProviders: ({
+				startIfStopped = false,
+				instanceId = defaultInstanceId,
+				requireFresh = false,
+			} = {}) =>
 				Effect.gen(function* () {
+					const targetId = target(instanceId);
 					const running = startIfStopped
-						? Option.some(client)
-						: yield* instances.ifRunning(instanceId);
-					if (Option.isSome(running)) return yield* refresh(running.value);
-					return catalog ?? { providers: [], defaults: {}, connected: [] };
+						? Option.some(
+								yield* instances
+									.use(targetId, config.projectDir)
+									.pipe(
+										Effect.mapError(
+											(error) => new Cause.UnknownException(error),
+										),
+									),
+							)
+						: yield* instances.ifRunning(targetId, config.projectDir);
+					if (Option.isSome(running))
+						return yield* refresh(running.value, targetId, requireFresh);
+					if (requireFresh)
+						return yield* Effect.fail(
+							new Cause.UnknownException("OpenCode is not running"),
+						);
+					return (
+						catalogs.get(targetId) ?? {
+							providers: [],
+							defaults: {},
+							connected: [],
+						}
+					);
 				}).pipe(Effect.scoped),
-			cachedProviders: () => Effect.sync(() => Option.fromNullable(catalog)),
+			cachedProviders: (instanceId = defaultInstanceId) =>
+				Effect.sync(() =>
+					Option.fromNullable(catalogs.get(target(instanceId))),
+				),
 			persistDefaultModel: (providerID: string, modelID: string) =>
 				Effect.tryPromise(async () => {
 					await client.config.update({ model: `${providerID}/${modelID}` });

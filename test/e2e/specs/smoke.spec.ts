@@ -26,16 +26,15 @@ test.describe("E2E Smoke Test", () => {
 		relayUrl,
 		harness,
 	}) => {
-		// Every reply to this page's ResolveSession request. The toast check below
-		// runs once the reply is in, when a failed resolve would already show it.
-		const resolveReplies: unknown[] = [];
+		// Attach already resolves a cold session URL, so wait for that reply.
+		const attachReplies: unknown[] = [];
 		page.on("websocket", (ws) => {
 			let requestId: string | undefined;
 			const parse = (payload: string | Buffer): Record<string, unknown> =>
 				typeof payload === "string" ? JSON.parse(payload) : {};
 			ws.on("framesent", (frame) => {
 				const message = parse(frame.payload);
-				if (message["tag"] === "ResolveSession") {
+				if (message["tag"] === "AttachProject") {
 					requestId = String(message["id"]);
 				}
 			});
@@ -45,7 +44,7 @@ test.describe("E2E Smoke Test", () => {
 					message["_tag"] === "Defect" ||
 					(requestId !== undefined && message["requestId"] === requestId)
 				) {
-					resolveReplies.push(message);
+					attachReplies.push(message);
 				}
 			});
 		});
@@ -59,12 +58,15 @@ test.describe("E2E Smoke Test", () => {
 		).toBeVisible();
 		await expect(app.messages).toBeVisible();
 		await expect
-			.poll(() => resolveReplies)
+			.poll(() => attachReplies)
 			.toEqual([
 				{
 					_tag: "Exit",
 					requestId: expect.any(String),
-					exit: { _tag: "Success", value: { projectSlug: "e2e-replay" } },
+					exit: {
+						_tag: "Success",
+						value: { projectSlug: "e2e-replay", sessionSlug: "e2e-replay" },
+					},
 				},
 			]);
 		await expect(page.getByText("Failed to open session")).toHaveCount(0);

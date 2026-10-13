@@ -669,6 +669,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
+			GetWorktreeCleanupSetting: (request) =>
+				run(wsRpcHandlers.GetWorktreeCleanupSetting(request)),
+			SetWorktreeCleanupSetting: (request) =>
+				run(wsRpcHandlers.SetWorktreeCleanupSetting(request)),
+			CleanUpWorktreesNow: (request) =>
+				run(wsRpcHandlers.CleanUpWorktreesNow(request)),
 			GetDefaultGroupingMode: (_request) =>
 				run(
 					Effect.sync(() => ({
@@ -715,6 +721,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.search !== undefined ? { search: request.search } : {}),
 						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 						...(request.scope !== undefined ? { scope: request.scope } : {}),
+						...(request.exclude !== undefined
+							? { exclude: request.exclude }
+							: {}),
 					}).pipe(
 						Effect.map((result) => ({
 							projectSlug: request.projectSlug,

@@ -1,6 +1,7 @@
 import { confirm, uiState } from "../../stores/ui.svelte.js";
 import {
 	type DeleteSessionRpcInput,
+	getWorktreeCleanupSettingRpc,
 	inspectSessionWorktreesRpc,
 } from "../../transport/ws-rpc-client.js";
 
@@ -15,20 +16,27 @@ export async function confirmSessionDeletion(
 	if (pending) return null;
 	pending = true;
 	try {
-		const inspections = await Promise.all(
-			targets.map((target) => inspectSessionWorktreesRpc(target)),
-		);
+		const [inspections, removeOnDelete] = await Promise.all([
+			Promise.all(targets.map((target) => inspectSessionWorktreesRpc(target))),
+			getWorktreeCleanupSettingRpc().then(
+				(setting) => setting.onDelete,
+				() => false,
+			),
+		]);
 		const worktrees = inspections.flatMap((inspection) => inspection.worktrees);
 		// Another action may have opened a dialog while inspection was in flight.
 		if (uiState.confirmDialog) return null;
-		let removeWorktrees = inspections
-			.filter((inspection) => inspection.worktrees.length > 0)
-			.every((inspection) => inspection.removeWorktrees);
+		// Removal still keeps worktrees in use or with uncommitted changes.
+		let removeWorktrees =
+			!removeOnDelete &&
+			inspections
+				.filter((inspection) => inspection.worktrees.length > 0)
+				.every((inspection) => inspection.removeWorktrees);
 		const confirmed = await confirm(
 			text,
 			"Delete",
 			returnFocus,
-			worktrees.length > 0
+			!removeOnDelete && worktrees.length > 0
 				? {
 						worktrees,
 						removeWorktrees,

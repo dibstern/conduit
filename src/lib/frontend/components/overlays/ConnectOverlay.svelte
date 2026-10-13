@@ -34,6 +34,8 @@
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
 	let cachedDriver = $state<string | null>(null);
+	let cachedSessionId = $state<string | null>(null);
+	const sameSession = $derived(cachedSessionId === sessionState.currentId);
 	const instanceId = $derived(sessionState.currentId
 		? findSession(sessionState.currentId)?.accountId
 		: getEffectiveInstanceId());
@@ -59,6 +61,7 @@
 	// Instance" buttons even after clearInstanceState() empties the store.
 	$effect(() => {
 		if (currentInstance) {
+			cachedSessionId = sessionState.currentId;
 			cachedInstanceId = currentInstance.id;
 			cachedInstanceStatus = currentInstance.status;
 			cachedDriver = currentInstance.driver ?? "opencode";
@@ -72,7 +75,7 @@
 	// Show instance action buttons when overlay is visible, instance was unhealthy/stopped,
 	// and there are multiple instances
 	const showInstanceActions = $derived(
-		instanceId === cachedInstanceId && cachedDriver === "opencode" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
+		sameSession && instanceId === cachedInstanceId && cachedDriver === "opencode" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
 	);
 
@@ -85,7 +88,7 @@
 			connectionState.statusText === "" ||
 			!connectionState.statusText
 		) {
-			return `Connecting to ${instanceName} server...`;
+			return instanceName ? `Connecting to ${instanceName} server...` : "Connecting...";
 		}
 		if (connectionState.statusText === "Disconnected") {
 			return "Reconnecting...";
@@ -114,7 +117,7 @@
 	const isHidden = $derived(connected && displayNone);
 
 	function handleStartInstance() {
-		if (cachedInstanceId) {
+		if (sameSession && instanceId === cachedInstanceId && cachedInstanceId) {
 			void startInstanceRpc({
 				instanceId: cachedInstanceId,
 			})

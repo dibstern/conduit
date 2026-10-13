@@ -12,12 +12,14 @@ import {
 	type Runtime,
 	Schema,
 } from "effect";
-import { accountRefFromSelection } from "../../../account-directory.js";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
-import { MissingWorktreeError } from "../../../contracts/worktree.js";
+import {
+	MissingWorktreeError,
+	WorktreeRecoveryError,
+} from "../../../contracts/worktree.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -32,9 +34,8 @@ import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
 	harnessForModelProvider,
+	ModelNotInCatalog,
 	resolveTurnSettings,
-	type TurnPick,
-	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type {
 	ModelInfo,
@@ -46,6 +47,7 @@ import {
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";
@@ -58,7 +60,6 @@ import {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "./services.js";
-import { inferSessionModel } from "./session-model-settings.js";
 import {
 	clearProcessingTimeout,
 	getPermissionMode,
@@ -69,10 +70,12 @@ import {
 	setPermissionMode,
 	startProcessingTimeout,
 } from "./session-overrides-state.js";
+import { storedSessionPick } from "./session-pick.js";
 import { SessionSetupTag } from "./session-setup.js";
 import { SessionTitleServiceTag } from "./session-title-service.js";
 import {
 	inspectSessionWorktree,
+	recreateSessionWorktrees,
 	SessionWorkspaceTag,
 } from "./session-workspace.js";
 import { SSEStreamTag } from "./sse-stream-service.js";
@@ -86,8 +89,10 @@ export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
 	{
 		fallbackMissingWorktree = false,
+		recreateMissingWorktree = false,
 	}: {
 		readonly fallbackMissingWorktree?: boolean;
+		readonly recreateMissingWorktree?: boolean;
 	} = {},
 ) =>
 	Effect.gen(function* () {
@@ -120,16 +125,48 @@ export const resolveSessionFolders = (
 						savedWorkspace,
 					);
 		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
-		if (
-			yield* inspectSessionWorktree(
-				{ id: session.id, workspace: state },
-				config,
-			)
-		)
-			return yield* new MissingWorktreeError({
+		const missing = yield* inspectSessionWorktree(
+			{ id: session.id, workspace: state },
+			config,
+		);
+		if (missing) {
+			const branch =
+				missing.folders?.find(({ reason }) => reason === "branch-missing")
+					?.branch ?? missing.branch;
+			const error = new MissingWorktreeError({
 				path: workspaceRoot,
-				message: `Worktree missing: ${workspaceRoot}. Recreate worktree or Continue in main folder before sending another message.`,
+				message:
+					missing.reason === "branch-missing"
+						? `Worktree missing: ${workspaceRoot}. Branch${branch ? ` ${branch}` : ""} no longer exists, so it cannot be recreated. Continue in main folder before sending another message.`
+						: `Worktree missing: ${workspaceRoot}. Recreate worktree or Continue in main folder before sending another message.`,
 			});
+			const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
+			if (
+				!recreateMissingWorktree ||
+				!missing.canRecreate ||
+				workspace._tag === "None" ||
+				read._tag === "None" ||
+				worktrees._tag === "None"
+			)
+				return yield* error;
+			// The locked reread above has finished. Recreation owns the same
+			// non-reentrant launch lock, so it must run outside that block.
+			const recreated = yield* recreateSessionWorktrees(session.id).pipe(
+				Effect.provideService(SessionWorkspaceTag, workspace.value),
+				Effect.provideService(ReadQueryEffectTag, read.value),
+				Effect.provideService(WorktreeServiceTag, worktrees.value),
+				Effect.mapError((cause) =>
+					cause instanceof WorktreeRecoveryError &&
+					cause.reason === "branch-missing"
+						? new MissingWorktreeError({
+								path: workspaceRoot,
+								message: `Worktree missing: ${workspaceRoot}. ${cause.message}`,
+							})
+						: error,
+				),
+			);
+			workspaceRoot = recreated.directory;
+		}
 		if (!existsSync(workspaceRoot)) {
 			const fallback =
 				fallbackMissingWorktree &&
@@ -450,189 +487,99 @@ const handleDispatchResult = (
 		}
 	});
 
-const resolveClaudeModel = (
-	input: ProviderTurnServiceSendInput,
-	account: Account,
-) =>
-	Effect.gen(function* () {
-		const driver = account.driver;
-		const orchestrationEngine = yield* OrchestrationEngineTag;
-		const log = yield* LoggerTag;
-		let resolvedInput = input;
-		let catalog: readonly ModelInfo[] | undefined;
-		if (isClaudeDriver(driver) && input.model === undefined) {
-			const discovery = yield* Effect.either(
-				orchestrationEngine.dispatchEffect({
-					type: "discover",
-					providerId: account.id,
-					account,
-				}),
-			);
-			const models =
-				discovery._tag === "Right" ? (discovery.right.models ?? []) : [];
-			catalog = models;
-			const inferred =
-				models.find((model) => model.id === "default") ?? models[0];
-			if (inferred === undefined) {
-				const reason =
-					discovery._tag === "Left"
-						? `discovery failed: ${formatErrorDetail(discovery.left)}`
-						: "discovery returned no usable model catalog";
-				log.error(
-					`client=${input.clientId} session=${input.sessionId} Claude model inference failed: ${reason}`,
-				);
-				yield* clearProcessingTimeout(input.sessionId);
-				const failTurn = yield* makeFailTurn;
-				yield* failTurn(
-					input.sessionId,
-					"A Claude model is required, but none could be selected.",
-					"MODEL_REQUIRED",
-				);
-				return undefined;
-			}
-
-			const inferredModel = {
-				providerID: inferred.providerId,
-				modelID: inferred.id,
-			};
-			// Recording the pick is not what this turn waits on.
-			yield* inferSessionModel(input.sessionId, inferredModel).pipe(
-				Effect.catchAll((error) =>
-					Effect.sync(() =>
-						log.warn(
-							`session=${input.sessionId} Could not record inferred model: ${formatErrorDetail(error)}`,
-						),
-					),
-				),
-			);
-			log.info(
-				`session=${input.sessionId} inferred provider=${inferred.providerId} model=${inferred.id} reason=no server-side session or default model; inferred from Claude catalog`,
-			);
-			resolvedInput = {
-				...input,
-				model: inferredModel,
-				modelUserSelected: false,
-			};
-		}
-
-		return { resolvedInput, catalog };
-	});
-
 const prepareEngineTurnInput = (
 	resolvedInput: ProviderTurnServiceSendInput,
 	account: Account,
-	discoveredCatalog: readonly ModelInfo[] | undefined,
 ) =>
 	Effect.gen(function* () {
 		const driver = account.driver;
-		// OpenCode keeps its own session model, so we only override it on an
-		// explicit pick. The Claude SDK has no such memory: omitting `model`
-		// makes it resolve the config dir's settings.json `model` instead, so a
-		// session inheriting the global default (or one whose per-session pick
-		// was lost to a daemon restart) would silently run a different model
-		// than the one conduit displays. Always send what we display.
-		const sendModel =
-			resolvedInput.model &&
-			(resolvedInput.modelUserSelected ||
-				(isClaudeDriver(driver) &&
-					harnessForModelProvider(resolvedInput.model.providerID) ===
-						"claude"));
-		// An effort belongs to its model. One inherited with the other harness's
-		// default model would run on a model that may not offer it.
-		const sendVariant =
-			resolvedInput.model === undefined ||
-			isClaudeDriver(driver) ===
-				(harnessForModelProvider(resolvedInput.model.providerID) === "claude");
-		let settings: TurnSettings | undefined;
-		// Both gates omit an inherited model from the other harness. In that
-		// case the engine's model is unknown, so there is no model pick to resolve.
-		if (resolvedInput.model && (sendModel || sendVariant)) {
-			let catalog = discoveredCatalog;
-			if (catalog === undefined && isClaudeDriver(driver)) {
-				const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
-				const catalogues =
-					projectSettings._tag === "Some"
-						? yield* Ref.get(projectSettings.value.live)
-						: undefined;
-				const providerModels =
-					catalogues?.[`providerModels:${account.id}`] ??
-					catalogues?.providerModels;
-				if (providerModels !== undefined)
-					catalog = catalogFromProviderList(providerModels.providers);
-			} else if (catalog === undefined) {
-				const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
-				if (models._tag === "Some") {
-					const cached = yield* models.value.cachedProviders();
-					if (cached._tag === "Some")
-						catalog = cached.value.providers.flatMap((provider) =>
-							(provider.models ?? []).map((model) => ({
-								...model,
-								providerId: provider.id || provider.name,
-							})),
-						);
-				}
-			}
-			const pick: TurnPick = {
-				harness: isClaudeDriver(driver) ? "claude" : "opencode",
-				model: {
-					providerId: resolvedInput.model.providerID,
-					modelId: resolvedInput.model.modelID,
-				},
-				effort: resolvedInput.variant ?? "",
-				contextWindow: resolvedInput.contextWindow ?? "",
-			};
-			if (catalog === undefined) {
-				const log = yield* LoggerTag;
-				log.debug(
-					`session=${resolvedInput.sessionId} turn pick sent unvalidated: ${driver} catalog unavailable`,
-				);
-				settings = pick;
-			} else {
-				const resolved = resolveTurnSettings(pick, catalog);
-				if (Either.isLeft(resolved)) {
-					yield* clearProcessingTimeout(resolvedInput.sessionId);
-					const failTurn = yield* makeFailTurn;
-					yield* failTurn(
-						resolvedInput.sessionId,
-						resolved.left.message,
-						"PICK_REJECTED",
-						resolvedInput.continuation ? undefined : resolvedInput.commandId,
+		const providerId = account.id;
+		const readQuery = yield* ReadQueryEffectTag;
+		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
+		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
+			yield* clearProcessingTimeout(resolvedInput.sessionId);
+			return undefined;
+		}
+		const harness = isClaudeDriver(driver) ? "claude" : "opencode";
+		const pick = storedSessionPick(sessionRow, harness);
+		if (!pick) {
+			yield* clearProcessingTimeout(resolvedInput.sessionId);
+			const failTurn = yield* makeFailTurn;
+			yield* failTurn(
+				resolvedInput.sessionId,
+				"A session model pick is required before sending a message.",
+				"PICK_REQUIRED",
+				resolvedInput.continuation ? undefined : resolvedInput.commandId,
+			);
+			return undefined;
+		}
+		let catalog: readonly ModelInfo[] | undefined;
+		if (harness === "claude") {
+			const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
+			const catalogues =
+				projectSettings._tag === "Some"
+					? yield* Ref.get(projectSettings.value.live)
+					: undefined;
+			const providers =
+				catalogues?.[`providerModels:${account.id}`] ??
+				catalogues?.providerModels;
+			if (providers !== undefined)
+				catalog = catalogFromProviderList(providers.providers);
+		} else {
+			// A missing OpenCode catalog must never accept an unchecked pick.
+			catalog = [];
+			const models = yield* Effect.serviceOption(OpenCodeModelServiceTag);
+			if (models._tag === "Some") {
+				const cached = yield* models.value.cachedProviders(providerId);
+				const available =
+					cached._tag === "Some"
+						? Either.right(cached.value)
+						: yield* Effect.either(
+								models.value.listProviders({
+									instanceId: providerId,
+									startIfStopped: true,
+									requireFresh: true,
+								}),
+							);
+				if (Either.isRight(available))
+					catalog = available.right.providers.flatMap((provider) =>
+						(provider.models ?? []).map((model) => ({
+							...model,
+							providerId: provider.id || provider.name,
+						})),
 					);
-					return undefined;
-				}
-				settings = resolved.right;
 			}
 		}
-		const variant = settings?.effort ?? resolvedInput.variant;
-		const contextWindow =
-			settings?.contextWindow ?? resolvedInput.contextWindow;
+		const resolved =
+			harnessForModelProvider(pick.model.providerId) !== harness
+				? Either.left(new ModelNotInCatalog({ harness, ...pick.model }))
+				: catalog === undefined
+					? Either.right(pick)
+					: resolveTurnSettings(pick, catalog);
+		if (Either.isLeft(resolved)) {
+			yield* clearProcessingTimeout(resolvedInput.sessionId);
+			const failTurn = yield* makeFailTurn;
+			yield* failTurn(
+				resolvedInput.sessionId,
+				resolved.left.message,
+				"PICK_REJECTED",
+				resolvedInput.continuation ? undefined : resolvedInput.commandId,
+			);
+			return undefined;
+		}
+		const settings = resolved.right;
 		const priorHistoryMetadata = isClaudeDriver(driver)
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
-		const readQuery = yield* ReadQueryEffectTag;
-		const sessionRow = yield* readQuery
-			.getSession(resolvedInput.sessionId)
-			.pipe(
-				Effect.catchAll((cause) =>
-					Effect.gen(function* () {
-						const log = yield* LoggerTag;
-						log.debug(
-							`Failed to read session ${resolvedInput.sessionId}: ${cause}`,
-						);
-						return undefined;
-					}),
-				),
-			);
-		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
-			yield* clearProcessingTimeout(resolvedInput.sessionId);
-			return;
-		}
 		const folders = yield* resolveSessionFolders(
 			{
 				id: resolvedInput.sessionId,
 				workspace: sessionRow?.workspace ?? null,
 			},
-			{ fallbackMissingWorktree: !resolvedInput.steer },
+			{
+				fallbackMissingWorktree: !resolvedInput.steer,
+				recreateMissingWorktree: true,
+			},
 		);
 		if (driver === "opencode") {
 			const stream = yield* Effect.serviceOption(SSEStreamTag);
@@ -716,7 +663,7 @@ const prepareEngineTurnInput = (
 			providerState,
 			account: turnAccount,
 			instanceId: account.id,
-			...(sendModel && settings ? { model: settings.model } : {}),
+			model: settings.model,
 			...folders,
 			...(turnAccount.driver === "claude"
 				? { configDir: turnAccount.folder, folderSource: "account" as const }
@@ -735,8 +682,8 @@ const prepareEngineTurnInput = (
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
 			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-			...(sendVariant && variant ? { variant } : {}),
-			...(contextWindow ? { contextWindow } : {}),
+			variant: settings.effort,
+			contextWindow: settings.contextWindow,
 		};
 
 		return { sendTurnInput, workspaceMoveSequence };
@@ -877,24 +824,17 @@ const sendViaEngine = (
 	account: Account,
 ) =>
 	Effect.gen(function* () {
-		const resolved = yield* resolveClaudeModel(input, account);
-		if (!resolved) return;
-		const { resolvedInput, catalog } = resolved;
-		const prepared = yield* prepareEngineTurnInput(
-			resolvedInput,
-			account,
-			catalog,
-		).pipe(
+		const prepared = yield* prepareEngineTurnInput(input, account).pipe(
 			Effect.catchIf(
 				(cause) =>
 					cause instanceof MissingWorktreeError ||
 					(cause instanceof RelayError && cause.code === "FILE_NOT_FOUND"),
-				(cause) => handleDispatchFailure(resolvedInput, cause, account.driver),
+				(cause) => handleDispatchFailure(input, cause, account.driver),
 			),
 		);
 		if (!prepared) return;
 		yield* dispatchEngineTurn(
-			resolvedInput,
+			input,
 			providerId,
 			account,
 			prepared.sendTurnInput,
@@ -932,26 +872,35 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 		if (setup._tag === "Some") yield* setup.value.wait(input.sessionId);
 		if (!input.steer) yield* startProcessing(input);
 		const engine = yield* OrchestrationEngineTag;
-		const boundProviderId = yield* engine.getProviderForSessionEffect(
-			input.sessionId,
-		);
+		const boundProviderId =
+			(yield* (yield* ReadQueryEffectTag).getSession(input.sessionId))
+				?.provider ??
+			(yield* engine.getProviderForSessionEffect(input.sessionId));
+		if (!boundProviderId) {
+			yield* clearProcessingTimeout(input.sessionId);
+			const failTurn = yield* makeFailTurn;
+			yield* failTurn(
+				input.sessionId,
+				"A session model pick is required before sending a message.",
+				"PICK_REQUIRED",
+				input.commandId,
+			);
+			return;
+		}
 		const resolved =
 			input.account === undefined
 				? yield* Effect.either(
-						(yield* AccountDirectory).resolve(
-							boundProviderId === undefined
-								? accountRefFromSelection({ model: input.model })
-								: { _tag: "Id", id: boundProviderId },
-						),
+						(yield* AccountDirectory).resolve({
+							_tag: "Id",
+							id: boundProviderId,
+						}),
 					)
 				: Either.right(input.account);
 		if (Either.isLeft(resolved)) {
 			yield* handleDispatchFailure(input, resolved.left, undefined);
 			return;
 		}
-		yield* sendViaEngine(
-			input,
-			boundProviderId ?? resolved.right.id,
-			resolved.right,
-		).pipe(Effect.provideService(OrchestrationEngineTag, engine));
+		yield* sendViaEngine(input, boundProviderId, resolved.right).pipe(
+			Effect.provideService(OrchestrationEngineTag, engine),
+		);
 	});

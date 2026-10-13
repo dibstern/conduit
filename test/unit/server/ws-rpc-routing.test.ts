@@ -256,7 +256,10 @@ describe("routed RPC server", () => {
 					Effect.fail(new WsRpcError({ message: "unexpected relay context" })),
 				);
 				const attachProject = vi.fn(() =>
-					Effect.succeed({ projectSlug: "project-c" }),
+					Effect.succeed({
+						projectSlug: "project-c",
+						sessionSlug: "project-c",
+					}),
 				);
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
@@ -273,7 +276,7 @@ describe("routed RPC server", () => {
 						projectSlug: "project-b",
 						originId: "daemon-client",
 					}),
-				).toEqual({ projectSlug: "project-c" });
+				).toEqual({ projectSlug: "project-c", sessionSlug: "project-c" });
 				expect(attachProject).toHaveBeenCalledWith(
 					expect.objectContaining({
 						projectSlug: "project-b",
@@ -302,7 +305,7 @@ describe("routed RPC server", () => {
 				);
 				expect(
 					yield* client.AttachProject({ originId: "relay-client" }),
-				).toEqual({ projectSlug: "initial" });
+				).toEqual({ projectSlug: "initial", sessionSlug: null });
 				expect(resolve).toHaveBeenCalledWith("initial");
 			}),
 	);

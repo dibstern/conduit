@@ -90,6 +90,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 		const instances: OpenCodeInstances = {
 			events: () => Stream.fromQueue(events),
 			use: () => Effect.succeed(client),
+			borrow: () => Effect.succeed(client),
 			useIfRunning: () => Effect.succeed(Option.none()),
 			ifRunning: () => Effect.succeed(Option.none()),
 			stop: (instanceId) =>
@@ -270,10 +271,20 @@ function makeLogger(): OpenCodeRuntimeIngressLog & {
 function makeProjectionRunner(): ProjectionRunnerEffect {
 	return {
 		projectEvent: vi.fn(() =>
-			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+			Effect.succeed({
+				version: 0,
+				sessionIds: [],
+				removedSessionIds: [],
+				collections: [],
+			}),
 		),
 		projectBatch: vi.fn(() =>
-			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+			Effect.succeed({
+				version: 0,
+				sessionIds: [],
+				removedSessionIds: [],
+				collections: [],
+			}),
 		),
 		recover: vi.fn(() =>
 			Effect.succeed({

@@ -13,7 +13,7 @@ import {
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
-import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
+import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import type { AccountId } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
@@ -35,8 +35,18 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
+import {
+	isPickRejection,
+	ModelNotInCatalog,
+	type PickRejection,
+	PickRequired,
+	type TurnSettings,
+} from "../../../provider/turn-settings.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
-import type { HistoryMessage } from "../../../shared-types.js";
+import type {
+	HistoryMessage,
+	SessionPermissionMode,
+} from "../../../shared-types.js";
 import type { SessionInfo } from "../../../types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
@@ -54,6 +64,7 @@ import {
 	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	StatusPollerTag,
 } from "./services.js";
@@ -98,7 +109,18 @@ import {
 	snoozeSession,
 	unsnoozeSession,
 } from "./session-manager-triage.js";
-import { OverridesStateTag } from "./session-overrides-state.js";
+import {
+	getDefaultPermissionMode,
+	OverridesStateTag,
+	setContextWindow,
+	setModel,
+	setPermissionMode,
+	setVariant,
+} from "./session-overrides-state.js";
+import {
+	loadServerSessionPick,
+	resolveSessionCreationInstance,
+} from "./session-pick.js";
 
 const PROVIDER_CLEANUP_TIMEOUT = "2 seconds";
 // Provider response bodies are untrusted; bound both durable receipts and the
@@ -142,6 +164,9 @@ export type ListSessionsOptions = {
 
 export interface CreateSessionOptions {
 	readonly account?: Account;
+	readonly pick?: TurnSettings;
+	readonly permissionMode?: SessionPermissionMode;
+	readonly sourceSessionId?: string;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
 }
@@ -234,7 +259,9 @@ export const createLocalSessionId = (): string =>
 const createLocalSession = (
 	title: string | undefined,
 	account: Extract<Account, { driver: "claude" }>,
-	reservedSessionId?: string,
+	reservedSessionId: string | undefined,
+	pick: TurnSettings,
+	permissionMode: SessionPermissionMode,
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -250,9 +277,9 @@ const createLocalSession = (
 		yield* applySessionCommand(
 			{
 				type: "session.created",
-				data: { sessionId, title: sessionTitle, provider },
+				data: { sessionId, title: sessionTitle, provider, permissionMode },
 			},
-			{ upstreamAdapter: null },
+			{ pick, upstreamAdapter: null },
 		).pipe(
 			Effect.mapError(
 				(cause) =>
@@ -562,10 +589,16 @@ export const deleteSession = (sessionId: string) =>
 export interface SessionManagerService {
 	initialize(
 		title?: string,
-	): Effect.Effect<string, SessionManagerError | AccountUnroutable>;
+	): Effect.Effect<
+		string,
+		SessionManagerError | PickRejection | AccountUnroutable
+	>;
 	getDefaultSessionId(
 		title?: string,
-	): Effect.Effect<string, SessionManagerError | AccountUnroutable>;
+	): Effect.Effect<
+		string,
+		SessionManagerError | PickRejection | AccountUnroutable
+	>;
 	getLastKnownSessionCount(): Effect.Effect<number>;
 	listSessions(
 		options?: ListSessionsOptions,
@@ -574,7 +607,10 @@ export interface SessionManagerService {
 	createSession(
 		title?: string,
 		options?: CreateSessionOptions,
-	): Effect.Effect<SessionDetail, SessionManagerError | AccountUnroutable>;
+	): Effect.Effect<
+		SessionDetail,
+		SessionManagerError | PickRejection | AccountUnroutable
+	>;
 	establishOpenCodeSession(
 		session: SessionDetail,
 		providerInstanceId: AccountId,
@@ -639,78 +675,93 @@ export class SessionManagerServiceTag extends Context.Tag(
 	"SessionManagerService",
 )<SessionManagerServiceTag, SessionManagerService>() {}
 
-const makeServiceCreateSession =
-	({
-		engine,
-		accounts,
-		instanceClients,
-		readQuery,
-		eventStore,
-		projectionRunner,
-		sql,
-	}: {
-		engine: OrchestrationEngine;
-		accounts: AccountDirectory["Type"];
-		instanceClients: OpenCodeInstances;
-		readQuery: ReadQueryEffect;
-		eventStore: EventStoreEffect;
-		projectionRunner: ProjectionRunnerEffect;
-		sql: SqlClient.SqlClient;
-	}) =>
-	(title?: string, options?: CreateSessionOptions) =>
+const makeServiceCreateSession = ({
+	engine,
+	accounts,
+	instanceClients,
+	readQuery,
+	eventStore,
+	projectionRunner,
+	sql,
+}: {
+	engine: OrchestrationEngine;
+	accounts: AccountDirectory["Type"];
+	instanceClients: OpenCodeInstances;
+	readQuery: ReadQueryEffect;
+	eventStore: EventStoreEffect;
+	projectionRunner: ProjectionRunnerEffect;
+	sql: SqlClient.SqlClient;
+}) => {
+	const serviceCreateSession = (
+		title?: string,
+		options?: CreateSessionOptions,
+	) =>
 		Effect.gen(function* () {
-			const account =
-				options?.account ??
-				(yield* accounts.resolve({ _tag: "DriverDefault", driver: "claude" }));
-			const create: Effect.Effect<
-				SessionDetail,
-				SessionManagerError,
-				| AccountDirectory
-				| ConfigTag
-				| LoggerTag
-				| OpenCodeAPITag
-				| ReadQueryEffectTag
-				| EventStoreEffectTag
-				| ProjectionRunnerEffectTag
-				| SqlClient.SqlClient
-			> =
-				account.driver === "claude"
-					? createLocalSession(title, account, options?.sessionId)
-					: Effect.gen(function* () {
-							const instanceApi = yield* instanceClients.use(account.id).pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "createSession.resolveInstanceClient",
-											cause,
-										}),
-								),
-							);
-							return yield* createOpenCodeSession(
-								title,
-								account.id,
-								options?.sessionId,
-							).pipe(
-								Effect.provideService(OpenCodeAPITag, instanceApi),
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "createSession",
-											cause,
-										}),
-								),
-							);
-						}).pipe(Effect.scoped);
-			const session = yield* create.pipe(
+			const { account, instanceId, harness } =
+				yield* resolveSessionCreationInstance(options).pipe(
+					Effect.provideService(AccountDirectory, accounts),
+				);
+			const source = options?.sourceSessionId
+				? yield* readQuery.getSession(options.sourceSessionId)
+				: undefined;
+			if (options?.sourceSessionId && !source) return yield* new PickRequired();
+			const pick =
+				options?.pick ??
+				(yield* loadServerSessionPick(harness, instanceId, source));
+			if (pick.harness !== harness)
+				return yield* new ModelNotInCatalog({ harness, ...pick.model });
+			const permissionMode =
+				options?.permissionMode ?? (yield* getDefaultPermissionMode());
+			const session = yield* Effect.scoped(
+				Effect.gen(function* () {
+					if (account.driver === "claude")
+						return yield* createLocalSession(
+							title,
+							account,
+							options?.sessionId,
+							pick,
+							permissionMode,
+						);
+					const instanceApi = yield* instanceClients.use(instanceId);
+					return yield* createOpenCodeSession(
+						title,
+						instanceId,
+						pick,
+						options?.sessionId,
+						permissionMode,
+					).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
+				}),
+			).pipe(
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
 				Effect.provideService(EventStoreEffectTag, eventStore),
 				Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({ operation: "createSession", cause }),
+				),
 			);
-			engine.bindSession(session.id, account.id);
+			engine.bindSession(session.id, instanceId);
+			yield* setModel(session.id, {
+				providerID: pick.model.providerId,
+				modelID: pick.model.modelId,
+			});
+			yield* setVariant(session.id, pick.effort);
+			yield* setContextWindow(session.id, pick.contextWindow);
+			yield* setPermissionMode(session.id, permissionMode);
 			return session;
-		});
+		}).pipe(
+			Effect.mapError((cause) =>
+				isPickRejection(cause) ||
+				cause instanceof AccountUnroutable ||
+				cause instanceof SessionManagerError
+					? cause
+					: new SessionManagerError({ operation: "createSession", cause }),
+			),
+		);
+	return serviceCreateSession;
+};
 
 export const SessionManagerServiceLive: Layer.Layer<
 	SessionManagerServiceTag,
@@ -750,6 +801,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const accounts = yield* AccountDirectory;
 		const overrides = yield* OverridesStateTag;
+		const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 		// Captured here, not read at call time: the auto-settle sweep calls in from
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
@@ -899,14 +951,22 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const createSessionWithServices = (
 			title?: string,
 			options?: CreateSessionOptions,
-		) =>
-			serviceCreateSession(title, options).pipe(
+		) => {
+			const create = serviceCreateSession(title, options).pipe(
+				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
 				Effect.provideService(OpenCodeAPITag, api),
+				Effect.provideService(OrchestrationEngineTag, engine),
 				Effect.provideService(OverridesStateTag, overrides),
 				Effect.provideService(RelayStatusSnapshotTag, snapshot),
 			);
+			return modelService._tag === "Some"
+				? create.pipe(
+						Effect.provideService(OpenCodeModelServiceTag, modelService.value),
+					)
+				: create;
+		};
 
 		const withSessionCommandServices = <A, E>(
 			effect: Effect.Effect<
@@ -1040,7 +1100,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 						onFailure: Effect.failCause,
 						onSuccess: () => Effect.succeed(true),
 					});
-				}),
+				}).pipe(
+					Effect.tap((deleted) =>
+						deleted
+							? (config.requestWorktreeCleanup?.() ?? Effect.void)
+							: Effect.void,
+					),
+				),
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),
 			markSessionSeen: (sessionId, upTo) =>
@@ -1050,9 +1116,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 			markSessionUnread: (sessionId) =>
 				withSessionCommandServices(markSessionUnread(sessionId)),
 			setSessionSettled: (sessionId, options) =>
-				triageLock.withPermits(1)(
-					withSessionCommandServices(setSessionSettled(sessionId, options)),
-				),
+				triageLock
+					.withPermits(1)(
+						withSessionCommandServices(setSessionSettled(sessionId, options)),
+					)
+					.pipe(
+						Effect.tap((changed) =>
+							changed && options.settled
+								? (config.requestWorktreeCleanup?.() ?? Effect.void)
+								: Effect.void,
+						),
+					),
 			setSessionAutoSettleDisabled: (sessionId, disabled) =>
 				triageLock.withPermits(1)(
 					withSessionCommandServices(

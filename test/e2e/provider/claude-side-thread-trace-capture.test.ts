@@ -8,6 +8,7 @@
  * answer recalls the parent's word and the SDK reports Ask ("default") mode.
  * Hook output and home paths are redacted; review the trace before committing.
  */
+import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -66,7 +67,9 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					const parentId = await browser.createSession("Side Thread capture");
 					evidence["parentId"] = parentId;
 					evidence["parentText"] = await send(parentId, PARENT_PROMPT);
-					// The SDK resume cursor commits just after the turn ends.
+					// The SDK resume cursor commits just after the turn ends. One input
+					// id across retries, so a retry cannot fork a second Side Thread.
+					const inputId = randomUUID();
 					const { sessionId: sideId } = await vi.waitFor(
 						() =>
 							Effect.runPromise(
@@ -74,13 +77,33 @@ describe.skipIf(!RUN_EXPENSIVE)(
 									projectSlug: "process-test",
 									parentSessionId: parentId,
 									title: QUESTION,
+									inputId,
+									text: QUESTION,
 								}),
 							),
 						{ timeout: 15_000, interval: 250 },
 					);
 					evidence["sideId"] = sideId;
 					await browser.view(sideId);
-					const text = await send(sideId, QUESTION);
+					await browser.waitFor(
+						(message) =>
+							message["type"] === "session_row" &&
+							message["id"] === sideId &&
+							message["status"] === "idle" &&
+							message["lastTurnEndInputId"] === inputId,
+						0,
+						120_000,
+					);
+					const reply = (await browser.history(sideId))
+						.filter((message) => message.role === "assistant")
+						.at(-1);
+					const text = (reply?.parts ?? [])
+						.flatMap((part) =>
+							part.type === "text" && typeof part.text === "string"
+								? [part.text]
+								: [],
+						)
+						.join("");
 					evidence["sideText"] = text;
 					expect(text.toLowerCase()).toContain("alpha");
 

@@ -342,7 +342,10 @@ export const WebSocketRoutingLive: Layer.Layer<
 				Effect.tap(({ slug }) =>
 					slug === null ? Effect.void : resolveRpcRelay(slug),
 				),
-				Effect.map(({ slug }) => ({ projectSlug: slug })),
+				Effect.map(({ slug, sessionSlug }) => ({
+					projectSlug: slug,
+					sessionSlug,
+				})),
 			);
 
 		const rpcHandler = yield* makeRoutedWsRpcWebSocketHandler(

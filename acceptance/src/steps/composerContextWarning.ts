@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
 import {
+	mockInstances,
 	openModelPicker,
 	requireRelayControl,
 	requireRpcControl,
@@ -150,7 +151,11 @@ export const composerContextWarningHandlers: StepHandler[] = [
 				.getAttribute("data-instance-id");
 			requireRelayControl(world.page).sendMessage({
 				type: "compaction",
-				provider: instanceId === "claude" ? "claude" : "opencode",
+				provider:
+					mockInstances
+						.get(world.page)
+						?.find((instance) => instance["id"] === instanceId)?.["driver"] ??
+					"opencode",
 				sessionId,
 				state,
 				detail:

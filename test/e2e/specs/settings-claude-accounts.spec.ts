@@ -9,9 +9,11 @@ import {
 	list,
 	resolve as resolveAccount,
 } from "../../../src/lib/account-directory.js";
-import type { InstanceListResponse } from "../../../src/lib/contracts/ws-rpc.js";
+import type {
+	GetModelsResponse,
+	InstanceListResponse,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { dualDriverProviders } from "../fixtures/mockup-state.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -83,7 +85,7 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	];
 	const rpc = await mockWsRpc(page, {
 		handlers: {
-			AttachProject: () => ({ projectSlug: null }),
+			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects: [] }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
 			UpdateInstance: (payload) => {
@@ -207,6 +209,58 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	relayUrl,
 }, testInfo) => {
 	const usageOrder = ["bravo", "zulu", "alpha", "claude"];
+	// Failure modes: promotion keeps the removed account's model; switching keeps
+	// a neighboring account's effort/window; restoring sends the obsolete pick.
+	const catalogues: Readonly<
+		Record<
+			string,
+			{
+				readonly modelId: string;
+				readonly variant: string;
+				readonly contextWindow: string;
+			}
+		>
+	> = {
+		claude: {
+			modelId: "claude-sonnet-4-5",
+			variant: "high",
+			contextWindow: "1m",
+		},
+		bravo: { modelId: "bravo-model", variant: "low", contextWindow: "200k" },
+		zulu: { modelId: "bravo-model", variant: "high", contextWindow: "512k" },
+		alpha: { modelId: "alpha-model", variant: "", contextWindow: "200k" },
+		"bravo-2": {
+			modelId: "restored-model",
+			variant: "max",
+			contextWindow: "1m",
+		},
+	};
+	const providersForAccount = (id: string): GetModelsResponse["providers"] => {
+		const catalogue = catalogues[id];
+		if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
+		return [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{
+						id: catalogue.modelId,
+						name: catalogue.modelId,
+						provider: "claude",
+						variants: [catalogue.variant],
+						contextWindowOptions: [
+							{
+								value: catalogue.contextWindow,
+								label: catalogue.contextWindow,
+								isDefault: true,
+							},
+						],
+					},
+				],
+			},
+		];
+	};
 	let state = accountsStateFromInstances(
 		[
 			{
@@ -280,21 +334,49 @@ test("deleting Claude defaults follows usage order and adding an account restore
 					stale: false,
 				})),
 		);
+		const defaultAccount = instances.find(
+			(account) => account.driver === "claude" && account.isDefault,
+		);
+		if (defaultAccount) publishCatalogue(defaultAccount.id);
 		return { instances };
 	};
 	const rpc = await mockWsRpc(page, {
 		handlers: {
-			AttachProject: () => ({ projectSlug: "myapp" }),
 			ResolveSession: () => ({ projectSlug: "myapp" }),
 			GetProjects: () => ({ projects: [project], current: "myapp" }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
-			GetModels: () => ({
-				projectSlug: "myapp",
-				providers: dualDriverProviders.filter(
-					(provider) => provider.id !== "claude",
-				),
-				active: { model: "claude-sonnet-4-5", provider: "claude" },
-			}),
+			GetModels: (payload) => {
+				const id =
+					typeof payload["instanceId"] === "string"
+						? payload["instanceId"]
+						: list(state).find(
+								(account) => account.driver === "claude" && account.isDefault,
+							)?.id;
+				if (!id) return { projectSlug: "myapp", providers: [] };
+				const catalogue = catalogues[id];
+				if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
+				publishCatalogue(id);
+				return {
+					projectSlug: "myapp",
+					instanceId: id,
+					providers: providersForAccount(id),
+					active: { model: catalogue.modelId, provider: "claude" },
+					variant: {
+						variant: catalogue.variant,
+						variants: [catalogue.variant],
+					},
+					contextWindow: {
+						contextWindow: catalogue.contextWindow,
+						options: [
+							{
+								value: catalogue.contextWindow,
+								label: catalogue.contextWindow,
+								isDefault: true,
+							},
+						],
+					},
+				};
+			},
 			GetAgents: () => ({ projectSlug: "myapp", agents: [] }),
 			GetUsageLimitsSetting: () => ({
 				usageLimits: {
@@ -337,6 +419,29 @@ test("deleting Claude defaults follows usage order and adding an account restore
 			}),
 		},
 	});
+	const publishCatalogue = (id: string) => {
+		const catalogue = catalogues[id];
+		if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
+		rpc.setProjectSetting({
+			_tag: "providerModels",
+			accountId: id,
+			providers: providersForAccount(id),
+		});
+		if (list(state).some((account) => account.id === id && account.isDefault))
+			rpc.setProjectSetting({
+				_tag: "harnessDefaults",
+				claude: {
+					status: "ok",
+					pick: {
+						providerId: "claude",
+						modelId: catalogue.modelId,
+						effort: catalogue.variant,
+						contextWindow: catalogue.contextWindow,
+					},
+				},
+				opencode: { status: "missing" },
+			});
+	};
 	await mockRelayWebSocket(page, {
 		initMessages: [
 			{ type: "project_list", projects: [project], current: "myapp" },
@@ -346,18 +451,21 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	});
 	refreshAccounts();
 	rpc.setProjectSetting({
-		_tag: "providerModels",
-		providers: dualDriverProviders.filter(
-			(provider) => provider.id === "claude",
-		),
-	});
-	rpc.setProjectSetting({
 		_tag: "defaultModel",
 		model: "claude-sonnet-4-5",
 		provider: "claude",
-		variant: "",
+		variant: "high",
 	});
 	await gotoRelay(page, new URL("/?p=myapp", relayUrl).toString());
+	const composerPick = page
+		.locator(
+			'[data-testid="composer-word-model"]:visible, [data-testid="model-picker-trigger"]:visible',
+		)
+		.first();
+	await expect(composerPick).toHaveAttribute(
+		"data-shown-model",
+		"claude-sonnet-4-5",
+	);
 	await openServerSettings(page);
 	const removeAccount = async (id: string) => {
 		const row = page.getByTestId(`instance-row-${id}`);
@@ -387,6 +495,12 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	await expect(
 		page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
 	).toHaveAttribute("data-account", "bravo");
+	await expect(composerPick).toHaveAttribute("data-shown-model", "bravo-model");
+	await expect(composerPick).toHaveAttribute("data-shown-effort", "low");
+	await expect(composerPick).toHaveAttribute(
+		"data-shown-context-window",
+		"200k",
+	);
 	await expect(page.getByTestId("usage-footer-row-bravo")).toHaveAttribute(
 		"data-default",
 		"true",
@@ -410,6 +524,22 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		"Alpha",
 	]);
 	await capture("usage-order-promotion-composer");
+	await page.getByTestId("picker-account-zulu").click();
+	await expect(composerPick).toHaveAttribute("data-instance-id", "zulu");
+	await expect(composerPick).toHaveAttribute("data-shown-model", "bravo-model");
+	await expect(composerPick).toHaveAttribute("data-shown-effort", "high");
+	await expect(composerPick).toHaveAttribute(
+		"data-shown-context-window",
+		"512k",
+	);
+	await capture("switched-account-catalogue-options");
+	await page.getByTestId("picker-account-bravo").click();
+	await expect(composerPick).toHaveAttribute("data-instance-id", "bravo");
+	await expect(composerPick).toHaveAttribute("data-shown-effort", "low");
+	await expect(composerPick).toHaveAttribute(
+		"data-shown-context-window",
+		"200k",
+	);
 	await page.keyboard.press("Escape");
 	await openServerSettings(page);
 	for (const id of ["zulu", "alpha", "bravo"]) await removeAccount(id);
@@ -472,6 +602,12 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	await expect(
 		page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
 	).toHaveAttribute("data-account", "bravo-2");
+	await expect(composerPick).toHaveAttribute(
+		"data-shown-model",
+		"restored-model",
+	);
+	await expect(composerPick).toHaveAttribute("data-shown-effort", "max");
+	await expect(composerPick).toHaveAttribute("data-shown-context-window", "1m");
 	await expect(
 		page.getByText("Add a Claude account in Settings before sending", {
 			exact: false,
@@ -483,6 +619,16 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		(request) => request.tag === "CreateSession",
 	);
 	expect(created.payload["instanceId"]).toBe("bravo-2");
+	expect(created.payload["model"]).toEqual({
+		providerId: "claude",
+		modelId: "restored-model",
+		variant: "max",
+		contextWindow: "1m",
+	});
+	await testInfo.attach("account-catalogue-picks", {
+		body: JSON.stringify({ catalogues, created: created.payload }, null, 2),
+		contentType: "application/json",
+	});
 	const sent = await rpc.waitForRequest(
 		(request) => request.tag === "input.submit",
 	);

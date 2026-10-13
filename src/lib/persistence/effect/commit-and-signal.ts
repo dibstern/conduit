@@ -2,6 +2,7 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect, Option } from "effect";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
+import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import type { EventStoreError } from "./event-store-effect.js";
@@ -227,6 +228,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 												version,
 												sessionIds: [...sessionIds],
 												removedSessionIds: [],
+												collections: ["sessions", "sidebar"],
 											});
 										return sessionIds;
 									});
@@ -243,6 +245,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 								return result;
 							}),
 						);
+						observeTurnTimelineCommit(stored);
 						if (Option.isSome(sessionEventBus) && options.publish !== false) {
 							// Post-commit, so a subscriber that re-queries on the advance
 							// cannot read behind the rows it was told about. Keep the permit
@@ -252,19 +255,25 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 							// is decided by the last projection that touched it, so a body that
 							// deletes and re-creates inside one commit announces the row it
 							// left behind, not the one it destroyed on the way.
-							const { stamped, removed } = mergeTouches(
+							const { stamped, removed, collections } = mergeTouches(
 								advances.map((advance) => ({
 									stamped: advance.sessionIds,
 									removed: advance.removedSessionIds,
+									collections: advance.collections,
 								})),
 							);
-							if (stamped.length > 0 || removed.length > 0)
+							if (
+								stamped.length > 0 ||
+								removed.length > 0 ||
+								collections.length > 0
+							)
 								yield* sessionEventBus.value.publishAdvance({
 									version: Math.max(
 										...advances.map((advance) => advance.version),
 									),
 									sessionIds: stamped,
 									removedSessionIds: removed,
+									collections,
 								});
 						}
 						return result;

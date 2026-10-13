@@ -25,7 +25,6 @@ import { subscribeProjectSettings } from "../domain/relay/Services/project-setti
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
-import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
@@ -33,7 +32,7 @@ import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
-import { modelsHandlers } from "./ws-rpc/models.js";
+import { modelsHandlers, subscribeDraftModels } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
 import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
@@ -258,8 +257,6 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					? {}
 					: { resumePoint: request.resumePoint }),
 			}).pipe(
-				(stream) =>
-					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
@@ -312,6 +309,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 			),
 		),
 	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
+	SubscribeDraftModels: (request) => Rpc.fork(subscribeDraftModels(request)),
 	SubscribeAlerts: () => Rpc.fork(subscribeAlerts()),
 	SubscribeInputDraft: (request) =>
 		Rpc.fork(subscribeInputDraft(request.sessionId)),
@@ -358,7 +356,13 @@ export type AttachDaemonProject = (payload: {
 	readonly originId: string;
 	readonly projectSlug?: string | undefined;
 	readonly sessionId?: string | undefined;
-}) => Effect.Effect<{ readonly projectSlug: string | null }, WsRpcError>;
+}) => Effect.Effect<
+	{
+		readonly projectSlug: string | null;
+		readonly sessionSlug: string | null;
+	},
+	WsRpcError
+>;
 
 export type DaemonRpcName =
 	| keyof typeof daemonOnlyHandlers
@@ -374,6 +378,9 @@ export type DaemonRpcName =
 	| "SetDefault"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
+	| "GetWorktreeCleanupSetting"
+	| "SetWorktreeCleanupSetting"
+	| "CleanUpWorktreesNow"
 	| "SetDefaultGroupingMode"
 	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
@@ -573,8 +580,8 @@ export const makeRoutedWsRpcServerLayer = <
 				),
 			),
 		SubscribeSessionDetail: (request) =>
-			routeStream(request.projectSlug, () => {
-				const source = subscribeSessionDetailWithPresence({
+			routeStream(request.projectSlug, () =>
+				subscribeSessionDetailWithPresence({
 					sessionId: request.sessionId,
 					...(request.resumeFromSequence === undefined
 						? {}
@@ -585,11 +592,8 @@ export const makeRoutedWsRpcServerLayer = <
 					...(request.resumePoint === undefined
 						? {}
 						: { resumePoint: request.resumePoint }),
-				});
-				return request.textSuffixes === true
-					? encodeSessionDetail(source)
-					: source;
-			}),
+				}),
+			),
 		SubscribeSessionTodos: (request) =>
 			routeStream(request.projectSlug, () =>
 				subscribeSessionTodos({
@@ -611,6 +615,8 @@ export const makeRoutedWsRpcServerLayer = <
 		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
 		SubscribeProjectSettings: (request) =>
 			routeStream(request.projectSlug, () => subscribeProjectSettings()),
+		SubscribeDraftModels: (request) =>
+			routeStream(request.projectSlug, () => subscribeDraftModels(request)),
 		SubscribeAlerts: (request) =>
 			routeStream(request.projectSlug, subscribeAlerts),
 		SubscribeInputDraft: (request) =>

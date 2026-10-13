@@ -5,6 +5,7 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
+import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import {
@@ -258,6 +259,7 @@ export const connectClaudeRunner = (options: {
 								),
 							);
 						} else if (message.type === "output") {
+							observeTurnTimelineFrame(message.output);
 							if (
 								message.sequence !== undefined &&
 								Number.isSafeInteger(message.sequence) &&

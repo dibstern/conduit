@@ -106,15 +106,17 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 					throw new Error("Incomplete reset queue submission");
 				const row = rpc.shellRows?.find(
 					(candidate) => (candidate as { id?: string }).id === sessionId,
-				) as { limitRecovery?: LimitRecovery } | undefined;
+				) as
+					| { accountId?: string | null; limitRecovery?: LimitRecovery }
+					| undefined;
 				const resetsAt = snapshot(world.page)
-					.find((reading) => reading.accountId === "claude")
+					.find((reading) => reading.accountId === row?.accountId)
 					?.windows.find(
 						(window) => window.utilization >= 100 && window.resetsAt,
 					)?.resetsAt;
 				if (row?.limitRecovery?.scheduledAt === undefined && resetsAt)
 					projectLimit(world.page, {
-						instanceId: "claude",
+						instanceId: row?.accountId ?? "",
 						rateLimitType: "five_hour",
 						rearms: 0,
 						continued: false,

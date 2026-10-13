@@ -34,7 +34,7 @@ describe("Button", () => {
 		const button = getByRole("button");
 
 		expect(button.className).toContain("bg-accent");
-		expect(button.className).toContain("h-8");
+		expect(button.className).toContain("min-h-[25px]");
 	});
 
 	it("renders the recipe classes for a disabled customized button", () => {
@@ -203,8 +203,8 @@ describe("Button colour axes", () => {
 
 		expect(restingText(classes)).toEqual(["text-text-muted"]);
 		expect(classes).toContain("hover:text-text");
-		// `secondary`'s own `text-text` is gone, not merely outranked.
-		expect(classes).not.toContain("text-text");
+		// `secondary`'s own `text-text-secondary` is gone, not merely outranked.
+		expect(classes).not.toContain("text-text-secondary");
 		// Non-colour parts of the variant survive.
 		expect(classes).toContain("border-border");
 	});

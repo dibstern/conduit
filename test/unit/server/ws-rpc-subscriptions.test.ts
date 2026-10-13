@@ -93,8 +93,9 @@ const commit = (event: CanonicalEvent) =>
 	});
 
 describe("subscription RPC handlers", () => {
-	for (const textSuffixes of [undefined, false, true]) {
-		it.scoped(`negotiates suffixes only for capability ${textSuffixes}`, () =>
+	it.scoped(
+		"sends suffixes by default and keeps snapshots and headers whole",
+		() =>
 			Effect.gen(function* () {
 				yield* (yield* ProjectionRunnerEffectTag).recover();
 				yield* commit(
@@ -129,7 +130,6 @@ describe("subscription RPC handlers", () => {
 				)({
 					projectSlug: "project-a",
 					sessionId: "s",
-					...(textSuffixes === undefined ? {} : { textSuffixes }),
 				});
 				yield* client.SubscribeSessionDetail(request).pipe(
 					Stream.tap((envelope) => Queue.offer(wire, envelope)),
@@ -155,23 +155,15 @@ describe("subscription RPC handlers", () => {
 						item: { _tag: "part", part: { text: "Hello world" } },
 					});
 					const envelope = yield* Queue.take(wire);
-					if (textSuffixes === true) {
-						expect(envelope).toHaveProperty("textSuffix");
-						expect(envelope).toMatchObject({ item: { part: { text } } });
-					} else {
-						expect(envelope).not.toHaveProperty("textSuffix");
-						expect(envelope).toMatchObject({
-							item: { part: { text: "Hello world" } },
-						});
-					}
+					expect(envelope).toHaveProperty("textSuffix");
+					expect(envelope).toMatchObject({ item: { part: { text } } });
 					// The message's header follows its part and carries no text, so never a suffix.
 					const header = { item: { _tag: "message", message: { id: "m" } } };
 					expect(yield* Queue.take(decoded)).toMatchObject(header);
 					expect(yield* Queue.take(wire)).toMatchObject(header);
 				}
 			}).pipe(Effect.provide(makeLayer())),
-		);
-	}
+	);
 	it("do not require a caller-owned Scope", () => {
 		expectTypeOf<
 			Extract<Layer.Layer.Context<typeof WsRpcServerLayer>, Scope.Scope>
@@ -335,14 +327,12 @@ describe("subscription RPC handlers", () => {
 						};
 						return member === "SubscribeShell"
 							? client.SubscribeShell(request)
-							: client
-									.SubscribeSessionDetail({ ...request, textSuffixes: true })
-									.pipe(
-										Stream.tap((envelope) =>
-											wire ? Queue.offer(wire, envelope) : Effect.void,
-										),
-										decodeSessionDetail,
-									);
+							: client.SubscribeSessionDetail(request).pipe(
+									Stream.tap((envelope) =>
+										wire ? Queue.offer(wire, envelope) : Effect.void,
+									),
+									decodeSessionDetail,
+								);
 					};
 					// Each consumer stays live after its boundary; the 33rd must not wait for a permit.
 					for (let i = 0; i < 33; i++) {

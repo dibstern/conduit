@@ -124,6 +124,7 @@ export const subscribeApprovals = (
 				bus,
 				source: {
 					name: "approvals",
+					collections: ["approvals"],
 					shareReads: true,
 					read: (range) =>
 						Effect.map(readQuery.readPendingApprovals(range), (answer) => {
@@ -139,15 +140,13 @@ export const subscribeApprovals = (
 							}
 							return { rows, removed, version: answer.version };
 						}),
-					// The projector moves an approval's session with it, so an advance
-					// naming no session cannot have moved one.
 					route: (advance) => {
 						const gone = new Set(advance.removedSessionIds);
 						const removed = [...announced]
 							.filter(([, sessionId]) => gone.has(sessionId))
 							.map(([id]) => id);
 						for (const id of removed) announced.delete(id);
-						return { moved: advance.sessionIds.length > 0, removed };
+						return { moved: true, removed };
 					},
 					resume: "rebase",
 				},

@@ -2,10 +2,11 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
 import {
 	clearDiscoveryState,
-	handleModelInfo,
+	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
+import { sessionState } from "../../stores/session.svelte.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
 import ConnectOverlay from "./ConnectOverlay.svelte";
 
@@ -71,7 +72,10 @@ export const RelayRegistering: Story = {
  */
 export const InstanceActions: Story = {
 	beforeEach: () => {
-		handleModelInfo({ provider: "opencode", model: "" });
+		const previousSession = sessionState.currentId;
+		clearDiscoveryState();
+		sessionState.currentId = null;
+		selectInstance("instance-stopped");
 		projectState.currentSlug = "demo";
 		projectState.projects = [
 			{
@@ -107,6 +111,7 @@ export const InstanceActions: Story = {
 		];
 		return () => {
 			clearDiscoveryState();
+			sessionState.currentId = previousSession;
 			projectState.currentSlug = null;
 			projectState.projects = [];
 			instanceState.instances = [];

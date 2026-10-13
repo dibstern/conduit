@@ -201,6 +201,8 @@ process.exit(result.status ?? 1);
 			const { sessionId } = await sendRpcRequest(
 				socket,
 				new CreateSession({
+					permissionMode: "ask",
+					model: { providerId: "claude", modelId: "sonnet" },
 					projectSlug,
 					originId: "delete-worktree-test",
 					providerId: "claude",
@@ -386,10 +388,10 @@ process.exit(result.status ?? 1);
 		else {
 			commit(session.path);
 			const branch = git(session.path, "branch", "--show-current");
-			if (reason === "unpushed") {
-				git(fixture.projectDir, "merge", "--ff-only", branch);
-				git(fixture.projectDir, "push", "origin", "main");
-			} else git(session.path, "push", "-u", "origin", branch);
+			// Work merged into a default branch is safe to remove, so "unpushed"
+			// means commits that exist only on the session branch.
+			if (reason === "unmerged")
+				git(session.path, "push", "-u", "origin", branch);
 		}
 		const result = await inspect(session.id);
 		expect(result.removeWorktrees).toBe(false);
@@ -397,13 +399,15 @@ process.exit(result.status ?? 1);
 			{
 				folder: fixture.projectDir,
 				path: session.path,
-				reasons: [
+				reasons:
 					reason === "uncommitted"
-						? "Uncommitted changes"
+						? ["Uncommitted changes"]
 						: reason === "unpushed"
-							? "Unpushed commits"
-							: "Commits not merged into the default branch",
-				],
+							? [
+									"Unpushed commits",
+									"Commits not merged into the default branch",
+								]
+							: ["Commits not merged into the default branch"],
 				inUse: false,
 			},
 		]);

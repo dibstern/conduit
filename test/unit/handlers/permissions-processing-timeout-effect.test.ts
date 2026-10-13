@@ -26,11 +26,11 @@ import {
 } from "../../../src/lib/handlers/permissions.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAccountDirectory,
 	makeMockAgentService,
+	makeMockConfig,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	NoopProviderRuntimeIngestionLive,
@@ -70,7 +70,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 					Layer.succeed(OpenCodeAPITag, client),
 					Layer.succeed(WebSocketHandlerTag, makeWsHandler()),
 					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-					Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+					Layer.succeed(ConfigTag, makeMockConfig()),
 					PendingInteractionServiceLive,
 					Layer.succeed(LoggerTag, createSilentLogger()),
 					Layer.succeed(

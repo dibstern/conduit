@@ -507,10 +507,21 @@ export class PtyHostClient {
 
 	async list(
 		cwd: string,
+		allProjects = false,
 	): Promise<Array<{ pty: PtyInfo; exitCode: number | null }>> {
-		const reply = await this.request({ type: "list", cwd: resolve(cwd) });
+		const reply = await this.request({
+			type: "list",
+			cwd: resolve(cwd),
+			...(allProjects ? { allProjects: true } : {}),
+		});
 		if (reply.type !== "list")
 			throw new PtyHostError({ message: "Unexpected PTY host list response" });
+		// A retained older host ignores unknown fields. Never mistake its
+		// project-only response for a complete list used to authorize removal.
+		if (allProjects && !reply.allProjects)
+			throw new PtyHostError({
+				message: "PTY host cannot inspect terminals across projects",
+			});
 		return [...reply.terminals];
 	}
 

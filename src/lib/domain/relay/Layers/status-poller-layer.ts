@@ -71,6 +71,7 @@ export const StatusPollerLive: Layer.Layer<
 > = Layer.scoped(
 	StatusPollerTag,
 	Effect.gen(function* () {
+		const scope = yield* Effect.scope;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 		const stateRef = yield* PollerStateTag;
@@ -258,7 +259,13 @@ export const StatusPollerLive: Layer.Layer<
 					yield* Ref.set(started, true);
 					if (!wasStarted) {
 						yield* runPoll;
-						yield* refreshGit;
+						// Persisted git can serve browsers while the relay scope refreshes it.
+						yield* Effect.forkIn(
+							Effect.interruptible(refreshGit).pipe(
+								Effect.withSpan("statusPoller.initialGitRefresh"),
+							),
+							scope,
+						);
 					}
 				}),
 			stop: () => Ref.set(started, false),

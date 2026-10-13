@@ -191,6 +191,8 @@ describe("session handler metadata", () => {
 			getStrandedChildren: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
+			listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+			getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 			getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 			countPendingApprovalsBySession: vi.fn(() => Effect.succeed([])),
 			readPendingApprovals: vi.fn(() =>
@@ -198,6 +200,8 @@ describe("session handler metadata", () => {
 			),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// A complete OpenCode projection carries message text and backfill origin.
+			readSessionTranscriptCatchUp: () =>
+				Effect.succeed({ messages: [], version: 0 }),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),

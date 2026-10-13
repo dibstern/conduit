@@ -37,6 +37,7 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -136,6 +137,8 @@ for (const scenario of [
 ] as const) {
 	it.scoped(scenario.name, () => {
 		const targetAccount = "at" in scenario ? "personal" : "work";
+		const admittedSessions: string[] = [];
+		const admission = Effect.unsafeMakeSemaphore(1);
 		const sends: Array<{
 			accountId: string;
 			folder: string;
@@ -236,6 +239,7 @@ for (const scenario of [
 			});
 			expect(outcome).toBe(scenario.outcome);
 			if ("at" in scenario) {
+				expect(admittedSessions).toEqual([]);
 				expect(binding).toBe("deleted-claude");
 				expect(sends).toEqual([]);
 				expect(
@@ -250,6 +254,7 @@ for (const scenario of [
 					),
 				).toHaveLength(1);
 			} else if (Either.isRight(result)) {
+				expect(admittedSessions).toEqual(["s1"]);
 				expect(binding).toBe("work");
 				expect(yield* engine.getProviderForSessionEffect("s1")).toBe("work");
 				expect(sends).toEqual([
@@ -261,6 +266,7 @@ for (const scenario of [
 					),
 				).toHaveLength(1);
 			} else {
+				expect(admittedSessions).toEqual([]);
 				expect(binding).toBe("deleted-claude");
 				expect(sends).toEqual([]);
 				expect(yield* store.readAllBySession("s1")).toEqual(before);
@@ -298,6 +304,18 @@ for (const scenario of [
 								sessionId: input.sessionId,
 							});
 					}),
+			}),
+			Effect.provideService(SessionInboxTag, {
+				withSession: (sessionId, effect) =>
+					admission.withPermits(1)(
+						Effect.sync(() => admittedSessions.push(sessionId)).pipe(
+							Effect.zipRight(effect),
+						),
+					),
+				start: Effect.void,
+				submit: () => Effect.die("This fixture only admits continuations"),
+				cancel: () => Effect.die("This fixture only admits continuations"),
+				sendNow: () => Effect.die("This fixture only admits continuations"),
 			}),
 			Effect.provide(AccountDirectoryStateLive(accounts)),
 			Effect.provide(makeOverridesStateLive()),

@@ -120,6 +120,8 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 
 			// Check request identity in the first write statement so independent
 			// SQLite connections cannot race a read snapshot into a write upgrade.
+			// MAX stays in its own subquery: as an aggregate under HAVING it loses
+			// SQLite's index lookup and scans the whole session on every append.
 			const rows = yield* sql<StoredEventRow>`
 				${sql.literal(isOpenCodeSessionSeed ? "INSERT OR IGNORE" : "INSERT")} INTO events (
 					project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
@@ -128,15 +130,13 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 					${projectId},
 					${event.eventId},
 					${event.sessionId},
-					COALESCE(MAX(stream_version) + 1, 0),
+					(SELECT COALESCE(MAX(stream_version) + 1, 0) FROM events WHERE session_id = ${event.sessionId}),
 					${event.type},
 					${dataJson},
 					${metadataJson},
 					${event.provider},
 					${event.createdAt}
-				FROM events
-				WHERE session_id = ${event.sessionId}
-				HAVING ${requestId ?? null} IS NULL OR NOT EXISTS (
+				WHERE ${requestId ?? null} IS NULL OR NOT EXISTS (
 					SELECT 1 FROM events
 					WHERE session_id = ${event.sessionId}
 						AND provider = ${event.provider} AND type = ${event.type}

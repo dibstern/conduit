@@ -75,11 +75,18 @@ async function setupWithProjectManagement(
 			AttachProject: async (params) => {
 				// A cold load without ?p attaches the daemon's default project.
 				if (typeof params["projectSlug"] !== "string")
-					return { projectSlug: "myapp" };
+					return {
+						projectSlug: "myapp",
+						sessionSlug:
+							typeof params["sessionId"] === "string" ? "myapp" : null,
+					};
 				// A real attach takes a round trip or two; an instant answer would
 				// hide anything that races it.
 				await new Promise((resolve) => setTimeout(resolve, 300));
-				return { projectSlug: String(params["projectSlug"]) };
+				return {
+					projectSlug: String(params["projectSlug"]),
+					sessionSlug: null,
+				};
 			},
 			ListSessions: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),

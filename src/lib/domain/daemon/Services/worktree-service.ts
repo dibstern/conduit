@@ -3,6 +3,7 @@ import type { SessionWorktreeOwnership } from "../../../contracts/session-worksp
 import type {
 	WorkspaceMissing,
 	WorktreeBranchRenameError,
+	WorktreeCleanup,
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
@@ -32,6 +33,10 @@ export type WorktreeSetupUpdate =
 	| WorktreeSetupResult;
 
 export interface WorktreeService {
+	/** Serialize cleanup with terminal creation, including from other project relays. */
+	readonly withCheckoutUse: <A, E, R>(
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E, R>;
 	/** Validate all owned checkouts before renaming; restore refs on a Git failure. */
 	readonly renameBranch: (
 		ownership: readonly SessionWorktreeOwnership[],
@@ -62,24 +67,44 @@ export interface WorktreeService {
 		owned: SessionWorktreeOwnership,
 		inUse?: Effect.Effect<boolean, WorktreeRecoveryError, R>,
 	) => Effect.Effect<void, WorktreeRecoveryError, R>;
-	/** Read Git's registration, including prunable entries, without changing any refs. */
+	/** Inspect checkout ownership and local files without changing its refs. */
+	readonly inspectCheckoutCleanup: (
+		folder: WorktreeFolder,
+		owned: SessionWorktreeOwnership,
+		keepWhen: WorktreeCleanup["keepWhen"],
+	) => Effect.Effect<
+		{ readonly head?: string; readonly keepReason?: string },
+		WorktreeRecoveryError
+	>;
+	/** Remove only the checkout. A returned reason means it was kept. Never delete its branch. */
+	readonly removeCheckout: <E, R>(
+		folder: WorktreeFolder,
+		owned: SessionWorktreeOwnership,
+		keepWhen: WorktreeCleanup["keepWhen"],
+		head: string,
+		changed: Effect.Effect<boolean, E, R>,
+	) => Effect.Effect<string | undefined, WorktreeRecoveryError | E, R>;
+	/** Read Git's registration, including prunable entries, without changing refs; fall back to the recorded branch only when Git has none. */
 	readonly inspectMissing: (
 		folder: WorktreeFolder,
 		directory?: string,
 		/** Recorded Project Folders can share a checkout created for any one of them. */
 		workspaceFolders?: readonly string[],
+		recordedBranch?: string,
 	) => Effect.Effect<WorkspaceMissing | undefined, WorktreeRecoveryError>;
-	/** Re-add an owned checkout from its existing branch; never create a new branch. */
+	/** Re-add an owned checkout from its existing branch; Git's registration takes precedence over recordedBranch. Never create a branch. */
 	readonly recreate: (
 		folder: WorktreeFolder,
 		directory?: string,
 		workspaceFolders?: readonly string[],
+		recordedBranch?: string,
 	) => Effect.Effect<string, WorktreeRecoveryError>;
-	/** Restore missing checkouts together, keeping present checkouts and all branch refs. */
+	/** Restore missing checkouts together, using recorded branches only when registrations lack them; keep present checkouts and all refs. */
 	readonly recreateAll: (
 		folders: readonly {
 			readonly folder: WorktreeFolder;
 			readonly directory: string;
+			readonly recordedBranch?: string;
 		}[],
 	) => Effect.Effect<void, WorktreeRecoveryError>;
 	/** One branch in every git folder; optional bases name local branches. Non-git folders stay in place. Failure rolls back all ownership. */

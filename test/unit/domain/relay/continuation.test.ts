@@ -33,6 +33,7 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
+import { SessionInboxTag } from "../../../../src/lib/domain/relay/Services/session-inbox.js";
 import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { preWarmSession } from "../../../../src/lib/handlers/session-prewarm.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -264,6 +265,8 @@ for (const scenario of [
 		let probes = 0;
 		let dispatches = 0;
 		const dispatchedAccounts: Account[] = [];
+		const admittedSessions: string[] = [];
+		const admission = Effect.unsafeMakeSemaphore(1);
 		const launchLogin = configuredClaudeConfigDir(
 			join(isolatedRoot, "launch-login"),
 		);
@@ -355,12 +358,16 @@ for (const scenario of [
 				expect(probes).toBe(scenario.probes);
 				expect(dispatches).toBe(scenario.result === "Right" ? 1 : 0);
 				if (scenario.result === "Right") {
+					expect(admittedSessions).toEqual(["s1"]);
 					expect(dispatchedAccounts).toHaveLength(1);
 					expect(dispatchedAccounts[0]).toMatchObject({
 						id: "claude",
 						folder: launchLogin,
 					});
-				} else expect(yield* store.readAllBySession("s1")).toEqual(before);
+				} else {
+					expect(admittedSessions).toEqual([]);
+					expect(yield* store.readAllBySession("s1")).toEqual(before);
+				}
 			}).pipe(
 				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 				Effect.provideService(LoggerTag, makeMockLogger()),
@@ -396,6 +403,18 @@ for (const scenario of [
 							if (input.account) dispatchedAccounts.push(input.account);
 						}),
 					interruptTurn: () => Effect.void,
+				}),
+				Effect.provideService(SessionInboxTag, {
+					withSession: (sessionId, effect) =>
+						admission.withPermits(1)(
+							Effect.sync(() => admittedSessions.push(sessionId)).pipe(
+								Effect.zipRight(effect),
+							),
+						),
+					start: Effect.void,
+					submit: () => Effect.die("This fixture only admits continuations"),
+					cancel: () => Effect.die("This fixture only admits continuations"),
+					sendNow: () => Effect.die("This fixture only admits continuations"),
 				}),
 				Effect.provide(makeOverridesStateLive()),
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
