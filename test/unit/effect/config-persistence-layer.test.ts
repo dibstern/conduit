@@ -49,7 +49,6 @@ describe("ConfigPersistenceLive", () => {
 		keepAwake: false,
 		keepAwakeCommand: undefined,
 		keepAwakeArgs: undefined,
-		claudeConfigDir: undefined,
 		shuttingDown: false,
 		startTime: Date.now(),
 		hostExplicit: false,
@@ -109,36 +108,44 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.scoped("persists claudeConfigDir when set, omits it when unset", () =>
-		Effect.gen(function* () {
-			const { layer, writes } = makeTestLayer([
-				{
+	it.scoped(
+		"persists the account folder and omits the retired server-wide field",
+		() =>
+			Effect.gen(function* () {
+				const { layer, writes } = makeTestLayer([
+					{
+						id: "claude",
+						name: "Claude",
+						driver: "claude",
+						port: 0,
+						managed: false,
+					},
+				]);
+				const scope = yield* Scope.make();
+				const ctx = yield* Layer.buildWithScope(Layer.fresh(layer), scope);
+				const persistence = Context.get(ctx, ConfigPersistenceTag);
+				const directory = Context.get(ctx, AccountDirectory);
+
+				yield* persistence.requestSave;
+				yield* persistence.flush;
+				yield* directory.apply({
+					_tag: "Update",
 					id: "claude",
-					name: "Claude",
-					driver: "claude",
-					port: 0,
-					managed: false,
-				},
-			]);
-			const scope = yield* Scope.make();
-			const ctx = yield* Layer.buildWithScope(Layer.fresh(layer), scope);
-			const persistence = Context.get(ctx, ConfigPersistenceTag);
-			const directory = Context.get(ctx, AccountDirectory);
+					updates: { configDir: "/isolated/claude-personal" },
+				});
+				yield* persistence.requestSave;
+				yield* Scope.close(scope, Exit.void);
 
-			yield* persistence.requestSave;
-			yield* persistence.flush;
-			yield* directory.apply({
-				_tag: "Update",
-				id: "claude",
-				updates: { configDir: "/isolated/claude-personal" },
-			});
-			yield* persistence.requestSave;
-			yield* Scope.close(scope, Exit.void);
-
-			expect(writes.length).toBe(2);
-			expect("claudeConfigDir" in (writes[0] ?? {})).toBe(false);
-			expect(writes[1]?.claudeConfigDir).toBe("/isolated/claude-personal");
-		}),
+				expect(writes.length).toBe(2);
+				expect("claudeConfigDir" in (writes[0] ?? {})).toBe(false);
+				expect(writes[1]).not.toHaveProperty("claudeConfigDir");
+				expect(
+					writes[0]?.instances?.find(({ id }) => id === "claude"),
+				).not.toHaveProperty("configDir");
+				expect(
+					writes[1]?.instances?.find(({ id }) => id === "claude"),
+				).toHaveProperty("configDir", "/isolated/claude-personal");
+			}),
 	);
 
 	it.scoped("writes within 500 ms despite requests every 100 ms", () =>

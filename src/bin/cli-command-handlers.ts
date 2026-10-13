@@ -44,10 +44,7 @@ export async function handleServe(
 	const opencodeUrl = ENV.opencodeUrl || `http://localhost:${args.ocPort}`;
 	if (
 		process.env["CONDUIT_SERVICE"] === "1" &&
-		(args.portExplicit ||
-			args.noHttps ||
-			args.tailscaleServe !== undefined ||
-			args.claudeConfigDir !== undefined)
+		(args.portExplicit || args.noHttps || args.tailscaleServe !== undefined)
 	) {
 		stderr.write(
 			"Warning: this service's arguments override stored settings; re-run conduit service install to update it.\n",

@@ -24,7 +24,6 @@ export interface DaemonRuntimeConfig {
 	readonly usageLimits?: UsageLimitsSetting;
 	readonly keepAwakeCommand: string | undefined;
 	readonly keepAwakeArgs: string[] | undefined;
-	readonly claudeConfigDir: string | undefined;
 	readonly newSessionProject?: string;
 	readonly shuttingDown: boolean;
 	readonly startTime: number;
@@ -80,7 +79,6 @@ export const makeDaemonConfigFromOptions = (options: {
 	usageLimits?: UsageLimitsSetting;
 	keepAwakeCommand?: string;
 	keepAwakeArgs?: string[];
-	claudeConfigDir?: string;
 	newSessionProject?: string;
 	startTime?: number;
 	persistedSessionCounts?: ReadonlyMap<string, number>;
@@ -103,7 +101,6 @@ export const makeDaemonConfigFromOptions = (options: {
 	}),
 	keepAwakeCommand: options.keepAwakeCommand,
 	keepAwakeArgs: options.keepAwakeArgs,
-	claudeConfigDir: options.claudeConfigDir,
 	...(options.newSessionProject !== undefined && {
 		newSessionProject: options.newSessionProject,
 	}),

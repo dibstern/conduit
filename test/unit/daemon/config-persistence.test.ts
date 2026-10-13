@@ -267,7 +267,7 @@ describe("saveDaemonConfig", () => {
 
 		expect(loaded).toEqual({
 			...config,
-			accountDefaults: { claude: "claude" },
+			accountDefaults: {},
 			deletedAccounts: [],
 		});
 	});

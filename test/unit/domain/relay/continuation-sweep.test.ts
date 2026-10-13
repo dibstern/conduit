@@ -161,6 +161,13 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 					...defaultDaemonConfig(),
 					instances: [
 						{
+							id: "claude",
+							name: "Claude",
+							driver: "claude",
+							port: 0,
+							managed: false,
+						},
+						{
 							id: "target",
 							name: "Target",
 							driver: "claude",

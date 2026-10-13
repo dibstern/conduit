@@ -32,6 +32,13 @@ const state = (): AccountsState =>
 			...defaultDaemonConfig(),
 			instances: [
 				{
+					id: "claude",
+					name: "Claude",
+					driver: "claude",
+					port: 0,
+					managed: false,
+				},
+				{
 					id: "work",
 					name: "Work",
 					driver: "claude",
@@ -66,7 +73,7 @@ describe("account directory reads", () => {
 			list(input)
 				.filter((account) => account.isDefault)
 				.map((account) => account.id),
-		).toEqual(["opencode", "claude"]);
+		).toEqual(["claude", "opencode"]);
 		expect(defaultFor(input, "claude")).toEqual(
 			Option.some(Either.getOrThrow(route(input, "claude"))),
 		);
@@ -166,8 +173,15 @@ describe("account directory reads", () => {
 			const input = accountsStateFromConfig(
 				{
 					...defaultDaemonConfig(),
-					claudeConfigDir: "/stored-login",
 					instances: [
+						{
+							id: "claude",
+							name: "Claude",
+							driver: "claude",
+							port: 0,
+							managed: false,
+							configDir: "/stored-login",
+						},
 						{
 							id: "no-folder",
 							name: "Launch",

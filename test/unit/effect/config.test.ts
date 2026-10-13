@@ -105,7 +105,7 @@ describe("DaemonConfigSchema", () => {
 		expect(Either.isLeft(result)).toBe(true);
 	});
 
-	it("accepts config without optional instances", () => {
+	it("migrates a legacy config without instances to one ordinary Claude default", () => {
 		const raw = {
 			pid: 1,
 			port: 2633,
@@ -118,7 +118,16 @@ describe("DaemonConfigSchema", () => {
 		const result = Schema.decodeUnknownEither(DaemonConfigSchema)(raw);
 		expect(Either.isRight(result)).toBe(true);
 		if (Either.isRight(result)) {
-			expect(result.right.instances).toBeUndefined();
+			expect(result.right.instances).toEqual([
+				{
+					id: "claude",
+					name: "Claude",
+					driver: "claude",
+					port: 0,
+					managed: false,
+				},
+			]);
+			expect(result.right.accountDefaults).toEqual({ claude: "claude" });
 		}
 	});
 

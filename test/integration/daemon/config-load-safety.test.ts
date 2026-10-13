@@ -26,7 +26,10 @@ import {
 	GetStatus,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	CURRENT_CONFIG_VERSION,
+	loadDaemonConfigResult,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const DIST = resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist");
@@ -291,7 +294,7 @@ syncBuiltinESMExports();
 		await expect.poll(() => existsSync(fixture.configPath)).toBe(true);
 		const saved = JSON.parse(readFileSync(fixture.configPath, "utf8"));
 		expect(saved).toMatchObject({
-			configVersion: 1,
+			configVersion: CURRENT_CONFIG_VERSION,
 			pinHash: null,
 			tls: false,
 			keepAwake: false,
@@ -357,8 +360,11 @@ syncBuiltinESMExports();
 			]),
 		);
 		const saved = JSON.parse(readFileSync(fixture.configPath, "utf8"));
-		expect(saved.configVersion).toBe(1);
-		expect(saved.claudeConfigDir).toBe(folder);
+		expect(saved.configVersion).toBe(CURRENT_CONFIG_VERSION);
+		expect(saved).not.toHaveProperty("claudeConfigDir");
+		expect(saved.instances).toContainEqual(
+			expect.objectContaining({ id: "claude", configDir: folder }),
+		);
 		expect(saved.projects[0].folders).toEqual([fixture.harness.projectDir]);
 		expect(saved.projects[0]).not.toHaveProperty("directory");
 		const probe: Array<{ kind: string; writer?: boolean }> = JSON.parse(
@@ -375,6 +381,41 @@ syncBuiltinESMExports();
 			accounts,
 			saved,
 		};
+	});
+
+	it.each([
+		{},
+		{ claude: "deleted" },
+	])("does not recreate Claude after restarting an empty current-version config with pointer %j", async (accountDefaults) => {
+		const fixture = createFixture("empty-claude-restart");
+		const seed = Either.getOrThrow(
+			loadDaemonConfigResult(fixture.harness.configDir),
+		);
+		writeFileSync(
+			fixture.configPath,
+			JSON.stringify({
+				...seed,
+				configVersion: CURRENT_CONFIG_VERSION,
+				instances: [],
+				accountDefaults,
+			}),
+		);
+		for (let i = 0; i < 2; i++) {
+			await fixture.start();
+			const accounts = await fixture.harness.requestRpc(new GetInstances({}));
+			expect(
+				accounts.instances.filter(({ driver }) => driver === "claude"),
+			).toEqual([]);
+			await fixture.harness.terminate();
+			const saved = Either.getOrThrow(
+				loadDaemonConfigResult(fixture.harness.configDir),
+			);
+			expect(saved.accountDefaults).toEqual({});
+			expect(
+				saved.instances?.filter(({ driver }) => driver === "claude"),
+			).toEqual([]);
+		}
+		evidence = { emptyAfterRestarts: 2 };
 	});
 
 	it.each([
@@ -406,7 +447,7 @@ syncBuiltinESMExports();
 			if (kind === "missing") {
 				await request;
 				const saved = JSON.parse(readFileSync(fixture.configPath, "utf8"));
-				expect(saved.configVersion).toBe(1);
+				expect(saved.configVersion).toBe(CURRENT_CONFIG_VERSION);
 				expect(saved.instances).toContainEqual(
 					expect.objectContaining({ id: "claude", name: "After" }),
 				);

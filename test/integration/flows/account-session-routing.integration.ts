@@ -23,6 +23,11 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	defaultDaemonConfig,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -426,5 +431,90 @@ describe("Integration: account session routing", () => {
 		expect(launchFolders.at(-1)).toBe(addedLogin);
 		expect(resumedSessions.at(-1)).toBe(childId);
 		expect(existsSync(join(root, "daemon.json"))).toBe(false);
+	});
+
+	it.each([
+		"legacy-binding",
+		"driver-only",
+		"legacy-alias",
+	] as const)("runs %s selections in Personal's folder", async (selection) => {
+		const login = join(root, "personal-login");
+		const original = join(root, "original-login");
+		mkdirSync(login);
+		mkdirSync(original);
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				accountDefaults: { claude: AccountIdSchema.make("personal") },
+				instances: [
+					{
+						id: "personal",
+						name: "Personal",
+						driver: "claude",
+						configDir: login,
+						port: 0,
+						managed: false,
+					},
+					...(selection === "legacy-binding"
+						? []
+						: [
+								{
+									id: "claude",
+									name: "Original",
+									driver: "claude" as const,
+									configDir: original,
+									port: 0,
+									managed: false,
+								},
+							]),
+				],
+			},
+			root,
+		);
+		harness = await createRelayHarness("chat-simple", {
+			configDir: root,
+			defaultModel: null,
+			claudeSdk: {
+				...claudeSdk,
+				query: (params) => {
+					launchFolders.push(
+						params.options?.env?.["CLAUDE_CONFIG_DIR"] ?? "unset",
+					);
+					return claudeSdk.query(params);
+				},
+			},
+		});
+		const client = await harness.connectWsClient();
+		await client.waitForInitialState();
+		let sessionId: string;
+		if (selection === "legacy-binding") {
+			sessionId = "ses-legacy-claude-binding";
+			await harness.stack.effectRuntime.runtime.runPromise(
+				applySessionCommand({
+					type: "session.created",
+					data: { sessionId, title: "Legacy binding", provider: "claude" },
+				}),
+			);
+			await client.viewSession(sessionId);
+		} else {
+			const created = await client.createSession("Personal default", {
+				providerId: selection === "legacy-alias" ? "claude-sdk" : "claude",
+			});
+			const id = created["id"];
+			if (typeof id !== "string")
+				throw new Error("CreateSession returned no session id");
+			sessionId = id;
+		}
+		const completed = client.waitForTurnEnd(sessionId, 10_000);
+		await client.sendMessage("Reply with pong", { sessionId });
+		expect((await completed).attention).not.toBe("error");
+		expect(launchFolders.at(-1)).toBe(login);
+		expect(launchFolders).not.toContain(original);
+		const stored = await harness.stack.effectRuntime.runtime.runPromise(
+			Effect.flatMap(ReadQueryEffectTag, (read) => read.getSession(sessionId)),
+		);
+		expect(stored?.provider).toBe(
+			selection === "legacy-binding" ? "claude" : "personal",
+		);
 	});
 });

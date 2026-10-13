@@ -55,6 +55,7 @@ import {
 	ProjectRegistryTag,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { AuthManagerTag } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
 const makeMockOptions = (): DaemonLiveOptions => {
 	// A directory per daemon: a fixed one makes this file collide with itself
@@ -62,6 +63,7 @@ const makeMockOptions = (): DaemonLiveOptions => {
 	const configDir = mkdtempSync(join(tmpdir(), "conduit-daemon-wiring-"));
 	return {
 		configDir,
+		launchLogin: sdkDefaultClaudeConfigDir(join(configDir, "home", ".claude")),
 		socketPath: join(configDir, "relay.sock"),
 		staticDir: process.cwd(),
 		initialConfig: makeDaemonConfigFromOptions({
@@ -403,7 +405,9 @@ describe("makeDaemonLive wiring", () => {
 
 			expect(persisted.port).toBeGreaterThan(0);
 			expect(persisted.projects).toEqual([]);
-			expect(persisted.instances).toEqual([]);
+			expect(persisted.instances).toEqual([
+				expect.objectContaining({ id: "claude", driver: "claude" }),
+			]);
 		}),
 	);
 
@@ -462,6 +466,7 @@ describe("makeDaemonLive wiring", () => {
 					expect.objectContaining({ slug: "alpha" }),
 				]);
 				expect(persisted.instances).toEqual([
+					expect.objectContaining({ id: "claude", driver: "claude" }),
 					expect.objectContaining({
 						id: "remote-1",
 						url: "https://opencode.example.test",

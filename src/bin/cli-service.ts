@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type DaemonConfig,
+	defaultDaemonConfig,
 	loadDaemonConfigResult,
 	saveDaemonConfig,
 } from "../lib/daemon/config-persistence.js";
@@ -33,7 +34,7 @@ export interface ServiceOptions {
 	port: number;
 	host?: string;
 	configOverrides?: Partial<
-		Pick<DaemonConfig, "port" | "tls" | "tailscaleServe" | "claudeConfigDir">
+		Pick<DaemonConfig, "port" | "tls" | "tailscaleServe">
 	>;
 	environment?: Record<string, string>;
 }
@@ -210,8 +211,8 @@ WantedBy=default.target
 }
 
 export function foregroundArguments(args: ParsedArgs): string[] {
-	// Port, TLS, Serve, and Claude config live in daemon.json. OpenCode's port
-	// only seeds a missing default instance; restored instances win at startup.
+	// Port, TLS, and Serve live in daemon.json. The Claude flag overrides the launch login.
+	// OpenCode's port only seeds a missing default instance; restored instances win at startup.
 	const flags = [
 		"serve",
 		"--oc-port",
@@ -221,6 +222,8 @@ export function foregroundArguments(args: ParsedArgs): string[] {
 	];
 	if (args.host) flags.push("--host", args.host);
 	if (args.logFormat) flags.push("--log-format", args.logFormat);
+	if (args.claudeConfigDir !== undefined)
+		flags.push("--claude-config-dir", args.claudeConfigDir);
 	return flags;
 }
 
@@ -363,6 +366,7 @@ export async function runServiceCommand(
 	const persisted = loaded._tag === "Right" ? loaded.right : null;
 	const config: DaemonConfig = {
 		...(persisted ?? {
+			...defaultDaemonConfig(),
 			pid: 0,
 			port: options.port,
 			pinHash: null,
@@ -553,9 +557,6 @@ export async function handleService(
 					...(ctx.args.noHttps ? { tls: false } : {}),
 					...(ctx.args.tailscaleServe !== undefined
 						? { tailscaleServe: ctx.args.tailscaleServe }
-						: {}),
-					...(ctx.args.claudeConfigDir !== undefined
-						? { claudeConfigDir: ctx.args.claudeConfigDir }
 						: {}),
 				},
 				...(ctx.args.host ? { host: ctx.args.host } : {}),

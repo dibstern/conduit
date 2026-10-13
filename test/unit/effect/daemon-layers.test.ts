@@ -195,7 +195,6 @@ describe("DaemonHandleTag", () => {
 					keepAwake: true,
 					keepAwakeCommand: undefined,
 					keepAwakeArgs: undefined,
-					claudeConfigDir: undefined,
 					shuttingDown: false,
 					startTime: Date.now() - 1_000,
 					hostExplicit: false,

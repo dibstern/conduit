@@ -35,13 +35,14 @@ const test = base.extend<{
 					(error) => error,
 				);
 				if (!seed) throw new Error("Missing process harness config");
+				const { configVersion: _version, ...legacy } = seed;
 				const configDir = testInfo.outputPath("initial-claude-account");
 				mkdirSync(configDir, { recursive: true });
 				// Existing installs store the implicit account's folder at the top level.
 				writeFileSync(
 					join(harness.configDir, "daemon.json"),
 					JSON.stringify({
-						...seed,
+						...legacy,
 						claudeConfigDir: configDir,
 					}),
 				);
@@ -155,7 +156,7 @@ test("the default Claude name applies live and its folder survives a login-servi
 		});
 		expect(
 			readStored().instances?.find(({ id }) => id === defaultId),
-		).not.toHaveProperty("configDir");
+		).toHaveProperty("configDir", initial?.configDir);
 		expect(daemonPid()).toBe(initialPid);
 		record("renamed-without-restart", await readDefault());
 		await page.screenshot({
@@ -174,10 +175,11 @@ test("the default Claude name applies live and its folder survives a login-servi
 		await expect(row).toContainText("Applies after restart");
 		const stored = readStored();
 		expect(daemonPid()).toBe(initialPid);
-		expect(stored.claudeConfigDir).toBe(configDir);
-		expect(
-			stored.instances?.find(({ id }) => id === defaultId),
-		).not.toHaveProperty("configDir");
+		expect(stored).not.toHaveProperty("claudeConfigDir");
+		expect(stored.instances?.find(({ id }) => id === defaultId)).toHaveProperty(
+			"configDir",
+			configDir,
+		);
 		record("folder-saved", stored);
 		await page.screenshot({
 			path: resolve(artifacts, `${testInfo.project.name}-folder-saved.png`),

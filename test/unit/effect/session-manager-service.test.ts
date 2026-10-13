@@ -230,6 +230,13 @@ function makeNamedOpenCodeDaemonConfig(): DaemonConfig {
 		projects: [],
 		instances: [
 			{
+				id: "claude",
+				name: "Claude",
+				driver: "claude",
+				port: 0,
+				managed: false,
+			},
+			{
 				id: "work-oc",
 				name: "Work OpenCode",
 				port: 4096,

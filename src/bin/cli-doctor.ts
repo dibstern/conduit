@@ -5,10 +5,7 @@ import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../lib/daemon/config-persistence.js";
-import {
-	configuredClaudeConfigDir,
-	makeClaudeSdkEnv,
-} from "../lib/provider/claude/claude-sdk-env.js";
+import { makeClaudeSdkEnv } from "../lib/provider/claude/claude-sdk-env.js";
 import {
 	findExecutable,
 	ProjectShellEnvResolver,
@@ -36,14 +33,11 @@ export async function handleDoctor(options: {
 		for (const project of projects) {
 			await resolver.refresh(project.path);
 			const snapshot = resolver.snapshot(project.path);
-			const launch =
-				config?.claudeConfigDir === undefined
-					? resolveClaudeLaunchConfig(
-							config,
-							undefined,
-							resolver.get(project.path),
-						)
-					: { configDir: configuredClaudeConfigDir(config.claudeConfigDir) };
+			const launch = resolveClaudeLaunchConfig(
+				config,
+				undefined,
+				resolver.get(project.path),
+			);
 			const env = makeClaudeSdkEnv({
 				baseEnv: resolver.get(project.path),
 				...launch,

@@ -20,6 +20,7 @@ import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instanc
 import { accountsStateFromConfig } from "../../../daemon/account-directory.js";
 import {
 	type DaemonConfig,
+	defaultDaemonConfig,
 	migrateDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import {
@@ -642,18 +643,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const { configDir, socketPath } = options;
 	const launchLogin =
 		options.launchLogin ?? captureClaudeLaunchLogin(process.env);
-	const accountsState =
-		options.persistedConfig === undefined
-			? undefined
-			: accountsStateFromConfig(
-					{
-						...options.persistedConfig,
-						...(options.initialConfig.claudeConfigDir !== undefined && {
-							claudeConfigDir: options.initialConfig.claudeConfigDir,
-						}),
-					},
-					launchLogin,
-				);
+	const accountsState = accountsStateFromConfig(
+		options.persistedConfig ?? defaultDaemonConfig(),
+		launchLogin,
+	);
 
 	// Tier 0: Foundation (no inter-dependencies)
 	// These Layers have zero dependencies on other Tags. They form the base
@@ -665,7 +658,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 					migrateDaemonConfig(
 						options.persistedConfig,
 						configDir,
-						options.persistedConfigNeedsMigration,
+						options.persistedConfigNeedsMigration ?? false,
 					).pipe(
 						Effect.andThen(
 							migrateProjectStorage(configDir, options.persistedConfig),
@@ -760,19 +753,17 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		: makeProjectRegistryLive();
 	const instanceManagerOptions = {
 		launchLogin,
-		...(accountsState !== undefined && {
-			accountsState: {
-				...accountsState,
-				// OpenCode startup owns creating its managed default and its metadata.
-				accounts: accountsState.accounts.filter(
-					(account) =>
-						account.id !== MANAGED_OPENCODE_ACCOUNT_ID ||
-						options.persistedConfig?.instances?.some(
-							({ id }) => id === account.id,
-						),
-				),
-			},
-		}),
+		accountsState: {
+			...accountsState,
+			// OpenCode startup owns creating its managed default and its metadata.
+			accounts: accountsState.accounts.filter(
+				(account) =>
+					account.id !== MANAGED_OPENCODE_ACCOUNT_ID ||
+					options.persistedConfig?.instances?.some(
+						({ id }) => id === account.id,
+					),
+			),
+		},
 		...(options.defaultOpencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.defaultOpencodeUrl,
 		}),

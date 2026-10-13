@@ -70,10 +70,7 @@ import {
 	ConfigPersistenceTag,
 	requestConfigSave,
 } from "./config-persistence-service.js";
-import {
-	commitDaemonRuntimeConfig,
-	DaemonConfigRefTag,
-} from "./daemon-config-ref.js";
+import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import {
 	type DaemonEventBusTag,
 	publishInstanceError,
@@ -488,19 +485,6 @@ export const applyAccountChange = (change: AccountChange) =>
 							pollerKey(id),
 							Effect.never.pipe(Effect.interruptible),
 						);
-				}
-				if (
-					change._tag === "Update" &&
-					change.updates.configDir !== undefined &&
-					account?.driver === "claude" &&
-					account.id === "claude"
-				) {
-					const config = yield* Effect.serviceOption(DaemonConfigRefTag);
-					if (Option.isSome(config))
-						yield* commitDaemonRuntimeConfig((current) => ({
-							...current,
-							claudeConfigDir: account.configuredFolder,
-						})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
 				}
 				if (change._tag === "Remove") yield* publishProviderInstanceRemoved(id);
 				else if (change._tag === "Update")

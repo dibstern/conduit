@@ -66,10 +66,6 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 	const accounts = yield* directory.snapshot;
 	const instanceState = yield* Ref.get(yield* InstanceManagerStateTag);
 	const instances = persistedInstanceConfigs(accounts.accounts, instanceState);
-	// This historical field still belongs to the original account until migration.
-	const claudeConfigDir = accounts.accounts.find(
-		(account) => account.id === "claude" && account.driver === "claude",
-	)?.configuredFolder;
 
 	return {
 		pid: process.pid,
@@ -94,9 +90,6 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		}),
 		...(runtime.keepAwakeArgs !== undefined && {
 			keepAwakeArgs: runtime.keepAwakeArgs,
-		}),
-		...(claudeConfigDir !== undefined && {
-			claudeConfigDir,
 		}),
 		...(runtime.newSessionProject !== undefined && {
 			newSessionProject: runtime.newSessionProject,

@@ -312,35 +312,17 @@ export function apply(
 	});
 }
 
-/** Legacy built-ins remain synthesized until their config migration retires it. */
+/** Claude accounts are explicit; the managed OpenCode default keeps its runtime semantics. */
 function accountInstancesFromConfig(config: DaemonConfig) {
 	const explicit = (config.instances ?? []).map((instance) => ({
 		...instance,
 		driver: instance.driver ?? ("opencode" as const),
-		...(instance.id === "claude" &&
-		instance.configDir === undefined &&
-		config.claudeConfigDir !== undefined
-			? { configDir: config.claudeConfigDir }
-			: {}),
 	}));
 	return [
 		...explicit,
 		...(!explicit.some(({ id }) => id === "opencode") &&
 		!config.deletedAccounts?.some(({ id }) => id === "opencode")
 			? [{ id: "opencode", name: "OpenCode", driver: "opencode" as const }]
-			: []),
-		...(!explicit.some(({ id }) => id === "claude") &&
-		!config.deletedAccounts?.some(({ id }) => id === "claude")
-			? [
-					{
-						id: "claude",
-						name: "Claude",
-						driver: "claude" as const,
-						...(config.claudeConfigDir === undefined
-							? {}
-							: { configDir: config.claudeConfigDir }),
-					},
-				]
 			: []),
 	];
 }

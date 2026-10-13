@@ -122,7 +122,6 @@ const buildInitialRuntimeConfig = (
 		options.keepAwakeCommand ?? persisted?.keepAwakeCommand ?? undefined;
 	const keepAwakeArgs =
 		options.keepAwakeArgs ?? persisted?.keepAwakeArgs ?? undefined;
-	const claudeConfigDir = options.claudeConfigDir ?? persisted?.claudeConfigDir;
 
 	const tailscaleServeEnabled =
 		options.tailscaleServe ?? persisted?.tailscaleServe ?? false;
@@ -152,7 +151,6 @@ const buildInitialRuntimeConfig = (
 		}),
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
-		...(claudeConfigDir !== undefined && { claudeConfigDir }),
 		...(persisted?.newSessionProject !== undefined && {
 			newSessionProject: persisted.newSessionProject,
 		}),
@@ -369,11 +367,6 @@ export async function startForegroundDaemon(
 		return stopInFlight;
 	};
 
-	// Claude SDK subprocesses (and PTY sessions) inherit the daemon's env, so
-	// a configured Claude profile must be applied before any provider starts.
-	if (initialConfig.claudeConfigDir !== undefined) {
-		process.env["CLAUDE_CONFIG_DIR"] = initialConfig.claudeConfigDir;
-	}
 	const mirrorRuntimeConfig = (config: DaemonRuntimeConfig) => {
 		status = {
 			...status,

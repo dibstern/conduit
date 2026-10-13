@@ -73,7 +73,6 @@ beforeEach(async () => {
 	vi.stubEnv("CONDUIT_CONFIG_DIR", configDir);
 	initial = {
 		...defaultDaemonConfig(),
-		claudeConfigDir: join(root, "original-login"),
 		usageLimits: {
 			autoResume: false,
 			autoSwitch: false,
@@ -84,6 +83,7 @@ beforeEach(async () => {
 			{
 				id: "claude",
 				name: "Claude",
+				configDir: join(root, "original-login"),
 				driver: "claude",
 				port: 0,
 				managed: false,
@@ -142,7 +142,6 @@ const makeLayer = (config: DaemonConfig) => {
 			...(config.usageLimits === undefined
 				? {}
 				: { usageLimits: config.usageLimits }),
-			claudeConfigDir: config.claudeConfigDir,
 		},
 		persistence: ConfigPersistenceLive.pipe(
 			Layer.provide(
@@ -257,7 +256,9 @@ describe("account defaults and deletions survive persistence", () => {
 		expect(saved.instances?.some((account) => account.id === "work")).toBe(
 			false,
 		);
-		expect(saved.claudeConfigDir).toBe(initial.claudeConfigDir);
+		expect(saved.instances?.find(({ id }) => id === "claude")?.configDir).toBe(
+			join(root, "original-login"),
+		);
 		const restarted = ManagedRuntime.make(makeLayer(saved));
 		try {
 			await restarted.runPromise(

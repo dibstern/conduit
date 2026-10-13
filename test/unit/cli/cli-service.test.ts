@@ -326,6 +326,8 @@ describe("service unit generation", () => {
 			"127.0.0.2",
 			"--log-format",
 			"json",
+			"--claude-config-dir",
+			"/profiles/work",
 		]);
 	});
 });

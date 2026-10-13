@@ -126,14 +126,7 @@ const makeLayer = (config = initial) =>
 	makeDaemonRpcTestLayer([], undefined, {
 		configDir,
 		launchLogin,
-		config: { claudeConfigDir: config.claudeConfigDir },
-		// Ticket 7 retires the legacy default-folder field. Restore it as today's
-		// startup does, while every config read stays inside this fixture.
-		instances: (config.instances ?? []).map((instance) =>
-			instance.id === "claude" && config.claudeConfigDir !== undefined
-				? { ...instance, configDir: config.claudeConfigDir }
-				: instance,
-		),
+		instances: config.instances ?? [],
 		persistence: ConfigPersistenceLive.pipe(
 			Layer.provide(
 				Layer.merge(
@@ -157,11 +150,11 @@ beforeEach(async () => {
 	initial = {
 		...defaultDaemonConfig(),
 		debug: true,
-		claudeConfigDir: join(directory, "old-default-folder"),
 		instances: [
 			{
 				id: "claude",
 				name: "Claude",
+				configDir: join(directory, "old-default-folder"),
 				driver: "claude",
 				port: 0,
 				managed: false,
@@ -433,7 +426,7 @@ describe("account mutations through daemon RPC", () => {
 					}).pipe(Effect.provide(makeLayer())),
 				);
 				const saved = readSaved();
-				expect(saved.claudeConfigDir).toBeUndefined();
+				expect(saved).not.toHaveProperty("claudeConfigDir");
 				expect(
 					saved.instances?.find((account) => account.id === "personal")
 						?.configDir,
@@ -559,9 +552,9 @@ describe("account mutations through daemon RPC", () => {
 					configDir: join(directory, "old-personal-folder"),
 					env: { ACCOUNT_MARKER: "personal" },
 				});
-				expect(saved.claudeConfigDir).toBe(
-					join(directory, "old-default-folder"),
-				);
+				expect(
+					saved.instances?.find(({ id }) => id === "claude")?.configDir,
+				).toBe(join(directory, "old-default-folder"));
 				evidence.push({
 					scenario:
 						"account metadata stays authoritative while only debug merges from disk",

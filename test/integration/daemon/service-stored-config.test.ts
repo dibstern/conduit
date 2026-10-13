@@ -43,7 +43,6 @@ const RUN_LOG = join("test-results", "service-stored-config", "run.log");
 const persistedFlags = [
 	"--port",
 	"-p",
-	"--claude-config-dir",
 	"--no-https",
 	"--tailscale-serve",
 	"--no-tailscale-serve",
@@ -239,19 +238,28 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					port: installPort,
 					tls: false,
 					tailscaleServe: false,
-					claudeConfigDir,
 					autoSettleAfterDays: 7,
 					debug: true,
 					projects: seed.projects,
 				});
+				expect(installed).not.toHaveProperty("claudeConfigDir");
+				expect(
+					installed.instances?.find(({ id }) => id === "claude"),
+				).not.toHaveProperty("configDir");
 				const unit = readFileSync(paths.unitFile, "utf8");
 				expect(unit).not.toBe(staleUnit);
 				const args = unitArguments(unit);
 				expect(args[0]).toBe("serve");
 				for (const flag of persistedFlags) expect(args).not.toContain(flag);
 				for (const flag of retained) expect(args).toContain(flag);
+				expect(
+					args.slice(
+						args.indexOf("--claude-config-dir"),
+						args.indexOf("--claude-config-dir") + 2,
+					),
+				).toEqual(["--claude-config-dir", claudeConfigDir]);
 				record("installed-unit", { args, unit, config: installed });
-				await install(retained);
+				await install([...retained, "--claude-config-dir", claudeConfigDir]);
 				expect(
 					Either.getOrThrowWith(
 						loadDaemonConfigResult(harness.configDir),
@@ -288,7 +296,15 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 				const changedClaudeDir = join(harness.root, "another-claude-profile");
 				mkdirSync(changedClaudeDir);
 				await saveDaemonConfig(
-					{ ...stopped, port: changedPort, claudeConfigDir: changedClaudeDir },
+					{
+						...stopped,
+						port: changedPort,
+						instances: (stopped.instances ?? []).map((instance) =>
+							instance.id === "claude"
+								? { ...instance, configDir: changedClaudeDir }
+								: instance,
+						),
+					},
 					harness.configDir,
 				);
 				record("stored-edit", {
@@ -305,7 +321,7 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 					Either.getOrThrowWith(
 						loadDaemonConfigResult(harness.configDir),
 						(error) => error,
-					)?.claudeConfigDir,
+					)?.instances?.find(({ id }) => id === "claude")?.configDir,
 				).toBe(changedClaudeDir);
 				record("restarted-daemon", {
 					args,

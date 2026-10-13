@@ -35,7 +35,6 @@ const baseConfig: DaemonRuntimeConfig = {
 	keepAwake: false,
 	keepAwakeCommand: undefined,
 	keepAwakeArgs: undefined,
-	claudeConfigDir: undefined,
 	shuttingDown: false,
 	startTime: Date.now(),
 	hostExplicit: false,
