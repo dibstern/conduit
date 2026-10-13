@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
-import { expect } from "vitest";
+import { Effect, Fiber, Layer } from "effect";
+import { afterEach, expect, vi } from "vitest";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -22,6 +22,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -31,6 +32,7 @@ import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-eng
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
+import type { SessionGit } from "../../../src/lib/shared-types.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -41,7 +43,77 @@ import {
 
 const DAY = 86_400_000;
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("relay automatic settlement sweep", () => {
+	it.effect("waits for fresh git before settling recent merged work", () => {
+		const projectDir = "/auto-settle-git";
+		const directories = new Map([
+			["merged", `${projectDir}/merged`],
+			["unmerged", `${projectDir}/unmerged`],
+		]);
+		const cached = new Map<string, SessionGit>([
+			[`${projectDir}/merged`, { merged: false }],
+			[`${projectDir}/unmerged`, { merged: true, mergedHead: "stale-head" }],
+		]);
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.spyOn(daemonSessionGitCache, "isStale").mockReturnValue(true);
+		vi.spyOn(daemonSessionGitCache, "peek").mockImplementation((directory) =>
+			cached.get(directory),
+		);
+		const refresh = vi
+			.spyOn(daemonSessionGitCache, "refresh")
+			.mockImplementation(async (directory) => {
+				await held;
+				const git =
+					directory === directories.get("merged")
+						? { merged: true, mergedHead: "fresh-head" }
+						: { merged: false };
+				cached.set(directory, git);
+				return git;
+			});
+		const setSettled = vi.fn((_id: string, _head?: string) =>
+			Effect.succeed(true),
+		);
+		return Effect.scoped(
+			Effect.gen(function* () {
+				const now = Date.now();
+				const sql = yield* SqlClient.SqlClient;
+				for (const [id, directory] of directories)
+					yield* sql`INSERT INTO sessions (id, provider, title, status, workspace, last_message_at, created_at, updated_at)
+						VALUES (${id}, 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now}, ${now})`;
+				const settling = yield* Effect.fork(
+					settleIdleSessions(
+						{
+							projectDir,
+							hasViewer: () => false,
+							hasLiveBackgroundWork: () => false,
+							setSettled,
+						},
+						3 * DAY,
+						now,
+					),
+				);
+				yield* Effect.tryPromise(() =>
+					vi.waitFor(() => expect(refresh).toHaveBeenCalled()),
+				);
+				expect(setSettled).not.toHaveBeenCalled();
+				release();
+				expect(yield* Fiber.join(settling)).toBe(1);
+				expect(setSettled.mock.calls).toEqual([["merged", "fresh-head"]]);
+				expect(refresh.mock.calls.map(([directory]) => directory)).toContain(
+					directories.get("unmerged"),
+				);
+			}),
+		).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			Effect.ensuring(Effect.sync(release)),
+		);
+	});
+
 	it.effect(
 		"settles only eligible rows once and clears the automatic marker on un-settle",
 		() => {

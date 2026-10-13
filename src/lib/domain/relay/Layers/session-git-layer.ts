@@ -190,21 +190,31 @@ export const SessionGitLive = Layer.effect(
 										directories.set(directory, true);
 								const next = new Map(published);
 								let fromDisk = 0;
-								for (const [directory, force] of directories) {
-									const workspaceMissing = missing.get(directory);
-									const stale =
-										force || daemonSessionGitCache.isStale(directory);
-									if (stale) fromDisk++;
-									const git = stale
-										? yield* Effect.tryPromise(() =>
-												daemonSessionGitCache.refresh(directory),
-											)
-										: daemonSessionGitCache.peek(directory);
-									next.set(directory, {
-										git: workspaceMissing ? undefined : git,
-										workspaceMissing,
-									});
-								}
+								// Current folders precede settled-only startup folders in this map.
+								yield* Effect.forEach(
+									directories,
+									([directory, force]) =>
+										Effect.gen(function* () {
+											const workspaceMissing = missing.get(directory);
+											const stale =
+												force || daemonSessionGitCache.isStale(directory);
+											if (stale) fromDisk++;
+											const git = stale
+												? yield* Effect.tryPromise(() =>
+														daemonSessionGitCache.refresh(directory),
+													).pipe(
+														Effect.withSpan("sessionGit.refreshDirectory", {
+															attributes: { directory },
+														}),
+													)
+												: daemonSessionGitCache.peek(directory);
+											next.set(directory, {
+												git: workspaceMissing ? undefined : git,
+												workspaceMissing,
+											});
+										}),
+									{ concurrency: 4, discard: true },
+								);
 								const changed = new Set(
 									[...directories.keys()].filter(
 										(directory) =>

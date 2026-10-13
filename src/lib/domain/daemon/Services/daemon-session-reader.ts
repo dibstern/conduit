@@ -80,9 +80,6 @@ const readProjectSessions = (
 				cause: `Project path is not a directory: ${projectDirectory}`,
 			});
 		}
-		for (const folder of project.folders)
-			if (gitCache.isStale(folder)) void gitCache.refresh(folder);
-
 		const databasePath = projectEventsDbPath({ configDir, ...project });
 		const databaseStat = yield* Effect.either(
 			Effect.try({
@@ -127,15 +124,16 @@ const readProjectSessions = (
 				),
 			]),
 		);
-		yield* Effect.tryPromise({
-			try: () =>
-				Promise.all(
-					[...directories]
-						.filter((path) => gitCache.isStale(path))
-						.map((path) => gitCache.refresh(path)),
-				),
-			catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
-		});
+		// Cold projects have no git-change signal to update browsers after this read.
+		yield* Effect.forEach(
+			[...directories].filter((directory) => gitCache.isStale(directory)),
+			(directory) =>
+				Effect.tryPromise({
+					try: () => gitCache.refresh(directory),
+					catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
+				}),
+			{ concurrency: 4, discard: true },
+		);
 		return yield* Effect.forEach(sessions, (session) =>
 			withSessionWorktreeStatus(
 				withCachedSessionGit(

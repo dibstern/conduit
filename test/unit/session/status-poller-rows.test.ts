@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Effect, HashMap, Layer } from "effect";
+import { Effect, HashMap, Layer, ManagedRuntime } from "effect";
 import { expect, it, vi } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
@@ -10,6 +10,7 @@ import {
 	LoggerTag,
 	StatusPollerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { SessionGitServiceTag } from "../../../src/lib/domain/relay/Services/session-git-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
 	makePollerPubSubLive,
@@ -47,6 +48,79 @@ const insertParentAndBusyChild = Effect.gen(function* () {
 		VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1)`;
 	yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at)
 		VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2)`;
+});
+
+it("returns readiness while initial git is blocked and completes it in the relay scope", async () => {
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let refreshed = false;
+	const readGit = vi.fn(() => held);
+	const runtime = ManagedRuntime.make(
+		pollerLayer(makeMockOpenCodeAPI()).pipe(
+			Layer.provide(
+				Layer.succeed(SessionGitServiceTag, {
+					refresh: () =>
+						Effect.tryPromise(readGit).pipe(
+							Effect.tap(() => {
+								refreshed = true;
+							}),
+						),
+				}),
+			),
+		),
+	);
+	let ready = false;
+	const starting = runtime
+		.runPromise(Effect.flatMap(StatusPollerTag, (poller) => poller.start()))
+		.then(() => {
+			ready = true;
+		});
+	try {
+		await vi.waitFor(() => expect(readGit).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(ready).toBe(true));
+		expect(refreshed).toBe(false);
+		release();
+		await vi.waitFor(() => expect(refreshed).toBe(true));
+	} finally {
+		release();
+		await starting;
+		await runtime.dispose();
+	}
+});
+
+it("interrupts the initial git refresh when the relay scope closes", async () => {
+	let reading = false;
+	let interrupted = false;
+	const runtime = ManagedRuntime.make(
+		pollerLayer(makeMockOpenCodeAPI()).pipe(
+			Layer.provide(
+				Layer.succeed(SessionGitServiceTag, {
+					refresh: () =>
+						Effect.sync(() => {
+							reading = true;
+						}).pipe(
+							Effect.zipRight(Effect.never),
+							Effect.onInterrupt(() =>
+								Effect.sync(() => {
+									interrupted = true;
+								}),
+							),
+						),
+				}),
+			),
+		),
+	);
+	try {
+		await runtime.runPromise(
+			Effect.flatMap(StatusPollerTag, (poller) => poller.start()),
+		);
+		await vi.waitFor(() => expect(reading).toBe(true));
+	} finally {
+		await runtime.dispose();
+	}
+	expect(interrupted).toBe(true);
 });
 
 // The poller only runs when OpenCode is reachable. After a restart without it,
