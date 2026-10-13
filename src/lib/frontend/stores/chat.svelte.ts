@@ -14,10 +14,10 @@ import type {
 	ToolMessage,
 } from "../types.js";
 import { generateUuid } from "../utils/format.js";
+import { isSubagentToolName } from "../utils/subagent-tools.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { findSession, isBusy, sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
-import { createToolRegistry, type ToolRegistry } from "./tool-registry.js";
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
@@ -37,9 +37,9 @@ export type SessionActivity = {
 
 // Tier 2 — Messages. LRU-capped. Holds only data safely reconstructable
 // from the server's event log.
-export type SessionMessages = {
-	messages: ChatMessage[];
-	transcript: {
+export class SessionMessages {
+	messages = $state.raw<ChatMessage[]>([]);
+	transcript = $state.raw<{
 		rows: HistoryMessage[];
 		hwm: number | null;
 		hasMore: boolean;
@@ -59,14 +59,13 @@ export type SessionMessages = {
 		waiting: ReadonlyMap<string, HistoryMessagePart[]>;
 		/** Each live part's place among its message's parts, by part id. */
 		partOrder: ReadonlyMap<string, number>;
-	} | null;
-	currentAssistantText: string;
-	loadLifecycle: LoadLifecycle;
-	contextPercent: number;
-	historyHasMore: boolean;
-	historyLoading: boolean;
-	toolRegistry: ToolRegistry;
-};
+	} | null>(null);
+	currentAssistantText = $state("");
+	loadLifecycle = $state<LoadLifecycle>("empty");
+	contextPercent = $state(0);
+	historyHasMore = $state(false);
+	historyLoading = $state(false);
+}
 
 type DetailItem = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"];
 
@@ -82,7 +81,7 @@ export type PendingInput = Extract<
 // Composite read shape for the chat view. NEVER instantiated as storage.
 export type SessionChatState = SessionActivity & SessionMessages;
 
-// Factories (return plain POJOs — $state wrapping happens in getOrCreate*)
+// Plain factories also supply the frozen sentinels and enumerable view keys.
 
 export function createEmptySessionActivity(): SessionActivity {
 	return {
@@ -109,7 +108,6 @@ export function createEmptySessionMessages(): SessionMessages {
 		contextPercent: 0,
 		historyHasMore: false,
 		historyLoading: false,
-		toolRegistry: createToolRegistry(),
 	};
 }
 
@@ -125,8 +123,8 @@ export function composeChatState(
 		get(_t, key) {
 			if (typeof key !== "string") return undefined;
 			return ACTIVITY_KEYS.has(key as keyof SessionActivity)
-				? (activity as Record<string, unknown>)[key]
-				: (messages as Record<string, unknown>)[key];
+				? activity[key as keyof SessionActivity]
+				: messages[key as keyof SessionMessages];
 		},
 		set() {
 			throw new Error(
@@ -142,10 +140,9 @@ export function composeChatState(
 		},
 		getOwnPropertyDescriptor(_t, key) {
 			if (typeof key !== "string") return undefined;
-			const source = ACTIVITY_KEYS.has(key as keyof SessionActivity)
-				? activity
-				: messages;
-			const value = (source as Record<string, unknown>)[key];
+			const value = ACTIVITY_KEYS.has(key as keyof SessionActivity)
+				? activity[key as keyof SessionActivity]
+				: messages[key as keyof SessionMessages];
 			if (value === undefined) return undefined;
 			return { value, writable: false, enumerable: true, configurable: true };
 		},
@@ -156,16 +153,6 @@ export function composeChatState(
 
 const EMPTY_ACTIVITY_RAW = createEmptySessionActivity();
 const EMPTY_MESSAGES_RAW = createEmptySessionMessages();
-const throwingRegistryStub = () => {
-	throw new Error("EMPTY_MESSAGES.toolRegistry is read-only");
-};
-for (const methodName of Object.keys(
-	EMPTY_MESSAGES_RAW.toolRegistry,
-) as (keyof ToolRegistry)[]) {
-	if (typeof EMPTY_MESSAGES_RAW.toolRegistry[methodName] === "function") {
-		EMPTY_MESSAGES_RAW.toolRegistry[methodName] = throwingRegistryStub;
-	}
-}
 export const EMPTY_ACTIVITY: SessionActivity =
 	Object.freeze(EMPTY_ACTIVITY_RAW);
 export const EMPTY_MESSAGES: SessionMessages =
@@ -224,9 +211,7 @@ export function getOrCreateSessionMessages(id: string): SessionMessages {
 		touchLRU(id);
 		return existing;
 	}
-	const sessionMessageState: SessionMessages = $state(
-		createEmptySessionMessages(),
-	);
+	const sessionMessageState = new SessionMessages();
 	sessionMessages.set(id, sessionMessageState);
 	ensureLRUCap();
 	touchLRU(id);
@@ -732,18 +717,17 @@ export function applyTerminalTurn(
 	}
 
 	// Finalize any tools still in non-terminal states (pending/running).
-	const finResult = messages.toolRegistry.finalizeAll(getMessages(messages));
-	if (finResult.action === "finalized") {
-		const msgs = [...getMessages(messages)];
-		for (const idx of finResult.indices) {
-			const message = msgs[idx];
-			if (message === undefined) continue;
-			if (message.type === "tool") {
-				msgs[idx] = { ...message, status: "completed" };
-			}
-		}
-		setMessages(messages, msgs);
-	}
+	const current = getMessages(messages);
+	const finalized = current.map(
+		(message): ChatMessage =>
+			message.type === "tool" &&
+			(message.status === "pending" || message.status === "running") &&
+			!isSubagentToolName(message.name)
+				? { ...message, status: "completed" }
+				: message,
+	);
+	if (finalized.some((message, i) => message !== current[i]))
+		setMessages(messages, finalized);
 
 	// Safety net: finalize any thinking blocks still marked as !done.
 	// Normal path: thinking_stop arrives before done. But if the event
@@ -936,19 +920,6 @@ export function addSystemMessage(
 /** Reset all chat state (for stories/tests). Alias for clearMessages. */
 export const resetChatState = clearMessages;
 
-/** Sync the tool registry with projected transcript tools so retained tool
- *  events can update them. */
-export function seedRegistryFromMessages(
-	_activity: SessionActivity,
-	_messages: SessionMessages,
-	chatMsgs: readonly ChatMessage[],
-): void {
-	const tools = chatMsgs.filter((m): m is ToolMessage => m.type === "tool");
-	if (tools.length > 0) {
-		_messages.toolRegistry.seedFromHistory(tools);
-	}
-}
-
 export function activateSessionChatState(sessionId: string): void {
 	const messages = sessionMessages.get(sessionId);
 
@@ -989,7 +960,6 @@ export function clearMessages(): void {
 			messages.messages = [];
 			messages.currentAssistantText = "";
 			messages.loadLifecycle = "empty";
-			messages.toolRegistry.clear();
 		}
 	}
 	historyState.hasMore = false;

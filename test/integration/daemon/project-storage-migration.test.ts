@@ -4,9 +4,11 @@ import {
 	readFileSync,
 	renameSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	RemoveProject,
@@ -71,7 +73,7 @@ describe("project storage migration through the daemon", () => {
 		}
 	});
 
-	it("moves legacy history before serving it and archives the original", async () => {
+	it("moves legacy history, reclaims migrated free pages, and archives the original", async () => {
 		scenario = "migration";
 		harness = await ProcessHarness.start();
 		const before = await harness.connect();
@@ -80,6 +82,51 @@ describe("project storage migration through the daemon", () => {
 		const history = await before.history(sessionId);
 		await harness.terminate();
 		stageLegacyStore(harness);
+		const bloated = new Database(legacyDb(harness));
+		try {
+			const delta = bloated
+				.prepare<
+					[string],
+					{ data: string; project_id: string; created_at: number }
+				>(
+					`SELECT data, project_id, created_at FROM events
+					WHERE session_id = ? AND type = 'text.delta' ORDER BY sequence LIMIT 1`,
+				)
+				.get(sessionId);
+			const latest = bloated
+				.prepare<[string], { version: number }>(
+					"SELECT MAX(stream_version) AS version FROM events WHERE session_id = ?",
+				)
+				.get(sessionId);
+			if (!delta || !latest) throw new Error("Missing legacy text fixture");
+			const deltaData: Record<string, unknown> = JSON.parse(delta.data);
+			const data = JSON.stringify({
+				...deltaData,
+				text: "",
+				padding: "x".repeat(8192),
+			});
+			bloated.transaction(() => {
+				bloated.exec(
+					"DELETE FROM effect_sql_migrations WHERE migration_id = 58",
+				);
+				const insert = bloated.prepare(`INSERT INTO events
+					(event_id, session_id, stream_version, type, data, created_at, project_id, provider)
+					VALUES (?, ?, ?, 'text.delta', ?, ?, ?, 'claude')`);
+				for (let index = 0; index < 80; index++) {
+					insert.run(
+						`reclaim-fixture-${index}`,
+						sessionId,
+						latest.version + index + 1,
+						data,
+						delta.created_at,
+						delta.project_id,
+					);
+				}
+			})();
+		} finally {
+			bloated.close();
+		}
+		const beforeBytes = statSync(legacyDb(harness)).size;
 		// Write the project the way a pre-folders daemon did: directory, no folders.
 		const configFile = join(harness.configDir, "daemon.json");
 		const config: { projects: { folders: string[] }[] } = JSON.parse(
@@ -121,6 +168,29 @@ describe("project storage migration through the daemon", () => {
 			/Migrated project history[\s\S]*?process-test/g,
 		);
 		expect(migrationLog).toHaveLength(1);
+		expect(harness.logTail).toContain("Reclaimed event store space");
+		const afterBytes = statSync(storageDb(harness)).size;
+		expect(afterBytes).toBeLessThan(beforeBytes);
+		const compacted = new Database(storageDb(harness), { readonly: true });
+		try {
+			expect(compacted.pragma("quick_check", { simple: true })).toBe("ok");
+			expect(
+				compacted
+					.prepare<[], { count: number }>(
+						"SELECT COUNT(*) AS count FROM events WHERE event_id LIKE 'reclaim-fixture-%'",
+					)
+					.get()?.count,
+			).toBe(1);
+			expect(
+				compacted
+					.prepare<[], { event_id: string }>(
+						"SELECT event_id FROM events WHERE event_id LIKE 'reclaim-fixture-%'",
+					)
+					.get()?.event_id,
+			).toBe("reclaim-fixture-79");
+		} finally {
+			compacted.close();
+		}
 		evidence = {
 			sessionId,
 			history,
@@ -128,6 +198,10 @@ describe("project storage migration through the daemon", () => {
 			owner: harness.projectDir,
 			migratedProjects,
 			migrationLog,
+			beforeBytes,
+			afterBytes,
+			quickCheck: "ok",
+			redundantEventsRemoved: 79,
 		};
 	}, 60_000);
 
@@ -170,9 +244,9 @@ describe("project storage migration through the daemon", () => {
 		});
 		const before = await harness.connect();
 		const sessionId = await before.createSession("Runner migration");
-		const pending = before
-			.send(sessionId, "migration-replay")
-			.catch(() => undefined);
+		// The restart fixture lets IPC disconnect settle between chunk marks.
+		const prompt = "restart-migration-replay";
+		const pending = before.send(sessionId, prompt).catch(() => undefined);
 		await before.waitFor(
 			(message) =>
 				message["type"] === "transcript_message" &&
@@ -184,21 +258,44 @@ describe("project storage migration through the daemon", () => {
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing preserved runner");
+		const pendingStore = new Database(storageDb(harness), { readonly: true });
+		try {
+			expect(
+				pendingStore
+					.prepare<[string], { status: string }>(
+						"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+					)
+					.all(sessionId)
+					.map((command) => command.status),
+			).toEqual(["running"]);
+		} finally {
+			pendingStore.close();
+		}
 		await harness.kill();
 		await pending;
+		await vi.waitFor(() =>
+			expect(statSync(`${runner.socketPath}.spool`).size).toBeGreaterThan(0),
+		);
+		const spooledBytes = statSync(`${runner.socketPath}.spool`).size;
 		stageLegacyStore(harness);
+		evidence = { sessionId, preservedRunnerPid: runner.pid, spooledBytes };
 
 		await harness.restart();
 		const after = await harness.connect(sessionId);
 		await vi.waitFor(
 			async () => {
 				const history = await after.history(sessionId);
+				evidence = {
+					...evidence,
+					history,
+					daemonLog: harness?.logTail,
+				};
 				expect(history.map((message) => message.role)).toEqual([
 					"user",
 					"assistant",
 				]);
 				expect(history[1]?.parts?.map((part) => part.text ?? "").join("")).toBe(
-					responseChunks("migration-replay").join(""),
+					responseChunks(prompt).join(""),
 				);
 			},
 			{ timeout: 15_000 },
@@ -208,7 +305,7 @@ describe("project storage migration through the daemon", () => {
 		).toMatchObject({ pid: runner.pid });
 		expect(existsSync(storageDb(harness))).toBe(true);
 		expect(existsSync(`${legacyDb(harness)}.migrated`)).toBe(true);
-		evidence = { sessionId, preservedRunnerPid: runner.pid, migrated: true };
+		evidence = { ...evidence, migrated: true };
 	}, 60_000);
 
 	it("keeps removed history and reuses it when the same folder returns", async () => {

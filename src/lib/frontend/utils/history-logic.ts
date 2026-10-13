@@ -25,6 +25,22 @@ import { createToolMessage } from "./tool-message-factory.js";
 // Re-export types for convenience
 export type { HistoryMessage, Turn };
 
+/** Only immutable parts are cached; message facts can change around them. */
+export interface HistoryConversionCache {
+	parts: WeakMap<
+		HistoryMessagePart,
+		{
+			messageId: string | undefined;
+			createdAt: number | undefined;
+			settled: boolean;
+			isReply: boolean;
+			messageOrder: ChatMessage["messageOrder"];
+			messages: ChatMessage[];
+		}
+	>;
+	messageOrders: ReadonlyMap<string, NonNullable<ChatMessage["messageOrder"]>>;
+}
+
 /**
  * Group a flat list of messages into user+assistant turn pairs.
  * Messages are expected in chronological order (oldest first).
@@ -157,15 +173,31 @@ function convertAssistantParts(
 	createdAt?: number,
 	uuidFor?: (messageId: string, partId: string) => string,
 	completed = true,
+	messageOrder?: ChatMessage["messageOrder"],
+	cache?: HistoryConversionCache,
 ): ChatMessage[] {
 	const result: ChatMessage[] = [];
 	// One fork point per message, on the text the transcript shows as the reply.
 	const replyPart = parts.filter((p) => p.type === "text" && p.text).at(-1);
 
 	for (const [index, part] of parts.entries()) {
+		const settled = completed || index < parts.length - 1;
+		const isReply = part === replyPart;
+		const cached = cache?.parts.get(part);
+		if (
+			cached &&
+			cached.messageId === messageId &&
+			cached.createdAt === createdAt &&
+			cached.settled === settled &&
+			cached.isReply === isReply &&
+			cached.messageOrder === messageOrder
+		) {
+			result.push(...cached.messages);
+			continue;
+		}
+		const first = result.length;
 		const uuid =
 			messageId && uuidFor ? uuidFor(messageId, part.id) : generateUuid();
-		const settled = completed || index < parts.length - 1;
 		// A turn's parts all live under one message, so the message stamp would
 		// make every step 0ms. Use the part's own stamp when the store has one.
 		const partCreatedAt = part.time?.start ?? createdAt;
@@ -176,7 +208,12 @@ function convertAssistantParts(
 				if (!rawText) break;
 				// Prefer server-pre-rendered HTML; fall back to client-side rendering
 				const html =
-					part.renderedHtml ?? (renderHtml ? renderHtml(rawText) : rawText);
+					part.renderedHtml ??
+					(cached?.messages[0]?.type === "assistant"
+						? cached.messages[0].html
+						: renderHtml
+							? renderHtml(rawText)
+							: rawText);
 				result.push({
 					type: "assistant",
 					uuid,
@@ -312,6 +349,19 @@ function convertAssistantParts(
 				// add a case above — don't let it fall through to here.
 				break;
 		}
+		for (let i = first; i < result.length; i++) {
+			const item = result[i];
+			if (item && messageOrder !== undefined)
+				result[i] = { ...item, messageOrder };
+		}
+		cache?.parts.set(part, {
+			messageId,
+			createdAt,
+			settled,
+			isReply,
+			messageOrder,
+			messages: result.slice(first),
+		});
 	}
 
 	return result;
@@ -333,9 +383,18 @@ export function historyToChatMessages(
 	renderHtml?: (text: string) => string,
 	turnContext: readonly HistoryMessage[] = messages,
 	uuidFor?: (messageId: string, partId: string) => string,
+	cache?: HistoryConversionCache,
 ): ChatMessage[] {
 	return messages.flatMap((msg) => {
 		const result: ChatMessage[] = [];
+		const createdAt = msg.time?.created;
+		const previousOrder = cache?.messageOrders.get(msg.id);
+		const messageOrder =
+			createdAt === undefined
+				? undefined
+				: previousOrder?.createdAt === createdAt
+					? previousOrder
+					: { createdAt, id: msg.id };
 		if (msg.role === "user") {
 			// User messages: extract text from parts
 			const text =
@@ -366,6 +425,8 @@ export function historyToChatMessages(
 						msg.time?.created,
 						uuidFor,
 						!uuidFor || msg.time?.completed !== undefined,
+						messageOrder,
+						cache,
 					),
 				);
 			}
@@ -422,12 +483,10 @@ export function historyToChatMessages(
 				} satisfies ResultMessage);
 			}
 		}
-		const createdAt = msg.time?.created;
-		return createdAt === undefined
+		return messageOrder === undefined
 			? result
-			: result.map((part) => ({
-					...part,
-					messageOrder: { createdAt, id: msg.id },
-				}));
+			: result.map((part) =>
+					part.messageOrder === messageOrder ? part : { ...part, messageOrder },
+				);
 	});
 }

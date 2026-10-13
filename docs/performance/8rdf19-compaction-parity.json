@@ -1,0 +1,815 @@
+{
+	"ticket": "conduit-test-8rdf.19",
+	"passed": true,
+	"measuredAt": "2026-10-13T16:04:56.964Z",
+	"command": [
+		"node",
+		"--import",
+		"tsx",
+		"scripts/verify-event-compaction.ts",
+		"--source",
+		"/tmp/perf-store/events.db",
+		"--output",
+		"docs/performance/8rdf19-compaction-parity.json"
+	],
+	"migration": {
+		"file": "0057_compact_redundant_events.sql",
+		"key": 58,
+		"sha256": "31851d8038679c54ec637d7e952976e5f494792e4f795c1aaf298af96926969a"
+	},
+	"source": {
+		"filename": "/private/tmp/perf-store/events.db",
+		"beforeBytes": 5731659776,
+		"events": 4038403,
+		"removedRows": 880908,
+		"removedByType": [
+			{
+				"type": "thinking.delta",
+				"rows": 439649,
+				"json_bytes": 152558143,
+				"payload_bytes": 204876382
+			},
+			{
+				"type": "thinking.end",
+				"rows": 441259,
+				"json_bytes": 148704283,
+				"payload_bytes": 200331586
+			}
+		],
+		"sourcePredicateEvaluationDurationMs": 14532,
+		"sizeAfter": {
+			"measured": false,
+			"estimatedBytes": 5053758762,
+			"estimatedSavingsBytes": 677901014,
+			"method": "Events table dbstat bytes weighted by deleted payload bytes; event-index dbstat bytes weighted by deleted row count. Payload includes measured JSON/string bytes plus 24 bytes for three integer columns.",
+			"averageEventPayloadBytes": 630.6208013415204,
+			"averageRemovedPayloadBytes": 459.98897501214657,
+			"eventTableBytes": 2933215232,
+			"eventIndexBytes": 968192000,
+			"fullStoreCopied": false,
+			"limitation": "Estimate isolates migration 0057. It excludes activities removal by earlier migration 0055, existing intrapage slack and other VACUUM effects; no full-store after size was measured."
+		}
+	},
+	"subset": {
+		"selection": "20 heaviest sessions by event count, ties by session id",
+		"sessions": [
+			{
+				"session_id": "ses_d87c87bc61474bb080110b076ede65b9",
+				"event_count": 110778
+			},
+			{
+				"session_id": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",
+				"event_count": 96215
+			},
+			{
+				"session_id": "claude-subagent-a8ba336c5d9cfe04ca8303dc",
+				"event_count": 95831
+			},
+			{
+				"session_id": "claude-subagent-48c85a2d58c8ec8b8bd2dbfc",
+				"event_count": 90687
+			},
+			{
+				"session_id": "ses_fc663e64b41c48759097e57efbaababa",
+				"event_count": 87033
+			},
+			{
+				"session_id": "claude-subagent-22469b9e1d5045c828cf5e75",
+				"event_count": 60928
+			},
+			{
+				"session_id": "ses_c3beadecfab94552a79926254e47013e",
+				"event_count": 57780
+			},
+			{
+				"session_id": "claude-subagent-a3d72923ef062bae1a83a12b",
+				"event_count": 49459
+			},
+			{
+				"session_id": "ses_647726e1a45c4cefad035c8a35f37964",
+				"event_count": 44784
+			},
+			{
+				"session_id": "ses_787ae555547849f89f70c73e6a1f35af",
+				"event_count": 42819
+			},
+			{
+				"session_id": "claude-subagent-022cafb400c870c677c98f35",
+				"event_count": 42329
+			},
+			{
+				"session_id": "claude-subagent-a71dfea9864b7da7f31dddd4",
+				"event_count": 38652
+			},
+			{
+				"session_id": "claude-subagent-7d2ca5e87266e4eb70425546",
+				"event_count": 37131
+			},
+			{
+				"session_id": "claude-subagent-a20c8a562478a3a0231aa363",
+				"event_count": 36125
+			},
+			{
+				"session_id": "ses_6c0016b3be5d4ea9b1e68c1c0ed10bc9",
+				"event_count": 36099
+			},
+			{
+				"session_id": "claude-subagent-3dc967a4481cf9e1f3179453",
+				"event_count": 35777
+			},
+			{
+				"session_id": "claude-subagent-94ddaca325940bc876692809",
+				"event_count": 34676
+			},
+			{
+				"session_id": "ses_3a0e722b296846d1951e29d28234e905",
+				"event_count": 34424
+			},
+			{
+				"session_id": "claude-subagent-3037a65054ba7f2920f3bb24",
+				"event_count": 33815
+			},
+			{
+				"session_id": "claude-subagent-70e846b590ae6e42f5b0125d",
+				"event_count": 31223
+			}
+		],
+		"eventsBefore": 1096565,
+		"eventsAfter": 737459,
+		"subagentThinkingRows": 543631,
+		"migrationDurationMs": 6148,
+		"beforeByType": [
+			{
+				"type": "input.admitted",
+				"rows": 25,
+				"json_bytes": 8108,
+				"payload_bytes": 11283
+			},
+			{
+				"type": "input.sent",
+				"rows": 25,
+				"json_bytes": 2575,
+				"payload_bytes": 5650
+			},
+			{
+				"type": "message.created",
+				"rows": 5890,
+				"json_bytes": 1641857,
+				"payload_bytes": 2370065
+			},
+			{
+				"type": "permission.asked",
+				"rows": 1814,
+				"json_bytes": 2330692,
+				"payload_bytes": 2588267
+			},
+			{
+				"type": "permission.resolved",
+				"rows": 1814,
+				"json_bytes": 542328,
+				"payload_bytes": 810784
+			},
+			{
+				"type": "question.asked",
+				"rows": 22,
+				"json_bytes": 25258,
+				"payload_bytes": 28052
+			},
+			{
+				"type": "question.resolved",
+				"rows": 22,
+				"json_bytes": 5747,
+				"payload_bytes": 8607
+			},
+			{
+				"type": "session.compaction",
+				"rows": 448,
+				"json_bytes": 127492,
+				"payload_bytes": 186180
+			},
+			{
+				"type": "session.context_window_changed",
+				"rows": 12,
+				"json_bytes": 1084,
+				"payload_bytes": 2840
+			},
+			{
+				"type": "session.created",
+				"rows": 380,
+				"json_bytes": 39079,
+				"payload_bytes": 88199
+			},
+			{
+				"type": "session.goal_changed",
+				"rows": 65,
+				"json_bytes": 64556,
+				"payload_bytes": 73201
+			},
+			{
+				"type": "session.model_changed",
+				"rows": 12,
+				"json_bytes": 1340,
+				"payload_bytes": 2988
+			},
+			{
+				"type": "session.permission_mode_changed",
+				"rows": 164,
+				"json_bytes": 26198,
+				"payload_bytes": 49906
+			},
+			{
+				"type": "session.pinned",
+				"rows": 4,
+				"json_bytes": 280,
+				"payload_bytes": 788
+			},
+			{
+				"type": "session.read",
+				"rows": 410,
+				"json_bytes": 28700,
+				"payload_bytes": 79950
+			},
+			{
+				"type": "session.renamed",
+				"rows": 13,
+				"json_bytes": 1527,
+				"payload_bytes": 3191
+			},
+			{
+				"type": "session.resume_cancelled",
+				"rows": 3,
+				"json_bytes": 12,
+				"payload_bytes": 423
+			},
+			{
+				"type": "session.resume_scheduled",
+				"rows": 4,
+				"json_bytes": 187,
+				"payload_bytes": 735
+			},
+			{
+				"type": "session.settled",
+				"rows": 7,
+				"json_bytes": 615,
+				"payload_bytes": 1511
+			},
+			{
+				"type": "session.snoozed",
+				"rows": 3,
+				"json_bytes": 276,
+				"payload_bytes": 660
+			},
+			{
+				"type": "session.status",
+				"rows": 37961,
+				"json_bytes": 7249181,
+				"payload_bytes": 12070290
+			},
+			{
+				"type": "session.unpinned",
+				"rows": 4,
+				"json_bytes": 280,
+				"payload_bytes": 796
+			},
+			{
+				"type": "session.unread",
+				"rows": 12,
+				"json_bytes": 840,
+				"payload_bytes": 2364
+			},
+			{
+				"type": "session.unsnoozed",
+				"rows": 3,
+				"json_bytes": 210,
+				"payload_bytes": 600
+			},
+			{
+				"type": "session.usage_limited",
+				"rows": 2,
+				"json_bytes": 510,
+				"payload_bytes": 778
+			},
+			{
+				"type": "session.variant_changed",
+				"rows": 13,
+				"json_bytes": 1148,
+				"payload_bytes": 2958
+			},
+			{
+				"type": "session.workspace_hint_changed",
+				"rows": 52,
+				"json_bytes": 6451,
+				"payload_bytes": 14667
+			},
+			{
+				"type": "session.workspace_started",
+				"rows": 5,
+				"json_bytes": 1095,
+				"payload_bytes": 1785
+			},
+			{
+				"type": "text.delta",
+				"rows": 208436,
+				"json_bytes": 61760205,
+				"payload_bytes": 87395185
+			},
+			{
+				"type": "thinking.delta",
+				"rows": 271282,
+				"json_bytes": 94134854,
+				"payload_bytes": 126417412
+			},
+			{
+				"type": "thinking.end",
+				"rows": 294200,
+				"json_bytes": 98872746,
+				"payload_bytes": 133477490
+			},
+			{
+				"type": "thinking.start",
+				"rows": 23595,
+				"json_bytes": 7683931,
+				"payload_bytes": 10671960
+			},
+			{
+				"type": "tool.completed",
+				"rows": 57260,
+				"json_bytes": 152300313,
+				"payload_bytes": 159414661
+			},
+			{
+				"type": "tool.running",
+				"rows": 131735,
+				"json_bytes": 65061716,
+				"payload_bytes": 81528591
+			},
+			{
+				"type": "tool.started",
+				"rows": 56500,
+				"json_bytes": 54962299,
+				"payload_bytes": 61873416
+			},
+			{
+				"type": "turn.completed",
+				"rows": 2090,
+				"json_bytes": 752547,
+				"payload_bytes": 1017977
+			},
+			{
+				"type": "turn.error",
+				"rows": 63,
+				"json_bytes": 21313,
+				"payload_bytes": 29066
+			},
+			{
+				"type": "turn.interrupted",
+				"rows": 26,
+				"json_bytes": 5990,
+				"payload_bytes": 9344
+			},
+			{
+				"type": "turn.model_resolved",
+				"rows": 2189,
+				"json_bytes": 485019,
+				"payload_bytes": 773967
+			}
+		],
+		"afterByType": [
+			{
+				"type": "input.admitted",
+				"rows": 25,
+				"json_bytes": 8108,
+				"payload_bytes": 11283
+			},
+			{
+				"type": "input.sent",
+				"rows": 25,
+				"json_bytes": 2575,
+				"payload_bytes": 5650
+			},
+			{
+				"type": "message.created",
+				"rows": 5890,
+				"json_bytes": 1641857,
+				"payload_bytes": 2370065
+			},
+			{
+				"type": "permission.asked",
+				"rows": 1814,
+				"json_bytes": 2330692,
+				"payload_bytes": 2588267
+			},
+			{
+				"type": "permission.resolved",
+				"rows": 1814,
+				"json_bytes": 542328,
+				"payload_bytes": 810784
+			},
+			{
+				"type": "question.asked",
+				"rows": 22,
+				"json_bytes": 25258,
+				"payload_bytes": 28052
+			},
+			{
+				"type": "question.resolved",
+				"rows": 22,
+				"json_bytes": 5747,
+				"payload_bytes": 8607
+			},
+			{
+				"type": "session.compaction",
+				"rows": 448,
+				"json_bytes": 127492,
+				"payload_bytes": 186180
+			},
+			{
+				"type": "session.context_window_changed",
+				"rows": 12,
+				"json_bytes": 1084,
+				"payload_bytes": 2840
+			},
+			{
+				"type": "session.created",
+				"rows": 380,
+				"json_bytes": 39079,
+				"payload_bytes": 88199
+			},
+			{
+				"type": "session.goal_changed",
+				"rows": 65,
+				"json_bytes": 64556,
+				"payload_bytes": 73201
+			},
+			{
+				"type": "session.model_changed",
+				"rows": 12,
+				"json_bytes": 1340,
+				"payload_bytes": 2988
+			},
+			{
+				"type": "session.permission_mode_changed",
+				"rows": 164,
+				"json_bytes": 26198,
+				"payload_bytes": 49906
+			},
+			{
+				"type": "session.pinned",
+				"rows": 4,
+				"json_bytes": 280,
+				"payload_bytes": 788
+			},
+			{
+				"type": "session.read",
+				"rows": 410,
+				"json_bytes": 28700,
+				"payload_bytes": 79950
+			},
+			{
+				"type": "session.renamed",
+				"rows": 13,
+				"json_bytes": 1527,
+				"payload_bytes": 3191
+			},
+			{
+				"type": "session.resume_cancelled",
+				"rows": 3,
+				"json_bytes": 12,
+				"payload_bytes": 423
+			},
+			{
+				"type": "session.resume_scheduled",
+				"rows": 4,
+				"json_bytes": 187,
+				"payload_bytes": 735
+			},
+			{
+				"type": "session.settled",
+				"rows": 7,
+				"json_bytes": 615,
+				"payload_bytes": 1511
+			},
+			{
+				"type": "session.snoozed",
+				"rows": 3,
+				"json_bytes": 276,
+				"payload_bytes": 660
+			},
+			{
+				"type": "session.status",
+				"rows": 37961,
+				"json_bytes": 7249181,
+				"payload_bytes": 12070290
+			},
+			{
+				"type": "session.unpinned",
+				"rows": 4,
+				"json_bytes": 280,
+				"payload_bytes": 796
+			},
+			{
+				"type": "session.unread",
+				"rows": 12,
+				"json_bytes": 840,
+				"payload_bytes": 2364
+			},
+			{
+				"type": "session.unsnoozed",
+				"rows": 3,
+				"json_bytes": 210,
+				"payload_bytes": 600
+			},
+			{
+				"type": "session.usage_limited",
+				"rows": 2,
+				"json_bytes": 510,
+				"payload_bytes": 778
+			},
+			{
+				"type": "session.variant_changed",
+				"rows": 13,
+				"json_bytes": 1148,
+				"payload_bytes": 2958
+			},
+			{
+				"type": "session.workspace_hint_changed",
+				"rows": 52,
+				"json_bytes": 6451,
+				"payload_bytes": 14667
+			},
+			{
+				"type": "session.workspace_started",
+				"rows": 5,
+				"json_bytes": 1095,
+				"payload_bytes": 1785
+			},
+			{
+				"type": "text.delta",
+				"rows": 208436,
+				"json_bytes": 61760205,
+				"payload_bytes": 87395185
+			},
+			{
+				"type": "thinking.delta",
+				"rows": 91417,
+				"json_bytes": 31721699,
+				"payload_bytes": 42600322
+			},
+			{
+				"type": "thinking.end",
+				"rows": 114959,
+				"json_bytes": 38468529,
+				"payload_bytes": 52102076
+			},
+			{
+				"type": "thinking.start",
+				"rows": 23595,
+				"json_bytes": 7683931,
+				"payload_bytes": 10671960
+			},
+			{
+				"type": "tool.completed",
+				"rows": 57260,
+				"json_bytes": 152300313,
+				"payload_bytes": 159414661
+			},
+			{
+				"type": "tool.running",
+				"rows": 131735,
+				"json_bytes": 65061716,
+				"payload_bytes": 81528591
+			},
+			{
+				"type": "tool.started",
+				"rows": 56500,
+				"json_bytes": 54962299,
+				"payload_bytes": 61873416
+			},
+			{
+				"type": "turn.completed",
+				"rows": 2090,
+				"json_bytes": 752547,
+				"payload_bytes": 1017977
+			},
+			{
+				"type": "turn.error",
+				"rows": 63,
+				"json_bytes": 21313,
+				"payload_bytes": 29066
+			},
+			{
+				"type": "turn.interrupted",
+				"rows": 26,
+				"json_bytes": 5990,
+				"payload_bytes": 9344
+			},
+			{
+				"type": "turn.model_resolved",
+				"rows": 2189,
+				"json_bytes": 485019,
+				"payload_bytes": 773967
+			}
+		],
+		"beforeBytes": 1040048128,
+		"afterLogicalBytes": 1040048128,
+		"afterPhysicalBytes": 746782720,
+		"quickCheck": "ok",
+		"limitation": "Only the selected sessions' events are replayed. Unselected events can add global boundaries or historical cascades in the full store; its deletion predicate is more conservative than this isolated extract. No full-store replay was performed."
+	},
+	"projection": {
+		"comparedTables": [
+			"sessions",
+			"messages",
+			"message_parts",
+			"turns",
+			"session_providers",
+			"pending_approvals",
+			"pending_inputs",
+			"session_goal_checks",
+			"message_tombstones",
+			"message_part_tombstones",
+			"session_sidebar"
+		],
+		"scopeSources": [
+			"src/lib/persistence/effect/projectors-effect.ts:createAllEffectProjectors",
+			"src/lib/persistence/effect/sidebar-projection.ts:refreshSidebar"
+		],
+		"rowCounts": {
+			"sessions": {
+				"before": 20,
+				"after": 20
+			},
+			"messages": {
+				"before": 6189,
+				"after": 6189
+			},
+			"message_parts": {
+				"before": 72237,
+				"after": 72237
+			},
+			"turns": {
+				"before": 579,
+				"after": 579
+			},
+			"session_providers": {
+				"before": 20,
+				"after": 20
+			},
+			"pending_approvals": {
+				"before": 1836,
+				"after": 1836
+			},
+			"pending_inputs": {
+				"before": 25,
+				"after": 25
+			},
+			"session_goal_checks": {
+				"before": 27,
+				"after": 27
+			},
+			"message_tombstones": {
+				"before": 0,
+				"after": 0
+			},
+			"message_part_tombstones": {
+				"before": 0,
+				"after": 0
+			},
+			"session_sidebar": {
+				"before": 8,
+				"after": 8
+			}
+		},
+		"before": {
+			"projectId": "compaction-parity",
+			"startCursor": 0,
+			"endCursor": 4049856,
+			"totalReplayed": 1403868,
+			"durationMs": 331343
+		},
+		"after": {
+			"projectId": "compaction-parity",
+			"startCursor": 0,
+			"endCursor": 4049856,
+			"totalReplayed": 1044762,
+			"durationMs": 275483
+		},
+		"failures": 0,
+		"ignoredFields": ["version", "session_sidebar.row.version"],
+		"serializedVersionReason": "SidebarRowSchema declares a top-level read-model version (sidebar-row.ts:9-11), serialized by refreshSidebar (sidebar-projection.ts:100-105). Only that property is excluded; every other JSON value is compared exactly.",
+		"comparison": "Exact equality for every column except version and session_sidebar.row.version",
+		"differenceCount": 0,
+		"unexpectedCounts": {},
+		"unexpected": []
+	},
+	"resume": {
+		"persistedInputRowsUnchanged": {
+			"sessions": 20,
+			"provider_state": 29,
+			"session_providers": 20,
+			"claude_runner_cursors": 7230
+		},
+		"historyMessages": 6189,
+		"historyParts": 72237,
+		"renderedHistoryEqual": true,
+		"renderedHistoryComparison": "Exact deep equality, including thinking time.end; no timestamp normalization",
+		"restartReplayedBefore": 0,
+		"restartReplayedAfter": 0,
+		"nextStreamVersion": "Production getNextStreamVersion matched MAX(stream_version)+1 for all 20 sessions on both stores",
+		"limitation": "Offline parity of persisted resume inputs and production history rendering. No live provider resumed; producer re-emission after losing in-memory offsets remains possible."
+	},
+	"readerAudit": [
+		{
+			"column": "messages.last_applied_seq",
+			"decision": "Preserve exactly",
+			"readers": [
+				"src/lib/persistence/effect/projectors-effect.ts:686",
+				"src/lib/persistence/effect/projectors-effect.ts:741",
+				"src/lib/persistence/effect/read-query-effect.ts:1367",
+				"src/lib/persistence/effect/read-query-effect.ts:1645",
+				"src/lib/persistence/effect/read-query-effect.ts:1688",
+				"src/lib/persistence/effect/read-query-effect.ts:2097"
+			],
+			"reason": "Text and thinking replay guards compare event.sequence with this checkpoint. Raw message queries also retain it through SELECT *. Preserve terminal deltas so deletion cannot change replay decisions or raw rows. Paging and sync use created_at/id and version cursors, which do not make checkpoint differences safe."
+		},
+		{
+			"column": "messages.updated_at",
+			"decision": "Preserve exactly",
+			"readers": [
+				"src/lib/persistence/effect/projectors-effect.ts:1131",
+				"src/lib/persistence/effect/read-query-effect.ts:1367",
+				"src/lib/persistence/effect/read-query-effect.ts:1645",
+				"src/lib/persistence/effect/read-query-effect.ts:1688",
+				"src/lib/persistence/effect/read-query-effect.ts:2097",
+				"src/lib/persistence/session-history-adapter.ts:337",
+				"src/lib/persistence/session-history-adapter.ts:429",
+				"src/lib/domain/relay/Services/session-detail-subscription.ts:270",
+				"src/lib/frontend/utils/history-logic.ts:421"
+			],
+			"reason": "Snapshot projection aggregates MAX(messages.updated_at) into turn.completed_at. History emits updated_at as message.time.completed when completed_at is null; cold, live, paged and resumed browser history exposes it, including result timestamps. Preserve terminal stamps before destructive boundaries so both intermediate turn aggregates and exact rendered history remain unchanged."
+		}
+	],
+	"disk": {
+		"minimumFreeBytes": 8589934592,
+		"minimumObservedFreeBytes": 13574197248,
+		"checks": [
+			{
+				"phase": "create fresh schema",
+				"availableBytes": 15786467328,
+				"budgetBytes": 16777216
+			},
+			{
+				"phase": "extract heaviest sessions",
+				"availableBytes": 15786033152,
+				"budgetBytes": 1377017758
+			},
+			{
+				"phase": "copy subset",
+				"availableBytes": 14747414528,
+				"budgetBytes": 1040048128
+			},
+			{
+				"phase": "logical migration",
+				"availableBytes": 13698211840,
+				"budgetBytes": 2080096256
+			},
+			{
+				"phase": "physical subset rewrite",
+				"availableBytes": 13698113536,
+				"budgetBytes": 2080096256
+			},
+			{
+				"phase": "replay both fresh read models",
+				"availableBytes": 14000009216,
+				"budgetBytes": 4160192512
+			}
+		],
+		"fullCopies": 0,
+		"temporaryDatabasesRemoved": true
+	},
+	"differences": [],
+	"independentConsumers": [
+		{
+			"behavior": "Transcript ordering and paging",
+			"sources": [
+				"src/lib/persistence/effect/read-query-effect.ts:1569",
+				"src/lib/persistence/effect/read-query-effect.ts:1606",
+				"src/lib/persistence/effect/read-query-effect.ts:1715"
+			],
+			"reason": "Ordering and page cursors use created_at and id; unchanged cursors alone do not establish message timestamp or replay-checkpoint parity."
+		},
+		{
+			"behavior": "Version sync",
+			"sources": ["src/lib/persistence/effect/read-query-effect.ts:2183"],
+			"reason": "Catch-up uses version and row ids rather than either message bookkeeping column; timestamp differences can still change the emitted payload."
+		},
+		{
+			"behavior": "Native Claude thread output",
+			"sources": [
+				"src/lib/provider/claude/claude-thread-read.ts:27",
+				"src/lib/provider/claude/claude-thread-read.ts:56"
+			],
+			"reason": "Thread output selects message ids, roles, text and interrupted state; it does not consume either bookkeeping column."
+		}
+	]
+}

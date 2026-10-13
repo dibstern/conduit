@@ -1,5 +1,4 @@
-// Asserts EMPTY_STATE mutations throw; EMPTY_MESSAGES.toolRegistry method
-// calls throw (methods stubbed with throwing stubs).
+// Asserts empty sentinel mutations throw.
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -76,54 +75,6 @@ describe("EMPTY_MESSAGES", () => {
 		expect(EMPTY_MESSAGES.loadLifecycle).toBe("empty");
 		expect(EMPTY_MESSAGES.contextPercent).toBe(0);
 	});
-
-	it("toolRegistry.start throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.start("id", "name")).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
-
-	it("toolRegistry.executing throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.executing("id")).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
-
-	it("toolRegistry.complete throws", () => {
-		expect(() =>
-			EMPTY_MESSAGES.toolRegistry.complete("id", "content", false),
-		).toThrow("EMPTY_MESSAGES.toolRegistry is read-only");
-	});
-
-	it("toolRegistry.finalizeAll throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.finalizeAll([])).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
-
-	it("toolRegistry.clear throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.clear()).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
-
-	it("toolRegistry.remove throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.remove("id")).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
-
-	it("toolRegistry.getUuid throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.getUuid("id")).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
-
-	it("toolRegistry.seedFromHistory throws", () => {
-		expect(() => EMPTY_MESSAGES.toolRegistry.seedFromHistory([])).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
-	});
 });
 
 describe("EMPTY_STATE (composeChatState-wrapped)", () => {
@@ -156,13 +107,6 @@ describe("EMPTY_STATE (composeChatState-wrapped)", () => {
 		const keys = Object.keys(EMPTY_STATE);
 		expect(keys).toContain("phase");
 		expect(keys).toContain("messages");
-		expect(keys).toContain("toolRegistry");
 		expect(keys.length).toBeGreaterThan(0);
-	});
-
-	it("toolRegistry methods from EMPTY_STATE throw", () => {
-		expect(() => EMPTY_STATE.toolRegistry.start("id", "name")).toThrow(
-			"EMPTY_MESSAGES.toolRegistry is read-only",
-		);
 	});
 });

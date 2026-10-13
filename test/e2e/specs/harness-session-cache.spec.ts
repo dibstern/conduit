@@ -229,6 +229,31 @@ test("a session opened from its saved page ends where a cold open does", async (
 
 	const openTab = async (init?: () => void): Promise<Tab> => {
 		const context = await browser.newContext({ viewport });
+		await context.addInitScript(() => {
+			const timing: {
+				feedRequestMs?: number;
+				savedReadStartedMs?: number;
+				savedReadFinishedMs?: number;
+			} = {};
+			Reflect.set(window, "sessionCacheTiming", timing);
+			const send = WebSocket.prototype.send;
+			WebSocket.prototype.send = function (data) {
+				if (typeof data === "string" && data.includes("SubscribeSessionDetail"))
+					timing.feedRequestMs ??= performance.now();
+				return send.call(this, data);
+			};
+			const get = IDBObjectStore.prototype.get;
+			IDBObjectStore.prototype.get = function (key) {
+				const request = get.call(this, key);
+				if (this.name === "transcripts") {
+					timing.savedReadStartedMs ??= performance.now();
+					request.addEventListener("success", () => {
+						timing.savedReadFinishedMs ??= performance.now();
+					});
+				}
+				return request;
+			};
+		});
 		if (init) await context.addInitScript(init);
 		const tab: Tab = {
 			context,
@@ -424,6 +449,14 @@ test("a session opened from its saved page ends where a cold open does", async (
 			const requests = detailRequests(tab.sent.slice(sentFrom));
 			return {
 				sessionId,
+				timing: await page.evaluate(
+					() =>
+						Reflect.get(window, "sessionCacheTiming") as {
+							feedRequestMs?: number;
+							savedReadStartedMs?: number;
+							savedReadFinishedMs?: number;
+						},
+				),
 				cached: await transcriptOf(page),
 				cold,
 				verdicts: {
@@ -451,6 +484,11 @@ test("a session opened from its saved page ends where a cold open does", async (
 
 	interface Result {
 		readonly sessionId: string;
+		readonly timing?: {
+			feedRequestMs?: number;
+			savedReadStartedMs?: number;
+			savedReadFinishedMs?: number;
+		};
 		readonly cached: string;
 		readonly cold: string | undefined;
 		readonly verdicts: Readonly<Record<string, unknown>>;
@@ -829,7 +867,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 		await run(name, visit(blocked, SESSION, shown), { ...clean, ...cold });
 	await blocked.context.close();
 
-	// IndexedDB never answers the app's open (it names version 1; this test's
+	// IndexedDB never answers the app's open (it names version 2; this test's
 	// own reads name none and still answer): the read gives up, and the
 	// session opens cold.
 	const hung = await openTab(() => {
@@ -838,7 +876,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 			this: IDBFactory,
 			...args: Parameters<IDBFactory["open"]>
 		) {
-			return args[1] === 1
+			return args[1] === 2
 				? Object.create(IDBOpenDBRequest.prototype)
 				: open.apply(this, args);
 		};
@@ -907,6 +945,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 		scenarios: scenarios.map(({ name, result, expected }) => ({
 			name,
 			sessionId: result.sessionId,
+			timing: result.timing,
 			cached: result.cached,
 			cold: result.cold,
 			verdicts: result.verdicts,

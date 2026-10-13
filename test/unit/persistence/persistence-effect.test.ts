@@ -1,6 +1,7 @@
 // test/unit/persistence/persistence-effect.test.ts
 
-import { mkdtempSync, rmSync } from "node:fs";
+import fs, { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -8,13 +9,14 @@ import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
 import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
 import { Effect, Layer, Logger } from "effect";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import {
 	makePersistenceServiceLive,
 	PersistenceProjectTag,
 	PersistenceServiceTag,
 	withTransaction,
 } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	LEGACY_SKELETON_CUTOFF_MS,
 	MAX_PURGEABLE_SKELETON_SESSIONS,
@@ -320,6 +322,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 55, name: "events_session_type_index" },
 				{ migration_id: 56, name: "drop_activities" },
 				{ migration_id: 57, name: "session_pick_backfill" },
+				{ migration_id: 58, name: "compact_redundant_events" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -535,12 +538,123 @@ describe("Persistence Effect", () => {
 		}),
 	);
 
-	it.effect("healthCheck returns true", () =>
-		Effect.gen(function* () {
-			const persistence = yield* PersistenceServiceTag;
-			const healthy = yield* persistence.healthCheck;
-			expect(healthy).toBe(true);
-		}).pipe(Effect.provide(makePersistenceLayer())),
+	it.scoped.each(["reclaim", "below threshold", "low disk", "rename failure"])(
+		"file-backed startup stays healthy after %s",
+		(scenario) => {
+			const messages: string[] = [];
+			const logger = Logger.make<unknown, void>((options) => {
+				const parts = Array.isArray(options.message)
+					? options.message
+					: [options.message];
+				messages.push(parts.map(String).join(" "));
+			});
+			return Effect.gen(function* () {
+				const dir = yield* Effect.sync(() =>
+					mkdtempSync(join(tmpdir(), "conduit-startup-reclaim-")),
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => {
+						vi.restoreAllMocks();
+						syncBuiltinESMExports();
+						rmSync(dir, { recursive: true, force: true });
+					}),
+				);
+				const filename = join(dir, "events.db");
+				yield* PersistenceServiceTag.pipe(
+					Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+					Effect.asVoid,
+				);
+				let retainedRows: Record<string, unknown>[] = [];
+				seedDatabase(filename, (db) => {
+					db.exec("DELETE FROM effect_sql_migrations WHERE migration_id = 58");
+					const insert = db.prepare(
+						`INSERT INTO events
+						(event_id, session_id, stream_version, type, data, created_at, project_id, provider)
+						VALUES (?, 'startup-session', ?, ?, ?, ?, 'test-project', 'claude')`,
+					);
+					insert.run("start", 1, "thinking.start", '{"partId":"part"}', 1);
+					insert.run("end", 2, "thinking.end", '{"partId":"part"}', 2);
+					retainedRows = db
+						.prepare<[], Record<string, unknown>>(
+							"SELECT * FROM events ORDER BY sequence",
+						)
+						.all();
+					if (scenario === "below threshold") return;
+					db.transaction(() => {
+						for (let index = 0; index < 80; index++) {
+							insert.run(
+								`redundant-${index}`,
+								index + 3,
+								"thinking.end",
+								JSON.stringify({ partId: "part", padding: "x".repeat(8192) }),
+								index + 3,
+							);
+						}
+					})();
+					retainedRows = db
+						.prepare<[], Record<string, unknown>>(
+							`SELECT * FROM events
+							WHERE event_id IN ('start', 'end', 'redundant-79')
+							ORDER BY sequence`,
+						)
+						.all();
+				});
+				const beforeBytes = statSync(filename).size;
+				const disk = vi.spyOn(fs, "statfsSync");
+				if (scenario === "low disk") {
+					disk.mockImplementation(() => ({
+						type: 0,
+						bsize: 4096,
+						frsize: 4096,
+						blocks: 0,
+						bfree: 0,
+						bavail: 0,
+						files: 0,
+						ffree: 0,
+					}));
+				}
+				if (scenario === "rename failure") {
+					vi.spyOn(fs, "renameSync").mockImplementation(() => {
+						throw new Error("promotion failed");
+					});
+				}
+				syncBuiltinESMExports();
+				yield* Effect.gen(function* () {
+					const persistence = yield* PersistenceServiceTag;
+					const sql = yield* SqlClient.SqlClient;
+					expect(yield* persistence.healthCheck).toBe(true);
+					expect(
+						yield* sql<Record<string, unknown>>`
+							SELECT * FROM events ORDER BY sequence`,
+					).toEqual(retainedRows);
+					expect(yield* sql`PRAGMA quick_check`).toEqual([
+						{ quick_check: "ok" },
+					]);
+				}).pipe(
+					Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				);
+				const afterBytes = statSync(filename).size;
+				if (scenario === "reclaim") {
+					expect(afterBytes).toBeLessThan(beforeBytes / 2);
+					expect(messages.join(" ")).toContain("Reclaimed event store space");
+				} else {
+					expect(afterBytes).toBe(beforeBytes);
+					expect(messages.join(" ")).not.toContain(
+						"Reclaimed event store space",
+					);
+				}
+				if (scenario === "below threshold") expect(disk).not.toHaveBeenCalled();
+				if (scenario === "low disk") {
+					expect(messages.join(" ")).toContain("insufficient disk");
+				}
+				if (scenario === "rename failure") {
+					expect(messages.join(" ")).toContain("keeping original");
+				}
+				expect(
+					readdirSync(dir).filter((name) => name.includes(".tmp")),
+				).toEqual([]);
+			}).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger)));
+		},
 	);
 
 	it.effect("withTransaction commits on success", () =>

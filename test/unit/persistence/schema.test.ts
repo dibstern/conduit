@@ -29,6 +29,7 @@ describe("Schema Migration", () => {
 					[55, "events_session_type_index"],
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
+					[58, "compact_redundant_events"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

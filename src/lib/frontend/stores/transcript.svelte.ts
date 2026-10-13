@@ -16,7 +16,10 @@ import type {
 	HistoryMessagePart,
 	ToolStatus,
 } from "../types.js";
-import { historyToChatMessages } from "../utils/history-logic.js";
+import {
+	type HistoryConversionCache,
+	historyToChatMessages,
+} from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
 import {
 	advanceTurnIfNewMessage,
@@ -26,7 +29,6 @@ import {
 	type PendingInput,
 	restoreContextFromMessages,
 	type SessionMessages,
-	seedRegistryFromMessages,
 	sessionMessages,
 } from "./chat.svelte.js";
 import {
@@ -44,6 +46,12 @@ export type TranscriptEntry = NonNullable<SessionMessages["transcript"]>;
 type DetailItem = Extract<SessionDetailEnvelope, { _tag: "upsert" }>["item"];
 type WireMessage = Extract<DetailItem, { _tag: "message" }>["message"];
 type WirePart = Extract<DetailItem, { _tag: "part" }>["part"];
+
+declare global {
+	/** Opt-in browser performance evidence; ordinary sessions allocate nothing. */
+	var __conduitTranscriptMarkdownRenders: Record<string, number> | undefined;
+	var __conduitMeasureTranscriptApply: boolean | undefined;
+}
 
 const FRAME_FALLBACK_DELAY_MS = 16;
 
@@ -235,8 +243,7 @@ const pendingOrder = (a: PendingInput, b: PendingInput): number =>
 
 /**
  * `parts` with `part` replacing its namesake in place while its order holds, or
- * placed by its order. Orders are kept by part id: held parts come back as
- * reactive proxies, and a part an older page brought has none and sorts first,
+ * placed by its order. A part an older page brought has none and sorts first,
  * since that page brought its message whole.
  */
 const placePart = (
@@ -367,27 +374,97 @@ const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 /** The server sends a message's header and each part as separate rows. */
 export function applyTranscriptEnvelope(
 	entry: TranscriptEntry,
-	envelope: SessionDetailEnvelope,
+	envelope:
+		| SessionDetailEnvelope
+		| Awaited<ReturnType<typeof loadMoreHistoryRpc>>,
 ): TranscriptEntry {
+	if ("messages" in envelope) {
+		// Older pages still bring whole messages. Preserve their existing
+		// precedence on overlap, and keep every other held row by identity.
+		const rows = new Map<string, HistoryMessage>();
+		for (const source of envelope.messages)
+			if (!rows.has(source.id)) rows.set(source.id, toHistoryMessage(source));
+		for (const row of entry.rows) if (!rows.has(row.id)) rows.set(row.id, row);
+		return {
+			...entry,
+			rows: [...rows.values()].sort(rowOrder),
+			hasMore: envelope.hasMore,
+		};
+	}
 	switch (envelope._tag) {
-		case "snapshot":
-			// The page is whole: no floor applies while it is laid down.
-			return {
-				...envelope.rows.reduce(withRow, {
-					...entry,
-					rows: [],
-					waiting: new Map(),
-					partOrder: new Map(),
-					hasMore: false,
-					pending: [],
-					pendingRewindMessageId: null,
-					paused: false,
-					steer: undefined,
-				}),
+		case "snapshot": {
+			const startedAt = globalThis.__conduitMeasureTranscriptApply
+				? performance.now()
+				: undefined;
+			// Build locally, then publish once. Parts may precede their header.
+			const messages = new Map<string, HistoryMessage>();
+			const parts = new Map<string, Map<string, HistoryMessagePart>>();
+			const partOrder = new Map<string, number>();
+			const pending = new Map<string, PendingInput>();
+			let next: TranscriptEntry = {
+				...entry,
+				rows: [],
+				waiting: new Map(),
+				partOrder,
+				pending: [],
+				hasMore: false,
+				pendingRewindMessageId: null,
+				paused: false,
+				steer: undefined,
+			};
+			for (const item of envelope.rows) {
+				switch (item._tag) {
+					case "message": {
+						const header = toHistoryMessage(item.message);
+						messages.set(header.id, { ...header, parts: [] });
+						break;
+					}
+					case "part": {
+						const part = toHistoryPart(item.part);
+						if (!part) break;
+						const group =
+							parts.get(item.messageId) ??
+							new Map<string, HistoryMessagePart>();
+						group.set(part.id, part);
+						parts.set(item.messageId, group);
+						partOrder.set(part.id, item.sortOrder);
+						break;
+					}
+					case "pendingInput":
+						pending.set(item.input.inputId, item.input);
+						break;
+					case "inbox":
+					case "rewind":
+						next = withRow(next, item);
+						break;
+				}
+			}
+			const waiting = new Map<string, HistoryMessagePart[]>();
+			for (const [messageId, group] of parts) {
+				const ordered = [...group.values()].sort(
+					(a, b) => (partOrder.get(a.id) ?? -1) - (partOrder.get(b.id) ?? -1),
+				);
+				const header = messages.get(messageId);
+				if (header) messages.set(messageId, { ...header, parts: ordered });
+				else waiting.set(messageId, ordered);
+			}
+			next = {
+				...next,
+				rows: [...messages.values()].sort(rowOrder),
+				waiting,
+				pending: [...pending.values()].sort(pendingOrder),
 				hwm: envelope.sequence,
 				hasMore: envelope.hasMore ?? false,
 				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
 			};
+			if (startedAt !== undefined)
+				performance.measure("conduit:transcript-apply", {
+					start: startedAt,
+					end: performance.now(),
+					detail: { partCount: partOrder.size },
+				});
+			return next;
+		}
 		case "upsert":
 			return withRow(
 				{ ...entry, hwm: Math.max(entry.hwm ?? 0, envelope.sequence) },
@@ -433,7 +510,7 @@ export function applyTranscriptEnvelope(
 	}
 }
 
-const convertedRows = new WeakMap<HistoryMessage, ChatMessage[]>();
+const convertedParts: HistoryConversionCache["parts"] = new WeakMap();
 /** What each slot's feed has applied, and where it resumes from, so its
  *  resumes are checked. Keyed by the slot, so it goes when the slot is
  *  evicted; reset with the transcript. */
@@ -491,21 +568,38 @@ function mergeSticky(
 	return reuseIfEqual(merged, previous);
 }
 
-/** Reuse unchanged row items; keep local items (errors, notices) in place. */
+/** Reuse unchanged parts; keep local items (errors, notices) in place. */
 export function deriveTranscriptMessages(
 	entry: TranscriptEntry,
 	previous: ChatMessage[],
 ): ChatMessage[] {
 	const previousByUuid = new Map(previous.map((item) => [item.uuid, item]));
+	const messageOrders = new Map<
+		string,
+		NonNullable<ChatMessage["messageOrder"]>
+	>();
+	for (const item of previous)
+		if (item.messageOrder)
+			messageOrders.set(item.messageOrder.id, item.messageOrder);
+	const cache: HistoryConversionCache = {
+		parts: convertedParts,
+		messageOrders,
+	};
 	const projected: ChatMessage[] = [];
 	for (const row of entry.rows) {
 		// A user row is created before its parts arrive; an empty bubble says nothing.
 		if (row.role === "user" && !row.parts?.length) continue;
-		let items = convertedRows.get(row);
-		if (!items) {
-			items = historyToChatMessages([row], renderMarkdown, entry.rows, uuidFor);
-			convertedRows.set(row, items);
-		}
+		const items = historyToChatMessages(
+			[row],
+			(text) => {
+				const counts = globalThis.__conduitTranscriptMarkdownRenders;
+				if (counts) counts[row.id] = (counts[row.id] ?? 0) + 1;
+				return renderMarkdown(text);
+			},
+			entry.rows,
+			uuidFor,
+			cache,
+		);
 		for (const item of items)
 			projected.push(mergeSticky(item, previousByUuid.get(item.uuid)));
 	}
@@ -594,12 +688,6 @@ function install(
 	slot.messages.loadLifecycle = "ready";
 	if (sessionState.currentId === sessionId)
 		historyState.hasMore = entry.hasMore;
-	slot.messages.toolRegistry.clear();
-	seedRegistryFromMessages(
-		slot.activity,
-		slot.messages,
-		slot.messages.messages,
-	);
 	restoreContextFromMessages(slot.messages);
 }
 
@@ -728,20 +816,42 @@ function transcriptView(): {
 				} else {
 					// The cached copy is only as current as the feed that stopped when we
 					// left; it is not live again until the new feed synchronizes.
-					slot.messages.transcript.status = { _tag: "cold" };
+					slot.messages.transcript = {
+						...slot.messages.transcript,
+						status: { _tag: "cold" },
+					};
 					install(sessionId, slot);
 				}
 			}
+			let opened: SavedSnapshot | undefined;
+			let subscribed = false;
+			let received = false;
+			void saved.then((record) => {
+				if (
+					currentGeneration !== generation ||
+					record?.project !== project ||
+					!slot ||
+					received
+				)
+					return;
+				opened = record.snapshot;
+				if (subscribed && slot.messages.transcript) {
+					// A cold request is already in flight. Draw only until its first reply.
+					slot.messages.transcript = applyTranscriptEnvelope(
+						slot.messages.transcript,
+						record.snapshot,
+					);
+					install(sessionId ?? record.sessionId, slot);
+				}
+			});
 			void stopFeed().then(async () => {
 				if (currentGeneration !== generation || !sessionId || !slot) return;
-				const [runtime, record] = await Promise.all([getRuntime(), saved]);
+				const runtime = await getRuntime();
 				if (currentGeneration !== generation) return;
 				const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
 				ledgers.set(slot.messages, ledger);
 				// Drawn first, once; a restarted feed resumes from what it applied.
-				const opened =
-					record?.project === project ? record.snapshot : undefined;
-				let unopened = opened;
+				let firstSubscription = true;
 				// The server's snapshot, saved once it synchronizes with no change
 				// between: only then is it exactly the rows at its sequence.
 				let unsaved: SavedSnapshot | undefined;
@@ -751,8 +861,9 @@ function transcriptView(): {
 							Stream.runForEach(
 								supervise(
 									Stream.suspend(() => {
-										const first = unopened;
-										unopened = undefined;
+										const first = firstSubscription ? opened : undefined;
+										firstSubscription = false;
+										subscribed = true;
 										return subscriptions.sessionDetail({
 											sessionId,
 											ledger,
@@ -765,7 +876,10 @@ function transcriptView(): {
 											currentGeneration === generation &&
 											slot.messages.transcript
 										)
-											slot.messages.transcript.status = status;
+											slot.messages.transcript = {
+												...slot.messages.transcript,
+												status,
+											};
 									},
 								),
 								(envelope) =>
@@ -775,6 +889,7 @@ function transcriptView(): {
 											!slot.messages.transcript
 										)
 											return;
+										received = true;
 										const before = slot.messages.transcript;
 										const item =
 											envelope._tag === "upsert" ? envelope.item : undefined;
@@ -798,13 +913,21 @@ function transcriptView(): {
 												)
 										)
 											refreshSessionSkills(sessionId);
-										if (envelope._tag === "synchronized" && unsaved)
-											void saveTranscript(
-												sessionId,
-												project,
-												unsaved,
-												opened?.resumePoint,
+										if (envelope._tag === "synchronized" && unsaved) {
+											const snapshot = unsaved;
+											// A restored server may be older than the saved page. Keep its
+											// CAS token even when the network won and nothing was drawn.
+											void saved.then((record) =>
+												saveTranscript(
+													sessionId,
+													project,
+													snapshot,
+													record?.project === project
+														? record.snapshot.resumePoint
+														: undefined,
+												),
 											);
+										}
 										unsaved =
 											envelope._tag === "snapshot" && envelope !== opened
 												? envelope
@@ -912,19 +1035,10 @@ export function loadOlderTranscript(sessionId: string): Promise<void> {
 				!slot.messages.transcript
 			)
 				return;
-			slot.messages.transcript = {
-				...slot.messages.transcript,
-				rows: [
-					...response.messages.map(toHistoryMessage),
-					...slot.messages.transcript.rows,
-				]
-					.filter(
-						(row, index, all) =>
-							all.findIndex((other) => other.id === row.id) === index,
-					)
-					.sort(rowOrder),
-				hasMore: response.hasMore,
-			};
+			slot.messages.transcript = applyTranscriptEnvelope(
+				slot.messages.transcript,
+				response,
+			);
 			install(sessionId, slot);
 		})
 		.finally(() => {

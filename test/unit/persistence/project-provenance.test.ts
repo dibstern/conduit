@@ -108,6 +108,7 @@ describe("Bound project provenance", () => {
 			"0055_events_session_type_index",
 			"0056_drop_activities",
 			"0057_session_pick_backfill",
+			"0058_compact_redundant_events",
 		]);
 	});
 

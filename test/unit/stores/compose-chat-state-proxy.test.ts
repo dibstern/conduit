@@ -118,7 +118,6 @@ describe("composeChatState Proxy", () => {
 			expect("messages" in state).toBe(true);
 			expect("currentAssistantText" in state).toBe(true);
 			expect("loadLifecycle" in state).toBe(true);
-			expect("toolRegistry" in state).toBe(true);
 		});
 
 		it("returns false for unknown keys", () => {

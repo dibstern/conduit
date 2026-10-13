@@ -17,6 +17,13 @@ const ALLOWED_DELETES = [
 		reason:
 			"Migration 0010 removes only pre-2026-07-15 OpenCode sessions with no messages; the 25-session limit and message FK backstop protect real conversations while clearing broken legacy skeletons.",
 	},
+	{
+		path: "src/lib/persistence/migrations/0057_compact_redundant_events.sql",
+		statement:
+			/^delete\s+from\s+events\s+where\s+sequence\s+in\s*\(\s*select\s+sequence\s+from\s+ranked_parts\b/i,
+		reason:
+			"ADR-0005 permits migration 0057 to compact later empty deltas and thinking endings, retaining part openers. Its pinned hash, migration fixture and real-store replay parity constrain this exception.",
+	},
 ];
 
 interface Source {
@@ -74,8 +81,15 @@ describe("permanent event log", () => {
 	});
 
 	it("detects mixed-case, multiline template SQL and cannot pass vacuously", () => {
+		const compactionPath = ALLOWED_DELETES[1]?.path;
+		if (!compactionPath) throw new Error("Missing compaction exception");
+		const compaction = {
+			path: compactionPath,
+			text: readFileSync(join(REPO_ROOT, compactionPath), "utf8"),
+		};
 		expect(
 			scan([
+				compaction,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;`,
@@ -89,6 +103,7 @@ describe("permanent event log", () => {
 		expect(scan([])[0]).toContain("allowed delete must have one live site");
 		expect(
 			scan([
+				compaction,
 				{
 					path: "src/lib/persistence/effect/migrations.ts",
 					text: `yield* sql\`DELETE FROM events WHERE session_id = \${id}\`;\nsql\`DELETE FROM events WHERE created_at < 1\`;`,

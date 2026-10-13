@@ -41,10 +41,7 @@ export interface SearchQuery {
 }
 
 export interface SessionListView {
-	readonly groups: readonly {
-		project: ProjectRef;
-		rows: readonly SessionRow[];
-	}[];
+	readonly rows: readonly SessionRow[];
 	readonly settled: boolean;
 	readonly status: FeedStatus;
 	readonly staleSince: number | null;
@@ -70,17 +67,12 @@ const searchQuery: SearchQuery = {
 	clear: () => clearSessionSearch(),
 };
 
+// The count and list read the same array until its dependencies change.
+const rows = $derived.by(() => getFilteredSessions());
+
 export const sessionList: SessionListView = {
-	get groups() {
-		const groups: { project: ProjectRef; rows: SessionRow[] }[] = [];
-		// Keep the current cross-project order when callers flatten the groups.
-		for (const row of getFilteredSessions()) {
-			const project = row.projectSlug;
-			const last = groups.at(-1);
-			if (last?.project === project) last.rows.push(row);
-			else groups.push({ project, rows: [row] });
-		}
-		return groups;
+	get rows() {
+		return rows;
 	},
 	get settled() {
 		return sessionSubscription.status._tag === "live";

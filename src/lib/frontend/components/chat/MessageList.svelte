@@ -6,6 +6,7 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { untrack } from "svelte";
+	import type { ChatMessage } from "../../types.js";
 	import {
 		consumeScrollRequest,
 		createEmptySessionMessages,
@@ -40,6 +41,7 @@
 	import {
 		economics,
 		forkMessageIdAtReply,
+		LAUNCH_SETTLE_MS,
 		lastResult,
 		liveLaunchedTasks,
 		segmentTurns,
@@ -86,15 +88,43 @@
 	// Rows, pills and strips share when this view last observed each live task.
 	const taskListedAt = new Map<string, number>();
 	let taskSessionId: string | null | undefined;
+	let previousTaskIds: readonly string[] = [];
+	let taskNow = $state(Date.now());
 	const liveTasks = $derived.by(() => {
 		const id = viewedSessionId;
 		if (id !== taskSessionId) {
 			taskListedAt.clear();
+			previousTaskIds = [];
 			taskSessionId = id;
 		}
 		const tasks = rootBackgroundTasks(id ?? "");
-		for (const task of tasks) taskListedAt.set(task.id, clock.now);
+		const now = Date.now();
+		const ids = new Set(tasks.map((task) => task.id));
+		// The outcome can trail removal from the live list. Start its grace here,
+		// rather than making every finished turn subscribe to the ticking clock.
+		for (const id of previousTaskIds) {
+			if (!ids.has(id)) taskListedAt.set(id, now);
+		}
+		for (const task of tasks) taskListedAt.set(task.id, now);
+		previousTaskIds = [...ids];
 		return tasks;
+	});
+	$effect(() => {
+		const tasks = liveTasks;
+		const ids = new Set(tasks.map((task) => task.id));
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const refresh = () => {
+			const now = Date.now();
+			taskNow = now;
+			let next = Number.POSITIVE_INFINITY;
+			for (const [id, at] of taskListedAt) {
+				const until = at + LAUNCH_SETTLE_MS;
+				if (!ids.has(id) && until > now) next = Math.min(next, until);
+			}
+			if (Number.isFinite(next)) timer = setTimeout(refresh, next - now);
+		};
+		refresh();
+		return () => clearTimeout(timer);
 	});
 
 	const scrollCtrl = createScrollController(() => chat.loadLifecycle);
@@ -295,7 +325,31 @@
 		processing ? "↓ New activity" : "↓ Latest",
 	);
 
-	const turns = $derived(segmentTurns(chat.messages, processing));
+	// Keep finished turns' props stable when only a later part changes.
+	function turnProjection() {
+		let previous = new Map<string, Turn>();
+		const same = (a: readonly ChatMessage[], b: readonly ChatMessage[]) =>
+			a.length === b.length && a.every((item, i) => item === b[i]);
+		return (messages: ChatMessage[], processing: boolean): Turn[] => {
+			const next = segmentTurns(messages, processing).map((turn) => {
+				const held = previous.get(turn.id);
+				return held && held.user === turn.user && held.live === turn.live &&
+					same(held.notices, turn.notices) &&
+					held.segments.length === turn.segments.length &&
+					turn.segments.every((segment, i) => {
+						const old = held.segments[i];
+						return old && old.end === segment.end && old.handBack === segment.handBack &&
+							same(old.activity, segment.activity) && same(old.reply, segment.reply);
+					}) ? held : turn;
+			});
+			previous = new Map(next.map((turn) => [turn.id, turn]));
+			return next;
+		};
+	}
+	const projectTurns = turnProjection();
+	const projectInheritedTurns = turnProjection();
+	const projectCurrentTurns = turnProjection();
+	const turns = $derived(projectTurns(chat.messages, processing));
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
 	const transcriptToolIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -353,10 +407,10 @@
 	});
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.inherited, false) : [],
+		projectInheritedTurns(forkSplit?.inherited ?? [], false),
 	);
 	const currentTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.current, processing) : [],
+		projectCurrentTurns(forkSplit?.current ?? [], processing),
 	);
 	// Each continuation leaves a divider before the first reply-side message
 	// created at or after it, or after the last message until one arrives. An
@@ -483,7 +537,7 @@
 				{@render resumed(segment.activity[0].uuid)}
 			{/if}
 			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
-				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} />
+				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -517,7 +571,7 @@
 				<!-- Same query container as the ledger, so the bill sheds the gauge and
 				     the token counts in the same order rather than overflowing. -->
 				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
-					<RunningPill count={liveLaunchedTasks(turn, liveTasks, clock.now, taskListedAt).size} />
+					<RunningPill count={liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt).size} />
 					<TurnEconomics economics={bill} showDuration />
 				</div>
 			</div>

@@ -801,7 +801,7 @@ describe("SessionManager Effect", () => {
 					// Reopen as a pre-repair store, with durable events still unprojected.
 					yield* sql`DROP TABLE session_pick_backfill`;
 					yield* sql`DROP TABLE session_pick_backfill_state`;
-					yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 57`;
+					yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 57`;
 				}).pipe(Effect.provide(layer()));
 				yield* Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;

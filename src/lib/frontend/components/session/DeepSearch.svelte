@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from "svelte";
+	import { onMount, tick } from "svelte";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
@@ -15,7 +15,8 @@
 	type SearchResult = SearchResponse["sessions"][number];
 
 	// The story supplies a transport stub; the app uses the daemon RPC directly.
-	let { search = listDaemonSessionsRpc }: { search?: SearchRpc } = $props();
+	let { search = listDaemonSessionsRpc, initiallyOpen = false }: { search?: SearchRpc; initiallyOpen?: boolean } = $props();
+	onMount(() => { if (initiallyOpen) openSearch(); });
 
 	let open = $state(false);
 	let query = $state("");

@@ -91,6 +91,7 @@ const expectedNames = [
 	"events_session_type_index",
 	"drop_activities",
 	"session_pick_backfill",
+	"compact_redundant_events",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -199,6 +200,7 @@ describe("Effect migration lineage", () => {
 					55,
 					56,
 					57,
+					58,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -363,8 +365,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 57", () => {
-		expect(migrationEntries).toHaveLength(57);
+	it("registers the contiguous production chain from 1 through 58", () => {
+		expect(migrationEntries).toHaveLength(58);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -373,7 +375,7 @@ describe("Effect migration lineage", () => {
 	});
 
 	it.effect(
-		"upgrades a database with messages migrations 1 through 47 to 57",
+		"upgrades migrations 1 through 47 and preserves replay across compaction and turn replacement",
 		() =>
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator(prefix(47));
@@ -390,6 +392,142 @@ describe("Effect migration lineage", () => {
 					VALUES ('already-migrated', 'claude', 'Preserved', 'idle', 1, 1)`;
 				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at, context_tokens, completed_at)
 					VALUES ('kept-message', 'already-migrated', 'assistant', 1, 2, 123456, 2)`;
+				const events = [
+					["thinking.start", "thinking", undefined],
+					["thinking.delta", "thinking", ""],
+					["thinking.delta", "thinking", "reason"],
+					["thinking.end", "thinking", undefined],
+					["thinking.end", "thinking", undefined],
+					["text.delta", "text-opener", ""],
+					["tool.started", "interleaved-tool", undefined],
+					["text.delta", "text-opener", "answer"],
+					["text.delta", "text-opener", ""],
+					["thinking.delta", "thinking-opener", ""],
+					["text.delta", "interleaved-text", "another answer"],
+					["thinking.delta", "thinking-opener", "reason"],
+					["thinking.delta", "thinking-opener", ""],
+					["thinking.end", "thinking-opener", undefined],
+					["thinking.end", "thinking-opener", undefined],
+					["thinking.end", "thinking", undefined, "other-session"],
+					["thinking.end", "other-part", undefined],
+					["text.delta", "whitespace", " "],
+					["text.delta", "missing-text", undefined],
+					["thinking.delta", "thinking", "", undefined, "late-thinking"],
+					["text.delta", "text-opener", "", undefined, "late-text"],
+					["thinking.end", "thinking", undefined, undefined, "late-thinking"],
+					["thinking.delta", "thinking", ""],
+					["thinking.delta", "thinking", ""],
+					["thinking.end", "thinking", undefined],
+					["text.delta", "text-opener", ""],
+					["thinking.delta", "thinking-opener", ""],
+					["thinking.end", "thinking-opener", undefined],
+				] as const;
+				for (const [
+					index,
+					[type, partId, text, sessionId, messageId],
+				] of events.entries()) {
+					yield* sql`INSERT INTO events
+						(sequence, project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+						VALUES (${index + 1}, 'test-project', ${`event-${index + 1}`}, ${sessionId ?? "already-migrated"},
+							${index + 100}, ${type}, ${JSON.stringify({ messageId: messageId ?? "kept-message", partId, text })},
+							' { "rawSource" : "claude.subagent.transcript" } ', 'claude', ${1000 - index})`;
+				}
+				const cascadeEvents = [
+					{
+						type: "message.created",
+						data: { messageId: "cascade-user", role: "user" },
+					},
+					{
+						type: "message.created",
+						data: {
+							messageId: "cascade-answer",
+							role: "assistant",
+							parentID: "cascade-user",
+						},
+					},
+					{ type: "thinking.start" },
+					{ type: "thinking.delta", data: { text: "" } },
+					{ type: "thinking.delta", data: { text: "" } },
+					{ type: "thinking.end" },
+					{ type: "thinking.end" },
+					// TurnProjector REPLACE cascades through messages to their parts.
+					{
+						type: "message.created",
+						data: { messageId: "cascade-user", role: "user" },
+					},
+					{ type: "thinking.delta", data: { text: "" } },
+					{ type: "thinking.end" },
+					{ type: "thinking.delta", data: { text: "" } },
+					{ type: "thinking.end" },
+					{ type: "thinking.delta", data: { text: "" } },
+					{ type: "thinking.end" },
+					// An end before insertion is ineffective. A retained tool event
+					// can read the later completion to decide a child's liveness.
+					{ type: "thinking.end", data: { partId: "observed-thinking" } },
+					{ type: "thinking.start", data: { partId: "observed-thinking" } },
+					{ type: "thinking.end", data: { partId: "observed-thinking" } },
+					{
+						type: "tool.running",
+						data: {
+							partId: "observed-thinking",
+							metadata: { childSessionId: "child" },
+						},
+					},
+					{ type: "thinking.end", data: { partId: "observed-thinking" } },
+					{ type: "text.delta", data: { partId: "text-noops", text: "" } },
+					{ type: "text.delta", data: { partId: "text-noops", text: "" } },
+					{ type: "text.delta", data: { partId: "text-noops", text: "" } },
+				] as const;
+				for (const [index, event] of cascadeEvents.entries()) {
+					const sequence = events.length + index + 1;
+					yield* sql`INSERT INTO events
+						(sequence, project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+						VALUES (${sequence}, 'test-project', ${`event-${sequence}`}, 'already-migrated',
+							${sequence + 100}, ${event.type}, ${JSON.stringify({
+								sessionId: "already-migrated",
+								messageId: "cascade-answer",
+								partId: "cascade-thinking",
+								...("data" in event ? event.data : {}),
+							})}, '{}', 'claude', ${1000 - sequence})`;
+				}
+				// The snapshot authority guard can skip a native opener while a
+				// later REST-sourced delta is the first effective insertion.
+				for (const sequence of [51, 52, 53, 54]) {
+					yield* sql`INSERT INTO events
+						(sequence, project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+						VALUES (${sequence}, 'test-project', ${`event-${sequence}`}, 'already-migrated',
+							${sequence + 100}, 'text.delta', '{"messageId":"snapshot-message","partId":"snapshot-part","text":""}',
+							${JSON.stringify({ rawSource: sequence === 51 ? "claude.sdk" : "opencode.rest" })}, 'claude', ${sequence})`;
+				}
+				// A tool update can observe only its own part, so unrelated tools
+				// must not prevent compaction of an otherwise redundant sequence.
+				const unrelatedObserverEvents = [
+					["text.delta", "scoped-text"],
+					["text.delta", "scoped-text"],
+					["tool.running", "unrelated-tool"],
+					["text.delta", "scoped-text"],
+					["thinking.end", "scoped-thinking"],
+					["thinking.end", "scoped-thinking"],
+					["tool.running", "unrelated-tool"],
+					["thinking.end", "scoped-thinking"],
+				] as const;
+				for (const [
+					index,
+					[type, partId],
+				] of unrelatedObserverEvents.entries()) {
+					const sequence = 55 + index;
+					yield* sql`INSERT INTO events
+						(sequence, project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+						VALUES (${sequence}, 'test-project', ${`event-${sequence}`}, 'already-migrated',
+							${sequence + 100}, ${type}, ${JSON.stringify({ messageId: "cascade-answer", partId, text: "" })},
+							'{}', 'claude', ${sequence})`;
+				}
+				const eventColumns = sql.literal(
+					"project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at",
+				);
+				const originalEvents = yield* sql<{
+					sequence: number;
+				}>`SELECT ${eventColumns} FROM events ORDER BY sequence`;
 
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[48, "sessions_claude_worktree_state"],
@@ -402,6 +540,33 @@ describe("Effect migration lineage", () => {
 					[55, "events_session_type_index"],
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
+					[58, "compact_redundant_events"],
+				]);
+				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
+					[{ type: "thinking.end" }],
+				);
+				const deletedSequences = new Set([
+					2, 5, 9, 13, 15, 23, 32, 39, 40, 49, 53, 56, 60,
+				]);
+				expect(
+					yield* sql`SELECT ${eventColumns} FROM events ORDER BY sequence`,
+				).toEqual(
+					originalEvents.filter(
+						({ sequence }) => !deletedSequences.has(sequence),
+					),
+				);
+				expect(
+					yield* sql`SELECT type, data FROM events WHERE sequence = 37`,
+				).toEqual([
+					{
+						type: "thinking.delta",
+						data: JSON.stringify({
+							sessionId: "already-migrated",
+							messageId: "cascade-answer",
+							partId: "cascade-thinking",
+							text: "",
+						}),
+					},
 				]);
 				const after = yield* sql<{ migration_id: number; name: string }>`
 					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
@@ -454,6 +619,7 @@ describe("Effect migration lineage", () => {
 					[55, "events_session_type_index"],
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
+					[58, "compact_redundant_events"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -511,6 +677,7 @@ describe("Effect migration lineage", () => {
 					[55, "events_session_type_index"],
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
+					[58, "compact_redundant_events"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1098,6 +1265,7 @@ describe("Effect migration lineage", () => {
 				[55, "events_session_type_index"],
 				[56, "drop_activities"],
 				[57, "session_pick_backfill"],
+				[58, "compact_redundant_events"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1192,6 +1360,7 @@ describe("Effect migration lineage", () => {
 					[55, "events_session_type_index"],
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
+					[58, "compact_redundant_events"],
 				]);
 				const rows = yield* sql<{
 					id: string;

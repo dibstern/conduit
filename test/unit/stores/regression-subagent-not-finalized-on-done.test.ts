@@ -1,6 +1,6 @@
 // A subagent tool completes via its own notification and can outlive the
 // parent turn. `done` used to force-complete every running tool, flipping the
-// still-running Task to "Done"; finalizeAll now skips subagent tools.
+// still-running Task to "Done"; terminal finalization skips subagent tools.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { seedSessions } from "./session-fixtures.js";
 
@@ -9,7 +9,6 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 import {
 	applyTerminalTurn,
 	getOrCreateSessionSlot,
-	seedRegistryFromMessages,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -70,11 +69,6 @@ function projectTool(name: "Task" | "Read") {
 		1,
 	).reduce(applyTranscriptEnvelope, entry);
 	slot.messages.messages = deriveTranscriptMessages(projected, []);
-	seedRegistryFromMessages(
-		slot.activity,
-		slot.messages,
-		slot.messages.messages,
-	);
 	return slot;
 }
 

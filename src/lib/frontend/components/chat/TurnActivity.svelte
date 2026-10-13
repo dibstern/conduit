@@ -44,12 +44,13 @@
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>() }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now() }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
 		liveTasks?: readonly BackgroundTask[];
 		taskListedAt?: ReadonlyMap<string, number>;
+		taskNow?: number;
 	} = $props();
 
 	let expanded = $state(false);
@@ -69,7 +70,7 @@
 		return workingTime(turn, now, until);
 	});
 	const bill = $derived(economics(turn, now));
-	const running = $derived(liveLaunchedTasks(turn, liveTasks, clock.now, taskListedAt));
+	const running = $derived(liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt));
 	const phrase = $derived(countsPhrase(stats));
 	const chapters = $derived(skillChapters(segment, turn, final, now));
 	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
