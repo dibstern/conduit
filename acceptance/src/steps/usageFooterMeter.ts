@@ -777,6 +777,54 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "the usage sheet folds into the dock rather than off screen",
+		match:
+			/^the usage sheet dragged down past the phone usage dock stops on it$/,
+		run: async ({ world }) => {
+			const sheet = world.page.getByTestId("usage-sheet");
+			// A drag moves the sheet from where it rests, so let the opening glide finish first.
+			await sheet.evaluate((node) =>
+				Promise.all(
+					(node.parentElement?.getAnimations() ?? []).map((a) => a.finished),
+				),
+			);
+			const box = await sheet.boundingBox();
+			const dock = await world.page
+				.getByTestId("usage-footer-phone")
+				.boundingBox();
+			const viewport = world.page.viewportSize();
+			if (!box || !dock || !viewport) throw new Error("Missing usage sheet");
+			const startY = box.y + 10;
+			const finger = await touchFinger(
+				world.page,
+				box.x + box.width / 2,
+				startY,
+			);
+			try {
+				// To the screen's edge: far past the dock even if the sheet was still rising.
+				await finger.move(viewport.height - 2 - startY);
+				await expect
+					.poll(async () => (await sheet.boundingBox())?.y)
+					.toBeCloseTo(dock.y, 0);
+			} finally {
+				await finger.lift();
+			}
+		},
+	},
+	{
+		name: "the usage sheet wears the dock's background",
+		match: /^the usage sheet has the phone usage dock's background$/,
+		run: async ({ world }) => {
+			const background = (testId: string) =>
+				world.page
+					.getByTestId(testId)
+					.evaluate((node) => getComputedStyle(node).backgroundColor);
+			expect(await background("usage-sheet")).toBe(
+				await background("usage-footer-phone"),
+			);
+		},
+	},
+	{
 		name: "pull the usage sheet down by its grab handle",
 		match: /^I drag the usage sheet down by (\d+) pixels$/,
 		run: async ({ world, match }) => {

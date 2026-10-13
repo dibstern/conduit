@@ -36,11 +36,18 @@
 	const single = $derived(accounts.length === 1 ? accounts.find((reading) => reading.windows.some((window) => window.kind in windowLabels)) : undefined);
 	let sheetOpen = $state(false);
 	let sheet: HTMLElement | undefined = $state();
+	let dock: HTMLElement | undefined = $state();
 	// The dock's grab handle promises a pull: past the slop, the sheet rises with the finger.
 	const PULL_SLOP_PX = 16;
 	let pull: { startY: number; lastY: number; lastTime: number; velocity: number; rising: boolean } | undefined;
 	// A pull ends in a click on the dock, which must not reopen a sheet the release put away.
 	let swallowClick = false;
+
+	// The sheet folds into the dock rather than off screen: at its lowest, its top meets the dock's.
+	function dockOffset() {
+		if (!sheet || !dock) return 0;
+		return Math.max(sheet.getBoundingClientRect().height - (innerHeight - dock.getBoundingClientRect().top), 0);
+	}
 
 	function pullDock(event: PointerEvent) {
 		if (!pull) return;
@@ -55,7 +62,7 @@
 		if (elapsed > 0) pull.velocity = (event.clientY - pull.lastY) / elapsed;
 		pull.lastY = event.clientY;
 		pull.lastTime = event.timeStamp;
-		if (sheet) placeSheet(sheet, Math.max(sheet.offsetHeight - travel, 0), false);
+		if (sheet) placeSheet(sheet, Math.max(dockOffset() - travel, 0), false);
 	}
 
 	function releaseDock(cancelled: boolean) {
@@ -63,8 +70,8 @@
 		pull = undefined;
 		if (!ended?.rising || !sheet) return;
 		const travel = ended.startY - ended.lastY - PULL_SLOP_PX;
-		const opens = !cancelled && (travel > sheet.offsetHeight * DISMISS_FRACTION || ended.velocity < -FLICK_PX_PER_MS);
-		placeSheet(sheet, opens ? 0 : sheet.offsetHeight, true);
+		const opens = !cancelled && (travel > dockOffset() * DISMISS_FRACTION || ended.velocity < -FLICK_PX_PER_MS);
+		placeSheet(sheet, opens ? 0 : dockOffset(), true);
 		if (!opens) setTimeout(() => { sheetOpen = false; }, settleMs());
 	}
 
@@ -157,6 +164,7 @@
 {#if phone}
 	<div
 		id="usage-footer-phone"
+		bind:this={dock}
 		data-testid="usage-footer-phone"
 		bind:clientHeight={height}
 		style:display={accounts.length > 1 || single ? undefined : "none"}
@@ -203,8 +211,9 @@
 		{/if}
 	</div>
 	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" labelledBy="{id}-title" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
-		<div bind:this={sheet} use:dragToDismiss={{ ondismiss: () => { sheetOpen = false; } }}>
-			<Surface variant="raised" radius="none" elevation="modal" data-testid="usage-sheet" class="w-full rounded-t-[18px] px-[8px] pt-[8px] pb-[calc(24px+env(safe-area-inset-bottom))] text-[11.5px]">
+		<div bind:this={sheet} use:dragToDismiss={{ ondismiss: () => { sheetOpen = false; }, dismissOffset: dockOffset }}>
+			<!-- The dock's own colour and edge, so the sheet reads as the dock pulled taller. -->
+			<Surface variant="bare" radius="none" elevation="modal" data-testid="usage-sheet" class="w-full rounded-t-[18px] border-t border-border-subtle bg-bg px-[8px] pt-[8px] pb-[calc(24px+env(safe-area-inset-bottom))] text-[11.5px]">
 				<div aria-hidden="true" class="mx-auto mb-[8px] h-[4px] w-[36px] rounded-full bg-border-chip"></div>
 				<div class="mx-[8px] mt-[2px] mb-[6px] flex items-baseline gap-[8px]">
 					<h2 id="{id}-title" class="flex-1 text-[14px] font-semibold text-text">Usage</h2>

@@ -4,6 +4,8 @@ type DragToDismissOptions = {
 	ondismiss: () => void;
 	/** 0 at rest, 1 fully dragged off; `settling` is true while the sheet animates on its own. */
 	onprogress?: (progress: number, settling: boolean) => void;
+	/** How far down the sheet travels to be put away: off screen unless it collapses into something. */
+	dismissOffset?: () => number;
 };
 
 /** A sheet released past this fraction of its height, or flicked faster, completes the move. */
@@ -46,9 +48,11 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 	let velocity = 0;
 	let dismissTimer: ReturnType<typeof setTimeout> | undefined;
 
+	const dismissOffset = () => options.dismissOffset?.() ?? node.offsetHeight;
+
 	function place(offset: number, settling: boolean) {
 		placeSheet(node, offset, settling);
-		options.onprogress?.(Math.min(offset / node.offsetHeight, 1), settling);
+		options.onprogress?.(Math.min(offset / dismissOffset(), 1), settling);
 	}
 
 	function onStart(event: TouchEvent) {
@@ -82,7 +86,7 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		if (elapsed > 0) velocity = (touch.clientY - lastY) / elapsed;
 		lastY = touch.clientY;
 		lastTime = event.timeStamp;
-		place(Math.max(offset, 0), false);
+		place(Math.min(Math.max(offset, 0), dismissOffset()), false);
 	}
 
 	function onEnd() {
@@ -90,11 +94,9 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		tracking = dragging = false;
 		if (!wasDragging) return;
 		const offset = lastY - startY;
-		if (
-			offset > node.offsetHeight * DISMISS_FRACTION ||
-			velocity > FLICK_PX_PER_MS
-		) {
-			place(node.offsetHeight, true);
+		const away = dismissOffset();
+		if (offset > away * DISMISS_FRACTION || velocity > FLICK_PX_PER_MS) {
+			place(away, true);
 			dismissTimer = setTimeout(() => options.ondismiss(), settleMs());
 		} else {
 			place(0, true);
