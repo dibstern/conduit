@@ -409,6 +409,7 @@ export class OpenCodeRuntimeEventTranslator {
 					messageId,
 				),
 			);
+			if (props.delta === "") return null;
 			return [
 				opencodeRuntimeEvent("thinking.delta", sessionId, event, {
 					messageId,
@@ -429,6 +430,7 @@ export class OpenCodeRuntimeEventTranslator {
 					messageId,
 				),
 			);
+			if (props.delta === "" && tracked !== undefined) return null;
 			return [
 				opencodeRuntimeEvent("text.delta", sessionId, event, {
 					messageId,
@@ -534,12 +536,12 @@ export class OpenCodeRuntimeEventTranslator {
 				partText,
 				"text",
 			);
-			if (suffix != null) {
+			if (suffix != null || (existing === undefined && partText === "")) {
 				return [
 					opencodeRuntimeEvent("text.delta", sessionId, event, {
 						messageId,
 						partId,
-						text: suffix,
+						text: suffix ?? "",
 					}),
 				];
 			}

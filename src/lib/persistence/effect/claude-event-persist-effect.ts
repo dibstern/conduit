@@ -336,7 +336,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						const now = Date.now();
 						const userMsgId = messageId ?? crypto.randomUUID();
 						const provider = options?.provider ?? "claude";
-						const stored = yield* eventStore.appendBatch([
+						const events: CanonicalEvent[] = [
 							canonicalEvent(
 								"message.created",
 								sessionId,
@@ -348,17 +348,22 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								},
 								{ provider, createdAt: now },
 							),
-							canonicalEvent(
-								"text.delta",
-								sessionId,
-								{
-									messageId: userMsgId,
-									partId: `${userMsgId}-0`,
-									text,
-								},
-								{ provider, createdAt: now },
-							),
-						]);
+						];
+						if (text !== "") {
+							events.push(
+								canonicalEvent(
+									"text.delta",
+									sessionId,
+									{
+										messageId: userMsgId,
+										partId: `${userMsgId}-0`,
+										text,
+									},
+									{ provider, createdAt: now },
+								),
+							);
+						}
+						const stored = yield* eventStore.appendBatch(events);
 						yield* project(stored);
 					}),
 				options,

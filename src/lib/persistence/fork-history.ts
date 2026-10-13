@@ -1,4 +1,44 @@
+import { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
+import { Data, Effect } from "effect";
+import { EventStoreError } from "./effect/event-store-effect.js";
+import {
+	decodeStoredEventRow,
+	type StoredEventRow,
+} from "./effect/stored-event-row.js";
 import type { CanonicalEvent, StoredEvent } from "./events.js";
+
+export class ForkRefusal extends Data.TaggedError("ForkRefusal")<{
+	readonly reason:
+		| "no_completed_turn"
+		| "no_transcript"
+		| "message_not_found"
+		| "point_not_found";
+	readonly messageId?: string;
+}> {}
+
+export interface ForkSource {
+	readonly boundary: {
+		readonly messageId: string;
+		readonly createdAt: number;
+		readonly sequence: number;
+	};
+	readonly historyMessageId?: string;
+	readonly lastRewindCommitSequence: number;
+	readonly instanceIds: ReadonlySet<string>;
+	readonly retained: readonly {
+		readonly id: string;
+		readonly role: string;
+		readonly created_at: number;
+	}[];
+	readonly copy: (
+		newSessionId: string,
+	) => Effect.Effect<
+		CanonicalEvent[],
+		EventStoreError | SqlError,
+		SqlClient.SqlClient
+	>;
+}
 
 const FORK_HISTORY_TYPES = new Set<CanonicalEvent["type"]>([
 	"message.created",
@@ -19,71 +59,276 @@ const FORK_HISTORY_TYPES = new Set<CanonicalEvent["type"]>([
 	"session.compaction",
 ]);
 
-const messageIdOf = (event: StoredEvent | CanonicalEvent) =>
+const FORK_BOUNDARY_TYPES = [
+	"session.created",
+	"session.provider_changed",
+	"session.status",
+	"session.rewind_committed",
+	"message.created",
+	"message.removed",
+	"turn.completed",
+];
+
+interface BoundaryRow {
+	readonly sequence: number;
+	readonly type: string;
+	readonly message_id: string | null;
+	readonly status: string | null;
+	readonly provider: string | null;
+	readonly old_provider: string | null;
+	readonly new_provider: string | null;
+	readonly stream_end: number;
+}
+
+const readBoundaryRows = Effect.fn("fork.readBoundaryRows")(function* (
+	parentId: string,
+) {
+	const sql = yield* SqlClient.SqlClient;
+	return yield* sql<BoundaryRow>`
+		SELECT sequence, type,
+			json_extract(data, '$.messageId') AS message_id,
+			json_extract(data, '$.status') AS status,
+			json_extract(data, '$.provider') AS provider,
+			json_extract(data, '$.oldProvider') AS old_provider,
+			json_extract(data, '$.newProvider') AS new_provider,
+			(SELECT MAX(sequence) FROM events WHERE session_id = ${parentId}) AS stream_end
+		FROM events INDEXED BY idx_events_session_type
+		WHERE session_id = ${parentId} AND type IN ${sql.in(FORK_BOUNDARY_TYPES)}
+		ORDER BY sequence`;
+});
+
+// OpenCode emits intermediate turn.completed events. Only status idle closes a
+// whole turn; a prompt after that idle is already queued before busy arrives.
+const midTurnForkBoundary = (rows: readonly BoundaryRow[]) =>
+	Effect.gen(function* () {
+		let busy = false;
+		let idle = -1;
+		for (const row of rows) {
+			if (row.type !== "session.status") continue;
+			busy = row.status !== "idle";
+			if (!busy) idle = row.sequence;
+		}
+		if (
+			!busy &&
+			(idle < 0 ||
+				!rows.some(
+					(row) => row.type === "message.created" && row.sequence > idle,
+				))
+		)
+			return undefined;
+		const completed = rows.reduce<BoundaryRow | undefined>(
+			(completed, row) =>
+				row.type === "turn.completed" && row.sequence < idle ? row : completed,
+			undefined,
+		);
+		if (!completed?.message_id)
+			return yield* new ForkRefusal({ reason: "no_completed_turn" });
+		return completed.message_id;
+	});
+
+/** OpenCode needs only the mid-turn decision; its native API owns the copy. */
+export const readSideThreadForkBoundary = Effect.fn(
+	"fork.readSideThreadForkBoundary",
+)(function* (parentId: string) {
+	return yield* midTurnForkBoundary(yield* readBoundaryRows(parentId));
+});
+
+/** Resolve a fork without reading message parts or decoding transcript content. */
+export const readForkSource = Effect.fn("fork.readForkSource")(function* (
+	parentId: string,
+	at: { readonly messageId?: string; readonly sideThread: boolean },
+) {
+	const sql = yield* SqlClient.SqlClient;
+	return yield* sql.withTransaction(
+		Effect.gen(function* () {
+			const rows = yield* readBoundaryRows(parentId);
+			const messageId =
+				at.messageId ??
+				(at.sideThread ? yield* midTurnForkBoundary(rows) : undefined);
+			const messages = yield* sql<{
+				readonly id: string;
+				readonly role: string;
+				readonly created_at: number;
+				readonly current_provider: string;
+				readonly pending_rewind_message_id: string | null;
+			}>`
+		SELECT m.id, m.role, m.created_at,
+			s.provider AS current_provider, s.pending_rewind_message_id
+		FROM messages m JOIN sessions s ON s.id = m.session_id
+		WHERE m.session_id = ${parentId}
+			AND NOT EXISTS (
+				SELECT 1 FROM sessions pending JOIN messages cut
+					ON cut.id = pending.pending_rewind_message_id AND cut.session_id = pending.id
+				WHERE pending.id = m.session_id
+					AND (m.created_at > cut.created_at
+						OR (m.created_at = cut.created_at AND m.id >= cut.id))
+			)
+		ORDER BY m.created_at ASC, m.id ASC`;
+			const point =
+				messageId === undefined
+					? messages.at(-1)
+					: messages.find((message) => message.id === messageId);
+			if (!point)
+				return yield* new ForkRefusal({
+					reason:
+						messageId === undefined ? "no_transcript" : "message_not_found",
+					...(messageId !== undefined && { messageId }),
+				});
+			const removedMessageIds = new Set(
+				rows.flatMap((row) =>
+					row.type === "message.removed" && row.message_id !== null
+						? [row.message_id]
+						: [],
+				),
+			);
+			const creation = rows.find(
+				(row) => row.type === "message.created" && row.message_id === point.id,
+			);
+			if (
+				!creation ||
+				(messageId !== undefined && removedMessageIds.has(messageId))
+			)
+				return yield* new ForkRefusal({
+					reason: "point_not_found",
+					...(messageId !== undefined && { messageId }),
+				});
+			const lastRewindCommitSequence = rows.reduce(
+				(sequence, row) =>
+					row.type === "session.rewind_committed" ? row.sequence : sequence,
+				0,
+			);
+			const historyMessageId =
+				messageId ??
+				(point.pending_rewind_message_id !== null ||
+				lastRewindCommitSequence > 0
+					? point.id
+					: undefined);
+			const instanceIds = new Set([point.current_provider]);
+			for (const row of rows) {
+				if (row.type === "session.created" && row.provider !== null)
+					instanceIds.add(row.provider);
+				if (row.type === "session.provider_changed") {
+					if (row.old_provider !== null) instanceIds.add(row.old_provider);
+					if (row.new_provider !== null) instanceIds.add(row.new_provider);
+				}
+			}
+			const retained = messages.map(({ id, role, created_at }) => ({
+				id,
+				role,
+				created_at,
+			}));
+			const retainedMessageIds = new Set(retained.map((message) => message.id));
+			const streamEnd = rows[0]?.stream_end ?? 0;
+			const source: ForkSource = {
+				boundary: {
+					messageId: point.id,
+					createdAt: point.created_at,
+					sequence: creation.sequence,
+				},
+				...(historyMessageId !== undefined && { historyMessageId }),
+				lastRewindCommitSequence,
+				instanceIds,
+				retained,
+				copy: (newSessionId) =>
+					Effect.gen(function* () {
+						if (
+							historyMessageId !== undefined &&
+							removedMessageIds.has(historyMessageId)
+						)
+							return [];
+						// Cut at the LAST target event, but retain messages created before its
+						// FIRST event. Adjacent turn events are determined from the full parent
+						// stream: omitted parent events break the run; other sessions do not.
+						const content = yield* sql<
+							StoredEventRow & { readonly first_target_sequence: number | null }
+						>`
+				WITH target AS (
+					SELECT MIN(sequence) AS first_sequence, MAX(sequence) AS last_sequence
+					FROM events
+					WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
+						AND ${historyMessageId ?? null} IS NOT NULL
+						AND json_extract(data, '$.messageId') = ${historyMessageId ?? null}
+				), cut AS (
+					SELECT COALESCE((
+						SELECT MIN(sequence) FROM events
+						WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
+							AND sequence > (SELECT last_sequence FROM target)
+							AND type NOT LIKE 'turn.%'
+					), ${streamEnd + 1}) AS excluded_sequence
+				)
+				SELECT project_id, sequence, event_id, session_id, stream_version,
+					type, data, metadata, provider, created_at,
+					(SELECT first_sequence FROM target) AS first_target_sequence
+				FROM events INDEXED BY idx_events_session_seq
+				WHERE session_id = ${parentId} AND sequence <= ${streamEnd}
+					AND sequence < (SELECT excluded_sequence FROM cut)
+					AND type IN ${sql.in([...FORK_HISTORY_TYPES])}
+				ORDER BY sequence`;
+						const firstTargetSequence = content[0]?.first_target_sequence;
+						const keptMessageIds =
+							historyMessageId === undefined
+								? undefined
+								: new Set([historyMessageId]);
+						if (
+							keptMessageIds &&
+							firstTargetSequence !== null &&
+							firstTargetSequence !== undefined
+						)
+							for (const row of rows)
+								if (
+									row.type === "message.created" &&
+									row.message_id !== null &&
+									row.sequence < firstTargetSequence
+								)
+									keptMessageIds.add(row.message_id);
+						const events = yield* Effect.forEach(content, (row) =>
+							decodeStoredEventRow(
+								row,
+								(cause) =>
+									new EventStoreError({
+										operation: "decodeStoredEventRow",
+										cause,
+									}),
+							),
+						);
+						return copyForkHistory(events, {
+							newSessionId,
+							removedMessageIds,
+							retainedMessageIds,
+							...(keptMessageIds !== undefined && { keptMessageIds }),
+						});
+					}),
+			};
+			return source;
+		}),
+	);
+});
+
+const messageIdOf = (event: StoredEvent) =>
 	"messageId" in event.data && typeof event.data.messageId === "string"
 		? event.data.messageId
 		: undefined;
 
-export function copyForkHistory(
-	parentEvents: readonly (StoredEvent | CanonicalEvent)[],
+function copyForkHistory(
+	parentEvents: readonly StoredEvent[],
 	input: {
 		readonly newSessionId: string;
-		readonly upToMessageId?: string;
-		readonly retainedMessageIds?: ReadonlySet<string>;
+		readonly retainedMessageIds: ReadonlySet<string>;
+		readonly removedMessageIds: ReadonlySet<string>;
+		readonly keptMessageIds?: ReadonlySet<string>;
 	},
-): { events: CanonicalEvent[]; forkMessageId?: string } | undefined {
-	const removedMessageIds = new Set(
-		parentEvents.flatMap((event) =>
-			event.type === "message.removed" ? [event.data.messageId] : [],
-		),
-	);
-	if (
-		input.upToMessageId !== undefined &&
-		(removedMessageIds.has(input.upToMessageId) ||
-			input.retainedMessageIds?.has(input.upToMessageId) === false)
-	)
-		return undefined;
-	let end = parentEvents.length - 1;
-	// A prompt queued mid-turn is created before the target turn ends, so the
-	// cut is by message, not only by position: keep messages created no later
-	// than the target.
-	let keptMessageIds: Set<string> | undefined;
-	if (input.upToMessageId !== undefined) {
-		keptMessageIds = new Set([input.upToMessageId]);
-		end = -1;
-		for (let index = 0; index < parentEvents.length; index++) {
-			const event = parentEvents[index];
-			if (!event) continue;
-			const messageId = messageIdOf(event);
-			if (messageId === input.upToMessageId) end = index;
-			else if (
-				end < 0 &&
-				messageId !== undefined &&
-				event.type === "message.created"
-			)
-				keptMessageIds.add(messageId);
-		}
-		if (end < 0) return undefined;
-		while (
-			end + 1 < parentEvents.length &&
-			parentEvents[end + 1]?.type.startsWith("turn.")
-		) {
-			end++;
-		}
-	}
-
+): CanonicalEvent[] {
 	const suffix = `_${input.newSessionId}`;
 	const rekey = (id: string) => `${id}${suffix}`;
 	const events: CanonicalEvent[] = [];
-	let lastMessageId: string | undefined;
-	for (const event of parentEvents.slice(0, end + 1)) {
+	for (const event of parentEvents) {
 		if (!FORK_HISTORY_TYPES.has(event.type)) continue;
 		const messageId = messageIdOf(event);
 		if (
 			messageId !== undefined &&
-			(removedMessageIds.has(messageId) ||
-				input.retainedMessageIds?.has(messageId) === false ||
-				keptMessageIds?.has(messageId) === false)
+			(input.removedMessageIds.has(messageId) ||
+				input.retainedMessageIds.has(messageId) === false ||
+				input.keptMessageIds?.has(messageId) === false)
 		)
 			continue;
 		const data: Record<string, unknown> = { ...event.data };
@@ -91,9 +336,6 @@ export function copyForkHistory(
 			if (typeof data[field] === "string") data[field] = rekey(data[field]);
 		}
 		if ("sessionId" in data) data["sessionId"] = input.newSessionId;
-		if (event.type === "message.created") {
-			lastMessageId = rekey(event.data.messageId);
-		}
 		// A streamed part arrives as thousands of fragments that project to their
 		// concatenation; copying each one makes a long session slow to fork.
 		const previous = events.at(-1);
@@ -121,46 +363,5 @@ export function copyForkHistory(
 			createdAt: event.createdAt,
 		} as CanonicalEvent);
 	}
-	const forkMessageId =
-		input.upToMessageId !== undefined
-			? rekey(input.upToMessageId)
-			: lastMessageId;
-	return { events, ...(forkMessageId !== undefined && { forkMessageId }) };
-}
-
-/**
- * Where a Side Thread forks off a parent that is mid-turn, read from the
- * parent's events. Undefined while the parent is idle: the fork then copies
- * everything, as before.
- *
- * A turn ends at `session.status` idle on both providers; OpenCode also emits
- * turn.completed for each intermediate step, so that alone is not a turn end.
- * `lastCompleted` is the final message of the last turn that completed before
- * that idle: the fork keeps messages up to and including it.
- */
-export function midTurnForkBoundary(
-	parentEvents: readonly (StoredEvent | CanonicalEvent)[],
-): { lastCompleted?: string } | undefined {
-	let busy = false;
-	let idle = -1;
-	parentEvents.forEach((event, index) => {
-		if (event.type !== "session.status") return;
-		busy = event.data.status !== "idle";
-		if (!busy) idle = index;
-	});
-	// A prompt is persisted before the provider reports busy.
-	if (
-		!busy &&
-		(idle < 0 ||
-			!parentEvents
-				.slice(idle + 1)
-				.some((event) => event.type === "message.created"))
-	)
-		return undefined;
-	let completed = idle - 1;
-	while (completed >= 0 && parentEvents[completed]?.type !== "turn.completed")
-		completed--;
-	const completedEvent = parentEvents[completed];
-	const lastCompleted = completedEvent && messageIdOf(completedEvent);
-	return lastCompleted ? { lastCompleted } : {};
+	return events;
 }

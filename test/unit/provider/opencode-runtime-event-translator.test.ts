@@ -36,6 +36,92 @@ function comparable(events: readonly CanonicalEvent[]) {
 }
 
 describe("OpenCodeRuntimeEventTranslator", () => {
+	it("emits the first empty text delta to open its part and drops later empty deltas", () => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const event = makeSSEEvent("message.part.delta", {
+			sessionID: sessionId,
+			messageID: "msg-1",
+			partID: "part-1",
+			field: "text",
+			delta: "",
+		});
+		expect(translator.translate(event, sessionId)).toMatchObject([
+			{
+				type: "text.delta",
+				data: { messageId: "msg-1", partId: "part-1", text: "" },
+			},
+		]);
+		expect(translator.translate(event, sessionId)).toBeNull();
+	});
+
+	it.each([
+		{ partType: "text", eventType: "text.delta" },
+		{ partType: "reasoning", eventType: "thinking.delta" },
+	])("skips empty $partType deltas without losing later text", ({
+		partType,
+		eventType,
+	}) => {
+		const translator = new OpenCodeRuntimeEventTranslator();
+		const sessionId = "ses-opencode";
+		const opening = translator.translate(
+			makeSSEEvent("message.part.updated", {
+				sessionID: sessionId,
+				part: {
+					id: "part-1",
+					messageID: "msg-1",
+					type: partType,
+					text: "",
+				},
+			}),
+			sessionId,
+		);
+		expect(opening).toMatchObject([
+			{
+				type: partType === "text" ? "text.delta" : "thinking.start",
+				data: { messageId: "msg-1", partId: "part-1" },
+			},
+		]);
+		expect(
+			translator.translate(
+				makeSSEEvent("message.part.delta", {
+					sessionID: sessionId,
+					messageID: "msg-1",
+					partID: "part-1",
+					field: "text",
+					delta: "",
+				}),
+				sessionId,
+			),
+		).toBeNull();
+		expect(
+			translator.translate(
+				makeSSEEvent("message.part.delta", {
+					sessionID: sessionId,
+					messageID: "msg-1",
+					partID: "part-1",
+					field: "text",
+					delta: " ",
+				}),
+				sessionId,
+			),
+		).toMatchObject([{ type: eventType, data: { text: " " } }]);
+		expect(
+			translator.translate(
+				makeSSEEvent("message.part.updated", {
+					sessionID: sessionId,
+					part: {
+						id: "part-1",
+						messageID: "msg-1",
+						type: partType,
+						text: " Ready",
+					},
+				}),
+				sessionId,
+			),
+		).toMatchObject([{ type: eventType, data: { text: "Ready" } }]);
+	});
+
 	it("translates removals and permits the same message id to be announced again", () => {
 		const translator = new OpenCodeRuntimeEventTranslator();
 		const sessionId = "ses-opencode";

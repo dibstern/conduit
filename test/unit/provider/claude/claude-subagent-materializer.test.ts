@@ -34,6 +34,7 @@ import {
 	stageSessionMessagesToEvents,
 } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type { SessionMessage } from "../../../../src/lib/provider/claude/types.js";
+import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 
 function dataOf(event: { readonly data: unknown }): Record<string, unknown> {
 	return event.data as Record<string, unknown>;
@@ -150,6 +151,82 @@ function establishCanonicalSession(sessionId: string, provider: string) {
 }
 
 describe("Claude subagent transcripts and session establishment", () => {
+	it("skips repeated empty deltas while preserving whitespace and nonempty transcript content", () => {
+		const cursor = newCursor();
+		const messages = [
+			contentMessage("assistant", "sub-assistant-1", [
+				{ type: "text", text: "" },
+				{ type: "thinking", thinking: "" },
+				{ type: "text", text: " " },
+				{ type: "thinking", thinking: " " },
+				{ type: "text", text: "Visible" },
+				{ type: "thinking", thinking: "Reasoning" },
+			]),
+		];
+		const stage = stageSessionMessagesToEvents({
+			childSessionId: "child-session",
+			messages,
+			cursor,
+		});
+		expect(
+			stage.events
+				.filter(
+					(event) =>
+						event.type === "text.delta" || event.type === "thinking.delta",
+				)
+				.map((event) => ({ type: event.type, text: dataOf(event)["text"] })),
+		).toEqual([
+			{ type: "text.delta", text: "" },
+			{ type: "text.delta", text: " " },
+			{ type: "thinking.delta", text: " " },
+			{ type: "text.delta", text: "Visible" },
+			{ type: "thinking.delta", text: "Reasoning" },
+		]);
+		commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
+		expect(
+			stageSessionMessagesToEvents({
+				childSessionId: "child-session",
+				messages,
+				cursor,
+			}).events,
+		).toEqual([]);
+	});
+
+	it("preserves projected part order when initially empty text grows after thinking", async () => {
+		const harness = makeEffectProjectionHarness();
+		const cursor = newCursor();
+		const sessionId = "child-session";
+		try {
+			await harness.query(
+				"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				[sessionId, "claude", "Child", "idle", 1, 1],
+			);
+			for (const text of ["", "", "Visible", "Visible"]) {
+				const stage = stageSessionMessagesToEvents({
+					childSessionId: sessionId,
+					messages: [
+						contentMessage("assistant", "sub-assistant-1", [
+							{ type: "text", text },
+							{ type: "thinking", thinking: "Reasoning" },
+						]),
+					],
+					cursor,
+				});
+				await harness.ingestBatch(stage.events);
+				commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
+			}
+			const messages = await harness.sessionMessagesWithParts(sessionId);
+			expect(
+				messages[0]?.parts.map(({ type, text }) => ({ type, text })),
+			).toEqual([
+				{ type: "text", text: "Visible" },
+				{ type: "thinking", text: "Reasoning" },
+			]);
+		} finally {
+			await harness.dispose();
+		}
+	});
+
 	it("diffs repeated subagent snapshots by text cursor", () => {
 		const cursor = newCursor();
 		const firstEvents = diffSessionMessagesToEvents({

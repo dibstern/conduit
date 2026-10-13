@@ -1,7 +1,7 @@
 import { Reactivity } from "@effect/experimental";
-import type { SqlClient } from "@effect/sql";
+import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { type ConfigError, Layer, type ManagedRuntime } from "effect";
+import { type ConfigError, Effect, Layer, type ManagedRuntime } from "effect";
 import {
 	makePersistenceServiceLive,
 	PersistenceError,
@@ -74,8 +74,34 @@ export function makePersistenceEffectLayer(
 			cause: "A store requires a non-empty project id",
 		});
 	const projectLayer = Layer.succeed(PersistenceProjectTag, { projectId });
-	const sqliteLayer = SqliteNode.layer({ filename }).pipe(
-		Layer.provide(Reactivity.layer),
+	const sqliteLayer = Layer.scopedDiscard(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			// SQLite maps at most the file's size; this is an address-space ceiling.
+			yield* sql`PRAGMA mmap_size = 1073741824`;
+			yield* sql`PRAGMA analysis_limit = 400`;
+			yield* sql`PRAGMA optimize = 0x10002`;
+			const optimize = sql`PRAGMA optimize`.pipe(
+				Effect.catchAll((cause) =>
+					Effect.logWarning("SQLite optimize failed", cause),
+				),
+				Effect.asVoid,
+			);
+			// Reverse finalization stops the fiber, optimizes, then closes the driver.
+			yield* Effect.addFinalizer(() => optimize);
+			yield* Effect.gen(function* () {
+				yield* Effect.sleep("6 hours");
+				yield* optimize;
+			}).pipe(Effect.forever, Effect.forkScoped);
+		}).pipe(
+			Effect.mapError(
+				(cause) => new PersistenceError({ operation: "tuneDatabase", cause }),
+			),
+		),
+	).pipe(
+		Layer.provideMerge(
+			SqliteNode.layer({ filename }).pipe(Layer.provide(Reactivity.layer)),
+		),
 	);
 
 	const persistenceServiceLayer = makePersistenceServiceLive.pipe(

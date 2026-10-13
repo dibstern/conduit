@@ -17,6 +17,100 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 describe("ClaudeEventPersistEffect session lifecycle", () => {
 	it.scoped(
+		"omits empty user deltas without losing attachments or nonempty text",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-empty-delta-"));
+			const layer = makePersistenceEffectLayer(
+				join(dir, "events.db"),
+				"test-project",
+			);
+			const sessionId = "attachment-session";
+
+			return Effect.gen(function* () {
+				const eventStore = yield* EventStoreEffectTag;
+				const projectionRunner = yield* ProjectionRunnerEffectTag;
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* projectionRunner.recover();
+				const created = yield* eventStore.append(
+					canonicalEvent("session.created", sessionId, {
+						sessionId,
+						title: "Attachments",
+						provider: "claude",
+						providerSessionId: "sdk-session",
+					}),
+				);
+				yield* projectionRunner.projectEvent(created);
+				yield* persist.persistUserMessage(sessionId, "", {
+					messageId: "image-message",
+				});
+				yield* persist.persistEvent(
+					canonicalEvent("file.attached", sessionId, {
+						messageId: "image-message",
+						partId: "image-part",
+						mime: "image/png",
+						url: "data:image/png;base64,aW1hZ2U=",
+					}),
+				);
+				yield* persist.persistUserMessage(sessionId, "Hello", {
+					messageId: "text-message",
+				});
+				yield* persist.persistUserMessage(sessionId, " ", {
+					messageId: "space-message",
+				});
+				const events = yield* eventStore.readBySession(sessionId);
+				expect(
+					events
+						.filter((event) => event.type !== "session.created")
+						.map((event) => ({ type: event.type, data: event.data })),
+				).toEqual([
+					{
+						type: "message.created",
+						data: { messageId: "image-message", role: "user", sessionId },
+					},
+					{
+						type: "file.attached",
+						data: {
+							messageId: "image-message",
+							partId: "image-part",
+							mime: "image/png",
+							url: "data:image/png;base64,aW1hZ2U=",
+						},
+					},
+					{
+						type: "message.created",
+						data: { messageId: "text-message", role: "user", sessionId },
+					},
+					{
+						type: "text.delta",
+						data: {
+							messageId: "text-message",
+							partId: "text-message-0",
+							text: "Hello",
+						},
+					},
+					{
+						type: "message.created",
+						data: { messageId: "space-message", role: "user", sessionId },
+					},
+					{
+						type: "text.delta",
+						data: {
+							messageId: "space-message",
+							partId: "space-message-0",
+							text: " ",
+						},
+					},
+				]);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+
+	it.scoped(
 		"preserves delayed authoritative OpenCode ownership during user-message persistence",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-claude-interleaving-"));

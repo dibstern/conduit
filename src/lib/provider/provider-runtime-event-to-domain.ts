@@ -146,7 +146,12 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "text.delta": {
+			const text = stringField(data["text"]) ?? "";
 			const messageId = messageIdFromData(event, data);
+			const partId = stringField(data["partId"]) ?? `${messageId}:text`;
+			const partExists =
+				state.itemMessageIds.get(partKey(event, partId)) === messageId;
+			if (text === "" && partExists) return { events: [], state };
 			return {
 				events: [
 					canonicalEvent(
@@ -154,13 +159,15 @@ export function translateProviderRuntimeEventToDomain(
 						event.sessionId,
 						{
 							messageId,
-							partId: stringField(data["partId"]) ?? `${messageId}:text`,
-							text: stringField(data["text"]) ?? "",
+							partId,
+							text,
 						},
 						eventOptions(event),
 					),
 				],
-				state,
+				state: partExists
+					? state
+					: withItemMessageId(event, state, partId, messageId),
 			};
 		}
 
@@ -181,21 +188,28 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "thinking.delta": {
+			const text = stringField(data["text"]) ?? "";
 			const partId = partIdFromData(event, data);
+			const messageId = messageIdForPart(event, data, state, partId);
+			const partExists =
+				state.itemMessageIds.get(partKey(event, partId)) === messageId;
+			if (text === "" && partExists) return { events: [], state };
 			return {
 				events: [
 					canonicalEvent(
 						"thinking.delta",
 						event.sessionId,
 						{
-							messageId: messageIdForPart(event, data, state, partId),
+							messageId,
 							partId,
-							text: stringField(data["text"]) ?? "",
+							text,
 						},
 						eventOptions(event),
 					),
 				],
-				state,
+				state: partExists
+					? state
+					: withItemMessageId(event, state, partId, messageId),
 			};
 		}
 

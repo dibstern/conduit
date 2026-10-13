@@ -39,8 +39,9 @@ import {
 	type EventPayloadMap,
 } from "../../../persistence/events.js";
 import {
-	copyForkHistory,
-	midTurnForkBoundary,
+	type ForkRefusal,
+	readForkSource,
+	readSideThreadForkBoundary,
 } from "../../../persistence/fork-history.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
@@ -586,6 +587,32 @@ export const forkOpenCodeSession = (
 		Effect.withSpan("session.forkOpenCodeSession"),
 	);
 
+const forkRefusalError = (parentId: string, refusal: ForkRefusal) => {
+	if (refusal.reason === "no_completed_turn")
+		return new SessionCommandError({
+			operation: "session.side_thread.no_completed_turn",
+			cause: parentId,
+			message:
+				"This session has no completed turn yet. Wait for its first reply.",
+		});
+	if (refusal.reason === "point_not_found") {
+		const message = `Fork point ${refusal.messageId} was not found in the session history`;
+		return new SessionCommandError({
+			operation: "session.forked.point",
+			cause: message,
+			message,
+		});
+	}
+	return new SessionCommandError({
+		operation: "session.forked.claude",
+		cause: "Claude fork boundary has no persisted message ordering key",
+		message:
+			refusal.reason === "no_transcript"
+				? "This session has no Claude transcript yet. Send a message first."
+				: `Fork point ${refusal.messageId} was not found in the session history`,
+	});
+};
+
 /** Route forks by the persisted parent provider, before contacting a runtime. */
 const forkSessionInWorkspace = (
 	parentSessionId: string,
@@ -615,26 +642,6 @@ const forkSessionInWorkspace = (
 			}
 		}
 		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
-		// A Side Thread of a parent mid-turn forks at its last completed turn,
-		// so it inherits no dangling tool call and no turn that never ends.
-		const midTurn =
-			options?.side &&
-			options.messageId === undefined &&
-			eventStore._tag === "Some"
-				? midTurnForkBoundary(
-						yield* eventStore.value.readAllBySession(parentSessionId),
-					)
-				: undefined;
-		if (midTurn && midTurn.lastCompleted === undefined) {
-			return yield* new SessionCommandError({
-				operation: "session.side_thread.no_completed_turn",
-				cause: parentSessionId,
-				message:
-					"This session has no completed turn yet. Wait for its first reply.",
-			});
-		}
-		// Both providers fork up to and including this message.
-		const messageId = options?.messageId ?? midTurn?.lastCompleted;
 		if (
 			!parent ||
 			!isClaudeSessionRow(
@@ -642,6 +649,18 @@ const forkSessionInWorkspace = (
 				config._tag === "Some" ? config.value.configDir : undefined,
 			)
 		) {
+			// A native OpenCode fork needs only the Side Thread's mid-turn cut.
+			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+			const messageId =
+				options?.messageId ??
+				(options?.side && eventStore._tag === "Some" && sql._tag === "Some"
+					? yield* readSideThreadForkBoundary(parentSessionId).pipe(
+							Effect.catchTag("ForkRefusal", (refusal) =>
+								Effect.fail(forkRefusalError(parentSessionId, refusal)),
+							),
+							Effect.provideService(SqlClient.SqlClient, sql.value),
+						)
+					: undefined);
 			const api = yield* Effect.serviceOption(OpenCodeAPITag);
 			if (api._tag === "None") {
 				return yield* new SessionCommandError({
@@ -701,75 +720,25 @@ const forkSessionInWorkspace = (
 			Effect.provideService(ProjectionRunnerEffectTag, projections.value),
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 		);
-		const parentMessages =
-			yield* readOption.value.getSessionMessagesWithParts(parentSessionId);
-		const forkPointMessage =
-			messageId === undefined
-				? parentMessages.at(-1)
-				: parentMessages.find((message) => message.id === messageId);
-		if (!forkPointMessage) {
-			return yield* new SessionCommandError({
-				operation: "session.forked.claude",
-				cause: "Claude fork boundary has no persisted message ordering key",
-				message:
-					messageId === undefined
-						? "This session has no Claude transcript yet. Send a message first."
-						: `Fork point ${messageId} was not found in the session history`,
-			});
-		}
+		const source = yield* readForkSource(parentSessionId, {
+			...(options?.messageId !== undefined && { messageId: options.messageId }),
+			sideThread: options?.side !== undefined,
+		}).pipe(
+			Effect.catchTag("ForkRefusal", (refusal) =>
+				Effect.fail(forkRefusalError(parentSessionId, refusal)),
+			),
+			Effect.provideService(SqlClient.SqlClient, sql.value),
+		);
+		const { historyMessageId, lastRewindCommitSequence, instanceIds } = source;
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
-		const parentEvents =
-			yield* eventStore.value.readAllBySession(parentSessionId);
-		const retainedMessageIds = new Set(
-			parentMessages.map((message) => message.id),
-		);
-		const lastRewindCommitSequence = parentEvents.reduce(
-			(sequence, event) =>
-				event.type === "session.rewind_committed" ? event.sequence : sequence,
-			0,
-		);
-		const historyMessageId =
-			messageId ??
-			(parent.pending_rewind_message_id != null || lastRewindCommitSequence > 0
-				? forkPointMessage.id
-				: undefined);
-		const forkPointSequence = parentEvents.find(
-			(event) =>
-				event.type === "message.created" &&
-				event.data.messageId === forkPointMessage.id,
-		)?.sequence;
-		if (
-			forkPointSequence === undefined ||
-			(messageId !== undefined &&
-				!copyForkHistory(parentEvents, {
-					newSessionId: parentSessionId,
-					upToMessageId: messageId,
-					retainedMessageIds,
-				}))
-		) {
-			return yield* new SessionCommandError({
-				operation: "session.forked.point",
-				cause: `Fork point ${messageId} was not found in the session history`,
-				message: `Fork point ${messageId} was not found in the session history`,
-			});
-		}
-		const instanceIds = new Set([parent.provider]);
-		for (const event of parentEvents) {
-			if (event.type === "session.created")
-				instanceIds.add(event.data.provider);
-			if (event.type === "session.provider_changed") {
-				instanceIds.add(event.data.oldProvider);
-				instanceIds.add(event.data.newProvider);
-			}
-		}
 		let selected: { instanceId: string; thread: NativeThread } | undefined;
 		for (const instanceId of instanceIds) {
 			const thread = yield* state.nativeThread(parentSessionId, instanceId);
 			if (
 				thread &&
-				thread.firstSequence <= forkPointSequence &&
-				forkPointSequence <= thread.deliveredThrough &&
+				thread.firstSequence <= source.boundary.sequence &&
+				source.boundary.sequence <= thread.deliveredThrough &&
 				(!selected || thread.firstSequence > selected.thread.firstSequence)
 			)
 				selected = { instanceId, thread };
@@ -809,8 +778,13 @@ const forkSessionInWorkspace = (
 									messageId: historyMessageId,
 								}),
 								...(historyMessageId !== undefined && {
-									fallbackMessageIds: parentMessages
-										.slice(0, parentMessages.indexOf(forkPointMessage))
+									fallbackMessageIds: source.retained
+										.slice(
+											0,
+											source.retained.findIndex(
+												(message) => message.id === source.boundary.messageId,
+											),
+										)
 										.flatMap((message) =>
 											message.role === "assistant" ? [message.id] : [],
 										)
@@ -827,14 +801,10 @@ const forkSessionInWorkspace = (
 						}),
 				})
 			: { sdkSessionId: randomUUID() };
-		const history = copyForkHistory(parentEvents, {
-			newSessionId: forked.sdkSessionId,
-			...(historyMessageId !== undefined && {
-				upToMessageId: historyMessageId,
-			}),
-			retainedMessageIds,
-		});
-		const forkPointEvent = messageId ?? forkPointMessage.id;
+		const history = yield* source
+			.copy(forked.sdkSessionId)
+			.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
+		const forkPointEvent = source.boundary.messageId;
 		// A native cursor commits before the row is announced. Without one,
 		// prepareTurn hands off this child's bounded history on its first send.
 		yield* commitAndSignal.write((project) =>
@@ -859,8 +829,8 @@ const forkSessionInWorkspace = (
 									}
 								: {}),
 							forkPointEvent,
-							forkPointTimestamp: forkPointMessage.created_at,
-							forkPointMessageId: forkPointMessage.id,
+							forkPointTimestamp: source.boundary.createdAt,
+							forkPointMessageId: source.boundary.messageId,
 						},
 						{
 							provider,
@@ -878,9 +848,9 @@ const forkSessionInWorkspace = (
 				// The fork has nothing in flight. Copied history can end inside a
 				// turn the parent is still running; the idle closes it, or the
 				// inbox reads the fork as busy and holds every send.
-				const stored = history?.events.length
+				const stored = history.length
 					? yield* eventStore.value.appendBatch([
-							...history.events,
+							...history,
 							canonicalEvent(
 								"session.status",
 								forked.sdkSessionId,
@@ -889,7 +859,7 @@ const forkSessionInWorkspace = (
 							),
 						])
 					: created;
-				if (history?.events.length) yield* project(stored);
+				if (history.length) yield* project(stored);
 				if (parentThread)
 					yield* state.saveUpdates(forked.sdkSessionId, [
 						{
@@ -924,7 +894,7 @@ const forkSessionInWorkspace = (
 			time: { created: now, updated: now },
 			provider: "claude" as const,
 			forkMessageId: forkPointEvent,
-			forkPointTimestamp: forkPointMessage.created_at,
+			forkPointTimestamp: source.boundary.createdAt,
 		};
 	});
 

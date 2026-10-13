@@ -299,14 +299,16 @@ function appendContentBlockEvents(input: {
 					input.eventOptions(),
 				),
 			);
-			input.events.push(
-				providerRuntimeEvent(
-					"thinking.delta",
-					input.sessionId,
-					{ messageId: input.messageId, partId, text },
-					input.eventOptions(),
-				),
-			);
+			if (text !== "") {
+				input.events.push(
+					providerRuntimeEvent(
+						"thinking.delta",
+						input.sessionId,
+						{ messageId: input.messageId, partId, text },
+						input.eventOptions(),
+					),
+				);
+			}
 			input.events.push(
 				providerRuntimeEvent(
 					"thinking.end",
