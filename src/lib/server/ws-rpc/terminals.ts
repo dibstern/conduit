@@ -1,5 +1,7 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
+import type { Account } from "../../contracts/account.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { OpenCodeTerminalServiceTag } from "../../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
@@ -25,7 +27,22 @@ export const terminalsHandlers = {
 				request,
 				"terminal",
 			);
-			yield* terminal.create(request.originId, directory);
+			const accounts = yield* AccountDirectory;
+			const selected =
+				request.accountId === undefined
+					? Option.none<Account>()
+					: yield* Effect.option(
+							accounts.resolve({ _tag: "Id", id: request.accountId }),
+						);
+			const account =
+				Option.isSome(selected) && selected.value.driver === "claude"
+					? selected
+					: yield* accounts.defaultFor("claude");
+			yield* terminal.create(
+				request.originId,
+				directory,
+				Option.getOrUndefined(account),
+			);
 			return { ok: true as const };
 		}).pipe(
 			Effect.mapError(

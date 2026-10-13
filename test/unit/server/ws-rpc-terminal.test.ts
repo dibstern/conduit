@@ -145,6 +145,9 @@ describe("WsRpcServerLayer terminal controls", () => {
 				expect(api.pty.create).not.toHaveBeenCalled();
 				expect(localPty.create).toHaveBeenCalledWith({
 					cwd: MOCK_PROJECT_DIR,
+					env: expect.objectContaining({
+						CLAUDE_CONFIG_DIR: expect.stringContaining("conduit-test-login"),
+					}),
 				});
 				expect(connectPtyUpstream).not.toHaveBeenCalled();
 

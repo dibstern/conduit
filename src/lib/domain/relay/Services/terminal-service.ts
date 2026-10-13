@@ -9,10 +9,12 @@ import {
 	Queue,
 	Schedule,
 } from "effect";
+import type { Account } from "../../../contracts/account.js";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import type { PtyEvent, PtyRow } from "../../../contracts/ws-rpc.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
+import { makeClaudeTerminalEnv } from "../../../provider/claude/claude-sdk-env.js";
 import {
 	type PtyUpstream,
 	trackedPtyInfo,
@@ -56,6 +58,7 @@ export interface OpenCodeTerminalService {
 	create(
 		clientId: string,
 		cwd?: string,
+		account?: Account,
 	): Effect.Effect<void, TerminalServiceError>;
 	/** Restore hosted PTYs, discover OpenCode's, and re-attach running ones. */
 	list(): Effect.Effect<PtyInfo[], TerminalServiceError>;
@@ -103,6 +106,7 @@ export interface LocalPtyService {
 		readonly projectDir?: string;
 		readonly cols?: number | undefined;
 		readonly rows?: number | undefined;
+		readonly env?: Readonly<Record<string, string | undefined>>;
 	}): Effect.Effect<LocalPtySession, TerminalServiceError>;
 }
 
@@ -428,12 +432,15 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		);
 
 		const terminal: OpenCodeTerminalService = {
-			create: (clientId: string, cwd = config.projectDir) =>
+			create: (clientId: string, cwd = config.projectDir, account) =>
 				Effect.gen(function* () {
 					const session = wsHandler.getClientSession(clientId) ?? "?";
 					const createResult = yield* Effect.either(
 						localPty.create({
 							cwd,
+							...(account?.driver === "claude"
+								? { env: makeClaudeTerminalEnv({ configDir: account.folder }) }
+								: {}),
 							...(cwd !== config.projectDir
 								? { projectDir: config.projectDir }
 								: {}),

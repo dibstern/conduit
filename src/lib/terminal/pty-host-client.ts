@@ -520,7 +520,7 @@ export class PtyHostClient {
 		cols?: number | undefined;
 		rows?: number | undefined;
 		shell?: string;
-		env?: Record<string, string>;
+		env?: Readonly<Record<string, string | undefined>>;
 	}): Promise<HostedPtySession> {
 		if (
 			options.projectDir !== undefined &&

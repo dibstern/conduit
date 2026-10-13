@@ -157,6 +157,7 @@ export interface CreatePtyRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
 	readonly sessionId?: string;
+	readonly accountId?: string;
 	readonly root?: string;
 }
 

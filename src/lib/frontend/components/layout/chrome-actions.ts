@@ -10,15 +10,18 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import {
+	getCurrentRoute,
 	getCurrentSessionId,
 	getCurrentSlug,
 } from "../../stores/router.svelte.js";
+import { getActiveSession } from "../../stores/session.svelte.js";
 import {
 	beginCreateTab,
 	failCreateTab,
 	terminalState,
 	togglePanel as toggleTerminalPanel,
 } from "../../stores/terminal.svelte.js";
+import { composerAccountId } from "../../stores/usage.svelte.js";
 import { createPtyRpc } from "../../transport/ws-rpc-client.js";
 
 export type SettingsSection =
@@ -99,6 +102,14 @@ export function chromeMenuActions(): readonly ChromeMenuAction[] {
  * terminal is the whole view (see ChatLayout), because a split terminal and
  * transcript leaves neither usable.
  */
+/** A terminal opened from a session or draft uses its composer's account; elsewhere the server picks the default. */
+export function terminalAccountId(): string | undefined {
+	const route = getCurrentRoute();
+	return route.page === "chat" && (getCurrentSessionId() || route.draft)
+		? composerAccountId(getActiveSession())
+		: undefined;
+}
+
 export function toggleTerminal(): void {
 	const wasOpen = terminalState.panelOpen;
 	toggleTerminalPanel();
@@ -108,11 +119,13 @@ export function toggleTerminal(): void {
 	if (terminalState.tabs.size === 0) {
 		const slug = getCurrentSlug();
 		const sessionId = getCurrentSessionId();
+		const accountId = terminalAccountId();
 		if (slug && beginCreateTab()) {
 			void createPtyRpc({
 				projectSlug: slug,
 				originId: getBrowserClientId(),
 				...(sessionId ? { sessionId } : {}),
+				...(accountId === undefined ? {} : { accountId }),
 			}).catch(() => {
 				failCreateTab("Failed to create terminal");
 			});

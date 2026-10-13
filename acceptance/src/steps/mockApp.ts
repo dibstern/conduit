@@ -417,6 +417,12 @@ export const mockAppHandlers: StepHandler[] = [
 						? "claude"
 						: undefined;
 			const rpcControl = await mockWsRpc(world.page, {
+				streams: {
+					SubscribePtys: () => [
+						{ _tag: "snapshot", rows: [] },
+						{ _tag: "synchronized" },
+					],
+				},
 				handlers: {
 					CreatePty: async () => ({ ok: true }),
 					ResolveSession: async () => ({ projectSlug: "myapp" }),

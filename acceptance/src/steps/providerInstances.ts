@@ -50,6 +50,84 @@ const listOf = (list: string) => (list === "none" ? [] : list.split(", "));
 
 export const providerInstancesHandlers: StepHandler[] = [
 	{
+		name: "return to the session list for a terminal",
+		match: /^I return to the session list for a terminal$/,
+		run: async ({ world }) => {
+			await world.page.goto(new URL("/?p=myapp", world.page.url()).toString());
+			await expect(world.page.getByTestId("views-rail-terminal")).toBeVisible();
+		},
+	},
+	{
+		name: "open a new terminal tab",
+		match: /^I open a new terminal tab$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setHandler("CreatePty", () => {
+				const count = rpc
+					.getRequests()
+					.filter((request) => request.tag === "CreatePty").length;
+				rpc.sendChunk("SubscribePtys", [
+					{
+						_tag: "upsert",
+						item: {
+							id: `terminal-${count}`,
+							title: `Terminal ${count}`,
+							command: "sh",
+							cwd: "/myapp",
+							status: "running",
+							pid: count,
+						},
+					},
+				]);
+				return { ok: true };
+			});
+			await world.page.getByTestId("views-rail-terminal").click();
+			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
+				1,
+			);
+		},
+	},
+	{
+		name: "add another terminal tab from the panel",
+		match: /^I add another terminal tab$/,
+		run: async ({ world }) => {
+			await world.page.locator("#terminal-panel .term-new-btn").click();
+			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
+				2,
+			);
+		},
+	},
+	{
+		name: "assert terminal account and session scope",
+		match:
+			/^the terminal create request carries the (Personal|Claude) account for (a draft|the viewed session)$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			await rpc.waitForRequest((candidate) => candidate.tag === "CreatePty");
+			const request = rpc
+				.getRequests()
+				.filter((candidate) => candidate.tag === "CreatePty")
+				.at(-1);
+			if (!request) throw new Error("No terminal create request");
+			expect(request.payload["accountId"]).toBe(instanceSlug(match[1] ?? ""));
+			expect(request.payload["sessionId"]).toBe(
+				match[2] === "a draft" ? undefined : "sess-account-deleted",
+			);
+		},
+	},
+	{
+		name: "assert sessionless terminal leaves account resolution to the server",
+		match:
+			/^the terminal create request leaves the account and session unspecified$/,
+		run: async ({ world }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "CreatePty",
+			);
+			expect(request.payload["accountId"]).toBeUndefined();
+			expect(request.payload["sessionId"]).toBeUndefined();
+		},
+	},
+	{
 		name: "seed an explicitly empty configured account list",
 		match: /^no provider accounts are configured$/,
 		run: ({ world }) => {

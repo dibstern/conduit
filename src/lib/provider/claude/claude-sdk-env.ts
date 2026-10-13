@@ -75,9 +75,6 @@ export function makeClaudeSdkEnv(
 		accountEnv?: Readonly<Record<string, string>> | undefined;
 	},
 ): NonNullable<SDKOptions["env"]> {
-	const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
-		opts.configDir,
-	);
 	const env: Record<string, string | undefined> = {
 		...(opts.baseEnv ?? process.env),
 	};
@@ -89,6 +86,18 @@ export function makeClaudeSdkEnv(
 	// claude.ai account connectors (Gmail, Drive, ...) otherwise load into every
 	// session, and their "sign in again" notices leak into model replies.
 	env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
+	return makeClaudeTerminalEnv({ configDir: opts.configDir, baseEnv: env });
+}
+
+/** Select a login folder without changing the rest of a terminal's shell env. */
+export function makeClaudeTerminalEnv(opts: {
+	configDir: ClaudeConfigDir;
+	baseEnv?: Readonly<Record<string, string | undefined>> | undefined;
+}): Record<string, string | undefined> {
+	const env = { ...(opts.baseEnv ?? process.env) };
+	const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
+		opts.configDir,
+	);
 	if (configDir._tag === "SdkDefault") {
 		const folder = resolve(configDir.path);
 		// An explicit standard root selects different Keychain and global-config
