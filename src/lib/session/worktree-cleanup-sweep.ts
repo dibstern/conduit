@@ -115,30 +115,6 @@ export const cleanUpProjectWorktrees = (
 				const setting = yield* getSetting;
 				const initial = yield* stateOf(sessionId);
 				const deleted = initial.facts === undefined;
-				if (
-					deleted &&
-					(yield* sql<{ found: number }>`SELECT EXISTS (
-						SELECT 1 FROM events AS deletion
-						WHERE deletion.type = 'session.deleted'
-							AND json_extract(deletion.data, '$.keepWorktrees') = 1
-							AND (
-								json_extract(deletion.data, '$.sessionId') = ${sessionId}
-								OR EXISTS (
-									SELECT 1 FROM json_each(deletion.data, '$.childSessionIds') AS child
-									WHERE child.value = ${sessionId}
-								)
-							)
-					) AS found`)[0]?.found === 1
-				) {
-					for (const { session_id, path } of paths)
-						if (session_id === sessionId)
-							report.kept.push({
-								...base,
-								path,
-								reason: "Kept when the session was deleted",
-							});
-					return;
-				}
 				const earlyReason = blockedReason(initial);
 				// Modern ownership is a pure event read. Legacy proof may inspect Git,
 				// so leave it until the cheap session guards have passed.

@@ -1,8 +1,8 @@
 /*
  * Failure modes: cleanup loses a branch or prevents the next turn; a policy
  * removes unmerged work, local files, a shared checkout or a viewed session;
- * deleted ownership or an explicit Keep choice disappears; deferred removal
- * becomes a permanent Keep; inactivity reads the wrong clock; defaults or
+ * deleted ownership disappears or deletion never requests cleanup; deferred
+ * removal becomes a permanent Keep; inactivity reads the wrong clock; defaults or
  * settings disappear across restart; automatic requests race the manual result.
  * Exercise the daemon RPCs, real owned checkouts and the next provider turn.
  */
@@ -800,31 +800,35 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		).toBe(head);
 	}, 300_000);
 
-	it("respects explicit Keep when deleting a session with onDelete enabled", async () => {
-		const { fixture, socket, create, sweep } = await start({
+	it("requests cleanup after deletion without a cleanup RPC", async () => {
+		const { fixture, socket, create, sessions } = await start({
 			onSettle: "off",
 			onDelete: true,
 		});
-		const session = await create("explicit Keep");
+		const session = await create("delete trigger");
 		const head = git(session.path, "rev-parse", "HEAD");
-		await sendRpcRequest(
-			socket,
-			new DeleteSession({
-				projectSlug: "process-test",
-				sessionId: session.id,
-				removeWorktrees: false,
-			}),
-		);
-		const result = await sweep("explicit Keep with onDelete", "process-test");
-		expect(result.removed).toEqual([]);
-		expect(result.kept).toContainEqual({
+		const payload = {
 			projectSlug: "process-test",
 			sessionId: session.id,
-			path: session.path,
-			reason: "Kept when the session was deleted",
-		});
+			removeWorktrees: false,
+		};
+		evidence["deletion"] = {
+			payload,
+			head,
+			checkoutExists: existsSync(session.path),
+		};
 		expect(existsSync(session.path)).toBe(true);
-		expect(git(session.path, "branch", "--show-current")).toBe(session.branch);
+		const deletion = await sendRpcRequest(socket, new DeleteSession(payload));
+		evidence["deletionResponse"] = deletion;
+		expect(deletion.ok).toBe(true);
+		expect(deletion.worktreeWarnings ?? []).toEqual([]);
+		await vi.waitFor(() => expect(existsSync(session.path)).toBe(false), {
+			timeout: 60_000,
+			interval: 100,
+		});
+		expect(
+			(await sessions()).sessions.some(({ id }) => id === session.id),
+		).toBe(false);
 		expect(
 			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
 		).toBe(head);

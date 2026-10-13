@@ -57,18 +57,7 @@ export const readColdWorktreeCleanupCandidates = (
 				AND json_extract(events.data, '$.cause') = 'launch'
 				AND json_extract(events.data, '$.origin') = 'conduit'
 				AND (
-					(sessions.id IS NULL AND ${Number(setting.onDelete)} = 1 AND NOT EXISTS (
-						SELECT 1 FROM events AS deletion
-						WHERE deletion.type = 'session.deleted'
-							AND json_extract(deletion.data, '$.keepWorktrees') = 1
-							AND (
-								json_extract(deletion.data, '$.sessionId') = events.session_id
-								OR EXISTS (
-									SELECT 1 FROM json_each(deletion.data, '$.childSessionIds') AS child
-									WHERE child.value = events.session_id
-								)
-							)
-					))
+					(sessions.id IS NULL AND ${Number(setting.onDelete)} = 1)
 					OR (sessions.id IS NOT NULL AND (
 						(${Number(setting.onSettle !== "off")} = 1 AND sessions.settled_at IS NOT NULL)
 						OR ${Number(setting.whenMerged || setting.noCommitsBeyondDefault)} = 1

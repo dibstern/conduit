@@ -28,7 +28,7 @@ export async function confirmSessionDeletion(
 		if (uiState.confirmDialog) return null;
 		// Removal still keeps worktrees in use or with uncommitted changes.
 		let removeWorktrees =
-			(removeOnDelete && worktrees.some((worktree) => !worktree.inUse)) ||
+			!removeOnDelete &&
 			inspections
 				.filter((inspection) => inspection.worktrees.length > 0)
 				.every((inspection) => inspection.removeWorktrees);
@@ -36,7 +36,7 @@ export async function confirmSessionDeletion(
 			text,
 			"Delete",
 			returnFocus,
-			worktrees.length > 0
+			!removeOnDelete && worktrees.length > 0
 				? {
 						worktrees,
 						removeWorktrees,

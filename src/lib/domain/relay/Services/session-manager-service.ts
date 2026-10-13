@@ -308,7 +308,7 @@ const createLocalSession = (
 	}).pipe(Effect.withSpan("session.createLocalSession"));
 
 /** Delete a session locally, then best-effort upstream, and clear associated state. */
-export const deleteSession = (sessionId: string, keepWorktrees = false) =>
+export const deleteSession = (sessionId: string) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
@@ -516,11 +516,10 @@ export const deleteSession = (sessionId: string, keepWorktrees = false) =>
 		yield* applySessionCommand(
 			{
 				type: "session.deleted",
-				data: {
-					sessionId,
-					...(childSessionIds.length === 0 ? {} : { childSessionIds }),
-					...(keepWorktrees ? { keepWorktrees: true } : {}),
-				},
+				data:
+					childSessionIds.length === 0
+						? { sessionId }
+						: { sessionId, childSessionIds },
 			},
 			{ upstreamAdapter },
 		).pipe(
@@ -630,10 +629,7 @@ export interface SessionManagerService {
 		session: SessionDetail,
 		providerInstanceId: ProviderInstanceId,
 	): Effect.Effect<void, SessionManagerError>;
-	deleteSession(
-		sessionId: string,
-		keepWorktrees?: boolean,
-	): Effect.Effect<boolean, SessionManagerError>;
+	deleteSession(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
 	renameSession(
 		sessionId: string,
 		title: string,
@@ -1071,7 +1067,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					return session;
 				}),
 			establishOpenCodeSession,
-			deleteSession: (sessionId, keepWorktrees) =>
+			deleteSession: (sessionId) =>
 				Effect.gen(function* () {
 					const completion = yield* Deferred.make<void, SessionManagerError>();
 					const existing = inFlightDeletes.get(sessionId);
@@ -1082,7 +1078,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					inFlightDeletes.set(sessionId, completion);
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
-							yield* deleteSession(sessionId, keepWorktrees).pipe(
+							yield* deleteSession(sessionId).pipe(
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),
 								Effect.provideService(OpenCodeInstancesTag, instanceClients),
@@ -1109,7 +1105,13 @@ export const SessionManagerServiceLive: Layer.Layer<
 						onFailure: Effect.failCause,
 						onSuccess: () => Effect.succeed(true),
 					});
-				}),
+				}).pipe(
+					Effect.tap((deleted) =>
+						deleted
+							? (config.requestWorktreeCleanup?.() ?? Effect.void)
+							: Effect.void,
+					),
+				),
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),
 			markSessionSeen: (sessionId, upTo) =>

@@ -301,10 +301,7 @@ export const deleteSessionForClient = ({
 				),
 			);
 
-			const didDelete = yield* sessionManagerService.deleteSession(
-				id,
-				removeWorktrees === false,
-			);
+			const didDelete = yield* sessionManagerService.deleteSession(id);
 			if (!didDelete) return [];
 
 			log.info(`client=${clientId} Deleted: ${id}`);
