@@ -1,10 +1,12 @@
 import { Layer } from "effect";
 import { vi } from "vitest";
+import { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import type { OpenCodeAPI } from "../../src/lib/instance/opencode-api.js";
 import type { Logger } from "../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import {
+	makeMockAccountDirectory,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 } from "./mock-factories.js";
@@ -54,8 +56,9 @@ export function makeHandlerLogger(): Logger {
 
 /** What a session model-settings write needs: a store to commit its event to. */
 export function makeSessionSettingsLayer() {
-	return Layer.merge(
+	return Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()),
 	);
 }

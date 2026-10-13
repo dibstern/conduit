@@ -21,8 +21,9 @@ import {
 	hydrateModelSettings,
 } from "./discovery.svelte.js";
 import { projectState } from "./project-state.svelte.js";
-import { sessionState } from "./session.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
+import { composerAccountId } from "./usage.svelte.js";
 
 export const applyProjectSetting = (setting: ProjectSetting): void => {
 	switch (setting._tag) {
@@ -59,6 +60,16 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 			uiState.opencodeConnections[setting.instanceId] = setting.status;
 			break;
 		case "providerModels":
+			if (
+				setting.accountId !== undefined &&
+				setting.accountId !==
+					composerAccountId(
+						sessionState.currentId
+							? findSession(sessionState.currentId)
+							: undefined,
+					)
+			)
+				break;
 			handleModelList({
 				providers: [
 					...discoveryState.providers.filter(

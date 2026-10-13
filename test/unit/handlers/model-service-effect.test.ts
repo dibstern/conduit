@@ -7,7 +7,7 @@ import {
 	Deferred,
 	Effect,
 	Fiber,
-	FiberHandle,
+	FiberMap,
 	Layer,
 	Option,
 	PubSub,
@@ -337,7 +337,7 @@ describe("model handlers with Effect-native model service", () => {
 					supportsQuestions: true, supportsAttachments: true, supportsFork: true, supportsRevert: true,
 				});
 				const published = yield* Fiber.join(update);
-				yield* FiberHandle.awaitEmpty((yield* ProjectSettingsTag).modelDiscovery);
+			yield* FiberMap.awaitEmpty((yield* ProjectSettingsTag).modelDiscovery);
 				expect(Option.isSome(published)).toBe(true);
 				if (Option.isSome(published)) expect(published.value).toMatchObject({
 					_tag: "upsert", item: { _tag: "providerModels", providers: [{ id: "claude", models: [{ id: "sonnet", variants: ["high"] }] }] },

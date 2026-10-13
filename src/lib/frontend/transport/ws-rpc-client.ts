@@ -759,6 +759,9 @@ const callAddInstance = (input: AddInstanceRpcInput) =>
 const callUpdateInstance = (input: UpdateInstanceRpcInput) =>
 	callDaemon((client) => client.UpdateInstance(input));
 
+const callSetDefault = (input: { readonly instanceId: string }) =>
+	callDaemon((client) => client.SetDefault(input));
+
 const callScanNow = (input: ScanNowRpcInput) =>
 	callDaemon((client) => client.ScanNow(input));
 
@@ -1227,6 +1230,14 @@ export async function updateInstanceRpc(
 	const result = await runTransportEffect(
 		Effect.either(callUpdateInstance(input)),
 	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
+}
+
+export async function setDefaultRpc(input: {
+	readonly instanceId: string;
+}): Promise<InstanceListResponse> {
+	const result = await runTransportEffect(Effect.either(callSetDefault(input)));
 	if (Either.isLeft(result)) throw result.left;
 	return result.right;
 }

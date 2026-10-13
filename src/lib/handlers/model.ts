@@ -3,10 +3,11 @@ import {
 	Data,
 	Effect,
 	Either,
-	FiberHandle,
+	FiberMap,
 	Option,
 	Ref,
 } from "effect";
+import type { AccountId } from "../contracts/account.js";
 import type { AccountUnroutable } from "../contracts/limit-recovery.js";
 import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
@@ -136,13 +137,17 @@ const claudeProviderFromCatalog = (
 		),
 });
 
-const publishClaudeModels = (models: readonly ModelInfo[]) =>
+const publishClaudeModels = (
+	models: readonly ModelInfo[],
+	accountId: AccountId,
+) =>
 	Effect.gen(function* () {
 		const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 		if (projectSettings._tag === "None") return;
 		const provider = claudeProviderFromCatalog(models);
 		yield* publishProjectSetting({
 			_tag: "providerModels",
+			accountId,
 			providers: models.length > 0 ? [provider] : [],
 		}).pipe(Effect.provideService(ProjectSettingsTag, projectSettings.value));
 		yield* refreshHarnessDefaults;
@@ -151,18 +156,25 @@ const publishClaudeModels = (models: readonly ModelInfo[]) =>
 /** Catalog discovery for interactive picks; turn dispatch uses cached catalogs. */
 export const loadModelCatalog = (
 	harness: Harness,
-	instanceId: string = harness,
+	instanceId?: string,
 	options?: { readonly startIfStopped?: boolean },
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		if (harness === "claude") {
 			const engine = yield* OrchestrationEngineTag;
+			const directory = yield* AccountDirectory;
+			const account = yield* directory.resolve(
+				instanceId === undefined
+					? { _tag: "DriverDefault", driver: harness }
+					: { _tag: "Id", id: instanceId },
+			);
 
 			const capsResult = yield* Effect.either(
 				engine.dispatchEffect({
 					type: "discover",
-					providerId: instanceId,
+					providerId: account.id,
+					account,
 				}),
 			);
 			if (capsResult._tag === "Left") {
@@ -172,7 +184,7 @@ export const loadModelCatalog = (
 				return [] as ModelInfo[];
 			}
 			const models = capsResult.right.models;
-			yield* publishClaudeModels(models);
+			yield* publishClaudeModels(models, account.id);
 			return models;
 		}
 
@@ -375,7 +387,7 @@ export const getModelsResponse = (
 				})
 				.pipe(
 					Effect.flatMap((capabilities) =>
-						publishClaudeModels(capabilities.models),
+						publishClaudeModels(capabilities.models, claudeAccount.id),
 					),
 					Effect.catchAll((error) =>
 						Effect.sync(() =>
@@ -386,7 +398,9 @@ export const getModelsResponse = (
 					),
 					Effect.asVoid,
 					(effect) =>
-						FiberHandle.run(modelDiscovery, effect, { onlyIfMissing: true }),
+						FiberMap.run(modelDiscovery, claudeAccount.id, effect, {
+							onlyIfMissing: true,
+						}),
 				);
 
 		const providers: ProviderInfo[] = [];
@@ -484,8 +498,11 @@ export const getModelsResponse = (
 		const selectedModel = selectedModelMatchesInstance
 			? fallbackModel
 			: undefined;
-		const claudeCatalog = (yield* Ref.get((yield* ProjectSettingsTag).live))
-			.providerModels;
+		const catalogues = yield* Ref.get((yield* ProjectSettingsTag).live);
+		const claudeCatalog = claudeAccount
+			? (catalogues[`providerModels:${claudeAccount.id}`] ??
+				catalogues.providerModels)
+			: catalogues.providerModels;
 		const catalog = catalogFromProviderList(
 			selectedDriver === "claude"
 				? (claudeCatalog?.providers ?? [])
@@ -721,7 +738,7 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 
 		const { provider, model } = input;
 		const harness = harnessForModelProvider(provider);
-		const catalog = yield* loadModelCatalog(harness, harness, {
+		const catalog = yield* loadModelCatalog(harness, undefined, {
 			startIfStopped: true,
 		});
 		const resolved = resolveTurnSettings(
@@ -781,7 +798,7 @@ export const setHarnessDefaultForRelay = (input: {
 }) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const catalog = yield* loadModelCatalog(input.harness, input.harness, {
+		const catalog = yield* loadModelCatalog(input.harness, undefined, {
 			startIfStopped: true,
 		});
 		const requestedEffort =

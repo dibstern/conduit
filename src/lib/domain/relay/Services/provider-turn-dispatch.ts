@@ -552,10 +552,13 @@ const prepareEngineTurnInput = (
 			let catalog = discoveredCatalog;
 			if (catalog === undefined && isClaudeDriver(driver)) {
 				const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
-				const providerModels =
+				const catalogues =
 					projectSettings._tag === "Some"
-						? (yield* Ref.get(projectSettings.value.live)).providerModels
+						? yield* Ref.get(projectSettings.value.live)
 						: undefined;
+				const providerModels =
+					catalogues?.[`providerModels:${account.id}`] ??
+					catalogues?.providerModels;
 				if (providerModels !== undefined)
 					catalog = catalogFromProviderList(providerModels.providers);
 			} else if (catalog === undefined) {

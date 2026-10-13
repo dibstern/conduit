@@ -509,6 +509,19 @@ export const mockAppHandlers: StepHandler[] = [
 						mockInstances.set(page, next);
 						return { projectSlug: "myapp", instances: next };
 					},
+					SetDefault: async (payload) => {
+						const next = (mockInstances.get(page) ?? []).map((instance) =>
+							instance["driver"] === "claude"
+								? {
+										...instance,
+										isDefault: instance["id"] === payload["instanceId"],
+									}
+								: instance,
+						);
+						mockInstances.set(page, next);
+						rpcControl.setDaemonList("SubscribeInstances", { instances: next });
+						return { instances: next };
+					},
 					RemoveInstance: async (payload) => {
 						const next = (mockInstances.get(page) ?? []).filter(
 							(i) => i["id"] !== payload["instanceId"],
@@ -582,7 +595,13 @@ export const mockAppHandlers: StepHandler[] = [
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]
 								: sessionInstance(payload);
-						const claude = instanceId === "claude";
+						const claude =
+							instanceId === "claude" ||
+							(mockInstances.get(page) ?? []).some(
+								(instance) =>
+									instance["id"] === instanceId &&
+									instance["driver"] === "claude",
+							);
 						return {
 							projectSlug: "myapp",
 							...(instanceId != null ? { instanceId } : {}),

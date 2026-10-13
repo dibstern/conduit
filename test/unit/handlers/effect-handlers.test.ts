@@ -945,10 +945,6 @@ describe("switchModelForSession", () => {
 				providerID: "claude",
 				modelID: "opus",
 			});
-			expect(engine.dispatchEffect).toHaveBeenCalledWith({
-				type: "discover",
-				providerId: "claude",
-			});
 			expect(client.provider.list).not.toHaveBeenCalled();
 			expect(result).toMatchObject({
 				variant: "",
@@ -1010,10 +1006,6 @@ describe("switchVariantForSession", () => {
 				variant: "high",
 			});
 			expect(yield* getVariant("session-42")).toBe("high");
-			expect(engine.dispatchEffect).toHaveBeenCalledWith({
-				type: "discover",
-				providerId: "claude",
-			});
 			expect(client.provider.list).not.toHaveBeenCalled();
 			expect(result).toMatchObject({
 				variant: "high",
@@ -1123,10 +1115,6 @@ describe("switchContextWindowForSession", () => {
 					contextWindow: "1m",
 				});
 				expect(yield* getContextWindow("session-42")).toBe("1m");
-				expect(engine.dispatchEffect).toHaveBeenCalledWith({
-					type: "discover",
-					providerId: "claude",
-				});
 				expect(result).toMatchObject({
 					contextWindow: "1m",
 					options: contextWindowOptions,
@@ -3119,6 +3107,7 @@ describe("handleMessage", () => {
 		return Effect.gen(function* () {
 			yield* publishProjectSetting({
 				_tag: "providerModels",
+				accountId: "claude",
 				providers: [{
 					id: "claude",
 					name: "Claude",
@@ -3226,6 +3215,7 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				yield* publishProjectSetting({
 					_tag: "providerModels",
+					accountId: "claude",
 					providers: [{
 						id: "claude",
 						name: "Claude",
@@ -3331,6 +3321,7 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				yield* publishProjectSetting({
 					_tag: "providerModels",
+					accountId: "claude",
 					providers: [{
 						id: "claude",
 						name: "Claude",

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, layer } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -28,6 +29,7 @@ import {
 } from "../../../src/lib/provider/provider-registry.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -59,7 +61,7 @@ const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory, makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag, makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag, new ProviderRegistry())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect override state", () => {
 	it.effect(
 		"stores selected session model and restored variant without legacy SessionOverrides",

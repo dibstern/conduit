@@ -66,6 +66,7 @@ import { DaemonStateTag } from "../Services/daemon-state.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance,
+	applyAccountChange,
 	getInstance,
 	getInstances,
 	type InstanceManagerStateTag,
@@ -650,6 +651,19 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList,
 						};
+					}),
+				),
+			SetDefault: (request) =>
+				mutate(
+					request.instanceId,
+					Effect.gen(function* () {
+						yield* applyAccountChange({
+							_tag: "SetDefault",
+							id: request.instanceId,
+						});
+						yield* persistConfig;
+						yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
+						return { instances: yield* instanceList };
 					}),
 				),
 			GetAutoSettleSetting: (request) =>

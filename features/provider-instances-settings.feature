@@ -46,6 +46,40 @@ Scenario: editing a named instance updates it in the settings list
   Then the Instances list shows Prod OC
   And the Instances list does not show Staging OC
 
+Scenario Outline: make an account default
+  Given the default Claude account is named Claude with folder /profiles/original
+  And a named Claude instance Personal is already configured
+  When I open settings to the Server section
+  And I make the Personal account default
+  Then only the Personal Claude account has the default marker
+  And SetDefault saves Personal as the default account
+  And the instances-settings region visually matches provider-instances-settings-personal-default at <threshold> percent
+
+Examples:
+  | threshold |
+  | 98        |
+
+Scenario Outline: a new draft's composer shows the default account
+  Given the default Claude account is named Claude with folder /profiles/original
+  And a named Claude instance Personal is already configured
+  And new drafts use a Claude model
+  When I open settings to the Server section
+  And I make the Personal account default
+  And I close settings
+  And I start a new session
+  Then the draft composer and usage meter use the Personal account
+  When I open the model picker
+  Then the picker selects the Personal account
+  And the model-picker region visually matches provider-instances-default-draft at <threshold> percent
+  When I close the model picker
+  And I type use my default account into the composer
+  And I send the composer message
+  Then the new session is created on the Personal account
+
+Examples:
+  | threshold |
+  | 98        |
+
 Scenario: the default Claude account shares the editor and cannot be removed
   Given the default Claude account is named Personal Claude with folder /profiles/personal
   When I open settings to the Server section

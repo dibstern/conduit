@@ -333,6 +333,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 							},
 						],
 					}),
+				SetDefault: () => Effect.succeed({ instances: [] }),
 				ScanNow: (request) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,

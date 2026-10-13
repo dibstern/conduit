@@ -584,7 +584,7 @@ describe("WsRpcServerLayer GetModels", () => {
 	);
 
 	it.effect(
-		"shares one live Claude catalog between default and named instances",
+		"keeps account catalogues scoped while their provider groups stay keyed by driver",
 		() => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-rpc-models-instance-"),
@@ -658,10 +658,14 @@ describe("WsRpcServerLayer GetModels", () => {
 				const catalogs = snapshot.value.rows.filter(
 					(row) => row._tag === "providerModels",
 				);
-				// Settings key their provider groups by id, including on reconnect.
+				// Reconnecting clients receive both accounts and select their own row.
+				expect(catalogs.map((row) => row.accountId)).toEqual([
+					"claude",
+					"claude-work",
+				]);
 				expect(
 					catalogs.flatMap((row) => row.providers.map(({ id }) => id)),
-				).toEqual(["claude"]);
+				).toEqual(["claude", "claude"]);
 				expect(catalogs[0]?.providers).toEqual([
 					{
 						id: "claude",

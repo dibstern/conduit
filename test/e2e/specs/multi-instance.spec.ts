@@ -1,11 +1,13 @@
 // Instance settings, health updates and reconnect actions with a mocked daemon.
 
 import { expect, test } from "@playwright/test";
+import type { InstanceListResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	instancesWith,
 	multiInstanceInitMessages,
 	noInstanceInitMessages,
 	singleInstanceInitMessages,
+	unboundInitMessages,
 } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
@@ -14,6 +16,316 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 type Page = import("@playwright/test").Page;
 type WsMockControl = Awaited<ReturnType<typeof mockRelayWebSocket>>;
 type MultiInstanceControl = WsMockControl & { rpc: RpcMockControl };
+
+// Defaults can diverge across clients, overwrite explicit picks through shared
+// catalogue broadcasts, or leave an unpicked draft's model and agents stale.
+// This fixture serves two distinct Claude catalogues and no real config or SDK.
+function defaultAccountDaemon() {
+	let instances: InstanceListResponse["instances"] = [
+		{
+			id: "claude",
+			name: "Claude",
+			driver: "claude",
+			isDefault: true,
+			usageEligible: true,
+			configDir: "/fixture/original",
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 1,
+		},
+		{
+			id: "personal",
+			name: "Personal",
+			driver: "claude",
+			isDefault: false,
+			usageEligible: true,
+			configDir: "/fixture/personal",
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 1,
+		},
+	];
+	const clients: RpcMockControl[] = [];
+	const providersFor = (id: string) => [
+		{
+			id: "claude",
+			name: "Claude",
+			configured: true,
+			models: [
+				{ id: "shared", name: "Shared Sonnet", provider: "claude" },
+				{
+					id: id === "personal" ? "personal-only" : "original-only",
+					name: id === "personal" ? "Personal Opus" : "Original Sonnet",
+					provider: "claude",
+				},
+			],
+		},
+	];
+	const publishModels = (id: string) => {
+		for (const client of clients)
+			client.setProjectSetting({
+				_tag: "providerModels",
+				accountId: id,
+				providers: providersFor(id),
+			});
+	};
+	const setDefault = (id: string) => {
+		instances = instances.map((instance) => ({
+			...instance,
+			isDefault: instance.id === id,
+		}));
+		for (const client of clients)
+			client.setDaemonList("SubscribeInstances", { instances });
+		return { instances };
+	};
+	const connect = async (page: Page, baseURL?: string) => {
+		const defaultId = () =>
+			instances.find((instance) => instance.isDefault)?.id ?? "claude";
+		let sessionAccount: string | undefined;
+		const rpc = await mockWsRpc(page, {
+			handlers: {
+				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
+				DetectProxy: () => ({ found: false, port: 8317 }),
+				GetModels: (payload) => {
+					const id =
+						typeof payload["instanceId"] === "string"
+							? payload["instanceId"]
+							: payload["sessionId"]
+								? (sessionAccount ?? defaultId())
+								: defaultId();
+					publishModels(id);
+					return {
+						projectSlug: "myapp",
+						instanceId: id,
+						providers: [],
+						active: { model: "shared", provider: "claude" },
+					};
+				},
+				GetAgents: (payload) => ({
+					projectSlug: "myapp",
+					instanceId: payload["instanceId"] ?? sessionAccount ?? defaultId(),
+					providerScope: { id: "claude", name: "Claude" },
+					agents: [
+						{
+							id:
+								payload["instanceId"] === "personal"
+									? "Personal agent"
+									: "Original agent",
+							name:
+								payload["instanceId"] === "personal"
+									? "Personal agent"
+									: "Original agent",
+						},
+					],
+				}),
+				CreateSession: (payload) => {
+					sessionAccount = String(payload["instanceId"]);
+					return { projectSlug: "myapp", sessionId: "sess-first-send" };
+				},
+				"input.submit": () => ({ ok: true, sessionId: "sess-first-send" }),
+			},
+		});
+		clients.push(rpc);
+		rpc.setDaemonList("SubscribeInstances", { instances });
+		rpc.setDaemonList("SubscribeUsage", {
+			readings: instances.map((instance) => ({
+				accountId: instance.id,
+				harness: "claude",
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 20 }],
+				readAt: 1,
+				stale: false,
+			})),
+		});
+		rpc.setProjectSetting({
+			_tag: "defaultModel",
+			model: "shared",
+			provider: "claude",
+			variant: "",
+		});
+		publishModels(defaultId());
+		await mockRelayWebSocket(page, {
+			initMessages: unboundInitMessages.filter(
+				(message) =>
+					message.type !== "model_info" &&
+					message.type !== "mock_model_catalog" &&
+					message.type !== "mock_agent_catalog",
+			),
+			responses: new Map(),
+			initDelay: 0,
+			messageDelay: 0,
+		});
+		await gotoAndWait(page, baseURL);
+		await page.locator("#new-session-btn:visible").click();
+		await expect(
+			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
+		).toHaveAttribute("data-account", "claude");
+		return rpc;
+	};
+	return { connect, setDefault, publishModels };
+}
+
+test.describe("Claude defaults", () => {
+	test("both clients update Settings, composer, usage and account catalogues without a reload", async ({
+		page,
+		context,
+		baseURL,
+	}, testInfo) => {
+		const daemon = defaultAccountDaemon();
+		const first = await daemon.connect(page, baseURL);
+		const peer = await context.newPage();
+		const second = await daemon.connect(peer, baseURL);
+		for (const client of [page, peer]) {
+			await openSettingsPanel(client);
+			await client.getByTestId("settings-tab-server").click();
+		}
+		const row = page.getByTestId("instance-row-personal");
+		await row.getByRole("button").first().click();
+		await row.getByTestId("make-default-btn").click();
+		for (const client of [page, peer]) {
+			await expect(client.getByTestId("default-account-marker")).toHaveCount(1);
+			await expect(
+				client
+					.getByTestId("instance-row-personal")
+					.getByTestId("default-account-marker"),
+			).toBeVisible();
+			await client.getByTestId("settings-close-btn").click();
+			await expect(
+				client
+					.locator('#input-area [data-testid="harness-logo"]:visible')
+					.first(),
+			).toHaveAttribute("data-account", "personal");
+			await expect(
+				client.getByTestId("usage-footer-row-personal"),
+			).toHaveAttribute("data-default", "true");
+			await openPickerRoot(
+				client,
+				client.getByTestId("model-picker-trigger").first(),
+			);
+			await expect(
+				client.getByTestId("picker-account-personal"),
+			).toHaveAttribute("aria-checked", "true");
+			await client.getByTestId("picker-row-model").click();
+			await expect(
+				client.locator('[data-model-id="personal-only"]'),
+			).toBeVisible();
+			await expect(
+				client.locator('[data-model-id="original-only"]'),
+			).toHaveCount(0);
+			await client.getByTestId("picker-back").click();
+			await client.getByTestId("picker-row-agent").click();
+			await expect(
+				client.getByText("Personal agent", { exact: true }).last(),
+			).toBeVisible();
+			await client.screenshot({
+				path: testInfo.outputPath(
+					client === page ? "client-default.png" : "peer-default.png",
+				),
+			});
+		}
+		for (const rpc of [first, second])
+			for (const tag of ["GetModels", "GetAgents"]) {
+				await rpc.waitForRequest(
+					(request) =>
+						request.tag === tag && request.payload["instanceId"] === "personal",
+				);
+			}
+		await testInfo.attach("default-account-rpc.json", {
+			body: JSON.stringify([first.getRequests(), second.getRequests()]),
+			contentType: "application/json",
+		});
+	});
+
+	test("an explicit pick of the current default keeps its catalogue after another client changes the default", async ({
+		page,
+		baseURL,
+	}, testInfo) => {
+		const daemon = defaultAccountDaemon();
+		const rpc = await daemon.connect(page, baseURL);
+		await openPickerRoot(
+			page,
+			page.getByTestId("model-picker-trigger").first(),
+		);
+		await page.getByTestId("picker-account-claude").click();
+		await page.keyboard.press("Escape");
+		await rpc.waitForRequest(
+			(request) =>
+				request.tag === "GetAgents" &&
+				request.payload["instanceId"] === "claude",
+		);
+		const before = rpc
+			.getRequests()
+			.filter(
+				(request) => request.tag === "GetModels" || request.tag === "GetAgents",
+			).length;
+		daemon.setDefault("personal");
+		daemon.publishModels("personal");
+		await openSettingsPanel(page);
+		await page.getByTestId("settings-tab-server").click();
+		await expect(
+			page
+				.getByTestId("instance-row-personal")
+				.getByTestId("default-account-marker"),
+		).toBeVisible();
+		await page.getByTestId("settings-close-btn").click();
+		await expect(
+			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
+		).toHaveAttribute("data-account", "claude");
+		await openPickerRoot(
+			page,
+			page.getByTestId("model-picker-trigger").first(),
+		);
+		await page.getByTestId("picker-row-model").click();
+		await expect(page.locator('[data-model-id="original-only"]')).toBeVisible();
+		await expect(page.locator('[data-model-id="personal-only"]')).toHaveCount(
+			0,
+		);
+		expect(
+			rpc
+				.getRequests()
+				.filter(
+					(request) =>
+						request.tag === "GetModels" || request.tag === "GetAgents",
+				),
+		).toHaveLength(before);
+		await page.screenshot({ path: testInfo.outputPath("picked-draft.png") });
+	});
+
+	test("a model-only Claude pick creates on the new default account", async ({
+		page,
+		baseURL,
+	}, testInfo) => {
+		const daemon = defaultAccountDaemon();
+		const rpc = await daemon.connect(page, baseURL);
+		await openPickerRoot(
+			page,
+			page.getByTestId("model-picker-trigger").first(),
+		);
+		await page.getByTestId("picker-row-model").click();
+		await page.locator('[data-model-id="shared"]').click();
+		daemon.setDefault("personal");
+		await expect(
+			page.locator('#input-area [data-testid="harness-logo"]:visible').first(),
+		).toHaveAttribute("data-account", "personal");
+		await page.locator("#input").fill("Use my model on the new default");
+		await page.locator("#send").click();
+		const created = await rpc.waitForRequest(
+			(request) => request.tag === "CreateSession",
+		);
+		expect(created.payload).toMatchObject({
+			instanceId: "personal",
+			model: { providerId: "claude", modelId: "shared" },
+		});
+		await testInfo.attach("model-only-creation.json", {
+			body: JSON.stringify(created.payload),
+			contentType: "application/json",
+		});
+	});
+});
 
 /** Hold the RPC retry so the disconnected overlay can be inspected. */
 async function disconnectControl(

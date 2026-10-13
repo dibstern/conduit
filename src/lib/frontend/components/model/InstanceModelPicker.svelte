@@ -22,7 +22,6 @@
 	import {
 		applyDefaultModelSet,
 		applyGetModelsResponse,
-		applyGetAgentsResponse,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
@@ -54,7 +53,6 @@
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import {
-		getAgentsRpc,
 		getModelsRpc,
 		setDefaultModelRpc,
 		switchAgentRpc,
@@ -297,7 +295,8 @@
 	}
 
 	function instanceForDriver(driver: ProviderDriverKind): InstanceOption | undefined {
-		return instances.find((instance) => instance.driver === driver);
+		return instances.find((instance) => instance.driver === driver && instance.isDefault)
+			?? instances.find((instance) => instance.driver === driver);
 	}
 
 	/** Strip date suffixes like -20250514 from model names. */
@@ -383,15 +382,8 @@
 		e?.stopPropagation();
 		if (isInstanceDisabled(instance)) return;
 		view = "root";
-		if (instance.id === selectedId) return;
+		if (instance.id === selectedId && discoveryState.hasInstanceChoice) return;
 		selectInstance(instance.id);
-		const projectSlug = getDraftProject();
-		if (projectSlug) void getAgentsRpc({ projectSlug, instanceId: instance.id })
-			.then((response) => {
-				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
-					applyGetAgentsResponse(response);
-			})
-			.catch(() => undefined);
 		searchQuery = "";
 	}
 

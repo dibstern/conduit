@@ -17,7 +17,7 @@
 	import { applyDetectProxyResponse, applyInstanceListResponse, applyScanNowResponse, beginProxyDetection, beginScan, clearScanInFlight, getCachedInstances, getProxyDetection, getScanResult, instanceStatusColor, isScanInFlight } from "../../stores/instance.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
+	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, setDefaultRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
@@ -39,6 +39,7 @@
 		formEnv: "",
 		formEnvOpen: false,
 		formSaving: false,
+		defaultSaving: false,
 	});
 
 	$effect(() => {
@@ -78,6 +79,17 @@
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
 			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
+	}
+	async function handleMakeDefault(instanceId: string) {
+		if (state.defaultSaving) return;
+		state.defaultSaving = true;
+		try {
+			applyInstanceListResponse(await setDefaultRpc({ instanceId }));
+		} catch (error: unknown) {
+			showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to change default account", { variant: "warn" });
+		} finally {
+			state.defaultSaving = false;
+		}
 	}
 	async function handleRemove(instanceId: string, instanceName: string) {
 		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
@@ -343,7 +355,7 @@
 						<div class="flex-1 min-w-0">
 							<div class="flex items-center gap-[6px] text-[12.5px] text-text">
 								<span class="truncate">{inst.name}</span>
-								{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill">default</Badge>{/if}
+								{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
 							</div>
 							<div class="font-mono text-[11px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
 						</div>
@@ -355,7 +367,7 @@
 								<dt class="text-text-muted">Config dir</dt>
 								<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 								<dt class="text-text-muted">Used by</dt>
-								<dd class="text-text">{inst.isDefault ? "New sessions, unless a project picks another account" : "Sessions you move to it, and auto-switch"}</dd>
+								<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : "Sessions you move to it, and auto-switch"}</dd>
 								{#if inst.isDefault}
 									<dt class="text-text-muted">Change</dt>
 									<dd class="text-text">Applies after restart</dd>
@@ -363,6 +375,9 @@
 							</dl>
 							<div class="flex flex-wrap items-center gap-2">
 								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+								{#if !inst.isDefault}
+									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
+								{/if}
 								{#if inst.isDefault}
 									<span class="text-xs text-text-muted">The default account can't be removed</span>
 								{:else}

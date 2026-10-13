@@ -8,6 +8,8 @@
  * - A fork must use the resolved account for receipts without rewriting its parent.
  * - A deleted non-default binding must launch in the default account's folder.
  * - With no native transcript in that folder, the handoff must preserve history.
+ * - SetDefault through daemon RPC must change the next draft's launch folder,
+ *   including model-only picks, while an explicit account pick still wins.
  * All configuration and launch logins in this flow belong to a temporary fixture.
  */
 import {
@@ -24,10 +26,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { SetDefault } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -43,7 +47,9 @@ import {
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	claudeSdk,
 	responseChunks,
@@ -516,5 +522,99 @@ describe("Integration: account session routing", () => {
 		expect(stored?.provider).toBe(
 			selection === "legacy-binding" ? "claude" : "personal",
 		);
+	});
+
+	it.each([
+		"default",
+		"model-only",
+		"explicit",
+	] as const)("SetDefault routes a %s draft's first turn to its selected folder", async (selection) => {
+		const original = join(root, "original-login");
+		const personal = join(root, "personal-login");
+		mkdirSync(original);
+		mkdirSync(personal);
+		const runtime = ManagedRuntime.make(
+			makeDaemonRpcTestLayer([], undefined, {
+				configDir: root,
+				launchLogin: configuredClaudeConfigDir(join(root, "login")),
+				instances: [
+					{
+						id: "claude",
+						name: "Claude",
+						driver: "claude",
+						configDir: original,
+						port: 0,
+						managed: false,
+					},
+					{
+						id: "personal",
+						name: "Personal",
+						driver: "claude",
+						configDir: personal,
+						port: 0,
+						managed: false,
+					},
+				],
+			}),
+		);
+		disposeRegistry = () => runtime.dispose();
+		const daemonConfigContext = await runtime.runPromise(
+			Effect.context<
+				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
+			>(),
+		);
+		__setProbeOverrideForTesting(async () => ({
+			models: [{ id: "shared", name: "Shared Sonnet", providerId: "claude" }],
+			agents: [],
+			commands: [],
+		}));
+		try {
+			harness = await createRelayHarness("chat-simple", {
+				configDir: root,
+				daemonConfigContext,
+				defaultModel: null,
+				claudeSdk: {
+					...claudeSdk,
+					query: (params) => {
+						launchFolders.push(
+							params.options?.env?.["CLAUDE_CONFIG_DIR"] ?? "unset",
+						);
+						return claudeSdk.query(params);
+					},
+				},
+			});
+			const client = await harness.connectWsClient();
+			await client.waitForInitialState();
+			await runtime.runPromise(
+				Effect.flatMap(DaemonWsRpcHandlersTag, (handlers) =>
+					handlers.SetDefault(new SetDefault({ instanceId: "personal" })),
+				),
+			);
+			const result = await client.rpcCall((rpc) =>
+				rpc.CreateSession({
+					projectSlug: "integration-test",
+					originId: "g4zp8-first-turn",
+					...(selection === "explicit"
+						? { instanceId: AccountIdSchema.make("claude") }
+						: selection === "default"
+							? { providerId: "claude" }
+							: {}),
+					...(selection === "model-only"
+						? { model: { providerId: "claude", modelId: "shared" } }
+						: {}),
+				}),
+			);
+			await client.viewSession(result.sessionId);
+			const completed = client.waitForTurnEnd(result.sessionId, 10_000);
+			await client.sendMessage("Reply with pong", {
+				sessionId: result.sessionId,
+			});
+			expect((await completed).attention).not.toBe("error");
+			expect(launchFolders.at(-1)).toBe(
+				selection === "explicit" ? original : personal,
+			);
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 });

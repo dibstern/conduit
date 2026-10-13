@@ -108,6 +108,22 @@
 	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const draftSlug = $derived(getDraftProject());
+	const draftAccountId = $derived(
+		sessionState.currentId || getCurrentSessionId() ? null : getEffectiveInstanceId(),
+	);
+	$effect(() => {
+		const projectSlug = draftSlug;
+		const instanceId = draftAccountId;
+		if (!projectSlug || !instanceId || !getIsConnected()) return;
+		let active = true;
+		void getModelsRpc({ projectSlug, instanceId })
+			.then((response) => { if (active) applyGetModelsResponse(response); })
+			.catch(() => undefined);
+		void getAgentsRpc({ projectSlug, instanceId })
+			.then((response) => { if (active) applyGetAgentsResponse(response); })
+			.catch(() => undefined);
+		return () => { active = false; };
+	});
 	const commandSessionId = $derived(getCurrentSessionId());
 	const commandWorkspace = $derived(JSON.stringify(commandSessionId ? findSession(commandSessionId)?.workspace ?? null : null));
 	let previousCommandContext: { sessionId: string | null; workspace: string } | undefined;
@@ -406,7 +422,7 @@
 			const routeSessionId = getCurrentSessionId();
 			const workspace = commandWorkspace;
 			const draftInstanceId =
-				routeSessionId == null && discoveryState.hasInstanceChoice
+				routeSessionId == null
 					? getEffectiveInstanceId()
 					: undefined;
 			void getAgentsRpc({
@@ -418,16 +434,17 @@
 					if (
 						generation === attachGeneration &&
 						getCurrentSessionId() === routeSessionId &&
-						(routeSessionId != null || draftInstanceId === (discoveryState.hasInstanceChoice ? getEffectiveInstanceId() : undefined))
+						(routeSessionId != null || draftInstanceId === getEffectiveInstanceId())
 					) applyGetAgentsResponse(response, routeSessionId ?? undefined);
 				})
 				.catch(() => undefined);
 			void getModelsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId) applyGetModelsResponse(response);
+					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyGetModelsResponse(response);
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({

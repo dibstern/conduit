@@ -13,8 +13,9 @@ import {
 	Context,
 	Effect,
 	Either,
-	FiberHandle,
+	FiberMap,
 	Layer,
+	Option,
 	PubSub,
 	Ref,
 	Stream,
@@ -38,6 +39,7 @@ import {
 	parseDefaultModel,
 	type RelaySettings,
 } from "../../../relay/relay-settings.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ConfigTag, OpenCodeModelServiceTag } from "./services.js";
 import {
 	type OverridesState,
@@ -71,6 +73,10 @@ type LiveProjectFacts = {
 		LiveProjectFact,
 		{ _tag: "providerModels" }
 	>;
+	readonly [account: `providerModels:${string}`]: Extract<
+		LiveProjectFact,
+		{ _tag: "providerModels" }
+	>;
 	readonly harnessDefaults?: Extract<
 		LiveProjectFact,
 		{ _tag: "harnessDefaults" }
@@ -86,8 +92,8 @@ export interface ProjectSettings {
 	readonly changes: PubSub.PubSub<ProjectSettingChange>;
 	/** Keep an older read from publishing after a newer one on this relay. */
 	readonly globalSync: Effect.Semaphore;
-	/** Share the pending Claude catalog refresh and its publication per relay. */
-	readonly modelDiscovery: FiberHandle.FiberHandle<void, never>;
+	/** Share a pending Claude catalogue refresh for each account. */
+	readonly modelDiscovery: FiberMap.FiberMap<string, void, never>;
 	/**
 	 * Open subscriptions: each tab holds one for its attached project.
 	 * Read synchronously by the relay status snapshot, like its own counts.
@@ -113,7 +119,7 @@ export const ProjectSettingsLive: Layer.Layer<ProjectSettingsTag> =
 		Effect.all({
 			changes: PubSub.unbounded<ProjectSettingChange>(),
 			globalSync: Effect.makeSemaphore(1),
-			modelDiscovery: FiberHandle.make<void, never>(),
+			modelDiscovery: FiberMap.make<string, void, never>(),
 			browsers: Effect.sync(() => {
 				let count = 0;
 				return {
@@ -134,7 +140,9 @@ export const publishProjectSetting = (setting: ProjectSetting) =>
 			yield* Ref.update(live, (facts) =>
 				setting._tag === "opencodeConnection"
 					? { ...facts, [`${setting._tag}:${setting.instanceId}`]: setting }
-					: { ...facts, [setting._tag]: setting },
+					: setting._tag === "providerModels" && setting.accountId !== undefined
+						? { ...facts, [`${setting._tag}:${setting.accountId}`]: setting }
+						: { ...facts, [setting._tag]: setting },
 			);
 		const sequence = yield* Ref.updateAndGet(revision, (n) => n + 1);
 		yield* PubSub.publish(changes, {
@@ -162,8 +170,16 @@ const readHarnessDefaults = Effect.gen(function* () {
 					})),
 				)
 			: undefined;
-	const claudeCatalog = facts.providerModels
-		? catalogFromProviderList(facts.providerModels.providers)
+	const directory = yield* Effect.serviceOption(AccountDirectory);
+	const defaultAccount = Option.isSome(directory)
+		? yield* directory.value.defaultFor("claude")
+		: Option.none();
+	const claudeModels = Option.isSome(defaultAccount)
+		? (facts[`providerModels:${defaultAccount.value.id}`] ??
+			facts.providerModels)
+		: facts.providerModels;
+	const claudeCatalog = claudeModels
+		? catalogFromProviderList(claudeModels.providers)
 		: undefined;
 	const state = (harness: Harness): HarnessDefaultState => {
 		const candidate = harnessDefaultPick(

@@ -549,6 +549,112 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "make a Claude account default",
+		match: /^I make the (.+) account default$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId(
+				`instance-row-${instanceSlug(match[1] ?? "")}`,
+			);
+			await row.getByRole("button").first().click();
+			await row.getByTestId("make-default-btn").click();
+			await expect(row.getByTestId("default-account-marker")).toBeVisible();
+		},
+	},
+	{
+		name: "assert exactly one default Claude account",
+		match: /^only the (.+) Claude account has the default marker$/,
+		run: async ({ world, match }) => {
+			const list = world.page.getByTestId("claude-accounts-list");
+			await expect(list.getByTestId("default-account-marker")).toHaveCount(1);
+			await expect(
+				list
+					.getByTestId(`instance-row-${instanceSlug(match[1] ?? "")}`)
+					.getByTestId("default-account-marker"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the default mutation uses daemon RPC",
+		match: /^SetDefault saves (.+) as the default account$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "SetDefault",
+			);
+			expect(request.payload).toMatchObject({
+				instanceId: instanceSlug(match[1] ?? ""),
+			});
+			expect(request.payload).not.toHaveProperty("projectSlug");
+		},
+	},
+	{
+		name: "seed a Claude model for unpicked drafts",
+		match: /^new drafts use a Claude model$/,
+		run: ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setResponse("GetModels", {
+				projectSlug: "myapp",
+				providers: [],
+				active: { model: "claude-sonnet-4-5", provider: "claude" },
+			});
+			rpc.setProjectSetting({
+				_tag: "defaultModel",
+				model: "claude-sonnet-4-5",
+				provider: "claude",
+				variant: "",
+			});
+			rpc.setDaemonList("SubscribeUsage", {
+				readings: (mockInstances.get(world.page) ?? [])
+					.filter((instance) => instance["driver"] === "claude")
+					.map((instance) => ({
+						accountId: instance["id"],
+						harness: "claude",
+						status: "available",
+						windows: [{ kind: "five_hour", utilization: 20 }],
+						readAt: Date.now(),
+						stale: false,
+					})),
+			});
+		},
+	},
+	{
+		name: "assert the draft composer and usage meter agree",
+		match: /^the draft composer and usage meter use the (.+) account$/,
+		run: async ({ world, match }) => {
+			const id = instanceSlug(match[1] ?? "");
+			await expect(
+				world.page
+					.locator('#input-area [data-testid="harness-logo"]:visible')
+					.first(),
+			).toHaveAttribute("data-account", id);
+			await expect(
+				world.page.getByTestId(`usage-footer-row-${id}`),
+			).toHaveAttribute("data-default", "true");
+		},
+	},
+	{
+		name: "assert the picker selects the default account",
+		match: /^the picker selects the (.+) account$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(
+					`picker-account-${instanceSlug(match[1] ?? "")}`,
+				),
+			).toHaveAttribute("aria-checked", "true");
+		},
+	},
+	{
+		name: "assert the new draft is created on its effective account",
+		match: /^the new session is created on the (.+) account$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "CreateSession",
+			);
+			expect(request.payload).toMatchObject({
+				instanceId: instanceSlug(match[1] ?? ""),
+			});
+		},
+	},
+	{
 		name: "open the shared default Claude editor",
 		match: /^I edit the default Claude account$/,
 		run: async ({ world }) => {

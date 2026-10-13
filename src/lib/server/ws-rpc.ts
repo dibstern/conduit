@@ -371,6 +371,7 @@ export type DaemonRpcName =
 	| "RenameInstance"
 	| "AddInstance"
 	| "UpdateInstance"
+	| "SetDefault"
 	| "GetAutoSettleSetting"
 	| "SetAutoSettleSetting"
 	| "SetDefaultGroupingMode"

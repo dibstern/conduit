@@ -113,6 +113,13 @@ export const instancesHandlers = {
 				instances,
 			};
 		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
+	SetDefault: (request) =>
+		Effect.fail(
+			new AccountChangeRejected({
+				id: request.instanceId,
+				reason: "SetDefault requires daemon mode",
+			}),
+		),
 	ScanNow: (request) =>
 		Effect.gen(function* () {
 			const scanService = yield* ScanServiceTag;
@@ -147,6 +154,7 @@ export const instancesHandlers = {
 	| "RenameInstance"
 	| "AddInstance"
 	| "UpdateInstance"
+	| "SetDefault"
 	| "ScanNow"
 	| "DetectProxy"
 >;

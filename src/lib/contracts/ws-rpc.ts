@@ -1261,6 +1261,20 @@ export class UpdateInstance extends Schema.TaggedRequest<UpdateInstance>()(
 	},
 ) {}
 
+export class SetDefault extends Schema.TaggedRequest<SetDefault>()(
+	"SetDefault",
+	{
+		failure: Schema.Union(
+			WsRpcError,
+			Schema.suspend(() => AccountChangeRejected),
+		),
+		success: InstanceListResponseSchema,
+		payload: {
+			instanceId: NonEmptyString,
+		},
+	},
+) {}
+
 const AutoSettleSettingResponseSchema = Schema.Struct({
 	autoSettleAfterDays: Schema.NullOr(Schema.Number),
 });
@@ -2624,6 +2638,7 @@ export const WsRpcRequest = Schema.Union(
 	RenameInstance,
 	AddInstance,
 	UpdateInstance,
+	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
 	GetUsageLimitsSetting,
@@ -2889,9 +2904,10 @@ export const ProjectSettingSchema = Schema.Union(
 		instanceId: Schema.String,
 		status: OpenCodeConnectionStatusSchema,
 	}),
-	/** The shared Claude catalog, including an empty discovery result. */
+	/** Claude models remain keyed by driver; the account identifies the discovery. */
 	Schema.TaggedStruct("providerModels", {
 		providers: Schema.Array(ProviderInfoSchema),
+		accountId: Schema.optional(Schema.String),
 	}),
 	Schema.TaggedStruct("harnessDefaults", {
 		claude: HarnessDefaultStateSchema,
@@ -3060,6 +3076,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RenameInstance),
 	Rpc.fromTaggedRequest(AddInstance),
 	Rpc.fromTaggedRequest(UpdateInstance),
+	Rpc.fromTaggedRequest(SetDefault),
 	Rpc.fromTaggedRequest(GetAutoSettleSetting),
 	Rpc.fromTaggedRequest(SetAutoSettleSetting),
 	Rpc.fromTaggedRequest(GetUsageLimitsSetting),

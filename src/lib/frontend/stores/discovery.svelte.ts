@@ -114,11 +114,8 @@ const providersFromGetModelsResponse = (
 	}));
 
 // The composer's harness picker selects a provider *instance*. Default
-// instances are derived from the discovered providers: the "claude" provider
-// belongs to the Claude driver's default instance; every other provider
-// catalog comes from the OpenCode driver's default instance. Named instances
-// (provider.instanceId) flow through unchanged so future config-defined
-// instances need no rework here.
+// instances come from the daemon's isDefault flags. Catalogue groups remain
+// keyed by driver; an explicit provider.instanceId keeps its own account.
 
 export interface InstanceOption {
 	readonly id: string;
@@ -126,6 +123,7 @@ export interface InstanceOption {
 	readonly label: string;
 	/** Non-default instance of a driver — disambiguated with an accent badge. */
 	readonly isCustom: boolean;
+	readonly isDefault?: boolean;
 	/** Newly-added instance — rendered with a sparkle in the rail. */
 	readonly isNew?: boolean;
 	/** Live status from the configured-instance source, when known. */
@@ -421,13 +419,19 @@ export function getAvailableInstances(): InstanceOption[] {
 	const byId = new Map<string, InstanceOption>();
 	for (const provider of discoveryState.providers) {
 		const driver = instanceIdForProviderId(provider.id);
-		const id = provider.instanceId ?? driver;
+		const defaultInstance = instanceState.instances.find(
+			(instance) => instance.driver === driver && instance.isDefault,
+		);
+		const id = provider.instanceId ?? defaultInstance?.id ?? driver;
 		if (!byId.has(id)) {
 			byId.set(id, {
 				id,
 				driver,
-				label: id === driver ? DRIVER_LABELS[driver] : id,
-				isCustom: id !== driver,
+				label: defaultInstance?.name ?? DRIVER_LABELS[driver],
+				isDefault:
+					provider.instanceId === undefined || defaultInstance?.id === id,
+				isCustom:
+					provider.instanceId !== undefined && defaultInstance?.id !== id,
 				capabilities: instanceState.providerCapabilities[driver],
 			});
 		}
@@ -439,6 +443,9 @@ export function getAvailableInstances(): InstanceOption[] {
 			byId.set(inst.id, {
 				...existing,
 				driver,
+				label: inst.name || existing.label,
+				isDefault: inst.isDefault ?? existing.isDefault ?? false,
+				isCustom: !(inst.isDefault ?? existing.isDefault),
 				status: inst.status,
 				capabilities:
 					inst.capabilities ?? instanceState.providerCapabilities[driver],
@@ -449,15 +456,16 @@ export function getAvailableInstances(): InstanceOption[] {
 			id: inst.id,
 			driver,
 			label: inst.name || inst.id,
-			isCustom: inst.id !== "claude" && inst.id !== "opencode",
+			isDefault: inst.isDefault ?? false,
+			isCustom: !inst.isDefault,
 			status: inst.status,
 			capabilities:
 				inst.capabilities ?? instanceState.providerCapabilities[driver],
 		});
 	}
 	const rank = (i: InstanceOption) => {
-		if (i.id === "claude") return 0;
-		if (i.id === "opencode") return 1;
+		if (i.isDefault && i.driver === "claude") return 0;
+		if (i.isDefault && i.driver === "opencode") return 1;
 		return 2;
 	};
 	return [...byId.values()].sort(
@@ -491,11 +499,19 @@ export function getEffectiveInstanceId(): string {
 		available.some((i) => i.id === choice.instanceId)
 	)
 		return choice.instanceId;
-	const derived = instanceIdForProviderId(
+	const driver = instanceIdForProviderId(
 		discoveryState.currentProviderId || discoveryState.defaultProviderId,
 	);
-	if (isAvailable(derived)) return derived;
-	return available[0]?.id ?? derived;
+	const defaultInstance = available.find(
+		(instance) => instance.driver === driver && instance.isDefault,
+	);
+	if (defaultInstance) return defaultInstance.id;
+	if (isAvailable(driver)) return driver;
+	return (
+		available.find((instance) => instance.driver === driver)?.id ??
+		available[0]?.id ??
+		driver
+	);
 }
 
 /** The instance a session's picker is locked to. Only built-in instances'
@@ -689,8 +705,17 @@ export function handleModelList({
 }
 
 export function applyGetModelsResponse(response: GetModelsResponse): void {
-	// Scoped reads describe one instance, not the project's catalog.
-	if (response.instanceId === undefined)
+	// A matching draft read supplies its OpenCode models. Claude models arrive
+	// on the account-scoped providerModels stream, including empty catalogues.
+	const scopedDraft =
+		response.instanceId !== undefined &&
+		!sessionState.currentId &&
+		response.instanceId === getEffectiveInstanceId();
+	const claudeScope = instanceState.instances.some(
+		(instance) =>
+			instance.id === response.instanceId && instance.driver === "claude",
+	);
+	if (response.instanceId === undefined || (scopedDraft && !claudeScope))
 		handleModelList({
 			providers: [
 				...response.providers,
