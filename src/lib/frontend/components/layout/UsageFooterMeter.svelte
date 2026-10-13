@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { flushSync } from "svelte";
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
-	import { DISMISS_FRACTION, dragToDismiss, FLICK_PX_PER_MS, placeSheet, settleMs } from "../../actions/drag-to-dismiss.js";
+	import { DISMISS_FRACTION, dragToDismiss, FLICK_PX_PER_MS, placeSheet } from "../../actions/drag-to-dismiss.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
@@ -62,7 +62,7 @@
 		if (elapsed > 0) pull.velocity = (event.clientY - pull.lastY) / elapsed;
 		pull.lastY = event.clientY;
 		pull.lastTime = event.timeStamp;
-		if (sheet) placeSheet(sheet, Math.max(dockOffset() - travel, 0), false);
+		if (sheet) placeSheet(sheet, Math.max(dockOffset() - travel, 0), dockOffset(), false);
 	}
 
 	function releaseDock(cancelled: boolean) {
@@ -70,9 +70,10 @@
 		pull = undefined;
 		if (!ended?.rising || !sheet) return;
 		const travel = ended.startY - ended.lastY - PULL_SLOP_PX;
-		const opens = !cancelled && (travel > dockOffset() * DISMISS_FRACTION || ended.velocity < -FLICK_PX_PER_MS);
-		placeSheet(sheet, opens ? 0 : dockOffset(), true);
-		if (!opens) setTimeout(() => { sheetOpen = false; }, settleMs());
+		const away = dockOffset();
+		const opens = !cancelled && (travel > away * DISMISS_FRACTION || ended.velocity < -FLICK_PX_PER_MS);
+		const glideMs = placeSheet(sheet, opens ? 0 : away, away, true);
+		if (!opens) setTimeout(() => { sheetOpen = false; }, glideMs);
 	}
 
 	function groupsOf(rows: readonly UsageReading[]) {

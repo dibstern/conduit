@@ -67,11 +67,15 @@
 	// touch-driven open and close (iOS 26: the "..." session-bar button, the
 	// phone usage dock). The ring is only right after keyboard input; a keyboard
 	// user dismissing with Escape keeps it.
+	// An opener still focused from the last hand-back gets it back from close()
+	// itself, ring included, and focusing an already focused element is a no-op,
+	// so let go of it first.
 	function focusOpener(target: HTMLElement): void {
 		const options: FocusOptions & { focusVisible: boolean } = {
 			preventScroll: true,
 			focusVisible: !lastInputWasPointer,
 		};
+		if (document.activeElement === target) target.blur();
 		target.focus(options);
 	}
 
@@ -187,9 +191,13 @@
 
 	/* ::backdrop inherits the dialog's theme tokens; the scrim stays dark in
 	   both themes, unlike --overlay-rgb's contrast wash. */
+	/* A sheet being dragged sets --scrim-opacity on its dialog, so the scrim
+	   fades with the sheet rather than vanishing when it closes. */
 	dialog::backdrop {
 		background: var(--color-backdrop);
 		backdrop-filter: blur(2px);
+		opacity: var(--scrim-opacity, 1);
+		transition: opacity var(--scrim-transition, 0s);
 	}
 
 	dialog[data-backdrop="dark"]::backdrop {

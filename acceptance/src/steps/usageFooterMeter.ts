@@ -782,7 +782,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	{
 		name: "the usage sheet folds into the dock rather than off screen",
 		match:
-			/^the usage sheet dragged down past the phone usage dock stops on it$/,
+			/^the usage sheet dragged down past the phone usage dock stops on it, faded into it$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("usage-sheet");
 			// A drag moves the sheet from where it rests, so let the opening glide finish first.
@@ -809,6 +809,18 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				await expect
 					.poll(async () => (await sheet.boundingBox())?.y)
 					.toBeCloseTo(dock.y, 0);
+				// Resting on the dock, nothing of the sheet or its scrim is left to vanish on close.
+				await expect
+					.poll(() =>
+						sheet.evaluate((node) => {
+							const dialog = node.closest("dialog");
+							return [
+								getComputedStyle(node.parentElement ?? node).opacity,
+								dialog ? getComputedStyle(dialog, "::backdrop").opacity : "",
+							];
+						}),
+					)
+					.toEqual(["0", "0"]);
 			} finally {
 				await finger.lift();
 			}
