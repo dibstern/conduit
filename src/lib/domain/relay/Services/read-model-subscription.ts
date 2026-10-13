@@ -108,49 +108,46 @@ export interface SubscriptionSource<T, E = never> {
 	 * return page information for snapshots. Rows and version must be read
 	 * coherently: the version is what the subscriber will resume from.
 	 *
-	 * A resume read is also given the client's `base`, if it sent one.
+	 * A resume read is also given the client's `base`, if it sent one. It may
+	 * answer `"snapshot"` when a bounded preflight declines the catch-up.
 	 */
 	readonly read: (
 		range?: VersionRange,
 		base?: ResumeBase,
 	) => Effect.Effect<
-		{
-			readonly rows: readonly VersionedRow<T>[];
-			readonly version: number;
-			readonly hasMore?: boolean;
-			readonly cursor?: string;
-			/**
-			 * Tombstones in a ranged read; a base snapshot represents absence
-			 * directly. `deleted` marks an item that is gone, not only out of
-			 * this collection.
-			 */
-			readonly removed?: readonly {
-				readonly id: string;
+		| {
+				readonly rows: readonly VersionedRow<T>[];
 				readonly version: number;
-				readonly deleted?: boolean;
-			}[];
-			/**
-			 * The oldest cursor the tombstones cover. A resume from below it, or
-			 * from above `version` (a reset or restored store), is rebased.
-			 */
-			readonly removedSince?: number;
-			/**
-			 * Read with a `base` only: the id and version of every row in the
-			 * set that base began, as it stands at `version`, in the same
-			 * transaction and without reading a row's body. Absent when the
-			 * source cannot place that base, such as a page cursor that is
-			 * gone; the resume then gets a snapshot. A source may skip it when
-			 * the cursor already means one (see `removedSince`).
-			 */
-			readonly listing?: Iterable<readonly [id: string, version: number]>;
-		},
+				readonly hasMore?: boolean;
+				readonly cursor?: string;
+				/**
+				 * Tombstones in a ranged read; a base snapshot represents absence
+				 * directly. `deleted` marks an item that is gone, not only out of
+				 * this collection.
+				 */
+				readonly removed?: readonly {
+					readonly id: string;
+					readonly version: number;
+					readonly deleted?: boolean;
+				}[];
+				/**
+				 * The oldest cursor the tombstones cover. A resume from below it, or
+				 * from above `version` (a reset or restored store), is rebased.
+				 */
+				readonly removedSince?: number;
+				/**
+				 * Read with a `base` only: the id and version of every row in the
+				 * set that base began, as it stands at `version`, in the same
+				 * transaction and without reading a row's body. Absent when the
+				 * source cannot place that base, such as a page cursor that is
+				 * gone; the resume then gets a snapshot. A source may skip it when
+				 * the cursor already means one (see `removedSince`).
+				 */
+				readonly listing?: Iterable<readonly [id: string, version: number]>;
+		  }
+		| "snapshot",
 		E
 	>;
-	/**
-	 * Whether a catch-up of these rows is within what a snapshot would send.
-	 * Past it the snapshot is both cheaper and certain, so it is sent instead.
-	 */
-	readonly fitsCatchUp?: (rows: readonly VersionedRow<T>[]) => boolean;
 	/** Route one advance. Called for every advance; must not touch the store. */
 	readonly route: (advance: ReadModelAdvance) => AdvanceRoute;
 	/**
@@ -276,7 +273,20 @@ export const stream = <T, E = never>(options: {
 						} satisfies ReadModelRead);
 					return options.source.read(range, base);
 				});
-			type SourceRead = Effect.Effect.Success<ReturnType<typeof read>>;
+			const readRequired = (
+				kind: Exclude<ReadModelRead["kind"], "resume">,
+				range?: VersionRange,
+			) =>
+				read(kind, range).pipe(
+					Effect.flatMap((result) =>
+						result === "snapshot"
+							? Effect.die(
+									new Error("Only a resume read can request a snapshot"),
+								)
+							: Effect.succeed(result),
+					),
+				);
+			type SourceRead = Effect.Effect.Success<ReturnType<typeof readRequired>>;
 			const name = options.source.name;
 			const shared =
 				options.source.shareReads === true
@@ -303,7 +313,8 @@ export const stream = <T, E = never>(options: {
 				after: number,
 				through: number,
 			): Effect.Effect<SourceRead, E> => {
-				if (shared === undefined) return read("window", { after, through });
+				if (shared === undefined)
+					return readRequired("window", { after, through });
 				// Uninterruptible from the miss until the read settles, so an asker
 				// interrupted after publishing its window cannot strand a joiner.
 				// Only a joiner's wait stays interruptible. A joiner shares the
@@ -326,7 +337,7 @@ export const stream = <T, E = never>(options: {
 						const window = { after, through, read: Deferred.await(deferred) };
 						shared.latest = window;
 						// A failure is not kept for later readers.
-						return read("window", { after, through }).pipe(
+						return readRequired("window", { after, through }).pipe(
 							Effect.exit,
 							Effect.tap((exit) => {
 								if (exit._tag === "Failure" && shared.latest === window)
@@ -351,10 +362,10 @@ export const stream = <T, E = never>(options: {
 			// source cannot list, which could not be checked.
 			const catchUp =
 				resumed !== undefined &&
+				resumed !== "snapshot" &&
 				after !== undefined &&
 				after >= (resumed.removedSince ?? after) &&
 				after <= resumed.version &&
-				(options.source.fitsCatchUp?.(resumed.rows) ?? true) &&
 				(resumeBase === undefined || resumed.listing !== undefined);
 			const checksum =
 				catchUp && resumeBase !== undefined && resumed.listing !== undefined
@@ -362,7 +373,7 @@ export const stream = <T, E = never>(options: {
 							digestRows(resumed.listing, resumeBase.sequence),
 						)
 					: undefined;
-			const base = catchUp ? resumed : yield* read("base");
+			const base = catchUp ? resumed : yield* readRequired("base");
 			// The counter the base was read at, not the newest row in it: what the
 			// live arm must not re-read, and what a resuming client resumes from.
 			const seen = yield* Ref.make(base.version);
@@ -393,7 +404,7 @@ export const stream = <T, E = never>(options: {
 						// cannot recover. Replace the entire view; read after every
 						// advance in the chunk was published, it covers them all.
 						if (Chunk.some(chunk, (advance) => advance.dropped === true)) {
-							const replacement = yield* read("replacement");
+							const replacement = yield* readRequired("replacement");
 							yield* Ref.set(seen, replacement.version);
 							yield* Ref.set(baseFloor, replacement.version);
 							return Chunk.unsafeFromArray<Envelope<T>>([

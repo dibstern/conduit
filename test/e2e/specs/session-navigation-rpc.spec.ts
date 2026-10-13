@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -22,6 +23,10 @@ const rows = [
 async function setup(page: import("@playwright/test").Page) {
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			AttachProject: ({ sessionId }) => ({
+				projectSlug,
+				sessionSlug: sessionId ? projectSlug : null,
+			}),
 			ResolveSession: () => ({ projectSlug }),
 			ViewSession: ({ sessionId }) => ({
 				ok: true,
@@ -58,6 +63,46 @@ async function setup(page: import("@playwright/test").Page) {
 	});
 	return { rpc, relay };
 }
+
+test("cold session navigation reuses attach resolution; warm navigation needs no resolution", async ({
+	page,
+	harness,
+}, testInfo) => {
+	const { rpc } = await setup(page);
+	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
+	await expect(page.locator("#input")).toHaveValue("Seed draft");
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeSessionDetail" &&
+			request.payload["sessionId"] === seed,
+	);
+	const cold = [...rpc.getRequests()];
+	const placement = (requests: typeof cold) =>
+		requests
+			.filter((request) =>
+				["AttachProject", "ResolveSession", "SubscribeSessionDetail"].includes(
+					request.tag,
+				),
+			)
+			.map((request) => request.tag);
+	expect(placement(cold)).toEqual(["AttachProject", "SubscribeSessionDetail"]);
+
+	rpc.removeShellRow(seed);
+	await expect(page).toHaveURL(new RegExp(`/s/${survivor}$`));
+	await expect(page.locator("#input")).toHaveValue(`Draft for ${survivor}`);
+	await rpc.waitForRequest(
+		(request) =>
+			request.tag === "SubscribeSessionDetail" &&
+			request.payload["sessionId"] === survivor,
+	);
+	const warm = rpc.getRequests().slice(cold.length);
+	// Deleting the viewed session switches to the survivor in place, so the
+	// route change that follows has nothing left to resolve.
+	expect(placement(warm)).toEqual(["SubscribeSessionDetail"]);
+	const output = testInfo.outputPath("session-navigation-rpc.json");
+	await writeFile(output, `${JSON.stringify({ cold, warm }, null, 2)}\n`);
+	await testInfo.attach("session-navigation-rpc", { path: output });
+});
 
 test("a draft's first send creates the session in its project and sends into it", async ({
 	page,

@@ -269,6 +269,7 @@ vi.mock("../../../src/lib/frontend/stores/client-identity.js", () => ({
 
 vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 	disposeRuntime: vi.fn(),
+	runTransportEffect: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
@@ -277,6 +278,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	})),
 	attachProjectRpc: vi.fn(async () => ({
 		projectSlug: null as string | null,
+		sessionSlug: null as string | null,
 	})),
 	listDaemonSessionsRpc: vi.fn(async () => ({
 		sessions: [],
@@ -326,6 +328,7 @@ import {
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { onProjectAttached } from "../../../src/lib/frontend/stores/ws-listeners.js";
+import { runTransportEffect } from "../../../src/lib/frontend/transport/runtime.js";
 import {
 	attachProjectRpc,
 	resolveSessionRpc,
@@ -368,6 +371,10 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.mocked(resolveSessionRpc).mockResolvedValue({
 			projectSlug: "test-project",
 		});
+		vi.mocked(attachProjectRpc).mockImplementation(async ({ sessionId }) => ({
+			projectSlug: "test-project",
+			sessionSlug: sessionId ? "test-project" : null,
+		}));
 		attachedProjectState.slug = null;
 	});
 
@@ -427,6 +434,7 @@ describe("ChatLayout RPC lifecycle", () => {
 	it("resolves a session within the attached project", async () => {
 		render(ChatLayout);
 		attach("test-project");
+		await tick();
 		replaceRoute("/s/ses_abc123");
 		flushSync();
 		await tick();
@@ -443,6 +451,7 @@ describe("ChatLayout RPC lifecycle", () => {
 	it("switches sessions across projects and resets before hydrating the attach", async () => {
 		render(ChatLayout);
 		attach("test-project");
+		await tick();
 		vi.clearAllMocks();
 		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
 			projectSlug: "other-project",
@@ -470,31 +479,33 @@ describe("ChatLayout RPC lifecycle", () => {
 		expect(attachSessionList).toHaveBeenCalledTimes(1);
 	});
 
-	it("resolves a cold session link before selecting it", async () => {
+	it("selects a cold session from AttachProject without a second resolve", async () => {
 		routerState.path = "/s/cold-session";
-		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
 			projectSlug: "other-project",
+			sessionSlug: "other-project",
 		});
 		render(ChatLayout);
-		attach("test-project");
 		await vi.waitFor(() =>
 			expect(switchToSession).toHaveBeenCalledExactlyOnceWith(
 				"cold-session",
 				"other-project",
 			),
 		);
-		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "cold-session",
-			projectSlug: "test-project",
+			originId: "browser-client-1",
 		});
+		expect(resolveSessionRpc).not.toHaveBeenCalled();
 		expect(
-			vi.mocked(resolveSessionRpc).mock.invocationCallOrder[0],
+			vi.mocked(attachProjectRpc).mock.invocationCallOrder[0],
 		).toBeLessThan(vi.mocked(switchToSession).mock.invocationCallOrder[0] ?? 0);
 	});
 
 	it("resolves and selects history navigation across projects", async () => {
 		render(ChatLayout);
 		attach("test-project");
+		await tick();
 		sessionState.currentId = "session-a";
 		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
 			projectSlug: "other-project",
@@ -585,9 +596,11 @@ describe("ChatLayout RPC lifecycle", () => {
 
 	it("returns an unknown session to the list with a dismissible notice", async () => {
 		routerState.path = "/s/missing-session";
-		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({ projectSlug: null });
+		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+			projectSlug: "test-project",
+			sessionSlug: null,
+		});
 		render(ChatLayout);
-		attach("test-project");
 		await vi.waitFor(() => expect(routerState.path).toBe("/"));
 		expect(routerState.sessionNotFound).toBe(true);
 		expect(switchToSession).not.toHaveBeenCalled();
@@ -596,9 +609,12 @@ describe("ChatLayout RPC lifecycle", () => {
 
 	it("ignores a late missing-session result after navigation elsewhere", async () => {
 		let resolveMissing:
-			| ((value: { projectSlug: string | null }) => void)
+			| ((value: {
+					projectSlug: string | null;
+					sessionSlug: string | null;
+			  }) => void)
 			| undefined;
-		vi.mocked(resolveSessionRpc).mockImplementationOnce(
+		vi.mocked(attachProjectRpc).mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
 					resolveMissing = resolve;
@@ -606,13 +622,12 @@ describe("ChatLayout RPC lifecycle", () => {
 		);
 		routerState.path = "/s/missing-session";
 		render(ChatLayout);
-		attach("test-project");
 		flushSync();
 		await vi.waitFor(() => expect(resolveMissing).toBeDefined());
 		replaceRoute("/s/next-session");
 		flushSync();
 		await tick();
-		resolveMissing?.({ projectSlug: null });
+		resolveMissing?.({ projectSlug: "test-project", sessionSlug: null });
 		await tick();
 		expect(routerState.path).toBe("/s/next-session");
 		expect(routerState.sessionNotFound).toBe(false);
@@ -631,6 +646,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.clearAllMocks();
 		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
 			projectSlug: "test-project",
+			sessionSlug: null,
 		});
 		render(ChatLayout);
 		await tick();
@@ -652,10 +668,13 @@ describe("ChatLayout RPC lifecycle", () => {
 	it("uses AttachProject for project-only navigation without reconnecting", async () => {
 		render(ChatLayout);
 		attach("test-project");
+		await tick();
+		vi.mocked(runTransportEffect).mockClear();
 		vi.mocked(attachProjectRpc).mockClear();
 		replaceRoute("/?p=other-project");
 		flushSync();
 		await tick();
+		expect(runTransportEffect).toHaveBeenCalledTimes(1);
 		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
 			projectSlug: "other-project",
 			originId: "browser-client-1",
@@ -666,6 +685,7 @@ describe("ChatLayout RPC lifecycle", () => {
 	it("attaches the cold-load project from the AttachProject reply", async () => {
 		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
 			projectSlug: "daemon-default",
+			sessionSlug: null,
 		});
 		render(ChatLayout);
 		await tick();

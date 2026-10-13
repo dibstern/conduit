@@ -856,6 +856,7 @@ describe("switchModelForSession", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2381,6 +2382,7 @@ describe("handleNewSession", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2484,6 +2486,7 @@ describe("handleNewSession", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2780,6 +2783,7 @@ describe("loadMoreHistoryForSession", () => {
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
 			listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 			getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+			readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
@@ -3347,6 +3351,7 @@ describe("handleMessage", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -3622,6 +3627,7 @@ describe("handleMessage", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptCatchUp: () => Effect.succeed({ messages: [], version: 0 }),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),

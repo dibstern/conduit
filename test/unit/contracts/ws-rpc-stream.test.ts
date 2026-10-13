@@ -125,6 +125,13 @@ const makeLayer = (options: {
 					// The catch-up read answers from its floor, so the version it
 					// reports is the one the caller will next carry — stateless, and
 					// identical for every subscriber that asks the same question.
+					readSessionTranscriptCatchUp: (_sessionId: string, after: number) =>
+						options.failRead
+							? Effect.fail(readFailure)
+							: Effect.succeed({
+									messages: [messageRow(`message-${after + 1}`, after + 1)],
+									version: after + 1,
+								}),
 					readSessionTranscript: (
 						_sessionId: string,
 						range?: { readonly after?: number; readonly through?: number },

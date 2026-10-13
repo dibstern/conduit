@@ -773,11 +773,13 @@ async function handleMessage(
 				: raw.tag === "ResolveSession"
 					? () => ({ projectSlug: control.projectSlug })
 					: raw.tag === "AttachProject"
-						? ({ projectSlug }) => ({
+						? ({ projectSlug, sessionId }) => ({
 								projectSlug:
 									typeof projectSlug === "string"
 										? projectSlug
 										: control.projectSlug,
+								sessionSlug:
+									typeof sessionId === "string" ? control.projectSlug : null,
 							})
 						: raw.tag === "ViewSession"
 							? () => ({ ok: true })

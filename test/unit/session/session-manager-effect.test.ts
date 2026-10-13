@@ -589,6 +589,8 @@ describe("SessionManager Effect", () => {
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
 				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
+				readSessionTranscriptCatchUp: () =>
+					Effect.succeed({ messages: [], version: 0 }),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),

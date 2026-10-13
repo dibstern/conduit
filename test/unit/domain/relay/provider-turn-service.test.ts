@@ -249,6 +249,8 @@ const makeReadQuery = (
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
+	readSessionTranscriptCatchUp: () =>
+		Effect.succeed({ messages: [], version: 0 }),
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),
 	),

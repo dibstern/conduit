@@ -296,7 +296,10 @@ describe("WebSocketRoutingLive", () => {
 				} else {
 					expect(result._tag).toBe("Right");
 					if (result._tag === "Right") {
-						expect(result.right).toEqual({ projectSlug: scenario.expected });
+						expect(result.right).toEqual({
+							projectSlug: scenario.expected,
+							sessionSlug: null,
+						});
 					}
 				}
 			}),

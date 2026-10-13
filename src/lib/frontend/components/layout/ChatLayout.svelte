@@ -4,8 +4,10 @@
 
 <script lang="ts">
 	import { onDestroy, onMount, tick, untrack } from "svelte";
+	import { Effect } from "effect";
 	import { getScopeGroupKey } from "../../../session-scope.js";
-	import { disposeRuntime } from "../../transport/runtime.js";
+	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
+	import { WsRpcClients } from "../../transport/shared-client.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
 	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
@@ -110,6 +112,15 @@
 	const mobileMaximized = $derived(phoneView === "terminal");
 
 	const draftSlug = $derived(getDraftProject());
+	// Navigation can arrive while disconnected; it must wake the socket before
+	// the placement effect's connected guard, without tracking connection state.
+	$effect(() => {
+		getCurrentRoute();
+		getCurrentSearchParams();
+		untrack(() => {
+			void runTransportEffect(Effect.flatMap(WsRpcClients, (clients) => clients.wake));
+		});
+	});
 	$effect(() => {
 		const route = getCurrentRoute();
 		const projectSlug = route.page === "chat" && route.draft && !sessionState.currentId &&
@@ -600,6 +611,17 @@
 		if (!connected || route.page !== "chat") return;
 		let cancelled = false;
 		untrack(() => {
+			const placeSession = (sessionId: string, projectSlug: string | null) => {
+				if (cancelled) return;
+				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
+				placeSavedDraw(sessionId, projectSlug);
+				if (projectSlug === null) {
+					routerState.sessionNotFound = true;
+					replaceRoute("/");
+					return;
+				}
+				switchToSession(sessionId, projectSlug);
+			};
 			// The server picks the project on a cold load (the session's, the hint,
 			// else its default); afterwards only a project-only route switches it.
 			if (!attachedThisMount || (groupScope && attachedSlug === null) || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
@@ -609,14 +631,17 @@
 					...(projectHint ? { projectSlug: projectHint } : {}),
 					...(route.sessionId ? { sessionId: route.sessionId } : {}),
 				})
-					.then(({ projectSlug }) => {
+					.then(({ projectSlug, sessionSlug }) => {
 						if (cancelled) return;
 						requestedProject = null;
-						if (projectSlug === null) return;
-						attachedThisMount = true;
-						setAttachedProject(projectSlug);
+						if (projectSlug !== null) {
+							attachedThisMount = true;
+							setAttachedProject(projectSlug);
+						}
+						if (route.sessionId) placeSession(route.sessionId, sessionSlug);
 					})
 					.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
+				if (route.sessionId) return;
 			}
 			if (!route.sessionId) {
 				if (sessionState.currentId !== null) {
@@ -649,15 +674,7 @@
 			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
 			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
-				if (cancelled) return;
-				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
-				placeSavedDraw(sessionId, projectSlug);
-				if (projectSlug === null) {
-					routerState.sessionNotFound = true;
-					replaceRoute("/");
-					return;
-				}
-				switchToSession(sessionId, projectSlug);
+				placeSession(sessionId, projectSlug);
 			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
 		});
 		return () => { cancelled = true; };

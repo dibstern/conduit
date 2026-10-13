@@ -97,6 +97,7 @@ async function openList(
 		handlers: {
 			AttachProject: ({ projectSlug }) => ({
 				projectSlug: projectSlug ?? projects[0]?.slug ?? null,
+				sessionSlug: null,
 			}),
 			GetProjects: () => ({ projects, current: projects[0]?.slug ?? null }),
 			GetDefaultGroupingMode: () => ({

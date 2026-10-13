@@ -6,17 +6,32 @@ import {
 } from "../../contracts/ws-rpc.js";
 import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
+import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
 export const projectsHandlers = {
 	// A standalone relay serves one project, so every tab attaches to it.
-	AttachProject: (_request: AttachProject) =>
-		Effect.flatMap(ProjectManagementServiceTag, (projectService) =>
-			projectService.currentSlug(),
-		).pipe(
-			Effect.map((projectSlug): { readonly projectSlug: string | null } => ({
+	AttachProject: (request: AttachProject) =>
+		Effect.gen(function* () {
+			const projectService = yield* ProjectManagementServiceTag;
+			const projectSlug = yield* projectService.currentSlug();
+			const read = yield* ReadQueryEffectTag;
+			const session = request.sessionId
+				? yield* read.getSession(request.sessionId)
+				: undefined;
+			const response: {
+				readonly projectSlug: string | null;
+				readonly sessionSlug: string | null;
+			} = {
 				projectSlug,
-			})),
+				sessionSlug: session ? projectSlug : null,
+			};
+			return response;
+		}).pipe(
+			Effect.mapError(
+				(cause) =>
+					new WsRpcError({ message: `AttachProject failed: ${String(cause)}` }),
+			),
 		),
 	GetProjects: (request) =>
 		Effect.gen(function* () {

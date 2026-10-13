@@ -91,6 +91,8 @@ const makeReadQuery = (
 	readStoreIdentity: () => Effect.succeed("store"),
 	readSessionTranscriptPage: () =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
+	readSessionTranscriptCatchUp: () =>
+		Effect.succeed({ messages: [], version: 0 }),
 	readSessionTranscript: () => Effect.succeed({ messages: [], version: 0 }),
 	readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 	readSessionList: () => Effect.succeed({ rows: [], version: 0 }),

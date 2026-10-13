@@ -359,7 +359,13 @@ export type AttachDaemonProject = (payload: {
 	readonly originId: string;
 	readonly projectSlug?: string | undefined;
 	readonly sessionId?: string | undefined;
-}) => Effect.Effect<{ readonly projectSlug: string | null }, WsRpcError>;
+}) => Effect.Effect<
+	{
+		readonly projectSlug: string | null;
+		readonly sessionSlug: string | null;
+	},
+	WsRpcError
+>;
 
 export type DaemonRpcName =
 	| keyof typeof daemonOnlyHandlers

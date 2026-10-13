@@ -93,6 +93,8 @@ const makeReadQuery = (
 	listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 	getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+	readSessionTranscriptCatchUp: () =>
+		Effect.succeed({ messages: [], version: 0 }),
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),
 	),

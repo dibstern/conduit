@@ -651,6 +651,7 @@ export const LoadMoreHistoryResponseSchema = Schema.Struct({
 	sessionId: Schema.String,
 	messages: Schema.Array(HistoryMessageSchema),
 	hasMore: Schema.Boolean,
+	cursor: Schema.optional(NonEmptyString),
 });
 
 export const ForkSessionResponseSchema = Schema.Struct({
@@ -2137,7 +2138,12 @@ export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
 	{
 		failure: WsRpcError,
 		// The project this tab is now attached to; null when none is registered.
-		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
+		success: Schema.Struct({
+			projectSlug: Schema.NullOr(Schema.String),
+			// Null means the requested session was not found, even if a fallback
+			// project was attached. Omitted requests also have no session location.
+			sessionSlug: Schema.NullOr(Schema.String),
+		}),
 		payload: {
 			// Hints, in priority order: the session's project, then projectSlug.
 			// The server falls back to its default project when neither resolves.

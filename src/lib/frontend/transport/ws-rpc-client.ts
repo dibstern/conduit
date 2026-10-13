@@ -1273,9 +1273,10 @@ export async function preWarmSessionRpc(
 	await runTransportEffect(callPreWarmSession(input));
 }
 
-export function attachProjectRpc(
-	input: AttachProjectRpcInput,
-): Promise<{ readonly projectSlug: string | null }> {
+export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
+	readonly projectSlug: string | null;
+	readonly sessionSlug: string | null;
+}> {
 	return runTransportEffect(callAttachProject(input));
 }
 

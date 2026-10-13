@@ -16,10 +16,6 @@
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
-import type {
-	MessageVersion,
-	PartVersion,
-} from "../../../contracts/tool-wire.js";
 import {
 	PartRemovalId,
 	type ResumeBase,
@@ -36,10 +32,9 @@ import {
 	ReadQueryEffectTag,
 	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
-import type { MessageWithParts } from "../../../persistence/read-model-types.js";
 import {
-	messageRowsToHistory,
-	newestRowsWithin,
+	FRAME_ENVELOPE_BYTES,
+	messageRowGroups,
 	PAGE_FRAME_BUDGET,
 	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
@@ -57,66 +52,6 @@ import { providerSteers } from "./session-inbox.js";
  * - `inbox`: the session's inbox state (paused), computed on read.
  */
 export type SessionDetailItem = typeof SessionDetailItemSchema.Type;
-
-/** Each row at the version its own table carries: a part's is never its message's. */
-type DetailRow =
-	| {
-			readonly item: Extract<SessionDetailItem, { _tag: "message" }>;
-			readonly version: MessageVersion;
-	  }
-	| {
-			readonly item: Extract<SessionDetailItem, { _tag: "part" }>;
-			readonly version: PartVersion;
-	  };
-
-/**
- * Split each projected message into its rows: a row for each part the read
- * returned, then a message row when `moved` says its own version is in the
- * window. The header comes last so a client that declines it (a message below
- * its held page) can drop the parts it has just queued along with it.
- * One group per message, so a page can keep or drop a message whole. The
- * adapter gets exactly these messages, so index `i` is still message `i`.
- */
-const messageRowGroups = (
-	messages: MessageWithParts[],
-	moved: (version: MessageVersion) => boolean,
-): DetailRow[][] =>
-	messageRowsToHistory(messages, {
-		pageSize: messages.length,
-	}).messages.map((message, index): DetailRow[] => {
-		const stored = messages[index];
-		if (stored === undefined) return [];
-		// The parts travel as rows; text is theirs, joined.
-		const { parts = [], text: _text, ...header } = message;
-		// A REST snapshot's parts come from its payload, stored under the same ids.
-		const projected = new Map(parts.map((part) => [part.id, part]));
-		return [
-			...stored.parts.flatMap((row): DetailRow[] => {
-				const part = projected.get(row.id);
-				return part === undefined
-					? []
-					: [
-							{
-								item: {
-									_tag: "part",
-									messageId: stored.id,
-									sortOrder: row.sort_order,
-									part,
-								},
-								version: row.version,
-							},
-						];
-			}),
-			...(moved(stored.version)
-				? [
-						{
-							item: { _tag: "message" as const, message: header },
-							version: stored.version,
-						},
-					]
-				: []),
-		];
-	});
 
 /**
  * The most messages a catch-up onto the page a resume point names carries.
@@ -329,23 +264,18 @@ export const subscribeSessionDetail = (options: {
 									options.sessionId,
 									{ limit: PAGE_MESSAGES, previewTools: true },
 								);
-								const groups = messageRowGroups(page.messages, () => true);
-								// The page also ends where its frame would pass the budget,
-								// never inside a message; "load older" pages from its
-								// oldest whole message.
-								const kept = newestRowsWithin(groups, PAGE_FRAME_BUDGET);
-								const oldest = page.messages[groups.length - kept.length];
 								const heldRows = yield* held(page.version);
 								return {
-									rows: [...kept.flat(), ...heldRows.rows],
+									rows: [
+										...messageRowGroups(page.messages, () => true).flat(),
+										...heldRows.rows,
+									],
 									version: page.version,
-									hasMore: page.hasMore || kept.length < groups.length,
-									...(oldest === undefined ? {} : { cursor: oldest.id }),
+									hasMore: page.hasMore,
+									...(page.cursor === undefined ? {} : { cursor: page.cursor }),
 								};
 							}
-							const window = yield* readQuery.readSessionTranscript(
-								options.sessionId,
-								range,
+							const listing =
 								base === undefined
 									? undefined
 									: {
@@ -353,19 +283,48 @@ export const subscribeSessionDetail = (options: {
 											...(base.cursor === undefined
 												? {}
 												: { from: base.cursor }),
-										},
-							);
+										};
+							const resuming = range.through === undefined;
+							const window = yield* resuming
+								? readQuery.readSessionTranscriptCatchUp(
+										options.sessionId,
+										range.after ?? -1,
+										fromSavedPage
+											? SAVED_PAGE_CATCH_UP_MESSAGES
+											: PAGE_MESSAGES,
+										listing,
+									)
+								: readQuery.readSessionTranscript(
+										options.sessionId,
+										range,
+										listing,
+									);
+							if (window === "snapshot") return window;
 							const heldRows = yield* held(range.through ?? window.version);
+							const rows = [
+								...messageRowGroups(
+									window.messages,
+									(version) =>
+										version > (range.after ?? Number.NEGATIVE_INFINITY) &&
+										version <= (range.through ?? Number.POSITIVE_INFINITY),
+								).flat(),
+								...heldRows.rows,
+							];
+							if (
+								resuming &&
+								FRAME_ENVELOPE_BYTES +
+									rows.reduce(
+										(bytes, row) =>
+											Buffer.byteLength(JSON.stringify(row), "utf8") +
+											1 +
+											bytes,
+										0,
+									) >
+									PAGE_FRAME_BUDGET
+							)
+								return "snapshot" as const;
 							return {
-								rows: [
-									...messageRowGroups(
-										window.messages,
-										(version) =>
-											version > (range.after ?? Number.NEGATIVE_INFINITY) &&
-											version <= (range.through ?? Number.POSITIVE_INFINITY),
-									).flat(),
-									...heldRows.rows,
-								],
+								rows,
 								version: window.version,
 								removed: [
 									...(window.removed ?? []),
@@ -399,20 +358,6 @@ export const subscribeSessionDetail = (options: {
 						moved: advance.sessionIds.includes(options.sessionId),
 						removed: [],
 					}),
-					// A catch-up is held to the first page's budget: past it, the
-					// page itself is the smaller answer.
-					fitsCatchUp: (rows) =>
-						new Set(
-							rows.flatMap(({ item }) =>
-								item._tag === "part"
-									? [item.messageId]
-									: item._tag === "message"
-										? [item.message.id]
-										: [],
-							),
-						).size <=
-							(fromSavedPage ? SAVED_PAGE_CATCH_UP_MESSAGES : PAGE_MESSAGES) &&
-						newestRowsWithin(rows, PAGE_FRAME_BUDGET).length === rows.length,
 					resume: "catchUp",
 				},
 				...(resume.resumeFromSequence === undefined

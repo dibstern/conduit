@@ -200,6 +200,8 @@ describe("session handler metadata", () => {
 			),
 			getLatestTurnModelExecution: vi.fn(() => Effect.succeed(undefined)),
 			// A complete OpenCode projection carries message text and backfill origin.
+			readSessionTranscriptCatchUp: () =>
+				Effect.succeed({ messages: [], version: 0 }),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),

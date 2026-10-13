@@ -21,6 +21,7 @@ import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import {
 	Context,
+	Duration,
 	Effect,
 	ExecutionStrategy,
 	Exit,
@@ -225,6 +226,11 @@ export interface WsRpcSockets {
 export type WsRpcConnect = (options: {
 	readonly url: string;
 	readonly trafficClass: TrafficClass;
+	readonly wake?: {
+		readonly version: number;
+		readonly wait: (after: number) => Effect.Effect<void>;
+		readonly signal: EventTarget;
+	};
 }) => Effect.Effect<WsRpcClient, never, Scope.Scope>;
 
 // Both classes dial the same endpoint; the traffic class picks the socket, not
@@ -249,7 +255,7 @@ const reconnectSchedule = Schedule.exponential("100 millis", 1.5).pipe(
 // the stored error, which runs after the raw "open" event. Reporting connected
 // from that hook, not the raw event, means a caller that reacts to `connected`
 // (ChatLayout loading the file tree) is never refused.
-const controlSocket = (url: string) =>
+const controlSocket = (url: string, onCreate: (socket: WebSocket) => void) =>
 	Layer.effect(
 		Socket.Socket,
 		Effect.map(
@@ -269,29 +275,83 @@ const controlSocket = (url: string) =>
 		Layer.provide(
 			Layer.succeed(Socket.WebSocketConstructor, (url, protocols) => {
 				const socket = new globalThis.WebSocket(url, protocols);
+				onCreate(socket);
 				trackControlSocket(socket);
 				return socket;
 			}),
 		),
 	);
 
-const connectWebSocket: WsRpcConnect = ({ url, trafficClass }) =>
-	Layer.build(
-		RpcClient.layerProtocolSocket({ retrySchedule: reconnectSchedule }).pipe(
-			Layer.provide(
-				trafficClass === "control"
-					? controlSocket(url)
-					: Socket.layerWebSocket(url).pipe(
-							Layer.provide(Socket.layerWebSocketConstructorGlobal),
-						),
-			),
-			Layer.provide(RpcSerialization.layerJson),
+const connectWebSocket: WsRpcConnect = ({ url, trafficClass, wake }) => {
+	let wakeVersion = wake?.version ?? 0;
+	let currentSocket: WebSocket | undefined;
+	const onCreate = (socket: WebSocket) => {
+		currentSocket = socket;
+		wakeVersion = wake?.version ?? 0;
+	};
+	const onWake = () => {
+		// Ignore healthy wakes, but keep a wake during CLOSING: tab visibility
+		// may close a stale socket before its asynchronous close event arrives.
+		if (currentSocket?.readyState === 1) wakeVersion = wake?.version ?? 0;
+	};
+	const retrySchedule = reconnectSchedule.pipe(
+		Schedule.modifyDelayEffect((_out, delay) =>
+			Effect.suspend(() => {
+				if (wake === undefined) return Effect.succeed(delay);
+				if (wake.version !== wakeVersion) {
+					wakeVersion = wake.version;
+					return Effect.succeed(Duration.zero);
+				}
+				// The schedule driver sleeps after this callback. Race the wait here
+				// and return zero so an event can interrupt a delay already in flight.
+				return Effect.race(Effect.sleep(delay), wake.wait(wakeVersion)).pipe(
+					Effect.tap(() =>
+						Effect.sync(() => {
+							wakeVersion = wake.version;
+						}),
+					),
+					Effect.as(Duration.zero),
+				);
+			}),
 		),
-	).pipe(Effect.flatMap((protocol) => Effect.provide(wsRpcClient, protocol)));
+	);
+	return Effect.zipRight(
+		wake === undefined
+			? Effect.void
+			: Effect.acquireRelease(
+					Effect.sync(() => wake.signal.addEventListener("wake", onWake)),
+					() =>
+						Effect.sync(() => wake.signal.removeEventListener("wake", onWake)),
+				),
+		Layer.build(
+			RpcClient.layerProtocolSocket({ retrySchedule }).pipe(
+				Layer.provide(
+					trafficClass === "control"
+						? controlSocket(url, onCreate)
+						: Socket.layerWebSocket(url).pipe(
+								Layer.provide(
+									Layer.succeed(
+										Socket.WebSocketConstructor,
+										(url, protocols) => {
+											const socket = new globalThis.WebSocket(url, protocols);
+											onCreate(socket);
+											return socket;
+										},
+									),
+								),
+							),
+				),
+				Layer.provide(RpcSerialization.layerJson),
+			),
+		).pipe(Effect.flatMap((protocol) => Effect.provide(wsRpcClient, protocol))),
+	);
+};
 
 export class WsRpcClients extends Context.Tag("WsRpcClients")<
 	WsRpcClients,
 	{
+		/** Skip both sockets' current redial wait without closing healthy sockets. */
+		readonly wake: Effect.Effect<void>;
 		/**
 		 * The app's one socket pair, opened on first use and kept for the
 		 * runtime's lifetime, with subscriptions bound to `projectSlug`. The
@@ -320,6 +380,40 @@ const make = (connect: WsRpcConnect) =>
 		// The layer's scope — i.e. the app-lifetime runtime. Disposing the runtime
 		// closes the pair opened below.
 		const appScope = yield* Effect.scope;
+		const wakes = new EventTarget();
+		let wakeVersion = 0;
+		const notifyWake = () => {
+			wakeVersion++;
+			wakes.dispatchEvent(new Event("wake"));
+		};
+		const wake = {
+			signal: wakes,
+			get version() {
+				return wakeVersion;
+			},
+			wait: (after: number) =>
+				Effect.async<void>((resume) => {
+					const cleanup = Effect.sync(() =>
+						wakes.removeEventListener("wake", onWake),
+					);
+					const onWake = () => resume(cleanup);
+					wakes.addEventListener("wake", onWake);
+					// The race's child may start after the wake already fired.
+					if (wakeVersion !== after) onWake();
+					return cleanup;
+				}),
+		};
+		const onVisible = () => {
+			if (globalThis.document?.visibilityState === "visible") notifyWake();
+		};
+		globalThis.document?.addEventListener("visibilitychange", onVisible);
+		globalThis.window?.addEventListener("online", notifyWake);
+		yield* Effect.addFinalizer(() =>
+			Effect.sync(() => {
+				globalThis.document?.removeEventListener("visibilitychange", onVisible);
+				globalThis.window?.removeEventListener("online", notifyWake);
+			}),
+		);
 		const current = yield* Ref.make<SocketPair | undefined>(undefined);
 		// Serialises get-or-open, so two concurrent callers cannot race four
 		// sockets open.
@@ -339,8 +433,8 @@ const make = (connect: WsRpcConnect) =>
 					const url = makeWsRpcUrl();
 					const [control, stream] = yield* restore(
 						Effect.all([
-							connect({ url, trafficClass: "control" }),
-							connect({ url, trafficClass: "stream" }),
+							connect({ url, trafficClass: "control", wake }),
+							connect({ url, trafficClass: "stream", wake }),
 						]).pipe(Scope.extend(scope)),
 					).pipe(
 						Effect.onExit((exit) =>
@@ -355,6 +449,7 @@ const make = (connect: WsRpcConnect) =>
 		);
 
 		return {
+			wake: Effect.sync(notifyWake),
 			forProject: (projectSlug: string) =>
 				Effect.map(pair, (sockets) => ({
 					...sockets,

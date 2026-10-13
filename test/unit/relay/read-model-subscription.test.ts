@@ -200,7 +200,7 @@ describe("ReadModelSubscription", () => {
 					...fake.source,
 					read: (range) =>
 						Effect.map(fake.source.read(range), (result) =>
-							range === undefined
+							range === undefined && result !== "snapshot"
 								? {
 										...result,
 										hasMore: true,
