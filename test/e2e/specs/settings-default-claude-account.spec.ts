@@ -34,15 +34,24 @@ const test = base.extend<{
 					(error) => error,
 				);
 				if (!seed) throw new Error("Missing process harness config");
-				const { configVersion: _version, ...legacy } = seed;
 				const configDir = testInfo.outputPath("initial-claude-account");
 				mkdirSync(configDir, { recursive: true });
-				// Existing installs store the implicit account's folder at the top level.
 				writeFileSync(
 					join(harness.configDir, "daemon.json"),
 					JSON.stringify({
-						...legacy,
-						claudeConfigDir: configDir,
+						...seed,
+						instances: [
+							...(seed.instances ?? []).filter(({ id }) => id !== defaultId),
+							{
+								id: defaultId,
+								name: "Claude",
+								driver: "claude",
+								port: 0,
+								managed: false,
+								configDir,
+							},
+						],
+						accountDefaults: { claude: defaultId },
 					}),
 				);
 				await harness.restart({ startupTimeoutMs: 60_000, serviceEnvironment });
@@ -67,7 +76,11 @@ if (process.env["CONDUIT_E2E_SINGLE_PROCESS"] === "1") {
 	});
 }
 
-async function openServer(page: Page, baseUrl: string): Promise<void> {
+async function openServer(
+	page: Page,
+	baseUrl: string,
+	accountId: string = defaultId,
+): Promise<void> {
 	await new AppPage(page).goto(baseUrl);
 	const listOverflow = page.getByTestId("list-bar-overflow");
 	const titleMenu = page.getByTestId("session-bar-title-menu");
@@ -86,10 +99,10 @@ async function openServer(page: Page, baseUrl: string): Promise<void> {
 		await page.getByTestId("overflow-settings").click();
 	}
 	await page.getByTestId("settings-tab-server").click();
-	await expect(page.getByTestId(`instance-row-${defaultId}`)).toBeVisible();
+	await expect(page.getByTestId(`instance-row-${accountId}`)).toBeVisible();
 }
 
-test("the default Claude name applies live and its folder survives a login-service restart", async ({
+test("ordinary Claude accounts apply edits live, can be removed and stay deleted after restart", async ({
 	page,
 	harness,
 	serviceEnvironment,
@@ -128,8 +141,7 @@ test("the default Claude name applies live and its folder survives a login-servi
 		await openServer(page, harness.baseUrl);
 		const row = page.getByTestId(`instance-row-${defaultId}`);
 		await row.getByRole("button").first().click();
-		await expect(row.getByTestId("remove-instance-btn")).toHaveCount(0);
-		await expect(row).toContainText("The default account can't be removed");
+		await expect(row.getByTestId("remove-instance-btn")).toBeVisible();
 		await row.getByTestId("edit-instance-btn").click();
 		await expect(page.getByTestId("instance-form-name")).toBeFocused();
 		await expect(page.getByTestId("instance-form-configdir")).toHaveValue(
@@ -207,6 +219,95 @@ test("the default Claude name applies live and its folder survives a login-servi
 		});
 		await page.screenshot({
 			path: resolve(artifacts, `${testInfo.project.name}-restarted.png`),
+		});
+
+		await page.getByTestId("add-instance-btn").click();
+		await page.getByTestId("instance-form-driver-claude").click();
+		await page.getByTestId("instance-form-name").fill("Personal");
+		await page.getByTestId("instance-form-configdir").fill(configDir);
+		await page.getByTestId("instance-form-save").click();
+		await expect(page.getByTestId("instance-form")).toBeHidden();
+		const personalRow = page.getByTestId("instance-row-personal");
+		await personalRow.getByRole("button", { expanded: false }).click();
+		await personalRow.getByTestId("make-default-btn").click();
+		await expect(
+			personalRow.getByTestId("default-account-marker"),
+		).toBeVisible();
+		await expect(
+			page
+				.getByTestId("claude-accounts-list")
+				.getByTestId("default-account-marker"),
+		).toHaveCount(1);
+		await row.getByRole("button", { expanded: false }).click();
+		await row.getByTestId("remove-instance-btn").click();
+		await page.getByTestId("confirm-modal-action").click();
+		await expect(row).toHaveCount(0);
+		expect(readStored().accountDefaults?.claude).toBe("personal");
+		expect(readStored().deletedAccounts).toContainEqual({
+			id: defaultId,
+			driver: "claude",
+		});
+		record("former-built-in-removed", readStored());
+		await harness.shutdown();
+		await harness.restart({
+			keepPort: true,
+			serviceEnvironment,
+			startupTimeoutMs: 60_000,
+			skipBrowserProbe: true,
+		});
+		await openServer(page, harness.baseUrl, "personal");
+		await expect(row).toHaveCount(0);
+		expect(await readDefault()).toBeUndefined();
+		expect(
+			(await harness.requestRpc(new GetInstances({}))).instances.filter(
+				({ driver, isDefault }) => driver === "claude" && isDefault,
+			),
+		).toMatchObject([{ id: "personal" }]);
+		record("deletion-survives-restart", readStored());
+		await page.screenshot({
+			path: resolve(
+				artifacts,
+				`${testInfo.project.name}-former-built-in-removed.png`,
+			),
+		});
+		await personalRow.getByRole("button", { expanded: false }).click();
+		await personalRow.getByTestId("remove-instance-btn").click();
+		await page.getByTestId("confirm-modal-action").click();
+		const empty = page.getByTestId("claude-empty-state");
+		await expect(empty).toContainText(/No.*accounts/);
+		await expect(
+			page
+				.getByTestId("claude-accounts-list")
+				.getByTestId("default-account-marker"),
+		).toHaveCount(0);
+		expect(readStored().accountDefaults?.claude).toBeUndefined();
+		await page.screenshot({
+			path: resolve(
+				artifacts,
+				`${testInfo.project.name}-no-claude-accounts.png`,
+			),
+		});
+		await empty
+			.getByRole("button", { name: "Add account", exact: true })
+			.click();
+		await page.getByTestId("instance-form-name").fill("Personal");
+		await page.getByTestId("instance-form-save").click();
+		await expect(
+			page
+				.getByTestId("instance-row-personal-2")
+				.getByTestId("default-account-marker"),
+		).toBeVisible();
+		await expect(personalRow).toHaveCount(0);
+		expect(readStored().accountDefaults?.claude).toBe("personal-2");
+		expect(readStored().deletedAccounts).toEqual(
+			expect.arrayContaining([
+				{ id: defaultId, driver: "claude" },
+				{ id: "personal", driver: "claude" },
+			]),
+		);
+		record("same-name-account-restored-with-new-id", readStored());
+		await page.screenshot({
+			path: resolve(artifacts, `${testInfo.project.name}-account-restored.png`),
 		});
 		record("result", "passed");
 	} catch (error) {

@@ -373,17 +373,21 @@
 								{#if !inst.isDefault}
 									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
 								{/if}
-								{#if inst.isDefault}
-									<span class="text-xs text-text-muted">The default account can't be removed</span>
-								{:else}
-									<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
-								{/if}
+								<Button variant="danger-outline" size="content" class="px-3 py-1 text-xs rounded" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
 							</div>
 						</div>
 					{/if}
 				</div>
 			{/each}
 		</div>
+	{:else}
+		<SettingsGroup testId="claude-empty-state">
+			<div class="bg-[rgba(var(--overlay-rgb),0.015)] px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted"><h4>Claude accounts</h4></div>
+			<div class="flex items-center justify-between gap-2 px-3 py-2 text-xs text-text-muted">
+				<p>No Claude accounts yet.</p>
+				<Button variant="ghost-accent" size="content" class="px-2 py-1 text-xs" data-testid="add-claude-account-settings-btn" disabled={state.formSaving} onclick={() => openAddInstance("claude")}>Add account</Button>
+			</div>
+		</SettingsGroup>
 	{/if}
 	<SettingsGroup testId="opencode-servers-list">
 		<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted">

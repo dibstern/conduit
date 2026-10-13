@@ -50,6 +50,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { openSettings } from "../layout/chrome-actions.js";
 	import {
 		getModelsRpc,
 		setDefaultModelRpc,
@@ -112,6 +113,7 @@
 		})),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
+	const needsClaudeAccount = $derived(selectedDriver === "claude" && driverInstances.length === 0);
 	const accountProjectSlug = $derived(
 		sessionState.currentId
 			? findSession(sessionState.currentId)?.projectSlug ?? ""
@@ -119,7 +121,7 @@
 	);
 	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
 	const switchingTo = $derived(selectedDriver === "claude" && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
-	const wordAccountName = $derived(accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedDriver === "claude" ? "Claude" : instances.find((instance) => instance.id === selectedLogoInstanceId)?.label ?? selectedLabel));
+	const wordAccountName = $derived(selectedInstance ? accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedInstance.label) : selectedLabel);
 	let presentedRequest = $state<number | undefined>();
 	const handoff = $derived(accounts.pendingHandoff?.requestId === presentedRequest ? accounts.pendingHandoff : undefined);
 	type AccountCard = { value: string; label: string; locked: boolean } & (
@@ -253,8 +255,8 @@
 		return last.length <= 4 ? last : last.slice(0, 3);
 	});
 
-	const visibleAgents = $derived(getVisibleAgents());
-	const activeAgent = $derived(getActiveAgent() ?? visibleAgents[0]);
+	const visibleAgents = $derived(needsClaudeAccount ? [] : getVisibleAgents());
+	const activeAgent = $derived(needsClaudeAccount ? undefined : getActiveAgent() ?? visibleAgents[0]);
 	// Regular OpenCode Plan sessions lock the agent; Side Threads use session rules.
 	const planLocked = $derived(
 		selectedDriver === "opencode" &&
@@ -617,6 +619,12 @@
 						{/if}
 					</section>
 				{/if}
+				{#if needsClaudeAccount}
+					<div class="flex items-center justify-between gap-2 border-b border-border-subtle py-2 text-xs text-text-muted">
+						<span>No Claude accounts yet.</span>
+						<Button variant="ghost-accent" size="content" data-testid="picker-add-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}>Add account</Button>
+					</div>
+				{/if}
 				<Button
 					variant="ghost"
 					size="content"
@@ -841,6 +849,9 @@
 	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : phone ? 'gap-[8px]' : 'shrink-0 gap-[2px]'}"
 	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
 >
+	{#if needsClaudeAccount}
+		<Button variant="ghost-accent" size="content" class="shrink-0 gap-1 px-1.5 py-1 text-[11.5px]" data-testid="add-claude-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}><Icon name="plus" size={12} />Add account</Button>
+	{/if}
 	{#if variant === "words"}
 		<Button
 			bind:element={triggerEl}

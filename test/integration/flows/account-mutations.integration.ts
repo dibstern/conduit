@@ -1,4 +1,4 @@
-// Failure modes: invalid requests lose their typed rejection; default retyping
+// Failure modes: invalid requests lose their typed rejection; account retyping
 // guards drift or default removal fails; concurrent adds collide or claim a bare
 // driver id; Claude accounts remain in the process registry; replies precede disk
 // saves; clearing a folder
@@ -189,7 +189,7 @@ afterEach(() => {
 });
 
 afterAll(() => {
-	if (evidence.length !== 9) return;
+	if (evidence.length !== 8) return;
 	mkdirSync(join(process.cwd(), "test-results"), { recursive: true });
 	writeFileSync(
 		artifact,
@@ -315,22 +315,23 @@ describe("account mutations through daemon RPC", () => {
 					},
 				});
 			}
-			expect(
-				yield* Effect.either(
-					client.UpdateInstance({
-						instanceId: "claude",
-						driver: "opencode",
-						port: 47002,
-					}),
-				),
-			).toMatchObject({
-				_tag: "Left",
-				left: {
-					_tag: "AccountChangeRejected",
-					id: "claude",
-					reason: expect.stringContaining("type"),
-				},
-			});
+			for (const instanceId of ["claude", "personal", "remote"]) {
+				expect(
+					yield* Effect.either(
+						client.UpdateInstance({
+							instanceId,
+							driver: instanceId === "remote" ? "claude" : "opencode",
+						}),
+					),
+				).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "AccountChangeRejected",
+						id: instanceId,
+						reason: expect.stringContaining("type"),
+					},
+				});
+			}
 			expect(readFileSync(join(configDir, "daemon.json"), "utf8")).toBe(before);
 			const removed = yield* client.RemoveInstance({ instanceId: "claude" });
 			expect(removed.instances.some((account) => account.id === "claude")).toBe(
@@ -655,111 +656,80 @@ describe("account mutations through daemon RPC", () => {
 			}).pipe(Effect.provide(makeLayer())),
 	);
 
-	for (const operation of ["remove", "retype"] as const) {
-		it.scoped(
-			`retains the account and recovery record after a failed ${operation}, then accepts a retry`,
-			() =>
-				Effect.gen(function* () {
-					const client = yield* makeClient;
-					yield* seedManagedRuntime;
-					yield* client.RenameInstance({
-						instanceId: "remote",
-						name: "Active Remote",
-					});
-					const savedBefore = readSaved().instances?.find(
+	it.scoped(
+		"retains the account and recovery record after a failed remove, then accepts a retry",
+		() =>
+			Effect.gen(function* () {
+				const client = yield* makeClient;
+				yield* seedManagedRuntime;
+				yield* client.RenameInstance({
+					instanceId: "remote",
+					name: "Active Remote",
+				});
+				const savedBefore = readSaved().instances?.find(
+					(account) => account.id === "remote",
+				);
+				expect(savedBefore).toMatchObject({
+					driver: "opencode",
+					managed: true,
+					...fakeManagedRecord,
+				});
+				vi.mocked(stopManagedOpenCode).mockResolvedValue(false);
+				const mutate = client.RemoveInstance({ instanceId: "remote" });
+				expect(yield* Effect.either(mutate)).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "AccountChangeRejected",
+						id: "remote",
+						reason: expect.stringContaining("ownership"),
+					},
+				});
+				expect(
+					(yield* client.GetInstances({})).instances.find(
 						(account) => account.id === "remote",
-					);
-					expect(savedBefore).toMatchObject({
-						driver: "opencode",
-						managed: true,
-						...fakeManagedRecord,
-					});
-					vi.mocked(stopManagedOpenCode).mockResolvedValue(false);
-					const mutate =
-						operation === "remove"
-							? client.RemoveInstance({ instanceId: "remote" })
-							: client.UpdateInstance({
-									instanceId: "remote",
-									driver: "claude",
-								});
-					expect(yield* Effect.either(mutate)).toMatchObject({
-						_tag: "Left",
-						left: {
-							_tag: "AccountChangeRejected",
-							id: "remote",
-							reason: expect.stringContaining("ownership"),
-						},
-					});
-					expect(
-						(yield* client.GetInstances({})).instances.find(
-							(account) => account.id === "remote",
-						),
-					).toMatchObject({
-						name: "Active Remote",
-						driver: "opencode",
-						port: fakeManagedRecord.port,
-						managed: true,
-						status: "healthy",
-					});
-					expect(
-						yield* (yield* AccountDirectory).resolve({
-							_tag: "Id",
-							id: "remote",
-						}),
-					).toMatchObject({ id: "remote", driver: "opencode" });
-					// An unrelated successful mutation must still persist the rejected
-					// account's complete recovery record, allowing another stop attempt.
-					yield* client.RenameInstance({
-						instanceId: "personal",
-						name: "Personal refreshed",
-					});
-					expect(
-						readSaved().instances?.find((account) => account.id === "remote"),
-					).toEqual(savedBefore);
-					vi.mocked(stopManagedOpenCode).mockResolvedValue(true);
-					const retried = yield* mutate;
-					expect(stopManagedOpenCode).toHaveBeenLastCalledWith(
-						expect.objectContaining({
-							pid: fakeManagedRecord.pid,
-							processIdentity: fakeManagedRecord.processIdentity,
-						}),
-					);
-					const savedAfter = readSaved().instances?.find(
-						(account) => account.id === "remote",
-					);
-					if (operation === "remove") {
-						expect(
-							retried.instances.some((account) => account.id === "remote"),
-						).toBe(false);
-						expect(savedAfter).toBeUndefined();
-					} else {
-						expect(
-							retried.instances.find((account) => account.id === "remote"),
-						).toMatchObject({ driver: "claude" });
-						expect(savedAfter).toMatchObject({
-							driver: "claude",
-							port: 0,
-							managed: false,
-						});
-						expect(savedAfter?.pid).toBeUndefined();
-						expect(savedAfter?.processIdentity).toBeUndefined();
-						expect(
-							yield* (yield* AccountDirectory).resolve({
-								_tag: "Id",
-								id: "remote",
-							}),
-						).toMatchObject({
-							driver: "claude",
-							folder: configuredClaudeConfigDir(
-								join(directory, "remote-folder"),
-							),
-						});
-					}
-					evidence.push({
-						scenario: `failed ${operation} preserves account and recovery metadata; confirmed retry succeeds`,
-						accounts: ["remote"],
-					});
-				}).pipe(Effect.provide(makeLayer())),
-		);
-	}
+					),
+				).toMatchObject({
+					name: "Active Remote",
+					driver: "opencode",
+					port: fakeManagedRecord.port,
+					managed: true,
+					status: "healthy",
+				});
+				expect(
+					yield* (yield* AccountDirectory).resolve({
+						_tag: "Id",
+						id: "remote",
+					}),
+				).toMatchObject({ id: "remote", driver: "opencode" });
+				// An unrelated successful mutation must still persist the rejected
+				// account's complete recovery record, allowing another stop attempt.
+				yield* client.RenameInstance({
+					instanceId: "personal",
+					name: "Personal refreshed",
+				});
+				expect(
+					readSaved().instances?.find((account) => account.id === "remote"),
+				).toEqual(savedBefore);
+				vi.mocked(stopManagedOpenCode).mockResolvedValue(true);
+				const retried = yield* mutate;
+				expect(stopManagedOpenCode).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						pid: fakeManagedRecord.pid,
+						processIdentity: fakeManagedRecord.processIdentity,
+					}),
+				);
+				const savedAfter = readSaved().instances?.find(
+					(account) => account.id === "remote",
+				);
+				expect(
+					retried.instances.some((account) => account.id === "remote"),
+				).toBe(false);
+				expect(savedAfter).toBeUndefined();
+				evidence.push({
+					scenario:
+						"failed remove preserves account and recovery metadata; confirmed retry succeeds",
+					accounts: ["remote"],
+				});
+			}).pipe(Effect.provide(makeLayer())),
+	);
 });

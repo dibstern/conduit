@@ -256,23 +256,17 @@ export function apply(
 		return reject(
 			`Unknown account driver "${driver}"; expected ${KnownProviderDriverKindSchema.literals.join(" or ")}`,
 		);
-	if (isDefaultClaude && driver !== "claude")
-		return reject("The default Claude account's type can't be changed");
+	if (driver !== current.driver)
+		return reject(
+			"An account's type can't be changed. Delete it and add a new account.",
+		);
 	const name = updates.name?.trim() ?? current.name;
 	if (!name) return reject("RenameInstance failed: name is required");
 	const configuredFolder =
 		updates.configDir === undefined
 			? current.configuredFolder
 			: updates.configDir.trim() || undefined;
-	let env = updates.env ?? current.env;
-	if (driver === "claude" && current.driver !== driver && env !== undefined) {
-		const {
-			OPENCODE_SERVER_PASSWORD: _password,
-			OPENCODE_SERVER_USERNAME: _username,
-			...claudeEnv
-		} = env;
-		env = claudeEnv;
-	}
+	const env = updates.env ?? current.env;
 	const updated = accountsStateFromInstances(
 		[
 			{
@@ -305,10 +299,6 @@ export function apply(
 		accounts: state.accounts.map((account) =>
 			account.id === current.id ? updated : account,
 		),
-		defaults:
-			updated.driver === "claude" && Option.isNone(state.defaults.claude)
-				? { claude: Option.some(updated.id) }
-				: state.defaults,
 	});
 }
 

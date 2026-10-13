@@ -6,8 +6,10 @@
  * - Explicit account picks must beat driver/model defaults.
  * - Legacy driver and model-only picks must resolve the driver's current default.
  * - A fork must use the resolved account for receipts without rewriting its parent.
- * - A deleted non-default binding must launch in the default account's folder.
+ * - A deleted default or non-default binding must launch in the default folder.
  * - With no native transcript in that folder, the handoff must preserve history.
+ * - With zero Claude accounts, creates/sends must fail despite OpenCode existing.
+ * - Adding after the last removal must restore the old session on a fresh ID.
  * - SetDefault through daemon RPC must change the next draft's launch folder,
  *   including model-only picks, while an explicit account pick still wins.
  * All configuration and launch logins in this flow belong to a temporary fixture.
@@ -75,6 +77,8 @@ describe("Integration: account session routing", () => {
 		};
 		deletedAccount?: {
 			withHistory: boolean;
+			removedId: string;
+			restoredId?: string;
 			prompts: string[];
 			resumeIds: Array<string | undefined>;
 		};
@@ -129,11 +133,20 @@ describe("Integration: account session routing", () => {
 	});
 
 	it.each([
-		false,
-		true,
-	])("routes a deleted non-default account to the default folder, preserving history=%s", async (withHistory) => {
+		{ removeDefault: false, withHistory: false },
+		{ removeDefault: false, withHistory: true },
+		{ removeDefault: true, withHistory: false },
+		{ removeDefault: true, withHistory: true },
+	])("routes a deleted account to the default folder and preserves history: %j", async ({
+		removeDefault,
+		withHistory,
+	}) => {
 		const login = join(root, "login");
 		const removedLogin = join(root, "removed-login");
+		const removedId = removeDefault ? "claude" : "removed";
+		const promotedId = removeDefault ? "removed" : "claude";
+		const sourceLogin = removeDefault ? login : removedLogin;
+		const targetLogin = removeDefault ? removedLogin : login;
 		mkdirSync(removedLogin);
 		writeFileSync(join(removedLogin, "conduit-test-record-forks"), "");
 		const registry = makeInstanceManagerStateLive(
@@ -210,7 +223,7 @@ describe("Integration: account session routing", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Deleted account history", {
-			instanceId: "removed",
+			instanceId: removedId,
 		});
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
@@ -220,20 +233,20 @@ describe("Integration: account session routing", () => {
 			const completed = client.waitForTurnEnd(sessionId, 10_000);
 			await client.sendMessage(historyText, { sessionId });
 			expect((await completed).attention).not.toBe("error");
-			expect(launchFolders.at(-1)).toBe(removedLogin);
+			expect(launchFolders.at(-1)).toBe(sourceLogin);
 		}
-		await runtime.runPromise(removeInstance("removed"));
+		await runtime.runPromise(removeInstance(removedId));
 		const defaultAccount = await runtime.runPromise(
 			Effect.flatMap(AccountDirectory, (directory) =>
-				directory.resolve({ _tag: "Id", id: "removed" }),
+				directory.resolve({ _tag: "Id", id: removedId }),
 			),
 		);
-		expect(defaultAccount.id).toBe("claude");
+		expect(defaultAccount.id).toBe(promotedId);
 		const nextText = "continue-after-account-deletion";
 		const completed = client.waitForTurnEnd(sessionId, 10_000);
 		await client.sendMessage(nextText, { sessionId });
 		expect((await completed).attention).not.toBe("error");
-		expect(launchFolders.at(-1)).toBe(login);
+		expect(launchFolders.at(-1)).toBe(targetLogin);
 		expect(resumeIds.at(-1)).toBeUndefined();
 		if (withHistory) {
 			const handoff = prompts.at(-1);
@@ -261,7 +274,57 @@ describe("Integration: account session routing", () => {
 					entry.event === "request" && entry.detail?.includes("/prompt"),
 			),
 		).toHaveLength(0);
-		deletedAccount = { withHistory, prompts, resumeIds };
+		deletedAccount = { withHistory, removedId, prompts, resumeIds };
+		if (removeDefault && withHistory) {
+			await runtime.runPromise(removeInstance(promotedId));
+			const launchesBefore = launchFolders.length;
+			await expect(
+				client.createSession("No Claude account", { providerId: "claude" }),
+			).rejects.toThrow(/claude/);
+			const sendError = await client.rpcCall((rpc) =>
+				rpc.input
+					.submit({
+						projectSlug: "integration-test",
+						sessionId,
+						inputId: "input-after-last-account-removed",
+						text: "Cannot send without a Claude account",
+						delivery: "queue",
+					})
+					.pipe(Effect.flip),
+			);
+			expect(sendError).toMatchObject({
+				_tag: "AccountUnroutable",
+				ref: { _tag: "Id", id: removedId },
+			});
+			expect(launchFolders).toHaveLength(launchesBefore);
+			expect(
+				harness.mock.diagnostics.filter(
+					(entry) =>
+						entry.event === "request" &&
+						(entry.detail === "POST /session" ||
+							entry.detail?.includes("/prompt")),
+				),
+			).toEqual([]);
+			const restoredLogin = join(root, "restored-login");
+			mkdirSync(restoredLogin);
+			const restored = await runtime.runPromise(
+				addInstance({
+					name: "Removed",
+					driver: "claude",
+					configDir: restoredLogin,
+				}),
+			);
+			expect(restored.id).toBe("removed-2");
+			expect(restored.isDefault).toBe(true);
+			const restoredText = "continue-after-account-restored";
+			const restoredTurn = client.waitForTurnEnd(sessionId, 10_000);
+			await client.sendMessage(restoredText, { sessionId });
+			expect((await restoredTurn).attention).not.toBe("error");
+			expect(launchFolders.at(-1)).toBe(restoredLogin);
+			expect(prompts.at(-1)).toContain(historyText);
+			expect(prompts.at(-1)).toContain(nextText);
+			deletedAccount.restoredId = restored.id;
+		}
 	});
 
 	it("rejects unknown creation and bound sends without provider fallback", async () => {

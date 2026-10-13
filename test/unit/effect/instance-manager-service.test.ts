@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest";
-import { Effect, HashMap, Layer, Queue, Ref } from "effect";
+import { Effect, Layer, Queue } from "effect";
 import { expect } from "vitest";
 import {
 	ConfigPersistenceNoopLive,
@@ -20,7 +20,6 @@ import {
 	getInstance,
 	getInstanceUrl,
 	getPersistedInstanceConfigs,
-	InstanceManagerStateTag,
 	makeInstanceManagerStateLive,
 	persistConfig,
 	startInstance,
@@ -221,38 +220,6 @@ describe("InstanceManager — missing methods", () => {
 				const inst = yield* getInstance("inst-1");
 				expect(inst.status).toBe("healthy");
 			}).pipe(Effect.provide(Layer.fresh(testLayer))),
-		);
-
-		it.scoped(
-			"moves converted Claude accounts out of OpenCode runtime state",
-			() =>
-				Effect.gen(function* () {
-					yield* addInstance({
-						id: "convert-me",
-						name: "Convert Me",
-						port: 4096,
-						managed: false,
-						url: "https://opencode.example.test",
-					});
-
-					yield* updateInstance("convert-me", {
-						driver: "claude",
-						configDir: "/profiles/work",
-					});
-
-					const instance = yield* getInstance("convert-me");
-					expect(instance).toMatchObject({
-						driver: "claude",
-						configDir: "/profiles/work",
-						managed: false,
-						port: 0,
-						status: "healthy",
-					});
-					expect(instance.url).toBeUndefined();
-					expect(yield* getInstanceUrl("convert-me")).toBeNull();
-					const runtime = yield* Ref.get(yield* InstanceManagerStateTag);
-					expect(HashMap.has(runtime.instances, "convert-me")).toBe(false);
-				}).pipe(Effect.provide(Layer.fresh(testLayer))),
 		);
 	});
 

@@ -4,7 +4,7 @@
 // capacity checks drift; invalid per-driver requests escape typed rejections;
 // defaults dangle after removal or ignore usage order; SetDefault accepts a
 // missing/wrong-driver account; deleted ids are reused or route across drivers;
-// the default Claude account is retyped before ticket 10 changes driver guards.
+// an account's driver changes without deleting and adding it.
 import { Either, Option } from "effect";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -164,57 +164,6 @@ describe("account directory mutations", () => {
 			apply(state, { _tag: "Add", name: "Replacement", driver: "claude" }, []),
 		);
 		expect(list(state)).toHaveLength(max);
-	});
-
-	it("still permits a nondefault account to change drivers", () => {
-		const initial = accountsStateFromInstances(
-			[
-				{ id: "claude", name: "Claude", driver: "claude" },
-				{
-					id: "work",
-					name: "Work",
-					driver: "claude",
-					configDir: "/accounts/work",
-				},
-			],
-			launchLogin,
-		);
-		const openCode = Either.getOrThrow(
-			apply(
-				initial,
-				{
-					_tag: "Update",
-					id: "work",
-					updates: { driver: "opencode", port: 4700 },
-				},
-				[],
-			),
-		);
-		expect(
-			Either.getOrThrow(resolve(openCode, { _tag: "Id", id: "work" })),
-		).toMatchObject({
-			id: "work",
-			driver: "opencode",
-		});
-		const claude = Either.getOrThrow(
-			apply(
-				openCode,
-				{
-					_tag: "Update",
-					id: "work",
-					updates: { driver: "claude", configDir: "/accounts/returned" },
-				},
-				[],
-			),
-		);
-		expect(
-			Either.getOrThrow(resolve(claude, { _tag: "Id", id: "work" })),
-		).toMatchObject({
-			id: "work",
-			driver: "claude",
-			folder: configuredClaudeConfigDir("/accounts/returned"),
-		});
-		expect(Option.getOrThrow(defaultFor(claude, "claude")).id).toBe("claude");
 	});
 
 	it.each([
@@ -395,7 +344,7 @@ describe("account directory mutations", () => {
 		expect(Option.getOrThrow(defaultFor(state, "claude")).id).toBe("claude");
 	});
 
-	it("retains the default retyping guard", () => {
+	it("rejects changing an account's type", () => {
 		const state = accountsStateFromInstances(
 			[{ id: "claude", name: "Claude", driver: "claude" }],
 			launchLogin,
@@ -408,7 +357,7 @@ describe("account directory mutations", () => {
 			if (Either.isLeft(result)) {
 				expect(result.left._tag).toBe("AccountChangeRejected");
 				expect(result.left.id).toBe("claude");
-				expect(result.left.reason).toMatch(/default/i);
+				expect(result.left.reason).toMatch(/type.*delete.*add/i);
 			}
 		}
 		expect(list(state)).toHaveLength(1);

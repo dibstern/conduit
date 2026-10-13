@@ -4,6 +4,9 @@
  * - Missing, dangling or wrong-driver pointers ignore usage order or remain on disk.
  * - A save changes the former built-in account's folder to the new default's folder.
  * - A removed id is reused after restart, capturing that account's old sessions.
+ * - Removing the default promotes by insertion/name rather than usage order.
+ * - Removing the last Claude account routes to OpenCode or is undone on restart.
+ * - Adding after an empty state fails to establish a new default.
  * - A second migration rewrites an already materialised current-version config.
  * HOME, launch login and all config reads belong to a temporary fixture.
  */
@@ -29,7 +32,12 @@ import {
 	it,
 	vi,
 } from "vitest";
-import { GetInstances, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	GetInstances,
+	RemoveInstance,
+	WsRpcGroup,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { accountsStateFromConfig } from "../../../src/lib/daemon/account-directory.js";
 import {
 	type DaemonConfig,
@@ -121,7 +129,7 @@ afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 afterAll(() => {
-	if (evidence.length !== 5) return;
+	if (evidence.length !== 6) return;
 	mkdirSync("test-results", { recursive: true });
 	writeFileSync(
 		artifact,
@@ -194,6 +202,11 @@ describe("account defaults and deletions survive persistence", () => {
 				logFormat: "json",
 			});
 			try {
+				if (start === 0)
+					await sendRpcRequest(
+						socketPath,
+						new RemoveInstance({ instanceId: "claude" }),
+					);
 				const rows = (await sendRpcRequest(socketPath, new GetInstances({})))
 					.instances;
 				expect(
@@ -206,9 +219,7 @@ describe("account defaults and deletions survive persistence", () => {
 				expect(
 					rows.find((account) => account.id === "personal")?.configDir,
 				).toBe(join(root, "personal-login"));
-				expect(rows.find((account) => account.id === "claude")?.configDir).toBe(
-					join(root, "original-login"),
-				);
+				expect(rows.some((account) => account.id === "claude")).toBe(false);
 				expect(rows.some((account) => account.id === "work")).toBe(false);
 			} finally {
 				await daemon.stop();
@@ -216,12 +227,146 @@ describe("account defaults and deletions survive persistence", () => {
 			expect(readSaved().accountDefaults).toEqual({ claude: "personal" });
 			expect(readSaved().deletedAccounts).toEqual([
 				{ id: "work", driver: "claude" },
+				{ id: "claude", driver: "claude" },
 			]);
 		}
 		evidence.push({
-			scenario: "foreground daemon restart keeps pointer and deleted records",
+			scenario:
+				"former built-in removed over IPC stays deleted after foreground daemon restart",
 			defaultId: "personal",
-			deletedIds: ["work"],
+			deletedIds: ["work", "claude"],
+		});
+	});
+
+	it("promotes in usage order and restores a default after the last account is removed", async () => {
+		const config: DaemonConfig = {
+			...initial,
+			accountDefaults: { claude: AccountIdSchema.make("claude") },
+			instances: [
+				...(initial.instances ?? []).filter(
+					(account) => account.driver === "claude",
+				),
+				{
+					id: "alpha",
+					name: "Alpha",
+					driver: "claude",
+					port: 0,
+					managed: false,
+				},
+			],
+			usageLimits: {
+				autoResume: false,
+				autoSwitch: false,
+				warnAt: 80,
+				order: ["opencode", "work", "alpha", "personal", "claude"],
+			},
+		};
+		await saveDaemonConfig(config, configDir);
+		const runtime = ManagedRuntime.make(makeLayer(readSaved()));
+		try {
+			await runtime.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* makeClient;
+						const directory = yield* AccountDirectory;
+						const removed = yield* client.RemoveInstance({
+							instanceId: "claude",
+						});
+						const survivors = removed.instances.filter(
+							(account) => account.driver === "claude",
+						);
+						expect(survivors.map(({ id }) => id)).toEqual([
+							"personal",
+							"work",
+							"alpha",
+						]);
+						expect(
+							[...survivors]
+								.sort((a, b) => a.name.localeCompare(b.name))
+								.map(({ id }) => id),
+						).toEqual(["alpha", "personal", "work"]);
+						expect(
+							survivors
+								.filter(({ isDefault }) => isDefault)
+								.map(({ id }) => id),
+						).toEqual(["work"]);
+						expect(
+							(yield* directory.resolve({ _tag: "Id", id: "claude" })).id,
+						).toBe("work");
+						for (const instanceId of ["personal", "work", "alpha"])
+							yield* client.RemoveInstance({ instanceId });
+						expect(
+							(yield* client.GetInstances({})).instances.filter(
+								({ driver }) => driver === "claude",
+							),
+						).toEqual([]);
+						expect(
+							yield* Effect.either(
+								directory.resolve({ _tag: "DriverDefault", driver: "claude" }),
+							),
+						).toMatchObject({
+							_tag: "Left",
+							left: { _tag: "AccountUnroutable" },
+						});
+						expect(
+							(yield* directory.resolve({
+								_tag: "DriverDefault",
+								driver: "opencode",
+							})).driver,
+						).toBe("opencode");
+					}),
+				),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+		const empty = readSaved();
+		expect(empty.accountDefaults).toEqual({});
+		expect(empty.deletedAccounts?.map(({ id }) => id)).toEqual([
+			"claude",
+			"personal",
+			"work",
+			"alpha",
+		]);
+		const restarted = ManagedRuntime.make(makeLayer(empty));
+		try {
+			await restarted.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const client = yield* makeClient;
+						const directory = yield* AccountDirectory;
+						expect(
+							(yield* client.GetInstances({})).instances.filter(
+								({ driver }) => driver === "claude",
+							),
+						).toEqual([]);
+						const added = yield* client.AddInstance({
+							name: "Alpha",
+							driver: "claude",
+						});
+						expect(added.addedInstanceId).toBe("alpha-2");
+						expect(
+							added.instances
+								.filter(
+									({ driver, isDefault }) => driver === "claude" && isDefault,
+								)
+								.map(({ id }) => id),
+						).toEqual(["alpha-2"]);
+						for (const id of ["claude", "personal", "work", "alpha"])
+							expect((yield* directory.resolve({ _tag: "Id", id })).id).toBe(
+								"alpha-2",
+							);
+					}),
+				),
+			);
+		} finally {
+			await restarted.dispose();
+		}
+		evidence.push({
+			scenario:
+				"usage order beats insertion and name; zero accounts survives restart; new default skips tombstones",
+			defaultId: readSaved().accountDefaults?.claude,
+			deletedIds: empty.deletedAccounts?.map(({ id }) => id),
 		});
 	});
 

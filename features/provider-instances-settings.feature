@@ -46,6 +46,86 @@ Scenario: editing a named instance updates it in the settings list
   Then the Instances list shows Prod OC
   And the Instances list does not show Staging OC
 
+Scenario: remove the former built-in Claude account
+  Given the configured Claude accounts are Claude and Personal with default Claude
+  And new drafts use a Claude model
+  When I open settings to the Server section
+  And I make the Personal account default
+  And I remove the Claude instance
+  Then the Instances list does not show Claude
+  And only the Personal Claude account has the default marker
+  When I close settings
+  And I start a new session
+  Then the draft composer uses the Personal account and the usage meter shows only it
+  When I open the model picker
+  Then the picker uses Personal for the Claude harness
+  And no former built-in Claude account is displayed
+  When I close the model picker
+  And I type Continue with Personal into the composer
+  And I send the composer message
+  Then the new session is created on the Personal account
+
+Scenario Outline: deleting the default promotes the next account in usage order
+  Given the configured Claude accounts are <insertion_order> with default Claude
+  And account removal follows the usage order <usage_order>
+  And new drafts use a Claude model
+  When I open settings to the Server section
+  And I remove the Claude instance
+  Then the Instances list does not show Claude
+  And only the <promoted> Claude account has the default marker
+  And the account settings screenshot is saved as provider-instances-promoted-settings
+  When I close settings
+  And I start a new session
+  Then the draft composer and usage meter use the <promoted> account
+  And the account composer screenshot is saved as provider-instances-promoted-composer
+  When I open the model picker
+  Then the picker selects the <promoted> account
+  And the picker account names are <remaining_order>
+  And the account picker screenshot is saved as provider-instances-promoted-picker
+  When I close the model picker
+  And I type Use the promoted account into the composer
+  And I send the composer message
+  Then the new session is created on the <promoted> account
+
+Examples:
+  | insertion_order           | usage_order               | promoted | remaining_order   |
+  | Claude, Zulu, Alpha, Bravo | Bravo, Zulu, Alpha, Claude | Bravo    | Bravo, Zulu, Alpha |
+
+Scenario: deleting the last Claude account offers Add account and adding it restores sending
+  Given the configured Claude accounts are Personal with default Personal
+  And new drafts use a Claude model
+  When I start a new session
+  And I open settings to the Server section
+  And I remove the Personal instance
+  Then Settings offers Add account with no Claude accounts
+  And the Instances list shows OpenCode
+  And the account settings screenshot is saved as provider-instances-empty-settings
+  When I close settings
+  Then the draft composer offers Add account
+  And the account composer screenshot is saved as provider-instances-empty-composer
+  When I open the model picker
+  Then the picker account names are none
+  And the Claude picker offers Add account
+  And the account picker screenshot is saved as provider-instances-empty-picker
+  When I close the model picker
+  And I type Keep my Claude draft into the composer
+  And I send the composer message
+  Then an error toast contains Add a Claude account in Settings before sending
+  And the composer still contains Keep my Claude draft
+  And no session is created or message sent without a Claude account
+  When I use the composer's Add account action
+  Then Settings offers Add account with no Claude accounts
+  When I add a Claude instance named Personal
+  Then the restored Personal account has a new id
+  And the draft composer uses the Personal account and the usage meter shows only it
+  And the composer still contains Keep my Claude draft
+  When I open settings to the Server section
+  Then only the Personal Claude account has the default marker
+  And the account settings screenshot is saved as provider-instances-restored-settings
+  When I close settings
+  And I send the composer message
+  Then the new session is created on the Personal account
+
 Scenario Outline: make an account default
   Given no provider accounts are configured
   And the default Claude account is named Claude with folder /profiles/original
@@ -153,7 +233,6 @@ Scenario: the default Claude account's name and folder apply without restart
   When I open settings to the Server section
   And I edit the default Claude account
   Then the default Claude editor shows name Personal Claude and folder /profiles/personal
-  And the default Claude account cannot be removed
   When I save the default Claude account as Home Claude with folder /profiles/home
   Then the Instances list shows Home Claude
   And the default Claude account shows folder /profiles/home without a restart notice

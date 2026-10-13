@@ -1,6 +1,20 @@
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { expect, type Page } from "@playwright/test";
+import { Either, Schema } from "effect";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
-import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	AccountIdSchema,
+	KnownProviderDriverKindSchema,
+} from "../../../src/lib/contracts/provider-instance.js";
+import {
+	type AccountChange,
+	type AccountsState,
+	accountsStateFromInstances,
+	apply,
+	list,
+} from "../../../src/lib/daemon/account-directory.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
@@ -48,7 +62,165 @@ const usageLimitToggle = (page: Page, label: string) =>
 
 const listOf = (list: string) => (list === "none" ? [] : list.split(", "));
 
+const accountDirectories = new WeakMap<Page, AccountsState>();
+const accountUsageOrders = new WeakMap<Page, string[]>();
+
+function accountIdForName(page: Page, name: string): string {
+	const id = mockInstances
+		.get(page)
+		?.find((instance) => instance["name"] === name)?.["id"];
+	if (typeof id !== "string")
+		throw new Error(`No configured account named "${name}"`);
+	return id;
+}
+
+/** Keep Settings mutations faithful to the daemon's account transitions. */
+function seedAccountDirectory(page: Page): void {
+	const rows = mockInstances.get(page) ?? [];
+	const instances = Schema.decodeUnknownSync(
+		Schema.Array(
+			Schema.Struct({
+				id: Schema.String,
+				name: Schema.String,
+				driver: KnownProviderDriverKindSchema,
+				configDir: Schema.optional(Schema.String),
+				env: Schema.optional(
+					Schema.Record({ key: Schema.String, value: Schema.String }),
+				),
+				url: Schema.optional(Schema.String),
+				port: Schema.optional(Schema.Number),
+				managed: Schema.optional(Schema.Boolean),
+			}),
+		),
+	)(rows);
+	const defaultClaudeId = rows.find(
+		(row) => row["driver"] === "claude" && row["isDefault"] === true,
+	)?.["id"];
+	accountDirectories.set(
+		page,
+		accountsStateFromInstances(
+			instances,
+			configuredClaudeConfigDir("/profiles/launch"),
+			5,
+			{
+				defaultClaudeId:
+					typeof defaultClaudeId === "string" ? defaultClaudeId : undefined,
+				deleted: accountDirectories.get(page)?.deleted,
+				usageOrder: accountUsageOrders.get(page) ?? [],
+			},
+		),
+	);
+	const rpc = requireRpcControl(page);
+	const mutate = (change: AccountChange) => {
+		const state = accountDirectories.get(page);
+		if (!state) throw new Error("Account directory was not seeded");
+		const next = Either.getOrThrowWith(
+			apply(state, change, accountUsageOrders.get(page) ?? []),
+			(error) => error,
+		);
+		accountDirectories.set(page, next);
+		const instances = list(next).map((account) => ({
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 1,
+			...mockInstances.get(page)?.find((row) => row["id"] === account.id),
+			id: account.id,
+			name: account.name,
+			driver: account.driver,
+			isDefault: account.isDefault,
+			configDir: account.configuredFolder ?? "",
+			usageEligible: account.driver === "claude" && account.usageEligible,
+		}));
+		mockInstances.set(page, instances);
+		rpc.setUsageReadings(
+			list(next)
+				.filter((account) => account.driver === "claude")
+				.map((account) => ({
+					accountId: account.id,
+					harness: "claude",
+					status: "available",
+					windows: [{ kind: "five_hour", utilization: 20 }],
+					readAt: PINNED_CLOCK_MS,
+					stale: false,
+				})),
+		);
+		return {
+			instances,
+			...(change._tag === "Add"
+				? { addedInstanceId: next.accounts.at(-1)?.id }
+				: {}),
+		};
+	};
+	for (const tag of ["RemoveInstance", "SetDefault"] as const) {
+		rpc.setHandler(tag, (payload) => {
+			const id = payload["instanceId"];
+			if (typeof id !== "string") throw new Error("Missing account id");
+			return mutate({
+				_tag: tag === "RemoveInstance" ? "Remove" : "SetDefault",
+				id,
+			});
+		});
+	}
+	rpc.setHandler("AddInstance", (payload) => {
+		const name = payload["name"];
+		if (typeof name !== "string") throw new Error("Missing account name");
+		return mutate({
+			_tag: "Add",
+			name,
+			driver:
+				typeof payload["driver"] === "string" ? payload["driver"] : undefined,
+			managed:
+				typeof payload["managed"] === "boolean"
+					? payload["managed"]
+					: undefined,
+			port: typeof payload["port"] === "number" ? payload["port"] : undefined,
+			url: typeof payload["url"] === "string" ? payload["url"] : undefined,
+			configDir:
+				typeof payload["configDir"] === "string"
+					? payload["configDir"]
+					: undefined,
+		});
+	});
+	rpc.setHandler("UpdateInstance", (payload) => {
+		const id = payload["instanceId"];
+		if (typeof id !== "string") throw new Error("Missing account id");
+		return mutate({
+			_tag: "Update",
+			id,
+			updates: {
+				name: typeof payload["name"] === "string" ? payload["name"] : undefined,
+				configDir:
+					typeof payload["configDir"] === "string"
+						? payload["configDir"]
+						: undefined,
+			},
+		});
+	});
+}
+
 export const providerInstancesHandlers: StepHandler[] = [
+	{
+		name: "save the reviewed account state",
+		match:
+			/^the (account settings|account composer|account picker) screenshot is saved as ([a-z0-9-]+)$/,
+		run: async ({ world, match }) => {
+			const directory = resolve("acceptance/visual/artifacts");
+			await mkdir(directory, { recursive: true });
+			const region =
+				match[1] === "account settings"
+					? "#instances-settings"
+					: match[1] === "account composer"
+						? "#input-area"
+						: "#model-picker";
+			const path = resolve(directory, `${match[2]}.png`);
+			await world.page
+				.locator(region)
+				.screenshot({ path, animations: "disabled" });
+			world.artifacts.push(path);
+		},
+	},
 	{
 		name: "return to the session list for a terminal",
 		match: /^I return to the session list for a terminal$/,
@@ -132,6 +304,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^no provider accounts are configured$/,
 		run: ({ world }) => {
 			mockInstances.set(world.page, []);
+			accountDirectories.delete(world.page);
+			seedAccountDirectory(world.page);
 			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
 				instances: [],
 			});
@@ -139,10 +313,10 @@ export const providerInstancesHandlers: StepHandler[] = [
 	},
 	{
 		name: "seed only the configured Claude accounts",
-		match:
-			/^the configured Claude accounts are (Claude and Personal|Personal|none) with default (Personal|none)$/,
+		match: /^the configured Claude accounts are (.+) with default (.+)$/,
 		run: ({ world, match }) => {
-			const names = match[1] === "none" ? [] : (match[1] ?? "").split(" and ");
+			const names =
+				match[1] === "none" ? [] : (match[1] ?? "").split(/, | and /);
 			const list = [
 				...(mockInstances.get(world.page) ?? []).filter(
 					(instance) => instance["driver"] !== "claude",
@@ -162,9 +336,22 @@ export const providerInstancesHandlers: StepHandler[] = [
 				})),
 			];
 			mockInstances.set(world.page, list);
+			seedAccountDirectory(world.page);
 			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
 				instances: list,
 			});
+		},
+	},
+	{
+		name: "seed the account removal usage order",
+		match: /^account removal follows the usage order (.+)$/,
+		run: ({ world, match }) => {
+			const order = listOf(match[1] ?? "").map((name) =>
+				accountIdForName(world.page, name),
+			);
+			accountUsageOrders.set(world.page, order);
+			seedUsageLimits(world.page, usageLimits(false, false, order));
+			seedAccountDirectory(world.page);
 		},
 	},
 	{
@@ -208,13 +395,75 @@ export const providerInstancesHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert missing accounts do not create a session",
-		match: /^no session is created without an account$/,
+		match:
+			/^no session is created(?: or message sent)? without (?:an account|a Claude account)$/,
 		run: ({ world }) => {
 			expect(
 				requireRpcControl(world.page)
 					.getRequests()
-					.filter((request) => request.tag === "CreateSession"),
+					.filter(
+						(request) =>
+							request.tag === "CreateSession" || request.tag === "input.submit",
+					),
 			).toEqual([]);
+		},
+	},
+	{
+		name: "assert Settings offers an account for empty Claude",
+		match: /^Settings offers Add account with no Claude accounts$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("server-settings")).toBeVisible();
+			const accounts = world.page.getByTestId("claude-accounts-list");
+			await expect(accounts.locator('[data-driver="claude"]')).toHaveCount(0);
+			await expect(accounts.getByTestId("default-account-marker")).toHaveCount(
+				0,
+			);
+			const empty = world.page.getByTestId("claude-empty-state");
+			await expect(empty).toContainText(/No.*accounts/);
+			await expect(
+				empty.getByRole("button", { name: "Add account", exact: true }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the empty Claude draft offers an account",
+		match: /^the draft composer offers Add account$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.locator("#input-area").getByTestId("add-claude-account-btn"),
+			).toHaveText("Add account");
+			await expect(
+				world.page.locator(
+					'#input-area [data-testid="harness-logo"][data-account="opencode"]',
+				),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the empty Claude picker offers an account",
+		match: /^the Claude picker offers Add account$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-add-account-btn")).toHaveText(
+				"Add account",
+			);
+			await expect(world.page.getByTestId("picker-row-agent")).toHaveCount(0);
+		},
+	},
+	{
+		name: "open Server settings from the empty Claude draft",
+		match: /^I use the composer's Add account action$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("add-claude-account-btn").click();
+			await expect(world.page.locator("#instances-settings")).toBeVisible();
+		},
+	},
+	{
+		name: "assert a restored account does not reuse a deleted id",
+		match: /^the restored (.+) account has a new id$/,
+		run: ({ world, match }) => {
+			expect(accountIdForName(world.page, match[1] ?? "")).not.toBe(
+				instanceSlug(match[1] ?? ""),
+			);
 		},
 	},
 	{
@@ -768,6 +1017,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 			// and the live frontend state (via the mocked SubscribeInstances list).
 			const list = [...(mockInstances.get(world.page) ?? []), inst];
 			mockInstances.set(world.page, list);
+			seedAccountDirectory(world.page);
 			await requireRelayControl(world.page).sendMessages([
 				{ type: "instance_list", instances: list },
 			]);
@@ -820,6 +1070,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				},
 			];
 			mockInstances.set(world.page, list);
+			seedAccountDirectory(world.page);
 			await requireRelayControl(world.page).sendMessages([
 				{ type: "instance_list", instances: list },
 			]);
@@ -830,7 +1081,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^I make the (.+) account default$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId(
-				`instance-row-${instanceSlug(match[1] ?? "")}`,
+				`instance-row-${accountIdForName(world.page, match[1] ?? "")}`,
 			);
 			await row.getByRole("button").first().click();
 			await row.getByTestId("make-default-btn").click();
@@ -845,7 +1096,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await expect(list.getByTestId("default-account-marker")).toHaveCount(1);
 			await expect(
 				list
-					.getByTestId(`instance-row-${instanceSlug(match[1] ?? "")}`)
+					.getByTestId(
+						`instance-row-${accountIdForName(world.page, match[1] ?? "")}`,
+					)
 					.getByTestId("default-account-marker"),
 			).toBeVisible();
 		},
@@ -900,7 +1153,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match:
 			/^the (?:draft|session) composer and usage meter use the (.+) account$/,
 		run: async ({ world, match }) => {
-			const id = instanceSlug(match[1] ?? "");
+			const id = accountIdForName(world.page, match[1] ?? "");
 			await expect(
 				world.page
 					.locator('#input-area [data-testid="harness-logo"]:visible')
@@ -916,7 +1169,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match:
 			/^the draft composer uses the (.+) account and the usage meter shows only it$/,
 		run: async ({ world, match }) => {
-			const id = instanceSlug(match[1] ?? "");
+			const id = accountIdForName(world.page, match[1] ?? "");
 			await expect(
 				world.page
 					.locator('#input-area [data-testid="harness-logo"]:visible')
@@ -938,7 +1191,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId(
-					`picker-account-${instanceSlug(match[1] ?? "")}`,
+					`picker-account-${accountIdForName(world.page, match[1] ?? "")}`,
 				),
 			).toHaveAttribute("aria-checked", "true");
 		},
@@ -951,7 +1204,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "CreateSession",
 			);
 			expect(request.payload).toMatchObject({
-				instanceId: instanceSlug(match[1] ?? ""),
+				instanceId: accountIdForName(world.page, match[1] ?? ""),
 			});
 		},
 	},
@@ -983,17 +1236,6 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByRole("radiogroup", { name: "Type" }),
 			).toHaveCount(0);
-		},
-	},
-	{
-		name: "assert the default Claude account has no Remove action",
-		match: /^the default Claude account cannot be removed$/,
-		run: async ({ world }) => {
-			const row = world.page.getByTestId(
-				`instance-row-${AccountIdSchema.make("claude")}`,
-			);
-			await expect(row.getByTestId("remove-instance-btn")).toHaveCount(0);
-			await expect(row).toContainText("The default account can't be removed");
 		},
 	},
 	{
