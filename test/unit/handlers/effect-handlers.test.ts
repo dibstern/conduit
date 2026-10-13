@@ -2534,7 +2534,7 @@ describe("handleDeleteSession", () => {
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
+					expect(deleteSession).toHaveBeenCalledWith("deleted-session", false);
 					expect(listSessions).not.toHaveBeenCalled();
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
@@ -2579,7 +2579,7 @@ describe("handleDeleteSession", () => {
 				Effect.provide(layer),
 				Effect.tap(() => {
 					expect(ws.getClientsForSession).not.toHaveBeenCalled();
-					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
+					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session", false);
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
 					expect(legacyListSessions).not.toHaveBeenCalled();

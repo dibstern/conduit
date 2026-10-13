@@ -318,7 +318,10 @@ export const deleteSessionForClient = ({
 				),
 			);
 
-			const didDelete = yield* sessionManagerService.deleteSession(id);
+			const didDelete = yield* sessionManagerService.deleteSession(
+				id,
+				removeWorktrees === false,
+			);
 			if (!didDelete) return [];
 
 			log.info(`client=${clientId} Deleted: ${id}`);

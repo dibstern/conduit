@@ -226,7 +226,7 @@
 	</SettingsRow>
 	<SettingsRow label="Remove once merged" description="Without waiting for the session to settle." checked={state.cleanup.whenMerged} disabled={state.cleanupSaving} onchange={() => saveCleanup({ whenMerged: !state.cleanup.whenMerged })} />
 	<SettingsRow label="Remove when there are no new commits" description="Its branch has nothing beyond the default branch." checked={state.cleanup.noCommitsBeyondDefault} disabled={state.cleanupSaving} onchange={() => saveCleanup({ noCommitsBeyondDefault: !state.cleanup.noCommitsBeyondDefault })} />
-	<SettingsRow label="Remove when a session is deleted" description="The delete dialog will remove it by default." checked={state.cleanup.onDelete} disabled={state.cleanupSaving} onchange={() => saveCleanup({ onDelete: !state.cleanup.onDelete })} />
+	<SettingsRow label="Remove when a session is deleted" description="The delete dialog will remove it by default. Choosing Keep there is respected." checked={state.cleanup.onDelete} disabled={state.cleanupSaving} onchange={() => saveCleanup({ onDelete: !state.cleanup.onDelete })} />
 	<div>
 		<SettingsRow label="Keep worktrees with" labelFor="settings-cleanup-keep-when">
 			{#snippet control()}

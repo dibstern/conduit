@@ -420,6 +420,7 @@ export interface SessionWorkspaceStartedPayload {
 
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
+	readonly keepWorktrees?: true;
 }
 
 /**
@@ -466,6 +467,7 @@ export interface SessionProviderChangedPayload {
 
 export interface SessionDeletedPayload {
 	readonly sessionId: string;
+	readonly keepWorktrees?: true;
 	/**
 	 * Descendant sessions deleted by the schema cascade, captured BEFORE the
 	 * tombstone persists (afterwards they can no longer be found by parent).
@@ -1143,6 +1145,7 @@ const SessionProviderChangedPayloadSchema = Schema.Struct({
 
 const SessionDeletedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
+	keepWorktrees: Schema.optionalWith(Schema.Literal(true), { exact: true }),
 	childSessionIds: Schema.optionalWith(Schema.Array(Schema.String), {
 		exact: true,
 	}),

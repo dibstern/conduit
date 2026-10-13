@@ -299,7 +299,7 @@ const createLocalSession = (
 	}).pipe(Effect.withSpan("session.createLocalSession"));
 
 /** Delete a session locally, then best-effort upstream, and clear associated state. */
-export const deleteSession = (sessionId: string) =>
+export const deleteSession = (sessionId: string, keepWorktrees = false) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
@@ -507,10 +507,11 @@ export const deleteSession = (sessionId: string) =>
 		yield* applySessionCommand(
 			{
 				type: "session.deleted",
-				data:
-					childSessionIds.length === 0
-						? { sessionId }
-						: { sessionId, childSessionIds },
+				data: {
+					sessionId,
+					...(childSessionIds.length === 0 ? {} : { childSessionIds }),
+					...(keepWorktrees ? { keepWorktrees: true } : {}),
+				},
 			},
 			{ upstreamAdapter },
 		).pipe(
@@ -618,7 +619,10 @@ export interface SessionManagerService {
 		session: SessionDetail,
 		providerInstanceId: ProviderInstanceId,
 	): Effect.Effect<void, SessionManagerError>;
-	deleteSession(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
+	deleteSession(
+		sessionId: string,
+		keepWorktrees?: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
 	renameSession(
 		sessionId: string,
 		title: string,
@@ -1175,7 +1179,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					return session;
 				}),
 			establishOpenCodeSession,
-			deleteSession: (sessionId) =>
+			deleteSession: (sessionId, keepWorktrees) =>
 				Effect.gen(function* () {
 					const completion = yield* Deferred.make<void, SessionManagerError>();
 					const existing = inFlightDeletes.get(sessionId);
@@ -1186,7 +1190,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					inFlightDeletes.set(sessionId, completion);
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
-							yield* deleteSession(sessionId).pipe(
+							yield* deleteSession(sessionId, keepWorktrees).pipe(
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),
 								Effect.provideService(OpenCodeInstancesTag, instanceClients),

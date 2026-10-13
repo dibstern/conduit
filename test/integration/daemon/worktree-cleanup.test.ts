@@ -1,7 +1,8 @@
 /*
  * Failure modes: cleanup loses a branch or prevents the next turn; a policy
  * removes unmerged work, local files, a shared checkout or a viewed session;
- * deleted ownership disappears; inactivity reads the wrong clock; defaults or
+ * deleted ownership or an explicit Keep choice disappears; deferred removal
+ * becomes a permanent Keep; inactivity reads the wrong clock; defaults or
  * settings disappear across restart; automatic requests race the manual result.
  * Exercise the daemon RPCs, real owned checkouts and the next provider turn.
  */
@@ -770,7 +771,6 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			new DeleteSession({
 				projectSlug: "process-test",
 				sessionId: session.id,
-				removeWorktrees: false,
 			}),
 		);
 		expect(existsSync(session.path)).toBe(true);
@@ -789,6 +789,70 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			sessionId: session.id,
 			path: session.path,
 			reason: expect.stringMatching(/deleted/i),
+		});
+		expect(existsSync(session.path)).toBe(false);
+		expect(
+			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
+		).toBe(head);
+	}, 300_000);
+
+	it("respects explicit Keep when deleting a session with onDelete enabled", async () => {
+		const { fixture, socket, create, sweep } = await start({
+			onSettle: "off",
+			onDelete: true,
+		});
+		const session = await create("explicit Keep");
+		const head = git(session.path, "rev-parse", "HEAD");
+		await sendRpcRequest(
+			socket,
+			new DeleteSession({
+				projectSlug: "process-test",
+				sessionId: session.id,
+				removeWorktrees: false,
+			}),
+		);
+		const result = await sweep("explicit Keep with onDelete", "process-test");
+		expect(result.removed).toEqual([]);
+		expect(result.kept).toContainEqual({
+			projectSlug: "process-test",
+			sessionId: session.id,
+			path: session.path,
+			reason: "Kept when the session was deleted",
+		});
+		expect(existsSync(session.path)).toBe(true);
+		expect(git(session.path, "branch", "--show-current")).toBe(session.branch);
+		expect(
+			git(fixture.projectDir, "rev-parse", `refs/heads/${session.branch}`),
+		).toBe(head);
+	}, 300_000);
+
+	it("retries requested deletion cleanup once a dirty checkout is clean", async () => {
+		const { fixture, socket, create, sweep } = await start({
+			onSettle: "off",
+			onDelete: true,
+		});
+		const session = await create("deferred removal");
+		const head = git(session.path, "rev-parse", "HEAD");
+		writeFileSync(join(session.path, "base.txt"), "unfinished work\n");
+		const deletion = await sendRpcRequest(
+			socket,
+			new DeleteSession({
+				projectSlug: "process-test",
+				sessionId: session.id,
+				removeWorktrees: true,
+			}),
+		);
+		evidence["deletion"] = deletion;
+		expect(deletion.worktreeWarnings?.join(" ")).toMatch(/uncommitted/i);
+		expect(existsSync(session.path)).toBe(true);
+		await sweep("drain dirty deletion request", "process-test");
+		git(session.path, "restore", "base.txt");
+		const result = await sweep("retry requested removal", "process-test");
+		expect(result.removed).toContainEqual({
+			projectSlug: "process-test",
+			sessionId: session.id,
+			path: session.path,
+			reason: "Session was deleted",
 		});
 		expect(existsSync(session.path)).toBe(false);
 		expect(
