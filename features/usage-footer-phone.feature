@@ -97,7 +97,7 @@ Scenario: the usage sheet folds back into the dock in the dock's colour
   And I drag the phone usage dock up by 120 pixels
   Then the usage sheet is open
   And the usage sheet has the phone usage dock's background
-  And the usage sheet dragged down past the phone usage dock stops on it
+  And the usage sheet dragged down past the phone usage dock stops on it, faded into it
   And the usage sheet is closed
 
 Scenario Outline: one account uses inline windows without the sheet
