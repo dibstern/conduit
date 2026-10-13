@@ -4,6 +4,22 @@
   "recordedAt": "2026-03-27T04:02:33.412Z",
   "initMessages": [
     {
+      "type": "instance_list",
+      "instances": [
+        {
+          "id": "opencode",
+          "name": "OpenCode",
+          "driver": "opencode",
+          "isDefault": true,
+          "port": 4096,
+          "managed": true,
+          "status": "healthy",
+          "restartCount": 0,
+          "createdAt": 1
+        }
+      ]
+    },
+    {
       "type": "client_count",
       "count": 2
     },
@@ -35,6 +51,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
           "title": "New session - 2026-03-27T04:02:08.557Z",
           "status": "idle",
@@ -49,6 +66,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
           "title": "New session - 2026-03-27T04:02:08.557Z",
           "status": "idle",
@@ -499,6 +517,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -513,6 +532,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -527,6 +547,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -541,6 +562,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -555,6 +577,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "busy",
@@ -575,6 +598,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "busy",
@@ -590,6 +614,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "busy",
@@ -605,6 +630,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "busy",
@@ -661,6 +687,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -680,6 +707,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -694,6 +722,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -708,6 +737,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -744,6 +774,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -752,6 +783,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -766,6 +798,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -774,6 +807,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -788,6 +822,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -796,6 +831,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -810,6 +846,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -818,6 +855,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -832,6 +870,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "busy",
@@ -841,6 +880,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -860,6 +900,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "busy",
@@ -869,6 +910,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -883,6 +925,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "busy",
@@ -892,6 +935,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -906,6 +950,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "busy",
@@ -915,6 +960,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -970,6 +1016,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -978,6 +1025,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -997,6 +1045,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1005,6 +1054,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1019,6 +1069,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1027,6 +1078,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1041,6 +1093,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1049,6 +1102,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1085,6 +1139,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1093,6 +1148,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1101,6 +1157,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1115,6 +1172,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1123,6 +1181,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1131,6 +1190,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1145,6 +1205,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1153,6 +1214,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1161,6 +1223,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1175,6 +1238,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1183,6 +1247,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1191,6 +1256,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1205,6 +1271,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "busy",
@@ -1214,6 +1281,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1222,6 +1290,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1241,6 +1310,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "busy",
@@ -1250,6 +1320,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1258,6 +1329,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1272,6 +1344,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "busy",
@@ -1281,6 +1354,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1289,6 +1363,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1303,6 +1378,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "busy",
@@ -1312,6 +1388,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1320,6 +1397,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1369,6 +1447,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1377,6 +1456,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1385,6 +1465,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1404,6 +1485,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1412,6 +1494,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1420,6 +1503,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1434,6 +1518,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1442,6 +1527,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1450,6 +1536,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1464,6 +1551,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1472,6 +1560,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1480,6 +1569,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1516,6 +1606,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1524,6 +1615,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1532,6 +1624,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1540,6 +1633,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1554,6 +1648,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1562,6 +1657,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1570,6 +1666,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1578,6 +1675,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1592,6 +1690,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1600,6 +1699,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1608,6 +1708,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1616,6 +1717,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1630,6 +1732,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1638,6 +1741,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1646,6 +1750,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1654,6 +1759,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1668,6 +1774,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "busy",
@@ -1677,6 +1784,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1685,6 +1793,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1693,6 +1802,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1712,6 +1822,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "busy",
@@ -1721,6 +1832,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1729,6 +1841,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1737,6 +1850,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1751,6 +1865,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "busy",
@@ -1760,6 +1875,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1768,6 +1884,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1776,6 +1893,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1790,6 +1908,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "busy",
@@ -1799,6 +1918,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1807,6 +1927,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1815,6 +1936,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1864,6 +1986,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1872,6 +1995,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1880,6 +2004,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1888,6 +2013,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1907,6 +2033,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1915,6 +2042,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1923,6 +2051,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1931,6 +2060,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1945,6 +2075,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1953,6 +2084,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1961,6 +2093,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1969,6 +2102,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1983,6 +2117,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1991,6 +2126,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1999,6 +2135,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2007,6 +2144,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2043,6 +2181,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -2051,6 +2190,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2059,6 +2199,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2067,6 +2208,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2075,6 +2217,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2089,6 +2232,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -2097,6 +2241,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2105,6 +2250,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2113,6 +2259,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2121,6 +2268,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2135,6 +2283,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -2143,6 +2292,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2151,6 +2301,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2159,6 +2310,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2167,6 +2319,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2181,6 +2334,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -2189,6 +2343,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2197,6 +2352,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2205,6 +2361,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2213,6 +2370,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2227,6 +2385,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "busy",
@@ -2236,6 +2395,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2244,6 +2404,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2252,6 +2413,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2260,6 +2422,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2279,6 +2442,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "busy",
@@ -2288,6 +2452,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2296,6 +2461,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2304,6 +2470,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2312,6 +2479,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2326,6 +2494,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "busy",
@@ -2335,6 +2504,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2343,6 +2513,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2351,6 +2522,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2359,6 +2531,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2373,6 +2546,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "busy",
@@ -2382,6 +2556,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2390,6 +2565,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2398,6 +2574,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2406,6 +2583,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2461,6 +2639,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2469,6 +2648,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2477,6 +2657,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2485,6 +2666,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2493,6 +2675,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2512,6 +2695,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2520,6 +2704,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2528,6 +2713,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2536,6 +2722,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2544,6 +2731,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2558,6 +2746,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2566,6 +2755,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2574,6 +2764,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2582,6 +2773,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2590,6 +2782,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2604,6 +2797,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2612,6 +2806,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2620,6 +2815,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2628,6 +2824,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2636,6 +2833,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",

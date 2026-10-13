@@ -2470,6 +2470,7 @@ describe("SessionManagerService", () => {
 			expect(sessions).toEqual([
 				{
 					id: "forked-1",
+					accountId: null,
 					projectSlug: "test-project",
 					title: "Forked",
 					status: "idle",

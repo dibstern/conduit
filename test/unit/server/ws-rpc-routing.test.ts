@@ -16,6 +16,7 @@ import {
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import {
 	BackgroundLivenessTag,
@@ -35,6 +36,7 @@ import {
 	makeWsRpcWebSocketHandler,
 } from "../../../src/lib/server/ws-rpc-handler.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -89,6 +91,7 @@ describe("routed RPC server", () => {
 						),
 						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
+						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					),
 				);
 				contexts.set(slug, context as Context.Context<unknown>);

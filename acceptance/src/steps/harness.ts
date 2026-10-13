@@ -184,6 +184,7 @@ export const harnessHandlers: StepHandler[] = [
 			)
 				rpc.upsertShellRow({
 					id: sessionId,
+					accountId: claude ? "claude" : "opencode",
 					title: `${harness} session`,
 					status: "idle",
 					updatedAt: Date.now(),

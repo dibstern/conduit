@@ -4,6 +4,22 @@
   "recordedAt": "2026-03-27T04:04:38.751Z",
   "initMessages": [
     {
+      "type": "instance_list",
+      "instances": [
+        {
+          "id": "opencode",
+          "name": "OpenCode",
+          "driver": "opencode",
+          "isDefault": true,
+          "port": 4096,
+          "managed": true,
+          "status": "healthy",
+          "restartCount": 0,
+          "createdAt": 1
+        }
+      ]
+    },
+    {
       "type": "client_count",
       "count": 1
     },
@@ -31,6 +47,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
           "title": "New session - 2026-03-27T04:04:12.813Z",
           "status": "idle",
@@ -45,6 +62,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
           "title": "New session - 2026-03-27T04:04:12.813Z",
           "status": "idle",
@@ -493,6 +511,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -507,6 +526,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -521,6 +541,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -535,6 +556,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "idle",
@@ -549,6 +571,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "busy",
@@ -569,6 +592,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "New session - 2026-03-27T04:04:12.813Z",
               "status": "busy",
@@ -584,6 +608,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -599,6 +624,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -693,6 +719,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -708,6 +735,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -822,6 +850,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -837,6 +866,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -955,6 +985,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -970,6 +1001,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1040,6 +1072,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1059,6 +1092,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1073,6 +1107,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1087,6 +1122,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1123,6 +1159,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1137,6 +1174,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1151,6 +1189,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1165,6 +1204,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1179,6 +1219,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1199,6 +1240,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1340,6 +1382,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1355,6 +1398,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1425,6 +1469,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1444,6 +1489,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1458,6 +1504,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1472,6 +1519,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1508,6 +1556,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1522,6 +1571,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1536,6 +1586,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1550,6 +1601,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1564,6 +1616,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1584,6 +1637,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1698,6 +1752,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1713,6 +1768,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "busy",
@@ -1783,6 +1839,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1802,6 +1859,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1816,6 +1874,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",
@@ -1830,6 +1889,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2893672ffeAHbpVXTzWstjuR",
               "title": "Create /tmp/e2e-test-diff.txt with \"hello world\"",
               "status": "idle",

@@ -26,6 +26,8 @@ export const sessionModeDefaultHandlers: StepHandler[] = [
 						id: "opencode",
 						name: "OpenCode",
 						driver: "opencode",
+						isDefault: true,
+						usageEligible: false,
 						port: 0,
 						managed: false,
 						status: "healthy",

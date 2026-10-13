@@ -124,7 +124,7 @@
 	const claudeInstanceId = $derived.by(() => {
 		const availableInstances = getAvailableInstances();
 		const selectedId = sessionId
-			? findSession(sessionId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId]
+			? findSession(sessionId)?.accountId
 			: getEffectiveInstanceId();
 		if (selectedId) {
 			const assigned =
@@ -133,7 +133,8 @@
 				) ?? getCachedInstanceById(selectedId);
 			if (assigned?.driver === "claude") return assigned.id;
 		}
-		return availableInstances.find((instance) => instance.driver === "claude")
+		if (sessionId) return undefined;
+		return availableInstances.find((instance) => instance.driver === "claude" && instance.isDefault)
 			?.id;
 	});
 

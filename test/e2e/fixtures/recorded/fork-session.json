@@ -4,6 +4,22 @@
   "recordedAt": "2026-03-27T04:01:44.263Z",
   "initMessages": [
     {
+      "type": "instance_list",
+      "instances": [
+        {
+          "id": "opencode",
+          "name": "OpenCode",
+          "driver": "opencode",
+          "isDefault": true,
+          "port": 4096,
+          "managed": true,
+          "status": "healthy",
+          "restartCount": 0,
+          "createdAt": 1
+        }
+      ]
+    },
+    {
       "type": "client_count",
       "count": 2
     },
@@ -35,6 +51,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
           "title": "New session - 2026-03-27T04:01:34.140Z",
           "status": "idle",
@@ -49,6 +66,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
           "title": "New session - 2026-03-27T04:01:34.140Z",
           "status": "idle",
@@ -497,6 +515,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -511,6 +530,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -525,6 +545,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -539,6 +560,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -553,6 +575,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -573,6 +596,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -643,6 +667,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -662,6 +687,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -676,6 +702,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -690,6 +717,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -726,6 +754,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -740,6 +769,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -754,6 +784,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -768,6 +799,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -782,6 +814,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -802,6 +835,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "busy",
@@ -872,6 +906,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -891,6 +926,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -905,6 +941,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -919,6 +956,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -955,6 +993,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -965,6 +1004,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -979,6 +1019,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -989,6 +1030,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1003,6 +1045,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1013,6 +1056,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1027,6 +1071,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1037,6 +1082,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1051,6 +1097,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "busy",
@@ -1062,6 +1109,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1081,6 +1129,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "busy",
@@ -1092,6 +1141,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1161,6 +1211,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1171,6 +1222,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1190,6 +1242,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1200,6 +1253,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1214,6 +1268,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1224,6 +1279,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",
@@ -1238,6 +1294,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28b88d7ffegPCb1hfEXpP6x6",
               "title": "New session - 2026-03-27T04:01:34.140Z (fork #1)",
               "status": "idle",
@@ -1248,6 +1305,7 @@
             },
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d28ba243ffe1MSYI6yJ9CzHak",
               "title": "New session - 2026-03-27T04:01:34.140Z",
               "status": "idle",

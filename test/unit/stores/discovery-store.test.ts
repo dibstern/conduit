@@ -15,6 +15,7 @@ import {
 	getActiveModel,
 	getActiveModelVariants,
 	getChosenModel,
+	getEffectiveInstanceId,
 	getModelDisplayName,
 	getProviderGroups,
 	getProviderGroupsForInstance,
@@ -300,13 +301,25 @@ describe("applyGetModelsResponse", () => {
 		]);
 	});
 
-	it("uses one live Claude catalog for default and named instance choices", () => {
+	it("uses one live Claude catalog for configured default and named account choices", () => {
 		applyInstanceListResponse({
 			instances: [
+				{
+					id: "personal",
+					name: "Personal",
+					driver: "claude",
+					isDefault: true,
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 0,
+				},
 				{
 					id: "claude-work",
 					name: "Work",
 					driver: "claude",
+					isDefault: false,
 					port: 0,
 					managed: false,
 					status: "stopped",
@@ -327,7 +340,10 @@ describe("applyGetModelsResponse", () => {
 			],
 		});
 		chooseModel({ modelId: "sonnet", providerId: "claude" });
-		for (const instanceId of ["claude", "claude-work"]) {
+		expect(getEffectiveInstanceId()).toBe("personal");
+		expect(getProviderGroupsForInstance("claude")).toEqual([]);
+		expect(getChosenModel("claude")).toBeUndefined();
+		for (const instanceId of ["personal", "claude-work"]) {
 			expect(
 				getProviderGroupsForInstance(instanceId).map(
 					({ provider }) => provider.id,

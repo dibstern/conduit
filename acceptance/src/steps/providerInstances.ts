@@ -1,7 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import { isRecord } from "../../../src/lib/utils.js";
+import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	instanceSlug,
@@ -46,6 +49,202 @@ const usageLimitToggle = (page: Page, label: string) =>
 const listOf = (list: string) => (list === "none" ? [] : list.split(", "));
 
 export const providerInstancesHandlers: StepHandler[] = [
+	{
+		name: "seed an explicitly empty configured account list",
+		match: /^no provider accounts are configured$/,
+		run: ({ world }) => {
+			mockInstances.set(world.page, []);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances: [],
+			});
+		},
+	},
+	{
+		name: "seed only the configured Claude accounts",
+		match:
+			/^the configured Claude accounts are (Claude and Personal|Personal|none) with default (Personal|none)$/,
+		run: ({ world, match }) => {
+			const names = match[1] === "none" ? [] : (match[1] ?? "").split(" and ");
+			const list = [
+				...(mockInstances.get(world.page) ?? []).filter(
+					(instance) => instance["driver"] !== "claude",
+				),
+				...names.map((name) => ({
+					id: instanceSlug(name),
+					name,
+					driver: "claude",
+					isDefault: name === match[2],
+					usageEligible: true,
+					configDir: `/profiles/${instanceSlug(name)}`,
+					port: 0,
+					managed: false,
+					status: "unhealthy",
+					restartCount: 0,
+					createdAt: 1,
+				})),
+			];
+			mockInstances.set(world.page, list);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances: list,
+			});
+		},
+	},
+	{
+		name: "assert the configured account names and order",
+		match: /^the picker account names are (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("picker-account-name")).toHaveText(
+				listOf(match[1] ?? ""),
+			);
+		},
+	},
+	{
+		name: "assert the picker harness uses its configured account",
+		match:
+			/^the picker uses (Personal|OpenCode) for the (Claude|OpenCode) harness$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId(`picker-harness-${(match[2] ?? "").toLowerCase()}`)
+					.getByTestId("harness-logo"),
+			).toHaveAttribute("data-account", instanceSlug(match[1] ?? ""));
+		},
+	},
+	{
+		name: "select the remaining configured driver",
+		match: /^I select the surviving OpenCode harness$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-harness-opencode").click();
+		},
+	},
+	{
+		name: "assert the draft selected the surviving configured account",
+		match: /^the draft composer selects the (OpenCode) account$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.locator('#input-area [data-testid="harness-logo"]:visible')
+					.first(),
+			).toHaveAttribute("data-account", instanceSlug(match[1] ?? ""));
+		},
+	},
+	{
+		name: "assert missing accounts do not create a session",
+		match: /^no session is created without an account$/,
+		run: ({ world }) => {
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((request) => request.tag === "CreateSession"),
+			).toEqual([]);
+		},
+	},
+	{
+		name: "assert no manufactured former built-in account",
+		match: /^no former built-in Claude account is displayed$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-account-claude")).toHaveCount(
+				0,
+			);
+			await expect(
+				world.page.getByTestId("usage-footer-row-claude"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "publish a deleted session's effective account",
+		match:
+			/^(?:a deleted-account session is published on|the deleted-account session is published on) (Personal|Claude)( after a default change)?$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const accountId = instanceSlug(match[1] ?? "");
+			const previous = rpc.shellRows?.find(
+				(row) => isRecord(row) && row["id"] === "sess-account-deleted",
+			);
+			if (match[2]) {
+				const list = (mockInstances.get(world.page) ?? []).map((instance) =>
+					instance["driver"] === "claude"
+						? { ...instance, isDefault: instance["id"] === accountId }
+						: instance,
+				);
+				mockInstances.set(world.page, list);
+				rpc.setDaemonList("SubscribeInstances", { instances: list });
+			}
+			rpc.setResponse("GetModels", {
+				projectSlug: "myapp",
+				providers: [],
+				active: { model: "claude-sonnet-4-5", provider: "claude" },
+			});
+			rpc.setResponse("GetAgents", {
+				projectSlug: "myapp",
+				instanceId: accountId,
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [],
+			});
+			rpc.upsertShellRow({
+				...(isRecord(previous) ? previous : {}),
+				id: "sess-account-deleted",
+				title: "Deleted account history",
+				status: "idle",
+				projectSlug: "myapp",
+				accountId,
+				updatedAt: PINNED_CLOCK_MS,
+				resumes: [
+					{
+						at: PINNED_CLOCK_MS,
+						instanceId: "deleted-account",
+						reason: "user",
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "view the deleted-account history",
+		match: /^I view the deleted-account session$/,
+		run: async ({ world }) => {
+			await world.page
+				.locator('[data-session-id="sess-account-deleted"]')
+				.press("Enter");
+			await expect(world.page.getByTestId("session-bar-title")).toHaveText(
+				"Deleted account history",
+			);
+		},
+	},
+	{
+		name: "assert the limit banner uses the session's effective account",
+		match: /^the session's usage limit names (Personal|Claude)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("usage-limit-title")).toHaveText(
+				`Usage limit reached · ${match[1]}`,
+			);
+		},
+	},
+	{
+		name: "hold the relay disconnected",
+		match: /^the relay disconnects and reconnect attempts are held$/,
+		run: async ({ world }) => {
+			await world.page.routeWebSocket(/\/rpc(?:\?|$)/, (socket) =>
+				socket.close(),
+			);
+			requireRpcControl(world.page).closeSockets();
+			await expect(world.page.locator("#connect-overlay")).toBeVisible();
+		},
+	},
+	{
+		name: "assert the Claude overlay has no OpenCode actions",
+		match: /^the connect overlay offers no OpenCode instance actions$/,
+		run: async ({ world }) => {
+			const overlay = world.page.locator("#connect-overlay");
+			await expect(overlay).toBeVisible();
+			await expect(
+				overlay.getByRole("button", { name: "Start Instance" }),
+			).toHaveCount(0);
+			await expect(
+				overlay.getByRole("button", { name: "Switch Instance" }),
+			).toHaveCount(0);
+		},
+	},
 	{
 		name: "seed the daemon's usage limit setting",
 		match: /^auto-resume limited sessions is (on|off) on the daemon$/,
@@ -593,7 +792,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setResponse("GetModels", {
 				projectSlug: "myapp",
-				providers: [],
+				providers: dualDriverProviders.filter(
+					(provider) => provider.id !== "claude",
+				),
 				active: { model: "claude-sonnet-4-5", provider: "claude" },
 			});
 			rpc.setProjectSetting({
@@ -618,7 +819,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the draft composer and usage meter agree",
-		match: /^the draft composer and usage meter use the (.+) account$/,
+		match:
+			/^the (?:draft|session) composer and usage meter use the (.+) account$/,
 		run: async ({ world, match }) => {
 			const id = instanceSlug(match[1] ?? "");
 			await expect(
@@ -629,6 +831,27 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByTestId(`usage-footer-row-${id}`),
 			).toHaveAttribute("data-default", "true");
+		},
+	},
+	{
+		name: "assert a sole account drives the composer and the single-line meter",
+		match:
+			/^the draft composer uses the (.+) account and the usage meter shows only it$/,
+		run: async ({ world, match }) => {
+			const id = instanceSlug(match[1] ?? "");
+			await expect(
+				world.page
+					.locator('#input-area [data-testid="harness-logo"]:visible')
+					.first(),
+			).toHaveAttribute("data-account", id);
+			// One account collapses the meter to a single line with no account rows.
+			const meter = world.page.getByTestId("usage-footer-single");
+			await expect(
+				meter.getByTestId(`usage-footer-cell-${id}-five_hour`),
+			).toBeVisible();
+			await expect(
+				meter.locator('[data-testid^="usage-footer-cell-"]'),
+			).toHaveCount(1);
 		},
 	},
 	{
@@ -769,15 +992,12 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "instances list does not show name",
 		match: /^the Instances list does not show (.+)$/,
 		run: async ({ world, match }) => {
-			const name = (match[1] ?? "").trim();
-			await world.page.waitForFunction(
-				(n) => {
-					const list = document.querySelector("#instance-settings-list");
-					return list ? !(list.textContent ?? "").includes(n) : true;
-				},
-				name,
-				{ timeout: 5_000 },
-			);
+			// Exact match: the "Claude accounts" heading must not count as an account named Claude.
+			await expect(
+				world.page
+					.locator("#instance-settings-list")
+					.getByText((match[1] ?? "").trim(), { exact: true }),
+			).toHaveCount(0);
 		},
 	},
 	{

@@ -17,7 +17,7 @@ Examples:
   | seven_day  | claude  | 2026-01-05T09:00:00Z | Usage limit reached · work2claude    | Weekly limit · resets Mon 9:00  |
   | five_hour  | claude  | 2026-01-01T14:30:00Z | Usage limit reached · work2claude    | 5-hour limit · resets 14:30     |
   | seven_day  | claude  | none                 | Usage limit reached · work2claude    | Reset time unavailable          |
-  | five_hour  | retired | 2026-01-01T14:30:00Z | Usage limit reached · retired        | 5-hour limit · resets 14:30     |
+  | five_hour  | retired | 2026-01-01T14:30:00Z | Usage limit reached · work2claude    | 5-hour limit · resets 14:30     |
 
 Scenario Outline: phone limit strip folds the account into the detail line
   Given the conduit app is served with the connected mockup

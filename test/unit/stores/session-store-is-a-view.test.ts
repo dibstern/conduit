@@ -55,6 +55,7 @@ import {
 
 const session = (id: string, title = id): SessionInfo => ({
 	projectSlug: "project-a",
+	accountId: null,
 	id,
 	title,
 	status: "idle",

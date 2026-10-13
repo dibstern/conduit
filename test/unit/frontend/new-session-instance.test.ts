@@ -48,6 +48,7 @@ const instances = ["claude", "claude-2", "opencode"].map((id) => ({
 	restartCount: 0,
 	createdAt: 0,
 	driver: id === "opencode" ? "opencode" : "claude",
+	isDefault: id === "claude" || id === "opencode",
 }));
 
 const defaults = {
@@ -109,7 +110,7 @@ describe("new session instance", () => {
 		});
 	});
 
-	it("falls back to the model's provider when the picked instance disappears", () => {
+	it("uses the selected driver's default when the picked account disappears", () => {
 		selectInstance("claude-2");
 		applyInstanceListResponse({
 			instances: instances.filter((instance) => instance.id !== "claude-2"),
@@ -118,14 +119,21 @@ describe("new session instance", () => {
 		expect(getEffectiveInstanceId()).toBe("claude");
 	});
 
-	it("uses the first available instance when the derived instance is unavailable", () => {
+	it("follows a promoted default and never falls back to another driver", () => {
 		clearDiscoveryState();
 		applyInstanceListResponse({
-			instances: instances.filter((instance) => instance.id === "claude-2"),
+			instances: instances
+				.filter((instance) => instance.id === "claude-2")
+				.map((instance) => ({ ...instance, isDefault: true })),
 			providerCapabilities: {},
 		});
 		handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
 		expect(getEffectiveInstanceId()).toBe("claude-2");
+		applyInstanceListResponse({
+			instances: instances.filter((instance) => instance.driver === "opencode"),
+			providerCapabilities: {},
+		});
+		expect(getEffectiveInstanceId()).toBeUndefined();
 	});
 
 	it("consumes the pick on session bind so the next draft starts on the default", () => {
@@ -170,6 +178,10 @@ describe("new session instance", () => {
 		const reloaded = await import(
 			"../../../src/lib/frontend/stores/discovery.svelte.js"
 		);
+		const reloadedInstances = await import(
+			"../../../src/lib/frontend/stores/instance.svelte.js"
+		);
+		reloadedInstances.applyInstanceListResponse({ instances });
 		reloaded.handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
 		reloaded.applyGetModelsResponse(defaults);
 		expect(reloaded.discoveryState.hasInstanceChoice).toBe(false);

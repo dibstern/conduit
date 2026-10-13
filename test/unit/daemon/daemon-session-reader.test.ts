@@ -9,12 +9,14 @@ import { Effect } from "effect";
 import { afterEach, describe, expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
 const temporaryRoots: string[] = [];
@@ -134,6 +136,7 @@ describe("listDaemonSessions", () => {
 				result.sessions.find((session) => session.id === "plain-session"),
 			).not.toHaveProperty("git");
 		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -192,6 +195,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -257,6 +261,7 @@ describe("listDaemonSessions", () => {
 				wokeBecause: "turn",
 			});
 		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -311,6 +316,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -374,7 +380,10 @@ describe("listDaemonSessions", () => {
 			expect(rootB?.id).toBe("root-b");
 			expect(rootB).not.toHaveProperty("processing");
 			expect(rootC).toMatchObject({ id: "root-c", processing: true });
-		}).pipe(Effect.provide(registry));
+		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(registry),
+		);
 	});
 
 	it.effect("reads pending attention counts from a cold project store", () => {
@@ -448,6 +457,7 @@ describe("listDaemonSessions", () => {
 			expect(result.hasMore).toBe(false);
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -504,6 +514,7 @@ describe("listDaemonSessions", () => {
 				expect(result.sessions).toEqual([
 					{
 						id: "a-new",
+						accountId: "opencode",
 						title: "A new",
 						status: "idle",
 						createdAt: 300,
@@ -517,6 +528,7 @@ describe("listDaemonSessions", () => {
 					},
 					{
 						id: "b-mid",
+						accountId: "opencode",
 						title: "B mid",
 						status: "idle",
 						createdAt: 200,
@@ -549,6 +561,7 @@ describe("listDaemonSessions", () => {
 				expect(result.hasMore).toBe(true);
 				expect(result.nextCursor).toEqual({ updatedAt: 200, id: "b-mid" });
 			}).pipe(
+				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{
@@ -681,7 +694,10 @@ describe("listDaemonSessions", () => {
 			expect(pastEnd.sessions).toEqual([]);
 			expect(pastEnd.hasMore).toBe(false);
 			expect(pastEnd.nextCursor).toBeNull();
-		}).pipe(Effect.provide(registry));
+		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(registry),
+		);
 	});
 
 	it.effect("detects more rows at a single-project page boundary", () => {
@@ -732,7 +748,10 @@ describe("listDaemonSessions", () => {
 			expect(final.sessions.map((session) => session.id)).toEqual(["one"]);
 			expect(final.hasMore).toBe(false);
 			expect(final.nextCursor).toBeNull();
-		}).pipe(Effect.provide(registry));
+		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(registry),
+		);
 	});
 
 	it.effect("searches every project and pages only the filtered set", () => {
@@ -804,7 +823,10 @@ describe("listDaemonSessions", () => {
 				cursor = page.nextCursor ?? undefined;
 			}
 			expect(paged).toEqual(expected);
-		}).pipe(Effect.provide(registry));
+		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(registry),
+		);
 	});
 
 	it.effect("scopes the read to one project, with search and paging", () => {
@@ -868,7 +890,10 @@ describe("listDaemonSessions", () => {
 			expect(scopedSearch.sessions.map((session) => session.id)).toEqual([
 				"a-needle",
 			]);
-		}).pipe(Effect.provide(registry));
+		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(registry),
+		);
 	});
 
 	it.effect("treats percent and underscore in search as literals", () => {
@@ -896,6 +921,7 @@ describe("listDaemonSessions", () => {
 				"literal-b",
 			]);
 		}).pipe(
+			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -956,6 +982,7 @@ describe("listDaemonSessions", () => {
 					]),
 				);
 			}).pipe(
+				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{

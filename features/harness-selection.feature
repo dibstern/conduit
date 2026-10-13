@@ -86,10 +86,10 @@ Examples:
   | wide  | OpenCode | words    | opencode | harness-logo-single-opencode-words | 98        |
   | phone | OpenCode | words    | opencode | harness-logo-single-opencode-words | 98        |
 
-Scenario Outline: B1 the implicit default Claude account counts and shows C
+Scenario Outline: B1 the default Claude account counts and shows C
   Given a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
-  And the Claude accounts are self as personal
+  And the Claude accounts are claude as Claude, self as personal
   And the composer uses <controls> controls
   Then the composer harness logo for claude shows C on its badge
   When I open the model picker

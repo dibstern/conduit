@@ -17,12 +17,14 @@ test("settings, commands and skill documents follow a workspace change and sessi
 	const contexts = new Set<string>();
 	const sessions: SessionInfo[] = [
 		{
+			accountId: "claude",
 			id: "moved-session",
 			title: "Moved session",
 			status: "idle",
 			projectSlug: "e2e-replay",
 		},
 		{
+			accountId: "claude",
 			id: "main-session",
 			title: "Main session",
 			status: "idle",
@@ -176,6 +178,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 			.filter(({ tag }) => tag === "GetCommands").length;
 		moved = true;
 		sessions[0] = {
+			accountId: "claude",
 			id: "moved-session",
 			title: "Moved session",
 			status: "idle",

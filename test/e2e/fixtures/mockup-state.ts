@@ -19,6 +19,34 @@ export interface MockMessage {
 
 export const initMessages: MockMessage[] = [
 	{
+		type: "instance_list",
+		instances: [
+			{
+				id: "claude",
+				name: "Claude",
+				driver: "claude",
+				isDefault: true,
+				usageEligible: true,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+			},
+			{
+				id: "opencode",
+				name: "OpenCode",
+				driver: "opencode",
+				isDefault: true,
+				port: 4096,
+				managed: true,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+			},
+		],
+	},
+	{
 		type: "status",
 		status: "idle",
 	},
@@ -38,6 +66,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-001",
+				accountId: "opencode",
 				title: "Fix model selector UI",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -46,6 +75,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-002",
+				accountId: "opencode",
 				title: "Add dark mode support",
 				status: "idle",
 				updatedAt: Date.now() - 3600_000,
@@ -54,6 +84,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-003",
+				accountId: "opencode",
 				title: "Refactor WebSocket handler",
 				status: "idle",
 				updatedAt: Date.now() - 7200_000,
@@ -62,6 +93,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-004",
+				accountId: "opencode",
 				title: "Implement file browser panel",
 				status: "idle",
 				updatedAt: Date.now() - 86400_000,
@@ -70,6 +102,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-005",
+				accountId: "opencode",
 				title: "Add notification system",
 				status: "idle",
 				updatedAt: Date.now() - 100800_000,
@@ -78,6 +111,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-006",
+				accountId: "opencode",
 				title: "Set up project structure",
 				status: "idle",
 				updatedAt: Date.now() - 345600_000,
@@ -86,6 +120,7 @@ export const initMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mockup-007",
+				accountId: "opencode",
 				title: "Initial relay architecture",
 				status: "idle",
 				updatedAt: Date.now() - 432000_000,
@@ -282,12 +317,26 @@ function modelExecutionInitMessages(
 				hasMore: false,
 			},
 		},
-		...unboundInitMessages.filter(
-			(message) =>
-				message.type !== "model_info" &&
-				message.type !== "mock_model_catalog" &&
-				message.type !== "mock_agent_catalog",
-		),
+		...unboundInitMessages
+			.filter(
+				(message) =>
+					message.type !== "model_info" &&
+					message.type !== "mock_model_catalog" &&
+					message.type !== "mock_agent_catalog",
+			)
+			.map((message) =>
+				message.type === "shell_snapshot" && Array.isArray(message["sessions"])
+					? {
+							...message,
+							sessions: message["sessions"].map(
+								(row: Record<string, unknown>) => ({
+									...row,
+									accountId: "claude",
+								}),
+							),
+						}
+					: message,
+			),
 		{ type: "model_info", model: "opus[1m]", provider: "claude" },
 		{ type: "mock_model_catalog", providers: modelExecutionProviders },
 		claudeAgentList,
@@ -497,6 +546,8 @@ export const multiInstanceList: MockMessage = {
 	instances: [
 		{
 			id: "personal",
+			driver: "opencode",
+			isDefault: true,
 			name: "Personal",
 			port: 4096,
 			managed: true,
@@ -506,6 +557,8 @@ export const multiInstanceList: MockMessage = {
 		},
 		{
 			id: "work",
+			driver: "opencode",
+			isDefault: false,
 			name: "Work",
 			port: 4097,
 			managed: true,
@@ -522,6 +575,8 @@ export const singleInstanceList: MockMessage = {
 	instances: [
 		{
 			id: "opencode",
+			driver: "opencode",
+			isDefault: true,
 			name: "Default",
 			port: 4096,
 			managed: true,
@@ -616,6 +671,7 @@ export const noInstanceInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-ni-001",
+				accountId: null,
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -649,6 +705,7 @@ export const multiInstanceInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-mi-001",
+				accountId: "personal",
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -682,6 +739,7 @@ export const singleInstanceInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-si-001",
+				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -753,6 +811,7 @@ export const variantInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-var-001",
+				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -798,6 +857,7 @@ export const noVariantInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-novar-001",
+				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -871,6 +931,7 @@ export const contextWindowInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-context-001",
+				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),
@@ -919,6 +980,7 @@ export const noContextWindowInitMessages: MockMessage[] = [
 			{
 				projectSlug: "myapp",
 				id: "sess-context-none-001",
+				accountId: "opencode",
 				title: "Test session",
 				status: "idle",
 				updatedAt: Date.now(),

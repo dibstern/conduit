@@ -11,9 +11,15 @@ import {
 	handleModelInfo,
 	handleModelList,
 	handleVariantInfo,
+	selectInstance,
 } from "../../stores/discovery.svelte.js";
-import { sessionState } from "../../stores/session.svelte.js";
-import type { ProviderInfo } from "../../types.js";
+import { instanceState } from "../../stores/instance.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../stores/session.svelte.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import type { OpenCodeInstance, ProviderInfo } from "../../types.js";
 import InstanceModelPicker from "./InstanceModelPicker.svelte";
 
 const contextWindows = [
@@ -21,6 +27,29 @@ const contextWindows = [
 	{ value: "1m", label: "1M" },
 ];
 const variants = ["low", "medium", "high", "xhigh", "max"];
+
+const claudeAccount = {
+	id: "claude",
+	name: "Claude",
+	driver: "claude",
+	isDefault: true,
+	port: 0,
+	managed: false,
+	status: "healthy",
+	restartCount: 0,
+	createdAt: 0,
+} satisfies OpenCodeInstance;
+const opencodeAccount = {
+	id: "opencode",
+	name: "OpenCode",
+	driver: "opencode",
+	isDefault: true,
+	port: 4096,
+	managed: true,
+	status: "healthy",
+	restartCount: 0,
+	createdAt: 0,
+} satisfies OpenCodeInstance;
 
 const anthropic: ProviderInfo = {
 	id: "claude",
@@ -67,6 +96,7 @@ function bottomRightFrame(): () => void {
 
 /** Seed a single configured Anthropic provider with Sonnet selected. */
 function seedClaude(): void {
+	instanceState.instances = [claudeAccount];
 	handleModelList({ providers: [anthropic] });
 	handleModelInfo({
 		model: "claude-sonnet-4-5",
@@ -180,6 +210,8 @@ const meta = {
 	beforeEach: () => {
 		// Reset state for each story.
 		clearDiscoveryState();
+		clearSessionState();
+		instanceState.instances = [];
 		// An active session locks the harness selection.
 		sessionState.currentId = null;
 	},
@@ -254,6 +286,7 @@ export const SingleContextWindow: Story = {
 	// Storybook reads tags statically; a spread does not carry them.
 	tags: ["viewport-capture"],
 	beforeEach: () => {
+		instanceState.instances = [opencodeAccount];
 		handleModelList({ providers: [opencode] });
 		handleModelInfo({
 			model: "gpt-5",
@@ -328,6 +361,19 @@ export const ContextUsage: Story = {
 	beforeEach: () => {
 		seedClaude();
 		const id = "picker-context-usage";
+		applySessionChange({
+			_tag: "snapshot",
+			sequence: 1,
+			rows: [
+				{
+					id,
+					title: "Context usage",
+					projectSlug: "conduit",
+					status: "idle",
+					accountId: "claude",
+				},
+			],
+		});
 		// currentChat() is a frozen empty state until the session has activity.
 		getOrCreateSessionActivity(id);
 		getOrCreateSessionMessages(id).contextPercent = 37;
@@ -348,6 +394,7 @@ export const UnlockedHarnesses: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
+		instanceState.instances = [claudeAccount, opencodeAccount];
 		handleModelList({ providers: [anthropic, opencode] });
 		return bottomRightFrame();
 	},
@@ -395,6 +442,7 @@ export const FavoritesOn: Story = {
 export const RoutingOptions: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
+		instanceState.instances = [claudeAccount];
 		handleModelList({
 			providers: [
 				{
@@ -455,6 +503,7 @@ export const Locked: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
+		instanceState.instances = [claudeAccount, opencodeAccount];
 		handleModelList({
 			providers: [
 				anthropic,
@@ -463,6 +512,19 @@ export const Locked: Story = {
 					name: "OpenCode",
 					configured: true,
 					models: [{ id: "gpt-5", name: "GPT-5", provider: "opencode" }],
+				},
+			],
+		});
+		applySessionChange({
+			_tag: "snapshot",
+			sequence: 1,
+			rows: [
+				{
+					id: "session-1",
+					title: "Locked session",
+					projectSlug: "conduit",
+					status: "idle",
+					accountId: "claude",
 				},
 			],
 		});
@@ -504,12 +566,8 @@ export const UnconfiguredProvider: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedClaude();
-		// Every non-claude provider maps to the `opencode` instance
-		// (instanceIdForProviderId is a two-way split), and the picker lists only
-		// the selected instance's groups -- so selecting opencode is what puts a
-		// configured and an unconfigured group side by side. That pairing is the
-		// real shape: an OpenCode instance exposes whatever providers it knows
-		// about, set up or not.
+		instanceState.instances = [claudeAccount, opencodeAccount];
+		// The OpenCode account exposes both configured and unconfigured providers.
 		handleModelList({
 			providers: [
 				anthropic,
@@ -527,6 +585,7 @@ export const UnconfiguredProvider: Story = {
 				},
 			],
 		});
+		selectInstance("opencode");
 		return bottomRightFrame();
 	},
 	play: async ({ canvasElement }) => {

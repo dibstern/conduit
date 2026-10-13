@@ -213,7 +213,19 @@ function setupWords(phone: boolean) {
 	routerState.path = "/";
 	sessionViewState.compact = phone;
 	sessionViewState.composerWidth = phone ? 393 : 760;
-	instanceState.instances = [];
+	instanceState.instances = [
+		{
+			id: "claude",
+			name: "Claude",
+			driver: "claude",
+			isDefault: true,
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 0,
+		},
+	];
 	projectState.projects = [
 		{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 	];
@@ -222,6 +234,7 @@ function setupWords(phone: boolean) {
 		sequence: Date.now(),
 		rows: [
 			{
+				accountId: "claude",
 				id: testId,
 				title: "Composer",
 				status: "idle",

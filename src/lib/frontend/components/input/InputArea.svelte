@@ -53,7 +53,6 @@
 		getChosenModel,
 		getAvailableInstances,
 		getEffectiveInstanceId,
-		getSessionInstanceId,
 		getModelDisplayName,
 		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
@@ -227,7 +226,7 @@
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
-	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === (accountId ?? getEffectiveInstanceId())));
+	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// The settings row appears in one go. Until the daemon answers, models load
 	// and a session link resolves, each control would fill in on its own and
 	// guess (an empty store reads as OpenCode). "" is the undialled state, which
@@ -237,8 +236,8 @@
 	const settingsPending = $derived(
 		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
-	const composerDriver = $derived(composerInstance?.driver ?? (currentSession ? getSessionInstanceId(currentSession.id) : getEffectiveInstanceId()));
-	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver]?.supportsWorktree);
+	const composerDriver = $derived(composerInstance?.driver);
+	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
@@ -806,6 +805,16 @@
 				if (context !== sessionModeContext || resolution !== pendingDraftSessionMode || sessionState.currentId) return false;
 				// The draft's model pick is client-local until the session exists.
 				const instanceId = getEffectiveInstanceId();
+				if (!instanceId) {
+					showToast({
+						title: "No account available",
+						variant: "error",
+						body: discoveryState.currentProviderId === "claude"
+							? "Add a Claude account in Settings before sending."
+							: "Add an account in Settings before sending.",
+					});
+					return false;
+				}
 				const model = getChosenModel(instanceId);
 				const created = await createSessionRpc({
 					projectSlug,
@@ -938,8 +947,8 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
 		if (!sessionId || !projectSlug) return;
-		const instanceId = currentSession?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionId];
-		const driver = getInstanceById(instanceId ?? "")?.driver ?? discoveryState.sessionProviderIds[sessionId];
+		const accountId = currentSession?.accountId;
+		const driver = getInstanceById(accountId ?? "")?.driver;
 		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
 		void cancelSessionRpc({
 			projectSlug,

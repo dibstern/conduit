@@ -34,6 +34,7 @@ it("two client stores render the same row changes from their root snapshots", as
 			rows: [
 				{
 					projectSlug: "project-a",
+					accountId: null,
 					id: "shared",
 					title: "Shared",
 					status: "idle",
@@ -53,6 +54,7 @@ it("two client stores render the same row changes from their root snapshots", as
 			rows: [
 				{
 					projectSlug: "project-a",
+					accountId: null,
 					id: "shared",
 					title: "Shared",
 					status: "idle",

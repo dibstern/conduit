@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
 	BackgroundLivenessTag,
@@ -19,7 +20,10 @@ import {
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
-import { makeMockConfig } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	makeMockConfig,
+} from "../../helpers/mock-factories.js";
 
 // The family source reads the sessions projection for one family (a root and
 // every descendant), so what is under test is a contract with the store: the
@@ -44,6 +48,7 @@ const makeFamilyTestLayer = () => {
 		SessionEventBusLive,
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		cleanup,
 	);
 };

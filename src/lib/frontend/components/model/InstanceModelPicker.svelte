@@ -33,7 +33,6 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getProviderGroupsForInstance,
-		getSessionInstanceId,
 		formatModelName,
 		type InstanceOption,
 		isProviderConfigured,
@@ -43,7 +42,6 @@
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { composerAccountId } from "../../stores/usage.svelte.js";
 	import { getClaudeAccounts, type AccountAvailability } from "../../stores/claude-accounts.svelte.js";
 	import { instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
@@ -89,29 +87,23 @@
 
 	const instances = $derived(getAvailableInstances());
 
-	/** Instance bound to the active session — non-null means locked mode. */
+	/** The server's effective account for the active session. */
 	const boundInstanceId = $derived(
-		sessionState.currentId ? getSessionInstanceId(sessionState.currentId) : null,
+		sessionState.currentId ? findSession(sessionState.currentId)?.accountId ?? undefined : undefined,
 	);
-	const locked = $derived(boundInstanceId !== null);
-	const selectedId = $derived(boundInstanceId ?? getEffectiveInstanceId());
+	const locked = $derived(sessionState.currentId !== null);
+	const selectedId = $derived(locked ? boundInstanceId : getEffectiveInstanceId());
 	const selectedInstance = $derived(
 		instances.find((i) => i.id === selectedId) ?? null,
 	);
-	const selectedLabel = $derived(
-		selectedInstance?.label ?? driverLabel(selectedId),
-	);
 	const selectedDriver = $derived(
 		selectedInstance?.driver ??
-			// getSessionInstanceId resolves a session to its driver, not an instance id.
-			boundInstanceId ??
-			(selectedId === "claude" ? ("claude" as const) : ("opencode" as const)),
+			(discoveryState.currentProviderId === "claude" ? "claude" : discoveryState.currentProviderId ? "opencode" : ""),
 	);
-	const selectedLogoInstanceId = $derived(
-		sessionState.currentId
-			? composerAccountId(findSession(sessionState.currentId)) ?? selectedId
-			: selectedId,
+	const selectedLabel = $derived(
+		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
 	);
+	const selectedLogoInstanceId = $derived(selectedId);
 	const harnesses = $derived(
 		[...new Set(instances.map((instance) => instance.driver))].map((driver) => ({
 			value: driver,
@@ -136,7 +128,7 @@
 	);
 	const accountCards = $derived.by<AccountCard[]>(() => {
 		if (selectedDriver === "claude") {
-			return accounts.accounts.map((account) => {
+			return [...accounts.accounts].sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true)).map((account) => {
 				// Cards show every account's own usage; only the lock depends on the open session.
 				const availability = accounts.availabilityOf(account.id, "");
 				return {
@@ -288,15 +280,14 @@
 		}
 	}
 
-	function driverLabel(id: ProviderDriverKind): string {
-		if (id === "claude") return "Claude";
-		if (id === "opencode") return "OpenCode";
-		return id.charAt(0).toUpperCase() + id.slice(1);
+	function driverLabel(driver: ProviderDriverKind): string {
+		if (driver === "claude") return "Claude";
+		if (driver === "opencode") return "OpenCode";
+		return driver.charAt(0).toUpperCase() + driver.slice(1);
 	}
 
 	function instanceForDriver(driver: ProviderDriverKind): InstanceOption | undefined {
-		return instances.find((instance) => instance.driver === driver && instance.isDefault)
-			?? instances.find((instance) => instance.driver === driver);
+		return instances.find((instance) => instance.driver === driver && instance.isDefault);
 	}
 
 	/** Strip date suffixes like -20250514 from model names. */
@@ -404,10 +395,7 @@
 			}
 			return;
 		}
-		const instance = instances.find((instance) => instance.id === id)
-			?? (selectedDriver === "claude" && id === "claude"
-				? { id, driver: "claude" as const, label: card.label, isCustom: false }
-				: undefined);
+		const instance = instances.find((instance) => instance.id === id);
 		if (instance) handleInstanceSelect(instance);
 	}
 
@@ -534,7 +522,7 @@
 		</div>
 		<div class="min-h-0 overflow-y-auto">
 			{#if view === "root"}
-				{#if harnesses.length > 1}
+				{#if harnesses.length > 1 || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
 					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[4px]">
 						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
 							<span>Harness</span>
@@ -559,7 +547,7 @@
 							{#snippet item(option)}
 								<HarnessLogo
 									driver={option.value}
-									instanceId={option.value === selectedDriver ? selectedLogoInstanceId : instanceForDriver(option.value)?.id ?? option.value}
+									instanceId={option.value === selectedDriver ? selectedLogoInstanceId : instanceForDriver(option.value)?.id}
 									size={14}
 									surface="surface"
 								/>
@@ -577,7 +565,7 @@
 						</div>
 						<OptionRow
 							options={accountCards}
-							value={selectedLogoInstanceId}
+							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
 							label={selectedDriver === "claude" ? "Account" : "Instance"}
 							lockedReason={selectedDriver === "claude" ? "" : "Harness is fixed for this session"}

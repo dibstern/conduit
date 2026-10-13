@@ -20,6 +20,7 @@ import { applySessionChange } from "./session-fixtures.js";
 
 const row = (compacting?: string): SessionInfo => ({
 	projectSlug: "project-a",
+	accountId: null,
 	id: "s",
 	title: "s",
 	status: "busy",

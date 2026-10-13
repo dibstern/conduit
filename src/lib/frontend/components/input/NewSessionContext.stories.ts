@@ -30,6 +30,7 @@ function seed(
 			id: "folder-provider",
 			name: "Folder provider",
 			driver,
+			isDefault: true,
 			port: 0,
 			managed: false,
 			status: "healthy",

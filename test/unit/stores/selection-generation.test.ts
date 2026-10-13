@@ -156,6 +156,7 @@ it("keeps B's model when A's row changes model last", () => {
 	select("B");
 	const row = (id: string, model: string, provider: string) => ({
 		projectSlug: "project-a",
+		accountId: null,
 		id,
 		title: id,
 		status: "idle" as const,

@@ -662,7 +662,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							id: request.instanceId,
 						});
 						yield* persistConfig;
-						yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 						return { instances: yield* instanceList };
 					}),
 				),

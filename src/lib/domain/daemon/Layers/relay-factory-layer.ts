@@ -201,6 +201,7 @@ export const RelayFactoryLive = (
 				runCallback(
 					listEffectDaemonSessions(configDir, options).pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
+						Effect.provideService(AccountDirectory, accounts),
 					),
 				);
 			const broadcastSessionListChanged = () =>

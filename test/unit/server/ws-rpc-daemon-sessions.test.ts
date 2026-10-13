@@ -18,6 +18,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 		const listDaemonSessions = vi.fn(async () => ({
 			sessions: [
 				{
+					accountId: null,
 					id: "session-1",
 					title: "Session one",
 					status: "idle" as const,
@@ -58,6 +59,7 @@ describe("WsRpcServerLayer daemon sessions", () => {
 				projectSlug: "project-a",
 				sessions: [
 					{
+						accountId: null,
 						id: "session-1",
 						title: "Session one",
 						status: "idle" as const,

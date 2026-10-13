@@ -147,6 +147,7 @@ describe("SessionList daemon sessions", () => {
 			projectSlug: "current-project",
 			sessions: [
 				{
+					accountId: null,
 					id: "foreign-session",
 					title: "Foreign session",
 					status: "idle",

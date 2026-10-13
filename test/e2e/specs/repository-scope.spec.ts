@@ -84,6 +84,7 @@ async function openList(
 							: 2,
 			},
 			(_, row) => ({
+				accountId: null,
 				id: `scope-${project.slug}-${row}`,
 				title: `needle ${project.title} ${row}`,
 				status: "idle" as const,
@@ -420,6 +421,7 @@ for (const viewport of [
 			await expect(rows(page)).toHaveCount(4);
 			const before = listRequests(rpc).length;
 			rpc.upsertShellRow({
+				accountId: null,
 				id: "live-member",
 				title: "Live HTTPS session",
 				status: "idle",
@@ -428,6 +430,7 @@ for (const viewport of [
 				messageCount: 0,
 			});
 			rpc.upsertShellRow({
+				accountId: null,
 				id: "live-outside",
 				title: "Live library session",
 				status: "idle",

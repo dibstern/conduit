@@ -44,6 +44,7 @@ async function openSession(
 		{ slug: projectSlug, title: "App", folders, git: { branch: "main" } },
 	];
 	let session: SessionInfo = {
+		accountId: null,
 		id: sessionId,
 		title: "Rename this branch",
 		status: "idle",

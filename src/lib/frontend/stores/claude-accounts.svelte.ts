@@ -30,8 +30,6 @@ import {
 	usageState,
 } from "./usage.svelte.js";
 
-const DEFAULT_ACCOUNT = { id: "claude", name: "Claude" } as const;
-
 export type AccountAvailability =
 	| { kind: "current" }
 	| { kind: "limited"; resetsAt: string | undefined }
@@ -71,16 +69,10 @@ class ClaudeAccounts {
 	}
 
 	get accounts() {
-		const configured = this.configuredAccounts;
-		return configured.some((account) => account.id === DEFAULT_ACCOUNT.id)
-			? configured
-			: [DEFAULT_ACCOUNT, ...configured];
+		return this.configuredAccounts;
 	}
 
-	nameOf(
-		instanceId: string | undefined,
-		fallback: string = DEFAULT_ACCOUNT.name,
-	): string {
+	nameOf(instanceId: string | undefined, fallback = "Claude"): string {
 		return getInstanceById(instanceId ?? "")?.name ?? fallback;
 	}
 
@@ -228,11 +220,8 @@ class ClaudeAccounts {
 	): Promise<void> {
 		const session = findSession(sessionId);
 		const recovery = session?.limitRecovery;
-		const from =
-			sourceId ??
-			composerAccountId(session) ??
-			(recovery?.switched ? undefined : recovery?.instanceId) ??
-			DEFAULT_ACCOUNT.id;
+		const from = sourceId ?? composerAccountId(session);
+		if (!from) return;
 		if (this.availabilityOf(targetId, from).kind !== "selectable") return;
 		const ticket = ++this.previewTicket;
 		const context: SwitchContext = {
@@ -279,9 +268,9 @@ class ClaudeAccounts {
 	}
 
 	// Mounted pickers retain their live source props; standalone callers use the preview.
-	async confirm(context?: { sessionId: string; from: string }): Promise<void> {
+	async confirm(): Promise<void> {
 		if (this.handoff.kind !== "pending" || this.switching) return;
-		const handoff = context ? { ...this.handoff, ...context } : this.handoff;
+		const handoff = this.handoff;
 		this.handoff = { ...handoff, kind: "switching" };
 		this.inFlightTarget = handoff.to;
 		try {

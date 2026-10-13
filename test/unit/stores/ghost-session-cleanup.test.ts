@@ -151,12 +151,14 @@ describe("shell snapshot omission", () => {
 			rows: [
 				{
 					projectSlug: "project-a",
+					accountId: null,
 					id: "session-A",
 					title: "A",
 					status: "idle",
 				},
 				{
 					projectSlug: "project-a",
+					accountId: null,
 					id: "session-C",
 					title: "C",
 					status: "idle",
@@ -236,6 +238,7 @@ describe("shell snapshot omission", () => {
 			rows: [
 				{
 					projectSlug: "project-a",
+					accountId: null,
 					id: "session-A",
 					title: "A",
 					status: "idle",

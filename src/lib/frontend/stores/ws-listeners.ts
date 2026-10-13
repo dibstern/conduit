@@ -13,6 +13,8 @@ export type FileBrowserListener = (reply: FileBrowserReply) => void;
 
 export const fileBrowserListeners = new Set<FileBrowserListener>();
 export const projectAttachedListeners = new Set<(slug: string) => void>();
+/** Account configuration changed; rebase rows whose effective account can change. */
+export const accountSnapshotChangedListeners = new Set<() => void>();
 
 /** Runs synchronously when an RPC reply attaches this tab to a project. */
 export function onProjectAttached(fn: (slug: string) => void): () => void {

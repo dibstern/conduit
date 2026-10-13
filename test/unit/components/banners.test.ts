@@ -31,6 +31,8 @@ import { seedRootSessions } from "../stores/session-fixtures.js";
 const unhealthyInstance = {
 	id: "default",
 	name: "Personal",
+	driver: "opencode",
+	isDefault: true,
 	port: 4096,
 	managed: false,
 	status: "unhealthy",
@@ -85,8 +87,16 @@ describe("Banners", () => {
 		clearSessionState();
 	});
 
-	it("does not show the OpenCode health warning when Claude is available", async () => {
-		instanceState.instances = [unhealthyInstance];
+	it("does not show the OpenCode health warning when the draft uses a configured Claude account", async () => {
+		instanceState.instances = [
+			unhealthyInstance,
+			{
+				...unhealthyInstance,
+				id: "personal",
+				driver: "claude",
+				status: "healthy",
+			},
+		];
 		handleModelList({ providers: [claudeProvider] });
 		handleModelInfo({ model: "", provider: "claude" });
 
@@ -108,7 +118,7 @@ describe("Banners", () => {
 	it.each([
 		["reconnecting", "Reconnecting to OpenCode…"],
 		["failed", "OpenCode failed to start"],
-	] as const)("shows %s for a persisted named instance without discovery", async (status, text) => {
+	] as const)("shows %s for the published session account without discovery", async (status, text) => {
 		applyInstanceListResponse({
 			instances: [
 				{
@@ -124,6 +134,7 @@ describe("Banners", () => {
 			{
 				id: "session-work",
 				title: "Work session",
+				accountId: "work-oc",
 				resumes: [{ at: 1, instanceId: "work-oc", reason: "user" }],
 			},
 		]);
@@ -156,6 +167,7 @@ describe("Banners", () => {
 				id: "session-work",
 				title: "Work session",
 				projectSlug: "work",
+				accountId: "work-oc",
 				resumes: [{ at: 1, instanceId: "work-oc", reason: "user" }],
 			},
 		]);
@@ -167,7 +179,7 @@ describe("Banners", () => {
 		expect(screen.getByText("Reconnecting to OpenCode…")).toBeTruthy();
 	});
 
-	it("uses the latest persisted Claude resume instead of stale OpenCode discovery", async () => {
+	it("uses the published Claude account instead of stale OpenCode discovery", async () => {
 		applyInstanceListResponse({
 			instances: [
 				{ ...unhealthyInstance, id: "work-claude", driver: "claude" },
@@ -177,6 +189,7 @@ describe("Banners", () => {
 			{
 				id: "session-work",
 				title: "Work session",
+				accountId: "work-claude",
 				resumes: [
 					{ at: 1, instanceId: "opencode", reason: "user" },
 					{ at: 2, instanceId: "work-claude", reason: "auto-switch" },
@@ -201,7 +214,13 @@ describe("Banners", () => {
 		).toBeNull();
 	});
 
-	it("keeps discovery as a fallback for a session without resume metadata", async () => {
+	it("does not infer an unroutable session account from discovery", async () => {
+		applyInstanceListResponse({
+			instances: [{ ...unhealthyInstance, id: "work-oc", status: "healthy" }],
+		});
+		seedRootSessions([
+			{ id: "session-work", title: "Work session", accountId: null },
+		]);
 		sessionState.currentId = "session-work";
 		applyGetAgentsResponse(
 			{
@@ -219,7 +238,8 @@ describe("Banners", () => {
 
 		await renderBanners();
 
-		expect(screen.getByText("Reconnecting to OpenCode…")).toBeTruthy();
+		expect(screen.queryByText("Reconnecting to OpenCode…")).toBeNull();
+		expect(screen.queryByText("OpenCode failed to start")).toBeNull();
 	});
 
 	it("renders a banner action after the banner arrives", async () => {

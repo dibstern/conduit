@@ -22,6 +22,7 @@ import {
 	handlePermissionModeInfo,
 	handleVariantInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import { applyProjectSetting } from "../../../src/lib/frontend/stores/project-settings.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { GetModelsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
@@ -30,6 +31,19 @@ beforeEach(() => {
 	clearClaudeSettingsState();
 	clearDiscoveryState();
 	sessionState.currentId = null;
+	applyInstanceListResponse({
+		instances: (["claude", "opencode"] as const).map((driver) => ({
+			id: driver,
+			name: driver,
+			driver,
+			isDefault: true,
+			port: 0,
+			managed: false,
+			status: "healthy",
+			restartCount: 0,
+			createdAt: 0,
+		})),
+	});
 });
 
 describe("project-settings dispatch", () => {

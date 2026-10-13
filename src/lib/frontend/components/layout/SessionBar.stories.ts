@@ -55,6 +55,7 @@ type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 
 function seedSessions(rows: readonly Row[]): void {
 	const sessions: SessionInfo[] = rows.map((row) => ({
+		accountId: null,
 		status: "idle",
 		projectSlug: "conduit",
 		...row,
@@ -663,6 +664,8 @@ export const NarrowestPhone: Story = {
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
+		driver: "opencode",
+		isDefault: true,
 		name: "Personal",
 		port: 4096,
 		managed: true,
@@ -672,6 +675,8 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 	{
 		id: "inst-work",
+		driver: "opencode",
+		isDefault: false,
 		name: "Work",
 		port: 4097,
 		managed: true,
@@ -683,6 +688,10 @@ const mockInstances: OpenCodeInstance[] = [
 
 function seedOpenCodeHeader(): void {
 	instanceState.instances = [...mockInstances];
+	seedSessions([
+		{ ...mockSession, accountId: "inst-personal" },
+		mockSessionLongTitle,
+	]);
 	applyGetAgentsResponse(
 		{
 			projectSlug: "conduit",
@@ -1009,7 +1018,12 @@ function seedClaudeHeader(): void {
 		...instance,
 		...accounts[index],
 		driver: "claude",
+		isDefault: index === 0,
 	}));
+	seedSessions([
+		{ ...mockSession, accountId: "claude-work" },
+		mockSessionLongTitle,
+	]);
 	applyGetAgentsResponse(
 		{
 			projectSlug: "conduit",

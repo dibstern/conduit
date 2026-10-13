@@ -285,6 +285,7 @@ describe("InstanceManager — missing methods", () => {
 				const sub = yield* subscribeToDaemonEvents;
 
 				yield* addInstance(sampleInput);
+				expect((yield* Queue.take(sub))._tag).toBe("DaemonSessionsChanged");
 				yield* startInstance("inst-1");
 
 				const event = yield* Queue.take(sub);

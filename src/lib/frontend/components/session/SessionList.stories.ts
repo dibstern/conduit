@@ -90,6 +90,7 @@ export const SelectMode: Story = {
 		const sessions: SessionInfo[] = [
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "select-one",
 				title: "Review build logs",
 				attention: "idle",
@@ -97,6 +98,7 @@ export const SelectMode: Story = {
 			},
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "select-two",
 				title: "Prepare release",
 				attention: "idle",
@@ -130,6 +132,7 @@ export const SnoozedShelfCollapsed: Story = {
 		seedSessions([
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "sleeping",
 				title: "Review build logs",
 				attention: "idle",
@@ -137,6 +140,7 @@ export const SnoozedShelfCollapsed: Story = {
 				snoozedUntil: new Date(2030, 9, 8, 9).getTime(),
 			},
 			{
+				accountId: null,
 				id: "working",
 				title: "Prepare release",
 				attention: "working",
@@ -164,6 +168,7 @@ export const SnoozedShelfOpen: Story = {
 		seedSessions([
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "sleeping",
 				title: "Review build logs",
 				attention: "idle",
@@ -172,6 +177,7 @@ export const SnoozedShelfOpen: Story = {
 			},
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "untimed",
 				title: "Wait for update",
 				attention: "idle",
@@ -197,6 +203,7 @@ export const PinnedAndSettledShelfCollapsed: Story = {
 			...mockSessionsAllGroups,
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "pinned",
 				title: "Review authentication",
 				attention: "needs-approval",
@@ -204,6 +211,7 @@ export const PinnedAndSettledShelfCollapsed: Story = {
 			},
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "settled",
 				title: "Fix navigation",
 				attention: "done-unread",
@@ -229,6 +237,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 			...mockSessionsAllGroups,
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "pinned",
 				title: "Review authentication",
 				attention: "needs-approval",
@@ -236,6 +245,7 @@ export const PinnedAndSettledShelfOpen: Story = {
 			},
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "settled",
 				title: "Fix navigation",
 				attention: "done-unread",
@@ -271,6 +281,7 @@ export const FilteredToNeedsYou: Story = {
 			...mockSessionsAllGroups,
 			{
 				projectSlug: "conduit",
+				accountId: null,
 				id: "approval",
 				title: "Approve deployment",
 				attention: "needs-approval",
@@ -292,6 +303,7 @@ export const FilterMatchesNothing: Story = {
 	beforeEach: () => {
 		seedSessions([
 			{
+				accountId: null,
 				id: "idle",
 				title: "Plan release",
 				attention: "idle",
@@ -314,6 +326,7 @@ export const GroupedByProject: Story = {
 	beforeEach: () => {
 		seedSessions([
 			{
+				accountId: null,
 				id: "local",
 				title: "Build sidebar",
 				attention: "working",
@@ -322,6 +335,7 @@ export const GroupedByProject: Story = {
 		]);
 		seedDaemonSessions([
 			{
+				accountId: null,
 				id: "foreign",
 				title: "Review release",
 				attention: "idle",
@@ -431,6 +445,7 @@ function seedRepositoryScope(projectOnly: boolean) {
 	seedSessions([
 		{
 			projectSlug: "conduit",
+			accountId: null,
 			id: "scope-main",
 			title: "Implement repository scope",
 			attention: "working",
@@ -438,6 +453,7 @@ function seedRepositoryScope(projectOnly: boolean) {
 	]);
 	seedDaemonSessions([
 		{
+			accountId: null,
 			id: "scope-review",
 			title: "Review the scope menu",
 			attention: "idle",

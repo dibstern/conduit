@@ -9,9 +9,14 @@ import {
 	handleModelInfo,
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import {
+	clearSessionState,
+	sessionState,
+} from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
+import { seedRootSessions } from "../stores/session-fixtures.js";
 
 const getAgentsRpcSpy = vi.hoisted(() =>
 	vi.fn(async (_input: unknown) => ({ projectSlug: "project-a", agents: [] })),
@@ -104,6 +109,41 @@ describe("InstanceModelPicker", () => {
 		reloadProviderSessionRpcSpy.mockClear();
 		showToastSpy.mockClear();
 		clearDiscoveryState();
+		clearSessionState();
+		applyInstanceListResponse({
+			instances: [
+				{
+					id: "personal",
+					name: "Personal",
+					driver: "claude",
+					isDefault: true,
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 0,
+				},
+				{
+					id: "opencode",
+					name: "OpenCode",
+					driver: "opencode",
+					isDefault: true,
+					port: 4096,
+					managed: true,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 0,
+				},
+			],
+		});
+		seedRootSessions([
+			{
+				id: "session-1",
+				title: "Session",
+				projectSlug: "project-a",
+				accountId: "personal",
+			},
+		]);
 		handleModelInfo({
 			model: "claude-sonnet-4-7",
 			provider: "claude",
@@ -119,7 +159,8 @@ describe("InstanceModelPicker", () => {
 
 	afterEach(() => {
 		cleanup();
-		sessionState.currentId = null;
+		clearSessionState();
+		applyInstanceListResponse({ instances: [] });
 		sessionViewState.compact = false;
 	});
 

@@ -21,6 +21,7 @@ import {
 	searchSessions,
 	sessionState,
 } from "./session.svelte.js";
+import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
 type ProjectRef = string;
 type SessionRow = SessionInfo;
@@ -101,6 +102,9 @@ export const sessionList: SessionListView = {
 let attachGeneration = 0;
 let shellFiber: RuntimeFiber<void, unknown> | null = null;
 let attachedProject: ProjectRef | null = null;
+accountSnapshotChangedListeners.add(() => {
+	if (attachedProject !== null) attachSessionList(attachedProject);
+});
 const shellSynchronizedListeners = new Set<(project: ProjectRef) => void>();
 
 export function onShellSynchronized(

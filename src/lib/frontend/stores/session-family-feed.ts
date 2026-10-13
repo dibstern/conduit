@@ -12,10 +12,14 @@ import {
 	resetSessionFamily,
 	sessionState,
 } from "./session.svelte.js";
+import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
 let viewed: { project: string; sessionId: string } | null = null;
 let generation = 0;
 let fiber: RuntimeFiber<void, never> | null = null;
+accountSnapshotChangedListeners.add(() => {
+	if (viewed !== null) viewFamily(viewed.project, viewed.sessionId, true);
+});
 
 /**
  * Follow the family of `sessionId` in `project`, an explicit argument rather
@@ -24,8 +28,13 @@ let fiber: RuntimeFiber<void, never> | null = null;
  * the old feed's envelopes are dropped by generation, so a late one from the
  * previous project cannot land in this one. `null` stops following.
  */
-export function viewFamily(project: string, sessionId: string | null): void {
+export function viewFamily(
+	project: string,
+	sessionId: string | null,
+	refresh = false,
+): void {
 	if (
+		!refresh &&
 		viewed !== null &&
 		sessionId !== null &&
 		viewed.project === project &&

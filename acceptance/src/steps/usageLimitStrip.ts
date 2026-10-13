@@ -3,6 +3,7 @@ import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	mockInstances,
 	requireRelayControl,
 	requireRpcControl,
 	setSessionRowStatus,
@@ -48,10 +49,15 @@ export function setClaudeAccounts(
 	page: Page,
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {
-	requireRpcControl(page).setDaemonList("SubscribeInstances", {
-		instances: accounts.map(([id, name]) => ({
+	// Like the daemon, replacing Claude accounts leaves other drivers' accounts listed.
+	const instances = [
+		...(mockInstances.get(page) ?? []).filter(
+			(instance) => instance["driver"] !== "claude",
+		),
+		...accounts.map(([id, name], index) => ({
 			id,
 			name,
+			isDefault: index === 0,
 			port: 0,
 			managed: false,
 			status: "healthy",
@@ -60,7 +66,9 @@ export function setClaudeAccounts(
 			driver: "claude",
 			usageEligible: true,
 		})),
-	});
+	];
+	mockInstances.set(page, instances);
+	requireRpcControl(page).setDaemonList("SubscribeInstances", { instances });
 }
 
 type StripAction = "Try again" | "Resume at reset" | "Cancel auto-resume";
@@ -393,6 +401,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			]);
 			setSessionRowStatus(world.page, currentSessionId(world.page), "idle", {
 				title: "Provider tests",
+				accountId: match[1],
 				limitRecovery: null,
 				resumes: [
 					{

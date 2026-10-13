@@ -205,11 +205,11 @@
 	});
 
 	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
-	const sessionInstanceId = $derived(session ? session.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[session.id] : undefined);
+	const sessionInstanceId = $derived(session?.accountId);
 	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
 	const supportsTaskStop = $derived((
 		sessionInstance?.capabilities?.supportsTaskStop
-			?? instanceState.providerCapabilities[sessionInstance?.driver ?? (session ? discoveryState.sessionProviderIds[session.id] : undefined) ?? sessionInstanceId ?? ""]?.supportsTaskStop
+			?? instanceState.providerCapabilities[sessionInstance?.driver ?? ""]?.supportsTaskStop
 	) === true);
 
 	const attentionCount = $derived(

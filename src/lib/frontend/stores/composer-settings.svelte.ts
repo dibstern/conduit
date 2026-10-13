@@ -26,7 +26,6 @@ import {
 	getActiveModelVariants,
 	getEffectiveInstanceId,
 	getProviderGroupsForInstance,
-	getSessionInstanceId,
 } from "./discovery.svelte.js";
 import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
@@ -236,7 +235,7 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 export const model: ComposerSetting<ComposerModel> = {
 	get options() {
 		const instanceId = sessionState.currentId
-			? getSessionInstanceId(sessionState.currentId)
+			? findSession(sessionState.currentId)?.accountId
 			: getEffectiveInstanceId();
 		return getProviderGroupsForInstance(instanceId).flatMap((group) =>
 			group.models.flatMap((entry) =>

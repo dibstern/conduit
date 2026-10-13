@@ -50,6 +50,7 @@ import type { SessionInfo } from "../../../src/lib/shared-types.js";
 
 const VICTIM = {
 	projectSlug: "project-a",
+	accountId: null,
 	id: "victim",
 	title: "Doomed Session",
 	status: "idle",
@@ -57,6 +58,7 @@ const VICTIM = {
 } satisfies SessionInfo;
 const KEEPER = {
 	projectSlug: "project-a",
+	accountId: null,
 	id: "keeper",
 	title: "Survivor",
 	status: "idle",
@@ -97,6 +99,7 @@ describe("deleted sessions leave the sidebar", () => {
 	it("keeps family rows until the family feed removes them", () => {
 		const child = {
 			projectSlug: "project-a",
+			accountId: null,
 			id: "child",
 			title: "Child",
 			status: "idle",
@@ -117,6 +120,7 @@ describe("deleted sessions leave the sidebar", () => {
 	it("removes a deleted subagent when the family feed removes it", () => {
 		const child = {
 			projectSlug: "project-a",
+			accountId: null,
 			id: "child",
 			title: "Child",
 			status: "idle",

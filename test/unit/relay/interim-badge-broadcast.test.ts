@@ -1,5 +1,6 @@
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { expect, it, vi } from "vitest";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	BackgroundLivenessTag,
 	ConfigTag,
@@ -13,7 +14,10 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
-import { makeMockConfig } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	makeMockConfig,
+} from "../../helpers/mock-factories.js";
 
 it("publishes task additions and removals from onChange without another event", async () => {
 	const bus = makeSessionEventBusLive();
@@ -34,6 +38,7 @@ it("publishes task additions and removals from onChange without another event", 
 			persistence,
 			Layer.succeed(BackgroundLivenessTag, liveness.backgroundOf),
 			Layer.succeed(ConfigTag, makeMockConfig()),
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		),
 	);
 	try {
@@ -121,6 +126,7 @@ it("publishes committed permission counts through the root subscription", async 
 			bus,
 			persistence,
 			Layer.succeed(ConfigTag, makeMockConfig()),
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		),
 	);
 	try {

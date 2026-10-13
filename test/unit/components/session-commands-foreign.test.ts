@@ -37,6 +37,7 @@ import {
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const foreign: SessionInfo = {
+	accountId: null,
 	id: "s1",
 	title: "Elsewhere",
 	status: "idle",

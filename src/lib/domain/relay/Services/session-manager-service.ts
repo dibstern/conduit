@@ -763,6 +763,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 				api,
 				stateRef,
 				readQuery,
+				sql,
+				accounts,
 				statusPollerOption,
 				backgroundOf,
 				snapshot,

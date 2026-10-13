@@ -139,6 +139,7 @@ describe("subscription RPC contracts", () => {
 		const decode = Schema.decodeUnknownSync(member.successSchema.success);
 		const session = {
 			id: "session-1",
+			accountId: null,
 			title: "Session",
 			status: "idle",
 			projectSlug: "project",

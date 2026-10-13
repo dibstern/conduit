@@ -131,15 +131,6 @@ export interface InstanceOption {
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
-const DRIVER_LABELS = { claude: "Claude", opencode: "OpenCode" } as const;
-
-/** Map a provider catalog id to the default instance id of its driver. */
-export function instanceIdForProviderId(
-	providerId: string,
-): "claude" | "opencode" {
-	return providerId === "claude" ? "claude" : "opencode";
-}
-
 // What the server has told us: the catalogue of providers, models, agents and
 // commands, the project's defaults, and the configuration the current session
 // is actually running with. Only the `handle*` and `apply*` functions in this
@@ -155,8 +146,6 @@ const serverDiscovery = $state({
 	currentProviderId: "" as string,
 	/** Retain session-scoped metadata so a switch never uses the previous provider. */
 	sessionProviderIds: {} as Record<string, string>,
-	/** The provider instance each session is bound to. */
-	sessionInstanceIds: {} as Record<string, string>,
 	commands: [] as CommandInfo[],
 	commandsFetched: false,
 	/** The project's model catalog has answered at least once. */
@@ -232,9 +221,6 @@ export const discoveryState = {
 	},
 	get sessionProviderIds(): Readonly<Record<string, string>> {
 		return serverDiscovery.sessionProviderIds;
-	},
-	get sessionInstanceIds(): Readonly<Record<string, string>> {
-		return serverDiscovery.sessionInstanceIds;
 	},
 	get commands(): readonly Immutable<CommandInfo>[] {
 		return serverDiscovery.commands;
@@ -410,49 +396,12 @@ export function getVisibleProviderGroups(): readonly Immutable<ProviderGroup>[] 
 	return filtered.length > 0 ? filtered : all;
 }
 
-/** Instances available in the harness rail. Configured provider instances are
- *  the source of truth (so an instance with no discovered models is still
- *  selectable); discovered providers supply the always-present default drivers
- *  and the model catalog. Default driver instances sort first (Claude, then
- *  OpenCode), named instances after. */
+/** Configured accounts are authoritative, including before models arrive.
+ *  Driver defaults sort first (Claude, then OpenCode), ordinary accounts after. */
 export function getAvailableInstances(): InstanceOption[] {
-	const byId = new Map<string, InstanceOption>();
-	for (const provider of discoveryState.providers) {
-		const driver = instanceIdForProviderId(provider.id);
-		const defaultInstance = instanceState.instances.find(
-			(instance) => instance.driver === driver && instance.isDefault,
-		);
-		const id = provider.instanceId ?? defaultInstance?.id ?? driver;
-		if (!byId.has(id)) {
-			byId.set(id, {
-				id,
-				driver,
-				label: defaultInstance?.name ?? DRIVER_LABELS[driver],
-				isDefault:
-					provider.instanceId === undefined || defaultInstance?.id === id,
-				isCustom:
-					provider.instanceId !== undefined && defaultInstance?.id !== id,
-				capabilities: instanceState.providerCapabilities[driver],
-			});
-		}
-	}
-	for (const inst of instanceState.instances) {
+	const available = instanceState.instances.map((inst): InstanceOption => {
 		const driver = inst.driver ?? "opencode";
-		const existing = byId.get(inst.id);
-		if (existing) {
-			byId.set(inst.id, {
-				...existing,
-				driver,
-				label: inst.name || existing.label,
-				isDefault: inst.isDefault ?? existing.isDefault ?? false,
-				isCustom: !(inst.isDefault ?? existing.isDefault),
-				status: inst.status,
-				capabilities:
-					inst.capabilities ?? instanceState.providerCapabilities[driver],
-			});
-			continue;
-		}
-		byId.set(inst.id, {
+		return {
 			id: inst.id,
 			driver,
 			label: inst.name || inst.id,
@@ -461,73 +410,56 @@ export function getAvailableInstances(): InstanceOption[] {
 			status: inst.status,
 			capabilities:
 				inst.capabilities ?? instanceState.providerCapabilities[driver],
-		});
-	}
+		};
+	});
 	const rank = (i: InstanceOption) => {
 		if (i.isDefault && i.driver === "claude") return 0;
 		if (i.isDefault && i.driver === "opencode") return 1;
 		return 2;
 	};
-	return [...byId.values()].sort(
+	return available.sort(
 		(a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
 	);
 }
 
 /** Visible provider groups scoped to one instance (the picker's right pane). */
 export function getProviderGroupsForInstance(
-	instanceId: string,
+	instanceId: string | null | undefined,
 ): readonly Immutable<ProviderGroup>[] {
-	const claude =
-		instanceId === "claude" ||
-		instanceState.instances.some(
-			(instance) => instance.id === instanceId && instance.driver === "claude",
-		);
+	const instance = instanceState.instances.find(
+		(item) => item.id === instanceId,
+	);
+	if (!instance) return [];
 	return getVisibleProviderGroups().filter((g) =>
 		g.provider.id === "claude"
-			? claude
-			: (g.provider.instanceId ?? "opencode") === instanceId,
+			? instance.driver === "claude"
+			: instance.driver !== "claude" &&
+				(g.provider.instanceId === undefined ||
+					g.provider.instanceId === instanceId),
 	);
 }
 
-/** The draft's available pick, else its model's provider, else the first instance. */
-export function getEffectiveInstanceId(): string {
+/** A draft's explicit live pick wins; otherwise use the server's driver default. */
+export function getEffectiveInstanceId(): string | undefined {
 	const available = getAvailableInstances();
-	const isAvailable = (id: string) =>
-		available.length === 0 || available.some((i) => i.id === id);
 	if (
 		choice.instanceId !== null &&
 		available.some((i) => i.id === choice.instanceId)
 	)
 		return choice.instanceId;
-	const driver = instanceIdForProviderId(
-		discoveryState.currentProviderId || discoveryState.defaultProviderId,
-	);
+	const provider =
+		discoveryState.currentProviderId || discoveryState.defaultProviderId;
+	const driver = provider
+		? provider === "claude"
+			? "claude"
+			: "opencode"
+		: undefined;
 	const defaultInstance = available.find(
-		(instance) => instance.driver === driver && instance.isDefault,
+		(instance) =>
+			instance.isDefault &&
+			(driver === undefined || instance.driver === driver),
 	);
-	if (defaultInstance) return defaultInstance.id;
-	if (isAvailable(driver)) return driver;
-	return (
-		available.find((instance) => instance.driver === driver)?.id ??
-		available[0]?.id ??
-		driver
-	);
-}
-
-/** The instance a session's picker is locked to. Only built-in instances'
- *  catalogues are fetched, so a custom instance shows its driver's. Until
- *  GetAgents reports the binding, the session's own model names its harness,
- *  since a model runs only on its own. One left on the default has none, so
- *  assume the composer's aim, which is where a new session runs. */
-export function getSessionInstanceId(sessionId: string): string {
-	const bound = getAvailableInstances().find(
-		(instance) => instance.id === serverDiscovery.sessionInstanceIds[sessionId],
-	);
-	if (bound) return bound.driver;
-	const provider = findSession(sessionId)?.model?.provider;
-	return provider
-		? instanceIdForProviderId(provider)
-		: getEffectiveInstanceId();
+	return defaultInstance?.id;
 }
 
 /** Pick this draft's instance and re-aim its model if it belongs to another harness. */
@@ -683,8 +615,6 @@ export function applyGetAgentsResponse(
 	});
 	if (sessionId) {
 		serverDiscovery.sessionProviderIds[sessionId] = response.providerScope.id;
-		if (response.instanceId !== undefined)
-			serverDiscovery.sessionInstanceIds[sessionId] = response.instanceId;
 	}
 	if (response.hiddenAgents) {
 		serverDiscovery.hiddenAgents = [...response.hiddenAgents];
@@ -1034,7 +964,7 @@ export function followDraftModelPick(): (msg: {
  *  commits the model it was picked for, which may be the one the server
  *  reported. Drops a model carried over from another harness, which
  *  `selectInstance` keeps when the new harness has no models yet. */
-export function getChosenModel(instanceId: string):
+export function getChosenModel(instanceId: string | undefined):
 	| {
 			readonly modelId: string;
 			readonly providerId: string;
@@ -1166,7 +1096,6 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
 	serverDiscovery.sessionProviderIds = {};
-	serverDiscovery.sessionInstanceIds = {};
 	serverDiscovery.commands = [];
 	serverDiscovery.commandsFetched = false;
 	serverDiscovery.modelsLoaded = false;

@@ -8,6 +8,7 @@
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
@@ -26,13 +27,14 @@
 
 	let busy = $state(false);
 	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
+	const accountId = $derived(findSession(sessionId)?.accountId ?? undefined);
 
 	const account = $derived(
-		claudeAccounts.nameOf(limitRecovery.instanceId, limitRecovery.instanceId),
+		accountId ? claudeAccounts.nameOf(accountId, accountId) : "Account unavailable",
 	);
 	// Switch account needs another Claude account to go to.
 	const canSwitch = $derived(
-		claudeAccounts.hasAlternative(limitRecovery.instanceId),
+		accountId !== undefined && claudeAccounts.hasAlternative(accountId),
 	);
 	const geometry = $derived(
 		sessionViewState.compact ? "h-[34px] flex-1 rounded-[10px] text-[12px]" : "h-[24px] rounded-[8px] text-[11px]",
@@ -79,26 +81,32 @@
 
 	// Without `at` the server re-checks quota and continues now; with it, the
 	// server schedules the resume and the strip turns to its waiting state.
-	const continueAt = (at?: number) =>
-		run(
+	async function continueAt(at?: number): Promise<void> {
+		const currentAccountId = accountId;
+		if (!currentAccountId) {
+			showToast("No account is available for this session. Add a Claude account in Settings before continuing.", { variant: "error" });
+			return;
+		}
+		return run(
 			continueSessionRpc({
 				projectSlug,
 				sessionId,
-				instanceId: limitRecovery.instanceId,
-				expectedInstanceId: limitRecovery.instanceId,
+				instanceId: currentAccountId,
+				expectedInstanceId: currentAccountId,
 				...(at === undefined ? {} : { at }),
 				originId: getBrowserClientId(),
 			}),
 			"Couldn't continue the session",
 		);
+	}
 
 	const cancelResume = () =>
 		run(cancelContinuationRpc({ projectSlug, sessionId, originId: getBrowserClientId() }), "Couldn't cancel the resume");
 </script>
 
 <!-- The strip's main action while limited, second to a scheduled resume. -->
-{#snippet switchAccount(primary: boolean)}
-	<AccountSwitch {sessionId} {projectSlug} account={limitRecovery.instanceId} limit={limitRecovery} side="top">
+{#snippet switchAccount(primary: boolean, currentAccountId: string)}
+	<AccountSwitch {sessionId} {projectSlug} account={currentAccountId} limit={limitRecovery} side="top">
 		{#snippet trigger({ props, loading })}
 			<Button
 				{...props}
@@ -130,8 +138,8 @@
 		</span>
 		{#if !limitRecovery.continued}
 			<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
-				{#if canSwitch}
-					{@render switchAccount(true)}
+				{#if canSwitch && accountId}
+					{@render switchAccount(true, accountId)}
 				{/if}
 				{#if limitRecovery.resetsAt === undefined}
 					<Button variant={canSwitch ? "secondary" : "inverse"} size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class="px-[10px] {canSwitch ? '' : 'font-semibold'} {geometry}" onclick={() => continueAt()}>Try again</Button>
@@ -147,8 +155,8 @@
 			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
 		</span>
 		<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[6px] w-full' : 'shrink-0'}">
-			{#if canSwitch}
-				{@render switchAccount(false)}
+			{#if canSwitch && accountId}
+				{@render switchAccount(false, accountId)}
 			{/if}
 			<Button variant="ghost" size="content" iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class="text-[11px] {sessionViewState.compact ? 'h-[34px] flex-1 rounded-[10px] px-[8px]' : 'h-[24px] rounded-[8px] px-[10px]'}" onclick={cancelResume}>Cancel auto-resume</Button>
 		</div>

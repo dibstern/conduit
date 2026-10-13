@@ -7,6 +7,7 @@ import {
 	openModelPicker,
 	requireRelayControl,
 	requireRpcControl,
+	setSessionRowStatus,
 } from "./shared.js";
 
 export const opencodeConnectionBannerHandlers: StepHandler[] = [
@@ -20,6 +21,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.upsertShellRow({
 				id: `sess-banner-${name.toLowerCase()}`,
+				accountId: instanceId,
 				title: `${name} session`,
 				status: "idle",
 				projectSlug: "myapp",
@@ -54,6 +56,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 				roots: true,
 				sessions: ["Claude", "OpenCode"].map((name) => ({
 					id: `sess-banner-${name.toLowerCase()}`,
+					accountId: name.toLowerCase(),
 					title: `${name} session`,
 					status: "idle",
 					projectSlug: "myapp",
@@ -75,6 +78,36 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			const claude = name === "Claude";
 			const claudeModel = claude && !match[2];
 			const rpc = requireRpcControl(world.page);
+			if (match[3]) {
+				const instanceId = match[3];
+				setSessionRowStatus(world.page, sessionId, "idle", {
+					accountId: instanceId,
+				});
+				const { instances } = rpc.initialDaemonList(
+					"SubscribeInstances",
+				)[0] as {
+					instances: Record<string, unknown>[];
+				};
+				if (!instances.some((instance) => instance["id"] === instanceId)) {
+					rpc.setDaemonList("SubscribeInstances", {
+						instances: [
+							...instances,
+							{
+								id: instanceId,
+								name: instanceId,
+								driver: claude ? "claude" : "opencode",
+								isDefault: false,
+								usageEligible: claude,
+								port: 0,
+								managed: false,
+								status: "healthy",
+								restartCount: 0,
+								createdAt: PINNED_CLOCK_MS,
+							},
+						],
+					});
+				}
+			}
 			rpc.setResponse("GetModels", {
 				projectSlug: "myapp",
 				providers: dualDriverProviders.filter(
@@ -123,12 +156,18 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const instanceId = match[1] ?? "";
 			const rpc = requireRpcControl(world.page);
+			const { instances } = rpc.initialDaemonList("SubscribeInstances")[0] as {
+				instances: Record<string, unknown>[];
+			};
 			rpc.setDaemonList("SubscribeInstances", {
 				instances: [
+					...instances.filter((instance) => instance["id"] !== instanceId),
 					{
 						id: instanceId,
 						name: instanceId,
 						driver: "opencode",
+						isDefault: false,
+						usageEligible: false,
 						port: 0,
 						managed: false,
 						status: "unhealthy",

@@ -26,6 +26,8 @@ export function toSessionInfoList(
 
 			return {
 				id: s.id,
+				// SDK-only summaries carry no Conduit account binding.
+				accountId: null,
 				projectSlug,
 				title: s.title ?? "Untitled",
 				status: status === "busy" || status === "retry" ? status : "idle",

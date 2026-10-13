@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { connectionState, getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { discoveryState, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
+	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import {
 		applyInstanceListResponse,
@@ -33,9 +33,9 @@
 	let cachedInstanceId = $state<string | null>(null);
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
-	let cachedProviderId = $state<string | null>(null);
+	let cachedDriver = $state<string | null>(null);
 	const instanceId = $derived(sessionState.currentId
-		? findSession(sessionState.currentId)?.resumes?.at(-1)?.instanceId ?? discoveryState.sessionInstanceIds[sessionState.currentId]
+		? findSession(sessionState.currentId)?.accountId
 		: getEffectiveInstanceId());
 	const currentInstance = $derived(instanceId
 		? getInstanceById(instanceId) ?? getCachedInstanceById(instanceId)
@@ -43,20 +43,13 @@
 
 	const instanceName = $derived.by(() => {
 		if (currentInstance?.name) return currentInstance.name;
-		if (instanceId === "claude" && cachedInstanceId === null) return "Claude";
-		return cachedInstanceName;
+		return instanceId && instanceId === cachedInstanceId ? cachedInstanceName : "Conduit";
 	});
 
 	// Keep the cache in sync whenever instanceName resolves from real data
 	$effect(() => {
 		if (instanceName && instanceName !== cachedInstanceName) {
 			cachedInstanceName = instanceName;
-		}
-	});
-
-	$effect(() => {
-		if (discoveryState.currentProviderId) {
-			cachedProviderId = discoveryState.currentProviderId;
 		}
 	});
 
@@ -68,7 +61,7 @@
 		if (currentInstance) {
 			cachedInstanceId = currentInstance.id;
 			cachedInstanceStatus = currentInstance.status;
-			cachedProviderId = currentInstance.driver ?? "opencode";
+			cachedDriver = currentInstance.driver ?? "opencode";
 		}
 		// Only update when instances are loaded (not after clearInstanceState)
 		if (instanceState.instances.length > 0) {
@@ -79,7 +72,7 @@
 	// Show instance action buttons when overlay is visible, instance was unhealthy/stopped,
 	// and there are multiple instances
 	const showInstanceActions = $derived(
-		cachedProviderId !== "claude" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
+		instanceId === cachedInstanceId && cachedDriver === "opencode" && !connected && cachedMultiInstance && cachedInstanceStatus != null &&
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
 	);
 

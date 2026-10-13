@@ -177,7 +177,7 @@ const QUIET = new Set<Command["kind"]>([
 	"rename",
 ]);
 
-type Item = Omit<SessionInfo, "updatedAt" | "projectSlug">;
+type Item = Omit<SessionInfo, "updatedAt" | "projectSlug" | "accountId">;
 interface Shown {
 	readonly item: Item;
 	/** The item without background work, which can hide a stored change. */
@@ -189,7 +189,7 @@ interface Shown {
 const visible = ({
 	updatedAt: _,
 	...item
-}: Omit<SessionInfo, "projectSlug">): Item => item;
+}: Omit<SessionInfo, "projectSlug" | "accountId">): Item => item;
 const byId = (items: readonly Item[]) =>
 	[...items].sort((a, b) => a.id.localeCompare(b.id));
 

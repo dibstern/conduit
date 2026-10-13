@@ -10,6 +10,7 @@ const now = Date.now();
 const sessions: ListDaemonSessionsResponse["sessions"] = [
 	{
 		id: "story-live",
+		accountId: null,
 		status: "idle",
 		title: "Review the release",
 		projectSlug: "conduit",
@@ -17,6 +18,7 @@ const sessions: ListDaemonSessionsResponse["sessions"] = [
 	},
 	{
 		id: "story-settled",
+		accountId: null,
 		status: "idle",
 		title: "Archive old notes",
 		projectSlug: "conduit",
@@ -25,6 +27,7 @@ const sessions: ListDaemonSessionsResponse["sessions"] = [
 	},
 	{
 		id: "story-snoozed",
+		accountId: null,
 		status: "idle",
 		title: "Resume design work",
 		projectSlug: "gym",

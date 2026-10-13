@@ -19,6 +19,7 @@ import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";
 
 const session = {
 	projectSlug: "project",
+	accountId: null,
 	id: "session-1",
 	title: 'Review "wire"\n雪',
 	status: "busy",

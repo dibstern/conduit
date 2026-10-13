@@ -10,7 +10,7 @@
 
 	let { driver, instanceId, size, surface }: {
 		driver: ProviderDriverKind;
-		instanceId: string;
+		instanceId: string | undefined;
 		// 15 and 17 retire with bn6x.8/.9.
 		size: 12 | 13 | 14 | 15 | 16 | 17;
 		surface: "box" | "surface" | "page";
@@ -23,7 +23,7 @@
 	const accounts = $derived(getClaudeAccounts(projectSlug));
 	const instances = $derived(getAvailableInstances());
 	const badged = $derived(
-		driver === "claude" ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2,
+		instanceId !== undefined && (driver === "claude" ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2),
 	);
 	const letter = $derived(accounts.nameOf(
 		instanceId,
@@ -32,7 +32,7 @@
 	const spinning = $derived(
 		driver === "claude" && accounts.switchingTo !== null &&
 		accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId &&
-		(instanceId === accounts.switchingTo || instanceId === (composerAccountId(session) ?? "claude")),
+		(instanceId === accounts.switchingTo || instanceId === composerAccountId(session)),
 	);
 </script>
 
@@ -51,7 +51,7 @@
 	{:else}
 		<Icon name="bot" {size} class="text-text-secondary" />
 	{/if}
-	{#if badged}
+	{#if badged && instanceId !== undefined}
 		<span
 			data-testid="harness-logo-badge"
 			data-account={instanceId}

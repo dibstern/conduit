@@ -32,6 +32,7 @@ function press(
 
 const open: SessionInfo = {
 	projectSlug: "test-project",
+	accountId: null,
 	id: "s1",
 	title: "Open",
 	status: "idle",

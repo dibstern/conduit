@@ -14,6 +14,7 @@ import type {
 	ScanNowResponse,
 } from "../transport/ws-rpc.js";
 import type { InstanceStatus, OpenCodeInstance } from "../types.js";
+import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 
 // This store has no client half: every field is an instance row, a cached copy
 // of one, or the result of a probe the server answered.
@@ -136,12 +137,18 @@ export function applyInstanceListResponse(
 			? { lastHealthCheck: instance.lastHealthCheck }
 			: {}),
 	}));
+	// Only these fields change which account a session or draft resolves to.
+	const routingKey = (list: readonly OpenCodeInstance[]) =>
+		list.map((i) => `${i.id}:${i.driver}:${i.isDefault}`).join("|");
+	const accountsChanged = routingKey(instances) !== routingKey(cachedInstances);
 	instanceState.instances = instances;
 	if (response.providerCapabilities) {
 		instanceState.providerCapabilities = { ...response.providerCapabilities };
 	}
 	// Keep a cached copy that survives disconnect
 	cachedInstances = [...instances];
+	if (accountsChanged)
+		for (const listener of accountSnapshotChangedListeners) listener();
 }
 
 export function getInstanceById(id: string): OpenCodeInstance | undefined {

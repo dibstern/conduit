@@ -24,6 +24,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 		run: ({ world, match }) => {
 			const rows: SessionInfo[] = [
 				{
+					accountId: null,
 					id: "row-existing",
 					title: "Existing worktree",
 					status: "idle",
@@ -37,6 +38,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 					git: { branch: match[1] ?? "", worktree: "existing", merged: false },
 				},
 				{
+					accountId: null,
 					id: "row-new",
 					title: "New worktree",
 					status: "idle",
@@ -50,6 +52,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 					git: { branch: match[2] ?? "", worktree: "new", merged: false },
 				},
 				{
+					accountId: null,
 					id: "row-local",
 					title: "Local session",
 					status: "idle",
@@ -113,6 +116,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 			];
 			const rows: SessionInfo[] = [
 				{
+					accountId: null,
 					id: "row-grouped-one",
 					title: "First grouped session",
 					status: "idle",
@@ -121,6 +125,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 					git: { branch: "main" },
 				},
 				{
+					accountId: null,
 					id: "row-grouped-two",
 					title: "Second grouped session",
 					status: "idle",
@@ -129,6 +134,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 					git: { branch: "main" },
 				},
 				{
+					accountId: null,
 					id: "row-solo",
 					title: "Lone repository session",
 					status: "idle",
@@ -159,6 +165,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 		run: ({ world, match }) => {
 			requireRpcControl(world.page).setShellRows([
 				{
+					accountId: "opencode",
 					id: OPENCODE_ROW_ID,
 					title: match[1] ?? "",
 					status: "idle",

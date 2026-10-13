@@ -23,6 +23,7 @@ const row = (
 	id: string,
 	overrides: Partial<SessionInfo> = {},
 ): SessionInfo => ({
+	accountId: null,
 	id,
 	title: id,
 	projectSlug: "local",
@@ -218,6 +219,7 @@ describe("groupSessionsByDate", () => {
 			[
 				{
 					projectSlug: "local",
+					accountId: null,
 					id: "created",
 					title: "created",
 					status: "idle",
@@ -234,6 +236,7 @@ describe("groupSessionsByDate", () => {
 			[
 				{
 					projectSlug: "local",
+					accountId: null,
 					id: "undated",
 					title: "undated",
 					status: "idle",

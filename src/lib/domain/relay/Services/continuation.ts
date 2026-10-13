@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
-import { Clock, Context, Effect, Layer, Queue, Ref, Schema } from "effect";
+import {
+	Clock,
+	Context,
+	Effect,
+	Layer,
+	Option,
+	Queue,
+	Ref,
+	Schema,
+} from "effect";
 import type { AccountRef, ClaudeAccount } from "../../../contracts/account.js";
 import {
 	AccountUnavailable,
@@ -270,14 +279,36 @@ export const makeContinuation = Effect.gen(function* () {
 					sessionId,
 					instanceId: options.instanceId,
 				});
+			// Legacy callers hold the stored binding; the UI holds its effective id.
+			// Freeze both before quota probing rather than resolving the expected token.
+			const expectedSourceMatches =
+				options.expectedInstanceId === initialSession.provider ||
+				options.expectedInstanceId === source.id;
 			const checkSession = (ownRequest = false) =>
 				Effect.gen(function* () {
 					const session = yield* read.getSession(sessionId);
-					if (!session || session.provider !== options.expectedInstanceId)
+					const currentSource = session
+						? yield* directory
+								.resolve({ _tag: "Id", id: session.provider })
+								.pipe(Effect.option)
+						: Option.none();
+					if (
+						!session ||
+						!expectedSourceMatches ||
+						session.provider !== initialSession.provider ||
+						!Option.exists(currentSource, (account) => account.id === source.id)
+					)
 						return yield* new StaleSwitch({
 							sessionId,
 							expectedInstanceId: options.expectedInstanceId,
-							...(session ? { actualInstanceId: session.provider } : {}),
+							...(session
+								? {
+										actualInstanceId: Option.match(currentSource, {
+											onNone: () => session.provider,
+											onSome: (account) => account.id,
+										}),
+									}
+								: {}),
 						});
 					if (
 						(options.at === undefined && session.pending_rewind_message_id) ||
@@ -409,7 +440,8 @@ export const makeContinuation = Effect.gen(function* () {
 										if (
 											switched ||
 											(recovery &&
-												recovery.instanceId !== options.expectedInstanceId) ||
+												recovery.instanceId !== initialSession.provider &&
+												recovery.instanceId !== source.id) ||
 											(options.onlyIfUnscheduled &&
 												recovery?.scheduledAt !== undefined)
 										)

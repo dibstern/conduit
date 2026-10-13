@@ -9,8 +9,9 @@ import {
 	planUsageWindows,
 	usageDisplay,
 } from "../utils/continuation.js";
-import { discoveryState, getEffectiveInstanceId } from "./discovery.svelte.js";
+import { getEffectiveInstanceId } from "./discovery.svelte.js";
 import { getInstanceById, instanceState } from "./instance.svelte.js";
+import { sessionState } from "./session.svelte.js";
 
 export const usageState = $state<{
 	readings: readonly UsageReading[];
@@ -25,14 +26,15 @@ export function applyUsageLimitsSetting(setting: UsageLimitsSetting): void {
 	usageState.limits = setting;
 }
 
-/** A resumed session uses its latest account; a draft uses its effective instance. */
+/** The server publishes a session's account; drafts use the directory's default. */
 export function composerAccountId(
 	session: Immutable<SessionInfo> | undefined,
 ): string | undefined {
 	return session
-		? (session.resumes?.at(-1)?.instanceId ??
-				discoveryState.sessionInstanceIds[session.id])
-		: getEffectiveInstanceId();
+		? (session.accountId ?? undefined)
+		: sessionState.currentId
+			? undefined
+			: getEffectiveInstanceId();
 }
 
 /** Include eligible Claude accounts even before their first usage reading. */

@@ -1455,6 +1455,7 @@ describe("handleForkSession", () => {
 				Effect.succeed([
 					{
 						projectSlug: "test-project",
+						accountId: null,
 						id: "ses-parent",
 						title: "Parent Session",
 						status: "idle" as const,
@@ -1463,6 +1464,7 @@ describe("handleForkSession", () => {
 					},
 					{
 						projectSlug: "test-project",
+						accountId: null,
 						id: "ses-child",
 						title: "Forked Session",
 						status: "idle" as const,
@@ -2507,6 +2509,7 @@ describe("handleDeleteSession", () => {
 				Effect.succeed([
 					{
 						projectSlug: "test-project",
+						accountId: null,
 						id: "remaining-session",
 						title: "Remaining Session",
 						status: "idle" as const,
@@ -3377,6 +3380,7 @@ describe("handleMessage", () => {
 				Effect.succeed([
 					{
 						projectSlug: "test-project",
+						accountId: null,
 						id: "session-1",
 						title: "Untitled",
 						status: "idle" as const,
@@ -3443,6 +3447,7 @@ describe("handleMessage", () => {
 			Effect.succeed([
 				{
 					projectSlug: "test-project",
+					accountId: null,
 					id: "session-1",
 					title: "User named this",
 					status: "idle" as const,

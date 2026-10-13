@@ -17,6 +17,7 @@ import {
 	HashMap,
 	Layer,
 	Option,
+	PubSub,
 	Ref,
 	Schedule,
 	Scope,
@@ -72,7 +73,8 @@ import {
 } from "./config-persistence-service.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import {
-	type DaemonEventBusTag,
+	DaemonEvent,
+	DaemonEventBusTag,
 	publishInstanceError,
 	publishInstanceStatusChanged,
 	publishProviderInstanceRemoved,
@@ -491,6 +493,10 @@ export const applyAccountChange = (change: AccountChange) =>
 					yield* publishInstanceStatusChanged(id);
 				yield* requestConfigSave;
 			}),
+		);
+		yield* PubSub.publish(
+			yield* DaemonEventBusTag,
+			DaemonEvent.DaemonSessionsChanged(),
 		);
 		return change._tag === "Add"
 			? committed.accounts.at(-1)

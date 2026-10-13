@@ -24,6 +24,7 @@ const row = (
 	> = {},
 ): SessionInfo => ({
 	projectSlug: "project-a",
+	accountId: null,
 	id,
 	title: id,
 	status: "idle",

@@ -12,20 +12,26 @@ export { clearSessionSearch } from "../../../src/lib/frontend/stores/session.sve
 
 type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 
+const completeRow = (row: Row): SessionInfo => ({
+	status: "idle",
+	projectSlug: "project-a",
+	accountId: null,
+	...row,
+});
 const completeRows = (rows: readonly Row[]): SessionInfo[] =>
-	rows.map((row) => ({ status: "idle", projectSlug: "project-a", ...row }));
+	rows.map(completeRow);
 
 let sequence = 0;
 
 type TestChange =
 	| {
 			readonly _tag: "snapshot";
-			readonly rows: readonly SessionInfo[];
+			readonly rows: readonly Row[];
 			readonly sequence?: number;
 	  }
 	| {
 			readonly _tag: "upsert";
-			readonly item: SessionInfo;
+			readonly item: Row;
 			readonly sequence?: number;
 	  }
 	| {
@@ -40,7 +46,11 @@ const sequenced = (change: TestChange): Change<SessionInfo> => {
 	if (change._tag === "synchronized") return change;
 	const version = change.sequence ?? ++sequence;
 	sequence = Math.max(sequence, version);
-	return { ...change, sequence: version };
+	return change._tag === "snapshot"
+		? { ...change, rows: completeRows(change.rows), sequence: version }
+		: change._tag === "upsert"
+			? { ...change, item: completeRow(change.item), sequence: version }
+			: { ...change, sequence: version };
 };
 
 export function applySessionChange(change: TestChange): void {
@@ -72,17 +82,26 @@ export function seedRootSessions(rows: readonly Row[]): void {
 }
 
 export function applySessionSnapshot(
-	rows: readonly SessionInfo[],
+	rows: readonly Row[],
 	scope: "complete" | "partial",
 ): void {
 	if (scope === "partial") {
-		for (const row of rows)
+		for (const row of completeRows(rows))
 			applyFeedChange({ _tag: "upsert", sequence: ++sequence, item: row });
-	} else applyFeedChange({ _tag: "snapshot", sequence: ++sequence, rows });
+	} else
+		applyFeedChange({
+			_tag: "snapshot",
+			sequence: ++sequence,
+			rows: completeRows(rows),
+		});
 }
 
-export function applySessionUpsert(row: SessionInfo): void {
-	applyFeedChange({ _tag: "upsert", sequence: ++sequence, item: row });
+export function applySessionUpsert(row: Row): void {
+	applyFeedChange({
+		_tag: "upsert",
+		sequence: ++sequence,
+		item: completeRow(row),
+	});
 }
 
 export function applySessionRemoved(id: string): void {

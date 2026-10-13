@@ -86,6 +86,7 @@ for (const scenario of [
 			},
 		};
 		const session: SessionInfo = {
+			accountId: null,
 			id: "git-folders-session",
 			title: "Git folders",
 			status: "idle",

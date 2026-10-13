@@ -15,6 +15,7 @@ describe("SessionItem wake marker", () => {
 	] as const)("shows %s in the existing meta line", (reason, label, colour) => {
 		const session: SessionInfo = {
 			projectSlug: "test-project",
+			accountId: null,
 			id: reason,
 			title: "Work",
 			status: "idle",

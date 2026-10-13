@@ -7,10 +7,11 @@
 <script module lang="ts">
 	import type { BannerConfig } from "../../types.js";
 	import { uiState } from "../../stores/ui.svelte.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getCachedInstances, instanceState } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
+	import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 
 	const INSTANCE_WARNING: BannerConfig = {
@@ -30,19 +31,14 @@
 	// running but aren't responding to health checks. "stopped" (intentionally
 	// off) and "starting" (booting up) are normal states.
 	function instanceWarningShown(): boolean {
-		const instances = instanceState.instances;
+		const instances = instanceState.instances.filter((instance) => instance.driver === "opencode");
 		if (instances.length === 0) return false;
 		if (!instances.every((i) => i.status === "unhealthy")) return false;
 
-		const currentProviderId = discoveryState.currentProviderId;
-		if (currentProviderId) return currentProviderId !== "claude";
-
-		return !discoveryState.providers.some(
-			(provider) =>
-				provider.id === "claude" &&
-				provider.configured &&
-				provider.models.length > 0,
-		);
+		const accountId = sessionState.currentId
+			? findSession(sessionState.currentId)?.accountId
+			: getEffectiveInstanceId();
+		return instances.some((instance) => instance.id === accountId);
 	}
 
 	/** The app-wide banners, health warning first. Reactive inside $derived. */
@@ -50,22 +46,16 @@
 		const banners = instanceWarningShown() ? [INSTANCE_WARNING, ...uiState.banners] : [...uiState.banners];
 		const sessionId = sessionState.currentId;
 		const session = sessionId ? findSession(sessionId) : undefined;
-		// Discovery can fail during an outage; the latest persisted resume still
-		// identifies this session's instance and its configured provider driver.
-		const instanceId = session?.resumes?.at(-1)?.instanceId
-			?? (sessionId ? discoveryState.sessionInstanceIds[sessionId] : undefined);
+		const accountId = sessionId ? session?.accountId : getEffectiveInstanceId();
 		const instances = getCachedInstances();
-		const instance = instances.find((candidate) => candidate.id === instanceId);
-		const providerId = instance ? instance.driver ?? "opencode"
-			: instanceId === "claude" || instanceId === "opencode" ? instanceId
-			: sessionId ? discoveryState.sessionProviderIds[sessionId] : undefined;
-		// The relay publishes its selected instance's status under the default
-		// alias, including when it implicitly selects the first OpenCode instance.
-		const defaultInstance = instances.find((candidate) => candidate.driver !== "claude");
-		const connectionInstanceId = instanceId === defaultInstance?.id ? "opencode" : instanceId ?? "opencode";
+		const instance = instances.find((candidate) => candidate.id === accountId);
+		// Older relays publish their first OpenCode runtime under the managed
+		// transport alias. Prefer the account's own status whenever it is present.
+		const aliasedInstance = instances.find((candidate) => candidate.driver === "opencode");
 		const status =
-			sessionId && providerId === "opencode"
-				? uiState.opencodeConnections[connectionInstanceId]
+			sessionId && instance?.driver === "opencode" && accountId
+				? uiState.opencodeConnections[accountId] ??
+					(accountId === aliasedInstance?.id ? uiState.opencodeConnections[MANAGED_OPENCODE_ACCOUNT_ID] : undefined)
 				: undefined;
 		if (status === "starting") {
 			banners.push({

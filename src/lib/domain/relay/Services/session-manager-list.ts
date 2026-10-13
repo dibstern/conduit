@@ -1,3 +1,4 @@
+import { SqlClient } from "@effect/sql";
 import { Effect, HashMap, type Option, Ref } from "effect";
 import { withCachedSessionGit } from "../../../git/session-git.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
@@ -11,6 +12,8 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import type { SessionBackground } from "../../../session/background-liveness.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { resolveSessionAccountIds } from "../../daemon/Services/session-accounts.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	type RelayStatusSnapshotService,
@@ -113,7 +116,19 @@ export const listSessions = (
 			lastKnownSessionCount: lineage.count,
 		}));
 		yield* updateRelaySessionCountSnapshot(lineage.count);
-		return sessions.map((session) => ({ ...session, projectSlug }));
+		const accountIds = yield* resolveSessionAccountIds(
+			sessions.map((session) => session.id),
+		).pipe(
+			Effect.mapError(
+				(cause) =>
+					new SessionManagerError({ operation: "listSessions", cause }),
+			),
+		);
+		return sessions.map((session) => ({
+			...session,
+			projectSlug,
+			accountId: accountIds.get(session.id) ?? null,
+		}));
 	}).pipe(
 		Effect.annotateLogs("operation", "listSessions"),
 		Effect.withSpan("session.listSessions"),
@@ -141,6 +156,8 @@ export const makeSessionListOperations = ({
 	api,
 	stateRef,
 	readQuery,
+	sql,
+	accounts,
 	statusPollerOption,
 	backgroundOf,
 	snapshot,
@@ -150,6 +167,8 @@ export const makeSessionListOperations = ({
 	api: OpenCodeAPI;
 	stateRef: Ref.Ref<SessionManagerState>;
 	readQuery: ReadQueryEffect;
+	sql: SqlClient.SqlClient;
+	accounts: AccountDirectory["Type"];
 	statusPollerOption: Option.Option<StatusPollerShape>;
 	backgroundOf:
 		| ((sessionId: string) => SessionBackground | undefined)
@@ -176,6 +195,8 @@ export const makeSessionListOperations = ({
 			}).pipe(
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(SessionManagerStateTag, stateRef),
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(AccountDirectory, accounts),
 			);
 			const withEffectRead = base.pipe(
 				Effect.provideService(ReadQueryEffectTag, readQuery),

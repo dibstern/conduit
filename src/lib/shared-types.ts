@@ -300,6 +300,8 @@ export const SessionGitSchema = Schema.Struct({
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
+	/** Effective live account, or null when the stored binding cannot route. */
+	accountId: Schema.NullOr(Schema.String),
 	title: Schema.String,
 	status: SessionStatusSchema,
 	projectSlug: Schema.String,

@@ -54,8 +54,8 @@ import {
 	toolDetail,
 } from "../tool-wire-projection.js";
 
-// The relay or daemon supplies project ownership when reading this database.
-type SessionProjection = Omit<SessionInfo, "projectSlug">;
+// The relay or daemon supplies ownership and resolves the current account.
+type SessionProjection = Omit<SessionInfo, "projectSlug" | "accountId">;
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
 const decodeGoalState = Schema.decodeUnknownSync(

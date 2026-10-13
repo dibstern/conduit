@@ -30,10 +30,12 @@ import type {
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
 import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
+import type { AccountDirectory } from "./account-directory.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
 } from "./project-registry-service.js";
+import { resolveSessionAccountIds } from "./session-accounts.js";
 
 class DaemonSessionReadError extends Data.TaggedError(
 	"DaemonSessionReadError",
@@ -119,6 +121,9 @@ const readProjectSessions = (
 				...(options.cursor !== undefined ? { before: options.cursor } : {}),
 			});
 		}).pipe(Effect.provide(readQueryLayer));
+		const accountIds = yield* resolveSessionAccountIds(
+			sessions.map((session) => session.id),
+		).pipe(Effect.provide(sqliteLayer));
 		const directories = new Set(
 			sessions.flatMap((session) => [
 				effectiveWorkingDirectory(project.folders[0], session.workspace),
@@ -139,7 +144,11 @@ const readProjectSessions = (
 		return yield* Effect.forEach(sessions, (session) =>
 			withSessionWorktreeStatus(
 				withCachedSessionGit(
-					{ ...session, projectSlug },
+					{
+						...session,
+						projectSlug,
+						accountId: accountIds.get(session.id) ?? null,
+					},
 					project.folders,
 					gitCache,
 				),
@@ -278,7 +287,11 @@ export const listDaemonSessions = (
 	configDir: string,
 	options: DaemonSessionQueryOptions = {},
 	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
-): Effect.Effect<DaemonSessionQueryResult, never, ProjectRegistryTag> =>
+): Effect.Effect<
+	DaemonSessionQueryResult,
+	never,
+	ProjectRegistryTag | AccountDirectory
+> =>
 	Effect.gen(function* () {
 		const registered = yield* allProjects;
 		const groupKey = getScopeGroupKey(options.scope);

@@ -233,6 +233,9 @@ export const mockAppHandlers: StepHandler[] = [
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Instance binding requires a session");
 			const instanceId = instanceSlug(match[1] ?? "");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				accountId: instanceId,
+			});
 			requireRpcControl(world.page).setResponse("GetAgents", {
 				projectSlug: "myapp",
 				instanceId,
@@ -268,6 +271,8 @@ export const mockAppHandlers: StepHandler[] = [
 				id: driver,
 				name,
 				driver,
+				isDefault: true,
+				usageEligible: driver === "claude",
 				port: driver === "opencode" ? 4096 : 0,
 				managed: false,
 				status: "healthy",
@@ -313,6 +318,7 @@ export const mockAppHandlers: StepHandler[] = [
 			rpc.upsertShellRow({
 				id: sessionId,
 				title: "Codex session",
+				accountId: instanceId,
 				status: "idle",
 				updatedAt: PINNED_CLOCK_MS,
 			});
@@ -372,7 +378,33 @@ export const mockAppHandlers: StepHandler[] = [
 			});
 			relayControls.set(world.page, relayControl);
 			const page = world.page;
-			mockInstances.set(page, []);
+			// Account rows come from configured accounts, independently of cached models.
+			const initialInstances = [
+				{
+					id: "claude",
+					name: "Claude",
+					driver: "claude",
+					isDefault: true,
+					usageEligible: true,
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+				{
+					id: "opencode",
+					name: "OpenCode",
+					driver: "opencode",
+					isDefault: true,
+					port: 4096,
+					managed: true,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			];
+			mockInstances.set(page, initialInstances);
 			mockClaudeSettings.set(page, { autoCompactEnabled: true });
 			/** Instance bound by the composer's CreateSession — session-scoped
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
@@ -469,6 +501,8 @@ export const mockAppHandlers: StepHandler[] = [
 					}),
 					AddInstance: async (payload) => {
 						const list = mockInstances.get(page) ?? [];
+						const driver =
+							payload["driver"] === "claude" ? "claude" : "opencode";
 						const name =
 							typeof payload["name"] === "string"
 								? payload["name"]
@@ -481,7 +515,11 @@ export const mockAppHandlers: StepHandler[] = [
 							status: "healthy",
 							restartCount: 0,
 							createdAt: 1,
-							driver: payload["driver"] === "claude" ? "claude" : "opencode",
+							driver,
+							isDefault: !list.some(
+								(instance) => instance["driver"] === driver,
+							),
+							usageEligible: driver === "claude",
 							...(typeof payload["configDir"] === "string"
 								? { configDir: payload["configDir"] }
 								: {}),
@@ -499,7 +537,7 @@ export const mockAppHandlers: StepHandler[] = [
 										...(typeof payload["name"] === "string"
 											? { name: payload["name"] }
 											: {}),
-										...(i["id"] === "claude" &&
+										...(i["driver"] === "claude" &&
 										typeof payload["configDir"] === "string"
 											? { configDir: payload["configDir"] }
 											: {}),
@@ -565,6 +603,14 @@ export const mockAppHandlers: StepHandler[] = [
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]
 								: undefined;
+						rpcControl.upsertShellRow({
+							id: "sess-first-send",
+							accountId: createdSessionInstance ?? null,
+							title: "New session",
+							status: "idle",
+							projectSlug: "myapp",
+							updatedAt: PINNED_CLOCK_MS,
+						});
 						return { projectSlug: "myapp", sessionId: "sess-first-send" };
 					},
 					// Like the server, answer for the session's own harness: opening a
@@ -614,6 +660,9 @@ export const mockAppHandlers: StepHandler[] = [
 				},
 			});
 			rpcControls.set(world.page, rpcControl);
+			rpcControl.setDaemonList("SubscribeInstances", {
+				instances: initialInstances,
+			});
 			rpcControl.detailFeed = detailFeeds.get(world.page) ?? "synchronize";
 			rpcControl.setProjectSetting({
 				_tag: "providerModels",

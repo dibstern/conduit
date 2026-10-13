@@ -58,6 +58,7 @@ function makeSession(
 	overrides: Partial<SessionInfo> & { id: string },
 ): SessionInfo {
 	return {
+		accountId: null,
 		title: `Session ${overrides.id}`,
 		projectSlug: "project-a",
 		status: "idle",
@@ -128,6 +129,7 @@ it("seedSessions settles the versioned map and derives sidebar roots", () => {
 		sequence: 0,
 		item: {
 			projectSlug: "project-a",
+			accountId: null,
 			id: "stale",
 			title: "Stale",
 			status: "idle",
@@ -143,6 +145,7 @@ it("keeps a newer root row when an older family arrives", () => {
 		rows: [
 			{
 				projectSlug: "project-a",
+				accountId: null,
 				id: "root",
 				title: "New title",
 				status: "busy",
@@ -155,12 +158,14 @@ it("keeps a newer root row when an older family arrives", () => {
 		rows: [
 			{
 				projectSlug: "project-a",
+				accountId: null,
 				id: "root",
 				title: "Old title",
 				status: "idle",
 			},
 			{
 				projectSlug: "project-a",
+				accountId: null,
 				id: "child",
 				title: "Child",
 				status: "idle",
@@ -223,9 +228,16 @@ it("keeps a newer family row when an older family upsert arrives", () => {
 		_tag: "snapshot",
 		sequence: 10,
 		rows: [
-			{ projectSlug: "project-a", id: "root", title: "Root", status: "idle" },
 			{
 				projectSlug: "project-a",
+				accountId: null,
+				id: "root",
+				title: "Root",
+				status: "idle",
+			},
+			{
+				projectSlug: "project-a",
+				accountId: null,
 				id: "child",
 				title: "New child",
 				status: "busy",
@@ -239,6 +251,7 @@ it("keeps a newer family row when an older family upsert arrives", () => {
 		sequence: 9,
 		item: {
 			projectSlug: "project-a",
+			accountId: null,
 			id: "child",
 			title: "Old child",
 			status: "idle",
@@ -255,9 +268,16 @@ it("a project switch forgets the family, and the next project's family applies",
 		_tag: "snapshot",
 		sequence: 10,
 		rows: [
-			{ projectSlug: "project-a", id: "root", title: "Root", status: "idle" },
 			{
 				projectSlug: "project-a",
+				accountId: null,
+				id: "root",
+				title: "Root",
+				status: "idle",
+			},
+			{
+				projectSlug: "project-a",
+				accountId: null,
 				id: "child",
 				title: "Child",
 				status: "idle",
@@ -276,7 +296,13 @@ it("a project switch forgets the family, and the next project's family applies",
 		_tag: "snapshot",
 		sequence: 3,
 		rows: [
-			{ projectSlug: "project-a", id: "other", title: "Other", status: "idle" },
+			{
+				projectSlug: "project-a",
+				accountId: null,
+				id: "other",
+				title: "Other",
+				status: "idle",
+			},
 		],
 	});
 	expect(sessionState.familySessions.map((row) => row.id)).toEqual(["other"]);
@@ -287,7 +313,13 @@ it("forgets chat and selection when the subscription snapshot omits a session", 
 		_tag: "snapshot",
 		sequence: 10,
 		rows: [
-			{ projectSlug: "project-a", id: "gone", title: "Gone", status: "idle" },
+			{
+				projectSlug: "project-a",
+				accountId: null,
+				id: "gone",
+				title: "Gone",
+				status: "idle",
+			},
 		],
 	});
 	getOrCreateSessionSlot("gone");
@@ -307,6 +339,7 @@ it("keeps chat and selection when a root only leaves the list", () => {
 		sequence: 10,
 		item: {
 			projectSlug: "project-a",
+			accountId: null,
 			id: "forked",
 			title: "Forked",
 			status: "idle",
@@ -329,6 +362,7 @@ it("forgets chat and selection when the subscription removes a session", () => {
 		sequence: 10,
 		item: {
 			projectSlug: "project-a",
+			accountId: null,
 			id: "gone",
 			title: "Gone",
 			status: "idle",
@@ -353,6 +387,7 @@ it("forgets chat and selection when the subscription removes a session", () => {
 it("keeps the family list owned by the family feed", () => {
 	const original = {
 		projectSlug: "project-a",
+		accountId: null,
 		id: "root",
 		title: "Family title",
 		status: "idle",
@@ -362,6 +397,7 @@ it("keeps the family list owned by the family feed", () => {
 		[
 			{
 				projectSlug: "project-a",
+				accountId: null,
 				id: "root",
 				title: "Snapshot title",
 				status: "idle",
@@ -372,6 +408,7 @@ it("keeps the family list owned by the family feed", () => {
 	expect(sessionState.familySessions).toEqual([original]);
 	applySessionUpsert({
 		projectSlug: "project-a",
+		accountId: null,
 		id: "root",
 		title: "Upsert title",
 		status: "idle",

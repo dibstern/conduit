@@ -39,6 +39,7 @@ describe("session wire type", () => {
 		expect(() =>
 			Schema.decodeUnknownSync(SessionInfoSchema)({
 				id: "ses_1",
+				accountId: null,
 				title: "t",
 				status: "idle",
 			}),
@@ -48,6 +49,7 @@ describe("session wire type", () => {
 	it("carries the row's status and survives a JSON round trip", () => {
 		const session: SessionInfo = {
 			projectSlug: "demo",
+			accountId: null,
 			id: "ses_1",
 			title: "Fix the sidebar",
 			status: "busy",
@@ -68,6 +70,7 @@ describe("session wire type", () => {
 	it("rejects a status the sessions projection cannot produce", () => {
 		expect(() =>
 			Schema.decodeUnknownSync(SessionInfoSchema)({
+				accountId: null,
 				id: "ses_1",
 				title: "t",
 				status: "processing",
@@ -86,6 +89,7 @@ describe("session wire type", () => {
 	it("carries main's read and attention state on the session", () => {
 		const derived: SessionInfo = {
 			projectSlug: "demo",
+			accountId: null,
 			id: "ses_1",
 			title: "t",
 			status: "idle",

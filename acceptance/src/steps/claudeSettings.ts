@@ -5,6 +5,7 @@ import {
 	openSessionRoute,
 	requireRpcControl,
 	serveModelCatalog,
+	setSessionRowStatus,
 } from "./shared.js";
 
 const claudeSettingsSessionId = "sess-claude-settings";
@@ -63,6 +64,10 @@ export const claudeSettingsHandlers: StepHandler[] = [
 		match: /^the Claude settings session is active$/,
 		run: async ({ world }) => {
 			await openSessionRoute(world.page, claudeSettingsSessionId);
+			// The server publishes the session's resolved account.
+			setSessionRowStatus(world.page, claudeSettingsSessionId, "idle", {
+				accountId: "claude",
+			});
 		},
 	},
 	{

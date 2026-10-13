@@ -19,6 +19,7 @@ type Row = Pick<SessionInfo, "id" | "title"> & Partial<SessionInfo>;
 
 function seedSessions(rows: readonly Row[]): void {
 	const sessions: SessionInfo[] = rows.map((row) => ({
+		accountId: null,
 		status: "idle",
 		projectSlug: "conduit",
 		...row,

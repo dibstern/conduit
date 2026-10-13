@@ -18,6 +18,7 @@ import { applySessionChange } from "./session-fixtures.js";
 
 const row = (status: SessionInfo["status"]): SessionInfo => ({
 	projectSlug: "project-a",
+	accountId: null,
 	id: "s",
 	title: "s",
 	status,
@@ -104,9 +105,16 @@ it("a child session, which has no shell row, starts from its family row", () => 
 		_tag: "snapshot",
 		sequence: 1,
 		rows: [
-			{ projectSlug: "project-a", id: "root", title: "Root", status: "busy" },
 			{
 				projectSlug: "project-a",
+				accountId: null,
+				id: "root",
+				title: "Root",
+				status: "busy",
+			},
+			{
+				projectSlug: "project-a",
+				accountId: null,
 				id: "child",
 				title: "Child",
 				status: "busy",

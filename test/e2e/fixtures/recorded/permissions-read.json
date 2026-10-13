@@ -4,6 +4,22 @@
   "recordedAt": "2026-03-27T04:04:01.685Z",
   "initMessages": [
     {
+      "type": "instance_list",
+      "instances": [
+        {
+          "id": "opencode",
+          "name": "OpenCode",
+          "driver": "opencode",
+          "isDefault": true,
+          "port": 4096,
+          "managed": true,
+          "status": "healthy",
+          "restartCount": 0,
+          "createdAt": 1
+        }
+      ]
+    },
+    {
       "type": "client_count",
       "count": 2
     },
@@ -35,6 +51,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
           "title": "New session - 2026-03-27T04:03:50.836Z",
           "status": "idle",
@@ -49,6 +66,7 @@
       "sessions": [
         {
           "projectSlug": "e2e-replay",
+          "accountId": "opencode",
           "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
           "title": "New session - 2026-03-27T04:03:50.836Z",
           "status": "idle",
@@ -497,6 +515,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -511,6 +530,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -525,6 +545,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -539,6 +560,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "idle",
@@ -553,6 +575,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "busy",
@@ -573,6 +596,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "New session - 2026-03-27T04:03:50.836Z",
               "status": "busy",
@@ -588,6 +612,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -603,6 +628,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -723,6 +749,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -738,6 +765,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "busy",
@@ -808,6 +836,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",
@@ -827,6 +856,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",
@@ -841,6 +871,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",
@@ -855,6 +886,7 @@
           "sessions": [
             {
               "projectSlug": "e2e-replay",
+              "accountId": "opencode",
               "id": "ses_2d2898c4bffeZXsfly5CyHf5PO",
               "title": "Extract name from package.json file",
               "status": "idle",

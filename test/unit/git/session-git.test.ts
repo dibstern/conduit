@@ -416,6 +416,7 @@ describe("createSessionGitCache", () => {
 describe("cached folder git", () => {
 	const session: SessionInfo = {
 		projectSlug: "test-project",
+		accountId: null,
 		id: "session",
 		title: "Folders",
 		status: "idle",

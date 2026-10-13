@@ -87,7 +87,15 @@ describe("the server half holds only rows the server sent", () => {
 
 	it("keeps a listed row unchanged while exposing announced parent lineage", () => {
 		applySessionSnapshot(
-			[{ projectSlug: "p", id: "ses_child", title: "Child", status: "idle" }],
+			[
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "ses_child",
+					title: "Child",
+					status: "idle",
+				},
+			],
 			"complete",
 		);
 		sessionState.currentId = "ses_child";
@@ -98,6 +106,7 @@ describe("the server half holds only rows the server sent", () => {
 		});
 
 		expect(sessionState.sessions.get("ses_child")).toEqual({
+			accountId: null,
 			id: "ses_child",
 			projectSlug: "p",
 			title: "Child",
@@ -110,11 +119,27 @@ describe("the server half holds only rows the server sent", () => {
 describe("the server half is one representation", () => {
 	it("shows a rename delivered by a new root snapshot", () => {
 		applySessionSnapshot(
-			[{ projectSlug: "p", id: "a", title: "Old", status: "idle" }],
+			[
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "a",
+					title: "Old",
+					status: "idle",
+				},
+			],
 			"complete",
 		);
 		applySessionSnapshot(
-			[{ projectSlug: "p", id: "a", title: "New", status: "idle" }],
+			[
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "a",
+					title: "New",
+					status: "idle",
+				},
+			],
 			"complete",
 		);
 
@@ -124,12 +149,21 @@ describe("the server half is one representation", () => {
 
 	it("reads search hits through the server half, so a rename follows", () => {
 		applySessionSnapshot(
-			[{ projectSlug: "p", id: "a", title: "Old", status: "idle" }],
+			[
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "a",
+					title: "Old",
+					status: "idle",
+				},
+			],
 			"complete",
 		);
 		seedSearchResults([{ id: "a", title: "Old", projectSlug: "p" }]);
 		applySessionUpsert({
 			projectSlug: "p",
+			accountId: null,
 			id: "a",
 			title: "Renamed",
 			status: "idle",
@@ -141,8 +175,20 @@ describe("the server half is one representation", () => {
 	it("drops a removed session out of an active search", () => {
 		applySessionSnapshot(
 			[
-				{ projectSlug: "p", id: "a", title: "A", status: "idle" },
-				{ projectSlug: "p", id: "b", title: "B", status: "idle" },
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "a",
+					title: "A",
+					status: "idle",
+				},
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "b",
+					title: "B",
+					status: "idle",
+				},
 			],
 			"complete",
 		);
@@ -162,6 +208,7 @@ describe("sidebar order", () => {
 			[
 				{
 					projectSlug: "p",
+					accountId: null,
 					id: "a",
 					title: "A",
 					status: "idle",
@@ -169,6 +216,7 @@ describe("sidebar order", () => {
 				},
 				{
 					projectSlug: "p",
+					accountId: null,
 					id: "b",
 					title: "B",
 					status: "idle",
@@ -181,6 +229,7 @@ describe("sidebar order", () => {
 
 		applySessionUpsert({
 			projectSlug: "p",
+			accountId: null,
 			id: "a",
 			title: "A",
 			status: "idle",
@@ -194,6 +243,7 @@ describe("sidebar order", () => {
 			[
 				{
 					projectSlug: "p",
+					accountId: null,
 					id: "a",
 					title: "A",
 					status: "idle",
@@ -201,6 +251,7 @@ describe("sidebar order", () => {
 				},
 				{
 					projectSlug: "p",
+					accountId: null,
 					id: "b",
 					title: "B",
 					status: "idle",
@@ -217,6 +268,7 @@ describe("every mutation path leaves the server half wire-valid", () => {
 	const ROWS: SessionInfo[] = [
 		{
 			projectSlug: "p",
+			accountId: null,
 			id: "root",
 			title: "Root",
 			status: "idle",
@@ -224,6 +276,7 @@ describe("every mutation path leaves the server half wire-valid", () => {
 		},
 		{
 			projectSlug: "p",
+			accountId: null,
 			id: "child",
 			title: "Child",
 			status: "busy",
@@ -290,11 +343,20 @@ describe("applying server rows never touches the client half", () => {
 		sessionState.searchQuery = "roo";
 
 		applySessionSnapshot(
-			[{ projectSlug: "p", id: "root", title: "Root", status: "idle" }],
+			[
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "root",
+					title: "Root",
+					status: "idle",
+				},
+			],
 			"complete",
 		);
 		applySessionUpsert({
 			projectSlug: "p",
+			accountId: null,
 			id: "other",
 			title: "Other",
 			status: "idle",
@@ -312,6 +374,7 @@ describe("deleting the session being viewed", () => {
 		try {
 			applySessionUpsert({
 				projectSlug: "p",
+				accountId: null,
 				id: "ses_doomed",
 				title: "Doomed",
 				status: "idle",

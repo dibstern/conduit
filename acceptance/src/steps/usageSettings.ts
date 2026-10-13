@@ -221,6 +221,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 					id,
 					name: id === "claude" ? "Personal" : id === "work" ? "Work" : "Spare",
 					driver: "claude",
+					isDefault: id === "claude",
 					usageEligible: true,
 					port: 0,
 					managed: false,

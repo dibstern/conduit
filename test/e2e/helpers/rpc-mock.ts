@@ -201,6 +201,7 @@ export class RpcMockControl {
 	owned(rows: readonly unknown[]): readonly unknown[] {
 		return rows.map((row) => ({
 			projectSlug: this.projectSlug,
+			accountId: null,
 			...(row as object),
 		}));
 	}

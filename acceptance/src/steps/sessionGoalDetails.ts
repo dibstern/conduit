@@ -61,8 +61,12 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			rpc.setResponse("CancelSession", { ok: true });
 			// The desktop header renders its title row, and with it the goal
 			// subtitle, only for a session the sidebar list knows about.
+			const row = rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === sessionId,
+			);
 			rpc.setShellRows([
 				{
+					...(row as object | undefined),
 					id: sessionId,
 					title: "Stabilise visual suite",
 					status: phase === "working" ? "busy" : "idle",

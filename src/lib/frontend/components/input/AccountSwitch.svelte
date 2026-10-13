@@ -107,12 +107,12 @@
 		to={chosen}
 		summary={handoff.summary}
 		confirm={{
-			from: account,
-			fromQuota: claudeAccounts.fromQuota({ from: account, limit }),
+			from: handoff.from,
+			fromQuota: claudeAccounts.fromQuota(handoff),
 			quota: claudeAccounts.quotaOf(chosen),
 			cutOff: limit?.cutOffMessageId !== undefined,
 			busy: claudeAccounts.switching,
-			onconfirm: () => void claudeAccounts.confirm({ sessionId, from: account }),
+			onconfirm: () => void claudeAccounts.confirm(),
 		}}
 	/>
 {/if}

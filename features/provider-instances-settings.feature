@@ -47,7 +47,8 @@ Scenario: editing a named instance updates it in the settings list
   And the Instances list does not show Staging OC
 
 Scenario Outline: make an account default
-  Given the default Claude account is named Claude with folder /profiles/original
+  Given no provider accounts are configured
+  And the default Claude account is named Claude with folder /profiles/original
   And a named Claude instance Personal is already configured
   When I open settings to the Server section
   And I make the Personal account default
@@ -60,7 +61,8 @@ Examples:
   | 98        |
 
 Scenario Outline: a new draft's composer shows the default account
-  Given the default Claude account is named Claude with folder /profiles/original
+  Given no provider accounts are configured
+  And the default Claude account is named Claude with folder /profiles/original
   And a named Claude instance Personal is already configured
   And new drafts use a Claude model
   When I open settings to the Server section
@@ -79,6 +81,72 @@ Scenario Outline: a new draft's composer shows the default account
 Examples:
   | threshold |
   | 98        |
+
+Scenario: moving the default makes the former built-in an ordinary picker account
+  Given the configured Claude accounts are Claude and Personal with default Personal
+  And new drafts use a Claude model
+  When I start a new session
+  Then the draft composer and usage meter use the Personal account
+  When I open the model picker
+  Then the picker selects the Personal account
+  And the picker account names are Personal, Claude
+  When I close the model picker
+  And the mock relay reports OpenCode reconnecting
+  Then the OpenCode connection banner is not visible
+  When the relay disconnects and reconnect attempts are held
+  Then the connect overlay offers no OpenCode instance actions
+
+Scenario: no built-in account is manufactured from a cached Claude catalogue
+  Given the configured Claude accounts are Personal with default Personal
+  And new drafts use a Claude model
+  When I start a new session
+  Then the draft composer uses the Personal account and the usage meter shows only it
+  When I open the model picker
+  Then the picker uses Personal for the Claude harness
+  And no former built-in Claude account is displayed
+  When I close the model picker
+  And I open settings to the Server section
+  Then the Instances list shows Personal
+  And the Instances list does not show Claude
+
+Scenario: zero Claude accounts stays empty despite a cached Claude catalogue
+  Given the configured Claude accounts are none with default none
+  And new drafts use a Claude model
+  When I start a new session
+  And I open the model picker
+  Then the picker account names are none
+  And no former built-in Claude account is displayed
+  When I close the model picker
+  And I type Keep my draft until I add an account into the composer
+  And I send the composer message
+  Then an error toast contains Add a Claude account in Settings before sending
+  And the composer still contains Keep my draft until I add an account
+  And no session is created without an account
+  When I open the model picker
+  And I select the surviving OpenCode harness
+  Then the draft composer selects the OpenCode account
+  When I close the model picker
+  And I send the composer message
+  Then the new session is created on the OpenCode account
+  When I open settings to the Server section
+  Then the Instances list does not show Claude
+
+Scenario: deleted-account history follows the server's effective account when the default changes
+  Given the configured Claude accounts are Claude and Personal with default Personal
+  And new drafts use a Claude model
+  And a deleted-account session is published on Personal
+  When I view the deleted-account session
+  Then the session composer and usage meter use the Personal account
+  When the session hits the five_hour limit on deleted-account resetting at none
+  Then the session's usage limit names Personal
+  When the mock relay reports OpenCode reconnecting
+  Then the OpenCode connection banner is not visible
+  When the deleted-account session is published on Claude after a default change
+  Then the session composer and usage meter use the Claude account
+  And the session's usage limit names Claude
+  And the OpenCode connection banner is not visible
+  When I open the model picker
+  Then the picker selects the Claude account
 
 Scenario: the default Claude account shares the editor and cannot be removed
   Given the default Claude account is named Personal Claude with folder /profiles/personal
@@ -121,6 +189,7 @@ Scenario: removing a named instance drops it from the settings list
   Then the Instances list does not show Staging OC
 
 Scenario Outline: the instance editor matches the approved layout
+  Given no provider accounts are configured
   When I open settings to the Server section
   And I start adding a <driver> instance
   Then the instances-settings region visually matches <baseline> at <threshold> percent

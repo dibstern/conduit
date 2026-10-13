@@ -49,6 +49,7 @@ const rpc = vi.mocked(listDaemonSessionsRpc);
  *  duplicate, a gap or a reorder is visible in the assertion itself. */
 function row(index: number, projectSlug: string) {
 	return {
+		accountId: null,
 		id: `s${index}`,
 		title: `Session ${index}`,
 		status: "idle" as const,
@@ -290,12 +291,14 @@ describe("cross-project search", () => {
 			...page([], { hasMore: false }),
 			sessions: [
 				{
+					accountId: null,
 					id: "local",
 					title: "Local session",
 					status: "idle",
 					projectSlug: "project-a",
 				},
 				{
+					accountId: null,
 					id: "s1",
 					title: "Session 1",
 					status: "idle",

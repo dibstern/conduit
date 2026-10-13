@@ -352,6 +352,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				Effect.succeed([
 					{
 						projectSlug: "project-a",
+						accountId: null,
 						id: "session-1",
 						title: "Original Session",
 						status: "idle" as const,
@@ -479,6 +480,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 					Effect.succeed([
 						{
 							projectSlug: "project-a",
+							accountId: null,
 							id: "ses-parent",
 							title: "Parent",
 							status: "idle" as const,
