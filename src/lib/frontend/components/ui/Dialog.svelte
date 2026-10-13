@@ -10,12 +10,14 @@
 <!-- only the dismissal behaviour and the scrim.                                 -->
 
 <script module lang="ts">
-	// Track the opener before a conditional dialog mounts: its own listeners are
-	// too late to see the pointerdown that created it.
-	let openedByPointer = false;
+	// Whether the latest input was a tap or click rather than a key, tracked
+	// page-wide: a conditional dialog mounts too late to see the pointerdown that
+	// opened it, and a sheet pulled up from its dock is closed by a gesture that
+	// began outside it.
+	let lastInputWasPointer = false;
 	if (typeof document !== "undefined") {
-		document.addEventListener("pointerdown", () => { openedByPointer = true; }, true);
-		document.addEventListener("keydown", () => { openedByPointer = false; }, true);
+		document.addEventListener("pointerdown", () => { lastInputWasPointer = true; }, true);
+		document.addEventListener("keydown", () => { lastInputWasPointer = false; }, true);
 	}
 </script>
 
@@ -59,24 +61,25 @@
 	provideDialogTarget(() => dialogEl);
 	const tabbableSelector = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
-	// Whether the most recent input inside the dialog was a tap or click.
-	// close() hands focus back to the control that opened the dialog, and
-	// WebKit treats that hand-back as keyboard focus, so the opener lights up
-	// with a focus ring after a purely touch-driven open and close (iOS 26,
-	// the "..." session-bar button). Dropping the restored focus is only right
-	// after pointer input; a keyboard user dismissing with Escape keeps it.
-	let closedByPointer = false;
+	// Closing hands focus back to the control that opened the dialog. WebKit
+	// never focused that control on the tap, so it treats the hand-back as
+	// keyboard focus and lights the opener with a focus ring after a purely
+	// touch-driven open and close (iOS 26: the "..." session-bar button, the
+	// phone usage dock). The ring is only right after keyboard input; a keyboard
+	// user dismissing with Escape keeps it.
+	function focusOpener(target: HTMLElement): void {
+		const options: FocusOptions & { focusVisible: boolean } = {
+			preventScroll: true,
+			focusVisible: !lastInputWasPointer,
+		};
+		target.focus(options);
+	}
+
 	onDestroy(() => {
 		// Conditional dialog hosts can unmount before `open` becomes false.
 		if (!dialogEl?.open) return;
 		const target = returnFocus?.();
-		if (target?.isConnected) {
-			const options: FocusOptions & { focusVisible: boolean } = {
-				preventScroll: true,
-				focusVisible: !closedByPointer,
-			};
-			target.focus(options);
-		}
+		if (target?.isConnected) focusOpener(target);
 	});
 
 	// showModal()/close() are imperative, so mirror `open` onto the element.
@@ -104,7 +107,7 @@
 			// it as a keyboard selection. Move off the UA's auto-focused control
 			// first so focusVisible:false also applies when it picked that same one.
 			if (initialFocus === "dialog") el.focus({ preventScroll: true });
-			else if (openedByPointer) {
+			else if (lastInputWasPointer) {
 				el.focus({ preventScroll: true });
 				const first = el.querySelector<HTMLElement>(tabbableSelector);
 				const options: FocusOptions & { focusVisible: boolean } = {
@@ -116,8 +119,8 @@
 		} else if (!open && el.open) {
 			el.close();
 			const target = returnFocus?.();
-			if (target?.isConnected) target.focus({ preventScroll: true });
-			else if (closedByPointer && document.activeElement instanceof HTMLElement) {
+			if (target?.isConnected) focusOpener(target);
+			else if (lastInputWasPointer && document.activeElement instanceof HTMLElement) {
 				document.activeElement.blur();
 			}
 		}
@@ -149,7 +152,6 @@
 	// Native dialogs can send Tab to <body> when there are no tabbable
 	// descendants. Keep focus on the dialog until it is dismissed.
 	function handleKeydown(event: KeyboardEvent): void {
-		closedByPointer = false;
 		if (event.key !== "Tab" || dialogEl?.querySelector(tabbableSelector)) return;
 		event.preventDefault();
 		dialogEl?.focus({ preventScroll: true });
@@ -170,10 +172,7 @@
 	class="max-w-[100vw] overflow-visible border-none bg-transparent p-0 text-text focus:outline-none {placement === 'sheet' ? 'fixed inset-x-0 bottom-0 top-auto m-0 w-full max-h-none' : placement === 'top' ? 'mx-auto mt-[10dvh] mb-auto' : 'm-auto'}"
 	oncancel={handleCancel}
 	onclick={handleClick}
-	onpointerdown={(e) => {
-		closedByPointer = true;
-		pressStartedInside = e.target !== dialogEl;
-	}}
+	onpointerdown={(e) => { pressStartedInside = e.target !== dialogEl; }}
 	onkeydown={handleKeydown}
 >
 	{#if open}
