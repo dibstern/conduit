@@ -147,11 +147,6 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 	},
 	{
 		path: "src/lib/frontend/stores/chat.svelte.ts",
-		snippetPattern: /EMPTY_MESSAGES\.toolRegistry is read-only/,
-		reason: "frontend mutation invariant on empty sentinel state",
-	},
-	{
-		path: "src/lib/frontend/stores/chat.svelte.ts",
 		snippetPattern: /Attempted to mutate EMPTY_STATE/,
 		reason: "dev-only frontend routing invariant",
 	},

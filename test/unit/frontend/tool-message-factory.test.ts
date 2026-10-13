@@ -1,5 +1,5 @@
 // Tests the createToolMessage factory that centralizes ToolMessage construction.
-// Used by both history-logic.ts (REST history) and tool-registry.ts (SSE lifecycle).
+// Used by history-logic.ts for projected transcript parts.
 
 import { describe, expect, it } from "vitest";
 import { Utf8Bytes } from "../../../src/lib/contracts/tool-wire.js";

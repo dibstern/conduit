@@ -210,7 +210,7 @@ describe("Task drawer transcript", () => {
 	it("pages earlier child rows in its own scroll root while the parent stays mounted", async () => {
 		const child = getOrCreateSessionSlot(childId).messages;
 		if (!child.transcript) throw new Error("Missing seeded child transcript");
-		child.transcript.hasMore = true;
+		child.transcript = { ...child.transcript, hasMore: true };
 		child.historyHasMore = true;
 		rpc.loadMoreHistoryRpc.mockResolvedValueOnce({
 			projectSlug: "conduit",
@@ -382,9 +382,12 @@ describe("Task drawer transcript", () => {
 		const messages = getOrCreateSessionSlot(childId).messages;
 		if (!messages.transcript)
 			throw new Error("Missing seeded child transcript");
-		messages.transcript.rows = [];
-		messages.transcript.hwm = null;
-		messages.transcript.status = { _tag: "cold" };
+		messages.transcript = {
+			...messages.transcript,
+			rows: [],
+			hwm: null,
+			status: { _tag: "cold" },
+		};
 		messages.messages = [];
 		messages.loadLifecycle = "loading";
 		const { pane } = mountDrawer();
@@ -392,10 +395,9 @@ describe("Task drawer transcript", () => {
 		expect(within(pane).getByTestId("transcript-skeleton")).toBeTruthy();
 		expect([...pane.querySelectorAll("div")].some((el) => el.inert)).toBe(true);
 		expect(within(pane).queryByText("Beginning of session")).toBeNull();
-		messages.transcript.status = {
-			_tag: "failing",
-			since: 1,
-			lastError: "offline",
+		messages.transcript = {
+			...messages.transcript,
+			status: { _tag: "failing", since: 1, lastError: "offline" },
 		};
 		flushSync();
 		expect(within(pane).getByText("Couldn't refresh")).toBeTruthy();

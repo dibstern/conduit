@@ -2,7 +2,7 @@
 // independent of the parent turn: they complete via their own
 // task_notification → tool.completed and may still be running after the parent
 // emits `done` (backgrounded or long-running subagents). Several call sites must
-// treat them specially — skip turn finalization (tool-registry), preserve a
+// treat them specially — skip turn finalization, preserve a
 // cached terminal status across transcript reloads, keep live
 // status when loaded from history (history-logic), mark their row in the activity
 // log with a rail (turns/ActivityRow), and render the subagent card when one is

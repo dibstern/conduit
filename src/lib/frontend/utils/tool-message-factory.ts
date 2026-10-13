@@ -1,6 +1,5 @@
 // Single factory for constructing ToolMessage objects.
-// Used by both history-logic.ts (REST history) and tool-registry.ts (SSE lifecycle).
-// Eliminates duplicated construction logic across the two call sites.
+// Used by history-logic.ts for projected transcript parts.
 
 import type { ToolStatus } from "../../shared-types.js";
 import type { ToolMessage, ToolPreview } from "../types.js";

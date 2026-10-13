@@ -6,6 +6,7 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { untrack } from "svelte";
+	import type { ChatMessage } from "../../types.js";
 	import {
 		consumeScrollRequest,
 		createEmptySessionMessages,
@@ -324,7 +325,31 @@
 		processing ? "↓ New activity" : "↓ Latest",
 	);
 
-	const turns = $derived(segmentTurns(chat.messages, processing));
+	// Keep finished turns' props stable when only a later part changes.
+	function turnProjection() {
+		let previous = new Map<string, Turn>();
+		const same = (a: readonly ChatMessage[], b: readonly ChatMessage[]) =>
+			a.length === b.length && a.every((item, i) => item === b[i]);
+		return (messages: ChatMessage[], processing: boolean): Turn[] => {
+			const next = segmentTurns(messages, processing).map((turn) => {
+				const held = previous.get(turn.id);
+				return held && held.user === turn.user && held.live === turn.live &&
+					same(held.notices, turn.notices) &&
+					held.segments.length === turn.segments.length &&
+					turn.segments.every((segment, i) => {
+						const old = held.segments[i];
+						return old && old.end === segment.end && old.handBack === segment.handBack &&
+							same(old.activity, segment.activity) && same(old.reply, segment.reply);
+					}) ? held : turn;
+			});
+			previous = new Map(next.map((turn) => [turn.id, turn]));
+			return next;
+		};
+	}
+	const projectTurns = turnProjection();
+	const projectInheritedTurns = turnProjection();
+	const projectCurrentTurns = turnProjection();
+	const turns = $derived(projectTurns(chat.messages, processing));
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
 	const transcriptToolIds = $derived.by(() => {
 		const ids = new Set<string>();
@@ -382,10 +407,10 @@
 	});
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.inherited, false) : [],
+		projectInheritedTurns(forkSplit?.inherited ?? [], false),
 	);
 	const currentTurns = $derived(
-		forkSplit ? segmentTurns(forkSplit.current, processing) : [],
+		projectCurrentTurns(forkSplit?.current ?? [], processing),
 	);
 	// Each continuation leaves a divider before the first reply-side message
 	// created at or after it, or after the last message until one arrives. An

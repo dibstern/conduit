@@ -175,13 +175,10 @@ describe("tier field completeness", () => {
 	it("snapMessages covers all SessionMessages keys from testMessages()", () => {
 		const fresh = testMessages();
 		const snap = snapMessages(fresh);
-		// All scalar keys should be present (toolRegistry and messages are
-		// summarized, not compared by identity)
+		// Messages are summarized, not compared by identity.
 		for (const key of Object.keys(fresh)) {
 			if (key === "messages") {
 				expect(snap).toHaveProperty("messagesLength");
-			} else if (key === "toolRegistry") {
-				// Intentionally excluded — function object, not comparable
 			} else {
 				expect(snap).toHaveProperty(key);
 			}

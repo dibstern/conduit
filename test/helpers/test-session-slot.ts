@@ -25,7 +25,6 @@ import {
 	sessionMessages,
 } from "../../src/lib/frontend/stores/chat.svelte.js";
 import { sessionState } from "../../src/lib/frontend/stores/session.svelte.js";
-import { createToolRegistry } from "../../src/lib/frontend/stores/tool-registry.js";
 
 /** Default test session ID. Matches the ID typically set in beforeEach blocks. */
 const TEST_SESSION_ID = "test-session";
@@ -63,7 +62,6 @@ export function testMessages(sessionId?: string): SessionMessages {
 		contextPercent: 0,
 		historyHasMore: false,
 		historyLoading: false,
-		toolRegistry: createToolRegistry(),
 	};
 	sessionMessages.set(id, m);
 	return m;

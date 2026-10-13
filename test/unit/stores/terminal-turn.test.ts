@@ -57,13 +57,36 @@ function projectedTurn() {
 		1,
 	).reduce(applyTranscriptEnvelope, empty);
 	slot.messages.messages = deriveTranscriptMessages(entry, []);
-	chat.seedRegistryFromMessages(
-		slot.activity,
-		slot.messages,
-		slot.messages.messages,
-	);
 	return slot;
 }
+
+// Behaviour retained from the deleted registry's finalizeAll tests.
+it.each([
+	"pending",
+	"running",
+	"completed",
+	"error",
+] as const)("finalizes ordinary %s tools and preserves terminal tools", (status) => {
+	const activity = chat.createEmptySessionActivity();
+	const messages = chat.createEmptySessionMessages();
+	const tool = {
+		type: "tool",
+		uuid: "tool",
+		id: "call",
+		name: "Read",
+		status,
+		result: "kept",
+	} as const;
+	messages.messages = [tool];
+	chat.applyTerminalTurn(activity, messages);
+	expect(messages.messages[0]).toEqual({
+		...tool,
+		status: status === "pending" || status === "running" ? "completed" : status,
+	});
+	if (status === "completed" || status === "error")
+		expect(messages.messages[0]).toBe(tool);
+	expect(tool.status).toBe(status);
+});
 
 it.each([
 	["idle row", "terminal row", "terminal replay"],

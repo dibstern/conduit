@@ -1,7 +1,6 @@
 // Regression: activity timings collapsed to 0s because per-part timestamps
 // were dropped on the way from SQLite to the transcript.
 import { describe, expect, it } from "vitest";
-import { createToolRegistry } from "../../../src/lib/frontend/stores/tool-registry.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	fmtDuration,
@@ -106,13 +105,24 @@ describe("activity timings", () => {
 		expect(steps).toEqual([20_000, 20_000, 20_000]);
 	});
 
-	it("stamps live tool steps so an in-flight turn has a clock", () => {
-		const registry = createToolRegistry();
-		const started = registry.start("call-1", "Bash");
-		expect(started.action).toBe("create");
-		expect(
-			started.action === "create" ? started.tool.createdAt : undefined,
-		).toBeTypeOf("number");
+	it("stamps projected tool steps so an in-flight turn has a clock", () => {
+		const [tool] = historyToChatMessages([
+			{
+				id: "live",
+				role: "assistant",
+				time: { created: T0 },
+				parts: [
+					{
+						id: "call-1",
+						type: "tool",
+						tool: "Bash",
+						state: { status: "pending" },
+						time: { start: T0 + 1 },
+					},
+				],
+			},
+		]);
+		expect(tool?.createdAt).toBe(T0 + 1);
 	});
 
 	it("reports a tool's own runtime, not the gap to a parallel sibling", () => {
