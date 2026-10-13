@@ -141,7 +141,6 @@ describe("Persistence Effect", () => {
 				projectionFailures,
 			}).toEqual({
 				tables: [
-					"activities",
 					"command_receipts",
 					"events",
 					"message_part_tombstones",
@@ -317,6 +316,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 53, name: "store_identity" },
 				{ migration_id: 54, name: "events_unstamped_index" },
 				{ migration_id: 55, name: "events_session_type_index" },
+				{ migration_id: 56, name: "drop_activities" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

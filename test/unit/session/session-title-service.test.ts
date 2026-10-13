@@ -186,9 +186,16 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 						WHERE session_id = ${sessionId} AND type = 'session.renamed'
 					) AS latest_sequence,
 					(
-						SELECT last_applied_seq
+						SELECT MAX(last_applied_seq)
 						FROM projector_cursors
 						WHERE projector_name = 'session'
+							OR (
+								projector_name LIKE '@batch:%'
+								AND instr(
+									',' || substr(projector_name, length('@batch:') + 1) || ',',
+									',session,'
+								) > 0
+							)
 					) AS cursor_sequence`);
 					const latest = Number(rows[0]?.latest_sequence ?? 0);
 					const cursor = Number(rows[0]?.cursor_sequence ?? 0);

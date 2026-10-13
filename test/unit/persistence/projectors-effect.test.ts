@@ -516,10 +516,6 @@ function readSessionProjectionSnapshot(sessionId: string) {
 			id: string;
 			session_id: string;
 		}>`SELECT id, session_id FROM pending_approvals WHERE session_id = ${sessionId} ORDER BY id`;
-		const activities = yield* sql<{
-			id: string;
-			session_id: string;
-		}>`SELECT id, session_id FROM activities WHERE session_id = ${sessionId} ORDER BY id`;
 		const toolContent = yield* sql<{
 			tool_id: string;
 			session_id: string;
@@ -537,7 +533,6 @@ function readSessionProjectionSnapshot(sessionId: string) {
 			turns,
 			sessionProviders,
 			pendingApprovals,
-			activities,
 			toolContent,
 			providerState,
 		};
@@ -855,7 +850,6 @@ describe("EventStoreEffect", () => {
 			Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
-				const sql = yield* SqlClient.SqlClient;
 				yield* runner.recover();
 				yield* seedSession("s1");
 				const asks = [
@@ -881,13 +875,6 @@ describe("EventStoreEffect", () => {
 				}
 				expect(yield* store.readBySession("s1")).toHaveLength(2);
 				expect(yield* store.getNextStreamVersion("s1")).toBe(2);
-				expect(
-					yield* sql`SELECT kind, json_extract(payload, '$.id') AS id
-					FROM activities ORDER BY sequence`,
-				).toEqual([
-					{ kind: "permission.asked", id: "permission-1" },
-					{ kind: "question.asked", id: "question-1" },
-				]);
 			}),
 		));
 
@@ -1373,12 +1360,12 @@ describe("ProjectorCursorEffect", () => {
 		runTest(
 			Effect.gen(function* () {
 				const cursor = yield* ProjectorCursorEffectTag;
-				yield* cursor.upsert("activity", 5);
+				yield* cursor.upsert("approval", 5);
 				yield* cursor.upsert("message", 10);
 				yield* cursor.upsert("session", 15);
 				const all = yield* cursor.listAll();
 				expect(all.length).toBe(3);
-				expect(all[0]?.projectorName).toBe("activity");
+				expect(all[0]?.projectorName).toBe("approval");
 				expect(all[1]?.projectorName).toBe("message");
 				expect(all[2]?.projectorName).toBe("session");
 			}),
@@ -1398,7 +1385,7 @@ describe("ProjectorCursorEffect", () => {
 				const cursor = yield* ProjectorCursorEffectTag;
 				yield* cursor.upsert("session", 50);
 				yield* cursor.upsert("message", 10);
-				yield* cursor.upsert("activity", 30);
+				yield* cursor.upsert("turn", 30);
 				const min = yield* cursor.minCursor();
 				expect(min).toBe(10);
 			}),
@@ -1744,7 +1731,6 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					"turn",
 					"provider",
 					"approval",
-					"activity",
 				]) {
 					yield* cursors.upsert(name, latestSeq);
 				}
@@ -2171,6 +2157,8 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 				yield* runner.projectEvent(e2);
 				const e3 = yield* store.append(makeToolStarted("s1", "m1", "tool1"));
 				yield* runner.projectEvent(e3);
+				const sessionBefore =
+					yield* sql`SELECT version FROM sessions WHERE id = 's1'`;
 				const e4 = yield* store.append(
 					makeToolRunning("s1", "m1", "tool1", {
 						childSessionId: "claude-subagent-abc",
@@ -2187,9 +2175,16 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 				const e6 = yield* store.append(makeToolRunning("s1", "m1", "tool1"));
 				yield* runner.projectEvent(e6);
 
+				const completed = yield* store.append(
+					makeToolCompleted("s1", "m1", "tool1"),
+				);
+				yield* runner.projectEvent(completed);
+				expect(
+					yield* sql`SELECT version FROM sessions WHERE id = 's1'`,
+				).toEqual(sessionBefore);
 				const rows = yield* sql<{ status: string; metadata: string | null }>`
 					SELECT status, metadata FROM message_parts WHERE id = 'tool1'`;
-				expect(rows[0]?.status).toBe("running");
+				expect(rows[0]?.status).toBe("completed");
 				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
 					childSessionId: "claude-subagent-abc",
 					providerTaskId: "task-1",
@@ -3021,7 +3016,6 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.messageRows).toEqual([]);
 		expect(result.partialProjectionWrites).toEqual([]);
 		expect(result.cursors).toEqual([
-			{ projector_name: "activity", last_applied_seq: 1 },
 			{ projector_name: "approval", last_applied_seq: 1 },
 			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
@@ -3205,7 +3199,6 @@ describe("ProjectionRunnerEffect", () => {
 			{ projector_name: "message", event_sequence: 1 },
 		]);
 		expect(result.cursorsAfterRetry).toEqual([
-			{ projector_name: "activity", last_applied_seq: 1 },
 			{ projector_name: "approval", last_applied_seq: 1 },
 			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
@@ -3278,14 +3271,12 @@ describe("ProjectionRunnerEffect", () => {
 			turns: [],
 			sessionProviders: [],
 			pendingApprovals: [],
-			activities: [],
 			toolContent: [],
 			providerState: [],
 		});
 		expect(cold.snapshot).toEqual(online.snapshot);
 		expect(online.failures).toEqual([]);
 		expect(cold.cursors).toEqual([
-			{ projector_name: "activity", last_applied_seq: 3 },
 			{ projector_name: "approval", last_applied_seq: 3 },
 			{ projector_name: "input", last_applied_seq: 3 },
 			{ projector_name: "message", last_applied_seq: 3 },
@@ -3405,8 +3396,7 @@ describe("ProjectionRunnerEffect", () => {
 						('message', 2, ${FIXED_TS}),
 						('provider', 0, ${FIXED_TS}),
 						('turn', 4, ${FIXED_TS}),
-						('approval', 1, ${FIXED_TS}),
-						('activity', 0, ${FIXED_TS})
+						('approval', 1, ${FIXED_TS})
 					ON CONFLICT (projector_name) DO UPDATE SET
 						last_applied_seq = excluded.last_applied_seq,
 						updated_at = excluded.updated_at`;
@@ -3437,7 +3427,6 @@ describe("ProjectionRunnerEffect", () => {
 				expect(messageRows).toEqual([{ text: "A" }]);
 				expect(partRows).toEqual([{ text: "A" }]);
 				expect(cursors).toEqual([
-					{ projector_name: "activity", last_applied_seq: 4 },
 					{ projector_name: "approval", last_applied_seq: 4 },
 					{ projector_name: "input", last_applied_seq: 4 },
 					{ projector_name: "message", last_applied_seq: 4 },
@@ -3547,7 +3536,6 @@ describe("ProjectionRunnerEffect", () => {
 				});
 				expect(firstSession).toEqual([{ status: "busy" }]);
 				expect(firstCursors).toEqual([
-					{ projector_name: "activity", last_applied_seq: 501 },
 					{ projector_name: "approval", last_applied_seq: 501 },
 					{ projector_name: "input", last_applied_seq: 501 },
 					{ projector_name: "message", last_applied_seq: 501 },
@@ -3861,7 +3849,7 @@ describe("ProjectionRunnerEffect", () => {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				const sql = yield* SqlClient.SqlClient;
-				yield* runner.markRecovered();
+				yield* runner.recover();
 
 				yield* seedSession("s1");
 				const e1 = yield* store.append(makeSessionCreated("s1"));
@@ -3875,53 +3863,81 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT title FROM sessions WHERE id = 's1'`;
 				expect(sessionRows[0]?.title).toBe("Test Session");
 
-				// Verify cursor was advanced
+				// Enrollment stays fixed while one watermark covers the atomic batch.
 				const cursorRepo = yield* ProjectorCursorEffectTag;
 				const cursor = yield* cursorRepo.get("session");
 				expect(cursor).toBeDefined();
-				expect(cursor?.lastAppliedSeq).toBe(e2.sequence);
+				expect(cursor?.lastAppliedSeq).toBe(0);
+				expect(
+					(yield* cursorRepo.get(
+						"@batch:approval,input,message,provider,session,turn",
+					))?.lastAppliedSeq,
+				).toBe(e2.sequence);
+				expect((yield* runner.recover()).totalReplayed).toBe(0);
 			}),
 		));
 
-	it("recover records a bad event and continues replay", () => {
-		let successfulProjectorRan = false;
+	it("recover rolls back one failed projection and keeps the rest of the replay page", () => {
 		const failingProjector: EffectProjector = {
 			name: "failing-replay-projector",
 			handles: ["session.created"],
-			project: () =>
-				Effect.fail(
-					new ProjectionError({
-						projector: "failing-replay-projector",
-						operation: "project",
-						cause: new Error("replay projector explosion"),
-					}),
-				),
+			project: (event) =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`UPDATE sessions SET title = 'projected' WHERE id = ${event.sessionId}`;
+					if (event.sessionId === "s-replay-2")
+						return yield* new ProjectionError({
+							projector: "failing-replay-projector",
+							operation: "project",
+							cause: new Error("replay projector explosion"),
+						});
+					return { stamped: [], removed: [] };
+				}),
 		};
 		const successfulProjector: EffectProjector = {
 			name: "successful-replay-projector",
 			handles: ["session.created"],
-			project: () =>
-				Effect.sync(() => {
-					successfulProjectorRan = true;
+			project: (event) =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`UPDATE sessions SET status = 'busy' WHERE id = ${event.sessionId}`;
 					return { stamped: [], removed: [] };
 				}),
 		};
-
 		return runTestWithProjectors(
 			[failingProjector, successfulProjector],
 			Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
-				yield* seedSession("s-resilient-replay");
-				yield* store.append(makeSessionCreated("s-resilient-replay"));
-
-				const result = yield* runner.recover();
-
-				expect(result.totalReplayed).toBe(2);
-				expect(successfulProjectorRan).toBe(true);
-				const failures = yield* runner.getFailures();
-				expect(failures).toHaveLength(1);
-				expect(failures[0]?.projectorName).toBe("failing-replay-projector");
+				const sql = yield* SqlClient.SqlClient;
+				for (const id of ["s-replay-1", "s-replay-2", "s-replay-3"]) {
+					yield* seedSession(id);
+					yield* store.append(makeSessionCreated(id));
+				}
+				expect((yield* runner.recover()).totalReplayed).toBe(6);
+				expect(
+					yield* sql`SELECT id, title, status FROM sessions ORDER BY id`,
+				).toEqual([
+					{ id: "s-replay-1", title: "projected", status: "busy" },
+					{ id: "s-replay-2", title: "Test Session", status: "busy" },
+					{ id: "s-replay-3", title: "projected", status: "busy" },
+				]);
+				expect(
+					yield* sql`SELECT projector_name, event_sequence FROM projection_failures`,
+				).toEqual([
+					{ projector_name: "failing-replay-projector", event_sequence: 2 },
+				]);
+				expect(
+					yield* sql`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`,
+				).toEqual([
+					{ projector_name: "failing-replay-projector", last_applied_seq: 3 },
+					{
+						projector_name: "successful-replay-projector",
+						last_applied_seq: 3,
+					},
+				]);
+				expect(yield* runner.getFailures()).toHaveLength(1);
+				expect((yield* runner.recover()).totalReplayed).toBe(0);
 			}),
 		);
 	});

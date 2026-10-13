@@ -83,6 +83,7 @@ export const EVENTS_UNSTAMPED_INDEX_MIGRATION =
 	"0053_events_unstamped_index.sql";
 export const EVENTS_SESSION_TYPE_INDEX_MIGRATION =
 	"0054_events_session_type_index.sql";
+export const DROP_ACTIVITIES_MIGRATION = "0055_drop_activities.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

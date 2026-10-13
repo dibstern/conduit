@@ -113,7 +113,7 @@ function isEventType<K extends CanonicalEventType>(
 	return event.type === type;
 }
 
-// A child-table row naming the session row it belongs to. `turns`, `activities`,
+// A child-table row naming the session row it belongs to. `turns`,
 // `pending_approvals` and `session_providers` move the session row that owns
 // them (pending_approvals also has a version, for its own subscription), and
 // the owner is whatever the write itself put in `session_id`, not what the
@@ -1416,115 +1416,6 @@ export const makeTurnProjector = (): EffectProjector => ({
 		),
 });
 
-export const makeActivityProjector = (): EffectProjector => ({
-	name: "activity",
-	handles: [
-		"tool.started",
-		"tool.running",
-		"tool.completed",
-		"permission.asked",
-		"permission.resolved",
-		"question.asked",
-		"question.resolved",
-		"turn.error",
-	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-
-			// OR IGNORE returns no row when the activity is already there, so a
-			// re-applied event announces nothing it did not actually write.
-			const insert = (
-				tone: string,
-				kind: string,
-				summary: string,
-				payload: unknown,
-			) => {
-				const id = `${event.sessionId}:${event.sequence}:${kind}`;
-				const payloadJson = encodeJson(payload);
-				return sql<OwnedRow>`
-					INSERT OR IGNORE INTO activities
-					(id, session_id, tone, kind, summary, payload, sequence, created_at)
-					VALUES (${id}, ${event.sessionId}, ${tone}, ${kind}, ${summary}, ${payloadJson}, ${event.sequence}, ${event.createdAt})
-					RETURNING session_id`;
-			};
-
-			if (isEventType(event, "tool.started")) {
-				return owners(
-					yield* insert(
-						"tool",
-						"tool.started",
-						event.data.toolName,
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "tool.running")) {
-				return owners(
-					yield* insert("tool", "tool.running", event.data.partId, event.data),
-				);
-			}
-			if (isEventType(event, "tool.completed")) {
-				const summary = `${event.data.partId} (${event.data.duration}ms)`;
-				return owners(
-					yield* insert("tool", "tool.completed", summary, event.data),
-				);
-			}
-			if (isEventType(event, "permission.asked")) {
-				return owners(
-					yield* insert(
-						"approval",
-						"permission.asked",
-						event.data.toolName,
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "permission.resolved")) {
-				return owners(
-					yield* insert(
-						"approval",
-						"permission.resolved",
-						event.data.decision,
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "question.asked")) {
-				return owners(
-					yield* insert("info", "question.asked", "Question asked", event.data),
-				);
-			}
-			if (isEventType(event, "question.resolved")) {
-				return owners(
-					yield* insert(
-						"info",
-						"question.resolved",
-						"Question answered",
-						event.data,
-					),
-				);
-			}
-			if (isEventType(event, "turn.error")) {
-				return owners(
-					yield* insert("error", "turn.error", event.data.error, event.data),
-				);
-			}
-			return [];
-		}).pipe(
-			Effect.mapError((e) =>
-				e instanceof ProjectionError
-					? e
-					: new ProjectionError({
-							projector: "activity",
-							operation: "project",
-							cause: e,
-						}),
-			),
-			Effect.flatMap((written) => stampSessions(written, ctx.version)),
-		),
-});
-
 export const makeApprovalProjector = (): EffectProjector => ({
 	name: "approval",
 	handles: [
@@ -1772,7 +1663,6 @@ export function createAllEffectProjectors(): EffectProjector[] {
 		makeTurnProjector(),
 		makeProviderProjector(),
 		makeApprovalProjector(),
-		makeActivityProjector(),
 		makeInputProjector(),
 	];
 }

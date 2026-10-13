@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
+	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
@@ -122,17 +123,6 @@ const readStateToTurnEndsMigrationSql = readMigrationSql(
 );
 
 const expectedTableColumns = {
-	activities: [
-		"id",
-		"session_id",
-		"turn_id",
-		"tone",
-		"kind",
-		"summary",
-		"payload",
-		"sequence",
-		"created_at",
-	],
 	command_receipts: [
 		"command_id",
 		"session_id",
@@ -384,6 +374,8 @@ const preDurableProviderCommandTableNames =
 // of any baseline shape, exactly as 0012's `version` columns and their indexes
 // are — otherwise every new table would need its own whole-schema variant.
 const postBaselineTableNames = new Set<string>([
+	// Legacy stores still have this retired projection until migration 56.
+	"activities",
 	"read_model_counter", // 0013
 	"sent_alerts", // 0015
 	"message_tombstones", // 0029
@@ -1168,6 +1160,9 @@ export const effectMigrationEntries = {
 	),
 	"0055_events_session_type_index": executeSqlStatements(
 		readMigrationSql(EVENTS_SESSION_TYPE_INDEX_MIGRATION),
+	),
+	"0056_drop_activities": executeSqlStatements(
+		readMigrationSql(DROP_ACTIVITIES_MIGRATION),
 	),
 } satisfies Record<
 	string,

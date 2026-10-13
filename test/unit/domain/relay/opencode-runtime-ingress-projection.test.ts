@@ -2098,7 +2098,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(await readPartText("part-publish-int")).toEqual([{ text: "hello" }]);
 	});
 
-	it("projector cursors advance after successful projection", async () => {
+	it("batch progress advances after successful projection", async () => {
 		await ingestOk(
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
@@ -2125,9 +2125,12 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		const cursorByName = new Map(
 			cursors.map((cursor) => [cursor.projectorName, cursor.lastAppliedSeq]),
 		);
-		expect(cursorByName.get("session")).toBe(expectedLastSequence);
-		expect(cursorByName.get("message")).toBe(expectedLastSequence);
-		expect(cursorByName.get("provider")).toBe(expectedLastSequence);
+		expect(
+			cursorByName.get("@batch:approval,input,message,provider,session,turn"),
+		).toBe(expectedLastSequence);
+		expect(cursorByName.get("session")).toBe(0);
+		expect(cursorByName.get("message")).toBe(0);
+		expect(cursorByName.get("provider")).toBe(0);
 	});
 
 	it("text.delta creates a text part in message_parts", async () => {

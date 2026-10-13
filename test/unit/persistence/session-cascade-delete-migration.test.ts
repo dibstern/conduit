@@ -7,6 +7,7 @@ import { Effect, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { seedLegacyEventStore } from "../../helpers/legacy-event-store.js";
 
 const parentId = "parent";
@@ -18,7 +19,6 @@ const projectionTables = [
 	"message_parts",
 	"session_providers",
 	"pending_approvals",
-	"activities",
 	"tool_content",
 	"provider_state",
 ] as const;
@@ -27,6 +27,9 @@ function seedLegacyDatabase(filename: string): void {
 	const db = new Database(filename);
 	try {
 		seedLegacyEventStore(db, 9);
+		db.prepare(
+			"INSERT INTO projector_cursors (projector_name, last_applied_seq, updated_at) VALUES ('activity', 2, 100)",
+		).run();
 		for (const sessionId of [parentId, childId]) {
 			const turnId = `${sessionId}-turn`;
 			const messageId = `${sessionId}-message`;
@@ -106,6 +109,15 @@ describe("session cascade delete migration", () => {
 			await runtime.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT name FROM sqlite_master WHERE name = 'activities' OR tbl_name = 'activities'`,
+					).toEqual([]);
+					expect(
+						yield* sql`SELECT * FROM projector_cursors WHERE projector_name = 'activity'`,
+					).toEqual([]);
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.recover();
+					expect((yield* runner.recover()).totalReplayed).toBe(0);
 					expect(yield* sql`PRAGMA foreign_keys`).toEqual([
 						{ foreign_keys: 1 },
 					]);

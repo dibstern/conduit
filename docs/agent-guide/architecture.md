@@ -23,7 +23,7 @@ Mermaid Diagram: docs/agent-guide/system-context-diagram.mermaid
 | Daemon | `src/lib/daemon/*`, `src/lib/domain/daemon/*` | Process lifecycle, persisted state, local RPC, project and instance registration |
 | HTTP / WS edge | `src/lib/server/*` | Shared HTTP server, auth gate, static assets, project route dispatch, WebSocket upgrades |
 | Project relay | `src/lib/relay/*`, `src/lib/domain/relay/*` | Per-project relay composition, provider event ingestion, event translation, pollers, PTY upstreams |
-| Persistence | `src/lib/persistence/*`, `src/lib/domain/persistence/*` | SQLite event store, projectors (sessions, messages, turns, providers, approvals, activities), migrations |
+| Persistence | `src/lib/persistence/*`, `src/lib/domain/persistence/*` | SQLite event store, projectors (sessions, messages, turns, providers, approvals), migrations |
 | Provider instances | `src/lib/provider/*` | Stateless execution engines (OpenCode, Claude Agent SDK) that stream events into the event store |
 | Session domain | `src/lib/session/*` | Active session tracking, history paging, status polling, client-to-session registry |
 | OpenCode instances | `src/lib/instance/*` | Managed and unmanaged OpenCode SDK/API runtimes, health checks, URL resolution, spawn/stop |
@@ -43,7 +43,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 |---|---|
 | Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
-| Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals, activities) are the primary record. Projectors maintain materialized views from the append-only event log. |
+| Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals) are the primary record. Projectors maintain materialized views from the append-only event log. |
 | Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and project history at `<configDir>/projects/<slug>/events.db`. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
 

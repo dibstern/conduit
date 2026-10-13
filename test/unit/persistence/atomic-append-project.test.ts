@@ -2,13 +2,15 @@
 // - A crash leaves a durable event ahead of its projection or cursor.
 // - A merged crash simulation omits the store's required project owner.
 // - Producers publish before another connection can read their projection.
+// - A batch watermark survives a rolled-back projection, or hides a new projector's history.
+// - A kill halfway through a replay page persists writes ahead of its cursor.
 
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient as EffectSqliteClient } from "@effect/sql-sqlite-node";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { expect, it } from "vitest";
 import { defaultInstanceIdForDriver } from "../../../src/lib/contracts/provider-instance.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -36,7 +38,10 @@ import {
 	makeProjectorCursorEffect,
 	ProjectorCursorEffectTag,
 } from "../../../src/lib/persistence/effect/projector-cursor-effect.js";
-import { createAllEffectProjectors } from "../../../src/lib/persistence/effect/projectors-effect.js";
+import {
+	createAllEffectProjectors,
+	type EffectProjector,
+} from "../../../src/lib/persistence/effect/projectors-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
@@ -45,6 +50,218 @@ import {
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+
+it("batch progress survives restart and a kill before COMMIT without skipping a fresh projector", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-batch-watermark-"));
+	const filename = join(dir, "events.db");
+	const killed = join(dir, "killed.db");
+	const delta = (text: string) =>
+		canonicalEvent("text.delta", "watermark-session", {
+			messageId: "watermark-message",
+			partId: "watermark-part",
+			text,
+		});
+	const retry = delta("B");
+	const fresh: EffectProjector = {
+		name: "fresh-text-counter",
+		handles: ["text.delta"],
+		project: () =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE projection_probe SET applied = applied + 1`;
+				return { stamped: [], removed: [] };
+			}),
+	};
+	try {
+		const initial = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "test-project"),
+		);
+		try {
+			await initial.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`CREATE TABLE projection_probe (applied INTEGER NOT NULL)`;
+					yield* sql`INSERT INTO projection_probe VALUES (0)`;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent("session.created", "watermark-session", {
+							sessionId: "watermark-session",
+							title: "Watermark",
+							provider: "claude",
+						}),
+						canonicalEvent("message.created", "watermark-session", {
+							sessionId: "watermark-session",
+							messageId: "watermark-message",
+							role: "assistant",
+						}),
+					]);
+					yield* commit([delta("A")]);
+					const failed = yield* Effect.either(
+						commit([retry], {
+							beforeCommit: Effect.sync(() => {
+								copyFileSync(filename, killed);
+								if (existsSync(`${filename}-wal`))
+									copyFileSync(`${filename}-wal`, `${killed}-wal`);
+							}).pipe(
+								Effect.andThen(
+									sql`INSERT INTO missing_projection_table VALUES (1)`,
+								),
+								Effect.asVoid,
+							),
+						}),
+					);
+					expect(failed._tag).toBe("Left");
+					expect(
+						yield* sql`SELECT last_applied_seq FROM projector_cursors WHERE projector_name LIKE '@batch:%'`,
+					).toEqual([{ last_applied_seq: 3 }]);
+				}),
+			);
+		} finally {
+			await initial.dispose();
+		}
+
+		// Existing projectors must not append A twice; the new counter must see it.
+		for (const storePath of [killed, filename]) {
+			const reopened = ManagedRuntime.make(
+				makePersistenceEffectLayer(storePath, "test-project", [
+					...createAllEffectProjectors(),
+					fresh,
+				]),
+			);
+			try {
+				await reopened.runPromise(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const runner = yield* ProjectionRunnerEffectTag;
+						expect((yield* runner.recover()).totalReplayed).toBe(1);
+						expect((yield* runner.recover()).totalReplayed).toBe(0);
+						expect(yield* sql`SELECT applied FROM projection_probe`).toEqual([
+							{ applied: 1 },
+						]);
+						expect(
+							yield* sql`SELECT text FROM messages WHERE id = 'watermark-message'`,
+						).toEqual([{ text: "A" }]);
+						expect(
+							yield* sql`SELECT text FROM message_parts WHERE id = 'watermark-part'`,
+						).toEqual([{ text: "A" }]);
+						expect(yield* sql`SELECT COUNT(*) AS count FROM events`).toEqual([
+							{ count: 3 },
+						]);
+						if (storePath === filename) {
+							const commit = yield* makeCommitAndSignal;
+							yield* commit([retry]);
+						}
+					}),
+				);
+			} finally {
+				await reopened.dispose();
+			}
+		}
+		const final = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "test-project", [
+				...createAllEffectProjectors(),
+				fresh,
+			]),
+		);
+		try {
+			await final.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const runner = yield* ProjectionRunnerEffectTag;
+					expect((yield* runner.recover()).totalReplayed).toBe(0);
+					expect(yield* sql`SELECT applied FROM projection_probe`).toEqual([
+						{ applied: 2 },
+					]);
+					expect(
+						yield* sql`SELECT text FROM messages WHERE id = 'watermark-message'`,
+					).toEqual([{ text: "AB" }]);
+				}),
+			);
+		} finally {
+			await final.dispose();
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+it("a kill during replay preserves completed pages and replays the uncommitted page once", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-recovery-crash-"));
+	const filename = join(dir, "events.db");
+	const killed = join(dir, "killed.db");
+	let crash = true;
+	const projector: EffectProjector = {
+		name: "replay-counter",
+		handles: ["session.renamed"],
+		project: (event) =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE projection_probe SET applied = applied + 1`;
+				if (crash && event.sequence === 750) {
+					copyFileSync(filename, killed);
+					if (existsSync(`${filename}-wal`))
+						copyFileSync(`${filename}-wal`, `${killed}-wal`);
+					return yield* Effect.die("killed during replay");
+				}
+				return { stamped: [], removed: [] };
+			}),
+	};
+	try {
+		const initial = ManagedRuntime.make(
+			makePersistenceEffectLayer(filename, "test-project", [projector]),
+		);
+		try {
+			await initial.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`CREATE TABLE projection_probe (applied INTEGER NOT NULL)`;
+					yield* sql`INSERT INTO projection_probe VALUES (0)`;
+					const store = yield* EventStoreEffectTag;
+					const runner = yield* ProjectionRunnerEffectTag;
+					yield* runner.recover();
+					yield* store.appendBatch(
+						Array.from({ length: 1001 }, (_, index) =>
+							canonicalEvent("session.renamed", "replay-session", {
+								sessionId: "replay-session",
+								title: String(index),
+							}),
+						),
+					);
+					expect((yield* Effect.exit(runner.recover()))._tag).toBe("Failure");
+				}),
+			);
+		} finally {
+			await initial.dispose();
+		}
+		crash = false;
+		const reopened = ManagedRuntime.make(
+			makePersistenceEffectLayer(killed, "test-project", [projector]),
+		);
+		try {
+			await reopened.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const runner = yield* ProjectionRunnerEffectTag;
+					expect(yield* sql`SELECT applied FROM projection_probe`).toEqual([
+						{ applied: 500 },
+					]);
+					expect((yield* runner.recover()).totalReplayed).toBe(501);
+					expect(yield* sql`SELECT applied FROM projection_probe`).toEqual([
+						{ applied: 1001 },
+					]);
+					expect((yield* runner.recover()).totalReplayed).toBe(0);
+					expect(
+						yield* sql`SELECT last_applied_seq FROM projector_cursors WHERE projector_name = 'replay-counter'`,
+					).toEqual([{ last_applied_seq: 1001 }]);
+				}),
+			);
+		} finally {
+			await reopened.dispose();
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 it("a kill after append leaves no durable event ahead of its projection", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-atomic-crash-"));
