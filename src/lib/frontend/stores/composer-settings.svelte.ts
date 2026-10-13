@@ -288,7 +288,14 @@ export const model: ComposerSetting<ComposerModel> = {
 								: {}),
 						});
 						void getAgentsRpc({ projectSlug, sessionId })
-							.then((response) => applyGetAgentsResponse(response, sessionId))
+							.then((response) => {
+								// Agents are shared composer state, unlike the per-session pick.
+								if (
+									sessionState.currentId === sessionId &&
+									getCurrentSlug() === projectSlug
+								)
+									applyGetAgentsResponse(response, sessionId);
+							})
 							.catch(() => undefined);
 					},
 				),
