@@ -186,7 +186,7 @@ it("catches up whole undelivered messages and turn errors without repeating deli
 						);
 						expect(prepared.resumeSessionId).toBe("native-personal");
 						expect(prepared.configDir).toEqual(
-							configuredClaudeConfigDir("/accounts/original-personal"),
+							configuredClaudeConfigDir("/accounts/changed-personal"),
 						);
 						expect(prepared.nativeThread).toEqual(receipt);
 						for (let index = 0; index < deliveredCount; index++)

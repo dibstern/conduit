@@ -14,6 +14,7 @@ import {
 } from "effect";
 import {
 	type Account,
+	AccountSchema,
 	accountRefFromSelection,
 } from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
@@ -688,6 +689,22 @@ const prepareEngineTurnInput = (
 				}
 			}
 		}
+		// The committed turn owns its account even before a runner has a snapshot.
+		let turnAccount = account;
+		if (resolvedInput.steer && account.driver === "claude") {
+			const sql = yield* SqlClient.SqlClient;
+			const [turn] = yield* sql<{ account_json: string | null }>`
+				SELECT json_extract(payload_json, '$.account') AS account_json
+				FROM provider_command_outbox
+				WHERE session_id = ${resolvedInput.sessionId} AND effect_type = 'send_turn'
+					AND json_extract(payload_json, '$.account.id') = ${account.id}
+				ORDER BY request_sequence DESC LIMIT 1`;
+			if (turn?.account_json) {
+				turnAccount = yield* Schema.decodeUnknown(
+					Schema.parseJson(AccountSchema),
+				)(turn.account_json);
+			}
+		}
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			inputId,
@@ -700,12 +717,12 @@ const prepareEngineTurnInput = (
 				: {}),
 			history: [],
 			providerState,
-			account,
+			account: turnAccount,
 			instanceId: account.id,
 			...(sendModel && settings ? { model: settings.model } : {}),
 			...folders,
-			...(account.driver === "claude"
-				? { configDir: account.folder, folderSource: "account" as const }
+			...(turnAccount.driver === "claude"
+				? { configDir: turnAccount.folder, folderSource: "account" as const }
 				: {}),
 			...(isClaudeDriver(driver) && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }

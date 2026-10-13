@@ -46,6 +46,14 @@ export const configuredClaudeConfigDir = (path: string): ClaudeConfigDir => ({
 	path,
 });
 
+/** Whether two launches log in through the same folder; a relative folder resolves against its own workspace. */
+export const sameClaudeLogin = (
+	a: { readonly configDir: ClaudeConfigDir; readonly root: string },
+	b: { readonly configDir: ClaudeConfigDir; readonly root: string },
+): boolean =>
+	a.configDir._tag === b.configDir._tag &&
+	resolve(a.root, a.configDir.path) === resolve(b.root, b.configDir.path);
+
 /** Capture once at a composition root, before daemon startup edits its env. */
 export function captureClaudeLaunchLogin(
 	baseEnv: Readonly<Record<string, string | undefined>>,

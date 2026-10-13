@@ -968,7 +968,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the default Claude edit fields and restart notice",
+		name: "assert the default Claude edit fields and next-turn notice",
 		match: /^the default Claude editor shows name (.+) and folder (.+)$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("instance-form-name")).toHaveValue(
@@ -978,7 +978,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				world.page.getByTestId("instance-form-configdir"),
 			).toHaveValue(match[2] ?? "");
 			await expect(world.page.getByTestId("instance-form")).toContainText(
-				"Folder changes apply after restart",
+				"Folder changes apply on the next turn",
 			);
 			await expect(
 				world.page.getByRole("radiogroup", { name: "Type" }),
@@ -1009,16 +1009,16 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the saved default Claude folder and restart copy",
+		name: "assert the saved default Claude folder without a restart notice",
 		match:
-			/^the default Claude account shows folder (.+) with Applies after restart$/,
+			/^the default Claude account shows folder (.+) without a restart notice$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId(
 				`instance-row-${AccountIdSchema.make("claude")}`,
 			);
 			await row.getByRole("button").first().click();
 			await expect(row).toContainText(match[1] ?? "");
-			await expect(row).toContainText("Applies after restart");
+			await expect(row).not.toContainText("Applies after restart");
 		},
 	},
 	{

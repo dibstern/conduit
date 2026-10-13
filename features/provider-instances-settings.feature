@@ -148,7 +148,7 @@ Scenario: deleted-account history follows the server's effective account when th
   When I open the model picker
   Then the picker selects the Claude account
 
-Scenario: the default Claude account shares the editor and cannot be removed
+Scenario: the default Claude account's name and folder apply without restart
   Given the default Claude account is named Personal Claude with folder /profiles/personal
   When I open settings to the Server section
   And I edit the default Claude account
@@ -156,7 +156,7 @@ Scenario: the default Claude account shares the editor and cannot be removed
   And the default Claude account cannot be removed
   When I save the default Claude account as Home Claude with folder /profiles/home
   Then the Instances list shows Home Claude
-  And the default Claude account shows folder /profiles/home with Applies after restart
+  And the default Claude account shows folder /profiles/home without a restart notice
   And UpdateInstance saves the default Claude name Home Claude and folder /profiles/home
 
 Scenario: the default Claude account can return to the environment's login
@@ -164,7 +164,7 @@ Scenario: the default Claude account can return to the environment's login
   When I open settings to the Server section
   And I edit the default Claude account
   And I save the default Claude account as Personal Claude with folder empty
-  Then the default Claude account shows folder env with Applies after restart
+  Then the default Claude account shows folder env without a restart notice
   And UpdateInstance saves the default Claude name Personal Claude and folder empty
 
 Scenario: the OpenCode empty state includes setup guides even with a Claude account

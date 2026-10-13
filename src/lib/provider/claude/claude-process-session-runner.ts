@@ -37,6 +37,7 @@ import {
 	type ClaudeRunnerUpgrade,
 	makeClaudeRunnerUpgrade,
 } from "./claude-runner-upgrade.js";
+import { sameClaudeLogin } from "./claude-sdk-env.js";
 import type {
 	ClaudeSessionCommand,
 	ClaudeSessionFailure,
@@ -1341,6 +1342,18 @@ export const makeProcessClaudeSessionRunner = (
 										launch !== undefined &&
 										(launch.workspaceRoot !== command.input.workspaceRoot ||
 											(extraFoldersChanged && !canReconcileExtraFolders));
+									const accountFolderChanged =
+										launch !== undefined &&
+										!sameClaudeLogin(
+											{
+												configDir: launch.configDir,
+												root: launch.workspaceRoot,
+											},
+											{
+												configDir: command.input.configDir,
+												root: command.input.workspaceRoot,
+											},
+										);
 									if (foldersChanged && command.type === "pre-warm")
 										return { entry: undefined, draining: false };
 									// Only an idle runner restarts. Background tasks can keep one
@@ -1352,7 +1365,9 @@ export const makeProcessClaudeSessionRunner = (
 										existing.commandsInFlight === 0 &&
 										existing.upgrade.state?.quiescent === true;
 									if (
-										(foldersChanged || upgradeByRestart) &&
+										(foldersChanged ||
+											accountFolderChanged ||
+											upgradeByRestart) &&
 										!existing.failure &&
 										!existing.stopping &&
 										!existing.idleExiting &&
@@ -1365,12 +1380,15 @@ export const makeProcessClaudeSessionRunner = (
 											existing.recovering ||
 											existing.commandsInFlight > 0 ||
 											existing.upgrade.state?.quiescent !== true
-										)
+										) {
+											if (command.type === "pre-warm")
+												return { entry: undefined, draining: false };
 											return {
 												entry: existing,
 												draining: true,
 												foldersPending: true,
 											};
+										}
 										existing.endingReleased = yield* Deferred.make<void>();
 										existing.ending++;
 										return {

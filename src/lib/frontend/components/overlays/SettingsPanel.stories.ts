@@ -711,7 +711,9 @@ export const DefaultClaudeAccountEdit: Story = {
 		await expect(
 			account.queryByTestId("remove-instance-btn"),
 		).not.toBeInTheDocument();
-		await expect(account.getByText("Applies after restart")).toBeVisible();
+		await expect(
+			account.queryByText("Applies after restart"),
+		).not.toBeInTheDocument();
 		await userEvent.click(account.getByTestId("edit-instance-btn"));
 		await expect(canvas.getByTestId("instance-form-name")).toHaveValue(
 			"Personal Claude",
@@ -721,7 +723,7 @@ export const DefaultClaudeAccountEdit: Story = {
 		);
 		await expect(
 			within(canvas.getByTestId("instance-form")).getByText(
-				/Folder changes apply after restart/,
+				/Folder changes apply on the next turn/,
 			),
 		).toBeVisible();
 		await expect(

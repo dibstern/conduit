@@ -151,6 +151,7 @@ import {
 import {
 	type ClaudeConfigDir,
 	configuredClaudeConfigDir,
+	sameClaudeLogin,
 	sdkDefaultClaudeConfigDir,
 } from "./claude-sdk-env.js";
 import {
@@ -1846,6 +1847,19 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 				log.info(`Evicting stopped session on sendTurn: ${sessionId}`);
 				yield* this.removeSessionEffect(sessionId);
 				return yield* this.createSessionAndSendTurnEffect(input);
+			} else if (
+				existingCtx &&
+				!sameClaudeLogin(
+					{ configDir: existingCtx.configDir, root: existingCtx.workspaceRoot },
+					{ configDir: input.configDir, root: input.workspaceRoot },
+				) &&
+				!(yield* hasPendingTurn(this.stateRef, sessionId))
+			) {
+				return yield* this.restartSessionEffect(
+					existingCtx,
+					input,
+					"Claude account folder changed",
+				);
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
 				if (yield* hasPendingTurn(this.stateRef, sessionId)) {
 					return this.agentSwitchDuringActiveTurnResult(existingCtx, input);

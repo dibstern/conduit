@@ -58,7 +58,6 @@
 		testId: `instance-form-driver-${driver}`,
 	}));
 	const instances = $derived(getCachedInstances());
-	const editingDefaultClaude = $derived(editingInstanceId != null && instances.some((instance) => instance.id === editingInstanceId && instance.driver === "claude" && instance.isDefault));
 	const claudeAccounts = $derived(instances.filter((inst) => instanceDriver(inst) === "claude"));
 	const opencodeInstances = $derived(instances.filter((inst) => instanceDriver(inst) === "opencode"));
 	const scanInFlight = $derived(isScanInFlight());
@@ -322,7 +321,7 @@
 			{/if}
 		</div>
 		{#if state.formDriver === "claude"}
-			<p class="text-[11px] text-text-muted">{editingDefaultClaude ? "Folder changes apply after restart. " : ""}Leave the folder empty to use the environment's default Claude login.</p>
+			<p class="text-[11px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
 		{:else if state.formManaged}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
 				<label for="instance-form-env" class="block p-3">
@@ -368,10 +367,6 @@
 								<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 								<dt class="text-text-muted">Used by</dt>
 								<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : "Sessions you move to it, and auto-switch"}</dd>
-								{#if inst.isDefault}
-									<dt class="text-text-muted">Change</dt>
-									<dd class="text-text">Applies after restart</dd>
-								{/if}
 							</dl>
 							<div class="flex flex-wrap items-center gap-2">
 								<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>

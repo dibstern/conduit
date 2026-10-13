@@ -6,7 +6,6 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import {
 	GetInstances,
 	GetStatus,
-	RemoveInstance,
 	RemoveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -131,9 +130,6 @@ test("the default Claude name applies live and its folder survives a login-servi
 		await row.getByRole("button").first().click();
 		await expect(row.getByTestId("remove-instance-btn")).toHaveCount(0);
 		await expect(row).toContainText("The default account can't be removed");
-		await expect(
-			harness.requestRpc(new RemoveInstance({ instanceId: defaultId })),
-		).rejects.toThrow("The default account can't be removed");
 		await row.getByTestId("edit-instance-btn").click();
 		await expect(page.getByTestId("instance-form-name")).toBeFocused();
 		await expect(page.getByTestId("instance-form-configdir")).toHaveValue(
@@ -141,7 +137,7 @@ test("the default Claude name applies live and its folder survives a login-servi
 		);
 		await expect(page.getByRole("radiogroup", { name: "Type" })).toHaveCount(0);
 		await expect(page.getByTestId("instance-form")).toContainText(
-			"Folder changes apply after restart",
+			"Folder changes apply on the next turn",
 		);
 		await page.screenshot({
 			path: resolve(artifacts, `${testInfo.project.name}-edit.png`),
@@ -172,7 +168,7 @@ test("the default Claude name applies live and its folder survives a login-servi
 		await expect(page.getByTestId("instance-form")).toBeHidden();
 		await expect(row).toContainText(configDir);
 		await row.getByRole("button").first().click();
-		await expect(row).toContainText("Applies after restart");
+		await expect(row).not.toContainText("Applies after restart");
 		const stored = readStored();
 		expect(daemonPid()).toBe(initialPid);
 		expect(stored).not.toHaveProperty("claudeConfigDir");

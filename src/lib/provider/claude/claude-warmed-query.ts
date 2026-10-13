@@ -15,6 +15,7 @@ import {
 	type ClaudeConfigDir,
 	type ClaudeLaunchConfig,
 	makeClaudeSdkEnv,
+	sameClaudeLogin,
 } from "./claude-sdk-env.js";
 import { makeEffectPromptQueue } from "./effect-prompt-queue.js";
 import type {
@@ -235,7 +236,19 @@ export const makeClaudeWarmedQueryOwner = (
 									}),
 								);
 							const existing = pending.get(input.sessionId);
-							if (existing) return existing;
+							if (existing) {
+								if (
+									sameClaudeLogin(
+										{
+											configDir: existing.resource.configDir,
+											root: existing.resource.options.cwd ?? process.cwd(),
+										},
+										{ configDir: input.configDir, root: input.workspaceRoot },
+									)
+								)
+									return existing;
+								yield* discardEntry(input.sessionId, existing);
+							}
 							let inheritedSettings: string | undefined;
 							let context: ClaudeSessionContext | undefined;
 							const canUseTool: CanUseTool = async (...args) =>
@@ -323,6 +336,13 @@ export const makeClaudeWarmedQueryOwner = (
 					);
 					if (!entry) return;
 					if (
+						!sameClaudeLogin(
+							{
+								configDir: entry.resource.configDir,
+								root: entry.resource.options.cwd ?? process.cwd(),
+							},
+							{ configDir, root: options.cwd ?? process.cwd() },
+						) ||
 						!isDeepStrictEqual(
 							immutableOptions(entry.resource.options),
 							immutableOptions(options),

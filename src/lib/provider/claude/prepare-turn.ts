@@ -239,7 +239,15 @@ function planTurn(input: {
 					resumeSessionId,
 				}
 			: undefined;
-	const catchingUp = !!resuming && !!nativeThread && input.hasAccountSwitch;
+	// Changing folders can make a same-account receipt unresumable. Keep the
+	// ordinary catch-up/fallback path available without changing the launch login.
+	const catchingUp =
+		!!resuming &&
+		!!nativeThread &&
+		(input.hasAccountSwitch ||
+			nativeThread.configDir === undefined ||
+			nativeThread.configDir._tag !== base.configDir._tag ||
+			nativeThread.configDir.path !== base.configDir.path);
 	if (resuming && !catchingUp) return resuming;
 	if (input.messages === undefined)
 		return {
@@ -248,25 +256,7 @@ function planTurn(input: {
 				? { deliveredThrough: nativeThread.deliveredThrough }
 				: {}),
 		};
-	// Legacy commands normalized to the default account must keep that folder.
-	let catchUpConfigDir: ClaudeConfigDir;
-	switch (options.folderSource) {
-		case "account":
-		case "implicitDefault":
-			catchUpConfigDir = nativeThread?.configDir ?? base.configDir;
-			break;
-		case "legacyDefault":
-			catchUpConfigDir = base.configDir;
-			break;
-		default:
-			return assertNever(options.folderSource);
-	}
-	const prepared = resuming
-		? {
-				...resuming,
-				configDir: catchUpConfigDir,
-			}
-		: base;
+	const prepared = resuming ?? base;
 	const currentIndex = input.messages.findIndex(
 		(message) => message.id === options.userMessageId,
 	);
