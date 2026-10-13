@@ -13,6 +13,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -190,7 +191,25 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 		// Providers
 		if (url.pathname === "/provider") {
-			res.end(JSON.stringify({ all: [], default: {}, connected: [] }));
+			res.end(
+				JSON.stringify({
+					all: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							models: {
+								"gpt-4": {
+									id: "gpt-4",
+									name: "GPT-4",
+									limit: { context: 128000, output: 4096 },
+								},
+							},
+						},
+					],
+					default: { openai: "gpt-4" },
+					connected: ["openai"],
+				}),
+			);
 			return;
 		}
 
@@ -274,12 +293,34 @@ async function createTestHarness(): Promise<TestHarness> {
 	// Relay startup makes no OpenCode requests; the first use opens the stream.
 	await relay.effectRuntime.runtime.runPromise(
 		Effect.scoped(
-			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-				instances.use("opencode"),
-			),
+			Effect.gen(function* () {
+				yield* (yield* OpenCodeInstancesTag).use("opencode");
+			}),
 		),
 	);
 	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
+	for (const session of Object.values(mock.sessions))
+		mock.injectSSE({ type: "session.created", properties: { info: session } });
+	const db = new Database(join(persistenceDir, "events.db"), {
+		readonly: true,
+	});
+	try {
+		await vi.waitFor(
+			() => {
+				for (const session of Object.values(mock.sessions))
+					expect(
+						db
+							.prepare<[string], { model_id: string; model_provider: string }>(
+								"SELECT model_id, model_provider FROM sessions WHERE id = ?",
+							)
+							.get(session.id),
+					).toEqual({ model_id: "gpt-4", model_provider: "openai" });
+			},
+			{ timeout: 5_000 },
+		);
+	} finally {
+		db.close();
+	}
 
 	return {
 		relay,

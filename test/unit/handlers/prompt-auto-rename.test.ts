@@ -10,6 +10,8 @@ import type { SessionRow } from "../../../src/lib/persistence/read-model-types.j
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import type { TurnResult } from "../../../src/lib/provider/types.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -51,6 +53,10 @@ const makeSessionRow = (
 	id: "session-1",
 	version: 1,
 	provider,
+	model_provider: provider === "claude" ? "claude" : "openai",
+	model_id: provider === "claude" ? "sonnet" : "gpt-4",
+	variant: "",
+	context_window: "",
 	provider_sid: null,
 	title,
 	status: "idle",
@@ -84,6 +90,8 @@ const makeReadQuery = (
 	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),
 	listSessionInfos: vi.fn(() => Effect.succeed([])),
+	listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+	getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 	readSessionList: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
 	readSessionTranscript: vi.fn(() =>
 		Effect.succeed({ messages: [], version: 0 }),
@@ -118,6 +126,9 @@ const providePromptLayer = (input: {
 	const sessionManagerService = makeMockSessionManagerService();
 	const baseLayer = makeTestHandlerLayer({
 		wsHandler,
+		openCodeModelService: makeMockOpenCodeModelService(
+			MOCK_OPENCODE_GPT4_CATALOG,
+		),
 		sessionManagerService,
 		orchestrationEngine: input.engine,
 		sessionTitleService: input.titleService,

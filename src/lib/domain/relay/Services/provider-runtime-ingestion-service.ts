@@ -41,6 +41,7 @@ import {
 	restoreRuntimeToolStart,
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
+import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
@@ -50,6 +51,7 @@ import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { announceBackgroundWork } from "./session-attention.js";
+import { sessionPickEvents } from "./session-pick.js";
 
 /** Terminal notifications can update an existing session, but cannot create one. */
 export function canSeedSession(event: ProviderRuntimeEvent): boolean {
@@ -87,6 +89,7 @@ export interface ProviderRuntimeIngestion {
 	readonly ingestBatch: (
 		events: readonly ProviderRuntimeEvent[],
 		options?: {
+			readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 			readonly publishToBus?: boolean;
 			readonly publishToRelay?: boolean;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
@@ -149,6 +152,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
 				ingestOptions: {
+					readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
 					readonly publishToBus?: boolean;
 					readonly publishToRelay?: boolean;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
@@ -338,6 +342,7 @@ export const makeProviderRuntimeIngestionLive = (
 												),
 											);
 											const accepted: CanonicalEvent[] = [];
+											const pickedSessions = new Set<string>();
 											for (let event of domainEvents) {
 												if (deleted.has(event.sessionId)) continue;
 												// A committed rewind already removed these messages locally.
@@ -391,6 +396,21 @@ export const makeProviderRuntimeIngestionLive = (
 															deleted.add(previous.sessionId);
 												}
 												accepted.push(event);
+												if (
+													event.type === "session.created" &&
+													!existing.has(event.sessionId) &&
+													!pickedSessions.has(event.sessionId)
+												) {
+													const pick = ingestOptions.sessionPicks?.get(
+														event.sessionId,
+													);
+													if (pick) {
+														accepted.push(
+															...sessionPickEvents(event.sessionId, pick),
+														);
+														pickedSessions.add(event.sessionId);
+													}
+												}
 											}
 											domainEvents = accepted;
 											// Started compactions and retries ride transient shell status;

@@ -96,7 +96,7 @@
 		{ status: statusFilter, grouping },
 		sessionState.now,
 		(session) => {
-			const slug = session.projectSlug ?? getCurrentSlug() ?? "";
+			const slug = session.projectSlug;
 			return { key: slug, label: projectDisplayName(slug) };
 		},
 	));
@@ -432,7 +432,7 @@
 		bulkPending = true;
 		const count = selectionCount;
 		const label = count === 1 ? "1 session" : `${count} sessions`;
-		const selected = selectedSessions.map((session) => ({ projectSlug: session.projectSlug ?? getCurrentSlug() ?? "", sessionId: session.id, originId: getBrowserClientId() }));
+		const selected = selectedSessions.map((session) => ({ projectSlug: session.projectSlug, sessionId: session.id, originId: getBrowserClientId() }));
 		let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
 		try {
 			targets = await confirmSessionDeletion(

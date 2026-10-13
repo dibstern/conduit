@@ -19,6 +19,7 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	type ClaudeTitleQueryFactory,
@@ -118,6 +119,7 @@ export const makeSessionTitleServiceLive = (
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
 			const api = yield* OpenCodeAPITag;
+			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 			const config = yield* ConfigTag;
 			const readQuery = yield* ReadQueryEffectTag;
 			const eventStore = yield* EventStoreEffectTag;
@@ -192,7 +194,7 @@ export const makeSessionTitleServiceLive = (
 							);
 					}
 
-					yield* applySessionCommand(
+					const rename = applySessionCommand(
 						{ type: "session.renamed", data: { sessionId, title } },
 						{ source: AUTO_TITLE_SOURCE },
 					).pipe(
@@ -204,6 +206,11 @@ export const makeSessionTitleServiceLive = (
 						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);
+					yield* instances._tag === "Some"
+						? rename.pipe(
+								Effect.provideService(OpenCodeInstancesTag, instances.value),
+							)
+						: rename;
 
 					const rows = yield* sql<{ title: string }>`
 						SELECT title FROM sessions WHERE id = ${sessionId}`;

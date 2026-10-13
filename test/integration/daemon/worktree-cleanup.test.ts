@@ -143,6 +143,8 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					projectSlug: "process-test",
 					originId: "cleanup-test",
 					providerId: "claude",
+					permissionMode: "ask",
+					model: { providerId: "claude", modelId: "sonnet" },
 					title,
 					...(newWorktree ? { newWorktree: true } : {}),
 				}),
@@ -690,6 +692,8 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 				projectSlug,
 				originId: "cleanup-test",
 				providerId: "claude",
+				permissionMode: "ask",
+				model: { providerId: "claude", modelId: "sonnet" },
 				title: "Registered project session",
 			}),
 		);

@@ -56,8 +56,8 @@ Scenario: An outage without a viewed session shows no warning
   When the mock relay reports OpenCode failed
   Then the OpenCode connection banner is not visible
 
-Scenario: A Claude session using the OpenCode default model shows no warning
-  When I view the Claude session using the OpenCode default model
+Scenario: A Claude session with an OpenCode project default shows no warning
+  When I view the Claude session with an OpenCode project default
   And the mock relay reports OpenCode reconnecting
   Then the OpenCode connection banner is not visible
   When the mock relay reports OpenCode failed
@@ -113,7 +113,8 @@ Scenario: Rejected discovery on a persisted Claude instance does not show an Ope
   Then the OpenCode connection banner is not visible
 
 Scenario: The first send shows why the selected OpenCode instance cannot create a session
-  Given creating a session on instance work-oc fails with CreateSession failed: OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused
+  Given the composer picker has the OpenCode catalog
+  And creating a session on instance work-oc fails with CreateSession failed: OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused
   When I type diagnose this outage into the composer
   And I send the composer message
   Then an error toast contains OpenCode instance "work-oc" is unreachable at http://127.0.0.1:4555: connection refused

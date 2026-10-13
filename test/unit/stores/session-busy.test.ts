@@ -42,7 +42,12 @@ it("rolls a Side Thread's subagents into it without making its parent busy", () 
 	expect(sessionState.currentParentId).toBe("root");
 	applySessionChange({
 		_tag: "upsert",
-		item: { id: "root", title: "Root", status: "busy" },
+		item: {
+			projectSlug: "project-a",
+			id: "root",
+			title: "Root",
+			status: "busy",
+		},
 	});
 	expect(isSessionBusy("root")).toBe(true);
 });
@@ -52,7 +57,7 @@ it("reads busy and retry from shell rows and accepts idle immediately", () => {
 	for (const status of ["busy", "retry", "idle"] as const) {
 		applySessionChange({
 			_tag: "upsert",
-			item: { id: "s", title: "s", status },
+			item: { projectSlug: "project-a", id: "s", title: "s", status },
 		});
 		expect(isSessionBusy("s")).toBe(status !== "idle");
 	}
@@ -80,14 +85,22 @@ it("does not propagate a live background agent's busy status into its monitoring
 			_tag: "snapshot",
 			rows: [
 				{
+					projectSlug: "project-a",
 					id: "root",
 					title: "Root",
 					status,
 					backgroundWork: "monitoring",
 					backgroundTasks,
 				},
-				{ id: "agent", title: "Agent", status: "busy", parentID: "root" },
 				{
+					projectSlug: "project-a",
+					id: "agent",
+					title: "Agent",
+					status: "busy",
+					parentID: "root",
+				},
+				{
+					projectSlug: "project-a",
 					id: "sibling",
 					title: "Sibling",
 					status: siblingStatus,
@@ -103,14 +116,22 @@ it("does not propagate a live background agent's busy status into its monitoring
 		_tag: "snapshot",
 		rows: [
 			{
+				projectSlug: "project-a",
 				id: "root",
 				title: "Root",
 				status: "idle",
 				backgroundWork: "monitoring",
 				backgroundTasks,
 			},
-			{ id: "agent", title: "Agent", status: "busy", parentID: "root" },
 			{
+				projectSlug: "project-a",
+				id: "agent",
+				title: "Agent",
+				status: "busy",
+				parentID: "root",
+			},
+			{
+				projectSlug: "project-a",
 				id: "foreground",
 				title: "Foreground",
 				status: "busy",
@@ -121,7 +142,12 @@ it("does not propagate a live background agent's busy status into its monitoring
 	expect(isSessionBusy("root")).toBe(true);
 	applySessionChange({
 		_tag: "upsert",
-		item: { id: "root", title: "Root", status: "idle" },
+		item: {
+			projectSlug: "project-a",
+			id: "root",
+			title: "Root",
+			status: "idle",
+		},
 	});
 	expect(isSessionBusy("root")).toBe(true);
 });
@@ -130,11 +156,29 @@ it("keeps every ancestor busy until its last busy descendant stops or is removed
 	applySessionChange({
 		_tag: "snapshot",
 		rows: [
-			{ id: "root", title: "root", status: "idle" },
-			{ id: "child", title: "child", status: "idle", parentID: "root" },
-			{ id: "leaf", title: "leaf", status: "busy", parentID: "child" },
-			{ id: "sibling", title: "sibling", status: "retry", parentID: "root" },
-			{ id: "other", title: "other", status: "idle" },
+			{ projectSlug: "project-a", id: "root", title: "root", status: "idle" },
+			{
+				projectSlug: "project-a",
+				id: "child",
+				title: "child",
+				status: "idle",
+				parentID: "root",
+			},
+			{
+				projectSlug: "project-a",
+				id: "leaf",
+				title: "leaf",
+				status: "busy",
+				parentID: "child",
+			},
+			{
+				projectSlug: "project-a",
+				id: "sibling",
+				title: "sibling",
+				status: "retry",
+				parentID: "root",
+			},
+			{ projectSlug: "project-a", id: "other", title: "other", status: "idle" },
 		],
 	});
 	expect(isSessionBusy("root")).toBe(true);
@@ -146,6 +190,7 @@ it("keeps every ancestor busy until its last busy descendant stops or is removed
 	applySessionChange({
 		_tag: "upsert",
 		item: {
+			projectSlug: "project-a",
 			id: "sibling",
 			title: "sibling",
 			status: "idle",

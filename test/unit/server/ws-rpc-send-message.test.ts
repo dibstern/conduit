@@ -6,9 +6,12 @@ import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockConfig,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -67,6 +70,12 @@ describe("WsRpcServerLayer input.submit", () => {
 							orchestrationEngine: engine,
 							seedEvents: [
 								makeSessionCreatedEvent("session-1", { provider: "claude" }),
+								...sessionPickEvents("session-1", {
+									harness: "claude",
+									model: { providerId: "claude", modelId: "sonnet" },
+									effort: "",
+									contextWindow: "",
+								}),
 							],
 							claudeEventPersistEffect: {
 								persistHandoffDelivered: () => Effect.void,
@@ -124,7 +133,18 @@ describe("WsRpcServerLayer input.submit", () => {
 						makeTestHandlerLayer({
 							config: makeMockConfig({ projectDir: tmpdir() }),
 							orchestrationEngine: engine,
-							seedEvents: [makeSessionCreatedEvent("session-1")],
+							openCodeModelService: makeMockOpenCodeModelService(
+								MOCK_OPENCODE_GPT4_CATALOG,
+							),
+							seedEvents: [
+								makeSessionCreatedEvent("session-1"),
+								...sessionPickEvents("session-1", {
+									harness: "opencode",
+									model: { providerId: "openai", modelId: "gpt-4" },
+									effort: "",
+									contextWindow: "",
+								}),
+							],
 							sessionManagerService: makeMockSessionManagerService({
 								recordMessageActivity,
 							}),
@@ -176,7 +196,18 @@ describe("WsRpcServerLayer input.submit", () => {
 							makeTestHandlerLayer({
 								config: makeMockConfig({ projectDir: tmpdir() }),
 								orchestrationEngine: engine,
-								seedEvents: [makeSessionCreatedEvent("session-1")],
+								openCodeModelService: makeMockOpenCodeModelService(
+									MOCK_OPENCODE_GPT4_CATALOG,
+								),
+								seedEvents: [
+									makeSessionCreatedEvent("session-1"),
+									...sessionPickEvents("session-1", {
+										harness: "opencode",
+										model: { providerId: "openai", modelId: "gpt-4" },
+										effort: "",
+										contextWindow: "",
+									}),
+								],
 							}),
 							RateLimiterLive({ maxRequests: 1, windowMs: 60_000 }),
 						),

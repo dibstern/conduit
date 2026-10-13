@@ -47,6 +47,7 @@ import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Serv
 import { deleteSession } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { setForkEntry } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { forkSessionForClient } from "../../../src/lib/handlers/session.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
@@ -122,7 +123,21 @@ const makeShellTestLayer = (
 		SessionEventBusLive,
 		Layer.succeed(
 			OrchestrationEngineTag,
-			withDispatchEffect({ dispatch: async () => undefined }),
+			withDispatchEffect({
+				dispatch: async () => ({
+					models: [
+						{
+							id: "sonnet",
+							name: "Sonnet",
+							providerId: "claude",
+							variants: { high: {} },
+							contextWindowOptions: [
+								{ value: "200k", label: "200K", isDefault: true },
+							],
+						},
+					],
+				}),
+			}),
 		),
 		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		Layer.succeed(
@@ -170,6 +185,27 @@ const sessionRenamed = (sessionId: string, title: string): CanonicalEvent =>
 		{ sessionId, title },
 		{ provider: "claude", createdAt: at() },
 	);
+
+const forkSourceEvents = (
+	sessionId: string,
+	harness: "claude" | "opencode" = "claude",
+) => [
+	canonicalEvent(
+		"session.created",
+		sessionId,
+		{ sessionId, title: "Shell", provider: harness },
+		{ provider: harness, createdAt: at() },
+	),
+	...sessionPickEvents(sessionId, {
+		harness,
+		model: {
+			providerId: harness === "claude" ? "claude" : "openai",
+			modelId: harness === "claude" ? "sonnet" : "gpt-4",
+		},
+		effort: harness === "claude" ? "high" : "",
+		contextWindow: harness === "claude" ? "200k" : "",
+	}),
+];
 const sessionStatus = (
 	sessionId: string,
 	status: "idle" | "busy",
@@ -333,7 +369,7 @@ describe("subscribeShell", () => {
 				return Effect.gen(function* () {
 					yield* recoverProjections;
 					yield* commit([
-						sessionCreated("claude-parent"),
+						...forkSourceEvents("claude-parent"),
 						messageCreated("claude-parent", "ui-boundary", 1000),
 					]);
 					const state = yield* ProviderStateEffectTag;
@@ -399,7 +435,7 @@ describe("subscribeShell", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
-				yield* commit([sessionCreated("claude-parent")]);
+				yield* commit([...forkSourceEvents("claude-parent")]);
 				const state = yield* ProviderStateEffectTag;
 				yield* state.saveUpdates("claude-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },
@@ -431,7 +467,7 @@ describe("subscribeShell", () => {
 			Effect.gen(function* () {
 				yield* recoverProjections;
 				yield* commit([
-					sessionCreated("claude-parent"),
+					...forkSourceEvents("claude-parent"),
 					messageCreated("claude-parent", "ui-tip", 1000),
 				]);
 				const state = yield* ProviderStateEffectTag;
@@ -470,7 +506,7 @@ describe("subscribeShell", () => {
 		Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([
-				sessionCreated("claude-parent"),
+				...forkSourceEvents("claude-parent"),
 				messageCreated("claude-parent", "ui-tip", 1000),
 				canonicalEvent(
 					"turn.completed",
@@ -511,7 +547,7 @@ describe("subscribeShell", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
-				yield* commit([sessionCreated("claude-parent")]);
+				yield* commit([...forkSourceEvents("claude-parent")]);
 				const state = yield* ProviderStateEffectTag;
 				yield* state.saveUpdates("claude-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },
@@ -560,7 +596,7 @@ describe("subscribeShell", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
-				yield* commit([sessionCreated("claude-parent")]);
+				yield* commit([...forkSourceEvents("claude-parent")]);
 				const state = yield* ProviderStateEffectTag;
 				yield* state.saveUpdates("claude-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },
@@ -606,7 +642,7 @@ describe("subscribeShell", () => {
 				);
 				yield* recoverProjections;
 				yield* commit([
-					sessionCreated("claude-parent"),
+					...forkSourceEvents("claude-parent"),
 					messageCreated("claude-parent", "api-tip", 1000),
 				]);
 				const state = yield* ProviderStateEffectTag;
@@ -634,6 +670,17 @@ describe("subscribeShell", () => {
 			`a new OpenCode fork exposes its parent and fork point ${messageId ?? "at tip"} without a metadata cache`,
 			() => {
 				const api = makeMockOpenCodeAPI();
+				vi.mocked(api.provider.list).mockResolvedValue({
+					connected: ["openai"],
+					defaults: { openai: "gpt-4" },
+					providers: [
+						{
+							id: "openai",
+							name: "OpenAI",
+							models: [{ id: "gpt-4", name: "GPT-4" }],
+						},
+					],
+				});
 				vi.mocked(api.session.messages).mockResolvedValue([
 					{
 						id: "fork-message",
@@ -655,7 +702,7 @@ describe("subscribeShell", () => {
 				});
 				return Effect.gen(function* () {
 					yield* recoverProjections;
-					yield* commit([sessionCreated("parent")]);
+					yield* commit(forkSourceEvents("parent", "opencode"));
 					const { q } = yield* openShell();
 					yield* takeN(q, 2);
 					yield* forkOpenCodeSession("parent", messageId);
@@ -667,7 +714,7 @@ describe("subscribeShell", () => {
 				}).pipe(
 					Effect.provide(
 						Layer.merge(
-							makeShellTestLayer(),
+							makeShellTestLayer(api),
 							Layer.succeed(OpenCodeAPITag, api),
 						),
 					),

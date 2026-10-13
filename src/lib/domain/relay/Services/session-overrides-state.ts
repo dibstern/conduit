@@ -33,7 +33,6 @@ export interface SessionState {
 	variant?: string;
 	contextWindow?: string;
 	permissionMode?: SessionPermissionMode;
-	modelUserSelected: boolean;
 	processingTimeoutCallback?: () => Effect.Effect<void>;
 	processingTimeoutToken?: symbol;
 }
@@ -82,7 +81,7 @@ const getOrCreate = (
 ): [Map<string, SessionState>, SessionState] => {
 	const existing = sessions.get(sessionId);
 	if (existing) return [sessions, existing];
-	const fresh: SessionState = { modelUserSelected: false };
+	const fresh: SessionState = {};
 	const next = new Map(sessions);
 	next.set(sessionId, fresh);
 	return [next, fresh];
@@ -219,20 +218,8 @@ export const getDefaultContextWindow = () =>
 		return state.defaultContextWindow;
 	});
 
-/** Set model for a session AND mark as user-selected. */
+/** Set the model stored for a session. */
 export const setModel = (sessionId: string, model: ModelOverride) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		yield* Ref.update(ref, (state) => {
-			const [sessions, entry] = getOrCreate(state.sessions, sessionId);
-			const next = new Map(sessions);
-			next.set(sessionId, { ...entry, model, modelUserSelected: true });
-			return { ...state, sessions: next };
-		});
-	});
-
-/** Set model for display WITHOUT marking as user-selected (auto-detected). */
-export const setModelDefault = (sessionId: string, model: ModelOverride) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		yield* Ref.update(ref, (state) => {
@@ -243,20 +230,12 @@ export const setModelDefault = (sessionId: string, model: ModelOverride) =>
 		});
 	});
 
-/** Get the effective model for a session (per-session ?? defaultModel). */
+/** Get the session model; missing picks never inherit a default. */
 export const getModel = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId)?.model ?? state.defaultModel;
-	});
-
-/** Whether the user explicitly selected a model for this session. */
-export const isModelUserSelected = (sessionId: string) =>
-	Effect.gen(function* () {
-		const ref = yield* OverridesStateTag;
-		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId)?.modelUserSelected ?? false;
+		return state.sessions.get(sessionId)?.model;
 	});
 
 /** Set the agent override for a session. */
@@ -305,12 +284,12 @@ export const setVariant = (sessionId: string, variant: string) =>
 		});
 	});
 
-/** Get the variant for a session (per-session ?? defaultVariant). */
+/** Get the session effort. */
 export const getVariant = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return state.sessions.get(sessionId)?.variant ?? state.defaultVariant;
+		return state.sessions.get(sessionId)?.variant ?? "";
 	});
 
 /** Set the approval mode for a session. */
@@ -356,14 +335,12 @@ export const setContextWindow = (sessionId: string, contextWindow: string) =>
 		});
 	});
 
-/** Get the context window for a session (per-session ?? defaultContextWindow). */
+/** Get the session context window. */
 export const getContextWindow = (sessionId: string) =>
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const state = yield* Ref.get(ref);
-		return (
-			state.sessions.get(sessionId)?.contextWindow ?? state.defaultContextWindow
-		);
+		return state.sessions.get(sessionId)?.contextWindow ?? "";
 	});
 
 /**

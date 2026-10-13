@@ -94,6 +94,21 @@ export function copyForkHistory(
 		if (event.type === "message.created") {
 			lastMessageId = rekey(event.data.messageId);
 		}
+		// A streamed part arrives as thousands of fragments that project to their
+		// concatenation; copying each one makes a long session slow to fork.
+		const previous = events.at(-1);
+		if (
+			(event.type === "text.delta" || event.type === "thinking.delta") &&
+			previous?.type === event.type &&
+			previous.data.partId === data["partId"] &&
+			previous.data.messageId === data["messageId"]
+		) {
+			events[events.length - 1] = {
+				...previous,
+				data: { ...previous.data, text: previous.data.text + event.data.text },
+			};
+			continue;
+		}
 		// Build a fresh envelope: StoredEvent sequence and streamVersion belong to
 		// the parent stream and must be assigned by the event store on append.
 		events.push({

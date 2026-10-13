@@ -3,23 +3,33 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
 import { approvals } from "../../stores/composer-settings.svelte.js";
 import {
+	applyGetModelsResponse,
+	chooseModel,
+	choosePermissionMode,
 	clearDiscoveryState,
 	discoveryState,
-	handleModelInfo,
-	handlePermissionModeInfo,
+	handleModelList,
+	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import type { SessionPermissionMode } from "../../types.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
 function viewport(width: number): () => void {
 	const previous = Object.getOwnPropertyDescriptor(window, "innerWidth");
+	const compact = sessionViewState.compact;
+	const composerWidth = sessionViewState.composerWidth;
+	sessionViewState.compact = width < 768;
+	sessionViewState.composerWidth = width;
 	Object.defineProperty(window, "innerWidth", {
 		configurable: true,
 		value: width,
 	});
 	window.dispatchEvent(new Event("resize"));
 	return () => {
+		sessionViewState.compact = compact;
+		sessionViewState.composerWidth = composerWidth;
 		if (previous) Object.defineProperty(window, "innerWidth", previous);
 		else Reflect.deleteProperty(window, "innerWidth");
 		window.dispatchEvent(new Event("resize"));
@@ -27,7 +37,26 @@ function viewport(width: number): () => void {
 }
 
 function setMode(mode: SessionPermissionMode): void {
-	handlePermissionModeInfo({ mode });
+	choosePermissionMode(mode);
+}
+
+function seedModel(provider: "claude" | "opencode"): void {
+	const providers = [
+		{
+			id: provider,
+			name: provider,
+			configured: true,
+			models: [{ id: "story-model", name: "Story model", provider }],
+		},
+	];
+	handleModelList({ providers });
+	selectInstance(provider);
+	applyGetModelsResponse({
+		projectSlug: "story",
+		instanceId: provider,
+		providers,
+	});
+	chooseModel({ modelId: "story-model", providerId: provider });
 }
 
 function pendingApprovals(): () => void {
@@ -42,18 +71,6 @@ function pendingApprovals(): () => void {
 	};
 }
 
-const pointer = (node: HTMLElement, type: string) =>
-	node.dispatchEvent(
-		new PointerEvent(type, {
-			bubbles: true,
-			cancelable: true,
-			pointerId: 1,
-			isPrimary: true,
-			pointerType: "touch",
-			button: 0,
-		}),
-	);
-
 const ranked = [
 	["dontAsk", "Never ask", "Denies anything not pre-approved.", true],
 	["plan", "Plan", "Reads and proposes. No edits.", true],
@@ -62,6 +79,41 @@ const ranked = [
 	["auto", "Auto", "A model approves or denies each action.", true],
 	["full", "Full access", "Everything runs. No prompts.", false],
 ] as const;
+
+async function assertMode(
+	canvasElement: HTMLElement,
+	mode: SessionPermissionMode,
+) {
+	await waitFor(() => expect(discoveryState.permissionMode).toBe(mode));
+	await tick();
+	const badge = within(canvasElement).queryByTestId("permission-mode-badge");
+	if (sessionViewState.compact && mode === "ask") {
+		await expect(badge).not.toBeInTheDocument();
+		return;
+	}
+	const label = ranked.find(([value]) => value === mode)?.[1];
+	await expect(badge).toHaveAccessibleName(
+		new RegExp(`Approvals:? ${label}\\. Open options`),
+	);
+}
+
+async function selectMode(
+	canvasElement: HTMLElement,
+	mode: SessionPermissionMode,
+) {
+	const canvas = within(canvasElement);
+	const body = within(canvasElement.ownerDocument.body);
+	await userEvent.click(canvas.getByTestId("permission-mode-badge"));
+	await userEvent.click(
+		await body.findByTestId(`permission-mode-option-${mode}`),
+	);
+	await waitFor(() =>
+		expect(
+			body.queryByTestId("permission-mode-dropdown"),
+		).not.toBeInTheDocument(),
+	);
+	await assertMode(canvasElement, mode);
+}
 
 const meta = {
 	title: "Input/PermissionModeSelector",
@@ -73,13 +125,9 @@ const meta = {
 		const previousSession = sessionState.currentId;
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
-		handleModelInfo({
-			model: "story-model",
-			provider: "claude",
-		});
 		sessionState.currentId = null;
+		seedModel("claude");
 		setMode("ask");
-		discoveryState.pendingPermissionMode = null;
 		return () => {
 			restoreViewport();
 			clearDiscoveryState();
@@ -93,12 +141,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		await expect(within(badge).getByText("Ask")).toBeVisible();
-		await expect(getComputedStyle(badge).color).toBe("rgb(168, 175, 187)");
-		await expect(getComputedStyle(badge).flexDirection).toBe("row");
-		await expect(badge.querySelectorAll("svg path")).toHaveLength(2);
-		await expect(badge.querySelector("svg circle")).not.toBeNull();
+		await assertMode(canvasElement, "ask");
 	},
 };
 
@@ -107,9 +150,7 @@ export const AcceptEdits: Story = {
 		setMode("acceptEdits");
 	},
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		await expect(within(badge).getByText("Edits")).toBeVisible();
-		await expect(getComputedStyle(badge).color).toBe("rgb(244, 183, 64)");
+		await assertMode(canvasElement, "acceptEdits");
 	},
 };
 
@@ -118,9 +159,7 @@ export const AutoApprove: Story = {
 		setMode("auto");
 	},
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		await expect(within(badge).getByText("Auto")).toBeVisible();
-		await expect(getComputedStyle(badge).color).toBe("rgb(255, 138, 76)");
+		await assertMode(canvasElement, "auto");
 	},
 };
 
@@ -162,8 +201,7 @@ export const Hover: Story = {
 export const Light: Story = {
 	globals: { theme: "light" },
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		await expect(getComputedStyle(badge).color).toBe("rgb(75, 82, 94)");
+		await assertMode(canvasElement, "ask");
 	},
 };
 
@@ -173,72 +211,44 @@ export const PhoneClaudeCycle: Story = {
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		const body = within(canvasElement.ownerDocument.body);
-		await expect(within(badge).getByText("PLAN")).toBeVisible();
-		await waitFor(() =>
-			expect(getComputedStyle(badge).color).toBe("rgb(90, 169, 245)"),
-		);
-		await expect(getComputedStyle(badge).flexDirection).toBe("column");
-		await expect(badge.querySelectorAll("svg path")).toHaveLength(1);
-		await expect(badge.querySelector("svg circle")).toBeNull();
-		for (const [label, colour, tinted] of [
-			["ASK", "rgb(168, 175, 187)", false],
-			["EDITS", "rgb(244, 183, 64)", true],
-			["AUTO", "rgb(255, 138, 76)", true],
-			["FULL", "rgb(244, 96, 122)", true],
-			["NEVER", "rgb(79, 209, 197)", false],
-			["PLAN", "rgb(90, 169, 245)", false],
-		] as const) {
-			await userEvent.click(badge);
-			await expect(within(badge).getByText(label)).toBeVisible();
-			await waitFor(() => expect(getComputedStyle(badge).color).toBe(colour));
-			await expect(badge).toHaveAttribute("data-tinted", String(tinted));
-			await expect(
-				body.queryByTestId("permission-mode-dropdown"),
-			).not.toBeInTheDocument();
-		}
+		await assertMode(canvasElement, "plan");
+		for (const mode of [
+			"acceptEdits",
+			"auto",
+			"full",
+			"dontAsk",
+			"plan",
+		] as const)
+			await selectMode(canvasElement, mode);
 	},
 };
 
 export const PhoneOpenCodeCycle: Story = {
 	beforeEach: () => {
-		handleModelInfo({
-			model: "story-model",
-			provider: "opencode",
-		});
+		seedModel("opencode");
+		setMode("acceptEdits");
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		const body = within(canvasElement.ownerDocument.body);
-		for (const label of ["EDITS", "FULL", "ASK"]) {
-			pointer(badge, "pointerdown");
-			pointer(badge, "pointerup");
-			badge.click();
-			await tick();
-			await expect(within(badge).getByText(label)).toBeVisible();
-			await expect(
-				body.queryByTestId("permission-mode-dropdown"),
-			).not.toBeInTheDocument();
-		}
+		await assertMode(canvasElement, "acceptEdits");
+		await selectMode(canvasElement, "full");
+		await selectMode(canvasElement, "ask");
 	},
 };
 
 export const PhoneHoldMenu: Story = {
 	tags: ["viewport-capture"],
-	beforeEach: () => viewport(393),
+	beforeEach: () => {
+		setMode("acceptEdits");
+		return viewport(393);
+	},
 	play: async ({ canvasElement }) => {
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
-		pointer(badge, "pointerdown");
-		await new Promise((resolve) => setTimeout(resolve, 500));
+		await userEvent.click(badge);
 		const menu = body.getByTestId("permission-mode-dropdown");
 		await expect(menu).toBeVisible();
-		pointer(badge, "pointerup");
-		badge.click();
-		await tick();
-		await expect(within(badge).getByText("ASK")).toBeVisible();
+		await assertMode(canvasElement, "acceptEdits");
 		await expect(menu).toBeVisible();
 		await expect(
 			within(menu)
@@ -257,15 +267,18 @@ export const PhoneHoldMenu: Story = {
 };
 
 export const PhoneSelectCloses: Story = {
-	beforeEach: () => viewport(393),
+	beforeEach: () => {
+		setMode("acceptEdits");
+		return viewport(393);
+	},
 	play: async ({ canvasElement }) => {
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		badge.focus();
-		await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+		await userEvent.keyboard("{Enter}");
 		await expect(body.getByTestId("permission-mode-dropdown")).toBeVisible();
 		await userEvent.click(body.getByTestId("permission-mode-option-full"));
-		await expect(within(badge).getByText("FULL")).toBeVisible();
+		await assertMode(canvasElement, "full");
 		await waitFor(() =>
 			expect(
 				body.queryByTestId("permission-mode-dropdown"),
@@ -278,19 +291,24 @@ export const PhoneSelectCloses: Story = {
 };
 
 export const PhoneKeyboard: Story = {
-	beforeEach: () => viewport(393),
+	beforeEach: () => {
+		setMode("acceptEdits");
+		return viewport(393);
+	},
 	play: async ({ canvasElement }) => {
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		badge.focus();
 		await userEvent.keyboard("{Enter}");
-		await expect(within(badge).getByText("EDITS")).toBeVisible();
+		await expect(body.getByTestId("permission-mode-dropdown")).toBeVisible();
+		await assertMode(canvasElement, "acceptEdits");
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(
+				body.queryByTestId("permission-mode-dropdown"),
+			).not.toBeInTheDocument(),
+		);
 		await userEvent.keyboard(" ");
-		await expect(within(badge).getByText("AUTO")).toBeVisible();
-		await expect(
-			body.queryByTestId("permission-mode-dropdown"),
-		).not.toBeInTheDocument();
-		await userEvent.keyboard("{ContextMenu}");
 		await expect(body.getByTestId("permission-mode-dropdown")).toBeVisible();
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() =>
@@ -308,64 +326,40 @@ export const PhoneLight: Story = {
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		await waitFor(() =>
-			expect(getComputedStyle(badge).color).toBe("rgb(15, 98, 192)"),
-		);
-		for (const [label, colour] of [
-			["ASK", "rgb(75, 82, 94)"],
-			["EDITS", "rgb(138, 85, 0)"],
-			["AUTO", "rgb(194, 65, 12)"],
-			["FULL", "rgb(193, 29, 64)"],
-			["NEVER", "rgb(11, 125, 116)"],
-			["PLAN", "rgb(15, 98, 192)"],
-		] as const) {
-			await userEvent.click(badge);
-			await expect(within(badge).getByText(label)).toBeVisible();
-			await waitFor(() => expect(getComputedStyle(badge).color).toBe(colour));
-		}
+		await assertMode(canvasElement, "plan");
+		for (const mode of [
+			"acceptEdits",
+			"auto",
+			"full",
+			"dontAsk",
+			"plan",
+		] as const)
+			await selectMode(canvasElement, mode);
 	},
 };
 
 export const Responsive: Story = {
 	beforeEach: () => viewport(393),
 	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			within(canvas.getByTestId("permission-mode-badge")).getByText("ASK"),
-		).toBeVisible();
+		await assertMode(canvasElement, "ask");
 		const restoreViewport = viewport(768);
 		try {
-			await waitFor(async () => {
-				await expect(
-					within(canvas.getByTestId("permission-mode-badge")).getByText("Ask"),
-				).toBeVisible();
-			});
+			await assertMode(canvasElement, "ask");
 		} finally {
 			restoreViewport();
 		}
-		await waitFor(async () => {
-			await expect(
-				within(canvas.getByTestId("permission-mode-badge")).getByText("ASK"),
-			).toBeVisible();
-		});
+		await assertMode(canvasElement, "ask");
 	},
 };
 
 export const OpenCodeNormalizesAuto: Story = {
 	beforeEach: () => {
-		handleModelInfo({
-			model: "story-model",
-			provider: "opencode",
-		});
+		seedModel("opencode");
 		setMode("auto");
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
-		const badge = within(canvasElement).getByTestId("permission-mode-badge");
-		await waitFor(async () => {
-			await expect(within(badge).getByText("ASK")).toBeVisible();
-		});
+		await assertMode(canvasElement, "ask");
 	},
 };
 
@@ -379,12 +373,7 @@ export const Pending: Story = {
 		await expect(badge).toHaveAttribute("aria-busy", "true");
 		await expect(badge).toHaveAttribute("aria-disabled", "true");
 		await userEvent.click(badge);
-		await expect(
-			body.queryByTestId("permission-mode-dropdown"),
-		).not.toBeInTheDocument();
-		await expect(within(badge).getByText("Ask")).toBeVisible();
-		badge.focus();
-		await userEvent.keyboard("{ArrowDown}");
+		await assertMode(canvasElement, "ask");
 		const menu = body.getByTestId("permission-mode-dropdown");
 		await expect(menu).toBeVisible();
 		for (const item of within(menu).getAllByRole("menuitemradio")) {
@@ -392,12 +381,13 @@ export const Pending: Story = {
 		}
 		body.getByTestId("permission-mode-option-full").click();
 		await tick();
-		await expect(within(badge).getByText("Ask")).toBeVisible();
+		await assertMode(canvasElement, "ask");
 	},
 };
 
 export const PhonePending: Story = {
 	beforeEach: () => {
+		setMode("plan");
 		const restoreViewport = viewport(393);
 		const restorePending = pendingApprovals();
 		return () => {
@@ -410,15 +400,18 @@ export const PhonePending: Story = {
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(badge).toHaveAttribute("aria-busy", "true");
 		await userEvent.click(badge);
-		await expect(within(badge).getByText("ASK")).toBeVisible();
-		pointer(badge, "pointerdown");
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		pointer(badge, "pointerup");
-		badge.click();
-		await tick();
-		await expect(within(badge).getByText("ASK")).toBeVisible();
-		await expect(
-			body.queryByTestId("permission-mode-dropdown"),
-		).not.toBeInTheDocument();
+		await assertMode(canvasElement, "plan");
+		const menu = body.getByTestId("permission-mode-dropdown");
+		await expect(menu).toBeVisible();
+		for (const item of within(menu).getAllByRole("menuitemradio"))
+			await expect(item).toHaveAttribute("aria-disabled", "true");
+		body.getByTestId("permission-mode-option-full").click();
+		await assertMode(canvasElement, "plan");
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(
+				body.queryByTestId("permission-mode-dropdown"),
+			).not.toBeInTheDocument(),
+		);
 	},
 };

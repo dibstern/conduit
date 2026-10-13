@@ -6,7 +6,6 @@ import {
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
-import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	PendingInteractionServiceTag,
@@ -30,7 +29,6 @@ import {
 	WebSocketHandlerTag,
 } from "./services.js";
 import { SessionManagerServiceTag } from "./session-manager-service.js";
-import { selectSessionModel } from "./session-model-settings.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
 
 export const completeRecoveredQuestion = (
@@ -164,10 +162,8 @@ const materializeOpenCodeSession = (
 		const targetProvider = input.model?.providerID ?? providerId;
 		const session = yield* sessionManagerService.createSession(row.title, {
 			providerId: targetProvider,
+			sourceSessionId: row.id,
 		});
-		if (input.model && input.modelUserSelected) {
-			yield* selectSessionModel(session.id, input.model);
-		}
 		orchestrationEngine.bindSession(session.id, OPENCODE_PROVIDER_ID);
 		wsHandler.setClientSession(input.clientId, session.id);
 		log.info(
@@ -180,10 +176,12 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
+		const read = yield* ReadQueryEffectTag;
+		const session = yield* read.getSession(input.sessionId);
 		const providerId =
-			(yield* orchestrationEngine.getProviderForSessionEffect(
-				input.sessionId,
-			)) ?? harnessForModelProvider(input.model?.providerID ?? "");
+			session?.provider ??
+			(yield* orchestrationEngine.getProviderForSessionEffect(input.sessionId));
+		if (!providerId) return input.sessionId;
 		const daemonConfig = loadDaemonConfig(config.configDir);
 		const driver = resolveProviderRoutingDriver(daemonConfig, providerId);
 		if (driver === undefined) return input.sessionId;

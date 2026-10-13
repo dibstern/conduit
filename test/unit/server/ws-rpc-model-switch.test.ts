@@ -70,6 +70,7 @@ describe("WsRpcServerLayer SwitchModel", () => {
 					provider: "openai",
 					variant: "fast",
 					variants: ["standard", "fast"],
+					contextWindow: { contextWindow: "", options: [] },
 				});
 				expect(yield* getModel("session-1")).toEqual({
 					providerID: "openai",
@@ -85,6 +86,7 @@ describe("WsRpcServerLayer SwitchModel", () => {
 				);
 				expect(committed.map((event) => event.type)).toEqual([
 					"session.model_changed",
+					"session.context_window_changed",
 					"session.variant_changed",
 				]);
 			}).pipe(

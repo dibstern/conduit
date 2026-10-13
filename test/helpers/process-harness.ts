@@ -243,6 +243,9 @@ export class ProcessHarness {
 		private readonly logLevel?: "warn",
 		relaySettings?: RelaySettings,
 		private readonly respawnOnExit = false,
+		managedOpenCodeId = "managed-test",
+		private readonly opencodeBorrowIdleTimeoutMs?: number,
+		private readonly opencodeInitiallyIdle = false,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -340,7 +343,7 @@ export class ProcessHarness {
 					? {
 							instances: [
 								{
-									id: "managed-test",
+									id: managedOpenCodeId,
 									name: "Managed test",
 									port: 0,
 									managed: true,
@@ -475,6 +478,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 			realSdk?: boolean;
 			shellEnvProof?: boolean;
 			managedOpenCode?: boolean;
+			/** Seed the managed fixture as the default or a named OpenCode instance. */
+			managedOpenCodeId?: string;
+			/** Test-only inventory borrow grace; production keeps its 30-second grace. */
+			opencodeBorrowIdleTimeoutMs?: number;
+			/** A recording's mid-turn status begins only when its first prompt fires. */
+			opencodeInitiallyIdle?: boolean;
 			ignoreOpenCodeSigterm?: boolean;
 			pauseOpenCodeSupervisor?: boolean;
 			runnerLifecycle?: ProcessHarness["runnerLifecycle"];
@@ -541,6 +550,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.logLevel,
 			options.relaySettings,
 			options.respawnOnExit,
+			options.managedOpenCodeId,
+			options.opencodeBorrowIdleTimeoutMs,
+			options.opencodeInitiallyIdle,
 		);
 	}
 
@@ -616,6 +628,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 		if (this.opencodeRecording && !this.recordedOpenCode) {
 			this.recordedOpenCode = new MockOpenCodeServer(
 				loadOpenCodeRecording(this.opencodeRecording),
+				this.opencodeInitiallyIdle,
 			);
 			await this.recordedOpenCode.start();
 			this.defaultOpenCodeUrl = this.recordedOpenCode.url;
@@ -752,6 +765,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 					XDG_CACHE_HOME: join(this.root, "cache"),
 					XDG_DATA_HOME: join(this.root, "data"),
 					CONDUIT_CONFIG_DIR: join(this.root, "config"),
+					...(this.opencodeBorrowIdleTimeoutMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS: String(
+									this.opencodeBorrowIdleTimeoutMs,
+								),
+							}),
 					CLAUDE_CONFIG_DIR: this.realSdk
 						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
 						: join(this.root, "claude"),
@@ -1084,7 +1104,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 		return `http://127.0.0.1:${this.port}`;
 	}
 
-	opencodeRequestBodies() {
+	opencodeRequestBodies(): readonly {
+		pid?: number;
+		method: string;
+		path: string;
+		body: string;
+	}[] {
 		const file = join(this.configDir, "fake-opencode-request-bodies.jsonl");
 		return (
 			this.recordedOpenCode?.requestBodies ??
@@ -2248,8 +2273,15 @@ export class ProcessBrowser {
 	): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
+				permissionMode: "ask",
 				projectSlug: this.projectSlug,
 				providerId,
+				model: {
+					providerId: providerId === "opencode" ? "fake" : "claude",
+					modelId: providerId === "opencode" ? "fake-model" : "sonnet",
+					variant: "",
+					contextWindow: providerId === "opencode" ? "" : "200k",
+				},
 				...(instanceId
 					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
 					: {}),

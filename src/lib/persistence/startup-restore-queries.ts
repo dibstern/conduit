@@ -21,20 +21,3 @@ export const pendingClaudeQuestionToolsQuery = `
 				AND later.role = 'user'
 				AND later.created_at > m.created_at
 		)`;
-
-/** Each session's effort and context window from its latest sent turn. */
-export const latestTurnSettingsQuery = `
-	SELECT latest.session_id,
-		json_extract(outbox.payload_json, '$.variant') AS variant,
-		json_extract(outbox.payload_json, '$.contextWindow') AS context_window
-	FROM (
-		SELECT session_id, MAX(side_effect_sequence) AS request_sequence
-		FROM command_receipts
-		WHERE command_type = 'send_turn' AND side_effect_sequence IS NOT NULL
-		GROUP BY session_id
-	) latest
-	-- The index holds both settings, so multi-MB payloads (images) stay unread.
-	JOIN provider_command_outbox outbox
-		INDEXED BY idx_provider_command_outbox_turn_settings
-		ON outbox.request_sequence = latest.request_sequence
-	WHERE outbox.effect_type = 'send_turn' AND json_valid(outbox.payload_json)`;

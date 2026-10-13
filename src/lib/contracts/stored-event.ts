@@ -301,7 +301,6 @@ export interface InputRequest {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly model?: { readonly providerID: string; readonly modelID: string };
-	readonly modelUserSelected: boolean;
 	readonly agent?: string;
 	readonly variant?: string;
 	readonly contextWindow?: string;
@@ -489,7 +488,7 @@ export interface SessionPermissionModeChangedPayload {
 	readonly mode: SessionPermissionModeValue;
 }
 
-/** The session's model, whether the user picked it or the relay inferred it. */
+/** The explicit model stored for the session. */
 export interface SessionModelChangedPayload {
 	readonly sessionId: string;
 	readonly modelId: string;
@@ -1001,7 +1000,6 @@ export const InputRequestSchema = Schema.Struct({
 		Schema.Struct({ providerID: Schema.String, modelID: Schema.String }),
 		{ exact: true },
 	),
-	modelUserSelected: Schema.Boolean,
 	agent: Schema.optionalWith(Schema.String, { exact: true }),
 	variant: Schema.optionalWith(Schema.String, { exact: true }),
 	contextWindow: Schema.optionalWith(Schema.String, { exact: true }),
@@ -1041,6 +1039,8 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),
 	providerSessionId: Schema.optionalWith(Schema.String, { exact: true }),
 	sideThread: Schema.optionalWith(Schema.Boolean, { exact: true }),
+	/** The input a Side Thread was started with, so a retried start finds it. */
+	startInputId: Schema.optionalWith(Schema.String, { exact: true }),
 	permissionMode: Schema.optionalWith(
 		Schema.Literal(...SESSION_PERMISSION_MODES),
 		{

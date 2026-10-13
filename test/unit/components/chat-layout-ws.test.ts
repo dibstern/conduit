@@ -207,9 +207,11 @@ vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 	clearDiscoveryState: vi.fn(),
 	applyGetAgentsResponse: vi.fn(),
 	applyGetCommandsResponse: vi.fn(),
-	applyGetModelsResponse: vi.fn(),
+	followModelsRead: vi.fn(() => vi.fn()),
 	getEffectiveInstanceId: () => "opencode",
-	discoveryState: { hasInstanceChoice: false },
+	getAvailableInstances: () => [],
+	viewDraftModels: vi.fn(),
+	discoveryState: { hasInstanceChoice: false, defaultsLoaded: false },
 }));
 
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({

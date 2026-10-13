@@ -25,10 +25,7 @@ import {
 } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
-import {
-	latestTurnSettingsQuery,
-	pendingClaudeQuestionToolsQuery,
-} from "../../../src/lib/persistence/startup-restore-queries.js";
+import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
@@ -1027,9 +1024,7 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 	);
 });
 
-// Relay startup runs both reads synchronously before the first session can
-// open. Driven from sessions or the outbox table, they read the store's largest
-// rows (tool output, prompt payloads with images): over a second on an 8 GB store.
+// Startup finds pending questions without scanning the store's tool output.
 describe("startup restore reads", () => {
 	const planOf = (query: string) =>
 		Effect.gen(function* () {
@@ -1047,15 +1042,6 @@ describe("startup restore reads", () => {
 				"SCAN mp USING INDEX idx_message_parts_open_questions",
 			);
 			expect(plan.join("\n")).not.toContain("idx_message_parts_message");
-		}).pipe(Effect.provide(testLayer)),
-	);
-
-	it.effect("reads turn settings from the index, not the payloads", () =>
-		Effect.gen(function* () {
-			const plan = yield* planOf(latestTurnSettingsQuery);
-			expect(plan).toContain(
-				"SEARCH outbox USING INDEX idx_provider_command_outbox_turn_settings (request_sequence=?)",
-			);
 		}).pipe(Effect.provide(testLayer)),
 	);
 });

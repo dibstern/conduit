@@ -87,6 +87,7 @@ Scenario: removing a named instance drops it from the settings list
   Then the Instances list does not show Staging OC
 
 Scenario Outline: the instance editor matches the approved layout
+  Given no provider instances are configured
   When I open settings to the Server section
   And I start adding a <driver> instance
   Then the instances-settings region visually matches <baseline> at <threshold> percent

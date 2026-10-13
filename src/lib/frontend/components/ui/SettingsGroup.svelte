@@ -59,17 +59,20 @@
 			<div class="flex items-center">
 				<Disclosure
 					look="section"
+					density="group"
+					chevron={false}
 					expanded={open}
 					onToggle={() => (open = !open)}
-					class="flex-1 min-w-0 min-h-[38px]"
+					class="flex-1 min-w-0"
 				>
-					<span id={titleId} class="truncate text-[12.5px] font-semibold">{title}</span>
+					<span aria-hidden="true" class="w-[10px] shrink-0 text-center text-[11.5px] font-normal text-text-muted transition-transform duration-200 {open ? 'rotate-90' : ''}">›</span>
+					<span id={titleId} class="truncate text-[11.5px] font-semibold">{title}</span>
 					{#if summary}
 						<span class="ml-auto shrink-0 text-[11px] font-normal text-text-muted">{summary}</span>
 					{/if}
 				</Disclosure>
 				{#if actions}
-					<div class="flex shrink-0 items-center gap-1.5 pr-3">{@render actions()}</div>
+					<div class="flex shrink-0 items-center gap-1.5 pr-[12px]">{@render actions()}</div>
 				{/if}
 			</div>
 			{#if open}

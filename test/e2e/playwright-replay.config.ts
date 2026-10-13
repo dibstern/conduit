@@ -43,6 +43,7 @@ export default defineConfig({
 		"composer-drift-layout.spec.ts",
 		"composer-large-paste.spec.ts",
 		"todo-overlay-feed.spec.ts",
+		"composer-agent-list-race.spec.ts",
 		// playwright-visual.config.ts: visual snapshot suite.
 		"visual-mockup.spec.ts",
 		"composer-layout.spec.ts",

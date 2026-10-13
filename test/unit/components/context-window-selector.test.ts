@@ -2,9 +2,9 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InstanceModelPicker from "../../../src/lib/frontend/components/model/InstanceModelPicker.svelte";
 import {
+	applyGetModelsResponse,
 	clearDiscoveryState,
 	discoveryState,
-	handleContextWindowInfo,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
@@ -46,13 +46,23 @@ describe("InstanceModelPicker context window", () => {
 		Element.prototype.scrollIntoView = vi.fn();
 		switchContextWindowRpcSpy.mockClear();
 		clearDiscoveryState();
-		handleContextWindowInfo({
-			contextWindow: "",
-			options: [
-				{ value: "200k", label: "200K", isDefault: true },
-				{ value: "1m", label: "1M (beta)" },
-			],
-		});
+		applyGetModelsResponse(
+			{
+				projectSlug: "project-a",
+				instanceId: "claude",
+				providers: [],
+				active: { model: "sonnet", provider: "claude" },
+				variant: { variant: "", variants: [] },
+				contextWindow: {
+					contextWindow: "200k",
+					options: [
+						{ value: "200k", label: "200K", isDefault: true },
+						{ value: "1m", label: "1M (beta)" },
+					],
+				},
+			},
+			"session-1",
+		);
 		sessionState.currentId = "session-1";
 	});
 

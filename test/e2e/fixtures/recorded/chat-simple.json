@@ -34,6 +34,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
           "title": "New session - 2026-03-27T04:02:08.557Z",
           "status": "idle",
@@ -47,6 +48,7 @@
       "type": "session_list",
       "sessions": [
         {
+          "projectSlug": "e2e-replay",
           "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
           "title": "New session - 2026-03-27T04:02:08.557Z",
           "status": "idle",
@@ -496,6 +498,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -509,6 +512,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -522,6 +526,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -535,6 +540,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "idle",
@@ -548,6 +554,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "busy",
@@ -567,6 +574,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "New session - 2026-03-27T04:02:08.557Z",
               "status": "busy",
@@ -581,6 +589,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "busy",
@@ -595,6 +604,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "busy",
@@ -650,6 +660,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -668,6 +679,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -681,6 +693,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -694,6 +707,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -729,6 +743,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -736,6 +751,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -749,6 +765,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -756,6 +773,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -769,6 +787,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -776,6 +795,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -789,6 +809,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "idle",
@@ -796,6 +817,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -809,6 +831,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "busy",
@@ -817,6 +840,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -835,6 +859,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "New session - 2026-03-27T04:02:14.925Z",
               "status": "busy",
@@ -843,6 +868,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -856,6 +882,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "busy",
@@ -864,6 +891,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -877,6 +905,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "busy",
@@ -885,6 +914,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -939,6 +969,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -946,6 +977,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -964,6 +996,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -971,6 +1004,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -984,6 +1018,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -991,6 +1026,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1004,6 +1040,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1011,6 +1048,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1046,6 +1084,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1053,6 +1092,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1060,6 +1100,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1073,6 +1114,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1080,6 +1122,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1087,6 +1130,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1100,6 +1144,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1107,6 +1152,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1114,6 +1160,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1127,6 +1174,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "idle",
@@ -1134,6 +1182,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1141,6 +1190,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1154,6 +1204,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "busy",
@@ -1162,6 +1213,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1169,6 +1221,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1187,6 +1240,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "New session - 2026-03-27T04:02:18.919Z",
               "status": "busy",
@@ -1195,6 +1249,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1202,6 +1257,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1215,6 +1271,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "busy",
@@ -1223,6 +1280,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1230,6 +1288,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1243,6 +1302,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "busy",
@@ -1251,6 +1311,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1258,6 +1319,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1306,6 +1368,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1313,6 +1376,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1320,6 +1384,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1338,6 +1403,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1345,6 +1411,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1352,6 +1419,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1365,6 +1433,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1372,6 +1441,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1379,6 +1449,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1392,6 +1463,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1399,6 +1471,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1406,6 +1479,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1441,6 +1515,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1448,6 +1523,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1455,6 +1531,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1462,6 +1539,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1475,6 +1553,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1482,6 +1561,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1489,6 +1569,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1496,6 +1577,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1509,6 +1591,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1516,6 +1599,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1523,6 +1607,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1530,6 +1615,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1543,6 +1629,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "idle",
@@ -1550,6 +1637,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1557,6 +1645,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1564,6 +1653,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1577,6 +1667,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "busy",
@@ -1585,6 +1676,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1592,6 +1684,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1599,6 +1692,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1617,6 +1711,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "New session - 2026-03-27T04:02:24.046Z",
               "status": "busy",
@@ -1625,6 +1720,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1632,6 +1728,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1639,6 +1736,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1652,6 +1750,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "busy",
@@ -1660,6 +1759,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1667,6 +1767,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1674,6 +1775,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1687,6 +1789,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "busy",
@@ -1695,6 +1798,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1702,6 +1806,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1709,6 +1814,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1757,6 +1863,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1764,6 +1871,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1771,6 +1879,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1778,6 +1887,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1796,6 +1906,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1803,6 +1914,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1810,6 +1922,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1817,6 +1930,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1830,6 +1944,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1837,6 +1952,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1844,6 +1960,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1851,6 +1968,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1864,6 +1982,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1871,6 +1990,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1878,6 +1998,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1885,6 +2006,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1920,6 +2042,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -1927,6 +2050,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1934,6 +2058,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1941,6 +2066,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1948,6 +2074,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -1961,6 +2088,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -1968,6 +2096,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -1975,6 +2104,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -1982,6 +2112,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -1989,6 +2120,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2002,6 +2134,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -2009,6 +2142,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2016,6 +2150,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2023,6 +2158,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2030,6 +2166,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2043,6 +2180,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "idle",
@@ -2050,6 +2188,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2057,6 +2196,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2064,6 +2204,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2071,6 +2212,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2084,6 +2226,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "busy",
@@ -2092,6 +2235,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2099,6 +2243,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2106,6 +2251,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2113,6 +2259,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2131,6 +2278,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "New session - 2026-03-27T04:02:28.335Z",
               "status": "busy",
@@ -2139,6 +2287,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2146,6 +2295,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2153,6 +2303,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2160,6 +2311,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2173,6 +2325,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "busy",
@@ -2181,6 +2334,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2188,6 +2342,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2195,6 +2350,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2202,6 +2358,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2215,6 +2372,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "busy",
@@ -2223,6 +2381,7 @@
               "processing": true
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2230,6 +2389,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2237,6 +2397,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2244,6 +2405,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2298,6 +2460,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2305,6 +2468,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2312,6 +2476,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2319,6 +2484,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2326,6 +2492,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2344,6 +2511,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2351,6 +2519,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2358,6 +2527,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2365,6 +2535,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2372,6 +2543,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2385,6 +2557,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2392,6 +2565,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2399,6 +2573,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2406,6 +2581,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2413,6 +2589,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",
@@ -2426,6 +2603,7 @@
           "type": "session_list",
           "sessions": [
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28ace90ffeJ6ZKJjGaVRS4XN",
               "title": "Greet function implementation",
               "status": "idle",
@@ -2433,6 +2611,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28adf51ffeC106HfUge4x26Q",
               "title": "Greeting",
               "status": "idle",
@@ -2440,6 +2619,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28af358ffezdGhltIAXNz3VN",
               "title": "ok",
               "status": "idle",
@@ -2447,6 +2627,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b02f2ffePlT1fSGFbEmcqE",
               "title": "Pong reply",
               "status": "idle",
@@ -2454,6 +2635,7 @@
               "messageCount": 0
             },
             {
+              "projectSlug": "e2e-replay",
               "id": "ses_2d28b1bd2ffeSjhBHLSlb2SRue",
               "title": "Greeting",
               "status": "idle",

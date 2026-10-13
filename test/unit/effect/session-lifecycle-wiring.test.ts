@@ -254,7 +254,15 @@ describe("SessionLifecycleWiringLive", () => {
 			return Effect.gen(function* () {
 				const service = yield* SessionManagerServiceTag;
 				yield* flushSubscribers;
-				yield* service.createSession("Claude", { providerId: "claude" });
+				yield* service.createSession("Claude", {
+					providerId: "claude",
+					pick: {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "opus" },
+						effort: "high",
+						contextWindow: "200k",
+					},
+				});
 				yield* waitForAssertion(() =>
 					expect(instances.ifRunning).toHaveBeenCalledOnce(),
 				);
@@ -266,6 +274,12 @@ describe("SessionLifecycleWiringLive", () => {
 				const session = yield* service.createSession("OpenCode", {
 					instanceId: defaultInstanceIdForDriver("opencode"),
 					providerId: "opencode",
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "",
+						contextWindow: "",
+					},
 				});
 				yield* waitForAssertion(() =>
 					expect(services.pollerManager.startPolling).toHaveBeenCalledWith(
@@ -353,6 +367,12 @@ describe("SessionLifecycleWiringLive", () => {
 				yield* flushSubscribers;
 				yield* service.createSession("Service Created", {
 					providerId: "opencode",
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "",
+						contextWindow: "",
+					},
 				});
 				yield* waitForAssertion(() =>
 					expect(services.pollerManager.startPolling).toHaveBeenCalled(),

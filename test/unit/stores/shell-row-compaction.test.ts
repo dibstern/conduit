@@ -19,6 +19,7 @@ import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 import { applySessionChange } from "./session-fixtures.js";
 
 const row = (compacting?: string): SessionInfo => ({
+	projectSlug: "project-a",
 	id: "s",
 	title: "s",
 	status: "busy",

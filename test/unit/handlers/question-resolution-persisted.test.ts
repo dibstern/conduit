@@ -56,10 +56,10 @@ import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
+	makeMockConfig,
 	makeMockSessionManagerService,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
@@ -129,7 +129,7 @@ const withHandlerStack = async (
 	const layer = Layer.mergeAll(
 		persistence,
 		bus,
-		Layer.succeed(ConfigTag, {} as ProjectRelayConfig),
+		Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
 		PendingInteractionServiceLive,
 		Layer.succeed(OpenCodeAPITag, client),
 		Layer.succeed(WebSocketHandlerTag, makeWsHandler()),

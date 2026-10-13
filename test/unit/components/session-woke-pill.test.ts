@@ -14,6 +14,7 @@ describe("SessionItem wake marker", () => {
 		["turn", "Woke · done", "text-success"],
 	] as const)("shows %s in the existing meta line", (reason, label, colour) => {
 		const session: SessionInfo = {
+			projectSlug: "test-project",
 			id: reason,
 			title: "Work",
 			status: "idle",

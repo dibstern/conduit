@@ -9,8 +9,12 @@ import {
 	planUsageWindows,
 	usageDisplay,
 } from "../utils/continuation.js";
-import { discoveryState, getEffectiveInstanceId } from "./discovery.svelte.js";
+import {
+	getEffectiveInstanceId,
+	getSessionInstanceId,
+} from "./discovery.svelte.js";
 import { getInstanceById, instanceState } from "./instance.svelte.js";
+import { sessionState } from "./session.svelte.js";
 
 export const usageState = $state<{
 	readings: readonly UsageReading[];
@@ -25,13 +29,13 @@ export function applyUsageLimitsSetting(setting: UsageLimitsSetting): void {
 	usageState.limits = setting;
 }
 
-/** A resumed session uses its latest account; a draft uses its effective instance. */
+/** Session account bindings come from GetModels; drafts use their effective instance. */
 export function composerAccountId(
 	session: Immutable<SessionInfo> | undefined,
 ): string | undefined {
-	return session
-		? (session.resumes?.at(-1)?.instanceId ??
-				discoveryState.sessionInstanceIds[session.id])
+	const sessionId = session?.id ?? sessionState.currentId;
+	return sessionId
+		? getSessionInstanceId(sessionId) || undefined
 		: getEffectiveInstanceId();
 }
 

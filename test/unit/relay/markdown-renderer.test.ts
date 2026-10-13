@@ -97,6 +97,7 @@ describe("SessionManager.loadPreRenderedHistory", () => {
 		};
 
 		const mgr = new SessionManager({
+			projectSlug: "test-project",
 			client: mockClient as unknown as OpenCodeAPI,
 		});
 

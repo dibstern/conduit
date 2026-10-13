@@ -28,10 +28,7 @@
 	import Button from "../ui/Button.svelte";
 	import MessageTime from "./MessageTime.svelte";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
-	import hljs from "highlight.js";
-	// Register aliases for template languages not natively supported by highlight.js.
-	// Consistent with FileViewer's mapExtToLanguage mapping (svelte/vue → xml).
-	hljs.registerAliases(["svelte", "vue"], { languageName: "xml" });
+	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import { themeState } from "../../stores/theme.svelte.js";
 
 	let { message, forkMessageId, sessionId }: {
@@ -139,7 +136,7 @@
 		if (!containerEl) return;
 		await tick();
 		// Re-check after async yield — component may have unmounted during tick
-		if (!containerEl) return;
+		if (!containerEl?.isConnected) return;
 
 		const contentEl = containerEl.querySelector(".md-content");
 		if (!contentEl) return;
@@ -151,8 +148,7 @@
 		// Add code block headers
 		addCodeBlockHeaders(contentEl as HTMLElement);
 
-		// Syntax highlighting via hljs (npm import)
-		highlightCodeBlocks(contentEl as HTMLElement);
+		void highlightCodeBlocks(contentEl as HTMLElement);
 
 		// Mermaid diagrams
 		renderMermaidBlocks(contentEl as HTMLElement);
@@ -233,13 +229,28 @@
 		}
 	}
 
-	function highlightCodeBlocks(container: HTMLElement): void {
-		const blocks = container.querySelectorAll(
+	async function highlightCodeBlocks(container: HTMLElement): Promise<void> {
+		const blocks = [...container.querySelectorAll<HTMLElement>(
 			"pre code:not(.hljs):not(.language-mermaid)",
-		);
-		for (const block of blocks) {
-			if (block.closest(".tool-result")) continue;
-			hljs.highlightElement(block as HTMLElement);
+		)].filter((block) => !block.closest(".tool-result"));
+		if (!blocks.length) return;
+		const hljs = await loadHighlighter();
+		const highlight = () => {
+			const replaying = sessionId === undefined
+				? isLoading()
+				: sessionMessages.get(sessionId)?.loadLifecycle === "loading";
+			if (!container.isConnected || !message.html || replaying) return;
+
+			for (const block of blocks) {
+				if (!block.isConnected || block.dataset["highlighted"] || block.classList.contains("hljs")) continue;
+				hljs.highlightElement(block);
+			}
+		};
+		// A cold import resumes all waiting messages together; spread the work out again.
+		if (typeof requestIdleCallback === "function") {
+			requestIdleCallback(highlight);
+		} else {
+			highlight();
 		}
 	}
 

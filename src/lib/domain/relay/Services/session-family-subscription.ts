@@ -14,12 +14,13 @@
 // the member it was opened on (a finished subagent) does not orphan it, and
 // every device viewing any member of one family asks the same question: the
 // source is named by that root and shares its window reads (y7eo.15). The read
-// is therefore a pure function of the window and the store; the ids served are
-// tracked from the envelopes each subscriber is sent.
+// is therefore a pure function of the window and the store. The base depends
+// on the viewed session; windows do not. The ids served are tracked from the
+// envelopes each subscriber is sent.
 // Resume is a rebase for the same reason as the shell: the query can only
 // report rows that still exist.
 
-import { Effect, Option, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { withCachedSessionGit } from "../../../git/session-git.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
@@ -35,16 +36,14 @@ export const subscribeSessionFamily = (options: {
 }): Stream.Stream<
 	Envelope<SessionInfo>,
 	ShellSubscriptionError,
-	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag
+	ReadQueryEffectTag | SessionEventBusTag | BackgroundLivenessTag | ConfigTag
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
 			const backgroundOf = yield* BackgroundLivenessTag;
-			const config = Option.getOrUndefined(
-				yield* Effect.serviceOption(ConfigTag),
-			);
+			const config = yield* ConfigTag;
 			const anchor =
 				(yield* readQuery.getSessionFamilyRoot(options.sessionId)) ??
 				options.sessionId;
@@ -56,22 +55,25 @@ export const subscribeSessionFamily = (options: {
 					shareReads: true,
 					read: (range) =>
 						readQuery
-							.readSessionList({ ...range, familyOf: anchor, backgroundOf })
+							.readSessionList({
+								...range,
+								familyOf: anchor,
+								...(range === undefined ? { viewed: options.sessionId } : {}),
+								backgroundOf,
+							})
 							.pipe(
 								Effect.flatMap((list) =>
 									Effect.forEach(list.rows, (row) =>
 										Effect.gen(function* () {
 											return {
 												...row,
-												item: config
-													? yield* withSessionWorktreeStatus(
-															withCachedSessionGit(row.item, [
-																config.projectDir,
-																...(config.extraFolders ?? []),
-															]),
-															config,
-														)
-													: row.item,
+												item: yield* withSessionWorktreeStatus(
+													withCachedSessionGit(
+														{ ...row.item, projectSlug: config.slug },
+														[config.projectDir, ...(config.extraFolders ?? [])],
+													),
+													config,
+												),
 											};
 										}),
 									).pipe(Effect.map((rows) => ({ ...list, rows }))),

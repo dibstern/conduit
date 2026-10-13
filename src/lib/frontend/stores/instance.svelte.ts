@@ -20,6 +20,7 @@ import type { InstanceStatus, OpenCodeInstance } from "../types.js";
 
 export const instanceState = $state({
 	instances: [] as OpenCodeInstance[],
+	loaded: false,
 	providerCapabilities: {} as Record<
 		string,
 		ProviderSessionCapabilities | undefined
@@ -131,6 +132,7 @@ export function applyInstanceListResponse(
 			: {}),
 	}));
 	instanceState.instances = instances;
+	instanceState.loaded = true;
 	if (response.providerCapabilities) {
 		instanceState.providerCapabilities = { ...response.providerCapabilities };
 	}
@@ -184,6 +186,7 @@ export function instanceStatusColor(
 
 export function clearInstanceState(): void {
 	instanceState.instances = [];
+	instanceState.loaded = false;
 	instanceState.providerCapabilities = {};
 	proxyDetection = null;
 	scanInFlight = false;

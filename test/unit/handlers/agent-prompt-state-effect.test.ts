@@ -3,9 +3,12 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { setDefaultAgent } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { handleMessage } from "../../../src/lib/handlers/prompt.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockOpenCodeAPI,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
@@ -57,10 +60,21 @@ describe("agent selection state", () => {
 				Layer.fresh(
 					makeTestHandlerLayer({
 						api,
+						openCodeModelService: makeMockOpenCodeModelService(
+							MOCK_OPENCODE_GPT4_CATALOG,
+						),
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
-						seedEvents: [makeSessionCreatedEvent("session-1")],
+						seedEvents: [
+							makeSessionCreatedEvent("session-1"),
+							...sessionPickEvents("session-1", {
+								harness: "opencode",
+								model: { providerId: "openai", modelId: "gpt-4" },
+								effort: "",
+								contextWindow: "",
+							}),
+						],
 					}),
 				),
 			),
@@ -105,10 +119,21 @@ describe("agent selection state", () => {
 				Layer.fresh(
 					makeTestHandlerLayer({
 						api,
+						openCodeModelService: makeMockOpenCodeModelService(
+							MOCK_OPENCODE_GPT4_CATALOG,
+						),
 						wsHandler: ws,
 						sessionManagerService,
 						orchestrationEngine: engine,
-						seedEvents: [makeSessionCreatedEvent("session-1")],
+						seedEvents: [
+							makeSessionCreatedEvent("session-1"),
+							...sessionPickEvents("session-1", {
+								harness: "opencode",
+								model: { providerId: "openai", modelId: "gpt-4" },
+								effort: "",
+								contextWindow: "",
+							}),
+						],
 					}),
 				),
 			),

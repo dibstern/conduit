@@ -331,7 +331,7 @@ const server = createServer(async (request, response) => {
 		);
 		response.writeHead(204).end();
 	} else if (request.url === "/global/health") {
-		if (!healthy) {
+		if (!healthy || existsSync(join(configDir, `${stateStem}-hold-health`))) {
 			response.writeHead(503).end("{}");
 			return;
 		}
@@ -345,6 +345,10 @@ const server = createServer(async (request, response) => {
 			}),
 		);
 	} else if (path === "/global/event" || path === "/event") {
+		if (existsSync(join(configDir, "fake-opencode-reject-events"))) {
+			response.writeHead(503).end("{}");
+			return;
+		}
 		const stream = {
 			connectionId: ++streamId,
 			path,
@@ -566,7 +570,11 @@ const server = createServer(async (request, response) => {
 			existsSync(projectConfig) ? readFileSync(projectConfig, "utf8") : "{}",
 		);
 	} else if (path === "/provider" && request.method === "GET") {
-		const catalogFile = join(configDir, "fake-opencode-model-catalog.json");
+		if (existsSync(join(configDir, `${stateStem}-reject-models`))) {
+			response.writeHead(503).end("{}");
+			return;
+		}
+		const catalogFile = join(configDir, `${stateStem}-model-catalog.json`);
 		response.end(
 			existsSync(catalogFile)
 				? readFileSync(catalogFile, "utf8")

@@ -8,7 +8,7 @@ export const sessionSkillsHandlers = {
 	GetSessionSkills: (request) =>
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
-			const messages = yield* readQuery.getSessionMessagesWithParts(
+			const messages = yield* readQuery.getSessionSkillMessages(
 				request.sessionId,
 			);
 			const names = yield* getSkillNamesForSession(request.sessionId);

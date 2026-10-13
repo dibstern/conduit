@@ -29,6 +29,7 @@ import {
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { harnessForModelProvider } from "../../../src/lib/provider/turn-settings.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { assembleDetailRows } from "../../helpers/detail-rows.js";
@@ -225,17 +226,51 @@ export class TestWsClient {
 
 	async createSession(
 		title?: string,
-		opts: { readonly providerId?: string; readonly instanceId?: string } = {},
+		opts: {
+			readonly providerId?: string;
+			readonly instanceId?: string;
+			readonly model?: {
+				readonly providerId: string;
+				readonly modelId: string;
+				readonly variant: string;
+				readonly contextWindow: string;
+			};
+		} = {},
 	): Promise<ReceivedMessage> {
 		const clientId = this.clientId;
+		const instanceId =
+			opts.instanceId ??
+			(opts.providerId ? harnessForModelProvider(opts.providerId) : undefined);
+		const models = await this.rpcCall((client) =>
+			client.GetModels({
+				projectSlug: this.projectSlug,
+				...(instanceId
+					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
+					: {}),
+			}),
+		);
+		const model =
+			opts.model ??
+			(models.active
+				? {
+						providerId: models.active.provider,
+						modelId: models.active.model,
+						variant: models.variant?.variant ?? "",
+						contextWindow: models.contextWindow?.contextWindow ?? "",
+					}
+				: undefined);
+		if (!model)
+			throw new Error("The session fixture needs a valid harness model pick");
 		const result = await this.rpcCall((client) =>
 			client.CreateSession({
+				permissionMode: "ask",
 				projectSlug: this.projectSlug,
 				originId: clientId,
+				model,
 				...(title != null ? { title } : {}),
 				...(opts.providerId ? { providerId: opts.providerId } : {}),
-				...(opts.instanceId
-					? { instanceId: ProviderInstanceIdSchema.make(opts.instanceId) }
+				...(instanceId
+					? { instanceId: ProviderInstanceIdSchema.make(instanceId) }
 					: {}),
 			}),
 		);

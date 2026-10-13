@@ -33,7 +33,7 @@ import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
-import { modelsHandlers } from "./ws-rpc/models.js";
+import { modelsHandlers, subscribeDraftModels } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
 import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
@@ -312,6 +312,7 @@ export const wsRpcHandlers = WsRpcGroup.of({
 			),
 		),
 	SubscribeProjectSettings: () => Rpc.fork(subscribeProjectSettings()),
+	SubscribeDraftModels: (request) => Rpc.fork(subscribeDraftModels(request)),
 	SubscribeAlerts: () => Rpc.fork(subscribeAlerts()),
 	SubscribeInputDraft: (request) =>
 		Rpc.fork(subscribeInputDraft(request.sessionId)),
@@ -450,10 +451,11 @@ export const makeRoutedWsRpcServerLayer = <
 	const routeHandler =
 		<P extends { readonly projectSlug?: string }, A, E, R>(
 			handler: (payload: P) => Effect.Effect<A, E, R>,
+			fallbackProjectSlug?: string,
 		) =>
 		(payload: P) =>
 			Effect.gen(function* () {
-				const slug = payload.projectSlug ?? defaultProjectSlug;
+				const slug = payload.projectSlug ?? fallbackProjectSlug;
 				if (slug === undefined)
 					return yield* Effect.fail(
 						new WsRpcError({ message: "projectSlug is required" }),
@@ -482,7 +484,10 @@ export const makeRoutedWsRpcServerLayer = <
 				(daemonUnaryHandlers && Object.hasOwn(daemonUnaryHandlers, name)) ||
 				Object.hasOwn(daemonOnlyHandlers, name)
 					? handler
-					: routeHandler<never, unknown, unknown, unknown>(handler),
+					: routeHandler<never, unknown, unknown, unknown>(
+							handler,
+							name === "CreateSession" ? undefined : defaultProjectSlug,
+						),
 			],
 		),
 	) as {
@@ -505,12 +510,7 @@ export const makeRoutedWsRpcServerLayer = <
 			payload: Parameters<(typeof unaryHandlers)["CreateSession"]>[0],
 		) =>
 			routeCreateSession(payload).pipe(
-				Effect.tap(() => {
-					const slug = payload.projectSlug ?? defaultProjectSlug;
-					return slug === undefined
-						? Effect.void
-						: daemonHandlers.sessionCreated(slug);
-				}),
+				Effect.tap(() => daemonHandlers.sessionCreated(payload.projectSlug)),
 			);
 	}
 	const routeStream = <
@@ -614,6 +614,8 @@ export const makeRoutedWsRpcServerLayer = <
 		SubscribePtys: (request) => routeStream(request.projectSlug, subscribePtys),
 		SubscribeProjectSettings: (request) =>
 			routeStream(request.projectSlug, () => subscribeProjectSettings()),
+		SubscribeDraftModels: (request) =>
+			routeStream(request.projectSlug, () => subscribeDraftModels(request)),
 		SubscribeAlerts: (request) =>
 			routeStream(request.projectSlug, subscribeAlerts),
 		SubscribeInputDraft: (request) =>

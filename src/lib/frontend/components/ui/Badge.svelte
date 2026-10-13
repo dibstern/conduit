@@ -23,7 +23,7 @@
 		// A neutral chip that sits on the chrome rather than cutting into it:
 		// SessionBar's woke/snoozed/settled state chips. The icon inside carries
 		// the colour, so the chip itself recedes.
-		quiet: "bg-bg-alt text-text-muted border border-border-subtle",
+		quiet: "bg-bg-alt text-text-muted border border-border",
 		accent: "bg-accent-bg text-accent",
 		"accent-solid": "bg-accent text-bg",
 		// The tag tint is theme-aware on purpose: the two SettingsPanel chips
@@ -39,7 +39,7 @@
 	// box guarantees that. 18px is literal rather than h-6 because the bubble
 	// is a circle paired with rounded-[9px], and the pair must not drift apart.
 	const SIZE_CLASSES: Record<BadgeSize, string> = {
-		xs: "px-1.5 py-0.5 text-xs font-medium",
+		xs: "px-[6px] py-[1px] text-[10px] font-medium",
 		sm: "px-2 py-0.5 text-sm font-medium",
 		// font-semibold rather than the others' font-medium: this is a 10px
 		// digit on a solid accent fill, and the extra weight is what keeps it

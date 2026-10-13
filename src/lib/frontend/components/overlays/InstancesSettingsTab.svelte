@@ -250,10 +250,7 @@
 	<div class="flex items-center gap-2">
 	<Button
 		variant="secondary"
-		tone="muted"
-		hoverFill="none"
-		size="content"
-		class="gap-1.5 px-2.5 py-1 text-xs rounded-[7px] hover:border-text-muted"
+		size="sm"
 		data-testid="scan-now-btn"
 		disabled={scanInFlight}
 		onclick={handleScanNow}

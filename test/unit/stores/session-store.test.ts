@@ -10,6 +10,7 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	applyGetAgentsResponse,
+	choosePermissionMode,
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
@@ -49,6 +50,7 @@ import {
 	applySessionRemoved,
 	applySessionSnapshot,
 	applySessionUpsert,
+	seedDaemonSessions,
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
@@ -58,6 +60,7 @@ function makeSession(
 ): SessionInfo {
 	return {
 		title: `Session ${overrides.id}`,
+		projectSlug: "project-a",
 		status: "idle",
 		...overrides,
 	};
@@ -96,6 +99,21 @@ beforeEach(() => {
 	attachedProjectState.slug = "project-a";
 });
 
+it.each([
+	"daemon",
+	"search",
+] as const)("keeps project ownership for a loaded %s row before attachment changes", (source) => {
+	attachedProjectState.slug = "conduit";
+	const foreign = makeSession({
+		id: "dotfiles-session",
+		projectSlug: "dotfiles",
+	});
+	sessionState.currentId = foreign.id;
+	if (source === "daemon") seedDaemonSessions([foreign]);
+	else seedSearchResults([foreign]);
+	expect(findSession(foreign.id)?.projectSlug).toBe("dotfiles");
+});
+
 it("seedSessions settles the versioned map and derives sidebar roots", () => {
 	seedSessions([
 		{ id: "root", title: "Root" },
@@ -109,7 +127,12 @@ it("seedSessions settles the versioned map and derives sidebar roots", () => {
 	applySessionChange({
 		_tag: "upsert",
 		sequence: 0,
-		item: { id: "stale", title: "Stale", status: "idle" },
+		item: {
+			projectSlug: "project-a",
+			id: "stale",
+			title: "Stale",
+			status: "idle",
+		},
 	});
 	expect(sessionSubscription.rows.has("stale")).toBe(false);
 });
@@ -118,14 +141,32 @@ it("keeps a newer root row when an older family arrives", () => {
 	applySessionChange({
 		_tag: "snapshot",
 		sequence: 10,
-		rows: [{ id: "root", title: "New title", status: "busy" }],
+		rows: [
+			{
+				projectSlug: "project-a",
+				id: "root",
+				title: "New title",
+				status: "busy",
+			},
+		],
 	});
 	applyFamilyChange({
 		_tag: "snapshot",
 		sequence: 8,
 		rows: [
-			{ id: "root", title: "Old title", status: "idle" },
-			{ id: "child", title: "Child", status: "idle", parentID: "root" },
+			{
+				projectSlug: "project-a",
+				id: "root",
+				title: "Old title",
+				status: "idle",
+			},
+			{
+				projectSlug: "project-a",
+				id: "child",
+				title: "Child",
+				status: "idle",
+				parentID: "root",
+			},
 		],
 	});
 
@@ -183,15 +224,27 @@ it("keeps a newer family row when an older family upsert arrives", () => {
 		_tag: "snapshot",
 		sequence: 10,
 		rows: [
-			{ id: "root", title: "Root", status: "idle" },
-			{ id: "child", title: "New child", status: "busy", parentID: "root" },
+			{ projectSlug: "project-a", id: "root", title: "Root", status: "idle" },
+			{
+				projectSlug: "project-a",
+				id: "child",
+				title: "New child",
+				status: "busy",
+				parentID: "root",
+			},
 		],
 	});
 	applyFamilyChange({ _tag: "synchronized" });
 	applyFamilyChange({
 		_tag: "upsert",
 		sequence: 9,
-		item: { id: "child", title: "Old child", status: "idle", parentID: "root" },
+		item: {
+			projectSlug: "project-a",
+			id: "child",
+			title: "Old child",
+			status: "idle",
+			parentID: "root",
+		},
 	});
 
 	expect(findSession("child")?.title).toBe("New child");
@@ -203,8 +256,14 @@ it("a project switch forgets the family, and the next project's family applies",
 		_tag: "snapshot",
 		sequence: 10,
 		rows: [
-			{ id: "root", title: "Root", status: "idle" },
-			{ id: "child", title: "Child", status: "idle", parentID: "root" },
+			{ projectSlug: "project-a", id: "root", title: "Root", status: "idle" },
+			{
+				projectSlug: "project-a",
+				id: "child",
+				title: "Child",
+				status: "idle",
+				parentID: "root",
+			},
 		],
 	});
 	applyFamilyChange({ _tag: "synchronized" });
@@ -217,7 +276,9 @@ it("a project switch forgets the family, and the next project's family applies",
 	applyFamilyChange({
 		_tag: "snapshot",
 		sequence: 3,
-		rows: [{ id: "other", title: "Other", status: "idle" }],
+		rows: [
+			{ projectSlug: "project-a", id: "other", title: "Other", status: "idle" },
+		],
 	});
 	expect(sessionState.familySessions.map((row) => row.id)).toEqual(["other"]);
 });
@@ -226,7 +287,9 @@ it("forgets chat and selection when the subscription snapshot omits a session", 
 	applySessionChange({
 		_tag: "snapshot",
 		sequence: 10,
-		rows: [{ id: "gone", title: "Gone", status: "idle" }],
+		rows: [
+			{ projectSlug: "project-a", id: "gone", title: "Gone", status: "idle" },
+		],
 	});
 	getOrCreateSessionSlot("gone");
 	sessionState.currentId = "gone";
@@ -243,7 +306,12 @@ it("keeps chat and selection when a root only leaves the list", () => {
 	applySessionChange({
 		_tag: "upsert",
 		sequence: 10,
-		item: { id: "forked", title: "Forked", status: "idle" },
+		item: {
+			projectSlug: "project-a",
+			id: "forked",
+			title: "Forked",
+			status: "idle",
+		},
 	});
 	getOrCreateSessionSlot("forked");
 	sessionState.currentId = "forked";
@@ -260,7 +328,12 @@ it("forgets chat and selection when the subscription removes a session", () => {
 	applySessionChange({
 		_tag: "upsert",
 		sequence: 10,
-		item: { id: "gone", title: "Gone", status: "idle" },
+		item: {
+			projectSlug: "project-a",
+			id: "gone",
+			title: "Gone",
+			status: "idle",
+		},
 	});
 	getOrCreateSessionSlot("gone");
 	sessionState.currentId = "gone";
@@ -280,17 +353,30 @@ it("forgets chat and selection when the subscription removes a session", () => {
 
 it("keeps the family list owned by the family feed", () => {
 	const original = {
+		projectSlug: "project-a",
 		id: "root",
 		title: "Family title",
 		status: "idle",
 	} as const;
 	applyFamilyChange({ _tag: "snapshot", sequence: 1, rows: [original] });
 	applySessionSnapshot(
-		[{ id: "root", title: "Snapshot title", status: "idle" }],
+		[
+			{
+				projectSlug: "project-a",
+				id: "root",
+				title: "Snapshot title",
+				status: "idle",
+			},
+		],
 		"complete",
 	);
 	expect(sessionState.familySessions).toEqual([original]);
-	applySessionUpsert({ id: "root", title: "Upsert title", status: "idle" });
+	applySessionUpsert({
+		projectSlug: "project-a",
+		id: "root",
+		title: "Upsert title",
+		status: "idle",
+	});
 	expect(sessionState.familySessions).toEqual([original]);
 	applySessionRemoved("root");
 	expect(sessionState.familySessions).toEqual([original]);
@@ -429,26 +515,20 @@ describe("switchToSession", () => {
 		clearSessionChatState("child-subagent");
 	});
 
-	it("applies the returned draft and flushes a pending permission mode", async () => {
+	it("applies the returned draft without sending a session permission switch", async () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		const sendMode = vi
 			.spyOn(sessionRpc, "switchPermissionModeRpc")
 			.mockResolvedValue({ projectSlug: "project-a", mode: "acceptEdits" });
 		try {
-			discoveryState.pendingPermissionMode = "acceptEdits";
+			choosePermissionMode("acceptEdits");
 			switchToSession("draft-session", "project-a", () =>
 				Promise.resolve({ ok: true, draft: "saved text" }),
 			);
 			await Promise.resolve();
 			expect(inputSyncState.text).toBe("saved text");
-			expect(discoveryState.pendingPermissionMode).toBeNull();
-			expect(sendMode).toHaveBeenCalledWith(
-				expect.objectContaining({
-					sessionId: "draft-session",
-					projectSlug: "project-a",
-					mode: "acceptEdits",
-				}),
-			);
+			expect(sessionState.currentId).toBe("draft-session");
+			expect(sendMode).not.toHaveBeenCalled();
 		} finally {
 			sendMode.mockRestore();
 			vi.unstubAllGlobals();

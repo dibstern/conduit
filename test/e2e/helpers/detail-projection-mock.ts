@@ -8,7 +8,7 @@ import type { MockMessage } from "../fixtures/mockup-state.js";
 type PendingInput = {
 	inputId: string;
 	state: "queued" | "steering";
-	request: { text: string; images?: string[]; modelUserSelected: boolean };
+	request: { text: string; images?: string[] };
 	admittedAt: number;
 };
 type DetailItem =
@@ -236,7 +236,6 @@ export function projectLegacyRelayMessage(
 			request: {
 				text: event["text"],
 				...(Array.isArray(images) ? { images: images.map(String) } : {}),
-				modelUserSelected: false,
 			},
 			admittedAt:
 				state.pending.get(event["inputId"])?.admittedAt ??

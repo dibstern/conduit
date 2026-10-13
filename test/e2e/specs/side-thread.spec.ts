@@ -1,6 +1,7 @@
 // Real relay and event store, with OpenCode REST/SSE replayed from the capture
 // and Claude SDK turns replayed from committed traces.
 
+import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { Socket } from "@effect/platform";
@@ -342,6 +343,8 @@ test.describe("OpenCode Side Threads", () => {
 						projectSlug,
 						parentSessionId: sideId,
 						title: "Nested question",
+						inputId: randomUUID(),
+						text: "Nested question",
 					}),
 				),
 			);
@@ -368,11 +371,12 @@ test.describe("OpenCode Side Threads", () => {
 			await app.input.fill("");
 
 			// Side Thread modes are session rules, so the agent stays selectable.
-			const modelPicker = page.locator(
-				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+			// The harness control opens the picker root, where the agent row lives.
+			const harnessPicker = page.locator(
+				'[data-testid="composer-harness-trigger"]:visible, [data-testid="composer-word-harness"]:visible',
 			);
 			const agentRow = page.getByTestId("picker-row-agent");
-			await modelPicker.click();
+			await harnessPicker.click();
 			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
 			await expect(agentRow).toContainText("Build");
 			await agentRow.click();
@@ -385,7 +389,7 @@ test.describe("OpenCode Side Threads", () => {
 			await page.getByTestId("picker-agent-build").click();
 			await expect(agentRow).toContainText("Build");
 			// Escape in an empty Side Thread composer goes back to the parent.
-			await modelPicker.click();
+			await harnessPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			await expect(approvalPill).toContainText("Ask");
 			await expect
@@ -424,9 +428,9 @@ test.describe("OpenCode Side Threads", () => {
 					{ title: question, permission: askRules },
 					{ permission: planRules },
 				]);
-			await modelPicker.click();
+			await harnessPicker.click();
 			await expect(agentRow).not.toHaveAttribute("data-locked", "plan");
-			await modelPicker.click();
+			await harnessPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			const sideScreenshot = testInfo.outputPath(
 				`${command}-side-thread-after-reload.png`,
@@ -477,6 +481,8 @@ test.describe("OpenCode Side Threads", () => {
 					projectSlug,
 					parentSessionId: "missing-side-thread-parent",
 					title: question,
+					inputId: randomUUID(),
+					text: question,
 				}),
 			),
 		);

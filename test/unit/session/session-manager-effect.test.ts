@@ -489,16 +489,31 @@ describe("SessionManager Effect", () => {
 
 				const session = yield* service.createSession("New", {
 					providerId: "opencode",
+					pick: {
+						harness: "opencode",
+						model: { providerId: "openai", modelId: "gpt-4" },
+						effort: "high",
+						contextWindow: "",
+					},
 				});
 
 				// conduit-test-48mo.1: create used to INSERT the sessions row directly
 				// and append nothing, so a read model rebuilt from the event store lost
 				// every OpenCode-backed session.
 				const events = yield* store.readBySession(session.id);
-				expect(events.map((e) => e.type)).toEqual(["session.created"]);
-				expect((yield* readQuery.getSession(session.id))?.provider).toBe(
-					"opencode",
-				);
+				expect(events.map((e) => e.type)).toEqual([
+					"session.created",
+					"session.model_changed",
+					"session.variant_changed",
+					"session.context_window_changed",
+				]);
+				expect(yield* readQuery.getSession(session.id)).toMatchObject({
+					provider: "opencode",
+					model_id: "gpt-4",
+					model_provider: "openai",
+					variant: "high",
+					context_window: "",
+				});
 			}).pipe(
 				Effect.provide(layer),
 				Effect.ensuring(
@@ -568,6 +583,8 @@ describe("SessionManager Effect", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -698,12 +715,12 @@ describe("SessionManager Effect", () => {
 						id, provider, title, status, created_at, updated_at
 					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
 
-				const before = yield* listSessions();
+				const before = yield* listSessions("test-project");
 				expect(before.map((s) => s.id)).toContain("ses-doomed");
 
 				yield* deleteSession("ses-doomed");
 
-				const after = yield* listSessions();
+				const after = yield* listSessions("test-project");
 				expect(after.map((s) => s.id)).not.toContain("ses-doomed");
 			}).pipe(
 				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
@@ -734,7 +751,7 @@ describe("SessionManager Effect", () => {
 
 				yield* deleteSession("ses-parent");
 
-				const after = yield* listSessions();
+				const after = yield* listSessions("test-project");
 				const ids = after.map((s) => s.id);
 				expect(ids).not.toContain("ses-parent");
 				expect(ids).not.toContain("ses-child");

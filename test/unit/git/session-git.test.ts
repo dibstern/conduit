@@ -415,6 +415,7 @@ describe("createSessionGitCache", () => {
 // folders, without giving those folders invented git status or storing flags.
 describe("cached folder git", () => {
 	const session: SessionInfo = {
+		projectSlug: "test-project",
 		id: "session",
 		title: "Folders",
 		status: "idle",

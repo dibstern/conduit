@@ -54,9 +54,9 @@
 				<span data-testid="{prefix}-sentence" class="{level === 'red' ? 'text-error' : level === 'amber' ? 'text-fill-amber' : 'text-text-secondary'}">{copy.before}<b>{copy.highlight}</b>{copy.after}</span>
 			</div>
 			<SegmentedControl
-				variant="compact"
+				variant="joined"
 				label="Forecast window"
-				class="shrink-0"
+				class="text-[10px]"
 				options={(["five_hour", "seven_day"] as const).map((kind) => ({ value: kind, label: kind === "five_hour" ? "5h" : "Week", testId: `${prefix}-${kind}`, disabled: !windows.some((item) => item.kind === kind && (item.forecast || usageWindowLimited(account, item))) }))}
 				bind:value={() => window?.kind ?? "five_hour", (next) => { selected = next; }}
 			/>

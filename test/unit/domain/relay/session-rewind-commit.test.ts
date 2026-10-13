@@ -16,6 +16,7 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../../src/lib/domain/relay/Services/services.js";
@@ -24,6 +25,7 @@ import {
 	clearProcessingTimeout,
 	makeOverridesStateLive,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
 import { SessionTitleServiceTag } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
@@ -38,6 +40,7 @@ import {
 	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeMockWebSocketHandler,
@@ -48,6 +51,20 @@ const services = Layer.mergeAll(
 	persistence,
 	makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 	Layer.succeed(OpenCodeAPITag, makeMockOpenCodeAPI()),
+	Layer.succeed(
+		OpenCodeModelServiceTag,
+		makeMockOpenCodeModelService({
+			providers: [
+				{
+					id: "opencode",
+					name: "OpenCode",
+					models: [{ id: "test-model", name: "Test model" }],
+				},
+			],
+			defaults: {},
+			connected: ["opencode"],
+		}),
+	),
 	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
 	Layer.succeed(LoggerTag, makeMockLogger()),
 	Layer.succeed(
@@ -90,6 +107,12 @@ it.scoped(
 					sessionId: "s1",
 					title: "Rewind commit race",
 					provider: "opencode",
+				}),
+				...sessionPickEvents("s1", {
+					harness: "opencode",
+					model: { providerId: "opencode", modelId: "test-model" },
+					effort: "",
+					contextWindow: "",
 				}),
 				...[
 					{ messageId: "kept-user", role: "user" as const, createdAt: 10 },
@@ -171,7 +194,6 @@ it.scoped(
 					sessionId: "s1",
 					text: "Continue from the cut",
 					model: { providerID: "opencode", modelID: "test-model" },
-					modelUserSelected: true,
 				})
 				.pipe(Effect.forkScoped);
 			yield* Deferred.await(prepared);

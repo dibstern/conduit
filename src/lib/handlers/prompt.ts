@@ -9,12 +9,7 @@ import {
 } from "../domain/relay/Services/services.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import {
-	getContextWindow,
-	getModel,
-	getVariant,
-	isModelUserSelected,
-} from "../domain/relay/Services/session-overrides-state.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 
 // Stores the last draft per session so that a tab switching to it (e.g. on a
 // different device) reads the current draft in its ViewSession response.
@@ -68,15 +63,21 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			return { sessionId: activeId } as SendMessageToSessionResult;
 		}
 		const originalActiveId = activeId;
-		const sessionModel = yield* getModel(activeId);
-		const sessionModelUserSelected = yield* isModelUserSelected(activeId);
+		const read = yield* ReadQueryEffectTag;
+		const originalSession = yield* read.getSession(activeId);
+		const sessionModel =
+			originalSession?.model_id && originalSession.model_provider
+				? {
+						modelID: originalSession.model_id,
+						providerID: originalSession.model_provider,
+					}
+				: undefined;
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		activeId = yield* providerTurnService.prepareTurnSession({
 			clientId,
 			commandId: input.commandId,
 			sessionId: activeId,
 			...(sessionModel ? { model: sessionModel } : {}),
-			modelUserSelected: sessionModelUserSelected,
 			...(input.delivery === "steer" ? { delivery: input.delivery } : {}),
 		});
 		// Talking to a settled or snoozed session brings it back. Triage bookkeeping must
@@ -108,12 +109,17 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		// Track message activity
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
-		// The request is captured now: a queued input keeps what was selected
-		// when it was sent, whatever changes before it is handed off.
+		// The inbox records the session pick; dispatch re-reads the durable pick.
 		const agentService = yield* AgentServiceTag;
 		const sessionAgent = yield* agentService.getActiveAgent(activeId);
-		const variant = yield* getVariant(activeId);
-		const contextWindow = yield* getContextWindow(activeId);
+		const session =
+			activeId === originalActiveId
+				? originalSession
+				: yield* read.getSession(activeId);
+		const model =
+			session?.model_id && session.model_provider
+				? { modelID: session.model_id, providerID: session.model_provider }
+				: undefined;
 
 		const inbox = yield* SessionInboxTag;
 		const submitted = yield* inbox.submit({
@@ -124,11 +130,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			request: {
 				text,
 				...(imageList ? { images: imageList } : {}),
-				...(sessionModel ? { model: sessionModel } : {}),
-				modelUserSelected: sessionModelUserSelected,
+				...(model ? { model } : {}),
 				...(sessionAgent ? { agent: sessionAgent } : {}),
-				...(variant ? { variant } : {}),
-				...(contextWindow ? { contextWindow } : {}),
+				variant: session?.variant ?? "",
+				contextWindow: session?.context_window ?? "",
 			},
 		});
 		// A refused steer admitted nothing: the text stays in the input box.

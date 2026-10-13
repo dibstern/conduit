@@ -10,6 +10,8 @@ import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/openco
 import {
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	applySessionCommand,
@@ -38,6 +40,9 @@ import {
 	makeReadQueryEffect,
 	type ReadQueryEffectTag,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
+import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -81,12 +86,25 @@ describe("applySessionCommand", () => {
 			| EventStoreEffectTag
 			| ConfigTag
 			| LoggerTag
+			| OrchestrationEngineTag
 		>,
 		projectors?: readonly EffectProjector[],
 	) => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-session-command-"));
 		const api = makeMockApi();
 		const log = makeMockLogger();
+		saveRelaySettings(
+			{
+				harnessDefaults: {
+					opencode: {
+						providerId: "openai",
+						modelId: "gpt-5",
+						contextWindow: "",
+					},
+				},
+			},
+			dir,
+		);
 		const persistenceLayer = makePersistenceEffectLayer(
 			join(dir, "events.db"),
 			"test-project",
@@ -103,6 +121,28 @@ describe("applySessionCommand", () => {
 						}),
 					),
 					Layer.succeed(LoggerTag, log),
+					Layer.succeed(
+						OrchestrationEngineTag,
+						new OrchestrationEngine({ registry: new ProviderRegistry() }),
+					),
+					Layer.succeed(OpenCodeModelServiceTag, {
+						listProviders: () =>
+							Effect.succeed({
+								providers: [
+									{
+										id: "openai",
+										name: "OpenAI",
+										models: [
+											{ id: "gpt-5", name: "GPT-5", variants: { high: {} } },
+										],
+									},
+								],
+								defaults: {},
+								connected: ["openai"],
+							}),
+						cachedProviders: () => Effect.succeedNone,
+						persistDefaultModel: () => Effect.void,
+					}),
 					// An empty config dir keeps provider routing at its defaults instead
 					// of reading the developer's real ~/.config/conduit.
 					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
@@ -128,8 +168,11 @@ describe("applySessionCommand", () => {
 			const runner = yield* ProjectionRunnerEffectTag;
 			yield* runner.markRecovered();
 			yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, ${provider}, 'Doomed', 'idle', 1000, 1000)`;
+				INSERT INTO sessions
+					(id, provider, title, status, model_provider, model_id, variant, context_window, created_at, updated_at)
+				VALUES (${sessionId}, ${provider}, 'Doomed', 'idle',
+					${provider === "opencode" ? "openai" : "claude"},
+					${provider === "opencode" ? "gpt-5" : "sonnet"}, 'high', '', 1000, 1000)`;
 		});
 
 	const sessionIds = Effect.gen(function* () {
@@ -140,7 +183,9 @@ describe("applySessionCommand", () => {
 
 	const eventTypes = Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const rows = yield* sql<{ type: string }>`SELECT type FROM events`;
+		const rows = yield* sql<{
+			type: string;
+		}>`SELECT type FROM events ORDER BY sequence`;
 		return rows.map((row) => row.type);
 	});
 
@@ -373,7 +418,12 @@ describe("applySessionCommand", () => {
 				// Creating a session upstream and recording nothing locally is the
 				// shape of conduit-test-42k7. Folding the command into the same
 				// function is what makes it unrepresentable from outside the seam.
-				expect(yield* eventTypes).toEqual(["session.created"]);
+				expect(yield* eventTypes).toEqual([
+					"session.created",
+					"session.model_changed",
+					"session.variant_changed",
+					"session.context_window_changed",
+				]);
 				expect(yield* sessionIds).toEqual([session.id]);
 			}),
 		),
@@ -387,6 +437,12 @@ describe("applySessionCommand", () => {
 
 				const forked = yield* forkOpenCodeSession("ses-parent", "msg-7");
 				const reads = yield* makeReadQueryEffect;
+				expect(yield* reads.getSession(forked.id)).toMatchObject({
+					model_provider: "openai",
+					model_id: "gpt-5",
+					variant: "high",
+					context_window: "",
+				});
 				expect(
 					(yield* reads.listSessionInfos()).find(({ id }) => id === forked.id),
 				).toMatchObject({ forkMessageId: "msg-7" });

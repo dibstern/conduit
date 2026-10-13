@@ -461,6 +461,7 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
+	defaultOpenCodeInstanceId: Schema.optional(Schema.String),
 	/** OpenCode catalog; Claude's shared catalog follows providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
@@ -483,6 +484,7 @@ export const SwitchModelResponseSchema = Schema.Struct({
 	provider: Schema.String,
 	variant: Schema.String,
 	variants: Schema.Array(Schema.String),
+	contextWindow: Schema.optional(ContextWindowInfoSchema),
 });
 
 export const SetDefaultModelResponseSchema = SwitchModelResponseSchema;
@@ -1439,8 +1441,7 @@ export class SwitchModel extends Schema.TaggedRequest<SwitchModel>()(
 		success: SwitchModelResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			// A draft has no session yet: it asks only for the model's efforts.
-			sessionId: Schema.optional(NonEmptyString),
+			sessionId: NonEmptyString,
 			modelId: NonEmptyString,
 			providerId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -2092,14 +2093,14 @@ export class CreateSession extends Schema.TaggedRequest<CreateSession>()(
 			newWorktree: Schema.optional(Schema.Boolean),
 			// Local base for the primary folder; requires newWorktree.
 			worktreeBase: Schema.optional(NonEmptyString),
-			// The draft composer's model, and its effort if one was picked.
-			// Recorded as the session's own choice so the first turn runs them
-			// instead of the relay default.
+			// The composer's displayed pick. The handler requires a real model.
+			permissionMode: SessionPermissionModeSchema,
 			model: Schema.optional(
 				Schema.Struct({
-					modelId: NonEmptyString,
-					providerId: NonEmptyString,
+					modelId: Schema.String,
+					providerId: Schema.String,
 					variant: Schema.optional(Schema.String),
+					contextWindow: Schema.optional(Schema.String),
 				}),
 			),
 		},
@@ -2178,6 +2179,9 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 	},
 ) {}
 
+/** Fork a Side Thread and submit its first input there, so a reply lost to a
+ *  dropped socket cannot lose the prompt. A retry with the same input id
+ *  returns the Side Thread that input already reached. */
 export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 	"StartSideThread",
 	{
@@ -2187,6 +2191,10 @@ export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 			projectSlug: NonEmptyString,
 			parentSessionId: NonEmptyString,
 			title: NonEmptyString,
+			inputId: NonEmptyString,
+			text: NonEmptyString,
+			images: Schema.optional(Schema.Array(Schema.String)),
+			originId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -2806,6 +2814,14 @@ export const SubscribeProjectSettings = Rpc.make("SubscribeProjectSettings", {
 	stream: true,
 });
 
+/** Borrow OpenCode while this browser has its draft open; never binds it. */
+export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
+	payload: { projectSlug: NonEmptyString, instanceId: NonEmptyString },
+	success: GetModelsResponseSchema,
+	error: WsRpcError,
+	stream: true,
+});
+
 /** A session finished or failed in this project while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
@@ -2862,6 +2878,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,
+	SubscribeDraftModels,
 	SubscribeAlerts,
 	SubscribeInputDraft,
 	SubscribeInstances,

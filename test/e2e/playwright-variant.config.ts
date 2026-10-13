@@ -12,6 +12,7 @@ export default defineConfig({
 		"composer-drift-layout.spec.ts",
 		"composer-large-paste.spec.ts",
 		"todo-overlay-feed.spec.ts",
+		"composer-agent-list-race.spec.ts",
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],

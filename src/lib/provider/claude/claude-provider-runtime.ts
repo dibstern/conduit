@@ -1961,7 +1961,9 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					currentApiModelId: apiModelId,
 					...(expectedApiModelId ? { expectedApiModelId } : {}),
 					...(input.agent ? { currentAgent: input.agent } : {}),
-					...(input.variant ? { currentVariant: input.variant } : {}),
+					...(input.variant === undefined
+						? {}
+						: { currentVariant: input.variant }),
 					settingsOutOfSync: false,
 					resumeSessionId,
 					lastAssistantUuid: undefined,
@@ -2122,7 +2124,7 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 					catch: (cause) =>
 						new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 				});
-				if (settings.variant) {
+				if (settings.variant !== undefined) {
 					ctx.currentVariant = settings.variant;
 				} else {
 					delete ctx.currentVariant;

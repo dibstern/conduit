@@ -141,6 +141,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SubscribeProjectSettings: () => Stream.empty,
 				SubscribeAlerts: () => Stream.empty,
 				SubscribeInputDraft: () => Stream.empty,
+				SubscribeDraftModels: () => Stream.empty,
 				SubscribeInstances: () => Stream.empty,
 				SubscribeUsage: () =>
 					Stream.fromIterable(usageSnapshots).pipe(
@@ -351,6 +352,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						projectSlug: request.projectSlug,
 						ptys: [
 							{
+								projectSlug: "demo",
 								id: "pty-1",
 								title: "Shell",
 								command: "zsh",
@@ -639,6 +641,7 @@ describe("browser WebSocket RPC contract", () => {
 	);
 	it("round-trips durable settled and pinned timestamps", () => {
 		const session = {
+			projectSlug: "demo",
 			id: "s1",
 			title: "Triage",
 			status: "idle" as const,
@@ -1100,6 +1103,7 @@ describe("browser WebSocket RPC contract", () => {
 					projectSlug: "demo",
 					ptys: [
 						{
+							projectSlug: "demo",
 							id: "pty-1",
 							title: "Shell",
 							command: "zsh",
@@ -1330,6 +1334,7 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const created = yield* client.CreateSession({
+					permissionMode: "ask",
 					projectSlug: "demo",
 					originId: "browser-tab-a",
 				});
@@ -1545,6 +1550,7 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("Left");
 		expect(
 			new CreateSession({
+				permissionMode: "ask",
 				projectSlug: "demo",
 				originId: "browser-tab-a",
 			})._tag,

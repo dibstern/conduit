@@ -11,10 +11,10 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	applyGetModelsResponse,
 	clearDiscoveryState,
-	handleModelInfo,
-	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
+import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	type TranscriptEntry,
@@ -119,6 +119,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		harness = undefined;
 		resetChatState();
 		clearDiscoveryState();
+		sessionState.currentId = null;
 	});
 
 	it.each([
@@ -127,7 +128,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			modelID: "big-pickle",
 		},
 		{
-			name: "native session model",
+			name: "different native session model",
 			modelID: "mimo-v2-omni-free",
 		},
 	])("uses the OpenCode model for Compact with $name", async ({
@@ -141,12 +142,25 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		const client = await relay.connectWsClient();
 		await client.waitForInitialState();
 		const sessionId = String(
-			(await client.createSession("Compact model", { providerId: "opencode" }))[
-				"id"
-			],
+			(
+				await client.createSession("Compact model", {
+					providerId: "opencode",
+					model: {
+						providerId: "opencode",
+						modelId: modelID,
+						variant: "",
+						contextWindow: "",
+					},
+				})
+			)["id"],
 		);
 		await client.viewSession(sessionId);
-		seedNativeUserTurn(relay, sessionId, modelID);
+		await client.switchModel(modelID, "opencode", sessionId);
+		seedNativeUserTurn(
+			relay,
+			sessionId,
+			modelID === "big-pickle" ? "mimo-v2-omni-free" : "big-pickle",
+		);
 		await client.sendMessage("/compact");
 		await expect
 			.poll(
@@ -175,10 +189,12 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				properties: { sessionID: sessionId, status: { type: "idle" } },
 			},
 		]);
-		saveEvidence(`model-${name.replaceAll(" ", "-")}`, { request });
+		const stored = await client.getModels(sessionId);
+		expect(stored.active).toEqual({ provider: "opencode", model: modelID });
+		saveEvidence(`model-${name.replaceAll(" ", "-")}`, { request, stored });
 	});
 
-	it("rejects Compact without an explicit model or a prior user turn", async () => {
+	it("rejects Compact without a stored pick even when native history has a model", async () => {
 		const relay = await createRelayHarness(recording(), {
 			defaultModel: "claude/sonnet",
 		});
@@ -189,36 +205,48 @@ describe("Integration: OpenCode compaction through the relay", () => {
 			(
 				await client.createSession("Empty compaction", {
 					providerId: "opencode",
+					model: {
+						providerId: "opencode",
+						modelId: "big-pickle",
+						variant: "",
+						contextWindow: "",
+					},
 				})
 			)["id"],
 		);
 		await client.viewSession(sessionId);
-		relay.mock.setExactResponse(
-			"GET",
-			`/session/${sessionId}/message`,
-			200,
-			[],
+		seedNativeUserTurn(relay, sessionId, "big-pickle");
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET model_id = NULL, model_provider = NULL,
+					variant = NULL, context_window = NULL WHERE id = ${sessionId}`;
+			}).pipe(
+				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+			),
 		);
 		await client.sendMessage("/compact");
 		const row = await client.waitForTurnEnd(sessionId);
 		expect(row.attention).toBe("error");
 		expect(row.compacting).toBeUndefined();
-		const notice = await client.waitForTranscriptMessage(
-			(message) =>
-				message.parts?.some(
-					(part) =>
-						part.type === "compaction" &&
-						part["failed"] === true &&
-						part.text?.includes("Nothing to compact yet"),
-				) === true,
-			sessionId,
+		const errors = await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{
+					code: string;
+				}>`SELECT json_extract(data, '$.code') AS code
+					FROM events WHERE session_id = ${sessionId} AND type = 'turn.error'`;
+			}).pipe(
+				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+			),
 		);
+		expect(errors).toEqual([{ code: "PICK_REQUIRED" }]);
 		expect(
 			relay.mock.requestBodies.some((request) =>
 				/\/(?:summarize|prompt_async|message)$/.test(request.path),
 			),
 		).toBe(false);
-		saveEvidence("nothing-to-compact", { row, notice });
+		saveEvidence("pick-required", { row, errors });
 	});
 
 	it("keeps Claude context when compact_boundary omits post_tokens", async () => {
@@ -276,24 +304,15 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		await client.waitForInitialState();
 		const sessionId = client.getActiveSessionId();
 		if (!sessionId) throw new Error("No Claude session was created");
-		handleModelInfo({ model: "sonnet", provider: "claude" });
-		handleModelList({
-			providers: [
-				{
-					id: "claude",
-					name: "Claude",
-					configured: true,
-					models: [
-						{
-							id: "sonnet",
-							name: "Sonnet",
-							provider: "claude",
-							limit: { context: 200_000, output: 32_000 },
-						},
-					],
-				},
-			],
-		});
+		await client.rpcCall((rpc) =>
+			rpc.SwitchContextWindow({
+				projectSlug: "integration-test",
+				sessionId,
+				contextWindow: "200k",
+			}),
+		);
+		sessionState.currentId = sessionId;
+		applyGetModelsResponse(await client.getModels(sessionId), sessionId);
 		const messages = testMessages(sessionId);
 		const emptyTranscript: TranscriptEntry = {
 			rows: [],
@@ -435,8 +454,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		const requestsBefore = relay.mock.requestBodies.length;
 		const evidence = [];
 
-		// Native session history supplies the model when there is no explicit pick.
-		// The next compaction must use a newly selected model in the same session.
+		// Each compaction must use the stored pick, including a later model switch.
 		for (const [index, modelID] of [
 			"big-pickle",
 			"mimo-v2-omni-free",
@@ -735,24 +753,8 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				sequence: 1,
 			},
 		);
-		handleModelInfo({ model: "mimo-v2-omni-free", provider: "opencode" });
-		handleModelList({
-			providers: [
-				{
-					id: "opencode",
-					name: "OpenCode",
-					configured: true,
-					models: [
-						{
-							id: "mimo-v2-omni-free",
-							name: "Mimo",
-							provider: "opencode",
-							limit: { context: 200_000, output: 32_000 },
-						},
-					],
-				},
-			],
-		});
+		sessionState.currentId = sessionId;
+		applyGetModelsResponse(await client.getModels(sessionId), sessionId);
 		const messages = testMessages(sessionId);
 		messages.contextPercent = 85;
 		setMessages(messages, historyToChatMessages(transcript.rows));

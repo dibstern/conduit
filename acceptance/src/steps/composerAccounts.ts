@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { pickerFixtureQuotaReads, requireRpcControl } from "./shared.js";
 
 const card = (page: Page, id: string) =>
 	page.getByTestId(`picker-account-${id}`);
@@ -434,7 +434,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 								(request) =>
 									request.tag === "QuotaForAccounts" &&
 									request.payload["projectSlug"] === "myapp",
-							).length,
+							).length - (pickerFixtureQuotaReads.get(world.page) ?? 0),
 				)
 				.toBe(Number(match[1]));
 		},

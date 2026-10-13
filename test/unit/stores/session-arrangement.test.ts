@@ -25,12 +25,13 @@ const row = (
 ): SessionInfo => ({
 	id,
 	title: id,
+	projectSlug: "local",
 	status: "idle",
 	updatedAt: at(7, 10),
 	...overrides,
 });
 const projectLabel = (session: SessionInfo) => {
-	const key = session.projectSlug ?? "local";
+	const key = session.projectSlug;
 	return { key, label: key === "local" ? "Local project" : `Project ${key}` };
 };
 const project = (
@@ -216,6 +217,7 @@ describe("groupSessionsByDate", () => {
 		const groups = groupSessionsByDate(
 			[
 				{
+					projectSlug: "local",
 					id: "created",
 					title: "created",
 					status: "idle",
@@ -229,7 +231,14 @@ describe("groupSessionsByDate", () => {
 
 	it("falls back to epoch when both timestamps are missing", () => {
 		const groups = groupSessionsByDate(
-			[{ id: "undated", title: "undated", status: "idle" }],
+			[
+				{
+					projectSlug: "local",
+					id: "undated",
+					title: "undated",
+					status: "idle",
+				},
+			],
 			new Date(now),
 		);
 		expect(ids(groups.older)).toEqual(["undated"]);

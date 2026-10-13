@@ -38,6 +38,23 @@ import {
 	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+
+const makeModelApi = () => {
+	const api = makeMockOpenCodeAPI();
+	vi.mocked(api.provider.list).mockResolvedValue({
+		providers: [
+			{
+				id: "openai",
+				name: "OpenAI",
+				models: [{ id: "gpt-4", name: "GPT-4" }],
+			},
+		],
+		defaults: {},
+		connected: ["openai"],
+	});
+	return api;
+};
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
@@ -104,6 +121,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 	);
 
 	it.effect("creates a session for the originating browser tab", () => {
+		const api = makeModelApi();
 		const createSession = vi.fn(() =>
 			Effect.succeed({
 				id: "session-new",
@@ -119,10 +137,17 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.CreateSession({
+				permissionMode: "ask",
 				projectSlug: "project-a",
 				originId: "browser-tab-a",
 				instanceId: ProviderInstanceIdSchema.make("opencode"),
 				providerId: "opencode",
+				model: {
+					providerId: "openai",
+					modelId: "gpt-4",
+					variant: "",
+					contextWindow: "",
+				},
 			});
 
 			expect(result).toEqual({
@@ -131,7 +156,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 			expect(createSession).toHaveBeenCalledWith(undefined, {
 				instanceId: "opencode",
-				providerId: "opencode",
+				permissionMode: "ask",
+				pick: {
+					harness: "opencode",
+					model: { providerId: "openai", modelId: "gpt-4" },
+					effort: "",
+					contextWindow: "",
+				},
 			});
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
@@ -142,7 +173,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			Effect.provide(
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
-						makeTestHandlerLayer({ wsHandler, sessionManagerService }),
+						makeTestHandlerLayer({ api, wsHandler, sessionManagerService }),
 					),
 				),
 			),
@@ -164,6 +195,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const client = yield* rpcClient;
 				const result = yield* Effect.either(
 					client.CreateSession({
+						permissionMode: "ask",
 						projectSlug: "project-a",
 						originId: "browser-tab-a",
 						worktreeBase: "main",
@@ -198,6 +230,24 @@ describe("WsRpcServerLayer ListSessions", () => {
 	it.scoped(
 		"preserves an unavailable instance's cause in the CreateSession error without auth details",
 		() => {
+			const dir = mkdtempSync(
+				join(tmpdir(), "conduit-rpc-unavailable-instance-"),
+			);
+			writeFileSync(
+				join(dir, "daemon.json"),
+				JSON.stringify({
+					...defaultDaemonConfig(),
+					instances: [
+						{
+							id: "work-oc",
+							name: "OpenCode",
+							port: 4555,
+							managed: false,
+							driver: "opencode",
+						},
+					],
+				}),
+			);
 			const cause = Object.assign(
 				new OpenCodeUnavailable({
 					instanceId: "work-oc",
@@ -211,6 +261,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 				},
 			);
 			const layer = makeTestHandlerLayer({
+				api: makeModelApi(),
+				config: makeMockConfig({ configDir: dir }),
 				sessionManagerService: makeMockSessionManagerService({
 					createSession: () =>
 						Effect.fail(
@@ -223,17 +275,29 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const client = yield* rpcClient;
 				const error = yield* Effect.flip(
 					client.CreateSession({
+						permissionMode: "ask",
 						projectSlug: "project-a",
 						originId: "browser-tab-a",
 						instanceId: ProviderInstanceIdSchema.make("work-oc"),
 						providerId: "opencode",
+						model: {
+							providerId: "openai",
+							modelId: "gpt-4",
+							variant: "",
+							contextWindow: "",
+						},
 					}),
 				);
 				expect(error.message).toBe(`CreateSession failed: ${cause.message}`);
 				expect(error.message).not.toMatch(
 					/Authorization|private-auth-header|private-instance-password/,
 				);
-			}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
+			}).pipe(
+				Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
 		},
 	);
 
@@ -324,7 +388,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 	});
 
 	it.effect("forks a session for the originating browser tab", () => {
-		const api = makeMockOpenCodeAPI();
+		const api = makeModelApi();
 		vi.mocked(api.session.fork).mockResolvedValue({
 			id: "session-forked",
 			title: "Forked Session",
@@ -340,6 +404,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 			listSessions: vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "project-a",
 						id: "session-1",
 						title: "Original Session",
 						status: "idle" as const,
@@ -357,8 +422,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
-			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
-				VALUES ('session-1', 'opencode', 'Original Session', 1, 1)`;
+			yield* sql`INSERT INTO sessions
+				(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+				VALUES ('session-1', 'opencode', 'Original Session', 'openai', 'gpt-4', '', '', 1, 1)`;
 			const client = yield* rpcClient;
 
 			const result = yield* client.ForkSession({
@@ -392,6 +458,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 				yield* sql`SELECT type FROM events WHERE session_id = 'session-forked' ORDER BY sequence`,
 			).toEqual([
 				{ type: "session.created" },
+				{ type: "session.model_changed" },
+				{ type: "session.variant_changed" },
+				{ type: "session.context_window_changed" },
 				{ type: "session.workspace_changed" },
 			]);
 			expect(wsHandler.setClientSession).not.toHaveBeenCalled();
@@ -465,7 +534,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 				setForkEntry,
 				listSessions: vi.fn(() =>
 					Effect.succeed([
-						{ id: "ses-parent", title: "Parent", status: "idle" as const },
+						{
+							projectSlug: "project-a",
+							id: "ses-parent",
+							title: "Parent",
+							status: "idle" as const,
+						},
 					]),
 				),
 			});
@@ -511,6 +585,21 @@ describe("WsRpcServerLayer ListSessions", () => {
 							wsHandler,
 							sessionManagerService,
 							persistenceLayer,
+							orchestrationEngine: withDispatchEffect({
+								dispatch: vi.fn(async () => ({
+									models: [
+										{ id: "sonnet", name: "Sonnet", providerId: "claude" },
+									],
+									supportsTools: true,
+									supportsThinking: true,
+									supportsPermissions: true,
+									supportsQuestions: true,
+									supportsAttachments: true,
+									supportsFork: true,
+									supportsRevert: false,
+									commands: [],
+								})),
+							}),
 							config: makeMockConfig({
 								configDir: dir,
 								projectDir: "/project",
@@ -532,15 +621,25 @@ describe("WsRpcServerLayer ListSessions", () => {
 			);
 
 			return Effect.gen(function* () {
-				yield* applySessionCommand({
-					type: "session.created",
-					data: {
-						sessionId: "ses-parent",
-						title: "Parent",
-						provider: "my-claude",
-						providerSessionId: "sdk-parent",
+				yield* applySessionCommand(
+					{
+						type: "session.created",
+						data: {
+							sessionId: "ses-parent",
+							title: "Parent",
+							provider: "my-claude",
+							providerSessionId: "sdk-parent",
+						},
 					},
-				});
+					{
+						pick: {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "",
+							contextWindow: "",
+						},
+					},
+				);
 				const providerState = yield* ProviderStateEffectTag;
 				yield* providerState.saveUpdates("ses-parent", [
 					{ key: "resumeSessionId", value: "sdk-parent" },

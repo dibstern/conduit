@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import { describe, layer } from "@effect/vitest";
 import {
 	Deferred,
@@ -48,6 +49,7 @@ import {
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -110,6 +112,12 @@ describe("model handlers with Effect-native model service", () => {
 			);
 
 			return Effect.gen(function* () {
+				const projections = yield* ProjectionRunnerEffectTag;
+				yield* projections.recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+					VALUES ('session-1', 'opencode', 'Stored session', 'openai', 'gpt-4', '', '', 1, 1)`;
 				yield* setModel("session-1", {
 					providerID: "openai",
 					modelID: "gpt-4",
@@ -425,10 +433,10 @@ describe("model handlers with Effect-native model service", () => {
 	);
 
 	it.effect(
-		"switches OpenCode models using the model service for restored variants without requiring the Promise OpenCode API tag",
+		"switches a stored OpenCode session model using the model service without requiring the Promise OpenCode API tag",
 		() => {
 			const wsHandler = makeMockWebSocketHandler({
-				getClientSession: vi.fn(() => undefined),
+				getClientSession: vi.fn(() => "session-model-switch"),
 			});
 			const logger = makeMockLogger();
 			const modelService = {
@@ -468,10 +476,18 @@ describe("model handlers with Effect-native model service", () => {
 				makeOverridesStateLive(),
 			);
 
-			return switchModelForSession({
-				clientId: "client-1",
-				modelId: "gpt-4",
-				providerId: "openai",
+			return Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions
+					(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+					VALUES ('session-model-switch', 'opencode', 'Stored session', 'openai', 'gpt-4', '', '', 1, 1)`;
+				return yield* switchModelForSession({
+					clientId: "client-1",
+					sessionId: "session-model-switch",
+					modelId: "gpt-4",
+					providerId: "openai",
+				});
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap((result) => {
@@ -481,6 +497,7 @@ describe("model handlers with Effect-native model service", () => {
 						provider: "openai",
 						variant: "",
 						variants: ["standard", "fast"],
+						contextWindow: { contextWindow: "", options: [] },
 					});
 				}),
 			);
@@ -584,7 +601,7 @@ describe("model handlers with Effect-native model service", () => {
 		)))));
 	});
 
-	it.effect("honours the running project's native default instead of the first catalog model without starting OpenCode", () => {
+	it.effect("honours the harness's native default for drafts independently of project defaults and session picks", () => {
 		let running = false;
 		const nativeConfig = { model: "fake/model-b" };
 		const api = makeHandlerOpenCodeAPI({
@@ -638,14 +655,14 @@ describe("model handlers with Effect-native model service", () => {
 			expect(yield* getDefaultModel()).toEqual({ providerID: "fake", modelID: "model-b" });
 			yield* refreshGlobalDefaults;
 			expect(yield* getDefaultModel()).toEqual({ providerID: "fake", modelID: "model-b" });
-			expect((yield* getModelsResponse({ instanceId: "opencode", sessionId: "opencode-session" })).active).toEqual({ provider: "fake", model: "model-b" });
+			expect((yield* getModelsResponse({ instanceId: "opencode", sessionId: "opencode-session" })).active).toBeUndefined();
 			for (const sessionId of ["claude-session", "named-claude-session"]) {
 				expect((yield* getModelsResponse({ sessionId })).active).toBeUndefined();
 			}
 			yield* setDefaultModel({ providerID: "fake", modelID: "model-a" });
-			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-a" });
+			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-b" });
 			running = false;
-			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-a" });
+			expect((yield* getModelsResponse({ instanceId: "opencode" })).active).toEqual({ provider: "fake", model: "model-b" });
 			expect(instances.use).not.toHaveBeenCalled();
 			expect(api.config.get).toHaveBeenCalledTimes(5);
 		}).pipe(Effect.provide(Layer.merge(deps, models)));

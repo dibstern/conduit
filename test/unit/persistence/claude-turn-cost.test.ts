@@ -9,6 +9,7 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	economics,
@@ -760,6 +761,18 @@ describe("Claude turn economics through SQLite persistence", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSession("s1");
 				yield* seedSession("s2");
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.projectBatch(
+					yield* store.appendBatch(
+						sessionPickEvents("s1", {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "high",
+							contextWindow: "1m",
+						}),
+					),
+				);
 				yield* seedTurn("s1", "u1", "a1");
 				yield* seedTurn("s2", "u2", "a2");
 				yield* persist.ensureClaudeSubagentSession({
@@ -768,6 +781,22 @@ describe("Claude turn economics through SQLite persistence", () => {
 					providerSessionId: "child-sdk",
 					title: "Child",
 				});
+				expect(
+					yield* (yield* ReadQueryEffectTag).getSession("child"),
+				).toMatchObject({
+					model_provider: "claude",
+					model_id: "sonnet",
+					variant: "high",
+					context_window: "1m",
+				});
+				expect(
+					(yield* store.readAllBySession("child")).map((event) => event.type),
+				).toEqual([
+					"session.created",
+					"session.model_changed",
+					"session.variant_changed",
+					"session.context_window_changed",
+				]);
 				yield* seedTurn("child", "uc", "ac");
 				yield* persist.persistEvent(
 					completion("s1", "a1", 1, "sdk-session", 500),

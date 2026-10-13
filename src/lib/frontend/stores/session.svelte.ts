@@ -27,7 +27,6 @@ import {
 	getModelsRpc,
 	listDaemonSessionsRpc,
 	reloadProviderSessionRpc,
-	switchPermissionModeRpc,
 	type ViewSessionRpcInput,
 	viewSessionRpc,
 } from "../transport/ws-rpc-client.js";
@@ -50,9 +49,8 @@ import { getBrowserClientId } from "./client-identity.js";
 import {
 	applyGetAgentsResponse,
 	applyGetCommandsResponse,
-	applyGetModelsResponse,
 	clearDraftSelection,
-	flushPendingPermissionMode,
+	followModelsRead,
 	followSessionModelSettings,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
@@ -610,6 +608,11 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	// status it has. Key on parentID, not shell membership: a root that gains a
 	// parent leaves the shell, and its family row is the one kept current.
 	if (change._tag === "snapshot") {
+		// A bounded rebase can omit a child that finished while disconnected.
+		for (const row of previousRows.values()) {
+			if (row.parentID !== undefined && !next.rows.has(row.id) && isBusy(row))
+				followSessionBusy(row.id, false);
+		}
 		for (const row of next.rows.values()) {
 			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
 		}
@@ -852,7 +855,9 @@ export function findSession(id: string): Immutable<SessionInfo> | undefined {
 	return (
 		serverSessions.get(id) ??
 		familySessions.find((row) => row.id === id) ??
-		rootSessions.find((row) => row.id === id)
+		rootSessions.find((row) => row.id === id) ??
+		sessionState.daemonSessions.find((row) => row.id === id) ??
+		sessionState.searchResults?.find((row) => row.id === id)
 	);
 }
 
@@ -921,15 +926,13 @@ export function getFilteredSessions(): SessionInfo[] {
 	const scope = getSessionScope();
 	const groupKey = getScopeGroupKey(scope);
 	const currentSlug = getCurrentSlug();
-	// Local rows carry no projectSlug: they belong to the project this socket
-	// is attached to.
 	const inScope = (session: SessionInfo) => {
-		const slug = session.projectSlug ?? currentSlug;
+		const slug = session.projectSlug;
 		return (
 			scope === null ||
 			(groupKey === null
 				? slug === scope
-				: slug != null && getProjectGroup(slug)?.key === groupKey)
+				: getProjectGroup(slug)?.key === groupKey)
 		);
 	};
 	if (sessionState.searchResults !== null) {
@@ -942,7 +945,7 @@ export function getFilteredSessions(): SessionInfo[] {
 		return sessionState.searchResults.flatMap((session) => {
 			if (session.parentID || session.sideThread || !inScope(session))
 				return [];
-			if (session.projectSlug != null && session.projectSlug !== searchSlug) {
+			if (session.projectSlug !== searchSlug) {
 				return [withReadMark(session)];
 			}
 			const liveSession = liveRoots.get(session.id);
@@ -957,7 +960,6 @@ export function getFilteredSessions(): SessionInfo[] {
 	// why these no longer have to stand down to avoid flashing in and out.
 	const foreignSessions = sessionState.daemonSessions.filter(
 		(session) =>
-			session.projectSlug != null &&
 			session.projectSlug !== currentSlug &&
 			!session.parentID &&
 			!session.sideThread,
@@ -1057,7 +1059,6 @@ export function switchToSession(
 		else navigate(`/s/${sessionId}`);
 	}
 	if (slug) {
-		flushPendingPermissionMode(slug, sessionId, switchPermissionModeRpc);
 		const input: ViewSessionRpcInput = {
 			projectSlug: slug,
 			sessionId,
@@ -1104,6 +1105,7 @@ export function switchToSession(
 			.catch(() => undefined);
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
+		const applyModels = followModelsRead(sessionId);
 		void getModelsRpc({ projectSlug: slug, sessionId })
 			.then((response) => {
 				if (
@@ -1111,7 +1113,7 @@ export function switchToSession(
 					clientSession.currentId === sessionId &&
 					getCurrentSlug() === slug
 				)
-					applyGetModelsResponse(response);
+					applyModels(response);
 			})
 			.catch(() => undefined);
 	}
@@ -1131,6 +1133,7 @@ export async function reloadProviderSession(
 		commandId: crypto.randomUUID(),
 	});
 	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
+	const applyModels = followModelsRead(sessionId);
 	const [commands, models] = await Promise.all([
 		getCommandsRpc({ projectSlug, sessionId }),
 		getModelsRpc({ projectSlug, sessionId }),
@@ -1139,7 +1142,7 @@ export async function reloadProviderSession(
 		return;
 	if (JSON.stringify(findSession(sessionId)?.workspace ?? null) === workspace)
 		applyGetCommandsResponse(commands);
-	applyGetModelsResponse(models);
+	applyModels(models);
 }
 
 /** Clear all session state (for project switch). */

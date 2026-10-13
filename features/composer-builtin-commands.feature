@@ -14,6 +14,7 @@ Examples:
   | /     | /commit  | /compact |
 
 Scenario Outline: a built-in typed with $ reaches the provider as a slash command
+  Given the composer picker has the OpenCode catalog
   When I type <message> into the composer
   And I send the composer message
   Then the relay receives the sent text <sent>

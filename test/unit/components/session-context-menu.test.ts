@@ -57,7 +57,7 @@ function openMenu(
 ) {
 	render(SessionContextMenu, {
 		props: {
-			session: { status: "idle", ...session },
+			session: { status: "idle", projectSlug: "test", ...session },
 			anchor: options?.anchor ?? document.body,
 			projectLabel: options?.projectLabel,
 			branch: options?.branch,

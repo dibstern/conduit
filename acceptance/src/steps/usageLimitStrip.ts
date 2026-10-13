@@ -3,6 +3,7 @@ import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	mockInstances,
 	requireRelayControl,
 	requireRpcControl,
 	setSessionRowStatus,
@@ -48,8 +49,11 @@ export function setClaudeAccounts(
 	page: Page,
 	accounts: readonly (readonly [id: string, name: string])[],
 ): void {
-	requireRpcControl(page).setDaemonList("SubscribeInstances", {
-		instances: accounts.map(([id, name]) => ({
+	const instances = [
+		...(mockInstances.get(page) ?? []).filter(
+			(instance) => instance["driver"] !== "claude",
+		),
+		...accounts.map(([id, name]) => ({
 			id,
 			name,
 			port: 0,
@@ -59,7 +63,9 @@ export function setClaudeAccounts(
 			createdAt: 1,
 			driver: "claude",
 		})),
-	});
+	];
+	mockInstances.set(page, instances);
+	requireRpcControl(page).setDaemonList("SubscribeInstances", { instances });
 }
 
 type StripAction = "Try again" | "Resume at reset" | "Cancel auto-resume";

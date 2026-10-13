@@ -15,6 +15,7 @@ const INITIAL_SESSION_LIST_LIMIT = 10_000;
 
 export interface SessionManagerOptions {
 	client: OpenCodeAPI;
+	projectSlug: string;
 	/** Number of messages to load per page (default 50) */
 	historyPageSize?: number;
 	/** Logger for diagnostics */
@@ -44,6 +45,7 @@ export interface HistoryPage {
 
 export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	private readonly client: OpenCodeAPI;
+	private readonly projectSlug: string;
 	private readonly historyPageSize: number;
 	private readonly log: Logger;
 	private readonly directory: string | undefined;
@@ -72,6 +74,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 	constructor(options: SessionManagerOptions) {
 		super();
 		this.client = options.client;
+		this.projectSlug = options.projectSlug;
 		this.historyPageSize = options.historyPageSize ?? 50;
 		this.log = options.log ?? createSilentLogger();
 		this.directory = options.directory;
@@ -140,7 +143,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				.map((s) => s.id.slice(0, 12))
 				.join(",")}${sessions.length > 5 ? "..." : ""}]`,
 		);
-		return toSessionInfoList(sessions, resolvedStatuses, this.lastMessageAt);
+		return toSessionInfoList(
+			sessions,
+			this.projectSlug,
+			resolvedStatuses,
+			this.lastMessageAt,
+		);
 	}
 
 	/** Load the newest REST page for initial OpenCode history while backfill runs. */
@@ -246,7 +254,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 				s.id.toLowerCase().includes(normalizedQuery)
 			);
 		});
-		return toSessionInfoList(matches, this.getStatuses?.(), this.lastMessageAt);
+		return toSessionInfoList(
+			matches,
+			this.projectSlug,
+			this.getStatuses?.(),
+			this.lastMessageAt,
+		);
 	}
 
 	/**

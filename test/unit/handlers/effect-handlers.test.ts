@@ -67,6 +67,10 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
+	selectSessionContextWindow,
+	selectSessionModel,
+} from "../../../src/lib/domain/relay/Services/session-model-settings.js";
+import {
 	getAgent,
 	getContextWindow,
 	getDefaultPermissionMode,
@@ -170,6 +174,22 @@ function mockWsHandler(
 		...overrides,
 	};
 }
+
+const seedSessionPick = (
+	sessionId: string,
+	modelId: string,
+	contextWindow = "",
+	modelProvider = "claude",
+) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const provider = modelProvider === "claude" ? "claude" : "opencode";
+		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at,
+			model_id, model_provider, variant, context_window)
+			VALUES (${sessionId}, ${provider}, 'Session', 'idle', 0, 0, ${modelId}, ${modelProvider}, '', ${contextWindow})
+			ON CONFLICT(id) DO UPDATE SET provider = ${provider}, model_id = ${modelId},
+			model_provider = ${modelProvider}, variant = '', context_window = ${contextWindow}`;
+	});
 
 const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
@@ -670,6 +690,7 @@ describe("sendModelsStateToClient", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* seedSessionPick("session-1", "claude-opus-4-7");
 				yield* setModel("session-1", {
 					providerID: "claude",
 					modelID: "claude-opus-4-7",
@@ -833,6 +854,8 @@ describe("switchModelForSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -998,6 +1021,7 @@ describe("switchVariantForSession", () => {
 		);
 
 		return Effect.gen(function* () {
+			yield* seedSessionPick("session-42", "claude-opus-4-7");
 			yield* setModel("session-42", {
 				providerID: "claude",
 				modelID: "claude-opus-4-7",
@@ -1058,6 +1082,7 @@ describe("switchVariantForSession", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* seedSessionPick("session-42", "gpt-4", "", "openai");
 				yield* setModel("session-42", {
 					providerID: "openai",
 					modelID: "gpt-4",
@@ -1111,6 +1136,7 @@ describe("switchContextWindowForSession", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* seedSessionPick("session-42", "claude-sonnet-4-7");
 				yield* setModel("session-42", {
 					providerID: "claude",
 					modelID: "claude-sonnet-4-7",
@@ -1161,6 +1187,7 @@ describe("switchContextWindowForSession", () => {
 			);
 
 			return Effect.gen(function* () {
+				yield* seedSessionPick("session-42", "claude-haiku-4-7", "200k");
 				yield* setModel("session-42", {
 					providerID: "claude",
 					modelID: "claude-haiku-4-7",
@@ -1259,9 +1286,16 @@ function makeForkSessionLayer(options?: {
 					),
 				),
 			);
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`UPDATE sessions SET model_id = 'gpt-4', model_provider = 'openai',
+				variant = '', context_window = '' WHERE id = 'ses-parent'`;
+
 		}),
 	).pipe(Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")));
 
+	vi.spyOn(client.provider, "list").mockResolvedValue(makeProviderListResult({
+			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
+		}));
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
 		Layer.succeed(WebSocketHandlerTag, ws),
@@ -1309,8 +1343,12 @@ function makeSessionLifecycleLayer(options?: {
 		}));
 	const log = options?.log ?? mockLogger();
 
+	vi.spyOn(client.provider, "list").mockResolvedValue(makeProviderListResult({
+			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
+		}));
 	return Layer.mergeAll(
 		openCodeModelLayer(client),
+		Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
 		Layer.succeed(WebSocketHandlerTag, ws),
 		Layer.succeed(SessionManagerServiceTag, sessionManagerService),
 		PendingInteractionServiceLive,
@@ -1461,6 +1499,7 @@ describe("handleForkSession", () => {
 			const serviceListSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "ses-parent",
 						title: "Parent Session",
 						status: "idle" as const,
@@ -1468,6 +1507,7 @@ describe("handleForkSession", () => {
 						messageCount: 1,
 					},
 					{
+						projectSlug: "test-project",
 						id: "ses-child",
 						title: "Forked Session",
 						status: "idle" as const,
@@ -2229,10 +2269,12 @@ describe("handleNewSession", () => {
 
 			return handleNewSession("client-1", {
 				title: "New Session",
+				permissionMode: "ask",
+				model: { modelId: "sonnet", providerId: "claude" },
 			}).pipe(
 				Effect.provide(layer),
 				Effect.tap(() => {
-					expect(serviceCreateSession).toHaveBeenCalledWith("New Session");
+					expect(serviceCreateSession).toHaveBeenCalledWith("New Session", { instanceId: "claude", permissionMode: "ask", pick: { harness: "claude", model: { modelId: "sonnet", providerId: "claude" }, effort: "", contextWindow: "" } });
 					expect(legacyCreateSession).not.toHaveBeenCalled();
 					expect(ws.setClientSession).toHaveBeenCalledWith(
 						"client-1",
@@ -2270,13 +2312,17 @@ describe("handleNewSession", () => {
 
 		return handleNewSession("client-1", {
 			title: "OpenCode Session",
+			permissionMode: "ask",
 			providerId: "opencode",
+			model: { modelId: "gpt-4", providerId: "openai" },
 		}).pipe(
 			Effect.provide(layer),
 			Effect.tap(() => {
 				expect(serviceCreateSession).toHaveBeenCalledWith("OpenCode Session", {
-					providerId: "opencode",
-				});
+					instanceId: "opencode",
+					permissionMode: "ask",
+				pick: { harness: "opencode", model: { modelId: "gpt-4", providerId: "openai" }, effort: "", contextWindow: "" },
+			});
 				expect(ws.setClientSession).toHaveBeenCalledWith(
 					"client-1",
 					"opencode-session",
@@ -2333,6 +2379,8 @@ describe("handleNewSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2434,6 +2482,8 @@ describe("handleNewSession", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -2511,6 +2561,7 @@ describe("handleDeleteSession", () => {
 			const listSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "remaining-session",
 						title: "Remaining Session",
 						status: "idle" as const,
@@ -2727,6 +2778,8 @@ describe("loadMoreHistoryForSession", () => {
 			getStrandedChildren: () => Effect.succeed([]),
 			listSessions: vi.fn(() => Effect.succeed([])),
 			listSessionInfos: vi.fn(() => Effect.succeed([])),
+			listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+			getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 			readSessionTranscript: vi.fn(() =>
 				Effect.succeed({ messages: [], version: 0 }),
 			),
@@ -3122,11 +3175,12 @@ describe("handleMessage", () => {
 					}],
 				}],
 			});
-			yield* setModel("session-1", {
+			yield* seedSessionPick("session-1", "sonnet");
+				yield* selectSessionModel("session-1", {
 				providerID: "claude",
 				modelID: "sonnet",
 			});
-			yield* setContextWindow("session-1", "1m");
+			yield* selectSessionContextWindow("session-1", "1m");
 			yield* handleMessage("client-1", {
 				text: "hello world",
 				commandId: "cmd-context-window",
@@ -3224,7 +3278,8 @@ describe("handleMessage", () => {
 						models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
 					}],
 				});
-				yield* setModel("session-1", {
+				yield* seedSessionPick("session-1", "sonnet");
+				yield* selectSessionModel("session-1", {
 					providerID: "claude",
 					modelID: "sonnet",
 				});
@@ -3275,7 +3330,14 @@ describe("handleMessage", () => {
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
-				getSession: vi.fn(() => Effect.succeed(undefined)),
+				getSession: vi.fn(() => Effect.succeed({
+					id: "session-1", provider: "claude", provider_sid: null, version: 0,
+					title: "Session", status: "idle", parent_id: null, fork_point_event: null,
+					last_message_at: null, last_turn_error_at: null, permission_mode: null,
+					read_at: null, settled_at: null, pinned_at: null, snoozed_at: null, snoozed_until: null,
+					woken_at: null, woken_reason: null, created_at: 0, updated_at: 0,
+					model_id: "sonnet", model_provider: "claude", variant: "", context_window: "",
+				})),
 				getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
 				getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 				getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
@@ -3283,6 +3345,8 @@ describe("handleMessage", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -3329,7 +3393,8 @@ describe("handleMessage", () => {
 						models: [{ id: "sonnet", name: "Sonnet", provider: "claude" }],
 					}],
 				});
-				yield* setModel("session-1", {
+				yield* seedSessionPick("session-1", "sonnet");
+				yield* selectSessionModel("session-1", {
 					providerID: "claude",
 					modelID: "sonnet",
 				});
@@ -3376,6 +3441,7 @@ describe("handleMessage", () => {
 			const listSessions = vi.fn(() =>
 				Effect.succeed([
 					{
+						projectSlug: "test-project",
 						id: "session-1",
 						title: "Untitled",
 						status: "idle" as const,
@@ -3441,6 +3507,7 @@ describe("handleMessage", () => {
 		const listSessions = vi.fn(() =>
 			Effect.succeed([
 				{
+					projectSlug: "test-project",
 					id: "session-1",
 					title: "User named this",
 					status: "idle" as const,
@@ -3494,7 +3561,7 @@ describe("handleMessage", () => {
 	});
 
 	it.effect(
-		"materializes an empty local session before sending an OpenCode-selected first prompt",
+		"rejects a missing stored pick rather than materializing OpenCode from a runtime override",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "ses-local-placeholder"),
@@ -3515,6 +3582,7 @@ describe("handleMessage", () => {
 			const sessionManagerService = makeMockSessionManagerService({
 				createSession: serviceCreateSession,
 			});
+			const ingestBatch = vi.fn(() => Effect.succeed(0));
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
@@ -3552,6 +3620,8 @@ describe("handleMessage", () => {
 				getStrandedChildren: () => Effect.succeed([]),
 				listSessions: vi.fn(() => Effect.succeed([])),
 				listSessionInfos: vi.fn(() => Effect.succeed([])),
+				listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
+				getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
 				readSessionTranscript: vi.fn(() =>
 					Effect.succeed({ messages: [], version: 0 }),
 				),
@@ -3593,6 +3663,11 @@ describe("handleMessage", () => {
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag, withDispatchEffect(engine)),
 					Layer.succeed(ReadQueryEffectTag, readQuery),
+					Layer.succeed(ProviderRuntimeIngestionTag, {
+						ingest: () => Effect.succeed(0),
+						ingestBatch,
+						drain: () => Effect.void,
+					}),
 					makeOverridesStateLive(),
 				),
 			);
@@ -3610,41 +3685,18 @@ describe("handleMessage", () => {
 					commandId: "cmd-materialize-opencode",
 				});
 				yield* flushDispatchContinuation();
-				expect(dispatchedSessionId).toBe("ses-opencode-created");
-
-				expect(serviceCreateSession).toHaveBeenCalledWith("Untitled", {
-					providerId: "opencode",
-				});
-				expect(engine.bindSession).toHaveBeenCalledWith(
-					"ses-opencode-created",
-					"opencode",
-				);
-				expect(ws.setClientSession).toHaveBeenCalledWith(
-					"client-1",
-					"ses-opencode-created",
-				);
-				expect(engine.dispatchEffect).toHaveBeenCalledWith(
+				expect(dispatchedSessionId).toBe("ses-local-placeholder");
+				expect(serviceCreateSession).not.toHaveBeenCalled();
+				expect(engine.bindSession).not.toHaveBeenCalled();
+				expect(ws.setClientSession).not.toHaveBeenCalled();
+				expect(engine.dispatchEffect).not.toHaveBeenCalled();
+				expect(ingestBatch).toHaveBeenCalledWith(expect.arrayContaining([
 					expect.objectContaining({
-						type: "send_turn",
-						providerId: "opencode",
-						input: expect.objectContaining({
-							sessionId: "ses-opencode-created",
-							inputId: "cmd-materialize-opencode",
-							prompt: "Test query",
-							model: {
-								providerId: "opencode",
-								modelId: "big-pickle",
-							},
-						}),
+						type: "turn.error",
+						sessionId: "ses-local-placeholder",
+						data: expect.objectContaining({ code: "PICK_REQUIRED" }),
 					}),
-				);
-				expect(engine.dispatchEffect).not.toHaveBeenCalledWith(
-					expect.objectContaining({
-						input: expect.objectContaining({
-							sessionId: "ses-local-placeholder",
-						}),
-					}),
-				);
+				]));
 			}).pipe(Effect.provide(PassThroughSessionInbox), Effect.provide(layer));
 		},
 	);
@@ -3691,8 +3743,8 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions
-					(id, provider, title, status, created_at, updated_at)
-					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0)`;
+					(id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
+					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",

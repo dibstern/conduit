@@ -2,11 +2,15 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { effort } from "../../stores/composer-settings.svelte.js";
 import {
+	chooseModel,
+	chooseVariant,
 	clearDiscoveryState,
 	discoveryState,
-	handleVariantInfo,
+	handleModelList,
+	selectInstance,
 } from "../../stores/discovery.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const onOpen = fn();
@@ -14,10 +18,31 @@ const fourLevels = ["low", "medium", "high", "max"];
 const fiveLevels = ["low", "medium", "high", "xhigh", "max"];
 
 function seed(variant = "", variants = fourLevels) {
-	handleVariantInfo({ variant, variants });
+	handleModelList({
+		providers: [
+			{
+				id: "claude",
+				name: "Claude",
+				configured: true,
+				models: [
+					{
+						id: "story-model",
+						name: "Story model",
+						provider: "claude",
+						variants,
+					},
+				],
+			},
+		],
+	});
+	selectInstance("claude");
+	chooseModel({ modelId: "story-model", providerId: "claude" });
+	chooseVariant(variant);
 }
 
 function resize(width: number) {
+	sessionViewState.compact = width < 768;
+	sessionViewState.composerWidth = width;
 	Object.defineProperty(window, "innerWidth", {
 		configurable: true,
 		value: width,
@@ -52,6 +77,14 @@ async function holdMenu(canvasElement: HTMLElement) {
 	}
 }
 
+async function keyboardMenu(canvasElement: HTMLElement) {
+	within(canvasElement).getByTestId("variant-badge").focus();
+	await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+	return within(canvasElement.ownerDocument.body).findByTestId(
+		"variant-dropdown",
+	);
+}
+
 const meta = {
 	title: "Model/ModelVariant",
 	component: ModelVariant,
@@ -60,6 +93,8 @@ const meta = {
 	globals: { theme: "dark" },
 	args: { onOpen },
 	beforeEach: ({ parameters }) => {
+		const compact = sessionViewState.compact;
+		const composerWidth = sessionViewState.composerWidth;
 		clearDiscoveryState();
 		// A draft changes local discovery state without a session or RPC connection.
 		sessionState.currentId = null;
@@ -70,6 +105,8 @@ const meta = {
 		// environment before render rather than relying on toolbar metadata.
 		resize(parameters["phone"] ? 393 : 1024);
 		return () => {
+			sessionViewState.compact = compact;
+			sessionViewState.composerWidth = composerWidth;
 			if (width) Object.defineProperty(window, "innerWidth", width);
 			else Reflect.deleteProperty(window, "innerWidth");
 			window.dispatchEvent(new Event("resize"));
@@ -228,7 +265,7 @@ export const PhoneHoldOptions: Story = {
 			expect(body.queryByTestId("variant-dropdown")).not.toBeInTheDocument(),
 		);
 		await expect(button).toHaveTextContent("LOW");
-		const reopened = await holdMenu(canvasElement);
+		const reopened = await keyboardMenu(canvasElement);
 		await userEvent.click(
 			within(reopened).getByTestId("variant-option-default"),
 		);
@@ -236,8 +273,9 @@ export const PhoneHoldOptions: Story = {
 			expect(body.queryByTestId("variant-dropdown")).not.toBeInTheDocument(),
 		);
 		await expect(button).toHaveTextContent("DEF");
+		await expect(discoveryState.currentVariant).toBe("");
 		await assertMeter(button, 5, 0);
-		const defaultMenu = await holdMenu(canvasElement);
+		const defaultMenu = await keyboardMenu(canvasElement);
 		await expect(defaultMenu).toBeVisible();
 		await expect(
 			within(defaultMenu).getByTestId("variant-option-default"),

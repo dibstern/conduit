@@ -4,7 +4,6 @@ import { InputPage } from "../../../test/e2e/page-objects/input.page.js";
 import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
-	exampleValue,
 	openComposerMoreSheet,
 	openSessionRoute,
 	relayControls,
@@ -31,16 +30,6 @@ async function openApprovalsMenu(page: Page): Promise<void> {
 	await expect(button).not.toHaveAttribute("aria-busy", "true");
 	await button.click();
 	await expect(menu).toBeVisible();
-}
-
-function booleanExampleValue(
-	example: Record<string, string>,
-	key: string,
-): boolean {
-	const value = exampleValue(example, key);
-	if (value === "true") return true;
-	if (value === "false") return false;
-	throw new Error(`Malformed boolean example value for <${key}>: ${value}`);
 }
 
 export const composerHandlers: StepHandler[] = [
@@ -165,8 +154,8 @@ export const composerHandlers: StepHandler[] = [
 	{
 		name: "assert send button state",
 		match: /^the send button is (true|false)$/,
-		run: async ({ world, example }) => {
-			const expectedEnabled = booleanExampleValue(example, "enabled");
+		run: async ({ world, match }) => {
+			const expectedEnabled = match[1] === "true";
 			const input = new InputPage(world.page);
 			await world.page.waitForFunction(
 				(expected) => {

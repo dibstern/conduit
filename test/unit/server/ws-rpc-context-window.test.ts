@@ -1,14 +1,14 @@
 import { RpcTest } from "@effect/rpc";
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	getContextWindow,
-	setModel,
-} from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { getContextWindow } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockLogger,
@@ -38,10 +38,11 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 		});
 
 		return Effect.gen(function* () {
-			yield* setModel("session-1", {
-				providerID: "claude",
-				modelID: "claude-sonnet-4-7",
-			});
+			yield* (yield* ProjectionRunnerEffectTag).recover();
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+				VALUES ('session-1', 'claude', 'Stored session', 'claude', 'claude-sonnet-4-7', '', '200k', 1, 1)`;
 
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.SwitchContextWindow({
@@ -57,6 +58,14 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 				options: contextWindowOptions,
 			});
 			expect(yield* getContextWindow("session-1")).toBe("1m");
+			expect(
+				yield* (yield* ReadQueryEffectTag).getSession("session-1"),
+			).toMatchObject({
+				model_provider: "claude",
+				model_id: "claude-sonnet-4-7",
+				variant: "",
+				context_window: "1m",
+			});
 			const committed = yield* (yield* EventStoreEffectTag).readAllBySession(
 				"session-1",
 			);

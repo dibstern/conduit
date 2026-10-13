@@ -1,3 +1,4 @@
+import { SqlClient } from "@effect/sql";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, TestClock } from "effect";
 import { expect, vi } from "vitest";
@@ -10,6 +11,7 @@ import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/
 import {
 	ConfigTag,
 	LoggerTag,
+	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -29,8 +31,10 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
+	MOCK_OPENCODE_GPT4_CATALOG,
 	MOCK_PROJECT_DIR,
 	makeMockAgentService,
+	makeMockOpenCodeModelService,
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	PassThroughSessionInbox,
@@ -70,6 +74,10 @@ describe("prompt processing timeouts through Effect state", () => {
 			Layer.mergeAll(
 				AlertsLive,
 				Layer.succeed(OpenCodeAPITag, client),
+				Layer.succeed(
+					OpenCodeModelServiceTag,
+					makeMockOpenCodeModelService(MOCK_OPENCODE_GPT4_CATALOG),
+				),
 				Layer.succeed(WebSocketHandlerTag, ws),
 				Layer.succeed(LoggerTag, createSilentLogger()),
 				Layer.succeed(ConfigTag, config as ProjectRelayConfig),
@@ -100,6 +108,10 @@ describe("prompt processing timeouts through Effect state", () => {
 		);
 
 		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+				VALUES ('session-1', 'opencode', 'Stored session', 'openai', 'gpt-4', '', '', 1, 1)`;
 			yield* handleMessage("client-1", {
 				text: "hello",
 				commandId: "cmd-timeout-send",

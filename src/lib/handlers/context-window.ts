@@ -1,11 +1,7 @@
 import { Effect, Either } from "effect";
 import { LoggerTag } from "../domain/relay/Services/services.js";
 import { selectSessionContextWindow } from "../domain/relay/Services/session-model-settings.js";
-import {
-	getDefaultModel,
-	getModel,
-	setDefaultContextWindow,
-} from "../domain/relay/Services/session-overrides-state.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import {
 	findCatalogModel,
 	harnessForModelProvider,
@@ -16,7 +12,7 @@ import { applyLiveSessionSettings, loadModelCatalog } from "./model.js";
 
 export interface SwitchContextWindowInput {
 	readonly clientId: string;
-	readonly sessionId?: string | undefined;
+	readonly sessionId: string;
 	readonly contextWindow: string;
 }
 
@@ -27,11 +23,13 @@ export const switchContextWindowForSession = (
 		const log = yield* LoggerTag;
 
 		const sessionId = input.sessionId;
-		const activeModel = sessionId
-			? ((yield* getModel(sessionId)) ?? (yield* getDefaultModel()))
-			: yield* getDefaultModel();
+		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		const activeModel =
+			row?.model_id && row.model_provider
+				? { modelID: row.model_id, providerID: row.model_provider }
+				: undefined;
 		const harness = harnessForModelProvider(activeModel?.providerID ?? "");
-		const catalog = yield* loadModelCatalog(harness);
+		const catalog = yield* loadModelCatalog(harness, row?.provider ?? harness);
 		const resolved = resolveTurnSettings(
 			{
 				harness,
@@ -48,12 +46,8 @@ export const switchContextWindowForSession = (
 		const model = findCatalogModel(harness, resolved.right.model, catalog);
 		const options = model ? [...offeredOptions(model).contextWindows] : [];
 		const contextWindow = resolved.right.contextWindow;
-		if (sessionId) {
-			yield* selectSessionContextWindow(sessionId, contextWindow);
-			yield* applyLiveSessionSettings(sessionId);
-		} else {
-			yield* setDefaultContextWindow(contextWindow);
-		}
+		yield* selectSessionContextWindow(sessionId, contextWindow);
+		yield* applyLiveSessionSettings(sessionId);
 
 		log.info(
 			`client=${input.clientId} session=${sessionId ?? "?"} Switched context window to: ${contextWindow || "default"}`,

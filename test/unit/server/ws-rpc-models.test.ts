@@ -13,7 +13,6 @@ import { saveDaemonConfig } from "../../../src/lib/daemon/config-persistence.js"
 import {
 	setDefaultContextWindow,
 	setDefaultVariant,
-	setModel,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -78,6 +77,8 @@ const makeReadQuery = (
 	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
 	listSessionInfos: () => Effect.succeed([]),
+	listSessionGitRefreshTargets: () => Effect.succeed([]),
+	getSessionSkillMessages: () => Effect.succeed([]),
 	getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 	countPendingApprovalsBySession: () => Effect.succeed([]),
 	readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
@@ -488,12 +489,8 @@ describe("WsRpcServerLayer GetModels", () => {
 			});
 
 			return Effect.gen(function* () {
-				yield* setModel("session-1", {
-					providerID: "claude",
-					modelID: "claude-sonnet",
-				});
-				yield* setDefaultVariant("careful");
-				yield* setDefaultContextWindow("200k");
+				yield* setDefaultVariant("fast");
+				yield* setDefaultContextWindow("");
 				const client = yield* rpcClient;
 
 				const result = yield* client.GetModels({
@@ -558,6 +555,30 @@ describe("WsRpcServerLayer GetModels", () => {
 							makeTestHandlerLayer({
 								api,
 								orchestrationEngine,
+								seedEvents: [
+									canonicalEvent("session.created", "session-1", {
+										sessionId: "session-1",
+										title: "Stored pick",
+										provider: "claude",
+									}),
+									canonicalEvent("session.model_changed", "session-1", {
+										sessionId: "session-1",
+										modelId: "claude-sonnet",
+										providerId: "claude",
+									}),
+									canonicalEvent("session.variant_changed", "session-1", {
+										sessionId: "session-1",
+										variant: "careful",
+									}),
+									canonicalEvent(
+										"session.context_window_changed",
+										"session-1",
+										{
+											sessionId: "session-1",
+											contextWindow: "200k",
+										},
+									),
+								],
 								config: makeMockConfig({
 									configDir: mkdtempSync(join(tmpdir(), "conduit-rpc-models-")),
 								}),
@@ -719,7 +740,7 @@ describe("WsRpcServerLayer GetModels", () => {
 	);
 
 	it.effect(
-		"omits active model metadata from a differently scoped instance",
+		"reports the session binding when a different catalog instance is requested",
 		() => {
 			const configDir = mkdtempSync(
 				join(tmpdir(), "conduit-rpc-models-active-scope-"),
@@ -755,7 +776,7 @@ describe("WsRpcServerLayer GetModels", () => {
 					instanceId: "opencode",
 				});
 
-				expect(result.instanceId).toBe("opencode");
+				expect(result.instanceId).toBe("claude");
 				expect(result.active).toBeUndefined();
 				expect(api.session.get).not.toHaveBeenCalled();
 				expect(orchestrationEngine.dispatch).not.toHaveBeenCalled();

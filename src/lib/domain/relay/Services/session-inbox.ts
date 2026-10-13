@@ -168,10 +168,7 @@ function steerBlocker(
 	if (request.text.trimStart().startsWith("/")) return undefined;
 	const { running } = view;
 	if (!running) return undefined;
-	// A turn sent without a model runs on the default Conduit infers for it,
-	// which later inputs carry unselected; only a model the user picked differs.
-	const runningModel =
-		running.model ?? (request.modelUserSelected ? undefined : request.model);
+	const runningModel = running.model;
 	if (
 		runningModel?.providerID !== request.model?.providerID ||
 		runningModel?.modelID !== request.model?.modelID ||
@@ -565,7 +562,6 @@ export const SessionInboxLive = Layer.scoped(
 						text: request.text,
 						...(request.images ? { images: request.images } : {}),
 						...(request.model ? { model: request.model } : {}),
-						modelUserSelected: request.modelUserSelected,
 						...(request.agent ? { agent: request.agent } : {}),
 						...(request.variant ? { variant: request.variant } : {}),
 						...(request.contextWindow

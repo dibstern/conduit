@@ -69,7 +69,14 @@ it("recovers historical sessions before startup can create a live session", asyn
 		const sessions = await relay.effectRuntime.runtime.runPromise(
 			Effect.gen(function* () {
 				const manager = yield* SessionManagerServiceTag;
-				const live = yield* manager.createSession("Live");
+				const live = yield* manager.createSession("Live", {
+					pick: {
+						harness: "claude",
+						model: { providerId: "claude", modelId: "sonnet" },
+						effort: "",
+						contextWindow: "",
+					},
+				});
 				const rows = yield* manager.listSessions();
 				return { liveId: live.id, ids: rows.map((row) => row.id) };
 			}),

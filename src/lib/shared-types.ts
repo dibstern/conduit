@@ -302,7 +302,7 @@ export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
 	title: Schema.String,
 	status: SessionStatusSchema,
-	projectSlug: Schema.optional(Schema.String),
+	projectSlug: Schema.String,
 	createdAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
 	updatedAt: Schema.optional(Schema.Union(Schema.String, Schema.Number)),
 	messageCount: Schema.optional(Schema.Number),

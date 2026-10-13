@@ -239,6 +239,7 @@ const wokenStory = (
 	args: {
 		session: {
 			id: `woken-${reason}`,
+			projectSlug: "conduit",
 			title: `Woken by ${reason}`,
 			status: "idle",
 			attention: "idle",

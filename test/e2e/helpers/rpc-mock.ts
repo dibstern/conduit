@@ -87,6 +87,8 @@ export interface RpcMockOptions {
 
 /** Mock-only catalog served by GetModels/GetAgents/GetCommands when a spec has no handler. */
 export interface MockCatalog {
+	instanceId?: string;
+	defaultOpenCodeInstanceId?: string;
 	providers?: readonly unknown[];
 	agents?: ReadonlyArray<{
 		providerScope: { id: string; name: string };
@@ -118,6 +120,7 @@ export class RpcMockControl {
 	private connectionCount = 0;
 	private readonly requests: RecordedRpcRequest[] = [];
 	private readonly responseHandlers = new Map<string, RpcHandler>();
+	initialHandlers: Record<string, RpcHandler> = {};
 	private readonly streams = new Map<
 		string,
 		{ ws: WebSocketRoute; id: string }
@@ -144,14 +147,27 @@ export class RpcMockControl {
 	}
 
 	getResponseHandler(tag: string): RpcHandler | undefined {
-		return this.responseHandlers.get(tag);
+		return this.responseHandlers.get(tag) ?? this.initialHandlers[tag];
 	}
 
 	catalogHandler(tag: string): RpcHandler | undefined {
 		const { providers, agents, commands, ...modelState } = this.catalog;
 		const projectSlug = this.projectSlug;
 		if (tag === "GetModels" && (providers || Object.keys(modelState).length))
-			return () => ({ projectSlug, providers: providers ?? [], ...modelState });
+			return ({ sessionId }) => ({
+				projectSlug,
+				providers: providers ?? [],
+				...modelState,
+				...(sessionId && modelState.instanceId === undefined
+					? {
+							instanceId:
+								(modelState.active as { provider?: string } | undefined)
+									?.provider === "claude"
+									? "claude"
+									: "opencode",
+						}
+					: {}),
+			});
 		if (tag === "GetCommands" && commands)
 			return () => ({ projectSlug, commands });
 		if (tag === "GetAgents" && agents?.length)
@@ -198,12 +214,24 @@ export class RpcMockControl {
 		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
 	}
 
+	/** The relay stamps its own project on every session row it streams. */
+	owned(rows: readonly unknown[]): readonly unknown[] {
+		return rows.map((row) => ({
+			projectSlug: this.projectSlug,
+			...(row as object),
+		}));
+	}
+
 	setShellRows(rows: readonly unknown[]): void {
 		this.shellRows = rows;
 		this.shellSequence++;
 		if (this.streams.has("SubscribeShell")) {
 			this.sendChunk("SubscribeShell", [
-				{ _tag: "snapshot", sequence: this.shellSequence, rows },
+				{
+					_tag: "snapshot",
+					sequence: this.shellSequence,
+					rows: this.owned(rows),
+				},
 				{ _tag: "synchronized" },
 			]);
 		}
@@ -224,7 +252,7 @@ export class RpcMockControl {
 					{
 						_tag: "snapshot",
 						sequence: this.familySequence,
-						rows: this.familyRows,
+						rows: this.owned(this.familyRows),
 					},
 					{ _tag: "synchronized" },
 				];
@@ -253,7 +281,11 @@ export class RpcMockControl {
 		this.shellSequence++;
 		if (this.streams.has("SubscribeShell"))
 			this.sendChunk("SubscribeShell", [
-				{ _tag: "upsert", item: row, sequence: this.shellSequence },
+				{
+					_tag: "upsert",
+					item: this.owned([row])[0],
+					sequence: this.shellSequence,
+				},
 			]);
 	}
 
@@ -351,7 +383,7 @@ export class RpcMockControl {
 					{
 						_tag: "snapshot",
 						sequence: this.shellSequence,
-						rows: this.shellRows,
+						rows: this.owned(this.shellRows),
 					},
 					{ _tag: "synchronized" },
 				];
@@ -377,7 +409,9 @@ export class RpcMockControl {
 			? [this.daemonLists.get(tag)]
 			: tag === "SubscribeUsage"
 				? [{ readings: [] }]
-				: [];
+				: tag === "SubscribeInstances"
+					? [{ instances: [] }]
+					: [];
 	}
 
 	/** GetProjects answers from the mocked list, as the daemon does. */
@@ -649,6 +683,33 @@ async function handleMessage(
 	}
 	if (isEffectRpcRequest(raw)) {
 		control.record(raw.tag, raw.payload ?? {});
+		if (raw.tag === "SubscribeDraftModels") {
+			control.registerStream(raw.tag, ws, raw.id);
+			const handler =
+				control.getResponseHandler("GetModels") ??
+				handlers["GetModels"] ??
+				control.catalogHandler("GetModels");
+			if (handler) {
+				try {
+					const response = await handler(raw.payload ?? {}, {
+						...raw,
+						tag: "GetModels",
+					});
+					if (typeof response !== "object" || response === null)
+						throw new Error("Mock GetModels must return an object");
+					control.sendChunk(raw.tag, [
+						{
+							defaultOpenCodeInstanceId: "opencode",
+							...response,
+							instanceId: raw.payload?.["instanceId"],
+						},
+					]);
+				} catch (error) {
+					control.failStream(raw.tag, String(error));
+				}
+			}
+			return;
+		}
 		const daemonList =
 			raw.tag === "SubscribeInstances" ||
 			raw.tag === "SubscribeUsage" ||
@@ -727,7 +788,11 @@ async function handleMessage(
 									: undefined);
 		if (!handler) return;
 		try {
-			const result = await handler(raw.payload ?? {}, raw);
+			const response = await handler(raw.payload ?? {}, raw);
+			const result =
+				raw.tag === "GetModels" && isRecord(response)
+					? { defaultOpenCodeInstanceId: "opencode", ...response }
+					: response;
 			// A mutation's answer is the daemon's new list, which it also fans out.
 			if (!raw.tag.startsWith("Get") && isRecord(result)) {
 				if (Array.isArray(result["projects"]))
@@ -834,6 +899,7 @@ export async function mockWsRpc(
 ): Promise<RpcMockControl> {
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
+	control.initialHandlers = options.handlers;
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {

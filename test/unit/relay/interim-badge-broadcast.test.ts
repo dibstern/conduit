@@ -1,6 +1,9 @@
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { expect, it, vi } from "vitest";
-import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
@@ -10,6 +13,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 it("publishes task additions and removals from onChange without another event", async () => {
 	const bus = makeSessionEventBusLive();
@@ -29,6 +33,7 @@ it("publishes task additions and removals from onChange without another event", 
 			bus,
 			persistence,
 			Layer.succeed(BackgroundLivenessTag, liveness.backgroundOf),
+			Layer.succeed(ConfigTag, makeMockConfig()),
 		),
 	);
 	try {
@@ -111,7 +116,13 @@ it("publishes committed permission counts through the root subscription", async 
 		undefined,
 		bus,
 	);
-	const runtime = ManagedRuntime.make(Layer.merge(bus, persistence));
+	const runtime = ManagedRuntime.make(
+		Layer.mergeAll(
+			bus,
+			persistence,
+			Layer.succeed(ConfigTag, makeMockConfig()),
+		),
+	);
 	try {
 		await runtime.runPromise(
 			Effect.flatMap(ProjectionRunnerEffectTag, (runner) => runner.recover()),

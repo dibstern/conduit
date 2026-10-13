@@ -12,15 +12,14 @@ import {
 	setComposerPreferences,
 } from "../../stores/composer-preferences.svelte.js";
 import {
+	applyGetModelsResponse,
+	chooseVariant,
 	clearDiscoveryState,
 	discoveryState,
+	getSessionPick,
 	handleAgentList,
 	handleCommandList,
-	handleContextWindowInfo,
 	handleDefaultModelInfo,
-	handleModelInfo,
-	handleModelList,
-	handleVariantInfo,
 } from "../../stores/discovery.svelte.js";
 import { fileTreeState } from "../../stores/file-tree.svelte.js";
 import { handleGoalChanged, sessionGoals } from "../../stores/goal.svelte.js";
@@ -89,35 +88,36 @@ async function assertSwapStyles(
 }
 
 function setHighVariant() {
-	handleVariantInfo({
-		variant: "high",
-		variants: ["low", "medium", "high"],
-	});
+	chooseVariant("high");
 }
 
 function setupDiscovery() {
-	handleModelList({
-		providers: [
-			{
-				id: "anthropic",
-				name: "Anthropic",
-				models: [
-					{
-						id: "claude-sonnet-4-20250514",
-						name: "Claude Sonnet 4",
-						provider: "anthropic",
-						variants: ["low", "medium", "high"],
-					},
-				],
-				configured: true,
-			},
-		],
-	});
-	handleModelInfo({
-		model: "claude-sonnet-4-20250514",
-		provider: "anthropic",
-	});
-	setHighVariant();
+	applyGetModelsResponse(
+		{
+			projectSlug: "conduit",
+			instanceId: "opencode",
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					models: [
+						{
+							id: "claude-sonnet-4-20250514",
+							name: "Claude Sonnet 4",
+							provider: "anthropic",
+							variants: ["low", "medium", "high"],
+						},
+					],
+					configured: true,
+				},
+			],
+			active: { model: "claude-sonnet-4-20250514", provider: "anthropic" },
+			variant: { variant: "high", variants: ["low", "medium", "high"] },
+			contextWindow: { contextWindow: "", options: [] },
+			permissionMode: "ask",
+		},
+		testId,
+	);
 	handleAgentList({
 		providerScope: { id: "anthropic", name: "Anthropic" },
 		agents: [{ id: "code", name: "code", description: "Write and edit code" }],
@@ -235,39 +235,40 @@ function setupWords(phone: boolean) {
 		{ value: "200k", label: "200K", isDefault: true },
 		{ value: "1m", label: "1M" },
 	];
-	handleModelList({
-		providers: [
-			{
-				id: "claude",
-				name: "Claude",
-				configured: true,
-				models: [
-					{
-						id: "claude-sonnet-5",
-						name: "Sonnet 5",
-						provider: "claude",
-						contextWindowOptions,
-					},
-				],
+	applyGetModelsResponse(
+		{
+			projectSlug: "conduit",
+			instanceId: "claude",
+			providers: [
+				{
+					id: "claude",
+					name: "Claude",
+					configured: true,
+					models: [
+						{
+							id: "claude-sonnet-5",
+							name: "Sonnet 5",
+							provider: "claude",
+							variants: ["low", "medium", "high", "xhigh", "max"],
+							contextWindowOptions,
+						},
+					],
+				},
+			],
+			active: { model: "claude-sonnet-5", provider: "claude" },
+			contextWindow: { contextWindow: "200k", options: contextWindowOptions },
+			variant: {
+				variant: "high",
+				variants: ["low", "medium", "high", "xhigh", "max"],
 			},
-		],
-	});
-	handleModelInfo({
-		model: "claude-sonnet-5",
-		provider: "claude",
-	});
+			permissionMode: "ask",
+		},
+		testId,
+	);
 	handleDefaultModelInfo({
 		model: "claude-sonnet-5",
 		provider: "claude",
 		variant: "",
-	});
-	handleContextWindowInfo({
-		contextWindow: "200k",
-		options: contextWindowOptions,
-	});
-	handleVariantInfo({
-		variant: "high",
-		variants: ["low", "medium", "high", "xhigh", "max"],
 	});
 	getOrCreateSessionMessages(testId).contextPercent = 42;
 	setComposerPreferences({ controls: "words" });
@@ -413,9 +414,43 @@ function setupGoal(
 	state: "checking" | "not_yet" | "not_yet_idle" | "paused" | "met" | "cleared",
 ) {
 	const previous = sessionGoals.get(testId);
-	const model = discoveryState.currentModelId;
-	const provider = discoveryState.currentProviderId;
-	handleModelInfo({ model, provider: "claude" });
+	const pick = getSessionPick(testId);
+	const previousModels = {
+		projectSlug: "conduit",
+		instanceId: pick?.instanceId ?? "opencode",
+		providers: discoveryState.providers,
+		active: { model: pick?.modelId ?? "", provider: pick?.providerId ?? "" },
+		variant: { variant: pick?.variant ?? "", variants: pick?.variants ?? [] },
+		contextWindow: {
+			contextWindow: pick?.contextWindow ?? "",
+			options: pick?.contextWindowOptions ?? [],
+		},
+		permissionMode: discoveryState.permissionMode,
+	};
+	applyGetModelsResponse(
+		{
+			...previousModels,
+			instanceId: "claude",
+			providers: [
+				{
+					id: "claude",
+					name: "Anthropic",
+					configured: true,
+					models: [
+						{
+							id: previousModels.active.model,
+							name: "Claude Sonnet 4",
+							provider: "claude",
+							variants: previousModels.variant.variants,
+							contextWindowOptions: previousModels.contextWindow.options,
+						},
+					],
+				},
+			],
+			active: { ...previousModels.active, provider: "claude" },
+		},
+		testId,
+	);
 	goalStorySetAt = Math.max(goalStorySetAt + 1, Date.now() - 41 * 60_000);
 	const activeGoal = {
 		condition: "All 38 scenarios pass",
@@ -456,7 +491,7 @@ function setupGoal(
 		endTurn?.();
 		if (previous) handleGoalChanged(previous);
 		else sessionGoals.delete(testId);
-		handleModelInfo({ model, provider });
+		applyGetModelsResponse(previousModels, testId);
 		localStorage.removeItem(
 			`conduit:goal-met-dismissed:${testId}:${activeGoal.setAt}`,
 		);

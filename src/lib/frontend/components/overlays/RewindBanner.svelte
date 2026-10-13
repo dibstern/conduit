@@ -11,7 +11,7 @@
 		showToast,
 	} from "../../stores/ui.svelte.js";
 	import { chatState, currentChat } from "../../stores/chat.svelte.js";
-	import { getSessionInstanceId } from "../../stores/discovery.svelte.js";
+	import { getSessionDriver } from "../../stores/discovery.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -35,7 +35,7 @@
 	);
 	const isClaude = $derived(
 		!pendingOnly && sessionState.currentId !== null &&
-		getSessionInstanceId(sessionState.currentId) === "claude",
+		getSessionDriver(sessionState.currentId) === "claude",
 	);
 	const showBanner = $derived(!pendingOnly && uiState.rewindActive);
 	const showModal = $derived(
