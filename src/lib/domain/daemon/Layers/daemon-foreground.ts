@@ -12,19 +12,14 @@ import {
 	HashMap,
 	Layer,
 	ManagedRuntime,
-	Option,
 	Ref,
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
 import {
-	accountsStateFromConfig,
-	defaultFor,
-} from "../../../daemon/account-directory.js";
-import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	defaultDaemonConfig,
-	loadDaemonConfigResult,
+	loadDaemonConfigStartupResult,
 } from "../../../daemon/config-persistence.js";
 import type {
 	DaemonOptions,
@@ -36,10 +31,7 @@ import { formatErrorDetail } from "../../../errors.js";
 import { setLogFormat, setLogLevel } from "../../../logger.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
-import {
-	type ClaudeConfigDir,
-	captureClaudeLaunchLogin,
-} from "../../../provider/claude/claude-sdk-env.js";
+import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -124,29 +116,13 @@ const persistedSessionCounts = (config: DaemonConfig | null) =>
 const buildInitialRuntimeConfig = (
 	options: DaemonOptions,
 	persisted: DaemonConfig | null,
-	launchLogin: ClaudeConfigDir,
 ) => {
 	const pinHash = options.pinHash ?? persisted?.pinHash ?? undefined;
 	const keepAwakeCommand =
 		options.keepAwakeCommand ?? persisted?.keepAwakeCommand ?? undefined;
 	const keepAwakeArgs =
 		options.keepAwakeArgs ?? persisted?.keepAwakeArgs ?? undefined;
-	const defaultClaude = defaultFor(
-		accountsStateFromConfig(
-			{
-				...(persisted ?? defaultDaemonConfig()),
-				...(options.claudeConfigDir !== undefined && {
-					claudeConfigDir: options.claudeConfigDir,
-				}),
-			},
-			launchLogin,
-		),
-		"claude",
-	);
-	const claudeConfigDir =
-		Option.isSome(defaultClaude) && defaultClaude.value.driver === "claude"
-			? defaultClaude.value.configuredFolder
-			: undefined;
+	const claudeConfigDir = options.claudeConfigDir ?? persisted?.claudeConfigDir;
 
 	const tailscaleServeEnabled =
 		options.tailscaleServe ?? persisted?.tailscaleServe ?? false;
@@ -236,16 +212,12 @@ export async function startForegroundDaemon(
 		process.env,
 		options.claudeConfigDir,
 	);
-	const loaded = loadDaemonConfigResult(configDir);
+	const loaded = loadDaemonConfigStartupResult(configDir);
 	if (Either.isLeft(loaded) && loaded.left._tag !== "NotFound") {
 		throw loaded.left;
 	}
-	const persisted = Either.getOrNull(loaded);
-	const initialConfig = buildInitialRuntimeConfig(
-		options,
-		persisted,
-		launchLogin,
-	);
+	const persisted = Either.isRight(loaded) ? loaded.right.config : null;
+	const initialConfig = buildInitialRuntimeConfig(options, persisted);
 	const socketPath = options.socketPath ?? join(configDir, "relay.sock");
 	// Check before acquiring runtime resources or replacing a stale RPC socket.
 	await new Promise<void>((ready, fail) => {
@@ -441,6 +413,8 @@ export async function startForegroundDaemon(
 				}
 			: {},
 		persistedConfig: persisted ?? defaultDaemonConfig(),
+		persistedConfigNeedsMigration:
+			Either.isLeft(loaded) || loaded.right.needsMigration,
 	};
 
 	// A native file lock excludes concurrent owners even across a stale RPC socket.

@@ -22,13 +22,20 @@ import {
 	Scope,
 } from "effect";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
-import { AccountChangeRejected } from "../../../contracts/account.js";
+import {
+	type Account,
+	AccountChangeRejected,
+} from "../../../contracts/account.js";
 import {
 	isKnownDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
-import type { AccountChange } from "../../../daemon/account-directory.js";
+import {
+	type AccountChange,
+	type AccountsState,
+	accountsStateFromInstances,
+} from "../../../daemon/account-directory.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
 	availableOpenCodePort,
@@ -51,7 +58,11 @@ import {
 } from "../../../provider/claude/claude-sdk-env.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
-import { AccountDirectory, AccountDirectoryLive } from "./account-directory.js";
+import {
+	AccountDirectory,
+	AccountDirectoryLive,
+	AccountDirectoryStateLive,
+} from "./account-directory.js";
 
 export { InstanceNotFound } from "../../../instance/instance-errors.js";
 
@@ -131,6 +142,7 @@ export interface InstanceManagerState {
 export interface InstanceManagerStateOptions
 	extends SmartDefaultInstanceOptions {
 	readonly launchLogin?: ClaudeConfigDir;
+	readonly accountsState?: AccountsState;
 }
 
 export const emptyInstanceManagerState = (
@@ -289,13 +301,37 @@ export function makeInstanceManagerStateLive(
 	options?: InstanceManagerStateOptions,
 ): Layer.Layer<InstanceManagerStateTag | PollerFibersTag | AccountDirectory> {
 	const seeded = initialInstanceConfigs(initialInstances, options);
+	const accountsState = options?.accountsState;
+	const runtimeAccounts =
+		accountsState === undefined
+			? []
+			: accountsStateFromInstances(
+					seeded
+						.filter(
+							(instance) =>
+								(instance.driver ?? "opencode") === "opencode" &&
+								!accountsState.accounts.some(
+									(account) => account.id === instance.id,
+								) &&
+								!accountsState.deleted.some(
+									(account) => account.id === instance.id,
+								),
+						)
+						.map((instance) => ({ ...instance, driver: "opencode" as const })),
+					accountsState.launchLogin,
+				).accounts;
 	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
 		Layer.merge(
-			AccountDirectoryLive(
-				options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
-				seeded,
-				config?.maxInstances ?? DEFAULT_CONFIG.maxInstances,
-			),
+			accountsState === undefined
+				? AccountDirectoryLive(
+						options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
+						seeded,
+						config?.maxInstances ?? DEFAULT_CONFIG.maxInstances,
+					)
+				: AccountDirectoryStateLive({
+						...accountsState,
+						accounts: [...runtimeAccounts, ...accountsState.accounts],
+					}),
 		),
 	);
 }
@@ -337,7 +373,11 @@ const restartKey = (id: string) => `restart:${id}`;
 export const applyAccountChange = (change: AccountChange) =>
 	Effect.gen(function* () {
 		const directory = yield* AccountDirectory;
-		const committed = yield* directory.apply(change, [], (committed) =>
+		const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+		const usageOrder = Option.isSome(config)
+			? ((yield* Ref.get(config.value)).usageLimits?.order ?? [])
+			: [];
+		const committed = yield* directory.apply(change, usageOrder, (committed) =>
 			Effect.gen(function* () {
 				const account =
 					change._tag === "Add"
@@ -453,7 +493,7 @@ export const applyAccountChange = (change: AccountChange) =>
 					change._tag === "Update" &&
 					change.updates.configDir !== undefined &&
 					account?.driver === "claude" &&
-					Option.contains(committed.defaults.claude, account.id)
+					account.id === "claude"
 				) {
 					const config = yield* Effect.serviceOption(DaemonConfigRefTag);
 					if (Option.isSome(config))
@@ -587,10 +627,10 @@ export const getManagedOpenCodeProcessEnv = (instanceId: string) =>
 	});
 
 /** Accounts own configuration; OpenCode contributes only process recovery data. */
-export const getPersistedInstanceConfigs = Effect.gen(function* () {
-	const directory = yield* AccountDirectory;
-	const accounts = yield* directory.list;
-	const state = yield* Ref.get(yield* InstanceManagerStateTag);
+export function persistedInstanceConfigs(
+	accounts: ReadonlyArray<Account>,
+	state: InstanceManagerState,
+): DaemonInstanceConfig[] {
 	return accounts.map((account): DaemonInstanceConfig => {
 		const runtime = Option.getOrUndefined(
 			HashMap.get(state.instances, account.id),
@@ -634,6 +674,13 @@ export const getPersistedInstanceConfigs = Effect.gen(function* () {
 				: { configDir: account.configuredFolder }),
 		};
 	});
+}
+
+export const getPersistedInstanceConfigs = Effect.gen(function* () {
+	const directory = yield* AccountDirectory;
+	const accounts = yield* directory.snapshot;
+	const state = yield* Ref.get(yield* InstanceManagerStateTag);
+	return persistedInstanceConfigs(accounts.accounts, state);
 }).pipe(Effect.withSpan("instance.getPersistedConfigs"));
 
 /** Verify process health, including immediately after a managed stream loss. */

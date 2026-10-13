@@ -1,6 +1,7 @@
-// Failure modes: invalid requests lose their typed rejection; protected-default
-// guards drift; concurrent adds collide or claim a bare driver id; Claude accounts
-// remain in the process registry; replies precede disk saves; clearing a folder
+// Failure modes: invalid requests lose their typed rejection; default retyping
+// guards drift or default removal fails; concurrent adds collide or claim a bare
+// driver id; Claude accounts remain in the process registry; replies precede disk
+// saves; clearing a folder
 // resurrects persisted metadata on restart; OpenCode edits lose account metadata;
 // disk read-merge overrides owned state; a failed save corrupts daemon.json;
 // renaming resets a selected runtime's port or managed mode; a failed stop loses
@@ -213,7 +214,7 @@ afterAll(() => {
 });
 
 describe("account mutations through daemon RPC", () => {
-	it.scoped("returns typed add validation and preserves default guards", () =>
+	it.scoped("returns typed rejections and allows default removal", () =>
 		Effect.gen(function* () {
 			const client = yield* makeClient;
 			const invalidAdds: ReadonlyArray<{
@@ -322,16 +323,6 @@ describe("account mutations through daemon RPC", () => {
 				});
 			}
 			expect(
-				yield* Effect.either(client.RemoveInstance({ instanceId: "claude" })),
-			).toMatchObject({
-				_tag: "Left",
-				left: {
-					_tag: "AccountChangeRejected",
-					id: "claude",
-					reason: expect.stringContaining("default"),
-				},
-			});
-			expect(
 				yield* Effect.either(
 					client.UpdateInstance({
 						instanceId: "claude",
@@ -348,8 +339,21 @@ describe("account mutations through daemon RPC", () => {
 				},
 			});
 			expect(readFileSync(join(configDir, "daemon.json"), "utf8")).toBe(before);
+			const removed = yield* client.RemoveInstance({ instanceId: "claude" });
+			expect(removed.instances.some((account) => account.id === "claude")).toBe(
+				false,
+			);
+			expect(removed.instances).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ id: "personal", isDefault: true }),
+				]),
+			);
+			expect(readSaved()).toMatchObject({
+				accountDefaults: { claude: "personal" },
+				deletedAccounts: [{ id: "claude", driver: "claude" }],
+			});
 			evidence.push({
-				scenario: "typed mutation rejections and existing default guards",
+				scenario: "typed mutation rejections and durable default removal",
 			});
 		}).pipe(Effect.provide(makeLayer())),
 	);

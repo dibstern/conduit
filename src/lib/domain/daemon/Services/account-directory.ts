@@ -23,6 +23,8 @@ import type { DaemonInstanceConfig } from "./daemon-state.js";
 export class AccountDirectory extends Context.Tag("AccountDirectory")<
 	AccountDirectory,
 	{
+		/** Read-only persistence projection; account mutations still go through apply. */
+		readonly snapshot: Effect.Effect<AccountsState>;
 		readonly list: Effect.Effect<ReadonlyArray<AccountListItem>>;
 		readonly defaultFor: (
 			driver: KnownProviderDriverKind,
@@ -43,6 +45,7 @@ export function makeAccountDirectory(
 	commit?: AccountDirectory["Type"]["apply"],
 ): AccountDirectory["Type"] {
 	return {
+		snapshot: read,
 		list: Effect.map(read, list),
 		defaultFor: (driver) =>
 			Effect.map(read, (state) => defaultFor(state, driver)),

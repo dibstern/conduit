@@ -6,6 +6,8 @@
  * - Explicit account picks must beat driver/model defaults.
  * - Legacy driver and model-only picks must resolve the driver's current default.
  * - A fork must use the resolved account for receipts without rewriting its parent.
+ * - A deleted non-default binding must launch in the default account's folder.
+ * - With no native transcript in that folder, the handoff must preserve history.
  * All configuration and launch logins in this flow belong to a temporary fixture.
  */
 import {
@@ -21,7 +23,7 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
-import type { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -32,11 +34,15 @@ import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daem
 import {
 	addInstance,
 	makeInstanceManagerStateLive,
+	removeInstance,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
+import {
+	claudeSdk,
+	responseChunks,
+} from "../../helpers/fake-claude-process-sdk.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -56,6 +62,11 @@ describe("Integration: account session routing", () => {
 			sdkCalls: number;
 			opencodePrompts: number;
 		};
+		deletedAccount?: {
+			withHistory: boolean;
+			prompts: string[];
+			resumeIds: Array<string | undefined>;
+		};
 	}> = [];
 	let root: string;
 	let harness: RelayHarness | undefined;
@@ -63,12 +74,14 @@ describe("Integration: account session routing", () => {
 	let launchFolders: string[];
 	let forkFolders: string[];
 	let unknownBoundSend: (typeof evidence)[number]["unknownBoundSend"];
+	let deletedAccount: (typeof evidence)[number]["deletedAccount"];
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "conduit-account-sessions-"));
 		launchFolders = [];
 		forkFolders = [];
 		unknownBoundSend = undefined;
+		deletedAccount = undefined;
 		const home = join(root, "home");
 		const login = join(root, "login");
 		mkdirSync(home);
@@ -94,13 +107,150 @@ describe("Integration: account session routing", () => {
 				folder.replace(root, "<fixture>"),
 			),
 			...(unknownBoundSend ? { unknownBoundSend } : {}),
+			...(deletedAccount ? { deletedAccount } : {}),
 		});
 		mkdirSync("test-results", { recursive: true });
 		writeFileSync(
-			"test-results/g4zp-5-session-routing.json",
+			"test-results/g4zp-15-session-routing.json",
 			`${JSON.stringify({ cases: evidence }, null, 2)}\n`,
 		);
 		rmSync(root, { recursive: true, force: true });
+	});
+
+	it.each([
+		false,
+		true,
+	])("routes a deleted non-default account to the default folder, preserving history=%s", async (withHistory) => {
+		const login = join(root, "login");
+		const removedLogin = join(root, "removed-login");
+		mkdirSync(removedLogin);
+		writeFileSync(join(removedLogin, "conduit-test-record-forks"), "");
+		const registry = makeInstanceManagerStateLive(
+			{},
+			[
+				{
+					id: "claude",
+					name: "Default Claude",
+					driver: "claude",
+					configDir: login,
+					port: 0,
+					managed: false,
+				},
+				{
+					id: "removed",
+					name: "Removed",
+					driver: "claude",
+					configDir: removedLogin,
+					port: 0,
+					managed: false,
+				},
+			],
+			{ launchLogin: configuredClaudeConfigDir(login) },
+		);
+		const runtime = ManagedRuntime.make(
+			Layer.mergeAll(
+				registry,
+				DaemonEventBusLive,
+				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
+				Layer.succeed(ConfigPersistenceTag, {
+					requestSave: Effect.void,
+					flush: Effect.void,
+				}),
+			),
+		);
+		disposeRegistry = () => runtime.dispose();
+		const daemonConfigContext = await runtime.runPromise(
+			Effect.context<
+				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
+			>(),
+		);
+		const prompts: string[] = [];
+		const resumeIds: Array<string | undefined> = [];
+		harness = await createRelayHarness("chat-simple", {
+			configDir: root,
+			daemonConfigContext,
+			defaultModel: null,
+			claudeSdk: {
+				...claudeSdk,
+				query: (params) => {
+					launchFolders.push(
+						params.options?.env?.["CLAUDE_CONFIG_DIR"] ?? "unset",
+					);
+					resumeIds.push(params.options?.resume);
+					const prompt = (async function* () {
+						for await (const message of params.prompt) {
+							const content = message.message.content;
+							prompts.push(
+								typeof content === "string"
+									? content
+									: content
+											.flatMap((block) =>
+												block.type === "text" ? [block.text] : [],
+											)
+											.join(""),
+							);
+							yield message;
+						}
+					})();
+					return claudeSdk.query({ ...params, prompt });
+				},
+			},
+		});
+		const client = await harness.connectWsClient();
+		await client.waitForInitialState();
+		const created = await client.createSession("Deleted account history", {
+			instanceId: "removed",
+		});
+		const sessionId = created["id"];
+		if (typeof sessionId !== "string")
+			throw new Error("CreateSession returned no session id");
+		const historyText = "history-before-account-deletion";
+		if (withHistory) {
+			const completed = client.waitForTurnEnd(sessionId, 10_000);
+			await client.sendMessage(historyText, { sessionId });
+			expect((await completed).attention).not.toBe("error");
+			expect(launchFolders.at(-1)).toBe(removedLogin);
+		}
+		await runtime.runPromise(removeInstance("removed"));
+		const defaultAccount = await runtime.runPromise(
+			Effect.flatMap(AccountDirectory, (directory) =>
+				directory.resolve({ _tag: "Id", id: "removed" }),
+			),
+		);
+		expect(defaultAccount.id).toBe("claude");
+		const nextText = "continue-after-account-deletion";
+		const completed = client.waitForTurnEnd(sessionId, 10_000);
+		await client.sendMessage(nextText, { sessionId });
+		expect((await completed).attention).not.toBe("error");
+		expect(launchFolders.at(-1)).toBe(login);
+		expect(resumeIds.at(-1)).toBeUndefined();
+		if (withHistory) {
+			const handoff = prompts.at(-1);
+			expect(handoff).toContain("[Conduit context handoff]");
+			expect(handoff).toContain(historyText);
+			expect(handoff).toContain(responseChunks(historyText).join(""));
+			expect(
+				handoff?.endsWith(`[End conduit context handoff]\n\n${nextText}`),
+			).toBe(true);
+		}
+		const history = await client.loadMoreHistory(sessionId);
+		expect(
+			history.messages
+				.filter((message) => message.role === "user")
+				.map((message) =>
+					message.parts
+						?.filter((part) => part.type === "text")
+						.map((part) => part.text)
+						.join(""),
+				),
+		).toEqual(withHistory ? [historyText, nextText] : [nextText]);
+		expect(
+			harness.mock.diagnostics.filter(
+				(entry) =>
+					entry.event === "request" && entry.detail?.includes("/prompt"),
+			),
+		).toHaveLength(0);
+		deletedAccount = { withHistory, prompts, resumeIds };
 	});
 
 	it("rejects unknown creation and bound sends without provider fallback", async () => {

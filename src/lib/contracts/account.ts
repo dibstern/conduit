@@ -206,6 +206,7 @@ export type AccountChange =
 				readonly configDir?: string | undefined;
 			};
 	  }
+	| { readonly _tag: "SetDefault"; readonly id: string }
 	| { readonly _tag: "Remove"; readonly id: string };
 
 export type AddAccountInput = Omit<

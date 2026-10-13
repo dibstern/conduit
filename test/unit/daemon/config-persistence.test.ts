@@ -1,5 +1,6 @@
 /* Failure modes: valid/legacy config is changed on decode; NotFound is confused
- * with invalid JSON/schema or an unreadable file; valid writes do not round-trip.
+ * with invalid JSON/schema or an unreadable file; valid writes do not round-trip;
+ * formatting a cause without a prototype throws instead of naming the config.
  */
 
 import {
@@ -20,6 +21,9 @@ import {
 	CURRENT_CONFIG_VERSION,
 	clearDaemonConfig,
 	type DaemonConfig,
+	DaemonConfigInvalid,
+	DaemonConfigNotFound,
+	DaemonConfigUnreadable,
 	getConfigDir,
 	loadDaemonConfigResult,
 	saveDaemonConfig,
@@ -56,6 +60,22 @@ describe("getConfigDir", () => {
 	it("returns a path ending in conduit", () => {
 		const dir = getConfigDir();
 		expect(dir).toMatch(/conduit$/);
+	});
+});
+
+describe("daemon config load errors", () => {
+	it.each([
+		["NotFound", DaemonConfigNotFound],
+		["Unreadable", DaemonConfigUnreadable],
+		["Invalid", DaemonConfigInvalid],
+	] as const)("formats %s causes without a prototype safely", (tag, ErrorType) => {
+		const path = join(tempDir, "daemon.json");
+		const cause: Record<string, unknown> = Object.create(null);
+		const error = new ErrorType({ path, cause });
+		expect(error._tag).toBe(tag);
+		expect(() => error.message).not.toThrow();
+		expect(error.message).toContain(path);
+		expect(error.message).toContain("Unknown error");
 	});
 });
 
@@ -245,7 +265,11 @@ describe("saveDaemonConfig", () => {
 			(error) => error,
 		);
 
-		expect(loaded).toEqual(config);
+		expect(loaded).toEqual({
+			...config,
+			accountDefaults: { claude: "claude" },
+			deletedAccounts: [],
+		});
 	});
 
 	it("loads legacy projects without folders, using directory or path as the main folder", async () => {

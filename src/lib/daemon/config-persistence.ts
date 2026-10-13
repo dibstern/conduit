@@ -18,11 +18,13 @@ import { SessionModeSchema } from "../contracts/project-file.js";
 import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
 
 import {
+	AccountIdSchema,
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
 } from "../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
+import { formatErrorDetail } from "../errors.js";
 import {
 	type ClaudeLaunchConfig,
 	captureClaudeLaunchLogin,
@@ -35,6 +37,7 @@ import type { RecentProject } from "../types.js";
 import { isRecord } from "../utils.js";
 import {
 	accountsStateFromConfig,
+	normalizeAccountConfig,
 	resolve as resolveAccount,
 } from "./account-directory.js";
 import {
@@ -176,6 +179,28 @@ export const DaemonConfigSchema = Schema.mutable(
 			Schema.mutable(Schema.Array(DaemonInstanceSchema)),
 			{ exact: true },
 		),
+		accountDefaults: Schema.optionalWith(
+			Schema.Struct({
+				claude: Schema.optionalWith(
+					Schema.suspend(() => AccountIdSchema),
+					{
+						exact: true,
+					},
+				),
+			}),
+			{ exact: true },
+		),
+		deletedAccounts: Schema.optionalWith(
+			Schema.mutable(
+				Schema.Array(
+					Schema.Struct({
+						id: Schema.suspend(() => AccountIdSchema),
+						driver: KnownProviderDriverKindSchema,
+					}),
+				),
+			),
+			{ exact: true },
+		),
 	}),
 );
 
@@ -314,7 +339,7 @@ function normalizeDefaultClaudeConfig(config: DaemonConfig): DaemonConfig {
 
 /** Default config for first-startup when no daemon.json exists. */
 export function defaultDaemonConfig(): DaemonConfig {
-	return {
+	return normalizeAccountConfig({
 		configVersion: CURRENT_CONFIG_VERSION,
 		pid: process.pid,
 		port: 2633,
@@ -324,7 +349,7 @@ export function defaultDaemonConfig(): DaemonConfig {
 		keepAwake: false,
 		autoSettleAfterDays: DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 		projects: [],
-	};
+	});
 }
 
 function resolveDir(configDir?: string): string {
@@ -378,7 +403,7 @@ export class DaemonConfigNotFound extends Data.TaggedError("NotFound")<{
 	readonly cause: unknown;
 }> {
 	override get message(): string {
-		return `Daemon config not found at ${this.path}: ${String(this.cause)}`;
+		return `Daemon config not found at ${this.path}: ${formatErrorDetail(this.cause)}`;
 	}
 }
 
@@ -387,7 +412,7 @@ export class DaemonConfigUnreadable extends Data.TaggedError("Unreadable")<{
 	readonly cause: unknown;
 }> {
 	override get message(): string {
-		return `Unreadable daemon config at ${this.path}: ${String(this.cause)}`;
+		return `Unreadable daemon config at ${this.path}: ${formatErrorDetail(this.cause)}`;
 	}
 }
 
@@ -396,7 +421,7 @@ export class DaemonConfigInvalid extends Data.TaggedError("Invalid")<{
 	readonly cause: unknown;
 }> {
 	override get message(): string {
-		return `Invalid daemon config at ${this.path}: ${String(this.cause)}`;
+		return `Invalid daemon config at ${this.path}: ${formatErrorDetail(this.cause)}`;
 	}
 }
 
@@ -405,8 +430,8 @@ export type DaemonConfigLoadError =
 	| DaemonConfigUnreadable
 	| DaemonConfigInvalid;
 
-/** Read once and distinguish first startup from a file that must be preserved. */
-export function loadDaemonConfigResult(
+/** Read and decode without materializing fields that startup may need to save. */
+function readDaemonConfigResult(
 	configDir?: string,
 ): Either.Either<DaemonConfig, DaemonConfigLoadError> {
 	const path = join(resolveDir(configDir), "daemon.json");
@@ -419,20 +444,51 @@ export function loadDaemonConfigResult(
 	});
 	if (Either.isLeft(data)) return Either.left(data.left);
 	return Either.try({
-		try: () => {
-			const decoded = Schema.decodeUnknownSync(DaemonConfigSchema)(
+		try: () =>
+			Schema.decodeUnknownSync(DaemonConfigSchema)(
 				sanitizeRestartMetadata(JSON.parse(data.right)),
-			);
-			return {
-				...normalizeDefaultClaudeConfig(migrateLegacyInstanceIds(decoded)),
-				autoSettleAfterDays:
-					decoded.autoSettleAfterDays === undefined
-						? DEFAULT_AUTO_SETTLE_AFTER_DAYS
-						: decoded.autoSettleAfterDays,
-			};
-		},
+			),
 		catch: (cause) => new DaemonConfigInvalid({ path, cause }),
 	});
+}
+
+function normalizeDaemonConfig(decoded: DaemonConfig) {
+	const config: DaemonConfig = {
+		...normalizeAccountConfig(
+			normalizeDefaultClaudeConfig(migrateLegacyInstanceIds(decoded)),
+		),
+		autoSettleAfterDays:
+			decoded.autoSettleAfterDays === undefined
+				? DEFAULT_AUTO_SETTLE_AFTER_DAYS
+				: decoded.autoSettleAfterDays,
+	};
+	return {
+		config,
+		needsMigration:
+			decoded.configVersion !== CURRENT_CONFIG_VERSION ||
+			decoded.claudeConfigDir !== config.claudeConfigDir ||
+			decoded.autoSettleAfterDays !== config.autoSettleAfterDays ||
+			JSON.stringify(decoded.instances) !== JSON.stringify(config.instances) ||
+			JSON.stringify(decoded.accountDefaults) !==
+				JSON.stringify(config.accountDefaults) ||
+			JSON.stringify(decoded.deletedAccounts) !==
+				JSON.stringify(config.deletedAccounts),
+	};
+}
+
+/** Capture the migration decision from the same read that seeds startup. */
+export function loadDaemonConfigStartupResult(configDir?: string) {
+	return Either.map(readDaemonConfigResult(configDir), normalizeDaemonConfig);
+}
+
+/** Distinguish first startup from a file that must be preserved. */
+export function loadDaemonConfigResult(
+	configDir?: string,
+): Either.Either<DaemonConfig, DaemonConfigLoadError> {
+	return Either.map(
+		loadDaemonConfigStartupResult(configDir),
+		({ config }) => config,
+	);
 }
 
 /** Atomic write: write to a unique tmp file then rename to daemon.json. */
@@ -444,7 +500,9 @@ export async function saveDaemonConfig(
 	ensureDir(dir);
 	const tmpPath = join(dir, `.daemon.json.tmp.${process.pid}.${Date.now()}`);
 	const finalPath = join(dir, "daemon.json");
-	const normalized = normalizeDefaultClaudeConfig(config);
+	const normalized = normalizeAccountConfig(
+		normalizeDefaultClaudeConfig(config),
+	);
 	const projects = normalized.projects.map(migrateProjectFolders);
 	await writeFile(
 		tmpPath,
@@ -463,10 +521,17 @@ export async function saveDaemonConfig(
 }
 
 /** Persist decode migrations once, using the same snapshot that seeds startup. */
-export const migrateDaemonConfig = (config: DaemonConfig, configDir: string) =>
+export const migrateDaemonConfig = (
+	config: DaemonConfig,
+	configDir: string,
+	needsMigration?: boolean,
+) =>
 	Effect.gen(function* () {
-		if (config.configVersion === CURRENT_CONFIG_VERSION) return;
-		yield* Effect.tryPromise(() => saveDaemonConfig(config, configDir));
+		const normalized = normalizeDaemonConfig(config);
+		if (!(needsMigration ?? normalized.needsMigration)) return;
+		yield* Effect.tryPromise(() =>
+			saveDaemonConfig(normalized.config, configDir),
+		);
 		yield* Effect.logInfo("Migrated daemon config", {
 			configVersion: CURRENT_CONFIG_VERSION,
 		});

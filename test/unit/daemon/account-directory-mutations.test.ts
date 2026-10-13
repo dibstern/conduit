@@ -2,7 +2,9 @@
 // allocated ids capture legacy driver bindings or collide with live accounts;
 // live ids resolve to a different account/driver; rejected changes mutate state;
 // capacity checks drift; invalid per-driver requests escape typed rejections;
-// the default Claude account is removed/retyped before ticket 10 permits it.
+// defaults dangle after removal or ignore usage order; SetDefault accepts a
+// missing/wrong-driver account; deleted ids are reused or route across drivers;
+// the default Claude account is retyped before ticket 10 changes driver guards.
 import { Either, Option } from "effect";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -328,13 +330,77 @@ describe("account directory mutations", () => {
 		expect(state).toEqual(before);
 	});
 
-	it("retains today's default removal and retyping guards", () => {
+	it("promotes defaults in usage order, clears the last pointer and records removals", () => {
+		let state = accountsStateFromInstances(
+			[
+				{ id: "claude", name: "Claude", driver: "claude" },
+				{ id: "personal", name: "Personal", driver: "claude" },
+				{ id: "work", name: "Work", driver: "claude" },
+			],
+			launchLogin,
+		);
+		state = Either.getOrThrow(
+			apply(state, { _tag: "SetDefault", id: "personal" }, []),
+		);
+		expect(Option.getOrThrow(defaultFor(state, "claude")).id).toBe("personal");
+		for (const [removed, promoted] of [
+			["personal", "work"],
+			["work", "claude"],
+			["claude", undefined],
+		] as const) {
+			state = Either.getOrThrow(
+				apply(state, { _tag: "Remove", id: removed }, [
+					"missing",
+					"work",
+					"claude",
+				]),
+			);
+			expect(Option.getOrUndefined(defaultFor(state, "claude"))?.id).toBe(
+				promoted,
+			);
+			expect(state.deleted).toContainEqual({ id: removed, driver: "claude" });
+			const routed = resolve(state, { _tag: "Id", id: removed });
+			if (promoted === undefined) expect(Either.isLeft(routed)).toBe(true);
+			else expect(Either.getOrThrow(routed).id).toBe(promoted);
+		}
+		const added = Either.getOrThrow(
+			apply(state, { _tag: "Add", name: "Personal", driver: "claude" }, []),
+		);
+		expect(Option.getOrThrow(defaultFor(added, "claude")).id).toBe(
+			"personal-2",
+		);
+		expect(
+			Either.isLeft(
+				apply(
+					added,
+					{ _tag: "Add", id: "personal", name: "Reuse", driver: "claude" },
+					[],
+				),
+			),
+		).toBe(true);
+	});
+
+	it("rejects unavailable and OpenCode defaults without changing state", () => {
+		const state = accountsStateFromInstances(
+			[
+				{ id: "opencode", name: "OpenCode", driver: "opencode" },
+				{ id: "claude", name: "Claude", driver: "claude" },
+			],
+			launchLogin,
+		);
+		for (const id of ["missing", "opencode"])
+			expect(Either.isLeft(apply(state, { _tag: "SetDefault", id }, []))).toBe(
+				true,
+			);
+		expect(Option.getOrThrow(defaultFor(state, "claude")).id).toBe("claude");
+	});
+
+	it("retains the default retyping guard", () => {
 		const state = accountsStateFromInstances(
 			[{ id: "claude", name: "Claude", driver: "claude" }],
 			launchLogin,
 		);
 		for (const change of [
-			{ _tag: "Remove", id: "claude" },
 			{ _tag: "Update", id: "claude", updates: { driver: "opencode" } },
 		] satisfies ReadonlyArray<AccountChange>) {
 			const result = apply(state, change, []);
@@ -348,12 +414,13 @@ describe("account directory mutations", () => {
 		expect(list(state)).toHaveLength(1);
 	});
 
-	it("preserves folders, allocated ids and live resolution over random mutations", () => {
+	it("preserves pointers, deleted routing, folders and unique ids over random mutations", () => {
 		const operation = fc.record({
-			kind: fc.constantFrom<"Add" | "Update" | "Remove">(
+			kind: fc.constantFrom<"Add" | "Update" | "Remove" | "SetDefault">(
 				"Add",
 				"Update",
 				"Remove",
+				"SetDefault",
 			),
 			index: fc.nat({ max: 16 }),
 			name: fc.constantFrom(
@@ -369,12 +436,26 @@ describe("account directory mutations", () => {
 		});
 		fc.assert(
 			fc.property(
+				fc.array(
+					fc.record({
+						driver: fc.constantFrom<"claude" | "opencode">(
+							"claude",
+							"opencode",
+						),
+						configDir: fc.constantFrom("", "/accounts/initial"),
+					}),
+					{ maxLength: 5 },
+				),
 				fc.array(operation, { minLength: 1, maxLength: 60 }),
-				(operations) => {
+				(initialAccounts, operations) => {
 					let state = accountsStateFromInstances(
 						[
 							{ id: "opencode", name: "OpenCode", driver: "opencode" },
-							{ id: "claude", name: "Claude", driver: "claude" },
+							...initialAccounts.map((account, index) => ({
+								...account,
+								id: `initial-${index}`,
+								name: `Initial ${index}`,
+							})),
 						],
 						launchLogin,
 						8,
@@ -412,7 +493,7 @@ describe("account directory mutations", () => {
 													: {}),
 											},
 										}
-									: { _tag: "Remove", id };
+									: { _tag: step.kind, id };
 						const result = apply(
 							state,
 							change,
@@ -426,6 +507,49 @@ describe("account directory mutations", () => {
 						}
 						state = result.right;
 						const current = list(state);
+						const claudeAccounts = current.filter(
+							(account) => account.driver === "claude",
+						);
+						const selected = defaultFor(state, "claude");
+						expect(Option.isSome(selected)).toBe(claudeAccounts.length > 0);
+						expect(Option.isSome(state.defaults.claude)).toBe(
+							claudeAccounts.length > 0,
+						);
+						if (Option.isSome(selected)) {
+							expect(state.defaults.claude).toEqual(
+								Option.some(selected.value.id),
+							);
+							expect(
+								claudeAccounts.some(
+									(account) => account.id === selected.value.id,
+								),
+							).toBe(true);
+						}
+						if (change._tag === "SetDefault")
+							expect(Option.getOrThrow(selected).id).toBe(id);
+						for (const deleted of state.deleted) {
+							const routed = resolve(state, { _tag: "Id", id: deleted.id });
+							const fallback = defaultFor(state, deleted.driver);
+							if (Option.isSome(fallback))
+								expect(routed).toEqual(Either.right(fallback.value));
+							else expect(Either.isLeft(routed)).toBe(true);
+						}
+						if (change._tag === "Remove") {
+							const removed = previous.find((account) => account.id === id);
+							expect(state.deleted).toContainEqual({
+								id,
+								driver: removed?.driver,
+							});
+						}
+						for (const legacyId of reservedIds) {
+							if (current.some((account) => account.id === legacyId)) continue;
+							const expectedDriver =
+								state.deleted.find((account) => account.id === legacyId)
+									?.driver ?? (legacyId === "opencode" ? "opencode" : "claude");
+							const routed = resolve(state, { _tag: "Id", id: legacyId });
+							if (Either.isRight(routed))
+								expect(routed.right.driver).toBe(expectedDriver);
+						}
 						expect(new Set(current.map((account) => account.id)).size).toBe(
 							current.length,
 						);
@@ -434,8 +558,12 @@ describe("account directory mutations", () => {
 								(account) => !previous.some((old) => old.id === account.id),
 							);
 							expect(added).toHaveLength(1);
-							for (const account of added)
+							for (const account of added) {
 								expect(reservedIds).not.toContain(account.id);
+								expect(
+									state.deleted.some((deleted) => deleted.id === account.id),
+								).toBe(false);
+							}
 						}
 						for (const { isDefault: _isDefault, ...account } of current) {
 							expect(resolve(state, { _tag: "Id", id: account.id })).toEqual(

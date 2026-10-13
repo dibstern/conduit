@@ -1,4 +1,5 @@
 import { Deferred, Effect, Layer, Ref } from "effect";
+import type { AccountsState } from "../../src/lib/daemon/account-directory.js";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
@@ -61,6 +62,7 @@ export const makeDaemonRpcTestLayer = (
 		configDir?: string;
 		instances?: ReadonlyArray<DaemonInstanceConfig>;
 		launchLogin?: ClaudeConfigDir;
+		accountsState?: AccountsState;
 		tailscaleCli?: Layer.Layer<TailscaleCliTag>;
 		persistence?: Layer.Layer<
 			ConfigPersistenceTag,
@@ -112,6 +114,9 @@ export const makeDaemonRpcTestLayer = (
 			}),
 		),
 		makeInstanceManagerStateLive(undefined, options.instances ?? [], {
+			...(options.accountsState !== undefined && {
+				accountsState: options.accountsState,
+			}),
 			launchLogin:
 				options.launchLogin ??
 				configuredClaudeConfigDir("/tmp/daemon-rpc-fixture/claude"),

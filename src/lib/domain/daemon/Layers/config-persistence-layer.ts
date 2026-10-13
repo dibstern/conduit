@@ -5,7 +5,16 @@
 // The ConfigWriterTag service exists for dependency injection — production
 // code provides a real disk writer, tests provide a mock.
 
-import { Context, Data, Duration, Effect, Layer, Queue, Ref } from "effect";
+import {
+	Context,
+	Data,
+	Duration,
+	Effect,
+	Layer,
+	Option,
+	Queue,
+	Ref,
+} from "effect";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -21,8 +30,8 @@ import {
 } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import {
-	getPersistedInstanceConfigs,
 	InstanceManagerStateTag,
+	persistedInstanceConfigs,
 } from "../Services/instance-manager-service.js";
 import {
 	allProjects,
@@ -53,13 +62,14 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 	const configRef = yield* DaemonConfigRefTag;
 	const runtime = yield* Ref.get(configRef);
 	const projects = yield* allProjects;
-	const instances = yield* getPersistedInstanceConfigs;
 	const directory = yield* AccountDirectory;
-	const claude = yield* directory.defaultFor("claude");
-	const claudeConfigDir =
-		claude._tag === "Some" && claude.value.driver === "claude"
-			? claude.value.configuredFolder
-			: undefined;
+	const accounts = yield* directory.snapshot;
+	const instanceState = yield* Ref.get(yield* InstanceManagerStateTag);
+	const instances = persistedInstanceConfigs(accounts.accounts, instanceState);
+	// This historical field still belongs to the original account until migration.
+	const claudeConfigDir = accounts.accounts.find(
+		(account) => account.id === "claude" && account.driver === "claude",
+	)?.configuredFolder;
 
 	return {
 		pid: process.pid,
@@ -117,6 +127,11 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			};
 		}),
 		instances,
+		accountDefaults: Option.match(accounts.defaults.claude, {
+			onNone: () => ({}),
+			onSome: (id) => ({ claude: id }),
+		}),
+		deletedAccounts: [...accounts.deleted],
 	} satisfies DaemonConfig;
 }).pipe(Effect.withSpan("configPersistence.buildSnapshot"));
 

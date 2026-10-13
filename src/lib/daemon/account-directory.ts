@@ -56,6 +56,11 @@ export function accountsStateFromInstances(
 	}>,
 	launchLogin: ClaudeConfigDir,
 	maxAccounts = 5,
+	settings: {
+		readonly defaultClaudeId?: string | undefined;
+		readonly deleted?: AccountsState["deleted"] | undefined;
+		readonly usageOrder?: ReadonlyArray<string> | undefined;
+	} = {},
 ): AccountsState {
 	const accounts = instances.map((instance): Account => {
 		const id = AccountIdSchema.make(instance.id);
@@ -92,24 +97,53 @@ export function accountsStateFromInstances(
 				!instance.env?.["ANTHROPIC_AUTH_TOKEN"],
 		};
 	});
-	const claude =
-		accounts.find(
-			(account) => account.driver === "claude" && account.id === "claude",
-		) ?? accounts.find((account) => account.driver === "claude");
 	return {
 		launchLogin,
 		maxAccounts,
 		accounts,
-		defaults: { claude: Option.fromNullable(claude?.id) },
-		deleted: [],
+		defaults: {
+			claude: materializeClaudeDefault(
+				accounts,
+				settings.defaultClaudeId,
+				settings.usageOrder ?? [],
+			),
+		},
+		deleted: settings.deleted ?? [],
 	};
 }
 
-/** All account invariants commit together. Pointer/deletion mutations land later. */
+function materializeClaudeDefault(
+	accounts: ReadonlyArray<{
+		readonly id: string;
+		readonly driver: KnownProviderDriverKind;
+	}>,
+	storedId: string | undefined,
+	usageOrder: ReadonlyArray<string>,
+): Option.Option<AccountId> {
+	const stored = accounts.find(
+		(account) => account.id === storedId && account.driver === "claude",
+	);
+	if (stored !== undefined) return Option.some(AccountIdSchema.make(stored.id));
+	for (const id of usageOrder) {
+		const account = accounts.find(
+			(account) => account.id === id && account.driver === "claude",
+		);
+		if (account !== undefined)
+			return Option.some(AccountIdSchema.make(account.id));
+	}
+	return Option.map(
+		Option.fromNullable(
+			accounts.find((account) => account.driver === "claude"),
+		),
+		(account) => AccountIdSchema.make(account.id),
+	);
+}
+
+/** All account invariants commit together. */
 export function apply(
 	state: AccountsState,
 	change: AccountChange,
-	_usageOrder: ReadonlyArray<string>,
+	usageOrder: ReadonlyArray<string>,
 ): Either.Either<AccountsState, AccountChangeRejected> {
 	const id = change.id ?? (change._tag === "Add" ? change.name : "");
 	const reject = (reason: string) =>
@@ -151,15 +185,17 @@ export function apply(
 		if (
 			change.id !== undefined &&
 			(Object.hasOwn(LEGACY_ACCOUNT_DRIVERS, allocated) ||
-				state.accounts.some((account) => account.id === allocated))
+				state.accounts.some((account) => account.id === allocated) ||
+				state.deleted.some((account) => account.id === allocated))
 		)
 			return reject(
-				`Instance "${allocated}" already exists or is a reserved driver id`,
+				`Instance "${allocated}" already exists, is a reserved driver id, or was deleted`,
 			);
 		let counter = 2;
 		while (
 			Object.hasOwn(LEGACY_ACCOUNT_DRIVERS, allocated) ||
-			state.accounts.some((account) => account.id === allocated)
+			state.accounts.some((account) => account.id === allocated) ||
+			state.deleted.some((account) => account.id === allocated)
 		)
 			allocated = `${base}-${counter++}`;
 		const input = decoded.right;
@@ -190,11 +226,28 @@ export function apply(
 	const isDefaultClaude =
 		current.driver === "claude" &&
 		Option.contains(state.defaults.claude, current.id);
-	if (change._tag === "Remove") {
-		if (isDefaultClaude) return reject("The default account can't be removed");
+	if (change._tag === "SetDefault") {
+		if (current.driver !== "claude")
+			return reject("Only Claude accounts can be made default");
 		return Either.right({
 			...state,
-			accounts: state.accounts.filter((account) => account.id !== change.id),
+			defaults: { claude: Option.some(current.id) },
+		});
+	}
+	if (change._tag === "Remove") {
+		const accounts = state.accounts.filter(
+			(account) => account.id !== change.id,
+		);
+		return Either.right({
+			...state,
+			accounts,
+			defaults: isDefaultClaude
+				? { claude: materializeClaudeDefault(accounts, undefined, usageOrder) }
+				: state.defaults,
+			deleted: [
+				...state.deleted.filter((account) => account.id !== current.id),
+				{ id: current.id, driver: current.driver },
+			],
 		});
 	}
 	const updates = change.updates;
@@ -259,11 +312,8 @@ export function apply(
 	});
 }
 
-/** Legacy config still synthesizes its built-ins until ticket 15 migrates it. */
-export function accountsStateFromConfig(
-	config: DaemonConfig,
-	launchLogin: ClaudeConfigDir,
-): AccountsState {
+/** Legacy built-ins remain synthesized until their config migration retires it. */
+function accountInstancesFromConfig(config: DaemonConfig) {
 	const explicit = (config.instances ?? []).map((instance) => ({
 		...instance,
 		driver: instance.driver ?? ("opencode" as const),
@@ -273,12 +323,14 @@ export function accountsStateFromConfig(
 			? { configDir: config.claudeConfigDir }
 			: {}),
 	}));
-	const instances = [
+	return [
 		...explicit,
-		...(!explicit.some(({ id }) => id === "opencode")
+		...(!explicit.some(({ id }) => id === "opencode") &&
+		!config.deletedAccounts?.some(({ id }) => id === "opencode")
 			? [{ id: "opencode", name: "OpenCode", driver: "opencode" as const }]
 			: []),
-		...(!explicit.some(({ id }) => id === "claude")
+		...(!explicit.some(({ id }) => id === "claude") &&
+		!config.deletedAccounts?.some(({ id }) => id === "claude")
 			? [
 					{
 						id: "claude",
@@ -291,7 +343,39 @@ export function accountsStateFromConfig(
 				]
 			: []),
 	];
-	return accountsStateFromInstances(instances, launchLogin);
+}
+
+/** Decode and save use the same pointer rules as runtime account changes. */
+export function normalizeAccountConfig(config: DaemonConfig): DaemonConfig {
+	const claude = materializeClaudeDefault(
+		accountInstancesFromConfig(config),
+		config.accountDefaults?.claude,
+		config.usageLimits?.order ?? [],
+	);
+	return {
+		...config,
+		accountDefaults: Option.match(claude, {
+			onNone: () => ({}),
+			onSome: (id) => ({ claude: id }),
+		}),
+		deletedAccounts: config.deletedAccounts ?? [],
+	};
+}
+
+export function accountsStateFromConfig(
+	config: DaemonConfig,
+	launchLogin: ClaudeConfigDir,
+): AccountsState {
+	return accountsStateFromInstances(
+		accountInstancesFromConfig(config),
+		launchLogin,
+		5,
+		{
+			defaultClaudeId: config.accountDefaults?.claude,
+			deleted: config.deletedAccounts,
+			usageOrder: config.usageLimits?.order,
+		},
+	);
 }
 
 export function defaultFor(

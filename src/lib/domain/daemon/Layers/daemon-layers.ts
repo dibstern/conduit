@@ -11,19 +11,15 @@ import {
 	Effect,
 	Exit,
 	Layer,
-	Option,
 	PubSub,
 	Ref,
 	Runtime,
 	Stream,
 } from "effect";
-import {
-	accountsStateFromConfig,
-	defaultFor,
-} from "../../../daemon/account-directory.js";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import { accountsStateFromConfig } from "../../../daemon/account-directory.js";
 import {
 	type DaemonConfig,
-	defaultDaemonConfig,
 	migrateDaemonConfig,
 } from "../../../daemon/config-persistence.js";
 import {
@@ -622,6 +618,8 @@ export interface DaemonLiveOptions {
 
 	/** Already decoded startup snapshot; seeds the project and instance registries. */
 	persistedConfig?: DaemonConfig;
+	/** Computed while loading that snapshot, before normalization discards the old values. */
+	persistedConfigNeedsMigration?: boolean;
 }
 
 /**
@@ -644,6 +642,18 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const { configDir, socketPath } = options;
 	const launchLogin =
 		options.launchLogin ?? captureClaudeLaunchLogin(process.env);
+	const accountsState =
+		options.persistedConfig === undefined
+			? undefined
+			: accountsStateFromConfig(
+					{
+						...options.persistedConfig,
+						...(options.initialConfig.claudeConfigDir !== undefined && {
+							claudeConfigDir: options.initialConfig.claudeConfigDir,
+						}),
+					},
+					launchLogin,
+				);
 
 	// Tier 0: Foundation (no inter-dependencies)
 	// These Layers have zero dependencies on other Tags. They form the base
@@ -652,7 +662,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		options.persistedConfig === undefined
 			? Layer.empty
 			: Layer.effectDiscard(
-					migrateDaemonConfig(options.persistedConfig, configDir).pipe(
+					migrateDaemonConfig(
+						options.persistedConfig,
+						configDir,
+						options.persistedConfigNeedsMigration,
+					).pipe(
 						Effect.andThen(
 							migrateProjectStorage(configDir, options.persistedConfig),
 						),
@@ -723,47 +737,18 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				},
 	).pipe(
 		Layer.tap((context) =>
-			Ref.update(Context.get(context, DaemonStateTag), (current) => {
-				const defaultId = defaultFor(
-					accountsStateFromConfig(
-						options.persistedConfig ?? defaultDaemonConfig(),
-						launchLogin,
-					),
-					"claude",
-				).pipe(Option.getOrThrow).id;
-				const existing = current.instances.find(({ id }) => id === defaultId);
-				const defaultClaude = {
-					...(existing ?? {
-						id: defaultId,
-						name: "Claude",
-						driver: "claude" as const,
-						port: 0,
-						managed: false,
-					}),
-					...(options.initialConfig.claudeConfigDir !== undefined && {
-						configDir: options.initialConfig.claudeConfigDir,
-					}),
-				};
-				return {
-					...current,
-					configDir,
-					socketPath,
-					keepAwake: options.initialConfig.keepAwake,
-					...(options.persistedConfig !== undefined && {
-						instances: existing
-							? current.instances.map((instance) =>
-									instance.id === defaultId ? defaultClaude : instance,
-								)
-							: [...current.instances, defaultClaude],
-					}),
-					...(options.initialConfig.keepAwakeCommand !== undefined && {
-						keepAwakeCommand: options.initialConfig.keepAwakeCommand,
-					}),
-					...(options.initialConfig.keepAwakeArgs !== undefined && {
-						keepAwakeArgs: options.initialConfig.keepAwakeArgs,
-					}),
-				};
-			}),
+			Ref.update(Context.get(context, DaemonStateTag), (current) => ({
+				...current,
+				configDir,
+				socketPath,
+				keepAwake: options.initialConfig.keepAwake,
+				...(options.initialConfig.keepAwakeCommand !== undefined && {
+					keepAwakeCommand: options.initialConfig.keepAwakeCommand,
+				}),
+				...(options.initialConfig.keepAwakeArgs !== undefined && {
+					keepAwakeArgs: options.initialConfig.keepAwakeArgs,
+				}),
+			})),
 		),
 	);
 
@@ -775,6 +760,19 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		: makeProjectRegistryLive();
 	const instanceManagerOptions = {
 		launchLogin,
+		...(accountsState !== undefined && {
+			accountsState: {
+				...accountsState,
+				// OpenCode startup owns creating its managed default and its metadata.
+				accounts: accountsState.accounts.filter(
+					(account) =>
+						account.id !== MANAGED_OPENCODE_ACCOUNT_ID ||
+						options.persistedConfig?.instances?.some(
+							({ id }) => id === account.id,
+						),
+				),
+			},
+		}),
 		...(options.defaultOpencodeUrl !== undefined && {
 			defaultOpencodeUrl: options.defaultOpencodeUrl,
 		}),
