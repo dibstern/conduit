@@ -477,11 +477,15 @@ describe("SessionOverrides Effect", () => {
 	it.scoped("resetProcessingTimeout restarts with same callback", () =>
 		Effect.gen(function* () {
 			const called = { value: false };
+			yield* setVariant("historical", "high");
+			const ref = yield* OverridesStateTag;
+			const settings = (yield* Ref.get(ref)).sessions;
 			yield* startProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS), () =>
 				Effect.sync(() => {
 					called.value = true;
 				}),
 			);
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
 
 			// Advance 100s
 			yield* TestClock.adjust(Duration.millis(100_000));
@@ -489,6 +493,7 @@ describe("SessionOverrides Effect", () => {
 
 			// Reset — timer restarts from 120s
 			yield* resetProcessingTimeout("sess-1", Duration.millis(TIMEOUT_MS));
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
 
 			// Advance another 100s (would have fired without reset)
 			yield* TestClock.adjust(Duration.millis(100_000));
@@ -497,6 +502,16 @@ describe("SessionOverrides Effect", () => {
 			// Advance to the new 120s mark
 			yield* TestClock.adjust(Duration.millis(20_001));
 			expect(called.value).toBe(true);
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
+			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(0);
+			yield* startProcessingTimeout(
+				"sess-1",
+				Duration.millis(TIMEOUT_MS),
+				() => Effect.void,
+			);
+			yield* clearProcessingTimeout("sess-1");
+			expect((yield* Ref.get(ref)).sessions).toBe(settings);
+			expect((yield* Ref.get(ref)).processingTimeouts.size).toBe(0);
 		}).pipe(Effect.provide(Layer.fresh(makeOverridesStateLive()))),
 	);
 

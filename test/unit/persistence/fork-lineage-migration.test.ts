@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
 import { expect, it, vi } from "vitest";
 import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
@@ -263,7 +264,19 @@ it("imports all known projects before deleting the sidecar, without appending hi
 				),
 			);
 		}
-		await Effect.runPromise(migrateForkLineage(dir));
+		const prepared = vi.spyOn(Database.prototype, "prepare");
+		try {
+			await Effect.runPromise(migrateForkLineage(dir));
+			expect(
+				prepared.mock.calls.filter(([query]) =>
+					/SELECT id, parent_id, fork_point_event FROM sessions\s+WHERE id IN/.test(
+						query,
+					),
+				),
+			).toHaveLength(2);
+		} finally {
+			prepared.mockRestore();
+		}
 		for (const [i] of projects.entries()) {
 			await Effect.runPromise(
 				Effect.gen(function* () {
@@ -292,7 +305,13 @@ it("imports all known projects before deleting the sidecar, without appending hi
 			);
 		}
 		expect(existsSync(sidecar)).toBe(false);
-		await Effect.runPromise(migrateForkLineage(dir));
+		const clean = vi.spyOn(Database.prototype, "prepare");
+		try {
+			await Effect.runPromise(migrateForkLineage(dir));
+			expect(clean).not.toHaveBeenCalled();
+		} finally {
+			clean.mockRestore();
+		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

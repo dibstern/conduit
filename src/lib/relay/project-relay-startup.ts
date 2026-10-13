@@ -19,9 +19,8 @@ import {
 } from "../domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
-import { restoreSessionPermissionModes } from "../domain/relay/Services/session-manager-permission-mode.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import { restoreSessionModelSettings } from "../domain/relay/Services/session-model-settings.js";
+import { restoreSessionSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
 	type OverridesStateTag,
 	setDefaultModel,
@@ -41,6 +40,7 @@ import { SSEStreamTag } from "../domain/relay/Services/sse-stream-service.js";
 import { OpenCodeTerminalServiceTag } from "../domain/relay/Services/terminal-service.js";
 import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
+import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
@@ -95,8 +95,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
-		// Defaults come from settings. Only missing legacy picks below may need
-		// catalog discovery; stored picks require no provider contact on restart.
+		// Defaults come from settings; legacy pick repair uses only stored history.
 		if (initialDefaultModel) {
 			yield* setDefaultModel(initialDefaultModel);
 		}
@@ -112,14 +111,9 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const instance = yield* orchestration.registry.getInstanceEffect("claude");
 		if (instance instanceof ClaudeProviderInstance)
 			yield* instance.recoverEffect();
-		const restoredPermissionModes = yield* restoreSessionPermissionModes();
-		if (restoredPermissionModes > 0) {
-			yield* Effect.sync(() =>
-				log.info(
-					`Restored permission modes for ${restoredPermissionModes} session(s)`,
-				),
-			);
-		}
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		if (!(yield* projectionRunner.isRecovered()))
+			yield* projectionRunner.recover();
 		const backfilled = yield* backfillSessionPicks().pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {
@@ -133,15 +127,20 @@ function acquireStartupServices(inputs: StartupInputs) {
 		if (backfilled > 0)
 			log.info(`Backfilled picks for ${backfilled} session(s)`);
 		// Restore only the durable pick; past turns never override it.
-		yield* restoreSessionModelSettings().pipe(
+		const restored = yield* restoreSessionSettings().pipe(
 			Effect.catchAll((error) =>
-				Effect.sync(() =>
+				Effect.sync(() => {
 					log.warn(
-						`Could not restore session model settings: ${formatErrorDetail(error)}`,
-					),
-				),
+						`Could not restore session settings: ${formatErrorDetail(error)}`,
+					);
+					return { modelSettings: 0, permissionModes: 0 };
+				}),
 			),
 		);
+		if (restored.permissionModes > 0)
+			log.info(
+				`Restored permission modes for ${restored.permissionModes} session(s)`,
+			);
 		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
 			Effect.catchAll((error) =>
 				Effect.sync(() => {
@@ -169,19 +168,32 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
-		const sessionsResult = yield* Effect.either(readQueryEffect.listSessions());
-		if (sessionsResult._tag === "Right" && sessionsResult.right.length > 0)
-			yield* statusSnapshot.setSessionCount(sessionsResult.right.length);
+		const sessionsResult = yield* Effect.either(
+			Effect.all({
+				count: sql<{
+					count: number;
+				}>`SELECT COUNT(*) AS count FROM sessions`.pipe(
+					Effect.map((rows) => rows[0]?.count ?? 0),
+				),
+				sessionId: sql<{ id: string | null }>`SELECT COALESCE(
+					(SELECT id FROM sessions WHERE parent_id IS NULL OR parent_id = ''
+						ORDER BY updated_at DESC, id DESC LIMIT 1),
+					(SELECT id FROM sessions ORDER BY updated_at DESC, id DESC LIMIT 1)
+				) AS id`.pipe(Effect.map((rows) => rows[0]?.id ?? undefined)),
+			}),
+		);
+		if (sessionsResult._tag === "Right" && sessionsResult.right.count > 0)
+			yield* statusSnapshot.setSessionCount(sessionsResult.right.count);
 		if (sessionsResult._tag === "Left")
 			yield* Effect.sync(() =>
 				log.warn(
 					`Session list unavailable at startup: ${formatErrorDetail(sessionsResult.left)}`,
 				),
 			);
-		const sessions =
-			sessionsResult._tag === "Right" ? sessionsResult.right : [];
 		const sessionId =
-			(sessions.find((session) => !session.parent_id) ?? sessions[0])?.id ?? "";
+			(sessionsResult._tag === "Right"
+				? sessionsResult.right.sessionId
+				: undefined) ?? "";
 		yield* PollerStateTag;
 		yield* PollerPubSubTag;
 		const statusPoller = yield* StatusPollerTag;

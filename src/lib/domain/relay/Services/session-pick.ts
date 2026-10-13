@@ -10,6 +10,7 @@ import {
 } from "../../../daemon/config-persistence.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
@@ -163,24 +164,55 @@ export const sessionPickEvents = (sessionId: string, pick: TurnSettings) => [
 	),
 ];
 
-/** Fill only NULL pick fields, then let every restart read the session row. */
+/** Consume the migration's legacy repairs; only recoverable rows remain queued. */
 export const backfillSessionPicks = () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const [repairState] = yield* sql<{ initialized: number }>`
+			SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
+		if (repairState?.initialized === 0) {
+			const projectionRunner = yield* ProjectionRunnerEffectTag;
+			if (!(yield* projectionRunner.isRecovered()))
+				yield* projectionRunner.recover();
+			yield* sql.withTransaction(
+				Effect.gen(function* () {
+					const [current] = yield* sql<{ initialized: number }>`
+					SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
+					if (current?.initialized === 1) return;
+					yield* sql`INSERT OR IGNORE INTO session_pick_backfill (session_id)
+					SELECT id FROM sessions WHERE model_id IS NULL OR model_provider IS NULL
+						OR variant IS NULL OR context_window IS NULL`;
+					yield* sql`UPDATE session_pick_backfill_state SET initialized = 1 WHERE singleton = 1`;
+				}),
+			);
+		}
+		const missing = yield* sql<{
+			id: string;
+			provider: string;
+			retry_reason: string;
+		}>`
+			SELECT s.id, s.provider, b.retry_reason FROM session_pick_backfill b
+			JOIN sessions s ON s.id = b.session_id`;
+		if (missing.length === 0) return 0;
 		const config = yield* ConfigTag;
 		const read = yield* ReadQueryEffectTag;
 		const store = yield* EventStoreEffectTag;
 		const commit = yield* makeCommitAndSignal;
 		const daemonConfig = loadDaemonConfig(config.configDir);
-		const missing = yield* sql<{ id: string }>`
-		SELECT id FROM sessions WHERE model_id IS NULL OR model_provider IS NULL
-			OR variant IS NULL OR context_window IS NULL`;
 		let filled = 0;
-		for (const { id } of missing) {
+		for (const { id, provider, retry_reason } of missing) {
+			const driver = resolveProviderRoutingDriver(daemonConfig, provider);
+			if (driver !== "claude" && driver !== "opencode") {
+				if (retry_reason !== "driver_unresolved")
+					yield* sql`UPDATE session_pick_backfill SET retry_reason = 'driver_unresolved' WHERE session_id = ${id}`;
+				continue;
+			}
 			const row = yield* read.getSession(id);
 			if (!row) continue;
-			const driver = resolveProviderRoutingDriver(daemonConfig, row.provider);
-			if (driver !== "claude" && driver !== "opencode") continue;
+			if (storedSessionPick(row, driver)) {
+				yield* sql`DELETE FROM session_pick_backfill WHERE session_id = ${id}`;
+				continue;
+			}
 			const [turn] = yield* sql<{
 				model_id: string | null;
 				model_provider: string | null;
@@ -246,21 +278,20 @@ export const backfillSessionPicks = () =>
 						effort: row.variant ?? turn?.variant ?? "",
 						contextWindow: row.context_window ?? turn?.context_window ?? "",
 					};
-			} else if (!turn && row.model_id == null) {
-				const resolved = yield* Effect.either(
-					loadServerSessionPick(driver, row.provider, undefined, {
-						startIfStopped: false,
-					}),
-				);
-				if (Either.isLeft(resolved)) continue;
-				pick = resolved.right;
 			}
-			if (!pick) continue;
+			if (!pick) {
+				// No stored/history pick can be recovered. The picker handles these.
+				yield* sql`DELETE FROM session_pick_backfill WHERE session_id = ${id}`;
+				continue;
+			}
 			const selectedPick = pick;
 			filled += yield* commit.write((project) =>
 				Effect.gen(function* () {
 					const current = yield* read.getSession(id);
-					if (!current) return 0;
+					if (!current) {
+						yield* sql`DELETE FROM session_pick_backfill WHERE session_id = ${id}`;
+						return 0;
+					}
 					const events = sessionPickEvents(id, {
 						...selectedPick,
 						model: {
@@ -277,8 +308,12 @@ export const backfillSessionPicks = () =>
 								? current.variant === null
 								: current.context_window === null,
 					);
-					if (events.length === 0) return 0;
+					if (events.length === 0) {
+						yield* sql`DELETE FROM session_pick_backfill WHERE session_id = ${id}`;
+						return 0;
+					}
 					yield* project(yield* store.appendBatch(events));
+					yield* sql`DELETE FROM session_pick_backfill WHERE session_id = ${id}`;
 					return 1;
 				}),
 			);

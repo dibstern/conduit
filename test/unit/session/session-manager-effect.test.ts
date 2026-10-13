@@ -19,10 +19,7 @@ import {
 import { SessionCommandError } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
-import {
-	persistSessionPermissionMode,
-	restoreSessionPermissionModes,
-} from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
+import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import {
 	deleteSession,
 	SessionManagerServiceLive,
@@ -36,10 +33,17 @@ import {
 	getSessionParentMap,
 	recordMessageActivity,
 } from "../../../src/lib/domain/relay/Services/session-manager-state-operations.js";
+import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
 import {
+	getContextWindow,
+	getModel,
+	getOverrides,
 	getPermissionMode,
+	getVariant,
 	makeOverridesStateLive,
+	setDefaultPermissionMode,
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { backfillSessionPicks } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { SessionDetail } from "../../../src/lib/instance/sdk-types.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -664,7 +668,7 @@ describe("SessionManager Effect", () => {
 	);
 
 	it.effect(
-		"restores valid persisted permission modes and skips null or invalid values",
+		"restores sparse model settings and valid permission modes in one read",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-restore-mode-"));
 			const filename = join(dir, "events.db");
@@ -680,11 +684,44 @@ describe("SessionManager Effect", () => {
 						('ses-auto', 'claude', 'Auto', 'idle', 'auto', 1000, 1000),
 						('ses-default', 'claude', 'Default', 'idle', NULL, 1000, 1000),
 						('ses-invalid', 'claude', 'Invalid', 'idle', 'broken', 1000, 1000)`;
-
-				expect(yield* restoreSessionPermissionModes()).toBe(1);
+				yield* sql`INSERT INTO sessions (
+					id, provider, title, status, created_at, updated_at,
+					model_id, model_provider, variant, context_window, permission_mode
+				) VALUES
+					('ses-complete', 'claude', 'Complete', 'idle', 1000, 1000, 'model', 'claude', 'high', '1m', 'full'),
+					('ses-model-only', 'claude', 'Partial', 'idle', 1000, 1000, 'model', NULL, NULL, NULL, NULL),
+					('ses-provider-only', 'claude', 'Partial', 'idle', 1000, 1000, NULL, 'claude', NULL, NULL, NULL),
+					('ses-variant', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, '', NULL, NULL),
+					('ses-context', 'claude', 'Empty', 'idle', 1000, 1000, NULL, NULL, NULL, '', NULL)`;
+				yield* setDefaultPermissionMode("plan");
+				const read = yield* ReadQueryEffectTag;
+				const fullRead = vi.fn(read.listSessions);
+				expect(
+					yield* restoreSessionSettings().pipe(
+						Effect.provideService(ReadQueryEffectTag, {
+							...read,
+							listSessions: fullRead,
+						}),
+					),
+				).toEqual({ modelSettings: 4, permissionModes: 2 });
+				expect(fullRead).not.toHaveBeenCalled();
 				expect(yield* getPermissionMode("ses-auto")).toBe("auto");
-				expect(yield* getPermissionMode("ses-default")).toBe("ask");
-				expect(yield* getPermissionMode("ses-invalid")).toBe("ask");
+				expect(yield* getPermissionMode("ses-default")).toBe("plan");
+				expect(yield* getPermissionMode("ses-invalid")).toBe("plan");
+				expect(yield* getOverrides("ses-invalid")).toBeUndefined();
+				expect(yield* getOverrides("ses-model-only")).toBeUndefined();
+				expect(yield* getOverrides("ses-provider-only")).toBeUndefined();
+				expect(yield* getOverrides("ses-variant")).toEqual({ variant: "" });
+				expect(yield* getOverrides("ses-context")).toEqual({
+					contextWindow: "",
+				});
+				expect(yield* getModel("ses-complete")).toEqual({
+					modelID: "model",
+					providerID: "claude",
+				});
+				expect(yield* getVariant("ses-complete")).toBe("high");
+				expect(yield* getContextWindow("ses-complete")).toBe("1m");
+				expect(yield* getPermissionMode("ses-complete")).toBe("full");
 			}).pipe(
 				Effect.provide(
 					Layer.merge(
@@ -692,6 +729,123 @@ describe("SessionManager Effect", () => {
 						Layer.fresh(makeOverridesStateLive()),
 					),
 				),
+				Effect.ensuring(
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+				),
+			);
+		},
+	);
+	it.effect(
+		"recovers pending projections before durable pick repair and retries recoverable records",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-pick-repair-"));
+			const filename = join(dir, "events.db");
+			const layer = () =>
+				Layer.merge(
+					makePersistenceEffectLayer(filename, "test-project"),
+					Layer.succeed(ConfigTag, makeMockConfig({ configDir: dir })),
+				);
+			return Effect.gen(function* () {
+				yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* (yield* ProjectionRunnerEffectTag).markRecovered();
+					yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at, model_id, model_provider, variant, context_window)
+					VALUES ('partial', 'claude', 1, 1, 'model', 'claude', NULL, '1m'),
+					('no-history', 'opencode', 1, 1, NULL, NULL, NULL, NULL),
+					('unresolved', 'late-instance', 1, 1, 'model', 'claude', NULL, NULL)`;
+					yield* (yield* EventStoreEffectTag).appendBatch([
+						canonicalEvent("session.created", "lagged", {
+							sessionId: "lagged",
+							title: "Pending projection",
+							provider: "claude",
+							providerSessionId: "lagged",
+						}),
+						canonicalEvent("session.model_changed", "lagged", {
+							sessionId: "lagged",
+							modelId: "model",
+							providerId: "claude",
+						}),
+					]);
+					// Reopen as a pre-repair store, with durable events still unprojected.
+					yield* sql`DROP TABLE session_pick_backfill`;
+					yield* sql`DROP TABLE session_pick_backfill_state`;
+					yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 57`;
+				}).pipe(Effect.provide(layer()));
+				yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT session_id FROM session_pick_backfill`,
+					).toEqual([]);
+					expect(yield* backfillSessionPicks()).toBe(2);
+					expect(
+						yield* sql`SELECT session_id, retry_reason FROM session_pick_backfill`,
+					).toEqual([
+						{ session_id: "unresolved", retry_reason: "driver_unresolved" },
+					]);
+					expect(
+						yield* sql`SELECT variant, context_window FROM sessions WHERE id = 'partial'`,
+					).toEqual([{ variant: "", context_window: "1m" }]);
+					expect(
+						yield* sql`SELECT model_id, variant, context_window FROM sessions WHERE id = 'lagged'`,
+					).toEqual([{ model_id: "model", variant: "", context_window: "" }]);
+				}).pipe(Effect.provide(layer()));
+				yield* Effect.gen(function* () {
+					const read = yield* ReadQueryEffectTag;
+					const rowRead = vi.fn(read.getSession);
+					expect(
+						yield* backfillSessionPicks().pipe(
+							Effect.provideService(ReadQueryEffectTag, {
+								...read,
+								getSession: rowRead,
+							}),
+						),
+					).toBe(0);
+					expect(rowRead).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(layer()));
+				yield* Effect.sync(() =>
+					writeFileSync(
+						join(dir, "daemon.json"),
+						JSON.stringify({
+							pid: 1,
+							port: 2633,
+							projects: [],
+							pinHash: null,
+							tls: false,
+							debug: false,
+							keepAwake: false,
+							instances: [
+								{
+									id: "late-instance",
+									name: "Late",
+									port: 0,
+									managed: false,
+									driver: "claude",
+								},
+							],
+						}),
+					),
+				);
+				yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					expect(yield* backfillSessionPicks()).toBe(1);
+					expect(
+						yield* sql`SELECT session_id FROM session_pick_backfill`,
+					).toEqual([]);
+				}).pipe(Effect.provide(layer()));
+				yield* Effect.gen(function* () {
+					const read = yield* ReadQueryEffectTag;
+					const rowRead = vi.fn(read.getSession);
+					expect(
+						yield* backfillSessionPicks().pipe(
+							Effect.provideService(ReadQueryEffectTag, {
+								...read,
+								getSession: rowRead,
+							}),
+						),
+					).toBe(0);
+					expect(rowRead).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(layer()));
+			}).pipe(
 				Effect.ensuring(
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				),

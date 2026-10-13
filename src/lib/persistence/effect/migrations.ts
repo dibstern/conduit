@@ -35,6 +35,7 @@ import {
 	SESSION_CASCADE_DELETES_MIGRATION,
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
+	SESSION_PICK_BACKFILL_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
@@ -1163,6 +1164,9 @@ export const effectMigrationEntries = {
 	),
 	"0056_drop_activities": executeSqlStatements(
 		readMigrationSql(DROP_ACTIVITIES_MIGRATION),
+	),
+	"0057_session_pick_backfill": executeSqlStatements(
+		readMigrationSql(SESSION_PICK_BACKFILL_MIGRATION),
 	),
 } satisfies Record<
 	string,

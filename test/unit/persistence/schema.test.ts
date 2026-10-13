@@ -28,6 +28,7 @@ describe("Schema Migration", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[55, "events_session_type_index"],
 					[56, "drop_activities"],
+					[57, "session_pick_backfill"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -74,6 +75,8 @@ describe("Schema Migration", () => {
 				"sent_alerts",
 				"session_git_published",
 				"session_goal_checks",
+				"session_pick_backfill",
+				"session_pick_backfill_state",
 				"session_providers",
 				"session_sidebar",
 				"session_sidebar_horizon",

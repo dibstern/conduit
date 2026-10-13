@@ -162,6 +162,8 @@ describe("Persistence Effect", () => {
 					"sent_alerts",
 					"session_git_published",
 					"session_goal_checks",
+					"session_pick_backfill",
+					"session_pick_backfill_state",
 					"session_providers",
 					"session_sidebar",
 					"session_sidebar_horizon",
@@ -317,6 +319,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 54, name: "events_unstamped_index" },
 				{ migration_id: 55, name: "events_session_type_index" },
 				{ migration_id: 56, name: "drop_activities" },
+				{ migration_id: 57, name: "session_pick_backfill" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
