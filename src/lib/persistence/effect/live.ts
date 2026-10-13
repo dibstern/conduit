@@ -9,6 +9,7 @@ import {
 	type PersistenceServiceTag,
 } from "../../domain/persistence/Services/persistence-service.js";
 import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import { reclaimStore } from "../rewrite-store.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
@@ -17,6 +18,7 @@ import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
 } from "./event-store-effect.js";
+import { makeEffectSqlMigrator } from "./migrations.js";
 import {
 	makeProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -74,6 +76,32 @@ export function makePersistenceEffectLayer(
 			cause: "A store requires a non-empty project id",
 		});
 	const projectLayer = Layer.succeed(PersistenceProjectTag, { projectId });
+	// Closing this migration connection first makes newly freed pages eligible
+	// on this boot, without replacing a file behind a persistent SQLite handle.
+	const prepareStore =
+		filename === ":memory:"
+			? Effect.void
+			: Effect.gen(function* () {
+					yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`PRAGMA foreign_keys = OFF`;
+						yield* makeEffectSqlMigrator();
+					}).pipe(
+						Effect.provide(
+							SqliteNode.layer({ filename }).pipe(
+								Layer.provide(Reactivity.layer),
+							),
+						),
+						Effect.mapError(
+							(cause) => new PersistenceError({ operation: "migrate", cause }),
+						),
+					);
+					yield* reclaimStore(filename);
+				});
+	const preparedSqliteLayer = SqliteNode.layer({ filename }).pipe(
+		Layer.provide(Reactivity.layer),
+		Layer.provide(Layer.effectDiscard(prepareStore)),
+	);
 	const sqliteLayer = Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -98,11 +126,7 @@ export function makePersistenceEffectLayer(
 				(cause) => new PersistenceError({ operation: "tuneDatabase", cause }),
 			),
 		),
-	).pipe(
-		Layer.provideMerge(
-			SqliteNode.layer({ filename }).pipe(Layer.provide(Reactivity.layer)),
-		),
-	);
+	).pipe(Layer.provideMerge(preparedSqliteLayer));
 
 	const persistenceServiceLayer = makePersistenceServiceLive.pipe(
 		Layer.provide(Layer.merge(sqliteLayer, projectLayer)),

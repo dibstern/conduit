@@ -4,6 +4,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
+	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
 	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
@@ -1167,6 +1168,9 @@ export const effectMigrationEntries = {
 	),
 	"0057_session_pick_backfill": executeSqlStatements(
 		readMigrationSql(SESSION_PICK_BACKFILL_MIGRATION),
+	),
+	"0058_compact_redundant_events": executeSqlStatements(
+		readMigrationSql(COMPACT_REDUNDANT_EVENTS_MIGRATION),
 	),
 } satisfies Record<
 	string,
