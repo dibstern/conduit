@@ -15,6 +15,10 @@ import {
 	type Runtime,
 	Tracer,
 } from "effect";
+import {
+	attachTurnTimeline,
+	type TurnTimelineRecord,
+} from "./turn-timeline.js";
 
 export const MAX_TRACE_STRING_LENGTH = 4096;
 export const MAX_TRACE_DEPTH = 4;
@@ -92,8 +96,10 @@ export interface TraceSinkOptions {
 }
 
 export interface TraceSink {
-	readonly write: (record: TraceRecord) => Effect.Effect<void>;
-	readonly writeSync: (record: TraceRecord) => void;
+	readonly write: (
+		record: TraceRecord | TurnTimelineRecord,
+	) => Effect.Effect<void>;
+	readonly writeSync: (record: TraceRecord | TurnTimelineRecord) => void;
 	readonly flush: () => Effect.Effect<void>;
 	readonly close: () => Effect.Effect<void>;
 }
@@ -269,7 +275,33 @@ const isLikelyProviderPayloadKey = (key: string): boolean =>
 const summarizeDiagnosticString = (value: string): string =>
 	value.length === 0 ? "" : `[string:length=${value.length}]`;
 
-const safeJsonLine = (record: TraceRecord, maxBytes: number): string => {
+const safeJsonLine = (
+	record: TraceRecord | TurnTimelineRecord,
+	maxBytes: number,
+): string => {
+	if (record.type === "turn-timeline") {
+		const line = jsonLine(record);
+		if (Buffer.byteLength(line) <= maxBytes) return line;
+		const compacted = jsonLine({
+			type: record.type,
+			schemaVersion: record.schemaVersion,
+			sessionId: truncateString(record.sessionId, 80),
+			inputId: truncateString(record.inputId, 80),
+			closedBy: record.closedBy,
+			phases: record.phases.map(
+				({ phase, elapsedMs, deltaMs, approximation }) => ({
+					phase,
+					elapsedMs: Math.round(elapsedMs * 1000) / 1000,
+					deltaMs: Math.round(deltaMs * 1000) / 1000,
+					...(approximation ? { approximation } : {}),
+				}),
+			),
+			truncated: true,
+		});
+		return Buffer.byteLength(compacted) <= maxBytes
+			? compacted
+			: jsonLine({ type: record.type, schemaVersion: 1, truncated: true });
+	}
 	const compacted: TraceRecord = {
 		...record,
 		attributes: compactTraceAttributes(record.attributes),
@@ -425,7 +457,7 @@ export const makeTraceSink = (
 			flushTimer.unref?.();
 		};
 
-		const enqueue = (record: TraceRecord) => {
+		const enqueue = (record: TraceRecord | TurnTimelineRecord) => {
 			if (closed) return;
 			buffer.push(safeJsonLine(record, maxBytes));
 			if (buffer.length >= bufferSize) {
@@ -718,7 +750,10 @@ export const makeLocalTraceArtifactLive = (
 		Effect.gen(function* () {
 			const sink = yield* makeTraceSink(options);
 			const runtime = yield* Effect.runtime<never>();
-			yield* Effect.addFinalizer(sink.close);
+			const detachTimeline = attachTurnTimeline(sink);
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(detachTimeline).pipe(Effect.andThen(sink.close())),
+			);
 			return Layer.setTracer(
 				makeLocalFileTracer({ ...options, sink }, runtime),
 			);

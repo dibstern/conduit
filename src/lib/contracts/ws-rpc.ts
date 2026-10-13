@@ -2573,8 +2573,6 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 		resumeBase: Schema.optional(ResumeBase),
 		// From a saved snapshot: the server resumes from this, not resumeBase.
 		resumePoint: Schema.optional(ResumePoint),
-		// Only clients that decode textSuffix may opt into compressed live parts.
-		textSuffixes: Schema.optional(Schema.Boolean),
 	},
 	success: SessionDetailEnvelopeSchema,
 	error: WsRpcError,

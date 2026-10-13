@@ -993,7 +993,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(projectedMessages).toEqual([]);
 
 		vi.spyOn(failingProjector, "project").mockReturnValue(
-			Effect.succeed({ stamped: [], removed: [] }),
+			Effect.succeed({ stamped: [], removed: [], collections: [] }),
 		);
 		const retryResult = await ingestOk(
 			makeSSEEvent("message.created", {
@@ -1035,7 +1035,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 									cause: new Error("simulated transient projection failure"),
 								}),
 							)
-						: Effect.succeed({ stamped: [], removed: [] });
+						: Effect.succeed({ stamped: [], removed: [], collections: [] });
 				},
 			},
 		]);
@@ -1103,7 +1103,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 									cause: new Error("simulated projection failure"),
 								}),
 							)
-						: Effect.succeed({ stamped: [], removed: [] }),
+						: Effect.succeed({ stamped: [], removed: [], collections: [] }),
 			},
 		]);
 
@@ -1179,7 +1179,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 				handles: ["text.delta"],
 				project: () =>
 					Effect.promise(() => snapshotGate).pipe(
-						Effect.as({ stamped: [], removed: [] }),
+						Effect.as({ stamped: [], removed: [], collections: [] }),
 					),
 			},
 		]);
@@ -1366,7 +1366,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 				handles: ["text.delta"],
 				project: () =>
 					Effect.promise(() => gatedText).pipe(
-						Effect.as({ stamped: [], removed: [] }),
+						Effect.as({ stamped: [], removed: [], collections: [] }),
 					),
 			},
 		]);
@@ -1955,7 +1955,7 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 								currentHook().onReconnect();
 								crossed();
 							}
-							return { stamped: [], removed: [] };
+							return { stamped: [], removed: [], collections: [] };
 						}),
 				},
 			],

@@ -376,7 +376,6 @@ describe("session detail wire", () => {
 						sessionId: "s",
 						...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					}).pipe(
-						encodeSessionDetail,
 						Stream.map(wireRoundTrip),
 						Stream.map((envelope) => {
 							if (
@@ -477,7 +476,6 @@ describe("session detail wire", () => {
 					const output = yield* Queue.unbounded<Envelope<SessionDetailItem>>();
 					let deliveredBytes = 0;
 					yield* subscribeSessionDetail({ sessionId }).pipe(
-						encodeSessionDetail,
 						Stream.map((envelope) => {
 							const json = JSON.stringify(
 								Schema.encodeSync(SessionDetailEnvelopeSchema)(envelope),

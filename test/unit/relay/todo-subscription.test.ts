@@ -1,15 +1,28 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { channel } from "node:diagnostics_channel";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
-import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
-import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { subscribeApprovals } from "../../../src/lib/domain/relay/Services/approvals-subscription.js";
+import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
-	type SessionTodos,
-	subscribeSessionTodos,
-} from "../../../src/lib/domain/relay/Services/todo-subscription.js";
+	BackgroundLivenessTag,
+	ConfigTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
+import { subscribeSessionDetail } from "../../../src/lib/domain/relay/Services/session-detail-subscription.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
+import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
+import { subscribeSessionTodos } from "../../../src/lib/domain/relay/Services/todo-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -17,6 +30,7 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { makeMockConfig } from "../../helpers/mock-factories.js";
 
 // The todo source reads TodoWrite tool parts out of the message projection, so
 // what is under test is a contract with the store: the version the projector
@@ -39,6 +53,8 @@ const makeTodoTestLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
+		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
 		cleanup,
 	);
 };
@@ -104,14 +120,17 @@ const commit = (events: readonly CanonicalEvent[]) =>
 		commitAndSignal(events),
 	);
 
-const openTodos = (sessionId: string) =>
+const openSubscription = <A, E, R>(source: Stream.Stream<A, E, R>) =>
 	Effect.gen(function* () {
-		const q = yield* Queue.unbounded<Envelope<SessionTodos>>();
-		yield* Stream.runForEach(subscribeSessionTodos({ sessionId }), (env) =>
-			Queue.offer(q, env),
-		).pipe(Effect.forkScoped);
+		const q = yield* Queue.unbounded<A>();
+		yield* Stream.runForEach(source, (env) => Queue.offer(q, env)).pipe(
+			Effect.forkScoped,
+		);
 		return q;
 	});
+
+const openTodos = (sessionId: string) =>
+	openSubscription(subscribeSessionTodos({ sessionId }));
 
 const takeN = <A>(q: Queue.Queue<A>, n: number): Effect.Effect<A[]> =>
 	Effect.forEach(Array.from({ length: n }), () => Queue.take(q));
@@ -125,6 +144,144 @@ const claudeTodos = (...pairs: [string, string][]) => ({
 });
 
 describe("subscribeSessionTodos", () => {
+	it.scopedLive(
+		"two staggered subscribers share todo windows and text deltas only read their collections",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("fanout")]);
+				yield* commit(
+					todoWrite(
+						"fanout",
+						"todo-before",
+						claudeTodos(["Plan", "pending"]),
+						"ok",
+					),
+				);
+				const reads: ReadModelRead[] = [];
+				const diagnostics = channel("conduit:read-model-read");
+				const record = (message: unknown) => {
+					const read = message as ReadModelRead;
+					if (read.kind === "window") reads.push(read);
+				};
+				yield* Effect.acquireRelease(
+					Effect.sync(() => diagnostics.subscribe(record)),
+					() => Effect.sync(() => diagnostics.unsubscribe(record)),
+				);
+				const openViewer = Effect.gen(function* () {
+					const detail = yield* openSubscription(
+						subscribeSessionDetail({ sessionId: "fanout" }),
+					);
+					const todos = yield* openTodos("fanout");
+					const shell = yield* openSubscription(subscribeShell());
+					const approvals = yield* openSubscription(subscribeApprovals());
+					const family = yield* openSubscription(
+						subscribeSessionFamily({ sessionId: "fanout" }),
+					);
+					const openings = yield* Effect.all([
+						takeN(detail, 2),
+						takeN(todos, 2),
+						takeN(shell, 2),
+						takeN(approvals, 2),
+						takeN(family, 2),
+					]);
+					for (const opening of openings) {
+						expect(opening.map((envelope) => envelope._tag)).toEqual([
+							"snapshot",
+							"synchronized",
+						]);
+					}
+					return { detail, todos };
+				});
+				const first = yield* openViewer;
+				yield* Effect.sleep("10 millis");
+				const second = yield* openViewer;
+				const counts = (after: number) =>
+					reads.slice(after).reduce<Record<string, number>>((result, read) => {
+						result[read.source] = (result[read.source] ?? 0) + 1;
+						return result;
+					}, {});
+				const textChunks: Record<string, number>[] = [];
+				for (let chunk = 0; chunk < 3; chunk++) {
+					const after = reads.length;
+					yield* commit([textDelta("fanout", "reply")]);
+					yield* Queue.take(first.detail);
+					yield* Queue.take(second.detail);
+					yield* Effect.sleep("20 millis");
+					yield* Queue.takeAll(first.detail);
+					yield* Queue.takeAll(second.detail);
+					expect(yield* Queue.size(first.todos)).toBe(0);
+					expect(yield* Queue.size(second.todos)).toBe(0);
+					textChunks.push(counts(after));
+				}
+				const todoAfter = reads.length;
+				yield* commit(
+					todoWrite(
+						"fanout",
+						"todo-after",
+						claudeTodos(["Build", "in_progress"]),
+						"ok",
+					),
+				);
+				for (const viewer of [first, second])
+					expect(yield* Queue.take(viewer.todos)).toMatchObject({
+						_tag: "upsert",
+						item: { items: [{ subject: "Build", status: "in_progress" }] },
+					});
+				const todoChanged = counts(todoAfter);
+				const dedupAfter = reads.length;
+				yield* commit(
+					todoWrite(
+						"fanout",
+						"todo-same",
+						claudeTodos(["Build", "in_progress"]),
+						"ok",
+					),
+				);
+				yield* Effect.sleep("20 millis");
+				for (const viewer of [first, second])
+					expect(yield* Queue.size(viewer.todos)).toBe(0);
+				const todoUnchanged = counts(dedupAfter);
+				const measurement = { textChunks, todoChanged, todoUnchanged };
+				const baseline = process.env["CONDUIT_CAPTURE_FANOUT_BASELINE"] === "1";
+				yield* Effect.sync(() => {
+					const file = "test-results/8rdf-13-read-counts.json";
+					const previous: unknown = existsSync(file)
+						? JSON.parse(readFileSync(file, "utf8"))
+						: undefined;
+					const recordedBaseline =
+						typeof previous === "object" &&
+						previous !== null &&
+						"baseline" in previous
+							? previous.baseline
+							: undefined;
+					mkdirSync("test-results", { recursive: true });
+					writeFileSync(
+						file,
+						`${JSON.stringify(
+							{
+								ticket: "conduit-test-8rdf.13",
+								subscribers: 2,
+								baseline: baseline ? measurement : recordedBaseline,
+								...(baseline ? {} : { after: measurement }),
+							},
+							null,
+							2,
+						)}\n`,
+					);
+				});
+				if (!baseline) {
+					for (const count of textChunks)
+						expect(count).toEqual({
+							"session-detail/fanout": 1,
+							"todos/fanout": 1,
+						});
+					expect(todoChanged["todos/fanout"]).toBe(1);
+					expect(todoUnchanged["todos/fanout"]).toBe(1);
+				}
+			}).pipe(Effect.provide(makeTodoTestLayer())),
+	);
+
 	it.scoped(
 		"todo updates land as ordered upserts after an empty base, and other writes stay silent",
 		() =>

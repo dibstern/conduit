@@ -207,6 +207,7 @@ it("answering an OpenCode question resolves the row and announces the advance", 
 				version: rows[0]?.version,
 				sessionIds: [SESSION],
 				removedSessionIds: [],
+				collections: ["sessions", "approvals", "sidebar"],
 			});
 		}),
 	);
@@ -231,6 +232,7 @@ it("skipping an OpenCode question resolves the row and announces the advance", a
 				version: rows[0]?.version,
 				sessionIds: [SESSION],
 				removedSessionIds: [],
+				collections: ["sessions", "approvals", "sidebar"],
 			});
 		}),
 	);

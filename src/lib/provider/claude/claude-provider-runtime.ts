@@ -44,6 +44,10 @@ import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
 } from "../../contracts/providers/claude-agent-sdk.js";
+import {
+	bindTurnTimelineSink,
+	observeTurnTimelineFrame,
+} from "../../domain/daemon/Services/turn-timeline.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProviderRuntimeIngestionError,
@@ -631,6 +635,10 @@ export class ClaudeProviderRuntime {
 							input.nativeResumeFallback,
 						);
 						this.sinks.set(sinkId, eventSink);
+						bindTurnTimelineSink(sinkId, {
+							sessionId,
+							inputId: input.inputId,
+						});
 						this.reportSinkForTesting("allocated", sinkId, sessionId);
 						const aborted = Effect.async<void>((resume) => {
 							const onAbort = () => resume(Effect.void);
@@ -890,6 +898,7 @@ export class ClaudeProviderRuntime {
 		recoveredSessionId?: string,
 	): Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> {
 		return Effect.gen(this, function* () {
+			observeTurnTimelineFrame(output);
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;

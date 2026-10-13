@@ -1,5 +1,15 @@
 import { Schema } from "effect";
 
+const ReadModelCollectionSchema = Schema.Literal(
+	"messages",
+	"sessions",
+	"sidebar",
+	"approvals",
+	"inputs",
+);
+
+export type ReadModelCollection = typeof ReadModelCollectionSchema.Type;
+
 /**
  * "The read model advanced to N, and these sessions moved."
  *
@@ -32,6 +42,7 @@ export const ReadModelAdvanceSchema = Schema.Struct({
 	version: Schema.Number,
 	sessionIds: Schema.Array(Schema.String),
 	removedSessionIds: Schema.Array(Schema.String),
+	collections: Schema.Array(ReadModelCollectionSchema),
 });
 
 export type ReadModelAdvance = typeof ReadModelAdvanceSchema.Type;

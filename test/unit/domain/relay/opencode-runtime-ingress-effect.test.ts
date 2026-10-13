@@ -271,10 +271,20 @@ function makeLogger(): OpenCodeRuntimeIngressLog & {
 function makeProjectionRunner(): ProjectionRunnerEffect {
 	return {
 		projectEvent: vi.fn(() =>
-			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+			Effect.succeed({
+				version: 0,
+				sessionIds: [],
+				removedSessionIds: [],
+				collections: [],
+			}),
 		),
 		projectBatch: vi.fn(() =>
-			Effect.succeed({ version: 0, sessionIds: [], removedSessionIds: [] }),
+			Effect.succeed({
+				version: 0,
+				sessionIds: [],
+				removedSessionIds: [],
+				collections: [],
+			}),
 		),
 		recover: vi.fn(() =>
 			Effect.succeed({

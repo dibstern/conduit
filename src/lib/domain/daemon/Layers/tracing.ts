@@ -26,6 +26,7 @@ import {
 	makeLocalTraceArtifactLive,
 	makeTraceSink,
 } from "../Services/local-trace-artifact.js";
+import { attachTurnTimeline } from "../Services/turn-timeline.js";
 
 export interface TracingConfig {
 	/** Master switch — when false the returned Layer is a no-op. */
@@ -135,7 +136,10 @@ export const makeDaemonTracingLive = (
 			const sink = yield* makeTraceSink(localOptions);
 			const runtime = yield* Effect.runtime<never>();
 			const upstreamTracer = yield* OtelEffectTracer.make;
-			yield* Effect.addFinalizer(sink.close);
+			const detachTimeline = attachTurnTimeline(sink);
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(detachTimeline).pipe(Effect.andThen(sink.close())),
+			);
 			return Layer.setTracer(
 				makeCompositeTracer(
 					makeLocalFileTracer({ ...localOptions, sink }, runtime),

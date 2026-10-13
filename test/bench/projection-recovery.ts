@@ -37,7 +37,7 @@ const projector: EffectProjector = {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`UPDATE benchmark_applications
 				SET applied_count = applied_count + 1 WHERE sequence = ${event.sequence}`;
-			return { stamped: [], removed: [] };
+			return { stamped: [], removed: [], collections: [] };
 		}),
 };
 

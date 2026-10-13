@@ -152,7 +152,7 @@ it("rolls back the entire upstream rewind commit when a hidden removal cannot pr
 							cause: "Test removal projection failure",
 						}),
 					)
-				: Effect.succeed({ stamped: [], removed: [] }),
+				: Effect.succeed({ stamped: [], removed: [], collections: [] }),
 	};
 	await Effect.runPromise(
 		Effect.gen(function* () {

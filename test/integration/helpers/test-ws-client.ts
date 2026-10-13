@@ -29,6 +29,7 @@ import {
 	type PtyListResponse,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { decodeSessionDetail } from "../../../src/lib/frontend/transport/session-detail-wire.js";
 import { harnessForModelProvider } from "../../../src/lib/provider/turn-settings.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
@@ -781,7 +782,10 @@ export class TestWsClient {
 		const assemble = assembleDetailRows();
 		await this.follow(
 			"session_detail",
-			(client) => client.SubscribeSessionDetail({ projectSlug, sessionId }),
+			(client) =>
+				client
+					.SubscribeSessionDetail({ projectSlug, sessionId })
+					.pipe(decodeSessionDetail),
 			scope,
 			(envelope) => {
 				const items =

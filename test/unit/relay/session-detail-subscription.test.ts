@@ -42,6 +42,7 @@ import {
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { resumeStream } from "../../../src/lib/frontend/transport/resume.js";
+import { decodeSessionDetail } from "../../../src/lib/frontend/transport/session-detail-wire.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -210,6 +211,7 @@ const subscribeMessages = (
 	options: Parameters<typeof subscribeSessionDetail>[0],
 ) =>
 	subscribeSessionDetail(options).pipe(
+		decodeSessionDetail,
 		Stream.filter(
 			(envelope) =>
 				envelope._tag !== "upsert" || envelope.item._tag !== "rewind",

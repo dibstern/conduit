@@ -58,6 +58,12 @@ function redactPayload(raw: string): string {
 
 /** Observe the source schemas at the wire boundary without replacing RPC errors. */
 export class RpcDecodeDiagnostics {
+	readonly wireFrames: {
+		endpoint: string;
+		bytes: number;
+		rpcs: string[];
+		detailParts: { messageId: string; bytes: number; suffix: boolean }[];
+	}[] = [];
 	readonly failures: {
 		endpoint: string;
 		rpc: string | null;
@@ -147,6 +153,57 @@ export class RpcDecodeDiagnostics {
 							this.capture(endpoint, null, raw, error);
 							throw error;
 						}
+						this.wireFrames.push({
+							endpoint,
+							bytes: new TextEncoder().encode(raw).byteLength,
+							rpcs: [
+								...new Set(
+									frames.flatMap((frame) => {
+										if (!isRecord(frame)) return [];
+										const tag = requests.get(String(frame["requestId"]));
+										return tag ? [tag] : [];
+									}),
+								),
+							],
+							detailParts: frames.flatMap((frame) => {
+								if (
+									!isRecord(frame) ||
+									requests.get(String(frame["requestId"])) !==
+										"SubscribeSessionDetail" ||
+									!Array.isArray(frame["values"])
+								)
+									return [];
+								return frame["values"].flatMap((envelope: unknown) => {
+									if (!isRecord(envelope)) return [];
+									const rows: unknown[] =
+										envelope["_tag"] === "snapshot" &&
+										Array.isArray(envelope["rows"])
+											? envelope["rows"]
+											: envelope["_tag"] === "upsert"
+												? [envelope["item"]]
+												: [];
+									return rows.flatMap((row) => {
+										if (
+											!isRecord(row) ||
+											row["_tag"] !== "part" ||
+											typeof row["messageId"] !== "string" ||
+											!isRecord(row["part"]) ||
+											row["part"]["type"] !== "text" ||
+											typeof row["part"]["text"] !== "string"
+										)
+											return [];
+										return [
+											{
+												messageId: row["messageId"],
+												bytes: new TextEncoder().encode(row["part"]["text"])
+													.byteLength,
+												suffix: envelope["textSuffix"] !== undefined,
+											},
+										];
+									});
+								});
+							}),
+						});
 						for (const frame of frames) {
 							if (!isRecord(frame)) continue;
 							const requestId = String(frame["requestId"]);

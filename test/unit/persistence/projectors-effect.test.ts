@@ -1523,7 +1523,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					yield* runner.projectEvent(yield* store.append(event));
 				const streamed = yield* reads.getSession("child");
 				expect(streamed?.fork_point_timestamp).toBe(FIXED_TS);
-				yield* runner.projectEvent(
+				const replaced = yield* runner.projectEvent(
 					yield* store.append(
 						canonicalEvent("message.snapshot", "child", {
 							messageId: "copy-reply",
@@ -1541,6 +1541,9 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				const snapshot = yield* reads.getSession("child");
 				expect(snapshot?.fork_point_timestamp).toBe(1000);
 				expect(snapshot?.version).toBeGreaterThan(streamed?.version ?? 0);
+				expect(replaced.collections).toEqual(
+					expect.arrayContaining(["messages", "sessions", "sidebar"]),
+				);
 				yield* runner.projectEvent(
 					yield* store.append(makeMessageCreated("child", "copy-reply")),
 				);
@@ -3756,7 +3759,7 @@ describe("ProjectionRunnerEffect", () => {
 			project: (_event, ctx) =>
 				Effect.sync(() => {
 					observedContext = ctx;
-					return { stamped: [], removed: [] };
+					return { stamped: [], removed: [], collections: [] };
 				}),
 		};
 
@@ -3814,7 +3817,7 @@ describe("ProjectionRunnerEffect", () => {
 			project: (event) =>
 				Effect.sync(() => {
 					projectedSequences.push(event.sequence);
-					return { stamped: [], removed: [] };
+					return { stamped: [], removed: [], collections: [] };
 				}),
 		};
 
@@ -3891,7 +3894,7 @@ describe("ProjectionRunnerEffect", () => {
 							operation: "project",
 							cause: new Error("replay projector explosion"),
 						});
-					return { stamped: [], removed: [] };
+					return { stamped: [], removed: [], collections: [] };
 				}),
 		};
 		const successfulProjector: EffectProjector = {
@@ -3901,7 +3904,7 @@ describe("ProjectionRunnerEffect", () => {
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`UPDATE sessions SET status = 'busy' WHERE id = ${event.sessionId}`;
-					return { stamped: [], removed: [] };
+					return { stamped: [], removed: [], collections: [] };
 				}),
 		};
 		return runTestWithProjectors(
@@ -3961,7 +3964,7 @@ describe("ProjectionRunnerEffect", () => {
 					: Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
 							yield* sql`UPDATE sessions SET title = 'batch-applied' WHERE id = ${event.sessionId}`;
-							return { stamped: [], removed: [] };
+							return { stamped: [], removed: [], collections: [] };
 						}),
 		};
 

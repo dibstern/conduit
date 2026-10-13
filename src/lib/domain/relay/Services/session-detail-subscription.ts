@@ -42,6 +42,7 @@ import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { stream } from "./read-model-subscription.js";
 import { ConfigTag } from "./services.js";
+import { encodeSessionDetail } from "./session-detail-wire.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { providerSteers } from "./session-inbox.js";
 
@@ -166,6 +167,7 @@ export const subscribeSessionDetail = (options: {
 				bus,
 				source: {
 					name: `session-detail/${options.sessionId}`,
+					collections: ["messages", "sessions", "inputs"],
 					shareReads: true,
 					read: (range, base) =>
 						Effect.gen(function* () {
@@ -387,4 +389,4 @@ export const subscribeSessionDetail = (options: {
 				),
 			);
 		}),
-	);
+	).pipe(encodeSessionDetail);

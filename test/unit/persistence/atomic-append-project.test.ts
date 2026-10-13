@@ -69,7 +69,7 @@ it("batch progress survives restart and a kill before COMMIT without skipping a 
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`UPDATE projection_probe SET applied = applied + 1`;
-				return { stamped: [], removed: [] };
+				return { stamped: [], removed: [], collections: [] };
 			}),
 	};
 	try {
@@ -203,7 +203,7 @@ it("a kill during replay preserves completed pages and replays the uncommitted p
 						copyFileSync(`${filename}-wal`, `${killed}-wal`);
 					return yield* Effect.die("killed during replay");
 				}
-				return { stamped: [], removed: [] };
+				return { stamped: [], removed: [], collections: [] };
 			}),
 	};
 	try {

@@ -10,7 +10,10 @@ import {
 	Stream,
 } from "effect";
 import { expect } from "vitest";
-import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import type {
+	ReadModelAdvance,
+	ReadModelCollection,
+} from "../../../src/lib/contracts/read-model-advance.js";
 import {
 	type AdvanceRoute,
 	type Envelope,
@@ -33,7 +36,13 @@ const advance = (
 	version: number,
 	sessionIds: readonly string[] = ["session-1"],
 	removedSessionIds: readonly string[] = [],
-): ReadModelAdvance => ({ version, sessionIds, removedSessionIds });
+	collections: readonly ReadModelCollection[] = ["messages"],
+): ReadModelAdvance => ({
+	version,
+	sessionIds,
+	removedSessionIds,
+	collections,
+});
 
 /** A row the fake read model keys by its own title. */
 const row = (title: string) => ({ id: title, row: { title } });
@@ -78,6 +87,7 @@ const makeFakeSource = <T>(
 
 		const source: SubscriptionSource<T> = {
 			name: "fake",
+			collections: ["messages"],
 			read: (range) =>
 				Effect.gen(function* () {
 					yield* Ref.update(calls, (seen) => [...seen, range]);
@@ -155,6 +165,7 @@ describe("ReadModelSubscription", () => {
 				const bus = yield* SessionEventBusTag;
 				const source: SubscriptionSource<Row> = {
 					name: "fake",
+					collections: ["messages"],
 					read: (range) =>
 						Effect.succeed({
 							rows: [],
@@ -345,7 +356,7 @@ describe("ReadModelSubscription", () => {
 	);
 
 	it.scoped(
-		"does not query for an advance that touches nothing it serves",
+		"does not query for an advance outside its session or collections",
 		() =>
 			withBus(
 				Effect.gen(function* () {
@@ -363,6 +374,7 @@ describe("ReadModelSubscription", () => {
 					yield* Queue.take(queue);
 
 					yield* bus.publishAdvance(advance(6, ["someone-else"]));
+					yield* bus.publishAdvance(advance(6, ["mine"], [], ["approvals"]));
 					yield* fake.commit(7, row("mine-moved"));
 					yield* bus.publishAdvance(advance(7, ["mine"]));
 
@@ -763,7 +775,9 @@ describe("ReadModelSubscription", () => {
 					yield* bus.publishAdvance(advance(7, [], ["b"]));
 					for (let version = 8; version <= 263; version++) {
 						yield* fake.commit(version, row("a"));
-						yield* bus.publishAdvance(advance(version, ["someone-else"]));
+						yield* bus.publishAdvance(
+							advance(version, ["someone-else"], [], ["approvals"]),
+						);
 					}
 					yield* Deferred.succeed(release, undefined);
 					expect(yield* Queue.take(queue)).toEqual({
@@ -855,6 +869,7 @@ describe("ReadModelSubscription shared windows", () => {
 							const bus = yield* SessionEventBusTag;
 							const source: SubscriptionSource<number> = {
 								name: "shared",
+								collections: ["messages"],
 								shareReads: true,
 								resume: "rebase",
 								route: () => ({ moved: true, removed: [] }),

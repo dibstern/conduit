@@ -125,7 +125,6 @@ const makeSubscriptions = (
 							{
 								projectSlug,
 								sessionId: options.sessionId,
-								textSuffixes: true,
 								...(resumeFromSequence === undefined
 									? {}
 									: { resumeFromSequence }),

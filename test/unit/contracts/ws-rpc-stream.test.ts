@@ -46,12 +46,32 @@ type Member = "SubscribeShell" | "SubscribeSessionDetail";
 const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 	member === "SubscribeShell"
 		? [
-				{ version: 1, sessionIds: [], removedSessionIds: ["session-1"] },
-				{ version: 2, sessionIds: [], removedSessionIds: ["session-2"] },
+				{
+					version: 1,
+					sessionIds: [],
+					removedSessionIds: ["session-1"],
+					collections: ["sidebar"],
+				},
+				{
+					version: 2,
+					sessionIds: [],
+					removedSessionIds: ["session-2"],
+					collections: ["sidebar"],
+				},
 			]
 		: [
-				{ version: 1, sessionIds: ["session-1"], removedSessionIds: [] },
-				{ version: 2, sessionIds: ["session-1"], removedSessionIds: [] },
+				{
+					version: 1,
+					sessionIds: ["session-1"],
+					removedSessionIds: [],
+					collections: ["messages"],
+				},
+				{
+					version: 2,
+					sessionIds: ["session-1"],
+					removedSessionIds: [],
+					collections: ["messages"],
+				},
 			];
 
 const messageRow = (id: string, version = 0): MessageWithParts => ({

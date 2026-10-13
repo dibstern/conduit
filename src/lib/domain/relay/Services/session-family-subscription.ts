@@ -52,6 +52,7 @@ export const subscribeSessionFamily = (options: {
 				bus,
 				source: {
 					name: `session-family/${anchor}`,
+					collections: ["sessions"],
 					shareReads: true,
 					read: (range) =>
 						readQuery
@@ -83,7 +84,7 @@ export const subscribeSessionFamily = (options: {
 						const removed = advance.removedSessionIds.filter((id) =>
 							held.delete(id),
 						);
-						return { moved: advance.sessionIds.length > 0, removed };
+						return { moved: true, removed };
 					},
 					resume: "rebase",
 				},

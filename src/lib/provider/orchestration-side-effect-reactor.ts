@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect } from "effect";
 import type { ProviderDriverKind } from "../contracts/provider-instance.js";
+import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -385,31 +386,39 @@ export class ProviderSideEffectReactor {
 
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
+				const turnKey = {
+					sessionId: payload.sessionId,
+					inputId: payload.inputId,
+				};
+				mark(turnKey, "reactor-start");
 				const send = (
 					prepared: PreparedTurn | undefined,
 					nativeResumeFallback: boolean,
 				) =>
-					instance.sendTurnEffect({
-						...payload,
-						history: payload.history ?? [],
-						...(driver === "claude"
-							? {
-									commandAttempt,
-									instanceId: payload.instanceId ?? row.provider_id,
-									prompt: prepared?.prompt ?? payload.prompt,
-									text: payload.prompt,
-									configDir: prepared?.configDir,
-									resumeSessionId: prepared?.resumeSessionId,
-									startFreshNativeSession:
-										prepared?.resumeSessionId === undefined ||
-										payload.rewind !== undefined,
-									nativeResumeFallback,
-									nativeThread: prepared?.nativeThread,
-									...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
-								}
-							: {}),
-						eventSink: this.makeReactorEventSink(interactions),
-						abortSignal: new AbortController().signal,
+					Effect.suspend(() => {
+						mark(turnKey, "history-ready");
+						return instance.sendTurnEffect({
+							...payload,
+							history: payload.history ?? [],
+							...(driver === "claude"
+								? {
+										commandAttempt,
+										instanceId: payload.instanceId ?? row.provider_id,
+										prompt: prepared?.prompt ?? payload.prompt,
+										text: payload.prompt,
+										configDir: prepared?.configDir,
+										resumeSessionId: prepared?.resumeSessionId,
+										startFreshNativeSession:
+											prepared?.resumeSessionId === undefined ||
+											payload.rewind !== undefined,
+										nativeResumeFallback,
+										nativeThread: prepared?.nativeThread,
+										...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
+									}
+								: {}),
+							eventSink: this.makeReactorEventSink(interactions),
+							abortSignal: new AbortController().signal,
+						});
 					});
 				const result =
 					driver === "claude"

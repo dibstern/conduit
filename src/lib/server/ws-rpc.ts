@@ -25,7 +25,6 @@ import { subscribeProjectSettings } from "../domain/relay/Services/project-setti
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
-import { encodeSessionDetail } from "../domain/relay/Services/session-detail-wire.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
@@ -258,8 +257,6 @@ export const wsRpcHandlers = WsRpcGroup.of({
 					? {}
 					: { resumePoint: request.resumePoint }),
 			}).pipe(
-				(stream) =>
-					request.textSuffixes === true ? encodeSessionDetail(stream) : stream,
 				Stream.mapError(
 					(error) =>
 						new WsRpcError({
@@ -582,8 +579,8 @@ export const makeRoutedWsRpcServerLayer = <
 				),
 			),
 		SubscribeSessionDetail: (request) =>
-			routeStream(request.projectSlug, () => {
-				const source = subscribeSessionDetailWithPresence({
+			routeStream(request.projectSlug, () =>
+				subscribeSessionDetailWithPresence({
 					sessionId: request.sessionId,
 					...(request.resumeFromSequence === undefined
 						? {}
@@ -594,11 +591,8 @@ export const makeRoutedWsRpcServerLayer = <
 					...(request.resumePoint === undefined
 						? {}
 						: { resumePoint: request.resumePoint }),
-				});
-				return request.textSuffixes === true
-					? encodeSessionDetail(source)
-					: source;
-			}),
+				}),
+			),
 		SubscribeSessionTodos: (request) =>
 			routeStream(request.projectSlug, () =>
 				subscribeSessionTodos({

@@ -52,6 +52,7 @@ import {
 	loadDaemonConfig,
 } from "../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../src/lib/daemon/daemon-rpc-client.js";
+import { decodeSessionDetail } from "../../src/lib/frontend/transport/session-detail-wire.js";
 import {
 	inspectManagedOpenCodeProcess,
 	isProcessAlive,
@@ -2126,10 +2127,12 @@ export class ProcessBrowser {
 			const assemble = assembleDetailRows();
 			this.detailFibers.add(
 				this.watch(
-					this.rpc.SubscribeSessionDetail({
-						projectSlug: this.projectSlug,
-						sessionId,
-					}),
+					this.rpc
+						.SubscribeSessionDetail({
+							projectSlug: this.projectSlug,
+							sessionId,
+						})
+						.pipe(decodeSessionDetail),
 					(envelope) =>
 						Effect.sync(() => {
 							this.record({ type: "session_detail", sessionId, ...envelope });

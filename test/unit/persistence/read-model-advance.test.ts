@@ -104,7 +104,12 @@ it("a committed session write announces the session and stamps its row", async (
 			}>`SELECT version FROM sessions WHERE id = 's1'`;
 
 			expect(advances).toEqual([
-				{ version: 1, sessionIds: ["s1"], removedSessionIds: [] },
+				{
+					version: 1,
+					sessionIds: ["s1"],
+					removedSessionIds: [],
+					collections: ["sessions", "sidebar"],
+				},
 			]);
 			expect(rows).toEqual([{ version: 1 }]);
 		}),
@@ -139,7 +144,12 @@ it("a changed workspace hint must stamp and announce its session row", async () 
 				workspaceHint: "/repo/linked",
 			});
 			expect(advances).toEqual([
-				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+				{
+					version: 2,
+					sessionIds: ["s1"],
+					removedSessionIds: [],
+					collections: ["sessions", "sidebar"],
+				},
 			]);
 
 			yield* commit([
@@ -152,8 +162,18 @@ it("a changed workspace hint must stamp and announce its session row", async () 
 				version: 3,
 			});
 			expect(advances).toEqual([
-				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
-				{ version: 3, sessionIds: ["s1"], removedSessionIds: [] },
+				{
+					version: 2,
+					sessionIds: ["s1"],
+					removedSessionIds: [],
+					collections: ["sessions", "sidebar"],
+				},
+				{
+					version: 3,
+					sessionIds: ["s1"],
+					removedSessionIds: [],
+					collections: ["sessions", "sidebar"],
+				},
 			]);
 			yield* commit([
 				canonicalEvent("session.workspace_hint_changed", "s1", { path: null }),
@@ -318,7 +338,12 @@ it("applySessionCommand announces through the projection path, not its own", asy
 			}>`SELECT version FROM sessions WHERE id = 's1'`;
 
 			expect(advances).toEqual([
-				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+				{
+					version: 2,
+					sessionIds: ["s1"],
+					removedSessionIds: [],
+					collections: ["sessions", "sidebar"],
+				},
 			]);
 			expect(rows).toEqual([{ version: 2 }]);
 		}),
@@ -766,7 +791,18 @@ it("a delete followed by a re-create in one commit announces the row that surviv
 				}>`SELECT id, version FROM sessions`,
 			).toEqual([{ id: "s1", version: 2 }]);
 			expect(advances).toEqual([
-				{ version: 2, sessionIds: ["s1"], removedSessionIds: [] },
+				{
+					version: 2,
+					sessionIds: ["s1"],
+					removedSessionIds: [],
+					collections: [
+						"sessions",
+						"messages",
+						"approvals",
+						"inputs",
+						"sidebar",
+					],
+				},
 			]);
 		}),
 	);
@@ -782,7 +818,18 @@ it("a re-create followed by a delete in one commit announces only the removal", 
 
 			expect(yield* sql<{ id: string }>`SELECT id FROM sessions`).toEqual([]);
 			expect(advances).toEqual([
-				{ version: 1, sessionIds: [], removedSessionIds: ["s2"] },
+				{
+					version: 1,
+					sessionIds: [],
+					removedSessionIds: ["s2"],
+					collections: [
+						"sessions",
+						"messages",
+						"approvals",
+						"inputs",
+						"sidebar",
+					],
+				},
 			]);
 		}),
 	);
@@ -814,7 +861,18 @@ it("a body that projects twice is judged by its last projection, not the union",
 				}>`SELECT id, version FROM sessions`,
 			).toEqual([{ id: "s3", version: 3 }]);
 			expect(advances).toEqual([
-				{ version: 3, sessionIds: ["s3"], removedSessionIds: [] },
+				{
+					version: 3,
+					sessionIds: ["s3"],
+					removedSessionIds: [],
+					collections: [
+						"sessions",
+						"messages",
+						"approvals",
+						"inputs",
+						"sidebar",
+					],
+				},
 			]);
 		}),
 	);

@@ -36,7 +36,10 @@ import {
 	type Schema,
 	Stream,
 } from "effect";
-import type { ReadModelAdvance } from "../../../contracts/read-model-advance.js";
+import type {
+	ReadModelAdvance,
+	ReadModelCollection,
+} from "../../../contracts/read-model-advance.js";
 import {
 	digestRows,
 	type EnvelopeSchema,
@@ -95,6 +98,8 @@ export interface SubscriptionSource<T, E = never> {
 	 * (`session-detail/<id>`). Diagnostics label each read with it.
 	 */
 	readonly name: string;
+	/** Collections whose changes can affect this source's rows. */
+	readonly collections: readonly ReadModelCollection[];
 	/**
 	 * Whether `read` is a pure function of the range and the store, keeping no
 	 * per-subscriber state. Subscribers of a source with this name then share
@@ -148,8 +153,8 @@ export interface SubscriptionSource<T, E = never> {
 		| "snapshot",
 		E
 	>;
-	/** Route one advance. Called for every advance; must not touch the store. */
-	readonly route: (advance: ReadModelAdvance) => AdvanceRoute;
+	/** Scope one advance or name removals. Called for every advance; no reads. */
+	readonly route?: (advance: ReadModelAdvance) => AdvanceRoute;
 	/**
 	 * How a resume is served.
 	 *
@@ -432,8 +437,17 @@ export const stream = <T, E = never>(options: {
 						for (const advance of chunk) {
 							// Already accounted for in a coherent base, removals included.
 							if (advance.version <= floor) continue;
-							const route = options.source.route(advance);
-							if (route.moved || route.removed.length > 0) {
+							const route = options.source.route?.(advance) ?? {
+								moved: true,
+								removed: [],
+							};
+							const moved =
+								route.moved &&
+								advance.collections.some((collection) =>
+									options.source.collections.includes(collection),
+								);
+							// Cascaded removals still reach each subscriber's held ids.
+							if (moved || route.removed.length > 0) {
 								through = advance.version;
 								for (const id of route.removed)
 									removed.push({ id, version: advance.version });

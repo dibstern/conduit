@@ -267,6 +267,7 @@ export const makeProjectionRunnerEffect = (
 						version,
 						sessionIds: touched.stamped,
 						removedSessionIds: touched.removed,
+						collections: touched.collections,
 					};
 				}),
 			);
@@ -283,6 +284,7 @@ export const makeProjectionRunnerEffect = (
 					version: 0,
 					sessionIds: [],
 					removedSessionIds: [],
+					collections: [],
 				});
 
 			return Effect.gen(function* () {
@@ -341,6 +343,7 @@ export const makeProjectionRunnerEffect = (
 					version,
 					sessionIds: touched.stamped,
 					removedSessionIds: touched.removed,
+					collections: touched.collections,
 				};
 			});
 		};

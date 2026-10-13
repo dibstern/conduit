@@ -265,6 +265,8 @@ function currentRequest(prompt: string): string {
 
 export function responseChunks(prompt: string): string[] {
 	const visiblePrompt = currentRequest(prompt);
+	if (visiblePrompt === "streaming-cost")
+		return Array.from({ length: 512 }, () => "0123456789abcdef01234567");
 	if (visiblePrompt === "approval-account-switch-history")
 		return ["OMIT-THIS-ASSISTANT-CONTEXT ".repeat(900), "\nHistory complete."];
 	if (visiblePrompt.startsWith("approval-thread-read-history-"))
