@@ -8,11 +8,13 @@
 	import TodoProgressBar from "./TodoProgressBar.svelte";
 	import TodoItemRow from "./TodoItemRow.svelte";
 
-	let { items }: { items: TodoItem[] } = $props();
+	let { items, forceCollapsed = false }: { items: TodoItem[]; forceCollapsed?: boolean } = $props();
 
 	let collapsed = $state(false);
 	let fading = $state(false);
 	let hidden = $state(false);
+	// A full-screen phone terminal has no room for the overlay.
+	$effect(() => { if (forceCollapsed) collapsed = true; });
 
 	const progress: TodoProgress = $derived.by(() => {
 		const total = items.length;
@@ -65,16 +67,6 @@
 	function toggleCollapse(): void {
 		collapsed = !collapsed;
 	}
-
-	// External collapse event (e.g. mobile terminal maximize)
-
-	$effect(() => {
-		function onTodoCollapse() {
-			collapsed = true;
-		}
-		window.addEventListener("todo:collapse", onTodoCollapse);
-		return () => window.removeEventListener("todo:collapse", onTodoCollapse);
-	});
 </script>
 
 <div id="todo-sticky" class:hidden={isHidden}>

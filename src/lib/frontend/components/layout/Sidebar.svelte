@@ -53,10 +53,7 @@
 
 	// Settled sessions are never counted: that set only grows.
 	const openCount = $derived(
-		sessionList.groups.reduce(
-			(total, group) => total + group.rows.filter((row) => row.settledAt == null).length,
-			0,
-		),
+		sessionList.rows.filter((row) => row.settledAt == null).length,
 	);
 
 	// Opens a draft; the session is created by its first send. Pins the

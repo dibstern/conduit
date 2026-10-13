@@ -233,6 +233,7 @@ vi.mock("../../../src/lib/frontend/stores/file-tree.svelte.js", () => ({
 
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	uiState: {
+		openPanels: new Set<string>(),
 		sidebarCollapsed: false,
 		sidebarWidth: 256,
 		rewindActive: false,

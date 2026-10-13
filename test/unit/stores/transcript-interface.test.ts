@@ -2,7 +2,11 @@
 import { RpcClient, type RpcMessage } from "@effect/rpc";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	ResumePoint,
+	type SessionDetailEnvelope,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
 import {
 	makeWsRpcClientsLayer,
 	type WsRpcConnect,
@@ -15,6 +19,15 @@ const runtimeMock = vi.hoisted(() => ({
 	runTransportEffect: vi.fn(),
 }));
 const pageMock = vi.hoisted(() => ({ loadMoreHistoryRpc: vi.fn() }));
+const savedMock = vi.hoisted(() => ({
+	openSavedTranscript: vi.fn<() => Promise<SavedTranscript | undefined>>(),
+	saveTranscript: vi.fn(() => Promise.resolve()),
+	forgetTranscript: vi.fn(() => Promise.resolve()),
+}));
+vi.mock(
+	"../../../src/lib/frontend/stores/saved-transcripts.js",
+	() => savedMock,
+);
 vi.mock("../../../src/lib/frontend/transport/runtime.js", () => runtimeMock);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => pageMock);
 vi.mock("../../../src/lib/frontend/utils/markdown.js", () => ({
@@ -119,7 +132,7 @@ const snapshot = (
 	rows: HistoryMessage[],
 	sequence: number,
 	hasMore = false,
-): SessionDetailEnvelope => ({
+): Extract<SessionDetailEnvelope, { _tag: "snapshot" }> => ({
 	_tag: "snapshot",
 	sequence,
 	hasMore,
@@ -147,6 +160,7 @@ let runtime: ManagedRuntime.ManagedRuntime<
 	never
 >;
 beforeEach(() => {
+	savedMock.openSavedTranscript.mockResolvedValue(undefined);
 	wire = adapter();
 	runtime = ManagedRuntime.make(makeWsRpcClientsLayer(wire.connect));
 	runtimeMock.getRuntime.mockResolvedValue(runtime);
@@ -162,12 +176,70 @@ afterEach(async () => {
 	runtimeMock.getRuntime.mockReset();
 	runtimeMock.runTransportEffect.mockReset();
 	pageMock.loadMoreHistoryRpc.mockReset();
+	savedMock.openSavedTranscript.mockReset();
 	sessionActivity.clear();
 	sessionMessages.clear();
 	sessionState.currentId = null;
 });
 
 describe("transcript feed interface", () => {
+	it("starts the feed while storage is pending and rejects a late saved draw", async () => {
+		let finish: ((record: SavedTranscript) => void) | undefined;
+		savedMock.openSavedTranscript.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		viewTranscript("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const request = requestFor(wire.requests, "A");
+		if (!request) throw new Error("missing request");
+		await wire.emit(request, snapshot([row("u1", "newer live page")], 10));
+		await wire.emit(request, { _tag: "synchronized" });
+		await settled(() => transcriptStatus("A")._tag === "live");
+		finish?.({
+			schema: 1,
+			sessionId: "A",
+			project: "project",
+			buildId: "test",
+			protocolVersion: 1,
+			openedAt: 1,
+			snapshot: {
+				...snapshot([row("u1", "old saved page")], 1),
+				resumePoint: ResumePoint.make("saved"),
+			},
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(getOrCreateSessionSlot("A").messages.messages).toMatchObject([
+			{ type: "user", text: "newer live page" },
+		]);
+		expect(requestFor(wire.requests, "A", 1)).toBeUndefined();
+	});
+
+	it("resumes from a saved page that is ready when the subscription starts", async () => {
+		savedMock.openSavedTranscript.mockResolvedValue({
+			schema: 1,
+			sessionId: "A",
+			project: "project",
+			buildId: "test",
+			protocolVersion: 1,
+			openedAt: 1,
+			snapshot: {
+				...snapshot([row("u1", "saved page")], 7),
+				resumePoint: ResumePoint.make("saved"),
+			},
+		});
+		viewTranscript("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		expect(requestFor(wire.requests, "A")?.payload).toMatchObject({
+			resumeFromSequence: 7,
+			resumePoint: "saved",
+		});
+		expect(getOrCreateSessionSlot("A").messages.messages).toMatchObject([
+			{ type: "user", text: "saved page" },
+		]);
+	});
 	it("installs a cold snapshot and reaches live", async () => {
 		viewTranscript("project", "A");
 		await settled(() => requestFor(wire.requests, "A") !== undefined);
@@ -318,7 +390,10 @@ describe("transcript feed interface", () => {
 			sessionId: "A",
 			before: "u2",
 		});
-		finish?.({ messages: [row("u1", "old")], hasMore: false });
+		finish?.({
+			messages: [row("u1", "old"), row("u1", "duplicate"), row("u2", "new")],
+			hasMore: false,
+		});
 		await one;
 		expect(
 			getOrCreateSessionSlot("A").messages.messages.map(

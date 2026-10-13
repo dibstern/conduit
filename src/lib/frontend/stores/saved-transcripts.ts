@@ -35,6 +35,9 @@ import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
 
 const DATABASE = "conduit-saved-transcripts";
 const STORE = "transcripts";
+// Recency only ({ sessionId, openedAt }): an open touches this small row, never
+// the page. The page row stays the only truth about what was saved.
+const META = "meta";
 const KEEP = 20;
 const READ_WAIT_MS = 150;
 
@@ -68,11 +71,17 @@ let database: Promise<IDBDatabase> | undefined;
 
 const open = (): Promise<IDBDatabase> =>
 	(database ??= new Promise((resolve, reject) => {
-		const request = indexedDB.open(DATABASE, 1);
-		request.onupgradeneeded = () =>
-			request.result
-				.createObjectStore(STORE, { keyPath: "sessionId" })
-				.createIndex("openedAt", "openedAt");
+		const request = indexedDB.open(DATABASE, 2);
+		request.onupgradeneeded = () => {
+			const db = request.result;
+			// These pages are a cache. Drop v1 rather than migrating large snapshots.
+			if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+			db.createObjectStore(STORE, { keyPath: "sessionId" });
+			db.createObjectStore(META, { keyPath: "sessionId" }).createIndex(
+				"openedAt",
+				"openedAt",
+			);
+		};
 		request.onsuccess = () => {
 			const db = request.result;
 			// Another tab upgrading the database: let it, and reopen next time.
@@ -86,22 +95,31 @@ const open = (): Promise<IDBDatabase> =>
 		request.onblocked = () => reject(request.error);
 	}));
 
+// Overlap the database open with module evaluation and transport startup.
+// Private browsing throws on merely reading `indexedDB`; the app must still load.
+try {
+	if (typeof indexedDB !== "undefined") void open().catch(() => undefined);
+} catch {
+	// Storage refused: every open is cold.
+}
+
 /**
- * Runs `work` in one readwrite transaction. Resolves with what `work` hands
+ * Runs `work` in one transaction. Resolves with what `work` hands
  * to `done`, as soon as it does, so a later abort (over quota) cannot take
  * back a read; otherwise once the transaction commits.
  */
 const transact = <T>(
-	work: (store: IDBObjectStore, done: (value: T) => void) => void,
+	mode: IDBTransactionMode,
+	work: (transaction: IDBTransaction, done: (value: T) => void) => void,
 ): Promise<T | undefined> =>
 	open()
 		.then(
 			(db) =>
 				new Promise<T | undefined>((resolve, reject) => {
-					const transaction = db.transaction(STORE, "readwrite");
+					const transaction = db.transaction([STORE, META], mode);
 					transaction.oncomplete = () => resolve(undefined);
 					transaction.onabort = () => reject(transaction.error);
-					work(transaction.objectStore(STORE), resolve);
+					work(transaction, resolve);
 				}),
 		)
 		.catch(() => undefined);
@@ -119,18 +137,36 @@ export const openSavedTranscript = (
 const readSavedTranscript = (
 	sessionId: string,
 ): Promise<SavedTranscript | undefined> =>
-	transact<SavedTranscript>((store, done) => {
+	transact<SavedTranscript>("readonly", (transaction, done) => {
+		const store = transaction.objectStore(STORE);
 		const get = store.get(sessionId);
 		get.onsuccess = () => {
 			const stored: unknown = get.result;
 			if (typeof stored !== "object" || stored === null) return;
 			const record = decode(stored);
 			if (record === undefined) {
-				store.delete(sessionId);
+				void transact<void>("readwrite", (cleanup) => {
+					const pages = cleanup.objectStore(STORE);
+					const current = pages.get(sessionId);
+					current.onsuccess = () => {
+						// A newer valid save may have landed since the readonly get.
+						if (decode(current.result) !== undefined) return;
+						pages.delete(sessionId);
+						cleanup.objectStore(META).delete(sessionId);
+					};
+				});
 				return;
 			}
 			done(record);
-			store.put({ ...stored, openedAt: Date.now() });
+			// A touch writes only the small recency row, after the read resolves.
+			void transact<void>("readwrite", (touch) => {
+				const key = touch.objectStore(STORE).getKey(sessionId);
+				key.onsuccess = () => {
+					// An evicted page must not come back as an orphan recency row.
+					if (key.result !== undefined)
+						touch.objectStore(META).put({ sessionId, openedAt: Date.now() });
+				};
+			});
 		};
 	});
 
@@ -148,8 +184,10 @@ export const saveTranscript = (
 ): Promise<void> =>
 	snapshot.resumePoint === undefined
 		? Promise.resolve()
-		: transact<void>((store) => {
-				const record = Schema.encodeSync(SavedTranscript)({
+		: transact<void>("readwrite", (transaction) => {
+				const store = transaction.objectStore(STORE);
+				const meta = transaction.objectStore(META);
+				const record: SavedTranscript = {
 					schema: 1,
 					sessionId,
 					project,
@@ -157,7 +195,7 @@ export const saveTranscript = (
 					protocolVersion: WS_PROTOCOL_VERSION,
 					openedAt: Date.now(),
 					snapshot,
-				});
+				};
 				const get = store.get(sessionId);
 				get.onsuccess = () => {
 					const existing = decode(get.result);
@@ -168,17 +206,22 @@ export const saveTranscript = (
 						existing.snapshot.resumePoint !== openedFrom
 					)
 						return;
-					store.put(record);
+					store.put(Schema.encodeSync(SavedTranscript)(record));
+					meta.put({ sessionId, openedAt: record.openedAt });
 					// Oldest first: everything before the newest KEEP goes.
-					const keys = store.index("openedAt").getAllKeys();
+					const keys = meta.index("openedAt").getAllKeys();
 					keys.onsuccess = () => {
-						for (const key of keys.result.slice(0, -KEEP)) store.delete(key);
+						for (const key of keys.result.slice(0, -KEEP)) {
+							store.delete(key);
+							meta.delete(key);
+						}
 					};
 				};
 			});
 
 /** Drop the session's saved page: the server has disowned it. */
 export const forgetTranscript = (sessionId: string): Promise<void> =>
-	transact<void>((store) => {
-		store.delete(sessionId);
+	transact<void>("readwrite", (transaction) => {
+		transaction.objectStore(STORE).delete(sessionId);
+		transaction.objectStore(META).delete(sessionId);
 	});

@@ -732,16 +732,35 @@ function transcriptView(): {
 					install(sessionId, slot);
 				}
 			}
+			let opened: SavedSnapshot | undefined;
+			let subscribed = false;
+			let received = false;
+			void saved.then((record) => {
+				if (
+					currentGeneration !== generation ||
+					record?.project !== project ||
+					!slot ||
+					received
+				)
+					return;
+				opened = record.snapshot;
+				if (subscribed && slot.messages.transcript) {
+					// A cold request is already in flight. Draw only until its first reply.
+					slot.messages.transcript = applyTranscriptEnvelope(
+						slot.messages.transcript,
+						record.snapshot,
+					);
+					install(sessionId ?? record.sessionId, slot);
+				}
+			});
 			void stopFeed().then(async () => {
 				if (currentGeneration !== generation || !sessionId || !slot) return;
-				const [runtime, record] = await Promise.all([getRuntime(), saved]);
+				const runtime = await getRuntime();
 				if (currentGeneration !== generation) return;
 				const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
 				ledgers.set(slot.messages, ledger);
 				// Drawn first, once; a restarted feed resumes from what it applied.
-				const opened =
-					record?.project === project ? record.snapshot : undefined;
-				let unopened = opened;
+				let firstSubscription = true;
 				// The server's snapshot, saved once it synchronizes with no change
 				// between: only then is it exactly the rows at its sequence.
 				let unsaved: SavedSnapshot | undefined;
@@ -751,8 +770,9 @@ function transcriptView(): {
 							Stream.runForEach(
 								supervise(
 									Stream.suspend(() => {
-										const first = unopened;
-										unopened = undefined;
+										const first = firstSubscription ? opened : undefined;
+										firstSubscription = false;
+										subscribed = true;
 										return subscriptions.sessionDetail({
 											sessionId,
 											ledger,
@@ -775,6 +795,7 @@ function transcriptView(): {
 											!slot.messages.transcript
 										)
 											return;
+										received = true;
 										const before = slot.messages.transcript;
 										const item =
 											envelope._tag === "upsert" ? envelope.item : undefined;
@@ -798,13 +819,21 @@ function transcriptView(): {
 												)
 										)
 											refreshSessionSkills(sessionId);
-										if (envelope._tag === "synchronized" && unsaved)
-											void saveTranscript(
-												sessionId,
-												project,
-												unsaved,
-												opened?.resumePoint,
+										if (envelope._tag === "synchronized" && unsaved) {
+											const snapshot = unsaved;
+											// A restored server may be older than the saved page. Keep its
+											// CAS token even when the network won and nothing was drawn.
+											void saved.then((record) =>
+												saveTranscript(
+													sessionId,
+													project,
+													snapshot,
+													record?.project === project
+														? record.snapshot.resumePoint
+														: undefined,
+												),
 											);
+										}
 										unsaved =
 											envelope._tag === "snapshot" && envelope !== opened
 												? envelope
@@ -912,16 +941,18 @@ export function loadOlderTranscript(sessionId: string): Promise<void> {
 				!slot.messages.transcript
 			)
 				return;
+			const seen = new Set<string>();
 			slot.messages.transcript = {
 				...slot.messages.transcript,
 				rows: [
 					...response.messages.map(toHistoryMessage),
 					...slot.messages.transcript.rows,
 				]
-					.filter(
-						(row, index, all) =>
-							all.findIndex((other) => other.id === row.id) === index,
-					)
+					.filter((row) => {
+						if (seen.has(row.id)) return false;
+						seen.add(row.id);
+						return true;
+					})
 					.sort(rowOrder),
 				hasMore: response.hasMore,
 			};

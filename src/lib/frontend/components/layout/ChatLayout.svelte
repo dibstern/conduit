@@ -10,9 +10,7 @@
 	import { WsRpcClients } from "../../transport/shared-client.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
-	import SidebarFilePanel from "../file/SidebarFilePanel.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
-	import TaskDrawer from "../session/TaskDrawer.svelte";
 	import { taskDrawer } from "../session/background-tasks.svelte.js";
 	import { activeSessionView, matchSessionViewShortcut } from "./session-views.js";
 	import Sidebar from "./Sidebar.svelte";
@@ -25,11 +23,7 @@
 	import NotificationStack from "../overlays/NotificationStack.svelte";
 	import ImageLightbox from "../overlays/ImageLightbox.svelte";
 	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
-	import InfoPanels from "../overlays/InfoPanels.svelte";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
-	import TodoOverlay from "../todo/TodoOverlay.svelte";
-	import TerminalPanel from "../terminal/TerminalPanel.svelte";
-	import FileViewer from "../file/FileViewer.svelte";
 	import Button from "../ui/Button.svelte";
 	import {
 		uiState,
@@ -75,7 +69,6 @@
 		observeOpenSession,
 		trackSeen,
 	} from "../../utils/attention.js";
-	import DeepSearch from "../session/DeepSearch.svelte";
 
 	let qrVisible = $state(false);
 	let qrEverOpened = $state(false);
@@ -389,6 +382,19 @@
 	// Todo items (the viewed session's todo subscription)
 
 	const todoItems = $derived(todoState.items);
+	let todoEverOpened = $state(false);
+	let fileViewerEverOpened = $state(false);
+	let deepSearchEverOpened = $state(false);
+	$effect(() => {
+		if (todoItems.length > 0) todoEverOpened = true;
+		if (uiState.fileViewerOpen) fileViewerEverOpened = true;
+	});
+
+	function handleDeepSearchShortcut(event: KeyboardEvent): void {
+		if (deepSearchEverOpened || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+		event.preventDefault();
+		deepSearchEverOpened = true;
+	}
 
 	function handleQrClose() {
 		qrVisible = false;
@@ -416,15 +422,16 @@
 				if (record && sessionState.currentId === null && getCurrentSessionId() === loadSessionId)
 					drawSavedTranscript(record);
 			});
-		void savedTranscript.then((transcript) => {
+		const readShell = (project: string | null | undefined) => {
 			if (attachGeneration !== 0) return;
-			const project = transcript?.project ?? loadProject ?? lastProject;
 			if (!project) return;
 			void openSavedShell(project).then((record) => {
 				if (record && attachGeneration === 0 && routerState.path === loadPath && routerState.search === loadSearch)
 					drawSavedShell(record);
 			});
-		});
+		};
+		if (loadProject) readShell(loadProject);
+		else void savedTranscript.then((transcript) => readShell(transcript?.project ?? lastProject));
 		// A page load starts clean; only a change of project clears state.
 		let previousSlug = attachedProjectState.slug;
 		const unsubscribe = onProjectAttached((slug) => {
@@ -689,11 +696,6 @@
 		});
 	}
 
-	// A full-screen phone terminal has no room for the todo overlay.
-	$effect(() => {
-		if (mobileMaximized) window.dispatchEvent(new CustomEvent("todo:collapse"));
-	});
-
 	// One matchMedia listener for the whole app decides whether the session's
 	// own bar replaces the global header. Kept here rather than in each consumer
 	// so the chrome cannot disagree with itself about what "compact" means.
@@ -850,7 +852,11 @@
 			{#if !phoneListScreen}<Banners />{/if}
 
 			<!-- Todo Sticky Overlay -->
-			<TodoOverlay items={todoItems} />
+			{#if todoEverOpened}
+				{#await import("../todo/TodoOverlay.svelte") then { default: TodoOverlay }}
+					<TodoOverlay items={todoItems} forceCollapsed={mobileMaximized} />
+				{/await}
+			{/if}
 
 			<!-- Rewind Banner -->
 			{#if uiState.rewindActive}
@@ -878,7 +884,9 @@
 					</div>
 					{#if sessionViewState.compact && sessionViewState.filesEverOpened}
 						<div class="absolute inset-0 z-10 flex min-h-0 bg-bg-surface" class:invisible={phoneView !== "files"} inert={phoneView !== "files"} style:padding-top="var(--phone-chrome-clearance)">
-							<SidebarFilePanel onClose={() => { setFilesOpen(false); }} />
+							{#await import("../file/SidebarFilePanel.svelte") then { default: SidebarFilePanel }}
+								<SidebarFilePanel onClose={() => { setFilesOpen(false); }} />
+							{/await}
 						</div>
 					{/if}
 
@@ -896,7 +904,9 @@
 							</div>
 						{/if}
 						<div class={mobileMaximized ? "absolute inset-0 z-20 flex min-h-0 flex-col bg-bg-surface" : "shrink-0 min-h-0"} style={mobileMaximized ? "padding-top: var(--phone-chrome-clearance);" : `height: ${terminalHeight}px;`}>
-							<TerminalPanel folders={fileTreeState.roots} onTabBarTouchStart={handleTabBarTouchStart} />
+							{#await import("../terminal/TerminalPanel.svelte") then { default: TerminalPanel }}
+								<TerminalPanel folders={fileTreeState.roots} onTabBarTouchStart={handleTabBarTouchStart} />
+							{/await}
 						</div>
 					{/if}
 				</div>
@@ -937,26 +947,42 @@
 					{/if}
 					<div data-testid="side-pane-files" aria-labelledby="files-pane-title" class="relative flex shrink-0 min-h-0 min-w-0 flex-col bg-bg-surface" style:flex={filesPaneExpanded ? "1 1 0%" : "0 0 auto"} style:width={filesPaneExpanded ? undefined : `${paneWidth}px`}>
 						<div class="relative flex flex-1 min-h-0" class:invisible={uiState.fileViewerOpen} inert={uiState.fileViewerOpen}>
-							<SidebarFilePanel pane paneTitle={uiState.fileViewerOpen ? undefined : paneTitle} paneActions={uiState.fileViewerOpen ? undefined : paneActions} onClose={closeFilesPane} />
+							{#await import("../file/SidebarFilePanel.svelte") then { default: SidebarFilePanel }}
+								<SidebarFilePanel pane paneTitle={uiState.fileViewerOpen ? undefined : paneTitle} paneActions={uiState.fileViewerOpen ? undefined : paneActions} onClose={closeFilesPane} />
+							{/await}
 						</div>
-						{#if uiState.fileViewerOpen}<div class="absolute inset-0 flex min-h-0"><FileViewer pane {paneTitle} {paneActions} visible onClose={closeFileViewer} /></div>{/if}
+						{#if uiState.fileViewerOpen}
+							<div class="absolute inset-0 flex min-h-0">
+								{#await import("../file/FileViewer.svelte") then { default: FileViewer }}
+									<FileViewer pane {paneTitle} {paneActions} visible onClose={closeFileViewer} />
+								{/await}
+							</div>
+						{/if}
 					</div>
 				{/if}
 				{#if !sessionViewState.compact && taskDrawer.task}
-					<TaskDrawer task={taskDrawer.task} />
+					{#await import("../session/TaskDrawer.svelte") then { default: TaskDrawer }}
+						<TaskDrawer task={taskDrawer.task} />
+					{/await}
 				{/if}
 			</div>
 			<ViewsRail />
 		</div>
 
 		<!-- Info Panels (absolute positioned floating panels) -->
-		<InfoPanels />
+		{#if uiState.openPanels.size > 0}
+			{#await import("../overlays/InfoPanels.svelte") then { default: InfoPanels }}
+				<InfoPanels />
+			{/await}
+		{/if}
 	</div>
 	<!-- /#app -->
 
 	<!-- The phone preview remains a full-screen overlay. -->
-	{#if sessionViewState.compact}
-		<FileViewer visible={phoneView === "files" && uiState.fileViewerOpen} onClose={closeFileViewer} overlay />
+	{#if sessionViewState.compact && fileViewerEverOpened}
+		{#await import("../file/FileViewer.svelte") then { default: FileViewer }}
+			<FileViewer visible={phoneView === "files" && uiState.fileViewerOpen} onClose={closeFileViewer} overlay />
+		{/await}
 	{/if}
 </div>
 <!-- /#layout -->
@@ -964,7 +990,12 @@
 <!-- Global overlays + notification stack (outside layout for proper z-index stacking) -->
 <ImageLightbox />
 <NotificationStack />
-<DeepSearch />
+<svelte:window onkeydown={handleDeepSearchShortcut} />
+{#if deepSearchEverOpened}
+	{#await import("../session/DeepSearch.svelte") then { default: DeepSearch }}
+		<DeepSearch initiallyOpen />
+	{/await}
+{/if}
 {#if qrEverOpened}
 	{#await import("../overlays/QrModal.svelte") then { default: QrModal }}
 		<QrModal visible={qrVisible} onClose={handleQrClose} />

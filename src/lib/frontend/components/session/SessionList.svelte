@@ -78,7 +78,7 @@
 	let bulkPending = $state(false);
 	let bulkSnoozeOpen = $state(false);
 
-	const filtered = $derived(sessionList.groups.flatMap((group) => group.rows));
+	const filtered = $derived(sessionList.rows);
 	let feedStale = $state(false);
 	$effect(() => {
 		const staleSince = sessionList.staleSince;
@@ -92,8 +92,8 @@
 	const grouping = $derived(getSessionGrouping());
 	const matching = $derived(filtered.filter((session) => statusFilter === null || sessionMatchesStatus(session, statusFilter)));
 	const arrangement = $derived(projectSessionList(
-		filtered,
-		{ status: statusFilter, grouping },
+		matching,
+		grouping,
 		sessionState.now,
 		(session) => {
 			const slug = session.projectSlug;

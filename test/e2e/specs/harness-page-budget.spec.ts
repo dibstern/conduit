@@ -182,6 +182,22 @@ test("a page holds up to 256 KB of whole messages, and load older reaches the re
 	await harness.terminate();
 	await seed(harness.projectStorePath());
 	await harness.restart({ keepPort: true });
+	await page.addInitScript(() => {
+		const metrics = { frameTimes: [] as number[], longTasks: [] as number[] };
+		Reflect.set(window, "historyMetrics", metrics);
+		let previous = performance.now();
+		const frame = (now: number) => {
+			metrics.frameTimes.push(now - previous);
+			previous = now;
+			requestAnimationFrame(frame);
+		};
+		requestAnimationFrame(frame);
+		if (PerformanceObserver.supportedEntryTypes.includes("longtask"))
+			new PerformanceObserver((list) => {
+				for (const entry of list.getEntries())
+					metrics.longTasks.push(entry.duration);
+			}).observe({ type: "longtask", buffered: true });
+	});
 
 	const snapshots: PageFrame[] = [];
 	const olderPages: PageFrame[] = [];
@@ -222,6 +238,7 @@ test("a page holds up to 256 KB of whole messages, and load older reaches the re
 	// A message over the budget arrives whole, alone on its page, and the page
 	// says there is more, from that message.
 	const [first] = snapshots;
+	const initialDomNodes = await page.locator("#messages *").count();
 	expect(first).toBeDefined();
 	expect(first?.ids).toEqual([assistantId(TURNS)]);
 	expect(first?.hasMore).toBe(true);
@@ -254,6 +271,15 @@ test("a page holds up to 256 KB of whole messages, and load older reaches the re
 		budgetBytes: PAGE_FRAME_BUDGET,
 		firstPage: first,
 		olderPages,
+		initialDomNodes,
+		pagedDomNodes: await page.locator("#messages *").count(),
+		metrics: await page.evaluate(
+			() =>
+				Reflect.get(window, "historyMetrics") as {
+					frameTimes: number[];
+					longTasks: number[];
+				},
+		),
 	};
 	mkdirSync("test-results", { recursive: true });
 	const output = join(

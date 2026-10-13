@@ -4,11 +4,12 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	getFilteredSessions,
 	groupSessionsByDate,
 	projectSessionList,
+	sessionMatchesStatus,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { sessionList } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import type {
 	SessionGrouping,
 	SessionStatusFilter,
@@ -38,7 +39,17 @@ const project = (
 	sessions: SessionInfo[],
 	grouping: SessionGrouping = "status",
 	status: SessionStatusFilter | null = null,
-) => projectSessionList(sessions, { grouping, status }, now, projectLabel);
+) =>
+	projectSessionList(
+		sessions
+			.filter(
+				(session) => status === null || sessionMatchesStatus(session, status),
+			)
+			.sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0)),
+		grouping,
+		now,
+		projectLabel,
+	);
 const ids = (sessions: SessionInfo[]) => sessions.map((session) => session.id);
 
 describe("projectSessionList", () => {
@@ -60,7 +71,7 @@ describe("projectSessionList", () => {
 		]);
 	});
 
-	it("groups projects by their newest row and sorts rows by recency", () => {
+	it("groups the sorted rows by project without changing recency order", () => {
 		const result = project(
 			[
 				row("a-old", { projectSlug: "a", updatedAt: at(5, 10) }),
@@ -173,7 +184,7 @@ describe("projectSessionList", () => {
 		sessionState.searchQuery = "Fix";
 		expect(
 			ids(
-				project(getFilteredSessions(), "project", "running").sections.flatMap(
+				project([...sessionList.rows], "project", "running").sections.flatMap(
 					(section) => section.sessions,
 				),
 			),

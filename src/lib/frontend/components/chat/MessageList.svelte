@@ -40,6 +40,7 @@
 	import {
 		economics,
 		forkMessageIdAtReply,
+		LAUNCH_SETTLE_MS,
 		lastResult,
 		liveLaunchedTasks,
 		segmentTurns,
@@ -86,15 +87,43 @@
 	// Rows, pills and strips share when this view last observed each live task.
 	const taskListedAt = new Map<string, number>();
 	let taskSessionId: string | null | undefined;
+	let previousTaskIds: readonly string[] = [];
+	let taskNow = $state(Date.now());
 	const liveTasks = $derived.by(() => {
 		const id = viewedSessionId;
 		if (id !== taskSessionId) {
 			taskListedAt.clear();
+			previousTaskIds = [];
 			taskSessionId = id;
 		}
 		const tasks = rootBackgroundTasks(id ?? "");
-		for (const task of tasks) taskListedAt.set(task.id, clock.now);
+		const now = Date.now();
+		const ids = new Set(tasks.map((task) => task.id));
+		// The outcome can trail removal from the live list. Start its grace here,
+		// rather than making every finished turn subscribe to the ticking clock.
+		for (const id of previousTaskIds) {
+			if (!ids.has(id)) taskListedAt.set(id, now);
+		}
+		for (const task of tasks) taskListedAt.set(task.id, now);
+		previousTaskIds = [...ids];
 		return tasks;
+	});
+	$effect(() => {
+		const tasks = liveTasks;
+		const ids = new Set(tasks.map((task) => task.id));
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const refresh = () => {
+			const now = Date.now();
+			taskNow = now;
+			let next = Number.POSITIVE_INFINITY;
+			for (const [id, at] of taskListedAt) {
+				const until = at + LAUNCH_SETTLE_MS;
+				if (!ids.has(id) && until > now) next = Math.min(next, until);
+			}
+			if (Number.isFinite(next)) timer = setTimeout(refresh, next - now);
+		};
+		refresh();
+		return () => clearTimeout(timer);
 	});
 
 	const scrollCtrl = createScrollController(() => chat.loadLifecycle);
@@ -483,7 +512,7 @@
 				{@render resumed(segment.activity[0].uuid)}
 			{/if}
 			{#if segment.activity.length > 0 || (i > 0 && final && turn.live)}
-				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} />
+				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -517,7 +546,7 @@
 				<!-- Same query container as the ledger, so the bill sheds the gauge and
 				     the token counts in the same order rather than overflowing. -->
 				<div class="result-bar @container max-w-[760px] mx-auto mt-1 mb-5 px-5">
-					<RunningPill count={liveLaunchedTasks(turn, liveTasks, clock.now, taskListedAt).size} />
+					<RunningPill count={liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt).size} />
 					<TurnEconomics economics={bill} showDuration />
 				</div>
 			</div>

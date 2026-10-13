@@ -503,24 +503,20 @@ export interface SessionProjection {
 	settled: SessionInfo[];
 }
 
-/** Project the already scoped and title-searched rows for the sidebar. */
+/** Group the sidebar's already sorted, scoped and status-filtered rows. */
 export function projectSessionList(
 	sessions: SessionInfo[],
-	options: { status: SessionStatusFilter | null; grouping: SessionGrouping },
+	grouping: SessionGrouping,
 	now: number,
 	projectLabel: (session: SessionInfo) => { key: string; label: string },
 ): SessionProjection {
-	const matching = sessions.filter(
-		(session) =>
-			options.status === null || sessionMatchesStatus(session, options.status),
-	);
-	const groups = groupSessionsByAttention(matching, now);
+	const groups = groupSessionsByAttention(sessions, now);
 	const shelves = {
 		pinned: groups.pinned,
 		snoozed: groups.snoozed,
 		settled: groups.settled,
 	};
-	if (options.grouping === "status") {
+	if (grouping === "status") {
 		return {
 			...shelves,
 			sections: [
@@ -532,15 +528,13 @@ export function projectSessionList(
 		};
 	}
 
-	const live = matching
-		.filter(
-			(session) =>
-				session.pinnedAt == null &&
-				session.settledAt == null &&
-				!isSessionSnoozed(session, now),
-		)
-		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
-	if (options.grouping === "time") {
+	const live = sessions.filter(
+		(session) =>
+			session.pinnedAt == null &&
+			session.settledAt == null &&
+			!isSessionSnoozed(session, now),
+	);
+	if (grouping === "time") {
 		const dates = groupSessionsByDate(live, new Date(now));
 		return {
 			...shelves,
@@ -582,14 +576,6 @@ export function sessionMatchesStatus(
 		case "unread":
 			return attention === "done-unread";
 	}
-}
-
-function getSessionDate(session: SessionInfo): Date {
-	return session.updatedAt
-		? new Date(session.updatedAt)
-		: session.createdAt
-			? new Date(session.createdAt)
-			: new Date(0);
 }
 
 /** Apply one family feed change. Versioned, so a late row cannot regress. */
@@ -918,7 +904,7 @@ function lastChangedAt(session: Immutable<SessionInfo>): number {
 	// `""` as readily as it omits the field, and all three mean the same thing
 	// — exactly as the line below reads a missing timestamp as 0.
 	const at = session.updatedAt || session.createdAt;
-	return at ? new Date(at).getTime() : 0;
+	return typeof at === "number" ? at : at ? Date.parse(at) : 0;
 }
 
 /** The sidebar and its search show root sessions only. */
@@ -935,6 +921,7 @@ export function getFilteredSessions(): SessionInfo[] {
 				: getProjectGroup(slug)?.key === groupKey)
 		);
 	};
+	let sessions: SessionInfo[];
 	if (sessionState.searchResults !== null) {
 		const searchSlug = currentSlug;
 		// Root rows carry the subtree rollup, so local search hits use the
@@ -942,44 +929,39 @@ export function getFilteredSessions(): SessionInfo[] {
 		const liveRoots = new Map(
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
-		return sessionState.searchResults.flatMap((session) => {
+		sessions = sessionState.searchResults.flatMap((session) => {
 			if (session.parentID || session.sideThread || !inScope(session))
 				return [];
 			if (session.projectSlug !== searchSlug) {
-				return [withReadMark(session)];
+				return [session];
 			}
 			const liveSession = liveRoots.get(session.id);
-			return liveSession ? [withReadMark(liveSession)] : [];
+			return liveSession ? [liveSession] : [];
 		});
+	} else {
+		const localSessions = sessionState.rootSessions;
+		const query = sessionState.searchQuery.toLowerCase().trim();
+		// Foreign rows stay in while a query is active and get title-filtered with
+		// the rest. The server search they will be replaced by now covers every
+		// project too, so the local filter and the landing results agree -- which is
+		// why these no longer have to stand down to avoid flashing in and out.
+		const foreignSessions = sessionState.daemonSessions.filter(
+			(session) =>
+				session.projectSlug !== currentSlug &&
+				!session.parentID &&
+				!session.sideThread,
+		);
+		sessions = [...localSessions, ...foreignSessions].filter(inScope);
+		if (query)
+			sessions = sessions.filter((s) => s.title.toLowerCase().includes(query));
 	}
-	const localSessions = sessionState.rootSessions;
-	const query = sessionState.searchQuery.toLowerCase().trim();
-	// Foreign rows stay in while a query is active and get title-filtered with
-	// the rest. The server search they will be replaced by now covers every
-	// project too, so the local filter and the landing results agree -- which is
-	// why these no longer have to stand down to avoid flashing in and out.
-	const foreignSessions = sessionState.daemonSessions.filter(
-		(session) =>
-			session.projectSlug !== currentSlug &&
-			!session.parentID &&
-			!session.sideThread,
-	);
-	const sessions = [...localSessions, ...foreignSessions]
-		.filter(inScope)
-		.map(withReadMark)
-		.sort((a, b) => getSessionDate(b).getTime() - getSessionDate(a).getTime());
-	if (!query) return sessions;
-	return sessions.filter((s) => s.title.toLowerCase().includes(query));
-}
-
-/** Get sessions grouped into the sidebar's sections. */
-export function getAttentionGroups(): AttentionGroups {
-	return groupSessionsByAttention(getFilteredSessions(), sessionState.now);
-}
-
-/** Get sessions grouped by date: today, yesterday, older. */
-export function getDateGroups(): DateGroups {
-	return groupSessionsByDate(getFilteredSessions());
+	return sessions
+		.map((session) => ({
+			row: withReadMark(session),
+			changedAt: lastChangedAt(session),
+		}))
+		.sort((a, b) => b.changedAt - a.changedAt)
+		.map(({ row }) => row);
 }
 
 /** Get the currently active session object (or undefined). */
