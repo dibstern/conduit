@@ -92,6 +92,13 @@
 		});
 	}
 
+	// Raised, the sheet's rest carries on the dock's last group rather than repeating its heading.
+	const continuedHarness = $derived.by(() => {
+		const above = groupsOf(docked).at(-1);
+		const below = groupsOf(folded)[0];
+		return above && below && above.harness === below.harness && above.columns.join() === below.columns.join() ? below.harness : undefined;
+	});
+
 	function displayWindow(reading: UsageReading, window: UsageWindow) {
 		// A limited 5h window must not turn a healthy week red.
 		const display = usageDisplay({ ...reading, status: window.utilization >= 100 ? "limited" : "available", windows: [window] }, usageState.limits.warnAt);
@@ -132,18 +139,20 @@
 
 <!-- The grid of harness groups. The desktop sidebar and the phone dock never
      show together, so they share test ids; the sheet opens over the dock. -->
-{#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone")}
+{#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone", continues?: string)}
 	{@const rowClass = size === "sidebar" ? "account-row px-[6px] py-[3px]" : "phone-row px-[6px] py-[3px]"}
 	{@const widths = size === "sidebar" ? { pair: 26, span: 88 } : { pair: 44, span: 120 }}
 	{#each groupsOf(rows) as group (group.harness)}
 		<div data-testid="{prefix}-group-{group.harness}">
-			<div class="{rowClass} grid items-center gap-[6px] rounded-[7px]">
-				<span></span>
-				<span data-testid="{prefix}-heading-{group.harness}" class="pt-[4px] font-mono text-[9px] uppercase tracking-[0.05em] text-text-dimmer">{group.harness.toUpperCase()}</span>
-				{#each group.columns as kind, index (kind)}
-					<span data-testid="{prefix}-column-{group.harness}-{kind}" class="pt-[4px] font-mono text-[9px] uppercase tracking-[0.05em] text-text-dimmer {group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : ''}">{windowLabels[kind].toUpperCase()}</span>
-				{/each}
-			</div>
+			{#if group.harness !== continues}
+				<div class="{rowClass} grid items-center gap-[6px] rounded-[7px]">
+					<span></span>
+					<span data-testid="{prefix}-heading-{group.harness}" class="pt-[4px] font-mono text-[9px] uppercase tracking-[0.05em] text-text-dimmer">{group.harness.toUpperCase()}</span>
+					{#each group.columns as kind, index (kind)}
+						<span data-testid="{prefix}-column-{group.harness}-{kind}" class="pt-[4px] font-mono text-[9px] uppercase tracking-[0.05em] text-text-dimmer {group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : ''}">{windowLabels[kind].toUpperCase()}</span>
+					{/each}
+				</div>
+			{/if}
 			{#each group.rows as reading (reading.accountId)}
 				{@const isDefault = reading.accountId === defaultAccount}
 				<div data-testid="{prefix}-row-{reading.accountId}" data-default={isDefault} title={isDefault ? "Current account" : undefined} class="{rowClass} grid items-center gap-[6px] rounded-[7px] {isDefault ? 'bg-bg-alt' : ''}">
@@ -165,12 +174,13 @@
 	<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>
 	{@render meter(docked, prefix, "phone")}
 	{#if folded.length > 0}
-		<span data-testid="{morePrefix}-more" class="flex items-center gap-[4px] pt-[4px] pr-[6px] pl-[19px] font-mono text-[10px] text-text-dimmer">
+		<!-- Its height is the distance the sheet's rest slides up to close the gap it leaves. -->
+		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[19px] items-center gap-[4px] pt-[4px] pr-[6px] pl-[19px] font-mono text-[10px] text-text-dimmer {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
 			{#each folded as reading (reading.accountId)}
 				<AccountDot instanceId={reading.accountId} size={6} data-testid="{morePrefix}-folded-{reading.accountId}" />
 			{/each}
 			<span data-testid="{morePrefix}-more-count" class="ml-[3px] flex-1">+{folded.length} more</span>
-			<span class={prefix === "usage-sheet" ? "sheet-chevron flex" : "flex"}><Icon name="chevron-up" size={12} /></span>
+			<Icon name="chevron-up" size={12} />
 		</span>
 	{/if}
 {/snippet}
@@ -231,10 +241,12 @@
 			     shadow: one would vanish when the folded sheet closes. -->
 			<Surface variant="bare" radius="none" data-testid="usage-sheet" class="flex w-full flex-col rounded-t-[14px] border-t border-border-subtle bg-bg px-[4px] pt-[5px] pb-[calc(16px+env(safe-area-inset-bottom))] text-[10.5px]">
 				{@render peek("usage-sheet")}
-				{@render meter(folded, "usage-sheet", "phone")}
-				<div class="mx-[6px] mt-[10px] flex items-center justify-between border-t border-border-subtle pt-[8px] font-mono text-text-dimmer">
-					<span>{accounts.length} accounts</span>
-					<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Usage settings ›</TextButton>
+				<div class={folded.length > 0 ? "sheet-rest" : undefined}>
+					{@render meter(folded, "usage-sheet", "phone", continuedHarness)}
+					<div class="mx-[6px] mt-[10px] flex items-center justify-between border-t border-border-subtle pt-[8px] font-mono text-text-dimmer">
+						<span>{accounts.length} accounts</span>
+						<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Usage settings ›</TextButton>
+					</div>
 				</div>
 			</Surface>
 		</div>
@@ -270,10 +282,18 @@
 		grid-column: span 2;
 	}
 
-	/* Points up on the dock and down on the raised sheet, turning as it is dragged. */
-	.sheet-chevron {
-		rotate: calc(var(--sheet-raised, 1) * 180deg);
-		transition: rotate var(--sheet-transition, 0s);
+	/* The "+N more" line only makes sense folded: as the sheet rises it fades,
+	   and the rest of the accounts slide up into its place, so the raised sheet
+	   reads as one list. It is gone a third of the way up, before the rows
+	   sliding over it get close. */
+	.sheet-fades {
+		opacity: calc(1 - 3 * var(--sheet-raised, 1));
+		transition: opacity var(--sheet-transition, 0s);
+	}
+
+	.sheet-rest {
+		translate: 0 calc(var(--sheet-raised, 1) * -19px);
+		transition: translate var(--sheet-transition, 0s);
 	}
 
 	@container sidebar (width < 210px) {
