@@ -63,7 +63,7 @@ Scenario Outline: tapping the dock opens every account's meter in a sheet
   When the usage footer work five_hour reading is 86% resetting at none
   And I tap back to the session list
   And I open the phone usage sheet
-  Then the usage sheet groups read CLAUDE, CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
+  Then the usage sheet groups read CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
   And the usage sheet row claude is the highlighted current account
   And the usage sheet work shows five_hour 86% and seven_day 48%
   And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
