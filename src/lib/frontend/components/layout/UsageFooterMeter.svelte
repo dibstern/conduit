@@ -16,7 +16,6 @@
 
 	let { phone = false, height = $bindable(0) }: { phone?: boolean; height?: number } = $props();
 
-	const id = $props.id();
 	const harnesses = ["claude", "codex", "cursor"] as const;
 	const windowLabels = { five_hour: "5h", seven_day: "Week", month: "Month" } as const;
 	type WindowKind = keyof typeof windowLabels;
@@ -63,6 +62,14 @@
 		pull.lastY = event.clientY;
 		pull.lastTime = event.timeStamp;
 		if (sheet) placeSheet(sheet, Math.max(dockOffset() - travel, 0), dockOffset(), false);
+	}
+
+	// A tap raises the sheet out of the dock, the way a pull does.
+	function openSheet() {
+		flushSync(() => { sheetOpen = true; });
+		if (!sheet) return;
+		placeSheet(sheet, dockOffset(), dockOffset(), false);
+		placeSheet(sheet, 0, dockOffset(), true);
 	}
 
 	function releaseDock(cancelled: boolean) {
@@ -125,8 +132,8 @@
 
 <!-- The grid of harness groups. The desktop sidebar and the phone dock never
      show together, so they share test ids; the sheet opens over the dock. -->
-{#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone" | "sheet")}
-	{@const rowClass = size === "sidebar" ? "account-row px-[6px] py-[3px]" : size === "phone" ? "phone-row px-[6px] py-[3px]" : "phone-row px-[8px] py-[6px] text-[12px]"}
+{#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone")}
+	{@const rowClass = size === "sidebar" ? "account-row px-[6px] py-[3px]" : "phone-row px-[6px] py-[3px]"}
 	{@const widths = size === "sidebar" ? { pair: 26, span: 88 } : { pair: 44, span: 120 }}
 	{#each groupsOf(rows) as group (group.harness)}
 		<div data-testid="{prefix}-group-{group.harness}">
@@ -151,6 +158,23 @@
 	{/each}
 {/snippet}
 
+<!-- The dock, and the top of the sheet: folded onto the dock, the sheet shows
+     exactly this in exactly the same place, so it reads as one panel. -->
+{#snippet peek(prefix: "usage-footer" | "usage-sheet")}
+	{@const morePrefix = prefix === "usage-footer" ? "usage-phone" : "usage-sheet"}
+	<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>
+	{@render meter(docked, prefix, "phone")}
+	{#if folded.length > 0}
+		<span data-testid="{morePrefix}-more" class="flex items-center gap-[4px] pt-[4px] pr-[6px] pl-[19px] font-mono text-[10px] text-text-dimmer">
+			{#each folded as reading (reading.accountId)}
+				<AccountDot instanceId={reading.accountId} size={6} data-testid="{morePrefix}-folded-{reading.accountId}" />
+			{/each}
+			<span data-testid="{morePrefix}-more-count" class="ml-[3px] flex-1">+{folded.length} more</span>
+			<span class={prefix === "usage-sheet" ? "sheet-chevron flex" : "flex"}><Icon name="chevron-up" size={12} /></span>
+		</span>
+	{/if}
+{/snippet}
+
 {#snippet singleLine(columnPrefix: string, abbreviateWeek: boolean)}
 	{#if single}
 		{#each kinds.filter((kind) => single.windows.some((window) => window.kind === kind)) as kind, index (kind)}
@@ -169,7 +193,7 @@
 		data-testid="usage-footer-phone"
 		bind:clientHeight={height}
 		style:display={accounts.length > 1 || single ? undefined : "none"}
-		class="usage-phone-dock shrink-0 border-t border-border-subtle bg-bg px-[4px] pt-[5px] text-[10.5px]"
+		class="usage-phone-dock shrink-0 border-t border-border-subtle bg-bg px-[4px] pt-[5px] text-[10.5px] {accounts.length > 1 ? 'rounded-t-[14px]' : ''}"
 	>
 		{#if single}
 			<TextButton tone="inherit" data-testid="usage-phone-single" aria-label="Open Usage settings" onclick={() => openSettings("usage")} class="flex w-full items-center gap-[10px] whitespace-nowrap px-[10px] py-[6px] text-left">
@@ -183,7 +207,7 @@
 				aria-haspopup="dialog"
 				onclick={() => {
 					if (swallowClick) swallowClick = false;
-					else sheetOpen = true;
+					else openSheet();
 				}}
 				onpointerdown={(event: PointerEvent) => {
 					if (!event.isPrimary) return;
@@ -197,30 +221,21 @@
 				onpointercancel={() => releaseDock(true)}
 				class="flex w-full touch-none flex-col text-left"
 			>
-				<span aria-hidden="true" class="mx-auto mt-[2px] mb-[3px] h-[4px] w-[32px] rounded-full bg-border-chip"></span>
-				{@render meter(docked, "usage-footer", "phone")}
-				{#if folded.length > 0}
-					<span data-testid="usage-phone-more" class="flex items-center gap-[4px] pt-[4px] pr-[6px] pl-[19px] font-mono text-[10px] text-text-dimmer">
-						{#each folded as reading (reading.accountId)}
-							<AccountDot instanceId={reading.accountId} size={6} data-testid="usage-phone-folded-{reading.accountId}" />
-						{/each}
-						<span data-testid="usage-phone-more-count" class="ml-[3px] flex-1">+{folded.length} more</span>
-						<Icon name="chevron-up" size={12} />
-					</span>
-				{/if}
+				{@render peek("usage-footer")}
 			</TextButton>
 		{/if}
 	</div>
-	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" labelledBy="{id}-title" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
+	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" ariaLabel="Usage" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
 		<div bind:this={sheet} use:dragToDismiss={{ ondismiss: () => { sheetOpen = false; }, dismissOffset: dockOffset }}>
-			<!-- The dock's own colour and edge, so the sheet reads as the dock pulled taller. -->
-			<Surface variant="bare" radius="none" elevation="modal" data-testid="usage-sheet" class="w-full rounded-t-[18px] border-t border-border-subtle bg-bg px-[8px] pt-[8px] pb-[calc(24px+env(safe-area-inset-bottom))] text-[11.5px]">
-				<div aria-hidden="true" class="mx-auto mb-[8px] h-[4px] w-[36px] rounded-full bg-border-chip"></div>
-				<div class="mx-[8px] mt-[2px] mb-[6px] flex items-baseline gap-[8px]">
-					<h2 id="{id}-title" class="flex-1 text-[14px] font-semibold text-text">Usage</h2>
-					<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Settings ›</TextButton>
+			<!-- The dock's own box, so the sheet reads as the dock pulled taller. No
+			     shadow: one would vanish when the folded sheet closes. -->
+			<Surface variant="bare" radius="none" data-testid="usage-sheet" class="flex w-full flex-col rounded-t-[14px] border-t border-border-subtle bg-bg px-[4px] pt-[5px] pb-[calc(16px+env(safe-area-inset-bottom))] text-[10.5px]">
+				{@render peek("usage-sheet")}
+				{@render meter(folded, "usage-sheet", "phone")}
+				<div class="mx-[6px] mt-[10px] flex items-center justify-between border-t border-border-subtle pt-[8px] font-mono text-text-dimmer">
+					<span>{accounts.length} accounts</span>
+					<TextButton tone="accent" data-testid="usage-sheet-settings" onclick={() => { sheetOpen = false; openSettings("usage"); }}>Usage settings ›</TextButton>
 				</div>
-				{@render meter(accounts, "usage-sheet", "sheet")}
 			</Surface>
 		</div>
 	</Dialog>
@@ -253,6 +268,12 @@
 
 	.spanning-window {
 		grid-column: span 2;
+	}
+
+	/* Points up on the dock and down on the raised sheet, turning as it is dragged. */
+	.sheet-chevron {
+		rotate: calc(var(--sheet-raised, 1) * 180deg);
+		transition: rotate var(--sheet-transition, 0s);
 	}
 
 	@container sidebar (width < 210px) {

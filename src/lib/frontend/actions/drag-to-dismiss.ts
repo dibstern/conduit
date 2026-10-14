@@ -16,14 +16,12 @@ const SETTLE_MS = 220;
 export const settleMs = () =>
 	matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : SETTLE_MS;
 
-/** Over this last fraction of its travel, a sheet fades into whatever it collapses into. */
-const FADE_FRACTION = 0.3;
-
 /**
  * Offsets a sheet `offset` px below its resting place, of `away` px to be put
- * away, gliding there when `settling`. The dialog's scrim fades with it, and the
- * sheet fades out over the last stretch, so closing at `away` changes nothing on
- * screen. Returns how long the glide takes: nothing when the sheet is already there.
+ * away, gliding there when `settling`. Its dialog gets --sheet-raised, 1 at rest
+ * and 0 put away, and --sheet-transition, so the scrim and anything else styled
+ * from them move with the sheet. Returns how long the glide takes: nothing when
+ * the sheet is already there.
  */
 export function placeSheet(
 	node: HTMLElement,
@@ -36,12 +34,11 @@ export function placeSheet(
 		settling && node.style.transform !== transform ? settleMs() : 0;
 	const timing = `${glideMs}ms cubic-bezier(0.32, 0.72, 0, 1)`;
 	const progress = away > 0 ? Math.min(Math.max(offset / away, 0), 1) : 0;
-	node.style.transition = `transform ${timing}, opacity ${timing}`;
+	node.style.transition = `transform ${timing}`;
 	node.style.transform = transform;
-	node.style.opacity = String(Math.min((1 - progress) / FADE_FRACTION, 1));
 	const dialog = node.closest("dialog");
-	dialog?.style.setProperty("--scrim-opacity", String(1 - progress));
-	dialog?.style.setProperty("--scrim-transition", timing);
+	dialog?.style.setProperty("--sheet-raised", String(1 - progress));
+	dialog?.style.setProperty("--sheet-transition", timing);
 	return glideMs;
 }
 
@@ -138,8 +135,8 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		destroy() {
 			clearTimeout(dismissTimer);
 			// The dialog outlives its sheet; its next opening starts with a full scrim.
-			dialog?.style.removeProperty("--scrim-opacity");
-			dialog?.style.removeProperty("--scrim-transition");
+			dialog?.style.removeProperty("--sheet-raised");
+			dialog?.style.removeProperty("--sheet-transition");
 			node.removeEventListener("touchstart", onStart);
 			node.removeEventListener("touchmove", onMove);
 			node.removeEventListener("touchend", onEnd);

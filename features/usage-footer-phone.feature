@@ -63,7 +63,7 @@ Scenario Outline: tapping the dock opens every account's meter in a sheet
   When the usage footer work five_hour reading is 86% resetting at none
   And I tap back to the session list
   And I open the phone usage sheet
-  Then the usage sheet groups read CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
+  Then the usage sheet groups read CLAUDE, CLAUDE, CODEX, CURSOR with rows claude, work, spare, unreadable, chatgpt, cursor
   And the usage sheet row claude is the highlighted current account
   And the usage sheet work shows five_hour 86% and seven_day 48%
   And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
@@ -97,7 +97,7 @@ Scenario: the usage sheet folds back into the dock in the dock's colour
   And I drag the phone usage dock up by 120 pixels
   Then the usage sheet is open
   And the usage sheet has the phone usage dock's background
-  And the usage sheet dragged down past the phone usage dock stops on it, faded into it
+  And the usage sheet dragged down past the phone usage dock lands on it row for row
   And the usage sheet is closed
 
 Scenario Outline: one account uses inline windows without the sheet
