@@ -72,37 +72,208 @@ describe("filterFiles", () => {
 	];
 
 	it("returns all entries for empty query (limited to 20)", () => {
-		expect(filterFiles(entries, "")).toEqual(entries);
+		expect(filterFiles(entries, "")).toEqual({ entries, dividerAt: 0 });
 	});
 
 	it("filters by case-insensitive substring match on path", () => {
-		const result = filterFiles(entries, "handler");
+		const result = filterFiles(entries, "handler").entries;
 		expect(result).toContain("src/lib/handlers/files.ts");
 		expect(result).toContain("src/lib/handlers/");
 	});
 
 	it("matches basename (filename portion)", () => {
-		const result = filterFiles(entries, "format");
+		const result = filterFiles(entries, "format").entries;
 		expect(result).toContain("src/lib/frontend/utils/format.ts");
 	});
 
 	it("returns empty for no match", () => {
-		expect(filterFiles(entries, "zzzzzzz")).toHaveLength(0);
+		expect(filterFiles(entries, "zzzzzzz")).toEqual({
+			entries: [],
+			dividerAt: 0,
+		});
 	});
 
 	it("limits results to 20", () => {
 		const manyEntries = Array.from({ length: 50 }, (_, i) => `file${i}.ts`);
-		expect(filterFiles(manyEntries, "file").length).toBeLessThanOrEqual(20);
+		expect(filterFiles(manyEntries, "file").entries).toHaveLength(20);
 	});
 
 	it("prioritizes basename matches over path-only matches", () => {
-		const result = filterFiles(entries, "files");
+		const result = filterFiles(entries, "files").entries;
 		expect(result[0]).toBe("src/lib/handlers/files.ts");
 	});
 
 	it("matches directories", () => {
-		const result = filterFiles(entries, "frontend/");
+		const result = filterFiles(entries, "frontend/").entries;
 		expect(result).toContain("src/lib/frontend/");
+	});
+
+	it("puts immediate children before deeper descendants and reports their boundary", () => {
+		expect(
+			filterFiles(
+				[
+					"src/lib/util.ts",
+					"src/main.ts",
+					"src/lib/",
+					"src/lib/nested/deep.ts",
+				],
+				"src/",
+			),
+		).toEqual({
+			entries: [
+				"src/lib/",
+				"src/main.ts",
+				"src/lib/nested/deep.ts",
+				"src/lib/util.ts",
+			],
+			dividerAt: 2,
+		});
+	});
+
+	it("does not include the queried directory in its own listing", () => {
+		expect(filterFiles(["src/", "src/lib/", "src/main.ts"], "src/")).toEqual({
+			entries: ["src/lib/", "src/main.ts"],
+			dividerAt: 2,
+		});
+	});
+
+	it("groups and self-excludes a directory query regardless of its case", () => {
+		const deep = Array.from({ length: 24 }, (_, i) => `src/aaa-deep/f${i}.ts`);
+		const result = filterFiles(["src/", ...deep, "src/z-immediate.ts"], "SRC/");
+		expect(result.entries).not.toContain("src/");
+		expect(result.entries[0]).toBe("src/z-immediate.ts");
+		expect(result.dividerAt).toBe(1);
+	});
+
+	it("ranks basename matches then locale order within each directory group", () => {
+		expect(
+			filterFiles(
+				[
+					"src/zeta.ts",
+					"src/deep/zeta.ts",
+					"other/src/zeta.ts",
+					"src/alpha.ts",
+					"vendor/src/",
+					"src/deep/alpha.ts",
+				],
+				"src/",
+			),
+		).toEqual({
+			entries: [
+				"src/alpha.ts",
+				"src/zeta.ts",
+				"vendor/src/",
+				"other/src/zeta.ts",
+				"src/deep/alpha.ts",
+				"src/deep/zeta.ts",
+			],
+			dividerAt: 2,
+		});
+	});
+
+	it("uses the 12 immediate and 8 deeper cap when both groups are plentiful", () => {
+		const immediate = Array.from(
+			{ length: 15 },
+			(_, index) => `src/immediate-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const deeper = Array.from(
+			{ length: 15 },
+			(_, index) =>
+				`src/deep/descendant-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const expected = {
+			entries: [...immediate.slice(0, 12), ...deeper.slice(0, 8)],
+			dividerAt: 12,
+		};
+
+		expect(filterFiles(expected.entries, "src/")).toEqual(expected);
+		expect(filterFiles([...immediate, ...deeper], "src/")).toEqual(expected);
+	});
+
+	it("lets deeper descendants fill unused immediate-child slots", () => {
+		const immediate = Array.from(
+			{ length: 3 },
+			(_, index) => `src/immediate-${index}.ts`,
+		);
+		const deeper = Array.from(
+			{ length: 30 },
+			(_, index) =>
+				`src/deep/descendant-${index.toString().padStart(2, "0")}.ts`,
+		);
+
+		expect(filterFiles([...immediate, ...deeper], "src/")).toEqual({
+			entries: [...immediate, ...deeper.slice(0, 17)],
+			dividerAt: 3,
+		});
+	});
+
+	it("lets immediate children fill slots unavailable to deeper descendants", () => {
+		const immediate = Array.from(
+			{ length: 30 },
+			(_, index) => `src/immediate-${index.toString().padStart(2, "0")}.ts`,
+		);
+		const deeper = Array.from(
+			{ length: 3 },
+			(_, index) => `src/deep/descendant-${index}.ts`,
+		);
+
+		expect(filterFiles([...immediate, ...deeper], "src/")).toEqual({
+			entries: [...immediate.slice(0, 17), ...deeper],
+			dividerAt: 17,
+		});
+	});
+
+	it("gives the whole cap to whichever group is the only one populated", () => {
+		const immediate = Array.from(
+			{ length: 21 },
+			(_, index) => `src/immediate-${index.toString().padStart(2, "0")}.ts`,
+		);
+		expect(filterFiles(immediate, "src/")).toEqual({
+			entries: immediate.slice(0, 20),
+			dividerAt: 20,
+		});
+
+		const deeper = Array.from(
+			{ length: 21 },
+			(_, index) =>
+				`src/deep/descendant-${index.toString().padStart(2, "0")}.ts`,
+		);
+		expect(filterFiles(deeper, "src/")).toEqual({
+			entries: deeper.slice(0, 20),
+			dividerAt: 0,
+		});
+	});
+
+	it("reports no grouping boundary for empty and non-directory queries", () => {
+		expect(filterFiles(entries, "").dividerAt).toBe(0);
+		expect(filterFiles(entries, "frontend").dividerAt).toBe(0);
+	});
+
+	it("groups workspace-relative paths without treating root metadata as a path prefix", () => {
+		applyGetFileTreeResponse({
+			projectSlug: "workspace",
+			entries: [
+				"src/",
+				"src/deep/file.ts",
+				"src/main.ts",
+				"src/deep/",
+				"other/src/main.ts",
+			],
+			roots: [
+				{ root: "/workspace/app", label: "app" },
+				{ root: "/workspace/shared", label: "shared", shared: true },
+			],
+		});
+
+		expect(filterFiles(fileTreeState.entries, "src/")).toEqual({
+			entries: [
+				"src/deep/",
+				"src/main.ts",
+				"other/src/main.ts",
+				"src/deep/file.ts",
+			],
+			dividerAt: 2,
+		});
 	});
 });
 
