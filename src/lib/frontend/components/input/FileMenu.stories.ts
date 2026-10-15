@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { menuOpensUpwardFrame } from "../../stories/frames";
+import FileMenuGroupedDemo from "./__fixtures__/FileMenuGroupedDemo.svelte";
 import FileMenu from "./FileMenu.svelte";
 
 const sampleEntries = [
@@ -116,5 +117,137 @@ export const DirectoriesOnly: Story = {
 		onSelect: noopSelect,
 		onClose: noopClose,
 		loading: false,
+	},
+};
+
+const groupedEntries = [
+	"src/lib/frontend/",
+	"src/lib/handlers/",
+	"src/lib/server.ts",
+	"src/lib/frontend/App.svelte",
+	"src/lib/frontend/stores/chat.svelte.ts",
+	"src/lib/handlers/files.ts",
+];
+const groupedDividerAt = 3;
+const groupedArgs = {
+	query: "src/lib/",
+	visible: true,
+	entries: groupedEntries,
+	onSelect: noopSelect,
+	onClose: noopClose,
+	loading: false,
+} satisfies Partial<Story["args"]>;
+
+export const GroupedResults: Story = {
+	tags: ["viewport-capture"],
+	args: { ...groupedArgs, dividerAt: groupedDividerAt },
+	render: (args) => ({ Component: FileMenuGroupedDemo, props: args }),
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByRole("listbox", { name: "File suggestions" });
+		const options = canvas.getAllByRole("option");
+		await expect(options).toHaveLength(groupedEntries.length);
+		for (const [index, option] of options.entries()) {
+			await expect(option).toHaveAttribute(
+				"id",
+				`${args["listboxId"]}-option-${index}`,
+			);
+		}
+
+		const dividers = canvasElement.querySelectorAll(
+			'[data-testid="file-menu-divider"]',
+		);
+		await expect(dividers).toHaveLength(1);
+		const divider = dividers[0];
+		await expect(divider).toHaveAttribute("role", "presentation");
+		await expect(divider).toHaveAttribute("aria-hidden", "true");
+		await expect(divider).toHaveTextContent("in subfolders");
+		await expect(divider?.previousElementSibling).toBe(
+			options[groupedDividerAt - 1],
+		);
+		await expect(divider?.nextElementSibling).toBe(options[groupedDividerAt]);
+
+		const composer = canvas.getByTestId("composer");
+		composer.focus();
+		await expect(options[0]).toHaveAttribute("aria-selected", "true");
+		await expect(composer).toHaveAttribute("aria-controls", args["listboxId"]);
+		await expect(composer).toHaveAttribute(
+			"aria-activedescendant",
+			options[0]?.id,
+		);
+
+		for (let i = 1; i <= groupedEntries.length; i += 1) {
+			await userEvent.keyboard("{ArrowDown}");
+			const index = i % groupedEntries.length;
+			await expect(canvas.getByTestId("active-index")).toHaveTextContent(
+				String(index),
+			);
+			await expect(options[index]).toHaveAttribute("aria-selected", "true");
+			await expect(composer).toHaveAttribute(
+				"aria-activedescendant",
+				options[index]?.id,
+			);
+			await expect(divider).not.toHaveAttribute("aria-selected");
+		}
+
+		for (let i = groupedEntries.length - 1; i >= groupedDividerAt; i -= 1) {
+			await userEvent.keyboard("{ArrowUp}");
+			await expect(options[i]).toHaveAttribute("aria-selected", "true");
+			await expect(composer).toHaveAttribute(
+				"aria-activedescendant",
+				options[i]?.id,
+			);
+		}
+		await userEvent.keyboard("{Enter}");
+		await expect(canvas.getByTestId("selected-path").textContent).toBe(
+			groupedEntries[groupedDividerAt],
+		);
+		await userEvent.keyboard("{ArrowUp}");
+		await expect(options[groupedDividerAt - 1]).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+		await expect(composer).toHaveAttribute(
+			"aria-activedescendant",
+			options[groupedDividerAt - 1]?.id,
+		);
+	},
+};
+
+export const GroupedNoImmediateChildren: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		...groupedArgs,
+		entries: groupedEntries.slice(groupedDividerAt),
+		dividerAt: 0,
+	},
+	render: (args) => ({ Component: FileMenuGroupedDemo, props: args }),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByRole("listbox", { name: "File suggestions" });
+		await expect(
+			canvasElement.querySelectorAll('[data-testid="file-menu-divider"]'),
+		).toHaveLength(0);
+		await expect(canvas.getAllByRole("option")).toHaveLength(
+			groupedEntries.length - groupedDividerAt,
+		);
+	},
+};
+
+export const GroupedAllImmediateChildren: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		...groupedArgs,
+		entries: groupedEntries.slice(0, groupedDividerAt),
+		dividerAt: groupedDividerAt,
+	},
+	render: (args) => ({ Component: FileMenuGroupedDemo, props: args }),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await canvas.findByRole("listbox", { name: "File suggestions" });
+		await expect(
+			canvasElement.querySelectorAll('[data-testid="file-menu-divider"]'),
+		).toHaveLength(0);
+		await expect(canvas.getAllByRole("option")).toHaveLength(groupedDividerAt);
 	},
 };

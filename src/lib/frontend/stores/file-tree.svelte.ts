@@ -10,6 +10,8 @@ export interface AtQuery {
 	end: number;
 }
 
+export type FilteredFiles = { entries: string[]; dividerAt: number };
+
 // This store has no client half: entries come from `GetFileTree`, and the two
 // flags track the request that is fetching them. The @-mention query the user
 // is typing lives in the component, not here.
@@ -76,17 +78,20 @@ export function buildMentionInsertion(path: string): string {
  * Filter file entries by query string.
  * Case-insensitive substring match on full path and basename.
  * Basename matches are prioritized. Limited to 20 results.
+ * Directory queries group immediate children before deeper matches.
  */
-export function filterFiles(entries: string[], query: string): string[] {
-	if (!query) return entries.slice(0, 20);
+export function filterFiles(entries: string[], query: string): FilteredFiles {
+	if (!query) return { entries: entries.slice(0, 20), dividerAt: 0 };
 
 	const lower = query.toLowerCase();
+	const isDirectoryQuery = query.endsWith("/");
 
 	type Scored = { entry: string; basenameMatch: boolean };
 	const matches: Scored[] = [];
 
 	for (const entry of entries) {
 		const entryLower = entry.toLowerCase();
+		if (isDirectoryQuery && entryLower === lower) continue;
 		if (!entryLower.includes(lower)) continue;
 
 		const lastSlash = entry.lastIndexOf(
@@ -99,14 +104,53 @@ export function filterFiles(entries: string[], query: string): string[] {
 		matches.push({ entry, basenameMatch });
 	}
 
-	matches.sort((a, b) => {
+	const compareMatches = (a: Scored, b: Scored): number => {
 		if (a.basenameMatch !== b.basenameMatch) {
 			return a.basenameMatch ? -1 : 1;
 		}
 		return a.entry.localeCompare(b.entry);
-	});
+	};
 
-	return matches.slice(0, 20).map((m) => m.entry);
+	if (!isDirectoryQuery) {
+		matches.sort(compareMatches);
+		return {
+			entries: matches.slice(0, 20).map((match) => match.entry),
+			dividerAt: 0,
+		};
+	}
+
+	const immediateChildren: Scored[] = [];
+	const deeperDescendants: Scored[] = [];
+	for (const match of matches) {
+		const remainder = match.entry.slice(query.length);
+		const pathBelowQuery = remainder.endsWith("/")
+			? remainder.slice(0, -1)
+			: remainder;
+		const group =
+			match.entry.toLowerCase().startsWith(lower) &&
+			!pathBelowQuery.includes("/")
+				? immediateChildren
+				: deeperDescendants;
+		group.push(match);
+	}
+
+	immediateChildren.sort(compareMatches);
+	deeperDescendants.sort(compareMatches);
+
+	const reservedDeeperSlots = Math.min(deeperDescendants.length, 8);
+	const immediateCount = Math.min(
+		immediateChildren.length,
+		20 - reservedDeeperSlots,
+	);
+	const deeperCount = Math.min(deeperDescendants.length, 20 - immediateCount);
+
+	return {
+		entries: [
+			...immediateChildren.slice(0, immediateCount),
+			...deeperDescendants.slice(0, deeperCount),
+		].map((match) => match.entry),
+		dividerAt: immediateCount,
+	};
 }
 
 export function applyGetFileTreeResponse(response: GetFileTreeResponse): void {
