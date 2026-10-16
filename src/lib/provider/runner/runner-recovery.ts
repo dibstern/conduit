@@ -204,7 +204,9 @@ export const settleRunnerCommand = (
 				const succeeded = !failure && result?.status === "completed";
 				const retryable =
 					result?.status !== "steer-declined" &&
-					(failure?.retryable === true || result?.error?.retryable === true);
+					(failure?.retryable === true ||
+						(result?.error?.retryable === true &&
+							result.error.retryHandled !== true));
 				const errorCode = succeeded
 					? null
 					: result?.status === "steer-declined"
