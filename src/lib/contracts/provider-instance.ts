@@ -41,8 +41,6 @@ export interface ProviderDriverTraits {
 	readonly runsOpenCodeServer: boolean;
 	/** account-usage.integration.ts pins the account sampler's usage harness. */
 	readonly usageHarness: "claude" | "cursor" | undefined;
-	/** Drivers without an installed runtime remain visible without accepting turns. */
-	readonly unavailableReason?: string;
 	/** permissions-processing-timeout-effect.test.ts pins service-owned approvals/questions. */
 	readonly interactionSink: "permission-asking" | "auto-approving";
 	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
@@ -159,7 +157,6 @@ export const PROVIDER_DRIVERS = {
 		},
 		runsOpenCodeServer: false, // Cursor must never start or borrow OpenCode.
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
-		unavailableReason: "Cursor runtime not installed", // Discovery explains the missing runtime.
 		interactionSink: "permission-asking", // Never fall through to auto-approval.
 		supportsNativeResume: false, // Resume needs a captured Cursor thread contract.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
@@ -197,7 +194,6 @@ export const BrowserDriverTraitsSchema = Schema.Struct({
 	sessionCapabilities: ProviderSessionCapabilitiesSchema,
 	runsOpenCodeServer: Schema.Boolean,
 	usageHarness: Schema.optional(Schema.Literal("claude", "cursor")),
-	unavailableReason: Schema.optional(Schema.String),
 	composerModeControl: Schema.Literal("agent", "permission-mode"),
 	accountKind: Schema.Literal("config-directory", "server"),
 	catalogSource: Schema.Literal("discovery", "server"),

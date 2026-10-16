@@ -81,6 +81,7 @@ export interface RunnerDriverPieces {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 	prepareTurnEffect(
 		input: SessionTurn,
@@ -296,8 +297,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return this.driver.discoverEffect(workspaceRoot, account);
+		return this.driver.discoverEffect(workspaceRoot, account, options);
 	}
 
 	getNativeSessionEffect(

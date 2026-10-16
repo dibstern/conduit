@@ -713,16 +713,19 @@ export const makeProcessSessionRunner = (
 							throw runnerFailure("spawn runner", "Runners are shutting down");
 						prepareRunnerDirectory(deps.workspaceRoot, configDir);
 						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+						// Launch the real absolute file: Cursor finds native helpers in
+						// ancestor node_modules directories of this entry, not its SDK import.
+						const runnerEntry = fileURLToPath(
+							new URL(
+								`../../../bin/claude-session-runner.${extension}`,
+								import.meta.url,
+							),
+						);
 						const child = spawn(
 							process.execPath,
 							[
 								...process.execArgv,
-								fileURLToPath(
-									new URL(
-										`../../../bin/claude-session-runner.${extension}`,
-										import.meta.url,
-									),
-								),
+								runnerEntry,
 								entry.socketPath,
 								sessionId,
 								entry.runnerId,

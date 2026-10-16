@@ -850,7 +850,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		name: "choose picker agent",
 		match: /^I choose agent (.+) in the picker$/,
 		run: async ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("SwitchAgent", { ok: true });
+			requireRpcControl(world.page).setStubs({
+				SwitchAgent: () => ({ ok: true }),
+			});
 			await world.page
 				.locator('#model-picker [data-testid^="picker-agent-"]')
 				.filter({ hasText: match[1] ?? "" })

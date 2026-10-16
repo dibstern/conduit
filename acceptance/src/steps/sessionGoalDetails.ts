@@ -50,15 +50,17 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 								: {}),
 						};
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("GetGoalDetails", {
-				checks: [8, 19, 31].map((minutes, index) => ({
-					iteration: index + 1,
-					at: setAt + minutes * 60_000,
-					reason: CHECK_REASONS[index],
-				})),
-				tokensSinceStart: 1_240_000,
+			rpc.setStubs({
+				GetGoalDetails: () => ({
+					checks: [8, 19, 31].map((minutes, index) => ({
+						iteration: index + 1,
+						at: setAt + minutes * 60_000,
+						reason: CHECK_REASONS[index] ?? null,
+					})),
+					tokensSinceStart: 1_240_000,
+				}),
 			});
-			rpc.setResponse("CancelSession", { ok: true });
+			rpc.setStubs({ CancelSession: () => ({ ok: true }) });
 			// The desktop header renders its title row, and with it the goal
 			// subtitle, only for a session the sidebar list knows about.
 			const row = rpc.shellRows?.find(

@@ -18,6 +18,7 @@ const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
 describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 	it(
 		"completes a real turn in a child of the default build",
+		{ timeout: 150_000 },
 		async () => {
 			const evidence = {
 				ticket: "conduit-test-85kb.15",
@@ -166,6 +167,5 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				}
 			}
 		},
-		{ timeout: 150_000 },
 	);
 });

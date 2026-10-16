@@ -1,4 +1,8 @@
 import type { Page } from "@playwright/test";
+import { Effect, Exit, Scope } from "effect";
+import { isRecord } from "../../../src/lib/utils.js";
+import { serveRpc } from "../../helpers/rpc-wire.js";
+import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
@@ -21,9 +25,46 @@ type SearchRow = {
 async function mockDaemonSearch(page: Page) {
 	const rows: SearchRow[] = [];
 	const requests: Record<string, unknown>[] = [];
+	const stubs = {
+		ListDaemonSessions: (params) => {
+			requests.push({ ...params });
+			const query = (params.search ?? "").toLowerCase();
+			const limit = params.limit ?? 20;
+			const matches = rows.filter((row) =>
+				row.title.toLowerCase().includes(query),
+			);
+			const offset = params.cursor
+				? matches.findIndex((row) => row.id === params.cursor?.id) + 1
+				: 0;
+			const sessions = matches.slice(offset, offset + limit).map((row) => ({
+				...row,
+				accountId: null,
+				status: "idle" as const,
+			}));
+			const last = sessions.at(-1);
+			const hasMore = offset + limit < matches.length;
+			return {
+				projectSlug: params.projectSlug,
+				sessions,
+				availability: [],
+				hasMore,
+				nextCursor:
+					hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
+			};
+		},
+	} satisfies StubTable;
+	const scope = Effect.runSync(Scope.make());
+	page.once("close", () => {
+		void Effect.runPromise(Scope.close(scope, Exit.void));
+	});
 	await page.routeWebSocket(/\/rpc$/, (ws) => {
 		const server = ws.connectToServer();
-		ws.onMessage((message) => {
+		const ready = Effect.runPromise(
+			serveRpc(stubs, (json) => Effect.sync(() => ws.send(json))).pipe(
+				Effect.provideService(Scope.Scope, scope),
+			),
+		);
+		ws.onMessage(async (message) => {
 			if (typeof message !== "string") {
 				server.send(message);
 				return;
@@ -35,63 +76,16 @@ async function mockDaemonSearch(page: Page) {
 				server.send(message);
 				return;
 			}
-			if (typeof frame !== "object" || frame === null || Array.isArray(frame)) {
-				server.send(message);
-				return;
-			}
-			const request = frame as {
-				_tag?: string;
-				tag?: string;
-				id?: string;
-				payload?: Record<string, unknown>;
-			};
 			if (
-				request._tag !== "Request" ||
-				request.tag !== "ListDaemonSessions" ||
-				!request.id
+				!isRecord(frame) ||
+				frame["_tag"] !== "Request" ||
+				frame["tag"] !== "ListDaemonSessions"
 			) {
 				server.send(message);
 				return;
 			}
-			const params = request.payload ?? {};
-			requests.push(params);
-			const query =
-				typeof params["search"] === "string"
-					? params["search"].toLowerCase()
-					: "";
-			const limit = typeof params["limit"] === "number" ? params["limit"] : 20;
-			const matches = rows.filter((row) =>
-				row.title.toLowerCase().includes(query),
-			);
-			const cursor = params["cursor"] as { id?: string } | undefined;
-			const offset = cursor?.id
-				? matches.findIndex((row) => row.id === cursor.id) + 1
-				: 0;
-			const sessions = matches.slice(offset, offset + limit).map((row) => ({
-				...row,
-				status: "idle" as const,
-			}));
-			const last = sessions.at(-1);
-			const hasMore = offset + limit < matches.length;
-			ws.send(
-				JSON.stringify({
-					_tag: "Exit",
-					requestId: request.id,
-					exit: {
-						_tag: "Success",
-						value: {
-							projectSlug: params["projectSlug"],
-							sessions,
-							availability: [],
-							hasMore,
-							nextCursor:
-								hasMore && last
-									? { updatedAt: last.updatedAt, id: last.id }
-									: null,
-						},
-					},
-				}),
-			);
+			const receive = await ready;
+			await Effect.runPromise(receive(message));
 		});
 	});
 	return { rows, requests };

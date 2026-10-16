@@ -514,16 +514,21 @@ export const providerInstancesHandlers: StepHandler[] = [
 				mockInstances.set(world.page, list);
 				rpc.setDaemonList("SubscribeInstances", { instances: list });
 			}
-			rpc.setResponse("GetModels", {
-				projectSlug: "myapp",
-				providers: [],
-				active: { model: "claude-sonnet-4-5", provider: "claude" },
+			rpc.setStubs({
+				GetModels: () => ({
+					defaultOpenCodeInstanceId: "opencode",
+					projectSlug: "myapp",
+					providers: [],
+					active: { model: "claude-sonnet-4-5", provider: "claude" },
+				}),
 			});
-			rpc.setResponse("GetAgents", {
-				projectSlug: "myapp",
-				instanceId: accountId,
-				providerScope: { id: "claude", name: "Claude" },
-				agents: [],
+			rpc.setStubs({
+				GetAgents: () => ({
+					projectSlug: "myapp",
+					instanceId: accountId,
+					providerScope: { id: "claude", name: "Claude" },
+					agents: [],
+				}),
 			});
 			rpc.upsertShellRow({
 				...(isRecord(previous) ? previous : {}),
@@ -1138,12 +1143,15 @@ export const providerInstancesHandlers: StepHandler[] = [
 		match: /^new drafts use a Claude model$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("GetModels", {
-				projectSlug: "myapp",
-				providers: dualDriverProviders.filter(
-					(provider) => provider.id !== "claude",
-				),
-				active: { model: "claude-sonnet-4-5", provider: "claude" },
+			rpc.setStubs({
+				GetModels: () => ({
+					defaultOpenCodeInstanceId: "opencode",
+					projectSlug: "myapp",
+					providers: dualDriverProviders.filter(
+						(provider) => provider.id !== "claude",
+					),
+					active: { model: "claude-sonnet-4-5", provider: "claude" },
+				}),
 			});
 			rpc.setProjectSetting({
 				_tag: "defaultModel",

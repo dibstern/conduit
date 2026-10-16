@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { STEER_BLOCKERS } from "../../../src/lib/contracts/stored-event.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
 
@@ -198,9 +199,10 @@ export const pendingInputTrayHandlers: StepHandler[] = [
 		name: "refuse steers",
 		match: /^the relay refuses steers with ([a-z_]+)$/,
 		run: async ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("input.submit", {
-				ok: false,
-				reason: match[1],
+			const reason = STEER_BLOCKERS.find((reason) => reason === match[1]);
+			if (!reason) throw new Error(`Unknown steer refusal: ${match[1]}`);
+			requireRpcControl(world.page).setStubs({
+				"input.submit": () => ({ ok: false, reason }),
 			});
 		},
 	},

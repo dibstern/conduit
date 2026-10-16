@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
 import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
+import type { GoalDetails } from "../../../contracts/ws-rpc.js";
 import {
 	getOrCreateSessionActivity,
 	phaseToIdle,
@@ -37,10 +38,7 @@ import {
 import { uiState } from "../../stores/ui.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
-import type {
-	GoalDetails,
-	getGoalDetailsRpc,
-} from "../../transport/ws-rpc-client.js";
+import type { rpc } from "../../transport/ws-rpc-client.js";
 import type {
 	BannerConfig,
 	OpenCodeInstance,
@@ -75,22 +73,22 @@ const goalCheckFixtures = [
 	{ minutes: 36, reason: "38/38 once. Needs a second run." },
 ];
 
-const getGoalDetails = fn<typeof getGoalDetailsRpc>(
-	async ({ sessionId }): Promise<GoalDetails> => {
-		const facts = sessionGoals.get(sessionId);
-		const goal = facts?.goal ?? facts?.endedGoal;
-		if (!goal) return { checks: [], tokensSinceStart: null };
-		const count = facts?.ended === "met" ? 4 : Math.min(goal.iterations, 3);
-		return {
-			checks: goalCheckFixtures.slice(0, count).map((check, index) => ({
-				iteration: index + 1,
-				at: goal.setAt + check.minutes * 60_000,
-				reason: check.reason,
-			})),
-			tokensSinceStart: goal.iterations === 0 ? 0 : 1_240_000,
-		};
-	},
-);
+const getGoalDetails = fn<
+	(input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>
+>(async ({ sessionId }): Promise<GoalDetails> => {
+	const facts = sessionGoals.get(sessionId);
+	const goal = facts?.goal ?? facts?.endedGoal;
+	if (!goal) return { checks: [], tokensSinceStart: null };
+	const count = facts?.ended === "met" ? 4 : Math.min(goal.iterations, 3);
+	return {
+		checks: goalCheckFixtures.slice(0, count).map((check, index) => ({
+			iteration: index + 1,
+			at: goal.setAt + check.minutes * 60_000,
+			reason: check.reason,
+		})),
+		tokensSinceStart: goal.iterations === 0 ? 0 : 1_240_000,
+	};
+});
 
 // Rendered through a phone-width frame; see the fixture for why.
 const meta = {

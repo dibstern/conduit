@@ -29,9 +29,7 @@ test("a draft offers and highlights its own account's skills", async ({
 		{ slug: "e2e-replay", title: "Draft project", folders: ["/workspace"] },
 	];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
@@ -53,6 +51,10 @@ test("a draft offers and highlights its own account's skills", async ({
 					},
 				],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {

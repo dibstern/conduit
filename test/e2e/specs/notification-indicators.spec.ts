@@ -126,7 +126,7 @@ async function mockRelayWithViewSessionRpc(
 	options: WsMockOptions,
 ): Promise<WsMockControl> {
 	await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ResolveSession: () => ({ projectSlug: PROJECT_SLUG }),
 			ViewSession: () => ({ ok: true }),
 		},

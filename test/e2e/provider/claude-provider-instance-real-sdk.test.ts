@@ -69,6 +69,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 
 	it(
 		"full turn: sendTurnEffect() resolves with completed TurnResult and emits canonical events",
+		{ timeout: 120_000 },
 		async () => {
 			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: process.cwd(),
@@ -107,7 +108,6 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			// Clean up the provider instance
 			await Effect.runPromise(instance.shutdownEffect());
 		},
-		{ timeout: 120_000 },
 	);
 
 	// The activity indicators (composer bounce bar, sidebar processing dot) are
@@ -117,6 +117,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 	// captured trace; this one proves the live SDK still orders things that way.
 	it(
 		"subagent turn: stays busy from the prompt until the result",
+		{ timeout: 180_000 },
 		async () => {
 			const instance = makeTestClaudeProviderInstance({
 				workspaceRoot: process.cwd(),
@@ -182,6 +183,5 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 
 			await Effect.runPromise(instance.shutdownEffect());
 		},
-		{ timeout: 180_000 },
 	);
 });

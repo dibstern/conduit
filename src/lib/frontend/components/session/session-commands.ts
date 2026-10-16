@@ -4,17 +4,8 @@ import { followFork, isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
-import { WsRpcError } from "../../transport/ws-rpc.js";
-import {
-	deleteSessionRpc,
-	forkSessionRpc,
-	renameSessionRpc,
-	setSessionAutoSettleRpc,
-	setSessionPinnedRpc,
-	setSessionSettledRpc,
-	snoozeSessionRpc,
-	unsnoozeSessionRpc,
-} from "../../transport/ws-rpc-client.js";
+import { toastFailure } from "../../transport/rpc-errors.js";
+import { rpc } from "../../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../types.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { formatSnoozeTime } from "../../utils/format.js";
@@ -139,7 +130,7 @@ async function settle(session: SessionInfo, settled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await setSessionSettledRpc({ ...input, settled });
+		await rpc("SetSessionSettled", { ...input, settled });
 		await refreshIfForeign(session);
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
@@ -147,14 +138,14 @@ async function settle(session: SessionInfo, settled: boolean) {
 				action: {
 					label: "Undo",
 					run: () => {
-						void setSessionSettledRpc({ ...input, settled: false })
+						void rpc("SetSessionSettled", { ...input, settled: false })
 							.then(() => refreshIfForeign(session))
-							.catch(() => showToast("Couldn't undo", { variant: "error" }));
+							.catch(toastFailure("Couldn't undo"));
 					},
 				},
 			});
-	} catch {
-		showToast("Couldn't settle session", { variant: "error" });
+	} catch (error) {
+		toastFailure("Couldn't settle session")(error);
 	}
 }
 
@@ -162,7 +153,7 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await setSessionPinnedRpc({ ...input, pinned });
+		await rpc("SetSessionPinned", { ...input, pinned });
 		await refreshIfForeign(session);
 		if (pinned)
 			showToast(`Pinned “${session.title || "New Session"}” to the top`, {
@@ -170,14 +161,14 @@ async function pin(session: SessionInfo, pinned: boolean) {
 				action: {
 					label: "Undo",
 					run: () => {
-						void setSessionPinnedRpc({ ...input, pinned: false })
+						void rpc("SetSessionPinned", { ...input, pinned: false })
 							.then(() => refreshIfForeign(session))
-							.catch(() => showToast("Couldn't undo", { variant: "error" }));
+							.catch(toastFailure("Couldn't undo"));
 					},
 				},
 			});
-	} catch {
-		showToast("Couldn't pin session", { variant: "error" });
+	} catch (error) {
+		toastFailure("Couldn't pin session")(error);
 	}
 }
 
@@ -185,10 +176,10 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await setSessionAutoSettleRpc({ ...input, disabled });
+		await rpc("SetSessionAutoSettle", { ...input, disabled });
 		await refreshIfForeign(session);
-	} catch {
-		showToast("Couldn't change auto-settle", { variant: "error" });
+	} catch (error) {
+		toastFailure("Couldn't change auto-settle")(error);
 	}
 }
 
@@ -196,13 +187,13 @@ async function rename(session: SessionInfo, title: string) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await renameSessionRpc({
+		await rpc("RenameSession", {
 			sessionId: input.sessionId,
 			title,
 		});
 		await refreshIfForeign(session);
-	} catch {
-		showToast("Couldn't rename session", { variant: "error" });
+	} catch (error) {
+		toastFailure("Couldn't rename session")(error);
 	}
 }
 
@@ -212,7 +203,7 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 	const wasSnoozed = isSessionSnoozed(session, now);
 	const previousUntil = session.snoozedUntil ?? null;
 	try {
-		await snoozeSessionRpc({ ...input, until });
+		await rpc("SnoozeSession", { ...input, until });
 		await refreshIfForeign(session);
 		showToast(
 			until === null
@@ -224,20 +215,17 @@ async function snooze(session: SessionInfo, until: number | null, now: number) {
 					label: "Undo",
 					run: () => {
 						const undo = wasSnoozed
-							? snoozeSessionRpc({ ...input, until: previousUntil })
-							: unsnoozeSessionRpc(input);
+							? rpc("SnoozeSession", { ...input, until: previousUntil })
+							: rpc("UnsnoozeSession", input);
 						void undo
 							.then(() => refreshIfForeign(session))
-							.catch(() => showToast("Couldn't undo", { variant: "error" }));
+							.catch(toastFailure("Couldn't undo"));
 					},
 				},
 			},
 		);
 	} catch (error) {
-		showToast(
-			error instanceof WsRpcError ? error.message : "Couldn't snooze session",
-			{ variant: "error" },
-		);
+		toastFailure("Couldn't snooze session")(error);
 	}
 }
 
@@ -245,13 +233,10 @@ async function unsnooze(session: SessionInfo) {
 	const input = rpcInput(session);
 	if (!input) return;
 	try {
-		await unsnoozeSessionRpc(input);
+		await rpc("UnsnoozeSession", input);
 		await refreshIfForeign(session);
 	} catch (error) {
-		showToast(
-			error instanceof WsRpcError ? error.message : "Couldn't unsnooze session",
-			{ variant: "error" },
-		);
+		toastFailure("Couldn't unsnooze session")(error);
 	}
 }
 
@@ -277,11 +262,11 @@ async function remove(
 	}
 	const target = targets?.[0];
 	if (!target) return;
-	let result: Awaited<ReturnType<typeof deleteSessionRpc>>;
+	let result: Awaited<ReturnType<typeof rpc<"DeleteSession">>>;
 	try {
-		result = await deleteSessionRpc(target);
-	} catch {
-		showToast(`Couldn't delete "${title}"`, { variant: "warn" });
+		result = await rpc("DeleteSession", target);
+	} catch (error) {
+		toastFailure(`Couldn't delete "${title}"`, "warn")(error);
 		return;
 	}
 	void refreshIfForeign(session).catch(() =>
@@ -298,9 +283,9 @@ async function remove(
 function fork(session: SessionInfo) {
 	const input = rpcInput(session);
 	if (!input) return;
-	void forkSessionRpc(input)
+	void rpc("ForkSession", input)
 		.then(followFork)
-		.catch(() => showToast("Failed to fork session", { variant: "error" }));
+		.catch(toastFailure("Failed to fork session"));
 }
 
 async function copyResume(session: SessionInfo) {

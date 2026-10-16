@@ -137,6 +137,7 @@ export function discoverCapabilitiesEffect(
 	workspaceRoot: string,
 	capabilitiesService: ClaudeCapabilitiesService | undefined,
 	folder: ClaudeConfigDir,
+	options?: { readonly refresh?: boolean },
 ): Effect.Effect<ProviderCapabilities> {
 	return Effect.gen(function* () {
 		const userBase = folder.path;
@@ -157,6 +158,7 @@ export function discoverCapabilitiesEffect(
 		const probe = yield* getCapabilitiesProbeEffect(
 			capabilitiesService,
 			workspaceRoot,
+			options,
 		).pipe(
 			Effect.catchAll((err) =>
 				Effect.sync(() => {
@@ -195,9 +197,12 @@ export function discoverCapabilitiesEffect(
 function getCapabilitiesProbeEffect(
 	service: ClaudeCapabilitiesService | undefined,
 	workspaceRoot: string,
+	options?: { readonly refresh?: boolean },
 ): Effect.Effect<ProbeResult, ClaudeAdapterError> {
 	return service
-		? service.get(workspaceRoot)
+		? options?.refresh
+			? service.get(workspaceRoot, { refresh: true })
+			: service.get(workspaceRoot)
 		: Effect.fail(
 				new ClaudeRuntimeError({
 					message: "Claude capabilities service unavailable",

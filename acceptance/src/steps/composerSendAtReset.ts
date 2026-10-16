@@ -96,47 +96,43 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
 			const relay = requireRelayControl(world.page);
-			rpc.setHandler("input.submit", (request) => {
-				const { sessionId, inputId, text } = request;
-				if (
-					typeof sessionId !== "string" ||
-					typeof inputId !== "string" ||
-					typeof text !== "string"
-				)
-					throw new Error("Incomplete reset queue submission");
-				const row = rpc.shellRows?.find(
-					(candidate) => (candidate as { id?: string }).id === sessionId,
-				) as
-					| { accountId?: string | null; limitRecovery?: LimitRecovery }
-					| undefined;
-				const resetsAt = snapshot(world.page)
-					.find((reading) => reading.accountId === row?.accountId)
-					?.windows.find(
-						(window) => window.utilization >= 100 && window.resetsAt,
-					)?.resetsAt;
-				if (row?.limitRecovery?.scheduledAt === undefined && resetsAt)
-					projectLimit(world.page, {
-						instanceId: row?.accountId ?? "",
-						rateLimitType: "five_hour",
-						rearms: 0,
-						continued: false,
-						scheduledAt: Date.parse(resetsAt) / 1000,
-					} satisfies LimitRecovery);
-				relay.sendMessage({
-					type: "mock_pending_input",
-					sessionId,
-					inputId,
-					text,
-				});
-				return { ok: true, sessionId };
-			});
-			rpc.setHandler("input.cancel", ({ sessionId, inputId }) => {
-				relay.sendMessage({
-					type: "mock_pending_input_removed",
-					sessionId,
-					inputId,
-				});
-				return { ok: true };
+			rpc.setStubs({
+				"input.submit": (request) => {
+					const { sessionId, inputId, text } = request;
+					const row = rpc.shellRows?.find(
+						(candidate) => (candidate as { id?: string }).id === sessionId,
+					) as
+						| { accountId?: string | null; limitRecovery?: LimitRecovery }
+						| undefined;
+					const resetsAt = snapshot(world.page)
+						.find((reading) => reading.accountId === row?.accountId)
+						?.windows.find(
+							(window) => window.utilization >= 100 && window.resetsAt,
+						)?.resetsAt;
+					if (row?.limitRecovery?.scheduledAt === undefined && resetsAt)
+						projectLimit(world.page, {
+							instanceId: row?.accountId ?? "",
+							rateLimitType: "five_hour",
+							rearms: 0,
+							continued: false,
+							scheduledAt: Date.parse(resetsAt) / 1000,
+						} satisfies LimitRecovery);
+					relay.sendMessage({
+						type: "mock_pending_input",
+						sessionId,
+						inputId,
+						text,
+					});
+					return { ok: true, sessionId };
+				},
+				"input.cancel": ({ sessionId, inputId }) => {
+					relay.sendMessage({
+						type: "mock_pending_input_removed",
+						sessionId,
+						inputId,
+					});
+					return { ok: true };
+				},
 			});
 		},
 	},
@@ -359,23 +355,22 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setUsageReadings(readings);
-			rpc.setResponse(
-				"QuotaForAccounts",
-				readings.map((reading) =>
-					reading.accountId === "blocked"
-						? { ...reading, status: "limited" }
-						: reading,
-				),
-			);
+			rpc.setStubs({
+				QuotaForAccounts: () =>
+					readings.map((reading) =>
+						reading.accountId === "blocked"
+							? { ...reading, status: "limited" }
+							: reading,
+					),
+			});
 		},
 	},
 	{
 		name: "accept a menu switch and project its destination account",
 		match: /^the mock relay accepts send-menu switches$/,
 		run: ({ world }) => {
-			requireRpcControl(world.page).setHandler(
-				"ContinueSession",
-				({ sessionId, instanceId, expectedInstanceId }) => {
+			requireRpcControl(world.page).setStubs({
+				ContinueSession: ({ sessionId, instanceId, expectedInstanceId }) => {
 					if (
 						typeof sessionId !== "string" ||
 						typeof instanceId !== "string" ||
@@ -395,7 +390,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 					});
 					return { ok: true };
 				},
-			);
+			});
 		},
 	},
 	{

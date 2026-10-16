@@ -344,6 +344,7 @@ export interface ProviderInstance {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */
