@@ -11,6 +11,7 @@
 		consumeScrollRequest,
 		createEmptySessionMessages,
 		currentChat,
+		draftSendIn,
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
@@ -454,6 +455,9 @@
 	// Turns render from chat.messages, which can still hold items from before the
 	// transcript reset. A cold open shows only the skeleton, never those leftovers.
 	const coldOpen = $derived(feed === "catchingUp" && !hasRows);
+	// A draft's first send shows until its new session places it, so the pane
+	// is not empty and never skeletons over it.
+	const firstSend = $derived(primary ? draftSendIn(sessionState.currentId) : null);
 	// A cold pane has not heard from the feed, so it cannot yet claim the start.
 	const startConfirmed = $derived(transcript != null && transcript.hwm !== null);
 
@@ -506,7 +510,7 @@
 	{/if}
 
 	<!-- Beginning of session marker (was in HistoryView) -->
-	{#if startConfirmed && !chat.historyHasMore && !chat.historyLoading && !isFork}
+	{#if (startConfirmed || firstSend) && !chat.historyHasMore && !chat.historyLoading && !isFork}
 		<div class="history-beginning flex flex-col items-center py-4 text-text-dimmer text-xs">
 			<div class="w-8 h-px bg-border mb-2"></div>
 			<span>Beginning of session</span>
@@ -633,10 +637,15 @@
 	{/if}
 	{@render resumed(END_OF_TRANSCRIPT)}
 	</div>
+	{#if firstSend}
+		<div class="msg-container">
+			<UserMessage message={firstSend} />
+		</div>
+	{/if}
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where
 	     the newest messages land; extra turns clip off the top. -->
-	{#if coldOpen}
+	{#if coldOpen && !firstSend}
 		<div
 			class="transcript-skeleton absolute inset-x-0 top-5 bottom-3 overflow-hidden max-w-[760px] mx-auto px-5 flex flex-col justify-end gap-6"
 			aria-hidden="true"

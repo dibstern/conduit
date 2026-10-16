@@ -43,3 +43,18 @@ Scenario Outline: A failing feed offers Retry, which reconnects immediately
 Examples:
   | baseline                | threshold |
   | transcript-feed-failing | 98        |
+
+Scenario Outline: A new session's first send shows at once, never under a skeleton
+  Given the transcript feed will hold
+  And the conduit app is served with the connected mockup
+  And the composer picker has the OpenCode catalog
+  And session creation takes <createMs> ms
+  When I send <message> from the composer, watching the transcript for <watchMs> ms
+  Then the sent message showed within <shownWithinMs> ms and stayed, with no loading skeleton
+  When the server places the sent message in the new session
+  Then the transcript shows the sent message exactly once
+  And the messages region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | createMs | message            | watchMs | shownWithinMs | baseline                   | threshold |
+  | 400      | Hello from a draft | 1200    | 100           | transcript-feed-first-send | 98        |
