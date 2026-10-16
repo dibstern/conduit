@@ -10,7 +10,7 @@ const FILES_PANE_STORAGE_KEY = "files-pane-by-session";
 const FILES_PANE_MEMORY_LIMIT = 100;
 export const FILES_PANE_MIN_WIDTH = 280;
 
-export type ComposerTier = "wide" | "narrow" | "phone";
+export type ComposerTier = "wide" | "narrow" | "thin" | "phone";
 
 type FilesPaneMemory = { filesOpen: boolean; width: number | null };
 let filesPaneMemory: Map<string, FilesPaneMemory> | undefined;
@@ -98,12 +98,16 @@ export const sessionViewState = $state({
 	},
 });
 
+// A composerWidth of 0 is unmeasured, so it keeps the fuller narrow controls.
 const composerTier = $derived<ComposerTier>(
 	sessionViewState.compact
 		? "phone"
 		: sessionViewState.composerWidth >= 600
 			? "wide"
-			: "narrow",
+			: sessionViewState.composerWidth > 0 &&
+					sessionViewState.composerWidth < 390
+				? "thin"
+				: "narrow",
 );
 
 export function isBarCollapsed(): boolean {
