@@ -3,11 +3,9 @@
 		refreshServerStatus,
 		serverStatus,
 	} from "../../stores/server-status.svelte.js";
-	import {
-		LOG_LEVELS,
-		type SetLogLevelRpcInput,
-		setLogLevelRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { RpcLogLevelSchema, type RpcLogLevel } from "../../transport/ws-rpc.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import Select from "../ui/Select.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
@@ -20,19 +18,19 @@
 		logLevel = serverStatus.status?.logLevel ?? "";
 	});
 
-	async function changeLogLevel(level: SetLogLevelRpcInput["level"]): Promise<void> {
+	async function changeLogLevel(level: RpcLogLevel): Promise<void> {
 		if (!serverStatus.status || saving) return;
 		const previousLevel = serverStatus.status.logLevel;
 		saving = true;
 		error = null;
 		try {
-			await setLogLevelRpc({ level });
+			await rpc("SetLogLevel", { level });
 			await refreshServerStatus();
 			logLevel = serverStatus.status?.logLevel ?? previousLevel;
 			error = serverStatus.error;
-		} catch {
+		} catch (cause) {
 			logLevel = previousLevel;
-			error = "Could not change log level.";
+			error = failureLine(cause, "Could not change log level.");
 		} finally {
 			saving = false;
 		}
@@ -52,9 +50,9 @@
 				disabled={!serverStatus.status || saving}
 				invalid={error !== null}
 				aria-describedby={error ? "server-log-level-error" : undefined}
-				onchange={(event) => changeLogLevel(event.currentTarget.value as SetLogLevelRpcInput["level"])}
+				onchange={(event) => changeLogLevel(event.currentTarget.value as RpcLogLevel)}
 			>
-				{#each LOG_LEVELS as level (level)}
+				{#each RpcLogLevelSchema.literals as level (level)}
 					<option value={level}>{level}</option>
 				{/each}
 			</Select>

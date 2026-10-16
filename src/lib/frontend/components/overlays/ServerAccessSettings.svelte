@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { refreshServerStatus, serverStatus } from "../../stores/server-status.svelte.js";
-	import { setTailscaleServeRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 
@@ -20,11 +21,11 @@
 		saving = true;
 		error = null;
 		try {
-			await setTailscaleServeRpc({ enabled: !status.tailscaleServeEnabled });
+			await rpc("SetTailscaleServe", { enabled: !status.tailscaleServeEnabled });
 			await refreshServerStatus();
 			if (serverStatus.error) error = "Could not save Tailscale Serve. Try again.";
-		} catch {
-			error = "Could not save Tailscale Serve. Try again.";
+		} catch (cause) {
+			error = failureLine(cause, "Could not save Tailscale Serve. Try again.");
 		} finally {
 			saving = false;
 		}

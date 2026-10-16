@@ -3,6 +3,7 @@
 	import { isKnownDriverKind, type KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import { onDestroy } from "svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
+	import CursorAuthSettings from "./CursorAuthSettings.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -352,7 +353,9 @@
 	{#each configDirectoryDrivers as driver (driver)}
 		{@const accounts = instancesByDriver[driver] ?? []}
 		{@const presentation = PROVIDER_PRESENTATION[driver]}
-		{#if accounts.length > 0}
+		{#if presentation.auth}
+			<CursorAuthSettings account={accounts[0]} />
+		{:else if accounts.length > 0}
 			<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="{driver}-accounts-list">
 				<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
 					<h4>{presentation.label} accounts</h4>

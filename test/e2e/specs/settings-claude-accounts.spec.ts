@@ -350,6 +350,14 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ResolveSession: () => ({ projectSlug: "myapp" }),
+			GetUsageLimitsSetting: () => ({
+				usageLimits: {
+					autoResume: false,
+					autoSwitch: false,
+					warnAt: 80,
+					order: usageOrder,
+				},
+			}),
 			CreateSession: (payload) => {
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");
@@ -414,14 +422,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		handlers: {
 			GetProjects: () => ({ projects: [project], current: "myapp" }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
-			GetUsageLimitsSetting: () => ({
-				usageLimits: {
-					autoResume: false,
-					autoSwitch: false,
-					warnAt: 80,
-					order: usageOrder,
-				},
-			}),
 			RemoveInstance: (payload) => {
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");

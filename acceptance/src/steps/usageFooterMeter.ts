@@ -97,12 +97,15 @@ function setAccounts(
 	])[],
 ): void {
 	const rpc = requireRpcControl(page);
-	rpc.setResponse("GetUsageLimitsSetting", {
-		usageLimits: {
-			autoResume: false,
-			autoSwitch: false,
-			order: ["claude", "work", "spare", "unreadable", "chatgpt", "cursor"],
-		},
+	rpc.setStubs({
+		GetUsageLimitsSetting: () => ({
+			usageLimits: {
+				autoResume: false,
+				autoSwitch: false,
+				warnAt: 80,
+				order: ["claude", "work", "spare", "unreadable", "chatgpt", "cursor"],
+			},
+		}),
 	});
 	rpc.setDaemonList("SubscribeInstances", {
 		instances: accounts.map(([id, name, driver = "claude"]) => ({

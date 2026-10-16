@@ -53,6 +53,13 @@ export interface CursorRuntimeProbe {
 	readonly reason?: string;
 }
 
+export interface CursorLoginOptions {
+	readonly openBrowser: false;
+	readonly apiKeyName: "conduit";
+	readonly signal: AbortSignal;
+	readonly onLoginUrl: (url: string) => void;
+}
+
 export interface CursorAgentOptions {
 	readonly cwd: string;
 	readonly dirs: readonly string[];
@@ -82,12 +89,35 @@ export interface CursorSendOptions {
 	readonly local?: { readonly force: true };
 }
 
+export interface CursorPersistedRun {
+	readonly runId: string;
+	readonly status:
+		| "queued"
+		| "running"
+		| "finished"
+		| "error"
+		| "cancelled"
+		| "expired";
+	readonly requestId?: string | null;
+	readonly startedAt?: number | null;
+}
+
 export interface CursorCustomTool {
 	readonly description: string;
+	readonly inputSchema: Record<string, CursorJsonValue>;
 	readonly execute: (
 		args: Readonly<Record<string, unknown>>,
+		context: { readonly toolCallId?: string; readonly sessionId?: string },
 	) => Promise<string>;
 }
+
+type CursorJsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| CursorJsonValue[]
+	| { [key: string]: CursorJsonValue };
 
 export interface CursorStore {
 	dispose(): Promise<void>;
@@ -117,10 +147,17 @@ export interface CursorAgent {
 export interface CursorSdkPort {
 	readonly replay?: true;
 	probeRuntime(): Promise<CursorRuntimeProbe>;
+	authLogin(options: CursorLoginOptions): Promise<void>;
 	authStatus(): Promise<CursorAuthStatus>;
+	authLogout(): Promise<void>;
 	storedCredential(): Promise<CursorStoredCredential | undefined>;
 	modelsList(credential: CursorCredential): Promise<readonly CursorModel[]>;
 	openStore(path: string, cwd: string): Promise<CursorStore>;
+	getActiveRun(
+		agentId: string,
+		store: CursorStore,
+	): Promise<CursorPersistedRun | undefined>;
+	deleteAgent(agentId: string, cwd: string, store: CursorStore): Promise<void>;
 	primeSandbox(
 		options: CursorAgentOptions,
 		credential: CursorCredential,

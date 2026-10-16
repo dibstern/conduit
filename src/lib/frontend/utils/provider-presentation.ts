@@ -13,6 +13,7 @@ export const PROVIDER_PRESENTATION = {
 		namePlaceholder: "Work Claude",
 		configDirPlaceholder: "~/.config/claude/work",
 		composerNotice: undefined,
+		auth: undefined,
 		subagentNotice: undefined,
 	},
 	opencode: {
@@ -22,6 +23,7 @@ export const PROVIDER_PRESENTATION = {
 		namePlaceholder: "Staging OC",
 		configDirPlaceholder: undefined,
 		composerNotice: undefined,
+		auth: undefined,
 		subagentNotice: undefined,
 	},
 	cursor: {
@@ -40,6 +42,21 @@ export const PROVIDER_PRESENTATION = {
 			plan: "Cursor plans without per-call approval, inside its sandbox.",
 			full: "Cursor runs every call with no approval and no sandbox.",
 		},
+		auth: {
+			title: "Cursor account",
+			login: "Log in to Cursor",
+			manage: "Cursor account settings",
+			logout: "Log out",
+			cancel: "Cancel login",
+			openLogin: "Open Cursor login",
+			pending:
+				"Open the link to finish logging in, on this device or another one.",
+			loggedIn: "Logged in",
+			loggedOut: "Not logged in",
+			environment: "From environment (CURSOR_API_KEY)",
+			expiryWarning: "Your Cursor key expires soon. Log in again to renew it.",
+			errorCode: "auth_required",
+		},
 		subagentNotice: "Subagent sessions are read-only.",
 	},
 } as const satisfies Record<
@@ -52,6 +69,22 @@ export const PROVIDER_PRESENTATION = {
 		readonly configDirPlaceholder: string | undefined;
 		readonly composerNotice:
 			| Partial<Record<SessionPermissionMode, string>>
+			| undefined;
+		readonly auth:
+			| {
+					readonly title: string;
+					readonly login: string;
+					readonly manage: string;
+					readonly logout: string;
+					readonly cancel: string;
+					readonly openLogin: string;
+					readonly pending: string;
+					readonly loggedIn: string;
+					readonly loggedOut: string;
+					readonly environment: string;
+					readonly expiryWarning: string;
+					readonly errorCode: string;
+			  }
 			| undefined;
 		readonly subagentNotice: string | undefined;
 	}

@@ -11,6 +11,7 @@ interface CursorErrorDetails {
 export class CursorSdkFailure extends Data.TaggedError("CursorSdkFailure")<{
 	readonly operation: string;
 	readonly reason: string;
+	readonly authRequired?: boolean;
 	readonly code?: TurnErrorCode;
 	readonly retryable?: boolean;
 	readonly sdkError?: CursorErrorDetails;
@@ -22,10 +23,14 @@ export class CursorSdkFailure extends Data.TaggedError("CursorSdkFailure")<{
 
 export function cursorTurnError(cause: unknown): TurnError {
 	if (cause instanceof CursorSdkFailure) {
+		const authRequired = cause.authRequired || cause.code === "auth_required";
 		return {
-			code: cause.code ?? "provider_error",
-			message: cause.reason,
-			retryable: cause.retryable ?? false,
+			code: authRequired ? "auth_required" : (cause.code ?? "provider_error"),
+			message:
+				cause.authRequired && cause.code === undefined
+					? "Cursor authentication failed. Log in to Cursor in Settings."
+					: cause.reason,
+			retryable: authRequired ? false : (cause.retryable ?? false),
 		};
 	}
 	const fields = cause !== null && typeof cause === "object" ? cause : {};
@@ -37,7 +42,9 @@ export function cursorTurnError(cause: unknown): TurnError {
 			? fields.message
 			: String(cause);
 	let mapped: TurnErrorCode = "provider_error";
-	if (
+	if ("authRequired" in fields && fields.authRequired === true) {
+		mapped = "auth_required";
+	} else if (
 		code === "auth_required" ||
 		code === "agent_busy" ||
 		code === "rate_limited" ||
@@ -115,14 +122,21 @@ export function cursorTurnError(cause: unknown): TurnError {
 	}
 	return {
 		code: mapped,
-		message,
+		message:
+			"authRequired" in fields &&
+			fields.authRequired === true &&
+			code === undefined &&
+			name === undefined
+				? "Cursor authentication failed. Log in to Cursor in Settings."
+				: message,
 		retryable:
-			code === "connection_stalled" ||
-			("isRetryable" in fields && typeof fields.isRetryable === "boolean"
-				? fields.isRetryable
-				: "retryable" in fields && typeof fields.retryable === "boolean"
-					? fields.retryable
-					: mapped === "network_error" || mapped === "rate_limited"),
+			mapped !== "auth_required" &&
+			(code === "connection_stalled" ||
+				("isRetryable" in fields && typeof fields.isRetryable === "boolean"
+					? fields.isRetryable
+					: "retryable" in fields && typeof fields.retryable === "boolean"
+						? fields.retryable
+						: mapped === "network_error" || mapped === "rate_limited")),
 	};
 }
 
@@ -138,6 +152,7 @@ export function cursorSdkFailure(
 		reason: error.message,
 		code: error.code,
 		retryable: error.retryable ?? false,
+		...(error.code === "auth_required" ? { authRequired: true } : {}),
 		sdkError: {
 			...("name" in fields && typeof fields.name === "string"
 				? { name: fields.name }

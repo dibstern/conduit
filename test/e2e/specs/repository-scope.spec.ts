@@ -96,6 +96,10 @@ async function openList(
 	);
 	const rpc = await mockWsRpc(page, {
 		stubs: {
+			GetDefaultGroupingMode: () => ({
+				mode: projects[0]?.effectiveGroupingMode ?? "repository",
+			}),
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			ListDaemonSessions: ({ scope, search, cursor, exclude, limit }) => {
 				const members = projects
 					.filter(
@@ -145,10 +149,6 @@ async function openList(
 				sessionSlug: null,
 			}),
 			GetProjects: () => ({ projects, current: projects[0]?.slug ?? null }),
-			GetDefaultGroupingMode: () => ({
-				mode: projects[0]?.effectiveGroupingMode ?? "repository",
-			}),
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 		},
 		streams: {
 			SubscribeShell: ({ projectSlug }) => [
