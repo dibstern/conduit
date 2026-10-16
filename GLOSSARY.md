@@ -4,8 +4,24 @@ Conduit is a browser-facing orchestrator for AI coding assistants. It keeps dura
 
 ## Language
 
+**Family**:
+A session plus every session it contains (Side Threads, subagents), transitively.
+_Avoid_: tree, thread group
+
+**Family Root**:
+A session that no other session contains. The sidebar shows exactly the Family Roots.
+_Avoid_: top-level session, root session, parentless session
+
+**Fork**:
+A session started from another session's context and contained by nobody. A Fork is a Family Root with lineage.
+_Avoid_: child session, branch
+
+**Source**:
+The session a Fork or Side Thread was started from.
+_Avoid_: parent, origin session
+
 **Side Thread**:
-A saved fork owned by its parent session that starts with the parent's context, keeps its own transcript, and stays hidden from the sidebar.
+A saved fork contained by its Source. It starts with the Source's context, keeps its own transcript, and stays hidden from the sidebar.
 _Avoid_: side chat, btw session, ephemeral fork
 
 **OpenCode Instance**:
@@ -89,6 +105,9 @@ _Avoid_: permissions setting
 
 ## Relationships
 
+- A **Fork** is a **Family Root**. Its **Source** is lineage, not containment, so a busy or unread Fork never marks its Source's row (ADR-0006).
+- A **Side Thread** belongs to its **Source**'s **Family**.
+- Deleting a session deletes its **Family**, but never its **Forks**. A Fork whose Source was deleted keeps its transcript and fork point.
 - A **Provider Runtime** may request a **Session Approval** during a turn.
 - A **Provider Contract** defines what Conduit accepts from and sends to a **Provider Runtime**.
 - A **Provider Model Catalog** belongs to the provider runtime; Conduit may cache or display it, but should not redefine which provider model is latest.
