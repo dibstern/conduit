@@ -6,9 +6,11 @@ import { Effect } from "effect";
 import { importRegisteredProjectStores } from "../../../src/lib/persistence/migrations/daemon-store-import.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import {
+	daemonStoreAssertions,
 	type ProjectManifest,
 	projectManifest,
 	sourceChecksums,
+	storeImportPosition,
 	storeTableCounts,
 	writeImportArtifact,
 } from "../../helpers/daemon-store-import-manifest.js";
@@ -19,6 +21,7 @@ const initial = {
 	projects: [],
 	sourceChecksums: false,
 	idempotency: false,
+	invariants: [],
 	passed: false,
 };
 
@@ -35,6 +38,7 @@ test("imports both daemon-written project histories after shutdown", async ({
 		}[];
 		sourceChecksums: boolean;
 		idempotency: boolean;
+		invariants: ReturnType<typeof daemonStoreAssertions>[];
 		passed: boolean;
 	} = { ...initial, projects: [] };
 	try {
@@ -64,6 +68,11 @@ test("imports both daemon-written project histories after shutdown", async ({
 		const checksums = projects.map((project) =>
 			sourceChecksums(project.sourcePath),
 		);
+		// With two sources the seed's untouched clocks are exactly the
+		// destination clocks before the only remaining project is imported.
+		const positions = projects.map((project) =>
+			storeImportPosition(project.sourcePath),
+		);
 		const results = await Effect.runPromise(
 			importRegisteredProjectStores(harness.configDir, projects),
 		);
@@ -72,6 +81,25 @@ test("imports both daemon-written project histories after shutdown", async ({
 			"seeded",
 		]);
 		const destination = daemonStorePath(harness.configDir);
+		const seedIndex = projects.findIndex((project) =>
+			results.some(
+				(result) =>
+					result.projectId === project.projectId && result.outcome === "seeded",
+			),
+		);
+		const position = positions[seedIndex];
+		if (!position) throw new Error("Missing pre-import seed position");
+		for (const result of results.filter(
+			(result) => result.outcome === "imported",
+		)) {
+			const assertions = daemonStoreAssertions(destination, {
+				projectId: result.projectId,
+				before: position,
+			});
+			evidence.invariants.push(assertions);
+			for (const [name, passed] of Object.entries(assertions))
+				expect(passed, name).toBe(true);
+		}
 		for (const [index, project] of projects.entries()) {
 			const prior = before[index];
 			if (!prior) throw new Error("Missing source manifest");

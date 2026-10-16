@@ -168,6 +168,7 @@ export function projectManifest(
 ): ProjectManifest {
 	const db = new Database(filename, { readonly: true, fileMustExist: true });
 	try {
+		const legacyOwner = source === undefined ? " OR project_id IS NULL" : "";
 		const names = db
 			.prepare(
 				"SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -176,9 +177,9 @@ export function projectManifest(
 		const sessions = new Set(
 			(
 				db
-					.prepare(`SELECT id FROM sessions WHERE project_id = ? OR project_id IS NULL
-			UNION SELECT session_id FROM events WHERE project_id = ? OR project_id IS NULL
-			UNION SELECT session_id FROM session_sidebar WHERE project_id = ? OR project_id IS NULL`)
+					.prepare(`SELECT id FROM sessions WHERE project_id = ?${legacyOwner}
+			UNION SELECT session_id FROM events WHERE project_id = ?${legacyOwner}
+			UNION SELECT session_id FROM session_sidebar WHERE project_id = ?${legacyOwner}`)
 					.all(projectId, projectId, projectId) as { id: string }[]
 			).map((row) => row.id),
 		);
@@ -186,7 +187,7 @@ export function projectManifest(
 			(
 				db
 					.prepare(
-						"SELECT sequence FROM events WHERE project_id = ? OR project_id IS NULL",
+						`SELECT sequence FROM events WHERE project_id = ?${legacyOwner}`,
 					)
 					.all(projectId) as { sequence: number }[]
 			).map((row) => row.sequence),
@@ -223,17 +224,17 @@ export function projectManifest(
 				);
 			else if (name === "message_parts")
 				rows = rows.filter((row) => messages.has(String(row["message_id"])));
-			else if (name === "sessions")
-				rows = rows.filter((row) => sessions.has(String(row["id"])));
 			else if (rows.some((row) => "project_id" in row))
 				rows = rows.filter(
 					(row) =>
-						row["project_id"] === projectId || row["project_id"] === null,
+						row["project_id"] === projectId ||
+						(source === undefined && row["project_id"] === null),
 				);
 			else if (rows.some((row) => "project_key" in row))
 				rows = rows.filter(
 					(row) =>
-						row["project_key"] === projectId || row["project_key"] === null,
+						row["project_key"] === projectId ||
+						(source === undefined && row["project_key"] === null),
 				);
 			else if (rows.some((row) => "session_id" in row))
 				rows = rows.filter((row) => sessions.has(String(row["session_id"])));
@@ -307,6 +308,7 @@ export function projectManifest(
 						if (key === "version" && versionTables.has(table))
 							return [key, visit(value, "version", transform)];
 						if (
+							source === undefined &&
 							(key === "project_id" || key === "project_key") &&
 							value === null
 						)
@@ -393,6 +395,142 @@ export function projectManifest(
 			Object.entries(tables).map(([table, rows]) => [table, rows.length]),
 		);
 		return { tables, rowCounts, hash: artifactHash(tables), unownedKeys };
+	} finally {
+		db.close();
+	}
+}
+
+export interface StoreImportPosition {
+	readonly eventSequence: number;
+	readonly readModelVersion: number;
+	readonly outboxSequence: number;
+}
+
+export function storeImportPosition(filename: string): StoreImportPosition {
+	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	try {
+		return db
+			.prepare(`SELECT
+			COALESCE((SELECT MAX(sequence) FROM events), 0) AS eventSequence,
+			(SELECT value FROM read_model_counter WHERE id = 1) AS readModelVersion,
+			COALESCE((SELECT MAX(request_sequence) FROM provider_command_outbox), 0) AS outboxSequence`)
+			.get() as StoreImportPosition;
+	} finally {
+		db.close();
+	}
+}
+
+/** Raw daemon-store invariants, independent of rank normalization and offsets. */
+export function daemonStoreAssertions(
+	filename: string,
+	imported: {
+		readonly projectId: string;
+		readonly before: StoreImportPosition;
+	},
+) {
+	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	try {
+		const names = db
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+			.all() as { name: string }[];
+		const nullOwnership = names.flatMap(({ name }) => {
+			const fields = db.prepare(`PRAGMA table_info("${name}")`).all() as {
+				name: string;
+			}[];
+			return fields
+				.filter(
+					(field) =>
+						field.name === "project_id" || field.name === "project_key",
+				)
+				.map((field) =>
+					Number(
+						(
+							db
+								.prepare(
+									`SELECT COUNT(*) AS n FROM "${name}" WHERE "${field.name}" IS NULL`,
+								)
+								.get() as { n: number }
+						).n,
+					),
+				);
+		});
+		const sessionScope = `SELECT id AS session_id FROM sessions WHERE project_id = ?
+			UNION SELECT session_id FROM events WHERE project_id = ?
+			UNION SELECT session_id FROM session_sidebar WHERE project_id = ?`;
+		const allVersions: number[] = [];
+		const importedVersions: number[] = [];
+		for (const table of versionTables) {
+			allVersions.push(
+				...(
+					db.prepare(`SELECT version FROM ${table}`).all() as {
+						version: number;
+					}[]
+				).map((row) => row.version),
+			);
+			const scope =
+				table === "sessions" || table === "session_sidebar"
+					? "project_id = ?"
+					: table === "message_parts"
+						? `message_id IN (SELECT id FROM messages WHERE session_id IN (${sessionScope}))`
+						: `session_id IN (${sessionScope})`;
+			const params =
+				table === "sessions" || table === "session_sidebar"
+					? [imported.projectId]
+					: [imported.projectId, imported.projectId, imported.projectId];
+			importedVersions.push(
+				...(
+					db
+						.prepare(`SELECT version FROM ${table} WHERE ${scope}`)
+						.all(...params) as { version: number }[]
+				).map((row) => row.version),
+			);
+		}
+		const sidebarVersions = db
+			.prepare(
+				"SELECT project_id, json_extract(row, '$.version') AS version FROM session_sidebar WHERE row IS NOT NULL",
+			)
+			.all() as { project_id: string; version: number }[];
+		allVersions.push(...sidebarVersions.map((row) => row.version));
+		importedVersions.push(
+			...sidebarVersions
+				.filter((row) => row.project_id === imported.projectId)
+				.map((row) => row.version),
+		);
+		const events = db
+			.prepare("SELECT sequence FROM events WHERE project_id = ?")
+			.all(imported.projectId) as { sequence: number }[];
+		const outbox = db
+			.prepare(
+				"SELECT request_sequence FROM provider_command_outbox WHERE project_key = ?",
+			)
+			.all(imported.projectId) as { request_sequence: number }[];
+		const position = storeImportPosition(filename);
+		const horizon = db
+			.prepare("SELECT version FROM session_sidebar_horizon WHERE id = 1")
+			.get() as { version: number };
+		const cursors = db
+			.prepare("SELECT last_applied_seq FROM projector_cursors")
+			.all() as { last_applied_seq: number }[];
+		return {
+			ownershipStamped: nullOwnership.every((count) => count === 0),
+			eventOffsets:
+				events.length > 0 &&
+				events.every((row) => row.sequence > imported.before.eventSequence),
+			versionOffsets:
+				importedVersions.length > 0 &&
+				importedVersions.every(
+					(version) => version > imported.before.readModelVersion,
+				),
+			outboxOffsets: outbox.every(
+				(row) => row.request_sequence > imported.before.outboxSequence,
+			),
+			counterMatchesVersions:
+				position.readModelVersion === Math.max(0, ...allVersions),
+			horizonMatchesCounter: horizon.version === position.readModelVersion,
+			cursorsCoverEvents:
+				cursors.length > 0 &&
+				cursors.every((row) => row.last_applied_seq >= position.eventSequence),
+		};
 	} finally {
 		db.close();
 	}

@@ -234,7 +234,6 @@ function verifyStore(
 		db,
 		`SELECT COALESCE(MAX(sequence), 0) AS value FROM ${schema}.events`,
 	);
-	if (max === 0) reject(project, "unsupported-source", "Source has no events");
 	const cursors = rows<{ projector_name: string; last_applied_seq: number }>(
 		db,
 		`SELECT projector_name, last_applied_seq FROM ${schema}.projector_cursors`,
@@ -275,6 +274,8 @@ function verifySource(
 	translating: boolean,
 ): string[] {
 	const names = verifyStore(db, schema, project);
+	if (number(db, `SELECT 1 AS value FROM ${schema}.events LIMIT 1`) === 0)
+		reject(project, "unsupported-source", "Source has no events");
 	if (
 		number(
 			db,
@@ -336,7 +337,7 @@ function verifySourcePath(
 		resolve(filename) === resolve(project.sourcePath) ||
 		(destination &&
 			((destination.dev === source.dev && destination.ino === source.ino) ||
-				realpathSync(filename) === realpathSync(project.sourcePath)))
+				realpathSync(filename) === project.sourcePath))
 	)
 		reject(
 			project,
@@ -359,7 +360,7 @@ function markerStatus(
 	return {
 		projectId: project.projectId,
 		outcome:
-			marker.source_path === resolve(project.sourcePath) &&
+			marker.source_path === project.sourcePath &&
 			marker.source_fingerprint === fingerprint(project.sourcePath, project)
 				? "skipped"
 				: "source-changed",
@@ -378,7 +379,7 @@ function writeMarker(
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
 		project.projectId,
 		method,
-		resolve(project.sourcePath),
+		project.sourcePath,
 		sourceFingerprint,
 		offsets.event,
 		offsets.outbox,
@@ -411,8 +412,12 @@ function counts(db: DatabaseSync): string {
 
 function seed(
 	configDir: string,
-	project: ProjectStoreSource,
+	sourceProject: ProjectStoreSource,
 ): ProjectStoreImportResult {
+	const project = {
+		...sourceProject,
+		sourcePath: realpathSync(sourceProject.sourcePath),
+	};
 	const filename = verifySourcePath(configDir, project);
 	if (existsSync(filename))
 		reject(project, "collision", "Daemon store already exists");
@@ -447,14 +452,24 @@ function seed(
 				reject(project, "source-changed", "Source changed during seed");
 			// Only the copy changes journal mode; source main and WAL stay untouched.
 			copy.exec("PRAGMA journal_mode = DELETE");
-			transaction(copy, () =>
+			transaction(copy, () => {
+				for (const table of copiedTables) {
+					for (const { name } of columns(copy, "main", table)) {
+						if (name === "project_id" || name === "project_key")
+							copy
+								.prepare(
+									`UPDATE ${quote(table)} SET ${quote(name)} = ? WHERE ${quote(name)} IS NULL`,
+								)
+								.run(project.projectId);
+					}
+				}
 				writeMarker(copy, project, "seeded", before, {
 					event: 0,
 					outbox: 0,
 					version: 0,
 					rowid: {},
-				}),
-			);
+				});
+			});
 		} finally {
 			copy.close();
 		}
@@ -710,8 +725,12 @@ function copyProject(
 
 function importOne(
 	configDir: string,
-	project: ProjectStoreSource,
+	sourceProject: ProjectStoreSource,
 ): ProjectStoreImportResult {
+	const project = {
+		...sourceProject,
+		sourcePath: realpathSync(sourceProject.sourcePath),
+	};
 	const filename = verifySourcePath(configDir, project);
 	if (!existsSync(filename))
 		reject(
@@ -843,7 +862,6 @@ function importOne(
 				);
 			if (fingerprint(project.sourcePath, project) !== before)
 				reject(project, "source-changed", "Source changed during import");
-			db.exec("PRAGMA optimize");
 			writeMarker(db, project, "imported", before, offsets);
 			return { projectId: project.projectId, outcome: "imported" };
 		});
