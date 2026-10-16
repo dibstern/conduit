@@ -51,7 +51,7 @@ export const modelsHandlers = {
 			),
 		),
 	GetCommands: (request) =>
-		getCommandsForSession(request.sessionId).pipe(
+		getCommandsForSession(request.sessionId, request.instanceId).pipe(
 			Effect.map((commands) => ({
 				projectSlug: request.projectSlug,
 				commands,

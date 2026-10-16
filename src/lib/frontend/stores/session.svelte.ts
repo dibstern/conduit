@@ -41,6 +41,8 @@ import {
 	activateSessionChatState,
 	clearSessionChatState,
 	followSessionBusy,
+	followSessionCompaction,
+	followSessionRetry,
 	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
@@ -592,11 +594,16 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (change._tag === "snapshot") {
 		// A bounded rebase can omit a child that finished while disconnected.
 		for (const row of previousRows.values()) {
-			if (row.parentID !== undefined && !next.rows.has(row.id) && isBusy(row))
-				followSessionBusy(row.id, false);
+			if (row.parentID === undefined || next.rows.has(row.id)) continue;
+			if (isBusy(row)) followSessionBusy(row.id, false);
+			followSessionCompaction(row.id, undefined);
+			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
-			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
+			if (row.parentID === undefined) continue;
+			followSessionBusy(row.id, isBusy(row));
+			followSessionCompaction(row.id, row.compacting);
+			followSessionRetry(row.id, row.retrying);
 		}
 	}
 	if (change._tag === "upsert" && change.item.parentID !== undefined) {
@@ -607,6 +614,10 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 			(!busy && turnEnded(previousRow, change.item))
 		)
 			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
+		if (change.item.compacting !== previousRow?.compacting)
+			followSessionCompaction(change.item.id, change.item.compacting);
+		if (change.item.retrying !== previousRow?.retrying)
+			followSessionRetry(change.item.id, change.item.retrying);
 	}
 }
 

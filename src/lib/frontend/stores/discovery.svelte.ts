@@ -221,21 +221,27 @@ interface DraftPick {
 
 const draft = $state<{
 	instanceId: string | null;
-	driver: "claude" | "opencode" | null;
+	driver: ProviderDriverKind | null;
 	model: DraftPick["model"] | null;
 	permissionMode: SessionPermissionMode;
 }>({ instanceId: null, driver: null, model: null, permissionMode: "ask" });
 let draftPermissionChosen = false;
+/** Like the permission mode, an untouched draft pick follows the server default. */
+let draftPickChosen = false;
 const instanceCatalogs = $state<Record<string, ProviderInfo[]>>({});
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
+	const pinned = draft.instanceId;
+	// A removed account, or an untouched draft's former default, falls back to its driver's default.
 	if (
-		draft.instanceId &&
+		pinned &&
 		draft.driver !== null &&
-		!getAvailableInstances().some((account) => account.id === draft.instanceId)
+		(!draftPickChosen ||
+			!getAvailableInstances().some((account) => account.id === pinned))
 	) {
 		draft.instanceId = null;
-		draft.model = null;
+		if (getEffectiveInstanceId() === pinned) draft.instanceId = pinned;
+		else draft.model = null;
 	}
 	fillDraftDefault();
 });
@@ -893,6 +899,7 @@ function setDraftModel(
 
 /** A different instance starts with its own default, never a neighboring model. */
 export function selectInstance(instanceId: string): void {
+	draftPickChosen = true;
 	const available = getAvailableInstances();
 	const ref = accountRefFromSelection({ providerId: instanceId });
 	const selected =
@@ -908,7 +915,6 @@ export function selectInstance(instanceId: string): void {
 		draft.model = null;
 		return;
 	}
-	if (selected.driver !== "claude" && selected.driver !== "opencode") return;
 	if (draft.instanceId === selected.id) return;
 	draft.instanceId = selected.id;
 	draft.driver = selected.driver;
@@ -928,6 +934,7 @@ export function clearDraftSelection(): void {
 	draft.model = null;
 	draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	draftPermissionChosen = false;
+	draftPickChosen = false;
 }
 
 /** Format agent label for display. */
@@ -1246,6 +1253,15 @@ export function handleDefaultModelInfo(msg: {
 	readonly provider?: string | undefined;
 	readonly variant?: string | undefined;
 }): void {
+	if (
+		!draftPickChosen &&
+		((msg.model ?? "") !== serverDiscovery.defaultModelId ||
+			(msg.provider ?? "") !== serverDiscovery.defaultProviderId)
+	) {
+		draft.instanceId = null;
+		draft.driver = null;
+		draft.model = null;
+	}
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
@@ -1415,6 +1431,7 @@ export function chooseModel(model: {
 				: "",
 		});
 	}
+	draftPickChosen = true;
 	setDraftModel(model);
 	return () => {};
 }
@@ -1427,6 +1444,7 @@ export function chooseVariant(variant: string): UndoChoice {
 		(variant === "" || getActiveModelVariants().includes(variant))
 	) {
 		draft.model.variant = variant;
+		draftPickChosen = true;
 		rememberDraftModel();
 	}
 	return () => {};
@@ -1443,6 +1461,7 @@ export function chooseContextWindow(contextWindow: string): UndoChoice {
 			))
 	) {
 		draft.model.contextWindow = contextWindow;
+		draftPickChosen = true;
 		rememberDraftModel();
 	}
 	return () => {};

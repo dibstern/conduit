@@ -17,7 +17,7 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { homedir, userInfo } from "node:os";
+import { userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
@@ -288,7 +288,7 @@ export class ProcessHarness {
 		if (realSdk && process.platform === "darwin") {
 			mkdirSync(join(this.root, "home", "Library"));
 			symlinkSync(
-				join(homedir(), "Library", "Keychains"),
+				join(userInfo().homedir, "Library", "Keychains"),
 				join(this.root, "home", "Library", "Keychains"),
 			);
 		}
@@ -796,7 +796,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 								),
 							}),
 					CLAUDE_CONFIG_DIR: this.realSdk
-						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
+						? (process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
+							join(userInfo().homedir, ".claude"))
 						: join(this.root, "claude"),
 					OPENCODE_URL: this.defaultOpenCodeUrl,
 					...(this.opencodeRecording
@@ -809,7 +810,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 								USER: userInfo().username,
 								CLAUDE_SECURESTORAGE_CONFIG_DIR:
 									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
-									process.env["CLAUDE_CONFIG_DIR"] ??
+									process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
 									"",
 							}
 						: {}),

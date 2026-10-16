@@ -52,6 +52,7 @@ afterEach(cleanup);
 
 describe("HistoryLoader", () => {
 	it("observes and disconnects its sentinel", () => {
+		getOrCreateSessionMessages("test-session").historyHasMore = true;
 		const { unmount } = render(HistoryLoader, {
 			props: { sentinelEl: document.createElement("div") },
 		});

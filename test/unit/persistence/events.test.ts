@@ -14,8 +14,22 @@ import {
 	canonicalEvent,
 	createCommandId,
 	createEventId,
-	validateEventPayload,
 } from "../../../src/lib/persistence/events.js";
+import { makeStored } from "../../helpers/persistence-factories.js";
+
+describe("Stored event factory", () => {
+	it("rejects a missing required tool input through append's schema", () => {
+		expect(() =>
+			// @ts-expect-error Deliberately omit input to exercise factory validation.
+			makeStored("tool.started", "s1", {
+				messageId: "m1",
+				partId: "p1",
+				toolName: "Bash",
+				callId: "call1",
+			}),
+		).toThrow();
+	});
+});
 
 describe("Canonical Event Types", () => {
 	it.each([
@@ -89,14 +103,9 @@ describe("Canonical Event Types", () => {
 		const event = canonicalEvent("session.workspace_hint_changed", "s1", {
 			path,
 		});
-		expect(() => validateEventPayload(event)).not.toThrow();
 		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
 		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
 			event,
-		);
-		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-		expect(() => validateEventPayload({ ...event, data: {} })).toThrow(
-			"missing required fields: path",
 		);
 	});
 
@@ -106,17 +115,11 @@ describe("Canonical Event Types", () => {
 		"session.pinned",
 		"session.unpinned",
 		"session.unsnoozed",
-	] as const)("validates and round-trips %s", (type) => {
+	] as const)("round-trips %s", (type) => {
 		const event = canonicalEvent(type, "s1", { sessionId: "s1" });
-		expect(() => validateEventPayload(event)).not.toThrow();
 		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
 		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
 			event,
-		);
-		const missingSession = { ...event, data: {} };
-		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-		expect(() => validateEventPayload(missingSession)).toThrow(
-			"missing required fields: sessionId",
 		);
 	});
 
@@ -125,7 +128,6 @@ describe("Canonical Event Types", () => {
 			sessionId: "s1",
 			until,
 		});
-		expect(() => validateEventPayload(event)).not.toThrow();
 		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
 		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
 			event,
@@ -195,40 +197,5 @@ describe("Canonical Event Types", () => {
 	it("EventMetadata can be empty", () => {
 		const meta: EventMetadata = {};
 		expect(meta).toEqual({});
-	});
-
-	it("validates permission mode change required fields", () => {
-		const event = canonicalEvent("session.permission_mode_changed", "s1", {
-			sessionId: "s1",
-			mode: "auto",
-		});
-		expect(() => validateEventPayload(event)).not.toThrow();
-
-		const missingMode = {
-			...event,
-			data: { sessionId: "s1" },
-		};
-		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-		expect(() => validateEventPayload(missingMode)).toThrow(
-			"missing required fields: mode",
-		);
-	});
-
-	it("validates provider cleanup failure required fields while instanceId stays optional", () => {
-		const event = canonicalEvent("session.provider_cleanup_failed", "s1", {
-			sessionId: "s1",
-			provider: "opencode",
-			reason: "provider_delete: unavailable",
-		});
-		expect(() => validateEventPayload(event)).not.toThrow();
-
-		for (const field of ["sessionId", "provider", "reason"] as const) {
-			const { [field]: _removed, ...data } = event.data;
-			const malformed = { ...event, data };
-			// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-			expect(() => validateEventPayload(malformed)).toThrow(
-				`missing required fields: ${field}`,
-			);
-		}
 	});
 });

@@ -74,6 +74,8 @@
 	const pickerOpen = $derived(composerPickerState.request !== null);
 	let view = $state<"root" | "model" | "agent">("root");
 	const phone = $derived(sessionViewState.composerTier === "phone");
+	// A thin desktop composer has no room for separate harness and model chips, so it uses the phone's combined trigger.
+	const combinedTrigger = $derived(phone || sessionViewState.composerTier === "thin");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
 	let variantRef: ModelVariant | undefined = $state();
@@ -105,8 +107,9 @@
 		instances.find((i) => i.id === selectedId) ?? null,
 	);
 	const selectedDriver = $derived(
-		selectedInstance?.driver ?? (sessionState.currentId ? getSessionDriver(sessionState.currentId) : undefined) ??
-			((discoveryState.currentProviderId || discoveryState.defaultProviderId) === "claude" ? "claude" : discoveryState.currentProviderId || discoveryState.defaultProviderId ? "opencode" : ""),
+		// A session shows only its own stored harness: never the draft default, and nothing until its pick loads.
+		sessionState.currentId ? (sessionLoading ? undefined : getSessionDriver(sessionState.currentId)) :
+			selectedInstance?.driver ?? ((discoveryState.currentProviderId || discoveryState.defaultProviderId) === "claude" ? "claude" : discoveryState.currentProviderId || discoveryState.defaultProviderId ? "opencode" : ""),
 	);
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
@@ -358,6 +361,13 @@
 		}
 	}
 
+	// The desktop panel hangs left from the trigger's right edge. A thin composer near the window's
+	// left edge would push it offscreen, so slide it right to the floating menus' 8px collision padding.
+	function keepOnscreen(panel: HTMLElement) {
+		const overflow = 8 - panel.getBoundingClientRect().left;
+		if (overflow > 0) panel.style.translate = `${overflow}px 0`;
+	}
+
 	function closePicker() {
 		const opener = phone ? composerPickerState.request?.opener : undefined;
 		composerPickerState.request = null;
@@ -494,6 +504,7 @@
 {#snippet pickerSurface(sheet: boolean)}
 	<Surface
 		variant={sheet ? "plain" : "card"}
+		{@attach !sheet && keepOnscreen}
 		radius="none"
 		elevation={sheet ? "modal" : "menu-lg"}
 		id="model-picker"
@@ -942,7 +953,7 @@
 		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
 			<span aria-hidden="true" class="text-border-chip">·</span>
 		{/if}
-	{:else if !phone}
+	{:else if !combinedTrigger}
 		<Button
 			bind:element={triggerEl}
 			variant="ghost"
@@ -996,7 +1007,7 @@
 			<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-down" size={10} /></span>
 		</Button>
 	{:else}
-		<!-- Phone keeps its combined logo and short model tag. -->
+		<!-- Phone and thin composers keep one logo and short model tag. -->
 		<Button
 			bind:element={triggerEl}
 			variant="ghost"

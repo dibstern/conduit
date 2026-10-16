@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
@@ -153,7 +154,8 @@ const materializeOpenCodeSession = (
 			_tag: "Id",
 			id: row.provider,
 		});
-		if (source.driver === "opencode") return input.sessionId;
+		if (PROVIDER_DRIVERS[source.driver].runsOpenCodeServer)
+			return input.sessionId;
 		const session = yield* sessionManagerService.createSession(row.title, {
 			account,
 			sourceSessionId: row.id,
@@ -179,16 +181,21 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		if (account.driver === "claude") {
-			if (input.delivery !== "steer")
-				yield* resolvePendingClaudeQuestions(input);
-			return input.sessionId;
-		}
-		return yield* materializeOpenCodeSession(
-			input,
-			account,
-			providerId ?? account.id,
-		).pipe(Effect.provideService(OrchestrationEngineTag, orchestrationEngine));
+		const traits = PROVIDER_DRIVERS[account.driver];
+		if (
+			traits.interactionSink === "permission-asking" &&
+			input.delivery !== "steer"
+		)
+			yield* resolvePendingClaudeQuestions(input);
+		if (traits.runsOpenCodeServer)
+			return yield* materializeOpenCodeSession(
+				input,
+				account,
+				providerId ?? account.id,
+			).pipe(
+				Effect.provideService(OrchestrationEngineTag, orchestrationEngine),
+			);
+		return input.sessionId;
 	});
 
 const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
@@ -224,10 +231,11 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		if (!isProviderTurnInterruptProvider(account.driver)) {
+		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 			yield* interruptLegacyTurn(input);
 			return;
 		}
+		if (!isProviderTurnInterruptProvider(account.driver)) return;
 
 		const interruptResult = yield* Effect.either(
 			engine.dispatchEffect({

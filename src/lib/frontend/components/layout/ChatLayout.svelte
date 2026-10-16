@@ -110,14 +110,20 @@
 	$effect(() => {
 		const projectSlug = draftSlug;
 		const instanceId = draftAccountId;
-		if (!projectSlug || !instanceId || !draftIsClaude || !getIsConnected()) return;
-		const applyModels = followModelsRead();
+		if (!projectSlug || !instanceId || !getIsConnected()) return;
 		let active = true;
-		void getModelsRpc({ projectSlug, instanceId })
-			.then((response) => { if (active) applyModels(response); })
-			.catch(() => undefined);
+		// OpenCode draft models arrive through viewDraftModels; agents have no subscription.
+		if (draftIsClaude) {
+			const applyModels = followModelsRead();
+			void getModelsRpc({ projectSlug, instanceId })
+				.then((response) => { if (active) applyModels(response); })
+				.catch(() => undefined);
+		}
 		void getAgentsRpc({ projectSlug, instanceId })
 			.then((response) => { if (active) applyGetAgentsResponse(response); })
+			.catch(() => undefined);
+		void getCommandsRpc({ projectSlug, instanceId })
+			.then((response) => { if (active) applyGetCommandsResponse(response); })
 			.catch(() => undefined);
 		return () => { active = false; };
 	});
@@ -161,8 +167,9 @@
 		const projectSlug = attachedProjectState.slug;
 		if (!projectSlug) return;
 		let active = true;
-		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) }).then((response) => {
-			if (active) applyGetCommandsResponse(response);
+		const instanceId = sessionId ? undefined : getEffectiveInstanceId();
+		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}), ...(instanceId ? { instanceId } : {}) }).then((response) => {
+			if (active && (sessionId || instanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 		}).catch(() => undefined);
 		return () => { active = false; };
 	});
@@ -508,9 +515,10 @@
 			void getCommandsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace) applyGetCommandsResponse(response);
+					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 				})
 				.catch(() => undefined);
 			void getProjectsRpc({ projectSlug: slug })

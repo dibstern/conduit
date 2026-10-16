@@ -1,4 +1,4 @@
-// Load/save relay-specific settings from ~/.conduit/settings.jsonc.
+// Load/save settings.jsonc in the config dir (DEFAULT_CONFIG_DIR).
 // Separate from OpenCode's own config — the relay has its own settings file.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

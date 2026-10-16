@@ -9,13 +9,29 @@
  *   pnpm test:e2e:expensive-real-prompts
  */
 
+import { mkdirSync, symlinkSync } from "node:fs";
+import { userInfo } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import {
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { EventSink } from "../../../src/lib/provider/types.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 
 const RUN_EXPENSIVE = process.env["RUN_EXPENSIVE_E2E"] === "1";
+
+// Turns no longer fall back to the environment's login, and test/setup.ts
+// moves the reviewer's CLAUDE_CONFIG_DIR aside and replaces HOME, so pass the
+// real login folder explicitly.
+const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
+const configDir =
+	configuredDir === undefined
+		? sdkDefaultClaudeConfigDir(join(userInfo().homedir, ".claude"))
+		: configuredClaudeConfigDir(configuredDir);
 
 function createCollectingEventSink(): EventSink & {
 	readonly events: ProviderRuntimeEvent[];
@@ -35,6 +51,22 @@ function createCollectingEventSink(): EventSink & {
 }
 
 describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
+	// macOS finds the login Keychain under HOME, which test/setup.ts isolates.
+	// Link only the Keychains dir, as the process harness does.
+	beforeAll(() => {
+		if (process.platform !== "darwin") return;
+		// Not os.homedir(): in a worker thread it still reports the real home.
+		const home = process.env["HOME"];
+		if (home === undefined || home === userInfo().homedir)
+			throw new Error("Expected the isolated HOME from test/setup.ts");
+		const library = join(home, "Library");
+		mkdirSync(library, { recursive: true });
+		symlinkSync(
+			join(userInfo().homedir, "Library", "Keychains"),
+			join(library, "Keychains"),
+		);
+	});
+
 	it(
 		"full turn: sendTurnEffect() resolves with completed TurnResult and emits canonical events",
 		async () => {
@@ -53,7 +85,8 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 					prompt: "Reply with exactly: hello world",
 					history: [],
 					providerState: {},
-					model: { providerId: "claude", modelId: "claude-haiku-4-5" },
+					model: { providerId: "claude", modelId: "haiku" },
+					configDir,
 					workspaceRoot: process.cwd(),
 					extraFolders: [],
 					eventSink: sink,
@@ -61,7 +94,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 				}),
 			);
 
-			expect(result.status).toBe("completed");
+			expect(result.status, JSON.stringify(result.error)).toBe("completed");
 			expect(result.tokens.input).toBeGreaterThan(0);
 			expect(result.tokens.output).toBeGreaterThan(0);
 			expect(result.cost).toBeLessThan(0.5);
@@ -90,10 +123,11 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			});
 			const sink = createCollectingEventSink();
 			const abortController = new AbortController();
+			const sessionId = `e2e-real-sdk-subagent-${Date.now()}`;
 
 			const result = await Effect.runPromise(
 				instance.sendTurnEffect({
-					sessionId: `e2e-real-sdk-subagent-${Date.now()}`,
+					sessionId,
 					inputId: "turn-1",
 					prompt:
 						"Use the Task tool to launch exactly one general-purpose subagent " +
@@ -101,7 +135,8 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 						"work yourself. Once it returns, reply with exactly: done",
 					history: [],
 					providerState: {},
-					model: { providerId: "claude", modelId: "claude-haiku-4-5" },
+					model: { providerId: "claude", modelId: "haiku" },
+					configDir,
 					workspaceRoot: process.cwd(),
 					extraFolders: [],
 					eventSink: sink,
@@ -109,7 +144,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 				}),
 			);
 
-			expect(result.status).toBe("completed");
+			expect(result.status, JSON.stringify(result.error)).toBe("completed");
 
 			// Without a real Task the rest of this proves nothing.
 			const usedSubagent = sink.events.some(
@@ -122,13 +157,18 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			const statusOf = (e: ProviderRuntimeEvent): string =>
 				String((e.data as { status?: unknown }).status);
 			const isStatus = (e: ProviderRuntimeEvent) => e.type === "session.status";
-			const turnEnd = sink.events.findIndex((e) => e.type === "turn.completed");
+			// The subagent streams into its own child session, which rightly goes
+			// idle when it finishes. Only the parent's indicators are under test.
+			const parentEvents = sink.events.filter((e) => e.sessionId === sessionId);
+			const turnEnd = parentEvents.findIndex(
+				(e) => e.type === "turn.completed",
+			);
 			expect(turnEnd).toBeGreaterThan(0);
 
 			// Nothing may report idle before the turn ends — not system/init a
 			// second after the prompt, and not the "requesting" status the main
 			// chain emits while the subagent holds it.
-			const midTurn = sink.events.slice(0, turnEnd).filter(isStatus);
+			const midTurn = parentEvents.slice(0, turnEnd).filter(isStatus);
 			expect(
 				midTurn.filter((e) => statusOf(e) === "idle"),
 				"session reported idle mid-turn",
@@ -136,9 +176,9 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 			expect(midTurn.length).toBeGreaterThan(0);
 
 			// And the lease is released exactly once, or the indicators stick on.
-			expect(sink.events.slice(turnEnd).filter(isStatus).map(statusOf)).toEqual(
-				["idle"],
-			);
+			expect(
+				parentEvents.slice(turnEnd).filter(isStatus).map(statusOf),
+			).toEqual(["idle"]);
 
 			await Effect.runPromise(instance.shutdownEffect());
 		},

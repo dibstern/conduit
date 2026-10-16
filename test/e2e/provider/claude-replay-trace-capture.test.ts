@@ -17,7 +17,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Effect, Schedule } from "effect";
@@ -246,7 +246,12 @@ async function capture(options: {
 		).toEqual(commandIds);
 		writeFileSync(
 			join(TRACES, `${options.fixture}.jsonl`),
-			rawLines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+			rawLines
+				.map(
+					(line) =>
+						`${JSON.stringify(line).replaceAll(userInfo().homedir, "/home/test")}\n`,
+				)
+				.join(""),
 		);
 	} finally {
 		try {
