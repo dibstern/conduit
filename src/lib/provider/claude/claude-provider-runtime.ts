@@ -1,7 +1,7 @@
 // src/lib/provider/claude/claude-provider-runtime.ts
 /**
- * ClaudeProviderRuntime adapts provider operations and EventSink to session
- * messages. A per-session runner process owns the live Claude Agent SDK state.
+ * Claude launch composition and the SDK payload. The shared runner provider
+ * instance routes daemon operations; this payload owns live Claude Agent SDK state.
  *
  * Architectural notes:
  * - One SDK query() per conduit session, not per turn.
@@ -23,7 +23,6 @@ import {
 	type Settings,
 	query as sdkQuery,
 } from "@anthropic-ai/claude-agent-sdk";
-import { SqlClient } from "@effect/sql";
 import {
 	Cause,
 	Context,
@@ -36,39 +35,23 @@ import {
 	HashMap,
 	HashSet,
 	Layer,
-	Option,
 	Ref,
 	type Scope,
 } from "effect";
+import { accountsStateFromConfig } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
 } from "../../contracts/providers/claude-agent-sdk.js";
 import {
+	defaultDaemonConfig,
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
-import {
-	bindTurnTimelineSink,
-	observeTurnTimelineFrame,
-} from "../../domain/daemon/Services/turn-timeline.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
-import {
-	type ProviderRuntimeIngestionError,
-	ProviderRuntimeIngestionTag,
-} from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import {
-	makeProcessingTimeoutHooks,
-	type OverridesStateTag,
-} from "../../domain/relay/Services/session-overrides-state.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
-import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-	type ClaudeEventPersistFailure,
-} from "../../persistence/effect/claude-event-persist-effect.js";
+import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import {
@@ -79,12 +62,26 @@ import {
 } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
+import {
+	makeRunnerProviderInstance,
+	type RunnerProviderInstance,
+} from "../runner/runner-provider-instance.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import type { SessionTurn } from "../runner/session-runner.js";
+import { makeClaudeRunnerDriver } from "./claude-runner-driver.js";
+
+export { RunnerProviderInstance as ClaudeProviderRuntime } from "../runner/runner-provider-instance.js";
+
+import type {
+	SessionCommand,
+	SessionFailure,
+	SessionOutput,
+	SessionOutputReply,
+	SessionRunner,
+} from "../runner/session-runner.js";
 import type {
 	EventSink,
 	PermissionDecision,
-	PreWarmSessionInput,
 	ProviderCapabilities,
 	ProviderNativeSession,
 	SendTurnInput,
@@ -114,15 +111,10 @@ import {
 import { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
-import { makeRecoveredClaudeEventSink } from "./claude-runner-event-sink.js";
 import {
-	claudeRunnerSinkId,
 	normalizeClaudeLaunchInput,
 	normalizeClaudeSessionTurn,
-} from "./claude-runner-protocol.js";
-import { settleUnclaimedClaudeRunnerCommands } from "./claude-runner-recovery.js";
-import { discoverClaudeRunners } from "./claude-runner-registry.js";
-import { failClaudeRunnerTurn } from "./claude-runner-turn-failure.js";
+} from "./claude-runner-wire.js";
 import {
 	discoverCapabilitiesEffect,
 	expectedApiModelIdEffect,
@@ -160,6 +152,7 @@ import {
 } from "./claude-runtime-turn.js";
 import {
 	type ClaudeConfigDir,
+	captureClaudeLaunchLogin,
 	configuredClaudeConfigDir,
 	sameClaudeLogin,
 	sdkDefaultClaudeConfigDir,
@@ -175,13 +168,6 @@ import {
 	defaultClaudeSessionForkSdk,
 	resolveRewindUpToUuid,
 } from "./claude-session-fork.js";
-import type {
-	ClaudeSessionCommand,
-	ClaudeSessionFailure,
-	ClaudeSessionOutput,
-	ClaudeSessionOutputReply,
-	ClaudeSessionRunner,
-} from "./claude-session-runner.js";
 import type { ClaudeSubagentSdk } from "./claude-subagent-materializer.js";
 import { claudeSubagentSessionId } from "./claude-subagent-materializer.js";
 import {
@@ -294,13 +280,12 @@ const emptyClaudeProviderRuntimeState = (): ClaudeProviderRuntimeState => ({
 
 export class ClaudeProviderRuntimeTag extends Context.Tag(
 	"ClaudeProviderRuntime",
-)<ClaudeProviderRuntimeTag, ClaudeProviderRuntime>() {}
+)<ClaudeProviderRuntimeTag, RunnerProviderInstance>() {}
 
 export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
-): Effect.Effect<ClaudeProviderRuntime, never, Scope.Scope> =>
+): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
-		const providerScope = yield* Effect.scope;
 		const capabilitiesService =
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
@@ -315,71 +300,38 @@ export const makeClaudeProviderRuntime = (
 						),
 					),
 			}));
-		const abortFibers = yield* FiberMap.make<string, void, never>();
-		const interactionFibers = yield* FiberMap.make<string, void, never>();
-		const preWarmFibers = yield* FiberMap.make<
-			string,
-			void,
-			ProviderInstanceFailure
-		>();
-		let runtime: ClaudeProviderRuntime | undefined;
-		const runner = yield* (
-			deps.runnerFactory ?? makeProcessClaudeSessionRunner
-		)(
+		const driver = makeClaudeRunnerDriver({ ...deps, capabilitiesService });
+		const accounts = Effect.suspend(() =>
+			loadDaemonConfigResult(deps.daemonConfigDir),
+		).pipe(
+			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
+			Effect.map((config) =>
+				accountsStateFromConfig(config, captureClaudeLaunchLogin(process.env)),
+			),
+		);
+		return yield* makeRunnerProviderInstance(
 			{
-				workspaceRoot: deps.workspaceRoot,
-				extraFolders: deps.extraFolders ?? [],
-				...(deps.daemonConfigDir !== undefined
-					? { daemonConfigDir: deps.daemonConfigDir }
-					: {}),
-				...(deps.shellEnv ? { shellEnv: deps.shellEnv } : {}),
-				...(deps.prepareShellEnv
-					? { prepareShellEnv: deps.prepareShellEnv }
-					: {}),
-				...(deps.claudeSettingsOverrides
-					? { claudeSettingsOverrides: deps.claudeSettingsOverrides }
-					: {}),
-				...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
-				...(deps.subagentSdk ? { subagentSdk: deps.subagentSdk } : {}),
-				...(deps.sessionForkSdk ? { sessionForkSdk: deps.sessionForkSdk } : {}),
-				...(deps.subagentPollTimeoutMs !== undefined
-					? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
-					: {}),
-				capabilitiesService,
-				...(deps.readGoalStatus ? { readGoalStatus: deps.readGoalStatus } : {}),
-				...(deps.persistHandoffDelivered
-					? { persistHandoffDelivered: deps.persistHandoffDelivered }
+				...deps,
+				accounts,
+				...(deps.ensureClaudeSubagentSession
+					? { ensureChildSession: deps.ensureClaudeSubagentSession }
 					: {}),
 			},
-			(output, sessionId?: string) =>
-				runtime
-					? runtime.handleOutputEffect(output, sessionId)
-					: Effect.succeed({}),
+			driver,
+			(emit) =>
+				(deps.runnerFactory ?? makeProcessClaudeSessionRunner)(
+					{ ...deps, capabilitiesService },
+					emit,
+				),
 		);
-		runtime = new ClaudeProviderRuntime(
-			{ ...deps, capabilitiesService },
-			runner,
-			abortFibers,
-			interactionFibers,
-			preWarmFibers,
-			providerScope,
-		);
-		const providerRuntime = runtime;
-		// Direct scope disposal also detaches before the FiberMaps interrupt waiters.
-		yield* Effect.addFinalizer(() =>
-			providerRuntime
-				.shutdownEffect({ detachInteractions: true })
-				.pipe(Effect.ignore),
-		);
-		return runtime;
 	});
 
 export const makeClaudeSessionRunner = (
 	deps: ClaudeSessionRunnerDeps,
 	emit: (
-		output: ClaudeSessionOutput,
-	) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
-): Effect.Effect<ClaudeSessionRunner, never, Scope.Scope> =>
+		output: SessionOutput,
+	) => Effect.Effect<SessionOutputReply, SessionFailure>,
+): Effect.Effect<SessionRunner, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const stateRef = yield* Ref.make<ClaudeProviderRuntimeState>(
 			emptyClaudeProviderRuntimeState(),
@@ -447,10 +399,7 @@ export const ClaudeProviderRuntimeLive = (
 ): Layer.Layer<ClaudeProviderRuntimeTag, never, Scope.Scope> =>
 	Layer.scoped(ClaudeProviderRuntimeTag, makeClaudeProviderRuntime(deps));
 
-function sessionFailure(
-	operation: string,
-	cause: unknown,
-): ClaudeSessionFailure {
+function sessionFailure(operation: string, cause: unknown): SessionFailure {
 	const failure =
 		cause instanceof ProviderInstanceFailure ? cause.cause : cause;
 	return {
@@ -477,713 +426,6 @@ function sessionFailure(
 			? { retryable: failure.retryable }
 			: {}),
 	};
-}
-
-/** Provider API compatibility and event-store interaction routing only. */
-export class ClaudeProviderRuntime {
-	readonly providerId = "claude";
-	private readonly sinks = new Map<string, EventSink>();
-	/** Sends handed to the runner and not yet finished, per session. */
-	private readonly sendsInFlight = new Map<string, number>();
-	private detachingInteractions = false;
-	private recoveredSink: ((sessionId: string) => EventSink) | undefined;
-	private readonly recoveredSinkIds = new Set<string>();
-	private readonly recoveredRequests = new Map<
-		string,
-		Deferred.Deferred<void>
-	>();
-
-	readonly recoverEffect = Effect.gen(this, function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		const pending = yield* PendingInteractionServiceTag;
-		const timeoutRuntime = yield* Effect.runtime<OverridesStateTag>();
-		// An in-process runner's turns ended with the relay that ran them, so
-		// every running command is unclaimed. Runner processes may outlive it.
-		let claimed = new Set<string>();
-		if (this.runner.recoverEffect) {
-			this.recoveredSink = (sessionId) =>
-				makeRecoveredClaudeEventSink({
-					sessionId,
-					sql,
-					ingestion,
-					pending,
-					timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
-					onRegistered: (id) => {
-						const ready = this.recoveredRequests.get(id);
-						return ready ? Deferred.succeed(ready, undefined) : Effect.void;
-					},
-				});
-			yield* this.runner.recoverEffect;
-			const registrations = yield* Effect.try(() =>
-				discoverClaudeRunners(
-					this.deps.workspaceRoot,
-					this.deps.daemonConfigDir,
-				),
-			).pipe(
-				Effect.catchAll((error) =>
-					Effect.logError(
-						"Could not verify Claude runner ownership",
-						error,
-					).pipe(Effect.as(undefined)),
-				),
-			);
-			// Discovery errors are not proof that a running command has no owner.
-			if (!registrations) return;
-			claimed = new Set(registrations.map((runner) => runner.sessionId));
-		}
-		yield* settleUnclaimedClaudeRunnerCommands(
-			sql,
-			claimed,
-			(sinkId, turn, failure) =>
-				Effect.gen(function* () {
-					let persistenceError: ProviderRuntimeIngestionError | undefined;
-					yield* failClaudeRunnerTurn(
-						(output) =>
-							Effect.gen(function* () {
-								if (output.type === "event") {
-									// Startup has no WebSocket publisher or live sink yet.
-									yield* ingestion.ingestBatch([output.event], {
-										publishToBus: false,
-										publishToRelay: false,
-									});
-								} else if (output.type === "cancel-interactions") {
-									yield* pending.cancelSessionInteractions(
-										turn.sessionId,
-										output.reason,
-										{ recoverQuestions: false },
-									);
-								}
-								return {};
-							}).pipe(
-								Effect.tapError((error) =>
-									Effect.sync(() => {
-										persistenceError = error;
-									}),
-								),
-								Effect.mapError((error) =>
-									sessionFailure("recover stopped runner", error),
-								),
-							),
-						sinkId,
-						turn,
-						failure,
-					);
-					// failClaudeRunnerTurn logs errors; database failures still need a retry.
-					if (persistenceError) return yield* Effect.fail(persistenceError);
-				}),
-			this.deps.daemonConfigDir,
-		);
-	});
-
-	constructor(
-		private readonly deps: ClaudeProviderInstanceDeps,
-		private readonly runner: ClaudeSessionRunner,
-		private readonly abortFibers: FiberMap.FiberMap<string, void, never>,
-		private readonly interactionFibers: FiberMap.FiberMap<string, void, never>,
-		private readonly preWarmFibers: FiberMap.FiberMap<
-			string,
-			void,
-			ProviderInstanceFailure
-		>,
-		private readonly providerScope: Scope.Scope,
-	) {}
-
-	private commandEffect(
-		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
-	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
-	private commandEffect(
-		command: Exclude<ClaudeSessionCommand, { type: "send-turn" }>,
-	): Effect.Effect<void, ProviderInstanceFailure>;
-	private commandEffect(
-		command: ClaudeSessionCommand,
-	): Effect.Effect<TurnResult | undefined, ProviderInstanceFailure> {
-		return this.runner.executeEffect(command).pipe(
-			Effect.mapError(
-				(failure) =>
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: failure.operation,
-						cause: Object.assign(new Error(failure.message), failure),
-					}),
-			),
-		);
-	}
-
-	discoverEffect(
-		workspaceRoot?: string,
-		account?: Account,
-	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
-			const configDir =
-				account?.driver === "claude"
-					? account.folder
-					: resolveClaudeLaunchConfig(
-							yield* Effect.suspend(() =>
-								loadDaemonConfigResult(this.deps.daemonConfigDir),
-							).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
-						).configDir;
-			return yield* discoverCapabilitiesEffect(
-				workspaceRoot ?? this.deps.workspaceRoot,
-				this.deps.capabilitiesService,
-				configDir,
-			);
-		}).pipe(
-			Effect.mapError(
-				(cause) =>
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "discover",
-						cause,
-					}),
-			),
-		);
-	}
-
-	getNativeSessionEffect(
-		sessionId: string,
-	): Effect.Effect<ProviderNativeSession | undefined> {
-		return (
-			this.runner.getNativeSessionEffect?.(sessionId) ??
-			Effect.succeed(undefined)
-		);
-	}
-
-	sendTurnEffect(
-		input: SendTurnInput,
-	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
-			const { eventSink, abortSignal, ...payload } = input;
-			const account = input.account;
-			if (account && account.driver !== "claude")
-				return yield* Effect.fail(
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "sendTurn",
-						cause: new Error("Claude turn requires a Claude account"),
-					}),
-				);
-			const folder = account?.folder ?? input.configDir;
-			if (folder === undefined)
-				return yield* Effect.fail(
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "sendTurn",
-						cause: new Error(
-							"Claude turn requires a resolved account or explicit config directory",
-						),
-					}),
-				);
-			const turn = {
-				...payload,
-				configDir: folder,
-				folderSource: input.folderSource ?? "account",
-				...(account ? { instanceId: account.id } : {}),
-			};
-			const claudeSettingsOverrides = yield* Effect.try({
-				try: () => this.deps.claudeSettingsOverrides?.(),
-				catch: (cause) =>
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "sendTurn",
-						cause,
-					}),
-			});
-			const { sessionId } = input;
-			return yield* Effect.acquireUseRelease(
-				Effect.sync(() => {
-					const inFlight = this.sendsInFlight.get(sessionId) ?? 0;
-					this.sendsInFlight.set(sessionId, inFlight + 1);
-					return inFlight;
-				}),
-				(inFlight) =>
-					Effect.gen(this, function* () {
-						// An idle send is placed before the runner hop, as fast as a
-						// local write; the runner places a held send when the SDK
-						// starts it (command_lifecycle: started). A continuation places
-						// nothing: it resumes the cut-off message's turn.
-						if (inFlight === 0 && !input.continuation)
-							yield* this.placeUserMessageEffect({
-								sessionId,
-								inputId: input.inputId,
-								text: input.text ?? input.prompt,
-							}).pipe(
-								Effect.mapError(
-									(cause) =>
-										new ProviderInstanceFailure({
-											providerId: this.providerId,
-											operation: "sendTurn",
-											cause,
-										}),
-								),
-							);
-						// The SDK reports busy only once the model streams, so SDK-local
-						// work (a manual /compact, a slash command) ran with the session
-						// idle until its result. A send to an idle session starts its
-						// turn now; the turn's end reports idle as before.
-						if (inFlight === 0)
-							yield* eventSink
-								.push(
-									claudeRuntimeEvent("session.status", sessionId, {
-										sessionId,
-										status: "busy",
-									}),
-								)
-								.pipe(Effect.ignore);
-						const sinkId = claudeRunnerSinkId(
-							input.inputId,
-							input.commandAttempt,
-							input.nativeResumeFallback,
-						);
-						this.sinks.set(sinkId, eventSink);
-						bindTurnTimelineSink(sinkId, {
-							sessionId,
-							inputId: input.inputId,
-						});
-						this.reportSinkForTesting("allocated", sinkId, sessionId);
-						const aborted = Effect.async<void>((resume) => {
-							const onAbort = () => resume(Effect.void);
-							if (abortSignal.aborted) onAbort();
-							else
-								abortSignal.addEventListener("abort", onAbort, { once: true });
-							return Effect.sync(() =>
-								abortSignal.removeEventListener("abort", onAbort),
-							);
-						});
-						yield* FiberMap.run(
-							this.abortFibers,
-							sinkId,
-							aborted.pipe(
-								Effect.andThen(
-									this.runner.executeEffect({ type: "abort", sinkId }),
-								),
-								Effect.ignore,
-							),
-						);
-						return yield* this.commandEffect({
-							type: "send-turn",
-							sinkId,
-							aborted: abortSignal.aborted,
-							claudeSettingsOverrides,
-							input: turn,
-						});
-					}),
-				() =>
-					Effect.sync(() => {
-						const remaining = (this.sendsInFlight.get(sessionId) ?? 1) - 1;
-						if (remaining > 0) this.sendsInFlight.set(sessionId, remaining);
-						else this.sendsInFlight.delete(sessionId);
-					}),
-			);
-		});
-	}
-
-	/** Places a send's user message once; only a missing session fails it. */
-	private placeUserMessageEffect(input: {
-		readonly sessionId: string;
-		readonly inputId: string;
-		readonly text: string;
-	}): Effect.Effect<void, ClaudeEventPersistFailure> {
-		return Effect.gen(this, function* () {
-			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
-			const persistUserMessage =
-				this.deps.persistUserMessage ??
-				(persist._tag === "Some"
-					? persist.value.persistUserMessage
-					: undefined);
-			if (!persistUserMessage) return;
-			yield* persistUserMessage(input.sessionId, input.text, {
-				messageId: input.inputId,
-				inputId: input.inputId,
-			}).pipe(
-				Effect.catchIf(
-					(error) => error._tag !== "ClaudeSessionLifecycleError",
-					(error) =>
-						Effect.sync(() =>
-							log.warn(
-								`Non-fatal persistence error for Claude user message: ${formatErrorDetail(error)}`,
-							),
-						),
-				),
-			);
-		});
-	}
-
-	preWarmSessionEffect(
-		input: PreWarmSessionInput,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		const preWarm = Effect.gen(this, function* () {
-			const account = input.account;
-			if (account && account.driver !== "claude")
-				return yield* Effect.fail(
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "preWarmSession",
-						cause: new Error("Claude warm-up requires a Claude account"),
-					}),
-				);
-			const folder = account?.folder ?? input.configDir;
-			if (folder === undefined)
-				return yield* Effect.fail(
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "preWarmSession",
-						cause: new Error(
-							"Claude warm-up requires a resolved account or explicit config directory",
-						),
-					}),
-				);
-			let model = input.model;
-			if (!model) {
-				// Discovery is shared with sends; cancellation only stops this waiter.
-				const discovery = yield* Effect.forkIn(
-					this.discoverEffect(input.workspaceRoot, account),
-					this.providerScope,
-				);
-				const { models } = yield* Fiber.join(discovery);
-				const inferred =
-					models.find((item) => item.id === "default") ?? models[0];
-				if (!inferred) return;
-				model = { providerId: inferred.providerId, modelId: inferred.id };
-			}
-			const prepareShellEnv = this.deps.prepareShellEnv;
-			if (prepareShellEnv) {
-				// Keep capture owned by the resolver when this request times out.
-				const ready = yield* Effect.tryPromise({
-					try: () => prepareShellEnv(input.workspaceRoot),
-					catch: (cause) =>
-						new ProviderInstanceFailure({
-							providerId: this.providerId,
-							operation: "preWarmSession",
-							cause,
-						}),
-				}).pipe(Effect.timeoutOption("10 seconds"));
-				if (Option.isNone(ready) || !ready.value) return;
-			}
-			const claudeSettingsOverrides = yield* Effect.try({
-				try: () => this.deps.claudeSettingsOverrides?.(),
-				catch: (cause) =>
-					new ProviderInstanceFailure({
-						providerId: this.providerId,
-						operation: "preWarmSession",
-						cause,
-					}),
-			});
-			yield* this.commandEffect({
-				type: "pre-warm",
-				sessionId: input.sessionId,
-				input: {
-					...input,
-					model,
-					configDir: folder,
-					folderSource: input.folderSource ?? "account",
-					...(account ? { instanceId: account.id } : {}),
-				},
-				claudeSettingsOverrides,
-			});
-		});
-		return Effect.uninterruptibleMask((restore) =>
-			Effect.gen(this, function* () {
-				const runPreWarm = yield* FiberMap.runtime(this.preWarmFibers)();
-				const fiber = yield* Effect.sync(() => {
-					const existing = FiberMap.unsafeGet(
-						this.preWarmFibers,
-						input.sessionId,
-					);
-					return Option.isSome(existing)
-						? existing.value
-						: runPreWarm(input.sessionId, Effect.interruptible(preWarm), {
-								onlyIfMissing: true,
-							});
-				});
-				const exit = yield* restore(Fiber.await(fiber)).pipe(
-					Effect.onInterrupt(() => Fiber.interrupt(fiber)),
-				);
-				if (Exit.isSuccess(exit)) return;
-				return yield* Cause.isInterruptedOnly(exit.cause)
-					? Effect.fail(
-							new ProviderInstanceFailure({
-								providerId: this.providerId,
-								operation: "preWarmSession",
-								cause: new Error("Session pre-warm was cancelled"),
-							}),
-						)
-					: Effect.failCause(exit.cause);
-			}),
-		);
-	}
-
-	interruptTurnEffect(
-		sessionId: string,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "interrupt", sessionId })),
-		);
-	}
-	stopTaskEffect(
-		sessionId: string,
-		taskId: string,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({ type: "stop-task", sessionId, taskId });
-	}
-	resolvePermissionEffect(
-		sessionId: string,
-		requestId: string,
-		decision: PermissionDecision,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({
-			type: "resolve-permission",
-			sessionId,
-			requestId,
-			decision,
-		});
-	}
-	resolveQuestionEffect(
-		sessionId: string,
-		requestId: string,
-		answers: Record<string, unknown>,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({
-			type: "resolve-question",
-			sessionId,
-			requestId,
-			answers,
-		});
-	}
-	applyLiveSettingsEffect(
-		sessionId: string,
-		settings: {
-			readonly modelId?: string | undefined;
-			readonly contextWindow?: string | undefined;
-			readonly variant?: string | undefined;
-		},
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({
-			type: "apply-live-settings",
-			sessionId,
-			settings,
-		});
-	}
-	setPermissionModeEffect(
-		sessionId: string,
-		mode: ClaudeSDKPermissionMode,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.commandEffect({ type: "set-permission-mode", sessionId, mode });
-	}
-	endSessionEffect(
-		sessionId: string,
-	): Effect.Effect<void, ProviderInstanceFailure> {
-		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "end-session", sessionId })),
-		);
-	}
-	shutdownEffect(options?: {
-		readonly detachInteractions?: true;
-	}): Effect.Effect<void, ProviderInstanceFailure> {
-		return Effect.gen(this, function* () {
-			if (options?.detachInteractions) {
-				this.detachingInteractions = true;
-				for (const sink of this.sinks.values()) {
-					yield* sink.detachInteractions?.() ?? Effect.void;
-				}
-			}
-			yield* FiberMap.clear(this.preWarmFibers);
-			yield* this.commandEffect({ type: "shutdown" });
-		}).pipe(
-			Effect.ensuring(
-				Effect.gen(this, function* () {
-					this.sinks.clear();
-					yield* FiberMap.clear(this.abortFibers);
-					yield* FiberMap.clear(this.interactionFibers);
-				}),
-			),
-		);
-	}
-
-	private reportSinkForTesting(
-		phase: "allocated" | "released",
-		sinkId: string,
-		sessionId: string | undefined,
-	): void {
-		if (
-			process.env["NODE_ENV"] === "test" &&
-			process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
-			process.connected
-		)
-			process.send?.({
-				channel: "conduit-process-test",
-				kind: "runtime-sink",
-				phase,
-				sinkId,
-				sessionId,
-				activeSinks: this.sinks.size,
-			});
-	}
-
-	handleOutputEffect(
-		output: ClaudeSessionOutput,
-		recoveredSessionId?: string,
-	): Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> {
-		return Effect.gen(this, function* () {
-			observeTurnTimelineFrame(output);
-			if (output.type === "background-task") {
-				this.deps.onBackgroundTask?.(output.transition);
-				return;
-			}
-			let sink = this.sinks.get(output.sinkId);
-			if (!sink && recoveredSessionId && this.recoveredSink) {
-				sink = this.recoveredSink(recoveredSessionId);
-				this.sinks.set(output.sinkId, sink);
-				this.recoveredSinkIds.add(output.sinkId);
-				this.reportSinkForTesting(
-					"allocated",
-					output.sinkId,
-					recoveredSessionId,
-				);
-			}
-			if (!sink) return;
-			if (this.detachingInteractions)
-				yield* sink.detachInteractions?.() ?? Effect.void;
-			switch (output.type) {
-				case "event":
-					return yield* sink
-						.push(output.event)
-						.pipe(Effect.mapError((cause) => sessionFailure("push", cause)));
-				case "permission-request":
-				case "question-request": {
-					const registered = this.recoveredSinkIds.has(output.sinkId)
-						? yield* Deferred.make<void>()
-						: undefined;
-					if (registered)
-						this.recoveredRequests.set(output.request.requestId, registered);
-					const request = Effect.suspend(() =>
-						output.type === "permission-request"
-							? sink.requestPermission(output.request).pipe(
-									Effect.flatMap((response) =>
-										this.runner.executeEffect({
-											type: "answer-permission",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											response,
-										}),
-									),
-								)
-							: sink.requestQuestion(output.request).pipe(
-									Effect.flatMap((answers) =>
-										this.runner.executeEffect({
-											type: "answer-question",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											answers,
-										}),
-									),
-								),
-					);
-					yield* FiberMap.run(
-						this.interactionFibers,
-						`${output.sinkId}:${output.request.requestId}`,
-						request.pipe(
-							Effect.onExit((exit) =>
-								Effect.gen(this, function* () {
-									if (
-										Exit.isFailure(exit) &&
-										!Cause.isInterruptedOnly(exit.cause)
-									) {
-										yield* this.runner
-											.executeEffect({
-												type: "interaction-failed",
-												sinkId: output.sinkId,
-												requestId: output.request.requestId,
-												kind:
-													output.type === "permission-request"
-														? "permission"
-														: "question",
-												failure: sessionFailure(
-													"request interaction",
-													Cause.squash(exit.cause),
-												),
-											})
-											.pipe(Effect.ignore);
-									}
-								}),
-							),
-							Effect.catchAllCause(() => Effect.void),
-						),
-					);
-					if (registered) {
-						yield* Deferred.await(registered);
-						this.recoveredRequests.delete(output.request.requestId);
-					}
-					return;
-				}
-				case "resolve-permission":
-					return yield* sink
-						.resolvePermission(output.requestId, output.response)
-						.pipe(
-							Effect.mapError((cause) =>
-								sessionFailure("resolvePermission", cause),
-							),
-						);
-				case "resolve-question":
-					return yield* sink
-						.resolveQuestion(output.requestId, output.answers)
-						.pipe(
-							Effect.mapError((cause) =>
-								sessionFailure("resolveQuestion", cause),
-							),
-						);
-				case "cancel-interactions":
-					return yield* Effect.suspend(
-						() =>
-							sink.cancelSessionInteractions?.(output.reason, {
-								recoverQuestions: output.recoverQuestions,
-							}) ?? Effect.void,
-					).pipe(Effect.catchAllCause(() => Effect.void));
-				case "cancel-interaction":
-					return yield* FiberMap.remove(
-						this.interactionFibers,
-						`${output.sinkId}:${output.requestId}`,
-					);
-				case "release-sink":
-					for (const [key] of Array.from(this.interactionFibers)) {
-						if (key.startsWith(`${output.sinkId}:`)) {
-							yield* FiberMap.remove(this.interactionFibers, key);
-						}
-					}
-					this.sinks.delete(output.sinkId);
-					this.recoveredSinkIds.delete(output.sinkId);
-					yield* FiberMap.remove(this.abortFibers, output.sinkId);
-					this.reportSinkForTesting(
-						"released",
-						output.sinkId,
-						recoveredSessionId,
-					);
-					return;
-				case "place-user-message":
-					return yield* this.placeUserMessageEffect(output.input).pipe(
-						Effect.mapError((cause) => sessionFailure(output.type, cause)),
-					);
-				case "ensure-subagent-session": {
-					const persist = yield* Effect.serviceOption(
-						ClaudeEventPersistEffectTag,
-					);
-					const ensureSession =
-						this.deps.ensureClaudeSubagentSession ??
-						(persist._tag === "Some"
-							? persist.value.ensureClaudeSubagentSession
-							: undefined);
-					return yield* ensureSession?.(output.input).pipe(
-						Effect.mapError((cause) => sessionFailure(output.type, cause)),
-					) ?? Effect.void;
-				}
-			}
-		}).pipe(
-			Effect.as({}),
-			Effect.catchAllDefect((cause) =>
-				Effect.fail(sessionFailure(output.type, cause)),
-			),
-		);
-	}
 }
 
 class ClaudeRunnerPayload implements RunnerPayload {
@@ -1215,8 +457,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		private readonly shutdownFibers: FiberMap.FiberMap<string, void, never>,
 		private readonly warmedQueries: ClaudeWarmedQueryOwner,
 		private readonly emit: (
-			output: ClaudeSessionOutput,
-		) => Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure>,
+			output: SessionOutput,
+		) => Effect.Effect<SessionOutputReply, SessionFailure>,
 		private readonly scope: Scope.Scope,
 		private readonly sinks: RunnerSinkBindings,
 	) {
@@ -1260,7 +502,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+	): Effect.Effect<void, SessionFailure> {
 		return this.resolvePermissionEffect(sessionId, requestId, decision).pipe(
 			Effect.mapError((cause) => sessionFailure("resolve-permission", cause)),
 		);
@@ -1269,14 +511,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+	): Effect.Effect<void, SessionFailure> {
 		return this.resolveQuestionEffect(sessionId, requestId, answers).pipe(
 			Effect.mapError((cause) => sessionFailure("resolve-question", cause)),
 		);
 	}
 
 	prepareTurn(
-		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
+		command: Extract<SessionCommand, { type: "send-turn" }>,
 		sink: EventSink,
 	): Effect.Effect<void> {
 		return Effect.sync(() =>
@@ -1287,7 +529,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		input: SessionTurn,
 		sink: EventSink,
 		signal: AbortSignal,
-	): Effect.Effect<TurnResult, ClaudeSessionFailure> {
+	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.suspend(() =>
 			this.sendTurnEffect({
 				...normalizeClaudeSessionTurn(input),
@@ -1296,7 +538,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}),
 		).pipe(Effect.mapError((cause) => sessionFailure("send-turn", cause)));
 	}
-	interrupt(sessionId: string): Effect.Effect<void, ClaudeSessionFailure> {
+	interrupt(sessionId: string): Effect.Effect<void, SessionFailure> {
 		return this.interruptTurnEffect(sessionId).pipe(
 			Effect.mapError((cause) => sessionFailure("interrupt", cause)),
 		);
@@ -1304,7 +546,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	applySettings(
 		sessionId: string,
 		settings: LiveSettings,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+	): Effect.Effect<void, SessionFailure> {
 		const permissionOnly =
 			settings.permissionMode !== undefined &&
 			!("modelId" in settings) &&
@@ -1326,14 +568,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			Effect.mapError((cause) => sessionFailure("apply-live-settings", cause)),
 		);
 	}
-	endSession(sessionId: string): Effect.Effect<void, ClaudeSessionFailure> {
+	endSession(sessionId: string): Effect.Effect<void, SessionFailure> {
 		return this.endSessionEffect(sessionId).pipe(
 			Effect.mapError((cause) => sessionFailure("end-session", cause)),
 		);
 	}
 	preWarm(
-		command: Extract<ClaudeSessionCommand, { type: "pre-warm" }>,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+		command: Extract<SessionCommand, { type: "pre-warm" }>,
+	): Effect.Effect<void, SessionFailure> {
 		return Effect.gen(this, function* () {
 			if (
 				(yield* getSession(this.stateRef, command.sessionId)) ||
@@ -1352,7 +594,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	stopTask(
 		sessionId: string,
 		taskId: string,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+	): Effect.Effect<void, SessionFailure> {
 		return Effect.gen(this, function* () {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx || ctx.stopped)
@@ -1372,19 +614,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	setPermissionMode(
 		sessionId: string,
 		mode: ClaudeSDKPermissionMode,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+	): Effect.Effect<void, SessionFailure> {
 		return this.setPermissionModeEffect(sessionId, mode).pipe(
 			Effect.mapError((cause) => sessionFailure("set-permission-mode", cause)),
 		);
 	}
-	shutdown(): Effect.Effect<void, ClaudeSessionFailure> {
+	shutdown(): Effect.Effect<void, SessionFailure> {
 		return this.shutdownEffect().pipe(
 			Effect.mapError((cause) => sessionFailure("shutdown", cause)),
 		);
 	}
-	shutdownAfterTurn(
-		sessionId: string,
-	): Effect.Effect<void, ClaudeSessionFailure> {
+	shutdownAfterTurn(sessionId: string): Effect.Effect<void, SessionFailure> {
 		return Effect.gen(this, function* () {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (!ctx && !this.sinks.hasSessionSinks(sessionId)) {

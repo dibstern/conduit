@@ -35,17 +35,11 @@ import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effe
 import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
-import { makeClaudeRunnerReceiptStore } from "../../../../src/lib/provider/claude/claude-runner-receipts.js";
-import type {
-	ClaudeSessionCommand,
-	ClaudeSessionFailure,
-} from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import type {
 	PermissionResult,
 	Options as SDKOptions,
@@ -54,6 +48,11 @@ import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-err
 import { OrchestrationEngine } from "../../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../../src/lib/provider/provider-registry.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
+import { makeRunnerReceiptStore } from "../../../../src/lib/provider/runner/runner-receipts.js";
+import type {
+	SessionCommand,
+	SessionFailure,
+} from "../../../../src/lib/provider/runner/session-runner.js";
 import type {
 	PermissionResponse,
 	TurnResult,
@@ -108,7 +107,7 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 			const pending = yield* PendingInteractionServiceTag;
 			const ingestion = yield* ProviderRuntimeIngestionTag;
 			const sql = yield* SqlClient.SqlClient;
-			yield* makeClaudeRunnerReceiptStore(sql);
+			yield* makeRunnerReceiptStore(sql);
 			yield* runner.recover();
 			const creation = yield* eventStore.append(
 				canonicalEvent(
@@ -150,17 +149,17 @@ function detachedRunnerFactory(
 ): typeof makeClaudeSessionRunner {
 	return () => {
 		function executeEffect(
-			command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
-		): Effect.Effect<TurnResult, ClaudeSessionFailure>;
+			command: Extract<SessionCommand, { type: "send-turn" }>,
+		): Effect.Effect<TurnResult, SessionFailure>;
 		function executeEffect(
-			command: Exclude<ClaudeSessionCommand, { type: "send-turn" }>,
-		): Effect.Effect<void, ClaudeSessionFailure>;
+			command: Exclude<SessionCommand, { type: "send-turn" }>,
+		): Effect.Effect<void, SessionFailure>;
 		function executeEffect(
-			command: ClaudeSessionCommand,
-		): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure>;
+			command: SessionCommand,
+		): Effect.Effect<TurnResult | undefined, SessionFailure>;
 		function executeEffect(
-			command: ClaudeSessionCommand,
-		): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure> {
+			command: SessionCommand,
+		): Effect.Effect<TurnResult | undefined, SessionFailure> {
 			return command.type === "send-turn"
 				? Deferred.succeed(started, command.sinkId).pipe(
 						Effect.andThen(Effect.never),
@@ -483,9 +482,7 @@ describe("Claude durable interaction resolution", () => {
 					}).pipe(Scope.extend(relayScope));
 					if (shutdownPath === "engine") {
 						const engine = new OrchestrationEngine({
-							registry: new ProviderRegistry([
-								new ClaudeProviderInstance(runtime),
-							]),
+							registry: new ProviderRegistry([runtime]),
 						});
 						yield* Effect.addFinalizer(() => engine.shutdownEffect()).pipe(
 							Scope.extend(relayScope),
@@ -755,7 +752,7 @@ describe("Claude recovered runner processing timeout", () => {
 						workspaceRoot: "/tmp/ws",
 						capabilitiesService,
 					});
-					yield* runtime.recoverEffect;
+					yield* runtime.recoverRunnerEffect;
 					// Answering a question re-arms the turn's timeout.
 					let timedOut = false;
 					yield* startProcessingTimeout("session-1", "2 minutes", () =>

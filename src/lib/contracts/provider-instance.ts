@@ -57,6 +57,20 @@ export const PROVIDER_SESSION_CAPABILITIES = {
 	ProviderSessionCapabilities
 >;
 
+/** Execution policy is indexed by driver; runner instances need no provider branches. */
+export const PROVIDER_DRIVERS = {
+	claude: {
+		runtime: "runner",
+		steering: true,
+		capabilities: PROVIDER_SESSION_CAPABILITIES.claude,
+	},
+	opencode: {
+		runtime: "native",
+		steering: false,
+		capabilities: PROVIDER_SESSION_CAPABILITIES.opencode,
+	},
+} as const;
+
 /**
  * Rewrite a pre-driver-model legacy default OpenCode instance id (`"default"`)
  * to `MANAGED_OPENCODE_ACCOUNT_ID` in an instance

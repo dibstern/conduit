@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Data, Effect, Either, Schema } from "effect";
+import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
@@ -74,6 +75,7 @@ export interface ClaudeEventPersistEffect {
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly ensureClaudeSubagentSession: (input: {
+		readonly provider?: KnownProviderDriverKind;
 		readonly childSessionId: string;
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
@@ -93,9 +95,12 @@ export class ClaudeEventPersistEffectTag extends Context.Tag(
 const LIFECYCLE_ROOT_OPTIONAL_EVENT_TYPES: ReadonlySet<CanonicalEvent["type"]> =
 	new Set(["session.deleted"]);
 
-function claudeSubagentSessionCreatedEventId(childSessionId: string): EventId {
+function claudeSubagentSessionCreatedEventId(
+	childSessionId: string,
+	provider: string,
+): EventId {
 	return Schema.decodeSync(EventId)(
-		`evt_claude_subagent_session_created_${childSessionId}`,
+		`evt_${provider}_subagent_session_created_${childSessionId}`,
 	);
 }
 
@@ -155,6 +160,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 
 	const seedClaudeSubagentSession = (input: {
+		readonly provider?: KnownProviderDriverKind;
 		readonly childSessionId: string;
 		readonly parentSessionId: string;
 		readonly providerSessionId: string;
@@ -164,7 +170,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		return sql`
 			INSERT OR IGNORE INTO sessions
 			(id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-			VALUES (${input.childSessionId}, 'claude', ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
+			VALUES (${input.childSessionId}, ${input.provider ?? "claude"}, ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
 			Effect.asVoid,
 		);
 	};
@@ -379,6 +385,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 			commitAndSignal
 				.write((project) =>
 					Effect.gen(function* () {
+						const provider = input.provider ?? "claude";
 						yield* requireSession(
 							input.parentSessionId,
 							"ensureClaudeSubagentSession",
@@ -397,7 +404,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						const existingChild = existingChildRows[0];
 						if (
 							existingChild &&
-							(existingChild.provider !== "claude" ||
+							(existingChild.provider !== provider ||
 								existingChild.parent_id !== input.parentSessionId ||
 								existingChild.provider_sid !== input.providerSessionId)
 						) {
@@ -420,8 +427,8 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							}>`SELECT model_id, model_provider, variant, context_window
 								FROM sessions WHERE id = ${input.parentSessionId}`;
 							const pick = resolveServerSessionPick(
-								"claude",
-								storedSessionPick(parent, "claude"),
+								provider,
+								storedSessionPick(parent, provider),
 							);
 							if (Either.isLeft(pick)) return yield* pick.left;
 							pickEvents = sessionPickEvents(input.childSessionId, pick.right);
@@ -434,15 +441,16 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 							{
 								sessionId: input.childSessionId,
 								title: input.title,
-								provider: "claude",
+								provider,
 								parentId: input.parentSessionId,
 								providerSessionId: input.providerSessionId,
 							},
 							{
 								eventId: claudeSubagentSessionCreatedEventId(
 									input.childSessionId,
+									provider,
 								),
-								provider: "claude",
+								provider,
 							},
 						);
 						const dataJson = JSON.stringify(event.data);

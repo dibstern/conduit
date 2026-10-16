@@ -25,9 +25,9 @@ import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persisten
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { inspectManagedOpenCodeProcess } from "../../../src/lib/instance/managed-opencode-process.js";
 import {
-	prepareClaudeRunnerDirectory,
-	registerClaudeRunner,
-} from "../../../src/lib/provider/claude/claude-runner-registry.js";
+	prepareRunnerDirectory,
+	registerRunner,
+} from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
@@ -982,7 +982,7 @@ describe("foreground conduit serve", () => {
 		harness = await ProcessHarness.start({ dist: DIST, foregroundCli: true });
 		const runnerId = "012345abcdef";
 		const socketPath = join(
-			prepareClaudeRunnerDirectory(harness.projectDir, harness.configDir),
+			prepareRunnerDirectory(harness.projectDir, harness.configDir),
 			runnerId,
 		);
 		const fixture = spawn(
@@ -1004,7 +1004,7 @@ describe("foreground conduit serve", () => {
 		pids.add(fixture.pid);
 		const argvPath = join(harness.root, `runner-argv-${fixture.pid}.json`);
 		await vi.waitFor(() => expect(existsSync(argvPath)).toBe(true));
-		registerClaudeRunner({
+		registerRunner({
 			runnerId,
 			socketPath,
 			sessionId: "stale-pid-fixture",

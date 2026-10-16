@@ -17,7 +17,7 @@ import {
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { FolderIssue } from "../../../src/lib/project-folders.js";
-import { discoverClaudeRunners } from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { testRunnerAlive } from "../../helpers/claude-runner-cleanup.js";
 import {
@@ -91,7 +91,7 @@ describe("SaveProject through the built daemon", () => {
 		evidence["configDir"] = harness.configDir;
 		await harness.restart();
 		evidence["projectsBefore"] = await projectFolders(harness);
-		evidence["runnerRegistrationsBefore"] = discoverClaudeRunners(
+		evidence["runnerRegistrationsBefore"] = discoverRunners(
 			harness.projectDir,
 			harness.configDir,
 		);
@@ -157,7 +157,7 @@ describe("SaveProject through the built daemon", () => {
 				exists: existsSync(path),
 				gitExists: existsSync(join(path, ".git")),
 			}));
-			evidence["runnerRegistrationsAfter"] = discoverClaudeRunners(
+			evidence["runnerRegistrationsAfter"] = discoverRunners(
 				fixture.projectDir,
 				fixture.configDir,
 			);
@@ -442,7 +442,7 @@ describe("SaveProject through the built daemon", () => {
 				evidence["heldTurnBeforeReplacement"] = state;
 				expect(state.session.status).toBe("busy");
 			});
-			const registrations = discoverClaudeRunners(
+			const registrations = discoverRunners(
 				fixture.projectDir,
 				fixture.configDir,
 			);
@@ -478,9 +478,9 @@ describe("SaveProject through the built daemon", () => {
 			expect(fixture.generations).toHaveLength(1);
 			evidence["heldTurnAfterReplacement"] = persistedTurn(fixture, sessionId);
 			expect(persistedTurn(fixture, sessionId).session.status).toBe("busy");
-			expect(
-				discoverClaudeRunners(fixture.projectDir, fixture.configDir),
-			).toEqual(registrations);
+			expect(discoverRunners(fixture.projectDir, fixture.configDir)).toEqual(
+				registrations,
+			);
 			await rejected(
 				fixture,
 				{ slug: "process-test", folders: [newMain, extra] },
@@ -552,7 +552,7 @@ describe("SaveProject through the built daemon", () => {
 						.map(({ message }) => message["lastTurnEndVersion"]),
 				).size,
 			).toBe(1);
-			evidence["runnerRegistrationsAfter"] = discoverClaudeRunners(
+			evidence["runnerRegistrationsAfter"] = discoverRunners(
 				fixture.projectDir,
 				fixture.configDir,
 			);
@@ -572,7 +572,7 @@ describe("SaveProject through the built daemon", () => {
 			expect(state.commands.map(({ status }) => status)).toEqual(["completed"]);
 		});
 		const history = await before.history(sessionId);
-		const registrations = discoverClaudeRunners(
+		const registrations = discoverRunners(
 			fixture.projectDir,
 			fixture.configDir,
 		);
@@ -588,16 +588,13 @@ describe("SaveProject through the built daemon", () => {
 		});
 		expect(saved.savedSlug).toBe("process-test");
 		await vi.waitFor(() => {
-			const after = discoverClaudeRunners(
-				fixture.projectDir,
-				fixture.configDir,
-			);
+			const after = discoverRunners(fixture.projectDir, fixture.configDir);
 			evidence["oldMainRunnerRegistrationsAfter"] = after;
 			expect(after).toEqual([]);
 			for (const { pid } of registrations)
 				expect(testRunnerAlive(pid)).toBe(false);
 		});
-		evidence["newMainRunnerRegistrationsAfter"] = discoverClaudeRunners(
+		evidence["newMainRunnerRegistrationsAfter"] = discoverRunners(
 			newMain,
 			fixture.configDir,
 		);
