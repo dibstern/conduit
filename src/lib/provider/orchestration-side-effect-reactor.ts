@@ -244,6 +244,8 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.left);
 			}
 			const turn = result.right;
+			// The steer-requeue ticket defines durable handling for declined inputs.
+			if (turn.status === "steer-declined") return turn;
 			// A joined input was delivered and answered by another input's turn.
 			if (turn.status !== "completed" && turn.status !== "joined") {
 				// Provider-declared failure delivered on the success channel (e.g.

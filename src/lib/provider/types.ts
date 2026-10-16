@@ -105,13 +105,15 @@ export interface EventSink {
 /**
  * `joined`: the provider folded this input into a turn another input owns.
  * That input's result finalises the turn; a joined input finalises nothing.
+ * `steer-declined`: the provider did not run this input as a steer.
  */
 export type TurnStatus =
 	| "completed"
 	| "error"
 	| "interrupted"
 	| "cancelled"
-	| "joined";
+	| "joined"
+	| "steer-declined";
 
 export interface TurnTokens {
 	readonly input: number;
