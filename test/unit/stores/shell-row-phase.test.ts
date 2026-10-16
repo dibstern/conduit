@@ -2,19 +2,39 @@
 // The client's processing phase follows the session's shell row (ni8.35):
 // the row's status is the only server signal for "a turn is running", so
 // a busy row starts the turn and the row going idle ends it, in every tab.
-import { beforeEach, expect, it } from "vitest";
+import { type Effect, ManagedRuntime } from "effect";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	getOrCreateSessionSlot,
-	phaseToProcessing,
 	sessionActivity,
+	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
 	applyFamilyChange,
 	clearSessionState,
+	resetSessionFamily,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { usageState } from "../../../src/lib/frontend/stores/usage.svelte.js";
+import { _resetRateLimit } from "../../../src/lib/frontend/stores/ws-send.svelte.js";
+import {
+	makeWsRpcClientsLayer,
+	type WsRpcClients,
+} from "../../../src/lib/frontend/transport/shared-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
-import { applySessionChange } from "./session-fixtures.js";
+import { makeRpcWire } from "../../helpers/rpc-wire.js";
+import type { StubTable } from "../../helpers/stub-ws-rpc.js";
+import {
+	applyFamilyFeedChange,
+	applySessionChange,
+} from "./session-fixtures.js";
+
+let runtime: ManagedRuntime.ManagedRuntime<WsRpcClients, never>;
+vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
+	runTransportEffect: <A, E>(effect: Effect.Effect<A, E, WsRpcClients>) =>
+		runtime.runPromise(effect),
+}));
 
 const row = (status: SessionInfo["status"]): SessionInfo => ({
 	projectSlug: "project-a",
@@ -52,6 +72,20 @@ it("a busy row starts the turn and the row going idle ends it once", () => {
 	expect(activity().phase).toBe("idle");
 	expect(activity().endedGeneration).toBe(activity().turnGeneration);
 	expect(activity().currentMessageId).toBeNull();
+	// An interrupted subagent may become idle without a new turn-end version.
+	applySessionChange({
+		_tag: "upsert",
+		item: { ...row("idle"), lastTurnEndVersion: 2 },
+	});
+	applySessionChange({
+		_tag: "upsert",
+		item: { ...row("busy"), lastTurnEndVersion: 2 },
+	});
+	applySessionChange({
+		_tag: "upsert",
+		item: { ...row("idle"), lastTurnEndVersion: 2 },
+	});
+	expect(activity().phase).toBe("idle");
 });
 
 it("a retrying row keeps the turn running", () => {
@@ -59,17 +93,6 @@ it("a retrying row keeps the turn running", () => {
 	getOrCreateSessionSlot("s");
 	upsert("retry");
 	expect(activity().phase).toBe("processing");
-});
-
-it("an idle row write does not end a turn the sender started optimistically", () => {
-	snapshot("idle");
-	const { activity: slot } = getOrCreateSessionSlot("s");
-	phaseToProcessing(slot);
-
-	// The user message bumps the row before the provider reports busy.
-	upsert("idle");
-
-	expect(slot.phase).toBe("processing");
 });
 
 it("a stale busy write after the turn ended does not restart it", () => {
@@ -123,4 +146,483 @@ it("a child session, which has no shell row, starts from its family row", () => 
 		],
 	});
 	expect(slot.phase).toBe("processing");
+});
+
+it("a row end finalizes an assistant whose turn started and ended between updates once", () => {
+	snapshot("idle");
+	const { messages } = getOrCreateSessionSlot("s");
+	messages.messages = [
+		{
+			type: "assistant",
+			uuid: "a",
+			rawText: "Answer",
+			html: "Answer",
+			finalized: false,
+		},
+	];
+	const ended = {
+		...row("idle"),
+		lastTurnEndVersion: 2,
+		lastTurnEndInputId: "input",
+	};
+	applySessionChange({ _tag: "upsert", item: ended });
+	expect(messages.messages).toMatchObject([
+		{ type: "assistant", rawText: "Answer", finalized: true },
+	]);
+	const finalized = messages.messages;
+	applySessionChange({ _tag: "upsert", item: ended });
+	expect(messages.messages).toBe(finalized);
+});
+
+// Failure modes at the browser RPC wire: incorrect handoff guesses, replies
+// racing row ends/reconnects, missed turn starts, holds, steers and family rows.
+describe("turn control sends over the browser RPC wire", () => {
+	let control: typeof import("../../../src/lib/frontend/stores/turn.svelte.js");
+	let reply: (
+		value:
+			| { ok: true; sessionId: string; handedOff: boolean }
+			| { ok: false; reason: "model_differs" },
+	) => void;
+	let reject: (error: Error) => void;
+	let inputId: string;
+	const request = () =>
+		control.send({ sessionId: "s", text: "Hello", delivery: "queue" });
+	const serve = (table: StubTable = {}) => {
+		const wire = makeRpcWire({
+			"input.submit": (input) => {
+				inputId = input.inputId;
+				return new Promise((resolve, fail) => {
+					reply = resolve;
+					reject = fail;
+				});
+			},
+			...table,
+		});
+		runtime = ManagedRuntime.make(makeWsRpcClientsLayer(wire.connect));
+	};
+	const received = () => vi.waitFor(() => expect(inputId).toBeTruthy());
+	const end = (id = inputId, version = 2) =>
+		applySessionChange({
+			_tag: "upsert",
+			item: {
+				...row("idle"),
+				lastTurnEndVersion: version,
+				lastTurnEndInputId: id,
+			},
+		});
+	beforeEach(async () => {
+		control = await import("../../../src/lib/frontend/stores/turn.svelte.js");
+		vi.stubGlobal("location", { protocol: "http:", host: "localhost:2633" });
+		sessionMessages.clear();
+		permissionsState.pendingPermissions = [];
+		permissionsState.pendingQuestions = [];
+		usageState.readings = [];
+		_resetRateLimit();
+		inputId = "";
+		snapshot("idle");
+		getOrCreateSessionSlot("s");
+		serve();
+	});
+	afterEach(async () => {
+		await runtime?.dispose();
+		for (const id of ["s", "side", "created"])
+			applySessionChange({ _tag: "remove", id, deleted: true });
+		clearSessionState();
+		sessionMessages.clear();
+		vi.unstubAllGlobals();
+	});
+
+	it("a guessed start clears working when the inbox queues and displays the queued input", async () => {
+		const sent = request();
+		expect(control.turn("s").working).toBe(true);
+		await received();
+		const { messages } = getOrCreateSessionSlot("s");
+		messages.transcript = {
+			rows: [],
+			hwm: null,
+			hasMore: false,
+			project: "project-a",
+			status: { _tag: "live" },
+			pending: [
+				{
+					inputId,
+					request: { text: "Hello", images: [] },
+					state: "queued",
+					admittedAt: 1,
+				},
+			],
+			waiting: new Map(),
+			partOrder: new Map(),
+		};
+		reply({ ok: true, sessionId: "s", handedOff: false });
+		await expect(sent).resolves.toEqual({ kind: "waiting" });
+		expect(control.turn("s").working).toBe(false);
+		expect(messages.transcript.pending).toMatchObject([
+			{ request: { text: "Hello" }, state: "queued" },
+		]);
+	});
+
+	it("every throttled send reaches the wire and settles working when its turn ends", async () => {
+		const sent: string[] = [];
+		serve({
+			"input.submit": (input) => {
+				sent.push(input.text);
+				end(input.inputId, sent.length + 2);
+				return Promise.resolve({ ok: true, sessionId: "s", handedOff: true });
+			},
+		});
+		for (let index = 0; index < 5; index++)
+			await control.send({
+				sessionId: "s",
+				text: String(index),
+				delivery: "queue",
+			});
+		vi.useFakeTimers();
+		try {
+			const sixth = control.send({
+				sessionId: "s",
+				text: "5",
+				delivery: "queue",
+			});
+			const seventh = control.send({
+				sessionId: "s",
+				text: "6",
+				delivery: "queue",
+			});
+			expect(control.turn("s").working).toBe(true);
+			await vi.advanceTimersByTimeAsync(10_001);
+			expect(sent).toEqual(["0", "1", "2", "3", "4", "5", "6"]);
+			await expect(Promise.all([sixth, seventh])).resolves.toEqual([
+				{ kind: "started" },
+				{ kind: "started" },
+			]);
+			expect(control.turn("s").working).toBe(false);
+		} finally {
+			_resetRateLimit();
+			vi.useRealTimers();
+		}
+	});
+
+	it("a guessed wait starts working when the inbox hands off", async () => {
+		permissionsState.pendingQuestions = [
+			{ toolId: "q", sessionId: "s", questions: [] },
+		];
+		const sent = request();
+		expect(control.turn("s").working).toBe(false);
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await expect(sent).resolves.toEqual({ kind: "started" });
+		expect(control.turn("s").working).toBe(true);
+		end();
+	});
+
+	it.each([
+		true,
+		false,
+	])("a turn ending before the reply never restarts working, known starter: %s", async (known) => {
+		const sent = request();
+		await received();
+		applySessionChange({
+			_tag: "upsert",
+			item: {
+				...row("idle"),
+				lastTurnEndVersion: 2,
+				...(known ? { lastTurnEndInputId: inputId } : {}),
+			},
+		});
+		expect(control.turn("s").working).toBe(false);
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("an unknown interruption settles the starter while the queued handoff follows the server phase", async () => {
+		const started = request();
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await started;
+		upsert("busy");
+		inputId = "";
+		const queued = control.send({
+			sessionId: "s",
+			inputId: "queued-input",
+			text: "Queued",
+			delivery: "queue",
+		});
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: false });
+		await expect(queued).resolves.toEqual({ kind: "waiting" });
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("idle"), lastTurnEndVersion: 2 },
+		});
+		expect(control.turn("s").working).toBe(false);
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("busy"), lastTurnEndVersion: 2 },
+		});
+		expect(control.turn("s").working).toBe(true);
+		end("queued-input", 3);
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("an unknown interruption cannot settle a send pressed at its advanced baseline", async () => {
+		const first = request();
+		await received();
+		const firstReply = reply;
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("idle"), lastTurnEndVersion: 2 },
+		});
+		expect(control.turn("s").working).toBe(false);
+		inputId = "";
+		const next = request();
+		await received();
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("idle"), lastTurnEndVersion: 2 },
+		});
+		firstReply({ ok: true, sessionId: "s", handedOff: true });
+		await first;
+		expect(control.turn("s").working).toBe(true);
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await next;
+		expect(control.turn("s").working).toBe(true);
+		end(inputId, 3);
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it.each([
+		false,
+		true,
+	])("a transport failure resolves failed and leaves working only for a busy row: %s", async (busy) => {
+		const sent = request();
+		await received();
+		if (busy) upsert("busy");
+		reject(new Error("socket closed"));
+		await expect(sent).resolves.toEqual({ kind: "failed" });
+		expect(control.turn("s").working).toBe(busy);
+	});
+
+	it("a refused steer resolves with the server reason", async () => {
+		upsert("busy");
+		const sent = control.send({
+			sessionId: "s",
+			text: "Steer",
+			delivery: "steer",
+		});
+		await received();
+		reply({ ok: false, reason: "model_differs" });
+		await expect(sent).resolves.toEqual({
+			kind: "refused",
+			reason: "model_differs",
+		});
+		expect(control.turn("s").refusal).toMatchObject({
+			reason: "model_differs",
+		});
+	});
+
+	it.each([
+		"idle",
+		"busy",
+	] as const)("a reconnect clears the live intent and follows the %s snapshot", async (status) => {
+		const sent = request();
+		await received();
+		snapshot(status);
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		expect(control.turn("s").working).toBe(status === "busy");
+	});
+
+	it("a reconnect after this and a later queued turn ended leaves working off", async () => {
+		const sent = request();
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		applySessionChange({
+			_tag: "snapshot",
+			rows: [
+				{
+					...row("idle"),
+					lastTurnEndVersion: 5,
+					lastTurnEndInputId: "later-input",
+				},
+			],
+		});
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("a draft's first send works before the created session row arrives", async () => {
+		await runtime.dispose();
+		serve({
+			CreateSession: () => ({ projectSlug: "project-a", sessionId: "created" }),
+		});
+		const sent = control.send({
+			draft: {
+				projectSlug: "project-a",
+				originId: "browser",
+				draftId: "draft",
+				permissionMode: "ask",
+			},
+			text: "Hello",
+			delivery: "queue",
+		});
+		await received();
+		expect(control.turn("created").working).toBe(true);
+		reply({ ok: true, sessionId: "created", handedOff: true });
+		await sent;
+		resetSessionFamily();
+		const created = { ...row("idle"), id: "created" };
+		applyFamilyFeedChange({ _tag: "snapshot", rows: [created] });
+		expect(control.turn("created").working).toBe(true);
+		applyFamilyFeedChange({
+			_tag: "upsert",
+			item: {
+				...created,
+				lastTurnEndVersion: 2,
+				lastTurnEndInputId: inputId,
+			},
+		});
+		expect(control.turn("created").working).toBe(false);
+		applySessionChange({ _tag: "remove", id: "created", deleted: true });
+	});
+
+	it("an accepted steer resolves waiting and ends with the running turn", async () => {
+		upsert("busy");
+		const sent = control.send({
+			sessionId: "s",
+			text: "Steer",
+			delivery: "steer",
+		});
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await expect(sent).resolves.toEqual({ kind: "waiting" });
+		end("original-turn");
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("a usage-held send stays queued without working", async () => {
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("idle"), accountId: "limited" },
+		});
+		usageState.readings = [
+			{
+				accountId: "limited",
+				harness: "claude",
+				status: "limited",
+				windows: [],
+				readAt: 0,
+				stale: false,
+			},
+		];
+		const sent = request();
+		expect(control.turn("s").working).toBe(false);
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: false });
+		await expect(sent).resolves.toEqual({ kind: "waiting" });
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it.each([
+		"upsert",
+		"cold snapshot",
+	] as const)("a side thread's send settles from its family feed: %s", async (change) => {
+		const child = {
+			...row("idle"),
+			id: "side",
+			parentID: "s",
+			sideThread: true,
+		};
+		applyFamilyFeedChange({ _tag: "snapshot", rows: [row("idle"), child] });
+		const sent = control.send({
+			sessionId: "side",
+			text: "Hello",
+			delivery: "queue",
+		});
+		await received();
+		const ended = {
+			...child,
+			lastTurnEndVersion: 2,
+			lastTurnEndInputId: inputId,
+		};
+		if (change === "upsert")
+			applyFamilyFeedChange({ _tag: "upsert", item: ended });
+		else {
+			resetSessionFamily();
+			applyFamilyFeedChange({ _tag: "snapshot", rows: [ended] });
+		}
+		reply({ ok: true, sessionId: "side", handedOff: true });
+		await sent;
+		expect(control.turn("side").working).toBe(false);
+	});
+
+	it("a guessed wait whose turn ends before the reply stays idle", async () => {
+		permissionsState.pendingQuestions = [
+			{ toolId: "q", sessionId: "s", questions: [] },
+		];
+		const sent = request();
+		await received();
+		end();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("the guess ignores rolled-up processing and prompts belonging to descendants or no session", async () => {
+		applySessionChange({
+			_tag: "upsert",
+			item: {
+				...row("idle"),
+				processing: true,
+				pendingQuestionCount: 2,
+				pendingPermissionCount: 2,
+			},
+		});
+		permissionsState.pendingQuestions = ["child", ""].map((sessionId) => ({
+			toolId: sessionId || "unknown",
+			sessionId,
+			questions: [],
+		}));
+		const sent = request();
+		expect(control.turn("s").working).toBe(true);
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: false });
+		await sent;
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("leaving a feed keeps the intent but deleting the session defeats a late reply", async () => {
+		const sent = request();
+		await received();
+		applySessionChange({ _tag: "remove", id: "s" });
+		expect(control.turn("s").working).toBe(true);
+		applySessionChange({ _tag: "remove", id: "s", deleted: true });
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		expect(control.turn("s").working).toBe(false);
+	});
+
+	it("a family reconnect clears a live side-thread intent even after later turns ended", async () => {
+		const child = {
+			...row("idle"),
+			id: "side",
+			parentID: "s",
+			sideThread: true,
+		};
+		applyFamilyFeedChange({ _tag: "snapshot", rows: [child] });
+		const sent = control.send({
+			sessionId: "side",
+			text: "Hello",
+			delivery: "queue",
+		});
+		await received();
+		applyFamilyFeedChange({
+			_tag: "snapshot",
+			rows: [{ ...child, lastTurnEndVersion: 5, lastTurnEndInputId: "later" }],
+		});
+		reply({ ok: true, sessionId: "side", handedOff: true });
+		await sent;
+		expect(control.turn("side").working).toBe(false);
+	});
 });

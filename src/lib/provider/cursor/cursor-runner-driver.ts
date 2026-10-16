@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
@@ -186,7 +187,8 @@ export const discoverCursorEffect = (
 			supportsPermissions: false,
 			supportsQuestions: true,
 			supportsAttachments: false,
-			supportsFork: false,
+			supportsFork:
+				PROVIDER_DRIVERS.cursor.forkStrategy === "transcript-digest",
 			supportsRevert: false,
 			commands: workspaceRoot
 				? yield* discoverCursorSkillsEffect(workspaceRoot)

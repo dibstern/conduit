@@ -6,7 +6,8 @@
 // - missing diagnostics make a fallback look like a read-free catch-up.
 // - the live burst never overflows the detail subscriber's advance buffer;
 // - overflow replaces the detail view instead of applying its durable removals;
-// - part B survives overflow catch-up or reappears after the view converges.
+// - part B survives overflow catch-up or reappears after the view converges;
+// - overflow catch-up waits for a later publication instead of the freed view.
 //
 // CONDUIT_TEST_DIST=dist pnpm exec playwright test \
 //   --config test/e2e/playwright-harness.config.ts --project=desktop --workers=1 \
@@ -378,7 +379,7 @@ test("an open recreated message catches up through overflow without replacing it
 		"recreated-message-overflow-metrics.json",
 	);
 	const initial = event(SESSION);
-	const advanceBusCapacity = 1;
+	const advanceBusCapacity = 2;
 	const unrelatedAdvances = 64;
 	const heldMs = 8000;
 	const heldDeliveries = 4;
@@ -413,7 +414,9 @@ test("an open recreated message catches up through overflow without replacing it
 		keepPort: true,
 		metricsFile,
 		skipBrowserProbe: true,
-		serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
+		serviceEnvironment: {
+			CONDUIT_TEST_ADVANCE_BUS_CAPACITY: String(advanceBusCapacity),
+		},
 	});
 	const driver = await harness.connect(undefined, undefined, undefined, false);
 	const {
@@ -515,9 +518,9 @@ test("an open recreated message catches up through overflow without replacing it
 		Date.now(),
 		"The burst must land while the page still holds its acknowledgement",
 	).toBeLessThan(heldUntil);
+	// The burst left its newest advances, the gap among them, on the bus. The
+	// freed view must catch up from them with no later publication.
 	await page.evaluate(() => undefined);
-	// The held view resumes on the next publication, which carries the gap.
-	await rename(OTHER, "After the hold");
 	await expect
 		.soft(messages.locator(".md-content p:visible"))
 		.toHaveText([TEXT_A]);

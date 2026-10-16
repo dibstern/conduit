@@ -49,6 +49,7 @@ interface CursorSession {
 	readonly cwd: string;
 	agentId?: string | undefined;
 	controllerPid?: number | undefined;
+	forkSeedPending?: boolean | undefined;
 	open?:
 		| {
 				readonly agent: CursorAgent;
@@ -196,6 +197,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 						? {
 								agentId: identity.agentId,
 								controllerPid: identity.controllerPid,
+								...(identity.forkSeedPending !== undefined
+									? { forkSeedPending: identity.forkSeedPending }
+									: {}),
 							}
 						: typeof storedId === "string"
 							? { agentId: storedId }
@@ -540,22 +544,41 @@ export class CursorRunnerPayload implements RunnerPayload {
 							}),
 						);
 					}
-					yield* Effect.try({
-						try: () =>
-							writeCursorSessionIdentity(
-								this.deps.daemonConfigDir,
-								input.sessionId,
-								{
-									agentId: open.agent.id,
-									cwd: session.cwd,
-									controllerPid: process.pid,
-								},
-							),
-						catch: (): SessionFailure => ({
-							operation: "session identity",
-							message: "Could not persist Cursor session identity before send",
-						}),
-					});
+					const digest = input.providerState["cursor.forkDigest"];
+					// A recorded accepted run can settle the seed after a crash.
+					// A rejected send leaves it pending for a new input.
+					if (
+						typeof digest === "string" &&
+						session.forkSeedPending === undefined
+					)
+						session.forkSeedPending = true;
+					if (
+						session.forkSeedPending &&
+						(activeRun?.requestId != null || activeRun?.startedAt != null)
+					)
+						session.forkSeedPending = false;
+					const seed = session.forkSeedPending && typeof digest === "string";
+					const persistIdentity = () =>
+						Effect.try({
+							try: () =>
+								writeCursorSessionIdentity(
+									this.deps.daemonConfigDir,
+									input.sessionId,
+									{
+										agentId: open.agent.id,
+										cwd: session.cwd,
+										controllerPid: process.pid,
+										...(session.forkSeedPending !== undefined
+											? { forkSeedPending: session.forkSeedPending }
+											: {}),
+									},
+								),
+							catch: (): SessionFailure => ({
+								operation: "session identity",
+								message: "Could not persist Cursor session identity",
+							}),
+						});
+					yield* persistIdentity();
 					session.controllerPid = process.pid;
 					const agent = open.agent;
 					const readUsage = sdkCall("usage", () => agent.getUsage()).pipe(
@@ -569,7 +592,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 					const beforeUsage = yield* readUsage;
 					const run = yield* sdkCall("send", () =>
 						agent.send(
-							input.prompt,
+							seed
+								? `${digest}\n\n[Current request]\n${input.prompt}`
+								: input.prompt,
 							{
 								...config.send,
 								...(force ? { local: { force: true as const } } : {}),
@@ -581,6 +606,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 						),
 					);
 					session.run = run;
+					if (seed) {
+						session.forkSeedPending = false;
+						yield* persistIdentity();
+					}
 					const steer = run.steer?.bind(run);
 					session.steer = (steeredInput, steerSink) =>
 						Effect.scoped(

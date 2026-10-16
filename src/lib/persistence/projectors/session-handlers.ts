@@ -182,6 +182,8 @@ function settleOpenSubagents(
 // answered, so a browser can tell a late end of an earlier turn from the end of
 // the one it is waiting on (conduit-test-jyr9.10). The id is NULL when the
 // ended turn has no known send.
+// Transcript turns split at each steer; messages.steered retains which inputs
+// joined a provider turn.
 function endTurn(
 	event: Pick<StoredEvent, "createdAt" | "sessionId" | "streamVersion">,
 	errorAt: number | null,
@@ -189,19 +191,27 @@ function endTurn(
 	messageId: string,
 ): SessionStatement {
 	return {
-		sql: `UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
+		sql: `WITH ended_input AS (
+			SELECT input_id, session_id, steered, rowid AS position FROM messages
+			WHERE id = COALESCE(?,
+				(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+		UPDATE sessions SET updated_at = ?, last_turn_error_at = ?,
 			last_turn_end_input_id = CASE WHEN ? > COALESCE(last_turn_end_version, -1)
-				THEN (SELECT input_id FROM messages WHERE id = COALESCE(?,
-					(SELECT COALESCE(turn_id, parent_id) FROM messages WHERE id = ?)))
+				THEN (SELECT CASE WHEN ended.steered = 1 THEN
+					(SELECT starter.input_id FROM messages starter
+						WHERE starter.session_id = ended.session_id AND starter.role = 'user'
+						AND starter.steered = 0 AND starter.is_backfilled = 0
+						AND starter.rowid <= ended.position ORDER BY starter.rowid DESC LIMIT 1)
+					ELSE ended.input_id END FROM ended_input ended)
 				ELSE last_turn_end_input_id END,
 			last_turn_end_version = MAX(COALESCE(last_turn_end_version, -1), ?)
 			WHERE id = ?`,
 		params: [
+			userMessageId,
+			messageId,
 			event.createdAt,
 			errorAt,
 			event.streamVersion,
-			userMessageId,
-			messageId,
 			event.streamVersion,
 			event.sessionId,
 		],
@@ -715,6 +725,7 @@ export const sessionHandlers = {
 		settleOpenSubagents(event.sessionId, event.createdAt),
 	],
 	"turn.interrupted": (event) => [
+		endTurn(event, null, null, event.data.messageId),
 		settleOpenSubagents(event.sessionId, event.createdAt),
 	],
 	"permission.asked": (event) => [

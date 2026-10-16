@@ -15,6 +15,7 @@ export interface CursorSessionIdentity {
 	readonly agentId: string;
 	readonly cwd: string;
 	readonly controllerPid: number;
+	readonly forkSeedPending?: boolean;
 }
 
 export function cursorSessionStorePath(
@@ -46,7 +47,9 @@ export function readCursorSessionIdentity(
 		typeof value["cwd"] !== "string" ||
 		typeof value["controllerPid"] !== "number" ||
 		!Number.isSafeInteger(value["controllerPid"]) ||
-		value["controllerPid"] <= 0
+		value["controllerPid"] <= 0 ||
+		(value["forkSeedPending"] !== undefined &&
+			typeof value["forkSeedPending"] !== "boolean")
 	) {
 		throw new CursorSdkFailure({
 			operation: "session.identity",
@@ -57,6 +60,9 @@ export function readCursorSessionIdentity(
 		agentId: value["agentId"],
 		cwd: value["cwd"],
 		controllerPid: value["controllerPid"],
+		...(typeof value["forkSeedPending"] === "boolean"
+			? { forkSeedPending: value["forkSeedPending"] }
+			: {}),
 	};
 }
 
