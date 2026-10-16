@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openComposerMoreSheet,
@@ -511,6 +512,33 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			const input = await box(world.page.locator("#input"));
 			const footer = await box(harness);
 			expect(input.y + input.height).toBeLessThanOrEqual(footer.y);
+		},
+	},
+	{
+		name: "set a desktop composer width",
+		match: /^the desktop composer is (\d+) pixels wide$/,
+		run: async ({ world, match }) => {
+			await world.driver.setViewport(world.page, DESKTOP_VIEWPORT);
+			await world.page.locator("#input-wrapper").evaluate((element, width) => {
+				element.style.width = `${width}px`;
+			}, Number(match[1]));
+		},
+	},
+	{
+		name: "assert which checkout labels fit beside send",
+		match: /^the composer checkout labels are (.+)$/,
+		run: async ({ world, match }) => {
+			const shown = match[1] === "none" ? [] : (match[1] ?? "").split(", ");
+			const checkout = world.page.getByTestId("composer-checkout");
+			for (const part of ["project", "branch", "upstream"]) {
+				await expect(checkout.locator(`[data-part="${part}"]`)).toHaveCount(
+					shown.includes(part) ? 1 : 0,
+				);
+			}
+			// The icon, its dirty mark and the chevron survive every width.
+			await expect(checkout.locator("[data-icon] svg")).toBeVisible();
+			await expect(checkout.locator('[data-part="dirty"]')).toBeVisible();
+			await expect(checkout.locator('[data-part="chevron"]')).toBeVisible();
 		},
 	},
 	{
