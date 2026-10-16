@@ -274,7 +274,7 @@ it("a kill after append leaves no durable event ahead of its projection", async 
 			Effect.gen(function* () {
 				yield* makeEffectSqlMigrator();
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES ('crash-session', 'opencode', 'Before', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at) VALUES ('crash-session', 'test-project', 'opencode', 'Before', 1, 1)`;
 				const store = yield* makeEventStoreEffect;
 				const cursors = yield* makeProjectorCursorEffect;
 				const runner = yield* makeProjectionRunnerEffect([
@@ -371,7 +371,7 @@ it.each([
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at) VALUES ('published', 'claude', 'Before', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at) VALUES ('published', 'test-project', 'claude', 'Before', 1, 1)`;
 				const commit = yield* makeCommitAndSignal;
 				yield* commit(
 					[

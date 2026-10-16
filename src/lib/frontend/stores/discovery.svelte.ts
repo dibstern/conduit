@@ -160,6 +160,7 @@ export interface InstanceOption {
 	readonly status?: InstanceStatus;
 	readonly available?: boolean | undefined;
 	readonly unavailableReason?: string | undefined;
+	readonly unavailableCode?: "auth_required" | undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
@@ -1006,6 +1007,7 @@ export function getAvailableInstances(): InstanceOption[] {
 			status: inst.status,
 			available: inst.available,
 			unavailableReason: inst.unavailableReason,
+			unavailableCode: inst.unavailableCode,
 			capabilities:
 				inst.capabilities ??
 				instanceState.providerCapabilities[driver] ??

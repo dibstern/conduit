@@ -12,12 +12,13 @@ vi.mock(
 );
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	createPtyRpc: vi.fn(async () => undefined),
-	rpc: vi.fn(async () => ({
-		checks: [],
-		tokensSinceStart: null,
-	})),
-	startInstanceRpc: vi.fn(async () => undefined),
+	rpc: vi.fn((tag: string) =>
+		Promise.resolve(
+			tag === "GetGoalDetails"
+				? { checks: [], tokensSinceStart: null }
+				: undefined,
+		),
+	),
 }));
 
 import SessionBar from "../../../src/lib/frontend/components/layout/SessionBar.svelte";

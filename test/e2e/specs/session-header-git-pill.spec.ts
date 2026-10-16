@@ -73,7 +73,7 @@ async function openCheckout(
 		{
 			slug: "e2e-replay",
 			title: "Display title differs",
-			folders: [directory],
+			folders: [directory] as const,
 			...(options.git ? { git: options.git } : {}),
 		},
 	];
@@ -137,9 +137,9 @@ async function openCheckout(
 						]
 					: [],
 			}),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
 		},
 		...(options.viewActivity

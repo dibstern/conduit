@@ -174,7 +174,9 @@ export const SessionSetupLive = Layer.scoped(
 			// primary-key range avoids parsing every part's metadata at startup.
 			recover: sql<{ session_id: string }>`SELECT m.session_id
 				FROM messages m JOIN message_parts p ON p.message_id = m.id
-				WHERE p.id >= 'setup-' AND p.id < 'setup.'
+				JOIN sessions s ON s.id = m.session_id
+				WHERE s.project_id = ${config.slug}
+					AND p.id >= 'setup-' AND p.id < 'setup.'
 					AND CASE WHEN json_valid(p.metadata)
 					THEN json_extract(p.metadata, '$.setup.status') END = 'running'`.pipe(
 				Effect.mapError(

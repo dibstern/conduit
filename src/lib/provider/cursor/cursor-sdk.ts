@@ -5,12 +5,20 @@ import { createTraceCursorSdkPort } from "./sdk-trace-player.js";
 
 export function createCursorSdkPort(): CursorSdkPort {
 	const tracePath = process.env["CONDUIT_CURSOR_SDK_TRACE"];
+	const authStatePath = process.env["CONDUIT_TEST_CURSOR_AUTH_STATE"];
 	return teeCursorSdkPort(
 		tracePath
 			? createTraceCursorSdkPort(
 					tracePath,
 					process.env["NODE_ENV"] === "test"
 						? {
+								...(authStatePath ? { authStatePath } : {}),
+								loginDelayMs: Number(
+									process.env["CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS"] ?? 0,
+								),
+								loginUrlDelayMs: Number(
+									process.env["CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS"] ?? 0,
+								),
 								closeDelayMs: Number(
 									process.env["CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"] ?? 0,
 								),
@@ -30,6 +38,15 @@ export function createCursorSdkPort(): CursorSdkPort {
 								cancelNeverSettles:
 									process.env["CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"] ===
 									"1",
+								...(process.env["CONDUIT_TEST_CURSOR_SEND_GATE"]
+									? { sendGate: process.env["CONDUIT_TEST_CURSOR_SEND_GATE"] }
+									: {}),
+								...(process.env["CONDUIT_TEST_CURSOR_STREAM_GATE"]
+									? {
+											streamGate:
+												process.env["CONDUIT_TEST_CURSOR_STREAM_GATE"],
+										}
+									: {}),
 							}
 						: {},
 				)

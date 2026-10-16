@@ -22,7 +22,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getSessionDriver } from "../../stores/discovery.svelte.js";
 	import { sessionGoals } from "../../stores/goal.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
 	import ForkContextBlock from "./ForkContextBlock.svelte";
@@ -552,7 +552,7 @@
 			{#if final}
 				{#each turn.notices as notice (notice.uuid)}
 					<div class="msg-container">
-						<SystemMessage message={notice} />
+						<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} />
 					</div>
 				{/each}
 			{/if}

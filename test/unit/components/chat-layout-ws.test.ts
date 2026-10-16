@@ -270,18 +270,26 @@ const resolveSession = vi.hoisted(() =>
 	})),
 );
 
+const attachProject = vi.hoisted(() =>
+	vi.fn((_input: { sessionId?: string }) =>
+		Promise.resolve({
+			projectSlug: null as string | null,
+			sessionSlug: null as string | null,
+		}),
+	),
+);
+
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	attachProjectRpc: vi.fn(async () => ({
-		projectSlug: null as string | null,
-		sessionSlug: null as string | null,
-	})),
-	getProjectsRpc: vi.fn(async () => ({
-		projectSlug: "test-project",
-		projects: [],
-		current: "test-project",
-	})),
 	rpc: vi.fn((tag: string, input: unknown) => {
 		if (tag === "ResolveSession") return resolveSession(input);
+		if (tag === "AttachProject")
+			return attachProject(input as { sessionId?: string });
+		if (tag === "GetProjects")
+			return Promise.resolve({
+				projectSlug: "test-project",
+				projects: [],
+				current: "test-project",
+			});
 		if (tag === "ListDaemonSessions")
 			return Promise.resolve({
 				sessions: [],
@@ -314,7 +322,6 @@ import {
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { runTransportEffect } from "../../../src/lib/frontend/transport/runtime.js";
-import { attachProjectRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 function attach(slug: string): void {
 	attachedProjectState.slug = slug;
@@ -352,10 +359,12 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.mocked(resolveSession).mockResolvedValue({
 			projectSlug: "test-project",
 		});
-		vi.mocked(attachProjectRpc).mockImplementation(async ({ sessionId }) => ({
-			projectSlug: "test-project",
-			sessionSlug: sessionId ? "test-project" : null,
-		}));
+		vi.mocked(attachProject).mockImplementation(({ sessionId }) =>
+			Promise.resolve({
+				projectSlug: "test-project",
+				sessionSlug: sessionId ? "test-project" : null,
+			}),
+		);
 		attachedProjectState.slug = null;
 	});
 
@@ -441,7 +450,7 @@ describe("ChatLayout RPC lifecycle", () => {
 
 	it("selects a cold session from AttachProject without a second resolve", async () => {
 		routerState.path = "/s/cold-session";
-		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+		vi.mocked(attachProject).mockResolvedValueOnce({
 			projectSlug: "other-project",
 			sessionSlug: "other-project",
 		});
@@ -452,14 +461,14 @@ describe("ChatLayout RPC lifecycle", () => {
 				"other-project",
 			),
 		);
-		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(attachProject).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "cold-session",
 			originId: "browser-client-1",
 		});
 		expect(resolveSession).not.toHaveBeenCalled();
-		expect(
-			vi.mocked(attachProjectRpc).mock.invocationCallOrder[0],
-		).toBeLessThan(vi.mocked(switchToSession).mock.invocationCallOrder[0] ?? 0);
+		expect(vi.mocked(attachProject).mock.invocationCallOrder[0]).toBeLessThan(
+			vi.mocked(switchToSession).mock.invocationCallOrder[0] ?? 0,
+		);
 	});
 
 	it("resolves and selects history navigation across projects", async () => {
@@ -556,7 +565,7 @@ describe("ChatLayout RPC lifecycle", () => {
 
 	it("returns an unknown session to the list with a dismissible notice", async () => {
 		routerState.path = "/s/missing-session";
-		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+		vi.mocked(attachProject).mockResolvedValueOnce({
 			projectSlug: "test-project",
 			sessionSlug: null,
 		});
@@ -574,7 +583,7 @@ describe("ChatLayout RPC lifecycle", () => {
 					sessionSlug: string | null;
 			  }) => void)
 			| undefined;
-		vi.mocked(attachProjectRpc).mockImplementationOnce(
+		vi.mocked(attachProject).mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
 					resolveMissing = resolve;
@@ -604,13 +613,13 @@ describe("ChatLayout RPC lifecycle", () => {
 		render(ChatLayout).unmount();
 		attachedProjectState.slug = "test-project";
 		vi.clearAllMocks();
-		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+		vi.mocked(attachProject).mockResolvedValueOnce({
 			projectSlug: "test-project",
 			sessionSlug: null,
 		});
 		render(ChatLayout);
 		await tick();
-		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(attachProject).toHaveBeenCalledExactlyOnceWith({
 			originId: "browser-client-1",
 		});
 		expect(wsLifecycleHarness.attachedSlugs.at(-1)).toBe("test-project");
@@ -630,12 +639,12 @@ describe("ChatLayout RPC lifecycle", () => {
 		attach("test-project");
 		await tick();
 		vi.mocked(runTransportEffect).mockClear();
-		vi.mocked(attachProjectRpc).mockClear();
+		vi.mocked(attachProject).mockClear();
 		replaceRoute("/?p=other-project");
 		flushSync();
 		await tick();
 		expect(runTransportEffect).toHaveBeenCalledTimes(1);
-		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(attachProject).toHaveBeenCalledExactlyOnceWith({
 			projectSlug: "other-project",
 			originId: "browser-client-1",
 		});
@@ -643,13 +652,13 @@ describe("ChatLayout RPC lifecycle", () => {
 	});
 
 	it("attaches the cold-load project from the AttachProject reply", async () => {
-		vi.mocked(attachProjectRpc).mockResolvedValueOnce({
+		vi.mocked(attachProject).mockResolvedValueOnce({
 			projectSlug: "daemon-default",
 			sessionSlug: null,
 		});
 		render(ChatLayout);
 		await tick();
-		expect(attachProjectRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(attachProject).toHaveBeenCalledExactlyOnceWith({
 			originId: "browser-client-1",
 		});
 		expect(wsLifecycleHarness.attachedSlugs).toEqual(["daemon-default"]);
@@ -660,7 +669,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		replaceRoute("/?p=first-project");
 		flushSync();
 		await tick();
-		expect(attachProjectRpc).toHaveBeenLastCalledWith({
+		expect(attachProject).toHaveBeenLastCalledWith({
 			projectSlug: "first-project",
 			originId: "browser-client-1",
 		});
@@ -669,15 +678,15 @@ describe("ChatLayout RPC lifecycle", () => {
 	it("cancels a pending project switch when navigating back to the attached project", async () => {
 		render(ChatLayout);
 		attach("test-project");
-		vi.mocked(attachProjectRpc).mockClear();
-		vi.mocked(attachProjectRpc).mockReturnValueOnce(new Promise(() => {}));
+		vi.mocked(attachProject).mockClear();
+		vi.mocked(attachProject).mockReturnValueOnce(new Promise(() => {}));
 		replaceRoute("/?p=other-project");
 		flushSync();
 		await tick();
 		replaceRoute("/?p=test-project");
 		flushSync();
 		await tick();
-		expect(attachProjectRpc).toHaveBeenLastCalledWith({
+		expect(attachProject).toHaveBeenLastCalledWith({
 			projectSlug: "test-project",
 			originId: "browser-client-1",
 		});

@@ -12,7 +12,7 @@ test("files, mentions and new terminals follow a session move and navigation", a
 	const main = "/workspace/main";
 	const worktree = "/workspace/worktree";
 	const projects = [
-		{ slug: projectSlug, title: "Workspace project", folders: [main] },
+		{ slug: projectSlug, title: "Workspace project", folders: [main] as const },
 	];
 	let moved = false;
 	let terminalCount = 0;
@@ -91,13 +91,13 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				providerScope: { id: "claude", name: "Claude" },
 				instanceId: "claude",
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({
 				projects,
 				current: projectSlug,
 			}),
-			CreatePty: ({ sessionId }) => {
+			CreatePty: (payload) => {
+				const sessionId =
+					"sessionId" in payload ? payload.sessionId : undefined;
 				const id = `pty-${++terminalCount}`;
 				rpc.sendChunk("SubscribePtys", [
 					{

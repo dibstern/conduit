@@ -293,7 +293,8 @@ export class EffectOpenCodeRuntimeIngress
 			Effect.flatMap(
 				SqlClient.SqlClient,
 				(sql) =>
-					sql`UPDATE sessions SET history_complete = 0 WHERE id = ${sessionId}`,
+					sql`UPDATE sessions SET history_complete = 0
+						WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(Effect.asVoid);
 	}
@@ -309,7 +310,8 @@ export class EffectOpenCodeRuntimeIngress
 				SqlClient.SqlClient,
 				(sql) =>
 					sql<{ history_complete: number }>`
-					SELECT history_complete FROM sessions WHERE id = ${sessionId}`,
+					SELECT history_complete FROM sessions
+					WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(
 			Effect.tap((rows) =>
@@ -356,11 +358,11 @@ export class EffectOpenCodeRuntimeIngress
 
 	private hasProjectedSession(sessionId: string): Effect.Effect<boolean> {
 		return this.withSql(
-			Effect.gen(function* () {
+			Effect.gen(this, function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const rows = yield* sql<{ id: string }>`
 					SELECT id FROM sessions
-					WHERE id = ${sessionId}
+					WHERE id = ${sessionId} AND project_id = ${this.projectId}
 					LIMIT 1`;
 				return rows.length > 0;
 			}),
@@ -380,7 +382,8 @@ export class EffectOpenCodeRuntimeIngress
 				Effect.flatMap(
 					SqlClient.SqlClient,
 					(sql) =>
-						sql`UPDATE sessions SET history_complete = 0 WHERE id = ${sessionId}`,
+						sql`UPDATE sessions SET history_complete = 0
+							WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 				),
 			);
 			const controller = new AbortController();
@@ -576,7 +579,8 @@ export class EffectOpenCodeRuntimeIngress
 							);
 						// This flag caches the REST reconciliation proof. Rebuilding the
 						// read model from events resets it to 0 until the next sighting.
-						yield* sql`UPDATE sessions SET history_complete = ${complete ? 1 : 0} WHERE id = ${sessionId}`;
+						yield* sql`UPDATE sessions SET history_complete = ${complete ? 1 : 0}
+							WHERE id = ${sessionId} AND project_id = ${this.projectId}`;
 						if (
 							this.stopped ||
 							this.sessionInstanceIds.get(sessionId) !== providerInstanceId ||
@@ -909,7 +913,8 @@ export class EffectOpenCodeRuntimeIngress
 								status: string;
 							}>`
 								SELECT s.provider_sid, s.status FROM sessions s
-								WHERE s.id = ${sessionId} AND s.provider = ${boundInstanceId}
+								WHERE s.id = ${sessionId} AND s.project_id = ${this.projectId}
+									AND s.provider = ${boundInstanceId}
 									AND EXISTS (
 										SELECT 1 FROM session_providers sp
 											WHERE sp.session_id = s.id AND sp.provider = ${boundInstanceId}
@@ -1004,8 +1009,12 @@ export class EffectOpenCodeRuntimeIngress
 					yield* this.sessionGate(sessionId).withPermits(1)(
 						Effect.gen(this, function* () {
 							if (this.sessionInstanceIds.get(sessionId) !== instanceId) return;
-							yield* sql`UPDATE sessions SET history_complete = 0 WHERE id = ${sessionId}`;
-							yield* this.startBackfill(sessionId, instanceId);
+							const rows = yield* sql<{
+								id: string;
+							}>`UPDATE sessions SET history_complete = 0
+								WHERE id = ${sessionId} AND project_id = ${this.projectId} RETURNING id`;
+							if (rows.length > 0)
+								yield* this.startBackfill(sessionId, instanceId);
 						}),
 					);
 				}
@@ -1020,7 +1029,8 @@ export class EffectOpenCodeRuntimeIngress
 				(sql) =>
 					sql<{
 						provider: string | null;
-					}>`SELECT provider FROM sessions WHERE id = ${sessionId}`,
+					}>`SELECT provider FROM sessions
+						WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(
 			Effect.flatMap((rows) => {
@@ -1065,7 +1075,8 @@ export class EffectOpenCodeRuntimeIngress
 				SqlClient.SqlClient,
 				(sql) =>
 					sql<{ history_complete: number }>`
-					SELECT history_complete FROM sessions WHERE id = ${sessionId}`,
+					SELECT history_complete FROM sessions
+					WHERE id = ${sessionId} AND project_id = ${this.projectId}`,
 			),
 		).pipe(
 			Effect.map((rows) => rows[0]?.history_complete === 1),

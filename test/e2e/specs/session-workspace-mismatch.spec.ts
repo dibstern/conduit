@@ -27,7 +27,11 @@ for (const viewport of [
 			const main = "/workspace/main";
 			const actualPath = "/workspace/main/.claude/worktrees/contract";
 			const projects = [
-				{ slug: projectSlug, title: "Workspace project", folders: [main] },
+				{
+					slug: projectSlug,
+					title: "Workspace project",
+					folders: [main] as const,
+				},
 			];
 			const session = {
 				accountId: null,
@@ -65,8 +69,6 @@ for (const viewport of [
 							"projectSlug" in input ? input.projectSlug : projectSlug,
 						providers: [],
 					}),
-				},
-				handlers: {
 					GetProjects: () => ({
 						projects,
 						current: projectSlug,

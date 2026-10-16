@@ -53,7 +53,8 @@ export const readColdWorktreeCleanupCandidates = (
 			FROM events, json_each(events.data, '$.worktrees') AS mapping
 			LEFT JOIN sessions ON sessions.id = events.session_id
 			LEFT JOIN latest_turns ON latest_turns.session_id = sessions.id AND latest_turns.rank = 1
-			WHERE events.type = 'session.workspace_changed'
+			WHERE events.project_id = ${project.slug}
+				AND events.type = 'session.workspace_changed'
 				AND json_extract(events.data, '$.cause') = 'launch'
 				AND json_extract(events.data, '$.origin') = 'conduit'
 				AND (

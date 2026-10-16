@@ -6,6 +6,7 @@
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
 
 import { expect, test } from "@playwright/test";
+import { Schema } from "effect";
 import { singleInstanceInitMessages } from "../fixtures/mockup-state.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import {
@@ -116,15 +117,15 @@ async function setupWithProjectManagement(
 						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
 				};
 			},
-		},
-		handlers: {
 			AttachProject: async (params) => {
 				// A cold load without ?p attaches the daemon's default project.
-				if (typeof params["projectSlug"] !== "string")
+				if (
+					!("projectSlug" in params) ||
+					typeof params.projectSlug !== "string"
+				)
 					return {
 						projectSlug: "myapp",
-						sessionSlug:
-							typeof params["sessionId"] === "string" ? "myapp" : null,
+						sessionSlug: "sessionId" in params ? "myapp" : null,
 					};
 				// A real attach takes a round trip or two; an instant answer would
 				// hide anything that races it.
@@ -134,17 +135,16 @@ async function setupWithProjectManagement(
 					sessionSlug: null,
 				};
 			},
-			ListSessions: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				sessions: sessions.filter(
-					(session) => session.projectSlug === params["projectSlug"],
-				),
-				roots: true,
-			}),
 			SaveProject: (params) => {
 				const slug = String(params["slug"] ?? "new-project");
 				const title = String(params["title"] ?? "new-project");
-				const folders = params["folders"] as string[];
+				const folders = Schema.decodeUnknownSync(
+					Schema.NonEmptyArray(Schema.String),
+				)(
+					params.folders.map((folder) =>
+						typeof folder === "string" ? folder : folder.path,
+					),
+				);
 				return {
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
 					projects: params["slug"]
@@ -174,6 +174,15 @@ async function setupWithProjectManagement(
 					current: "myapp",
 				};
 			},
+		},
+		handlers: {
+			ListSessions: (params) => ({
+				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				sessions: sessions.filter(
+					(session) => session.projectSlug === params["projectSlug"],
+				),
+				roots: true,
+			}),
 		},
 		// Each shell subscription carries only its own project's rows, as the
 		// daemon's does; one broadcast stream would leak the next project's rows
@@ -218,12 +227,12 @@ function baseProjects() {
 		{
 			slug: "myapp",
 			title: "myapp",
-			folders: ["/src/myapp"],
+			folders: ["/src/myapp"] as const,
 		},
 		{
 			slug: "mylib",
 			title: "mylib",
-			folders: ["/src/mylib"],
+			folders: ["/src/mylib"] as const,
 		},
 	];
 }

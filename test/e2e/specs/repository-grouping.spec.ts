@@ -123,8 +123,6 @@ async function openProjectList(page: Page, baseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
 			SaveProject: ({ slug: savedSlug, groupingMode }) => {
 				const stored = projects.find((project) => project.slug === savedSlug);
@@ -146,7 +144,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 					project.slug === savedSlug ? updated : project,
 				);
 				rpc.setDaemonList("SubscribeProjects", { projects });
-				return { savedSlug, projects, warnings: [] };
+				return { savedSlug: stored.slug, projects, warnings: [] };
 			},
 		},
 	});
