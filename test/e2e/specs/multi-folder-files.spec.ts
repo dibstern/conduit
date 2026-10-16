@@ -18,6 +18,7 @@ for (const multiple of [true, false]) {
 				{ slug: projectSlug, title: "Folders project", folders },
 			];
 			const session = {
+				accountId: null,
 				id: "folders-session",
 				title: "Folders session",
 				status: "idle",
@@ -26,6 +27,7 @@ for (const multiple of [true, false]) {
 			let moved = false;
 			const rpc = await mockWsRpc(page, {
 				handlers: {
+					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 					GetProjects: () => ({ projects, current: projectSlug }),
 					GetAgents: () => ({
 						projectSlug,
