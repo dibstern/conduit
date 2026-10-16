@@ -39,7 +39,10 @@ describe("playDoneSound", () => {
 
 	beforeEach(() => {
 		mockCtx = createMockAudioContext();
-		AudioContextMock = vi.fn(() => mockCtx.ctx);
+		// biome-ignore lint/complexity/useArrowFunction: Vitest invokes this mock as a constructor.
+		AudioContextMock = vi.fn(function () {
+			return mockCtx.ctx;
+		});
 		vi.stubGlobal("AudioContext", AudioContextMock);
 	});
 

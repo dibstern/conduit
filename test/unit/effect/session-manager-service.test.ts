@@ -2205,7 +2205,7 @@ describe("SessionManagerService", () => {
 				const dispatchEffect = vi.fn(() => neverSettles);
 				const engine = withDispatchEffect({ dispatchEffect });
 				engine.bindSession(sessionId, "work-oc");
-				const bindSession = vi.spyOn(engine, "bindSession");
+				const bindSession = vi.spyOn(engine, "bindSession").mockClear();
 				const api = makeMockOpenCodeAPI();
 				const use = vi.fn(() => neverSettles);
 				const instanceClients = {
