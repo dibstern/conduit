@@ -191,7 +191,7 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 		"The cache and wire are the same on every device; desktop shows both sessions.",
 	);
 	test.setTimeout(120_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const metricsFile = join(harness.root, "recreated-message-metrics.json");
 	const initial = event(SESSION);
 	const other = event(OTHER);
@@ -372,7 +372,7 @@ test("an open recreated message catches up through overflow without replacing it
 		"The cache and wire are the same on every device; desktop shows both sessions.",
 	);
 	test.setTimeout(120_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const metricsFile = join(
 		harness.root,
 		"recreated-message-overflow-metrics.json",

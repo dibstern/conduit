@@ -143,7 +143,7 @@ function readStoredState(
 	slug: string,
 	sessionId: string,
 ) {
-	const db = new Database(harness.projectStorePath(slug), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const events = db
 			.prepare<[string], EventRow>(
@@ -155,10 +155,10 @@ function readStoredState(
 		return {
 			sessionCount:
 				db
-					.prepare<[], { count: number }>(
-						"SELECT count(*) AS count FROM sessions",
+					.prepare<[string], { count: number }>(
+						"SELECT count(*) AS count FROM sessions WHERE project_id = ?",
 					)
-					.get()?.count ?? 0,
+					.get(slug)?.count ?? 0,
 			pick: db
 				.prepare<[string], StoredPickRow>(
 					`SELECT provider, model_id, model_provider, variant, context_window
@@ -375,7 +375,7 @@ async function sendAndCapture(
 		);
 		if (!slug || !sessionId)
 			throw new Error("No project/session for Claude receipt");
-		const db = new Database(harness.projectStorePath(slug), { readonly: true });
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
 		let contextWindow: string | null | undefined;
 		try {
 			contextWindow = db
@@ -1943,14 +1943,17 @@ function readDraftReceipt(
 	slug: string,
 	sessionId: string,
 ) {
-	const db = new Database(harness.projectStorePath(slug), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		const stored = db
-			.prepare<[string], StoredPickRow & { permission_mode: string | null }>(
+			.prepare<
+				[string, string],
+				StoredPickRow & { permission_mode: string | null }
+			>(
 				`SELECT provider, model_id, model_provider, variant, context_window, permission_mode
-			 FROM sessions WHERE id = ?`,
+			 FROM sessions WHERE id = ? AND project_id = ?`,
 			)
-			.get(sessionId);
+			.get(sessionId, slug);
 		const row = db
 			.prepare<[string], { payload_json: string }>(
 				`SELECT payload_json FROM provider_command_outbox WHERE session_id = ?
@@ -3211,7 +3214,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 	const before = readStoredState(harness, slug, sessionId);
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	try {
 		expect(
 			db
@@ -3219,7 +3222,8 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 			variant = NULL, context_window = NULL WHERE id = ?`)
 				.run(sessionId).changes,
 		).toBe(1);
-		// This fixture now represents a legacy database needing its first repair.
+		// Deliberately reset the daemon-wide singleton: these isolated fixtures
+		// exercise the first store-wide pick repair across all registered projects.
 		db.exec(
 			"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 		);
@@ -3339,7 +3343,7 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 		`${caseId}-before`,
 	);
 	const before = readStoredState(harness, slug, sessionId);
-	const receiptDb = new Database(harness.projectStorePath(slug), {
+	const receiptDb = new Database(harness.daemonStorePath(), {
 		readonly: true,
 	});
 	let lastTurn:
@@ -3384,7 +3388,7 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 	);
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	try {
 		expect(
 			db
@@ -3392,7 +3396,8 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 			variant = NULL, context_window = NULL WHERE id = ?`)
 				.run(sessionId).changes,
 		).toBe(1);
-		// This fixture now represents a legacy database needing its first repair.
+		// Deliberately reset the daemon-wide singleton: these isolated fixtures
+		// exercise the first store-wide pick repair across all registered projects.
 		db.exec(
 			"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 		);
@@ -3539,7 +3544,7 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 				enqueues(harness, true).some((mark) => mark.prompt === prompt),
 			)
 			.toBe(true);
-		const receiptDb = new Database(harness.projectStorePath(slug), {
+		const receiptDb = new Database(harness.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
@@ -3574,19 +3579,20 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 	);
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	let executedTurns: { session_id: string; started_at: number | null }[];
 	try {
 		executedTurns = db
-			.prepare<[], { session_id: string; started_at: number | null }>(
-				"SELECT session_id, started_at FROM turns ORDER BY requested_at",
+			.prepare<[string], { session_id: string; started_at: number | null }>(
+				"SELECT t.session_id, t.started_at FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.project_id = ? ORDER BY t.requested_at",
 			)
-			.all();
+			.all(slug);
 		for (const sample of samples)
 			db.prepare(
 				"UPDATE sessions SET variant = ?, context_window = ? WHERE id = ?",
 			).run(sample.variant, sample.contextWindow, sample.sessionId);
-		// This fixture now represents a legacy database needing its first repair.
+		// Deliberately reset the daemon-wide singleton: these isolated fixtures
+		// exercise the first store-wide pick repair across all registered projects.
 		db.exec(
 			"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 		);
@@ -3673,7 +3679,7 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	const receiptsBefore = enqueues(harness, true).length;
 	await browser.close();
 	await harness.terminate();
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	let history:
 		| {
 				started_at: number | null;
@@ -5119,7 +5125,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 							bound_provider: string | null;
 					  })
 					| undefined;
-				const db = new Database(harness.projectStorePath(slug), {
+				const db = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
@@ -5173,7 +5179,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				} finally {
 					observation["prompts"] = prompts;
 					observation["after"] = readStoredState(harness, slug, native.id);
-					const commandDb = new Database(harness.projectStorePath(slug), {
+					const commandDb = new Database(harness.daemonStorePath(), {
 						readonly: true,
 					});
 					try {
@@ -5265,7 +5271,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		const requestsBefore = harness.opencodeRequests().length;
 		await browser.close();
 		await harness.terminate();
-		const db = new Database(harness.projectStorePath(slug));
+		const db = new Database(harness.daemonStorePath());
 		try {
 			db.prepare(`UPDATE sessions SET model_id = NULL, model_provider = NULL,
 			 variant = NULL, context_window = NULL WHERE id = ?`).run(sessionId);
@@ -5344,20 +5350,21 @@ test.describe("runtime and stopped OpenCode picks", () => {
 		const requestsBefore = harness.opencodeRequests().length;
 		await browser.close();
 		await harness.terminate();
-		const db = new Database(harness.projectStorePath(slug));
+		const db = new Database(harness.daemonStorePath());
 		let executedTurns: number;
 		try {
 			executedTurns =
 				db
-					.prepare<[], { count: number }>(
-						"SELECT count(*) AS count FROM turns WHERE started_at IS NOT NULL",
+					.prepare<[string], { count: number }>(
+						"SELECT count(*) AS count FROM turns t JOIN sessions s ON s.id = t.session_id WHERE s.project_id = ? AND t.started_at IS NOT NULL",
 					)
-					.get()?.count ?? 0;
+					.get(slug)?.count ?? 0;
 			for (const sample of samples)
 				db.prepare(
 					"UPDATE sessions SET variant = ?, context_window = ? WHERE id = ?",
 				).run(sample.variant, sample.contextWindow, sample.sessionId);
-			// This fixture now represents a legacy database needing its first repair.
+			// Deliberately reset the daemon-wide singleton: these isolated fixtures
+			// exercise the first store-wide pick repair across all registered projects.
 			db.exec(
 				"UPDATE session_pick_backfill_state SET initialized = 0 WHERE singleton = 1",
 			);
@@ -5476,7 +5483,7 @@ for (const rejection of [
 		await Effect.runPromise(browser.rpc.GetModels({ sessionId }));
 		const before = readStoredState(harness, slug, sessionId);
 		const receiptsBefore = enqueues(harness, true).length;
-		const db = new Database(harness.projectStorePath(slug));
+		const db = new Database(harness.daemonStorePath());
 		try {
 			const changed =
 				rejection === "uncatalogued"
@@ -5682,7 +5689,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 		effort: "high",
 		contextWindow: "1m",
 	});
-	const db = new Database(harness.projectStorePath(slug));
+	const db = new Database(harness.daemonStorePath());
 	try {
 		db.prepare("UPDATE sessions SET context_window = NULL WHERE id = ?").run(
 			sessionId,

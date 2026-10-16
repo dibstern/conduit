@@ -178,7 +178,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		);
 		await browser.followSessions();
 		const persistedStatus = () => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				return (
 					db
@@ -264,7 +264,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		await fixture.setOpenCodeStatus(fixture.projectDir, sessionId, {
 			type: "idle",
 		});
-		const beforeStopDb = new Database(fixture.projectStorePath(), {
+		const beforeStopDb = new Database(fixture.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
@@ -338,7 +338,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		expect(subsequentRows.filter((row) => row["status"] !== "busy")).toEqual(
 			[],
 		);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const persisted = db
 				.prepare("SELECT status FROM sessions WHERE id = ?")
@@ -496,7 +496,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			claudeId,
 		];
 		const sessionState = () => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				return {
 					statuses: Object.fromEntries(
@@ -511,7 +511,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 					),
 					approvals: db
 						.prepare(
-							"SELECT id, session_id, type, status FROM pending_approvals ORDER BY id",
+							"SELECT id, session_id, type, status FROM pending_approvals WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test') ORDER BY id",
 						)
 						.all(),
 				};

@@ -211,7 +211,7 @@ test("a session opened from its saved page ends where a cold open does", async (
 		"The cache and the wire are the same on every device.",
 	);
 	test.setTimeout(600_000);
-	const store = harness.projectStorePath();
+	const store = harness.daemonStorePath();
 	const viewport = testInfo.project.use.viewport ?? null;
 	const url = (sessionId: string) =>
 		`${harness.baseUrl}/s/${sessionId}?p=process-test`;

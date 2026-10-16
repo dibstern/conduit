@@ -84,8 +84,8 @@ describe("Worktree branch settlement through the built daemon", () => {
 					)
 				).sessions;
 			}
-			if (existsSync(fixture.projectStorePath())) {
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+			if (existsSync(fixture.daemonStorePath())) {
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					if (task.result?.errors?.length)
 						evidence["settleFacts"] = db
@@ -95,7 +95,7 @@ describe("Worktree branch settlement through the built daemon", () => {
 							.all();
 					evidence["lifecycle"] = db
 						.prepare(
-							"SELECT session_id, type, data FROM events WHERE type IN ('session.workspace_changed', 'session.settled', 'session.unsettled', 'session.deleted', 'session.archived') ORDER BY sequence",
+							"SELECT session_id, type, data FROM events WHERE project_id = 'process-test' AND type IN ('session.workspace_changed', 'session.settled', 'session.unsettled', 'session.deleted', 'session.archived') ORDER BY sequence",
 						)
 						.all()
 						.map((row) => {
@@ -484,7 +484,7 @@ describe("Worktree branch settlement through the built daemon", () => {
 		expect(
 			sessionQueries(fixture, otherId).map(({ options }) => options["cwd"]),
 		).toEqual([existing, existing]);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			expect(
 				db

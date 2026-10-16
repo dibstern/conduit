@@ -28,7 +28,7 @@ import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import { makeSessionDirectoryLive } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
@@ -209,7 +209,13 @@ describe("daemon Unix RPC transport", () => {
 			// This fixture exercises only these daemon methods; all other routes
 			// retain the existing handlers and fail at the resolver above.
 			daemonHandlers as unknown as DaemonRpcHandlers,
-		).pipe(Layer.provide(makeSessionDirectoryLive(directory, [])));
+		).pipe(
+			Layer.provide(
+				Layer.succeed(SessionDirectory, {
+					projectOf: () => Effect.succeed(Option.none()),
+				}),
+			),
+		);
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {

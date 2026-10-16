@@ -1,119 +1,67 @@
-import { statSync } from "node:fs";
-import { Reactivity } from "@effect/experimental";
 import type { SqlClient } from "@effect/sql";
-import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Context, Effect, Either, Layer, Option } from "effect";
+import { Context, Effect, Layer } from "effect";
 import {
 	type PersistenceEffectError,
 	PersistenceStore,
 } from "../../../persistence/effect/live.js";
-import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import type { StoredProject } from "../../../types.js";
 import {
 	makePersistenceService,
-	makePersistenceServiceLive,
 	PersistenceProjectTag,
 	PersistenceServiceTag,
 } from "../../persistence/Services/persistence-service.js";
 import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 
-/** Preserve the optional borrowed store across explicitly restricted contexts. */
-export const optionalPersistenceStoreContext = Effect.gen(function* () {
-	const store = yield* Effect.serviceOption(PersistenceStore);
-	return Context.add(
-		Option.isSome(store)
-			? Context.make(PersistenceStore, store.value)
-			: Context.empty(),
-		DaemonStoreAvailability,
-		yield* DaemonStoreAvailability,
+/** Preserve the borrowed daemon store across explicitly restricted contexts. */
+export const persistenceStoreContext = Effect.gen(function* () {
+	return Context.make(PersistenceStore, yield* PersistenceStore).pipe(
+		Context.add(DaemonStoreAvailability, yield* DaemonStoreAvailability),
 	);
 });
 
-type ProjectReadOptions = {
-	readonly mapPathError?: (cause: unknown) => unknown;
-};
-
-/** Shared readers bind a project without preparing or stamping the daemon store. */
+/** Bind a project without opening, preparing or stamping the daemon store. */
 export function projectReadDatabase(
-	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
-	options: ProjectReadOptions & { readonly prepare: true },
+	project: Pick<StoredProject, "slug">,
+	options: { readonly prepare: true },
 ): Effect.Effect<
-	Option.Option<
-		Layer.Layer<
+	Layer.Layer<
+		SqlClient.SqlClient | PersistenceServiceTag,
+		PersistenceEffectError
+	>,
+	never,
+	PersistenceStore
+>;
+export function projectReadDatabase(
+	project: Pick<StoredProject, "slug">,
+	options?: { readonly prepare?: false },
+): Effect.Effect<
+	Layer.Layer<SqlClient.SqlClient, PersistenceEffectError>,
+	never,
+	PersistenceStore
+>;
+export function projectReadDatabase(
+	project: Pick<StoredProject, "slug">,
+	options: { readonly prepare?: boolean } = {},
+): Effect.Effect<
+	| Layer.Layer<SqlClient.SqlClient, PersistenceEffectError>
+	| Layer.Layer<
 			SqlClient.SqlClient | PersistenceServiceTag,
 			PersistenceEffectError
-		>
-	>,
-	unknown
->;
-export function projectReadDatabase(
-	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
-	options?: ProjectReadOptions & { readonly prepare?: false },
-): Effect.Effect<
-	Option.Option<Layer.Layer<SqlClient.SqlClient, PersistenceEffectError>>,
-	unknown
->;
-export function projectReadDatabase(
-	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
-	options: ProjectReadOptions & { readonly prepare?: boolean } = {},
-): Effect.Effect<
-	| Option.Option<Layer.Layer<SqlClient.SqlClient, PersistenceEffectError>>
-	| Option.Option<
-			Layer.Layer<
-				SqlClient.SqlClient | PersistenceServiceTag,
-				PersistenceEffectError
-			>
 	  >,
-	unknown
+	never,
+	PersistenceStore
 > {
 	return Effect.gen(function* () {
-		const store = yield* Effect.serviceOption(PersistenceStore);
-		const database: Option.Option<
-			Layer.Layer<SqlClient.SqlClient, PersistenceEffectError>
-		> = yield* Option.isSome(store)
-			? Effect.succeed(Option.some(Layer.succeedContext(store.value)))
-			: Effect.gen(function* () {
-					const filename = projectEventsDbPath({ configDir, ...project });
-					const databaseStat = yield* Effect.either(
-						Effect.try({
-							try: () => statSync(filename),
-							catch: (cause) => cause,
-						}),
-					);
-					if (Either.isLeft(databaseStat)) {
-						const cause = databaseStat.left;
-						if (
-							typeof cause === "object" &&
-							cause !== null &&
-							"code" in cause &&
-							cause.code === "ENOENT"
-						)
-							return Option.none();
-						return yield* Effect.fail(options.mapPathError?.(cause) ?? cause);
-					}
-					return Option.some(
-						SqliteNode.layer({
-							filename,
-							...(options.prepare ? {} : { readonly: true }),
-							disableWAL: true,
-						}).pipe(Layer.provide(Reactivity.layer)),
-					);
-				});
-		if (Option.isNone(database) || !options.prepare) return database;
-		const projectLayer = Layer.succeed(PersistenceProjectTag, {
-			projectId: project.slug,
-		});
-		const bindProject = Layer.fresh(
-			Option.isSome(store)
-				? Layer.effect(PersistenceServiceTag, makePersistenceService)
-				: makePersistenceServiceLive,
-		);
-		return Option.some(
-			bindProject.pipe(
-				Layer.provideMerge(Layer.merge(database.value, projectLayer)),
+		const database = Layer.succeedContext(yield* PersistenceStore);
+		if (!options.prepare) return database;
+		return Layer.fresh(
+			Layer.effect(PersistenceServiceTag, makePersistenceService),
+		).pipe(
+			Layer.provideMerge(
+				Layer.merge(
+					database,
+					Layer.succeed(PersistenceProjectTag, { projectId: project.slug }),
+				),
 			),
 		);
 	});

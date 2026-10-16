@@ -69,7 +69,7 @@ describe("Managed OpenCode stops when idle", () => {
 			.filter(alive);
 
 	function persistedRecovery(fixture: ProcessHarness, sessionId: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return {
 				session: db

@@ -1,18 +1,12 @@
 // Failure modes are recorded before these tests in
 // docs/plans/2026-10-16-shared-store-scope-failure-modes.md.
-import {
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import * as Statement from "@effect/sql/Statement";
 import Database from "better-sqlite3";
-import { Effect, Layer, ManagedRuntime, Option, Ref, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Ref, Stream } from "effect";
 import {
 	afterAll,
 	afterEach,
@@ -30,7 +24,6 @@ import {
 	hasProviderRecoveryCandidate,
 } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
@@ -77,7 +70,11 @@ import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import {
+	makePersistenceEffectLayer,
+	PersistenceStore,
+	type PersistenceStoreContext,
+} from "../../../src/lib/persistence/effect/live.js";
 import {
 	makeProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -207,27 +204,13 @@ function changedRows(before: ScopeManifest, after: ScopeManifest): number {
 async function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "conduit-shared-scope-"));
 	const filename = join(root, "events.db");
-	const replacements: { project: string; sessions: readonly string[] }[] = [];
-	const directory: SessionDirectory["Type"] = {
-		projectOf: () => Effect.succeed(Option.none()),
-		record: () => Effect.void,
-		remove: () => Effect.void,
-		removeProject: () => Effect.void,
-		replaceProject: (project, sessions) =>
-			Effect.sync(() => {
-				replacements.push({ project, sessions });
-			}),
-	};
 	// Open only A's production layer. In particular, B must never run the
 	// store-opening provenance stamp over A's already-existing rows.
 	const runtime = ManagedRuntime.make(
-		makePersistenceEffectLayer(
-			filename,
-			A,
-			undefined,
-			undefined,
-			Layer.succeed(SessionDirectory, directory),
-		),
+		Layer.effect(
+			PersistenceStore,
+			Effect.context<PersistenceStoreContext>(),
+		).pipe(Layer.provideMerge(makePersistenceEffectLayer(filename, A))),
 	);
 	await runtime.runPromise(
 		Effect.gen(function* () {
@@ -421,7 +404,7 @@ async function fixture() {
 			yield* sql`UPDATE session_pick_backfill_state SET initialized = 1 WHERE singleton = 1`;
 		}),
 	);
-	return { root, filename, runtime, replacements };
+	return { root, filename, runtime };
 }
 
 describe("shared-store relay project scope", () => {
@@ -631,14 +614,10 @@ describe("shared-store relay project scope", () => {
 	it("cold worktree cleanup probe returns only A's launch paths", async () => {
 		for (const project of [A, B])
 			mkdirSync(join(store.root, `${project}-launch`));
-		const target = join(store.root, "projects", A, "events.db");
-		mkdirSync(dirname(target), { recursive: true });
-		symlinkSync(store.filename, target);
 		const before = daemonStoreManifest(store.filename);
-		const rows = await Effect.runPromise(
+		const rows = await store.runtime.runPromise(
 			readColdWorktreeCleanupCandidates(
 				{ slug: A, folders: [store.root] },
-				store.root,
 				{ ...DEFAULT_WORKTREE_CLEANUP, whenMerged: true },
 				NOW,
 			),
@@ -724,27 +703,6 @@ describe("shared-store relay project scope", () => {
 			before,
 			removed.filter((session) => session === id(A, "worktree")).length,
 			removed.filter((session) => session.startsWith(`${B}-`)).length,
-		);
-	});
-
-	it("projection recovery indexes only A's sessions", async () => {
-		const before = daemonStoreManifest(store.filename);
-		store.replacements.length = 0;
-		await store.runtime.runPromise(
-			// Event replay stays store-wide: projector cursors are store-wide, so
-			// skipping B's events here would advance past them for good.
-			Effect.gen(function* () {
-				yield* (yield* ProjectionRunnerEffectTag).recover();
-			}),
-		);
-		const sessions = store.replacements
-			.filter((entry) => entry.project === A)
-			.flatMap((entry) => entry.sessions);
-		record(
-			"projection-recovery-directory",
-			before,
-			sessions.filter((session) => session.startsWith(`${A}-`)).length,
-			sessions.filter((session) => session.startsWith(`${B}-`)).length,
 		);
 	});
 
@@ -837,32 +795,19 @@ describe("shared-store relay project scope", () => {
 		it(`daemon ${probe} probe ignores B and sees A`, async () => {
 			const before = daemonStoreManifest(store.filename);
 			const folder: [string] = [store.root];
-			for (const project of [A, B]) {
-				const target = join(store.root, "projects", project, "events.db");
-				mkdirSync(dirname(target), { recursive: true });
-				symlinkSync(store.filename, target);
-			}
 			const read = (
 				project: string,
-			): Effect.Effect<number | boolean, unknown> =>
+			): Effect.Effect<number | boolean, unknown, PersistenceStore> =>
 				probe === "provider-recovery"
-					? hasProviderRecoveryCandidate(
-							{ slug: project, folders: folder },
-							store.root,
-							[],
-						)
+					? hasProviderRecoveryCandidate({ slug: project, folders: folder }, [])
 					: probe === "cold-auto-settle"
 						? hasColdAutoSettleCandidate(
 								{ slug: project, folders: folder },
-								store.root,
 								NOW,
 								1000,
 							)
-						: countRunningProjectSessions(
-								{ slug: project, folders: folder },
-								store.root,
-							);
-			const positive = await Effect.runPromise(read(A));
+						: countRunningProjectSessions({ slug: project, folders: folder });
+			const positive = await store.runtime.runPromise(read(A));
 			// Keep A's sessions while removing only its candidate facts. B retains
 			// all three stimuli and therefore exposes a missing project predicate.
 			await store.runtime.runPromise(
@@ -872,7 +817,7 @@ describe("shared-store relay project scope", () => {
 					yield* sql`UPDATE sessions SET last_message_at = NULL, status = 'idle' WHERE project_id = ${A}`;
 				}),
 			);
-			const negative = await Effect.runPromise(read(A));
+			const negative = await store.runtime.runPromise(read(A));
 			record(
 				`daemon-${probe}`,
 				before,

@@ -146,9 +146,6 @@ async function openDraft(
 				return { savedSlug, projects, warnings: [] };
 			},
 		},
-		handlers: {
-			GetInstances: () => instances,
-		},
 	});
 	await mockRelayWebSocket(page, {
 		initMessages: [

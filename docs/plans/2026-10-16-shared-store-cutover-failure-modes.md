@@ -1,7 +1,8 @@
 # Shared-store cutover failure modes
 
 The seams are the production daemon startup layer, daemon readers, session directory,
-borrowed relay project tier, and the process harness. The opt-in remains internal.
+borrowed relay project tier, and the process harness. The daemon now always uses
+the shared store; the earlier opt-in cases below record the preceding stages.
 
 | Failure | Test that catches it |
 | --- | --- |
@@ -56,3 +57,13 @@ negatives and checks that reads neither prepare nor mutate the store.
 | Repairing and restarting duplicates or loses original user messages. | Process E2E restores the original bytes, checks the count and renders the cold transcript. |
 | Re-adding a removed folder chooses a new slug or hides its imported history. | Process E2E checks the original slug, session list and cold transcript. |
 | Unavailable evidence varies by path, slug, id or timestamp. | Process E2E writes a separate normalized 82tn6-shared-store-unavailable.json artifact. |
+
+## conduit-test-82tn.6.4.3: shared store as the only daemon mode
+
+- Startup must import legacy fixtures before acquiring the daemon store, including when the destination does not exist.
+- Runtime readers and test SQL must scope shared rows by project; store-wide backfill resets must remain intentional.
+- Restart, project edits and relay disposal must not recreate project databases or close the daemon store; removed history must remain retained.
+- Legacy fixtures must contain projected user and assistant messages that render through cold session links.
+- Backup and restore must move the daemon database and its WAL/SHM sidecars together.
+- Cutover artifacts must normalize volatile values and remain byte-identical across repeated runs.
+- Standalone relay files and importer sources must remain independent, while no daemon mode selector or per-file fallback survives.
