@@ -53,6 +53,13 @@ export interface CursorRuntimeProbe {
 	readonly reason?: string;
 }
 
+export interface CursorLoginOptions {
+	readonly openBrowser: false;
+	readonly apiKeyName: "conduit";
+	readonly signal: AbortSignal;
+	readonly onLoginUrl: (url: string) => void;
+}
+
 export interface CursorAgentOptions {
 	readonly cwd: string;
 	readonly dirs: readonly string[];
@@ -126,7 +133,9 @@ export interface CursorAgent {
 export interface CursorSdkPort {
 	readonly replay?: true;
 	probeRuntime(): Promise<CursorRuntimeProbe>;
+	authLogin(options: CursorLoginOptions): Promise<void>;
 	authStatus(): Promise<CursorAuthStatus>;
+	authLogout(): Promise<void>;
 	storedCredential(): Promise<CursorStoredCredential | undefined>;
 	modelsList(credential: CursorCredential): Promise<readonly CursorModel[]>;
 	openStore(path: string, cwd: string): Promise<CursorStore>;

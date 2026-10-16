@@ -111,12 +111,14 @@ const sdkCall = <A>(operation: string, run: () => Promise<A>) =>
 		try: run,
 		catch: (cause): SessionFailure => {
 			const failure = cursorSdkFailure(operation, cause);
+			const error = cursorTurnError(failure);
 			return {
 				operation,
-				message: failure.reason,
-				code: failure.code ?? "provider_error",
-				retryable: failure.retryable ?? false,
-				...(cause instanceof CursorSdkFailure &&
+				message: error.message,
+				code: error.code,
+				retryable: error.retryable ?? false,
+				...(error.code !== "auth_required" &&
+				cause instanceof CursorSdkFailure &&
 				cause.operation === "sandbox.prime"
 					? { code: "sandbox_unavailable", retryable: false }
 					: {}),
@@ -268,7 +270,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						return yield* finish(
 							"error",
 							"auth_required",
-							"Cursor requires a credential; set CURSOR_API_KEY or log in with the Cursor SDK",
+							"Cursor authentication required. Log in to Cursor in Settings.",
 						);
 					if (!input.model)
 						return yield* finish(
@@ -392,9 +394,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 									this.sdk.primeSandbox(config.agent, credential, store),
 								),
 							).pipe(
-								Effect.tapError(() =>
+								Effect.tapError((failure) =>
 									Effect.sync(() => {
-										this.sandboxFailed = true;
+										if (failure.code !== "auth_required")
+											this.sandboxFailed = true;
 									}),
 								),
 							);
@@ -691,7 +694,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 						return yield* finish(
 							"error",
 							error.code,
-							error.message,
+							error.code === "auth_required"
+								? `${error.message}\n\nLog in to Cursor in Settings.`
+								: error.message,
 							error.retryable,
 						);
 					}

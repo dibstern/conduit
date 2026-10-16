@@ -916,6 +916,12 @@ export async function mockWsRpc(
 		ViewSession: () => ({ ok: true }),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		GetCursorAuth: () => ({
+			source: "none",
+			status: "logged-out",
+			expiresSoon: false,
+			login: { state: "idle" },
+		}),
 		GetStatus: () => MOCK_SERVER_STATUS,
 		GetDefaultGroupingMode: () => ({ mode: "repository" }),
 		GetWorktreeCleanupSetting: () => ({
