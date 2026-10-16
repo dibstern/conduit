@@ -67,6 +67,7 @@ interface RunnerChild {
 	connection?: ClaudeRunnerSocket;
 	buildId?: string;
 	stopsTasks?: boolean;
+	draftPreWarm?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
 	readonly upgrade: ClaudeRunnerUpgrade;
@@ -961,7 +962,18 @@ export const makeProcessClaudeSessionRunner = (
 					deps.workspaceRoot,
 					configDir,
 				)) {
+					const persisted = sql
+						? (yield* sql<{
+								id: string;
+							}>`SELECT id FROM sessions WHERE id = ${registration.sessionId} LIMIT 1`.pipe(
+								Effect.mapError((cause) =>
+									claudeRunnerFailure("recover runner session", cause),
+								),
+							)).length > 0
+						: true;
+					// Draft warms are not durable; verify their identity before stopping them.
 					let abandoned =
+						!persisted ||
 						registration.role === "candidate" ||
 						children.has(registration.sessionId);
 					const entry: RunnerChild = {
@@ -1502,6 +1514,8 @@ export const makeProcessClaudeSessionRunner = (
 					} while (draining);
 					if (!entry) return;
 					child = entry;
+					if (command.type === "pre-warm" && command.input.draftPreWarm)
+						entry.draftPreWarm = true;
 					const connection = yield* Deferred.await(entry.ready);
 					if (
 						command.type === "pre-warm" &&
@@ -1512,6 +1526,40 @@ export const makeProcessClaudeSessionRunner = (
 							entry.ending > 0)
 					)
 						return;
+					if (
+						command.type === "send-turn" &&
+						entry.draftPreWarm &&
+						deps.prepareShellEnv
+					) {
+						// Project RPC routing can prune a draft worktree's env cache.
+						// Await its current capture before sampling, just as warming does.
+						const prepareShellEnv = deps.prepareShellEnv;
+						yield* Effect.tryPromise(() =>
+							prepareShellEnv(command.input.workspaceRoot),
+						).pipe(
+							Effect.timeoutOption("10 seconds"),
+							Effect.catchAllCause((cause) =>
+								Effect.sync(() =>
+									log.debug(
+										`Draft environment readiness failed: ${String(cause)}`,
+									),
+								),
+							),
+						);
+						if (entry.failure) return yield* Effect.fail(entry.failure);
+						if (entry.stopping || entry.ending > 0)
+							return yield* Effect.fail(
+								claudeRunnerFailure(command.type, "Claude runner is ending"),
+							);
+						if (entry.idleExiting)
+							return yield* Effect.fail({
+								...claudeRunnerFailure(
+									command.type,
+									"Claude runner is no longer accepting turns",
+								),
+								code: "runner_idle_exit",
+							});
+					}
 					if (closing)
 						return yield* Effect.fail(
 							claudeRunnerFailure(
@@ -1551,6 +1599,7 @@ export const makeProcessClaudeSessionRunner = (
 										},
 									}
 								: command;
+					if (command.type === "send-turn") entry.draftPreWarm = false;
 					let commandId =
 						command.type === "send-turn" ? command.input.inputId : randomUUID();
 					if (

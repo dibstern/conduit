@@ -188,6 +188,7 @@ export type ProcessMark =
 	| {
 			kind: "query";
 			queryId: string;
+			runnerSessionId?: string;
 			at: string;
 			sessionId: string;
 			pid: number;
@@ -677,6 +678,9 @@ function query(params: {
 	mark({
 		kind: "query",
 		queryId,
+		...(params.options?.env?.["CONDUIT_SESSION_ID"]
+			? { runnerSessionId: params.options.env["CONDUIT_SESSION_ID"] }
+			: {}),
 		at: process.hrtime.bigint().toString(),
 		sessionId,
 		pid: process.pid,

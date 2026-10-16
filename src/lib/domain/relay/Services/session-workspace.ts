@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Schema } from "effect";
+import type { Account } from "../../../contracts/account.js";
 import {
 	type SessionWorkspace as RecordedWorkspace,
 	SessionWorkspaceSchema,
@@ -28,6 +29,14 @@ import { SessionGitServiceTag } from "./session-git-service.js";
 import { readSessionWorktreeOwnership } from "./session-worktree-deletion.js";
 
 export interface SessionWorkspace {
+	/** Resolve an existing workspace before a draft has a persisted session. */
+	readonly preview: (
+		account: Account,
+		path: string,
+	) => Effect.Effect<
+		RecordedWorkspace,
+		WorkspaceMoveError | SessionCommandError
+	>;
 	readonly renameBranch: (
 		sessionId: string,
 		branchName: string,

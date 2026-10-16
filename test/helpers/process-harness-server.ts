@@ -358,6 +358,15 @@ async function main(): Promise<void> {
 				)) as typeof import("../../src/lib/persistence/session-family-query.js")
 			).sessionFamilyWindowQuery,
 		);
+	const readCapabilitiesFixture =
+		(): import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult => {
+			const resultPath = join(root, "capabilities-probe-result.json");
+			return existsSync(resultPath)
+				? (JSON.parse(
+						readFileSync(resultPath, "utf8"),
+					) as import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult)
+				: { models: [], agents: [], commands: [] };
+		};
 	if (existsSync(join(root, "capabilities-probe-gated"))) {
 		const { ClaudeDriver } = (await import(
 			pathToFileURL(
@@ -402,6 +411,9 @@ async function main(): Promise<void> {
 						capabilitiesService: {
 							get: (workspaceRoot) =>
 								Effect.gen(function* () {
+									// Session creation validates the pick before the test arms discovery.
+									if (!existsSync(join(root, "capabilities-probe-armed")))
+										return readCapabilitiesFixture();
 									const id = ++consumerId;
 									const request = yield* Effect.fork(
 										service.get(workspaceRoot),
@@ -439,12 +451,7 @@ async function main(): Promise<void> {
 			while (!existsSync(join(root, "capabilities-probe-release")))
 				await new Promise<void>((done) => setTimeout(done, 10));
 		}
-		const resultPath = join(root, "capabilities-probe-result.json");
-		return existsSync(resultPath)
-			? (JSON.parse(
-					readFileSync(resultPath, "utf8"),
-				) as import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult)
-			: { models: [], agents: [], commands: [] };
+		return readCapabilitiesFixture();
 	});
 	const { startForegroundDaemon } = (await import(
 		pathToFileURL(

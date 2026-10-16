@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import type { SessionMode } from "../../../src/lib/contracts/project-file.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
@@ -128,6 +129,7 @@ async function openDraft(
 				sessionId: "created-session",
 			}),
 			PreWarmSession: () => ({ ok: true }),
+			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -157,6 +159,7 @@ test.afterEach(async ({ page }, info) => {
 					"SaveProject",
 					"SetDefaultSessionMode",
 					"CreateSession",
+					"PreWarmDraft",
 				].includes(tag),
 			) ?? [];
 	const artifact = info.outputPath("session-mode-default.json");
@@ -206,6 +209,17 @@ for (const viewport of [
 				await expect(page.getByTestId("draft-start-chip")).toHaveText(
 					mode === "worktree" ? "New worktree" : "main",
 				);
+				await page.locator("#input").focus();
+				const warm =
+					mode === "local"
+						? await rpc.waitForRequest(({ tag }) => tag === "PreWarmDraft")
+						: undefined;
+				if (mode === "worktree") {
+					await page.waitForTimeout(175);
+					expect(
+						rpc.getRequests().filter(({ tag }) => tag === "PreWarmDraft"),
+					).toHaveLength(0);
+				}
 				await page.locator("#input").fill("Use the default workspace");
 				await press(page.locator("#send"));
 				const request = await rpc.waitForRequest(
@@ -218,8 +232,78 @@ for (const viewport of [
 				if (mode === "worktree")
 					expect(request.payload).toHaveProperty("newWorktree", true);
 				else expect(request.payload).not.toHaveProperty("newWorktree");
+				if (warm)
+					expect(request.payload).toEqual({
+						...warm.payload,
+						_tag: "CreateSession",
+					});
 			});
 		}
+
+		test("draft prewarm keeps its token through a failed create and rotates it after success", async ({
+			page,
+			harness,
+		}) => {
+			const rpc = await openDraft(page, harness.relayBaseUrl);
+			const input = page.locator("#input");
+			await input.focus();
+			const warm = await rpc.waitForRequest(
+				({ tag }) => tag === "PreWarmDraft",
+			);
+			expect(warm.payload["draftId"]).toEqual(expect.any(String));
+			rpc.setHandler("CreateSession", () => {
+				throw new WsRpcError({ message: "simulated create failure" });
+			});
+			await input.fill("Keep this message after failure");
+			await press(page.locator("#send"));
+			await expect(
+				page.getByText("Failed to create session", { exact: true }),
+			).toBeVisible();
+			await expect(input).toHaveValue("Keep this message after failure");
+			const failed = await rpc.waitForRequest(
+				({ tag }) => tag === "CreateSession",
+			);
+			expect(failed.payload).toEqual({
+				...warm.payload,
+				_tag: "CreateSession",
+			});
+
+			rpc.setResponse("CreateSession", {
+				projectSlug: slug,
+				sessionId: "created-session",
+			});
+			await press(page.locator("#send"));
+			await expect
+				.poll(
+					() =>
+						rpc.getRequests().filter(({ tag }) => tag === "CreateSession")
+							.length,
+				)
+				.toBe(2);
+			const created = rpc
+				.getRequests()
+				.filter(({ tag }) => tag === "CreateSession")
+				.at(-1);
+			expect(created?.payload).toEqual({
+				...warm.payload,
+				_tag: "CreateSession",
+			});
+			await expect(page).toHaveURL(/\/s\/created-session$/);
+			const back = page.getByTestId("session-bar-back");
+			if (await back.isVisible()) await press(back);
+			await press(page.locator("#new-session-btn:visible"));
+			await expect(page).toHaveURL(/\/new\?/);
+			await input.focus();
+			const next = await rpc.waitForRequest(
+				({ tag, payload }) =>
+					tag === "PreWarmDraft" &&
+					payload["draftId"] !== warm.payload["draftId"],
+			);
+			expect(next.payload).toEqual({
+				...warm.payload,
+				draftId: expect.any(String),
+			});
+		});
 
 		for (const chooseLocal of [false, true]) {
 			test(`a first send ${chooseLocal ? "uses an explicit Local choice" : "waits for the worktree default"} while resolution is pending`, async ({

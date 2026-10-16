@@ -273,7 +273,10 @@ export type PreWarmSessionInput = Pick<
 	| "variant"
 	| "contextWindow"
 	| "agent"
->;
+> & {
+	/** Recheck directory environment readiness when this reserved warm gets its first send. */
+	readonly draftPreWarm?: true;
+};
 
 export type CommandSource =
 	| "builtin"

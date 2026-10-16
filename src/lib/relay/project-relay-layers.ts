@@ -65,6 +65,7 @@ import {
 import { AlertsLive, AlertsTag } from "../domain/relay/Services/alerts.js";
 import { DaemonSessionQueryServiceLive } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
+import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
 import {
 	hasInstanceManagementConfig,
 	InstanceManagementServiceFromConfigLive,
@@ -713,7 +714,7 @@ export function createProjectRelayLayers({
 	);
 	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
 	const baseLayers = Layer.provideMerge(
-		translatorLayer,
+		Layer.merge(translatorLayer, DraftPreWarmLive),
 		relayStateServicesAndBridges,
 	);
 	const baseLayersWithProjectionNotifier = Layer.provideMerge(
