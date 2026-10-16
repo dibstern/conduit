@@ -19,6 +19,7 @@
 
 import { existsSync } from "node:fs";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
 import {
 	commitDaemonRuntimeConfig,
@@ -58,7 +59,8 @@ export const prefetchSessionCounts: Effect.Effect<
 	const config = yield* Ref.get(configRef);
 	const registryState = yield* Ref.get(registryRef);
 	const openCodeInstances = (yield* getInstances).filter(
-		(instance) => instance.driver !== "claude",
+		(instance) =>
+			getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer,
 	);
 	if (openCodeInstances.length === 0) return 0;
 

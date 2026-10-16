@@ -1,8 +1,9 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Exit, Option, Runtime } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
-import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { backgroundOpenCodeAPI } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
@@ -82,6 +83,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 	const { relayManagedRuntime } = layers;
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const activity = yield* SessionActivityTag;
 		const projectSettingsContext = yield* Effect.context<
 			ProjectSettingsTag | OverridesStateTag | ConfigTag
 		>();
@@ -250,6 +252,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		return {
 			sql,
+			activity,
 			projectSettingsContext,
 			translator,
 			api,
@@ -447,6 +450,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				} = services;
 				return {
 					sql,
+					activity: services.activity,
 					projectSettingsContext: services.projectSettingsContext,
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.

@@ -5,11 +5,12 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -46,7 +47,7 @@ const makeFamilyTestLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
 		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		cleanup,

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Settings } from "@anthropic-ai/claude-agent-sdk";
 import { Deferred, Effect, Exit, FiberMap } from "effect";
+import { getProviderDriver } from "../../contracts/provider-instance.js";
 import {
 	type ClaudeAdapterError,
 	ClaudeBoundaryError,
@@ -70,8 +71,9 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 						...launchConfig,
 						baseEnv: launch.env,
 						accountEnv:
-							launchConfig.account?.driver === "claude"
-								? launchConfig.account.env
+							getProviderDriver(launchConfig.account?.driver)?.accountKind ===
+							"config-directory"
+								? launchConfig.account?.env
 								: undefined,
 					}),
 				};

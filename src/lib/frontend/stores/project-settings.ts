@@ -19,6 +19,7 @@ import {
 	handleModelList,
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
+import { getDriverTraits } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
@@ -59,7 +60,8 @@ export const applyProjectSetting = (setting: ProjectSetting): void => {
 					: { accountId: setting.accountId }),
 				providers: [
 					...discoveryState.providers.filter(
-						(provider) => provider.id !== "claude",
+						(provider) =>
+							getDriverTraits(provider.id)?.catalogSource !== "discovery",
 					),
 					...setting.providers,
 				],

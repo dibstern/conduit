@@ -71,7 +71,7 @@
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
@@ -82,12 +82,13 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -144,7 +145,7 @@
 			.catch(() => { if (current) showToast("Couldn't load default session mode", { variant: "error" }); });
 		return () => { current = false; };
 	});
-	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
+	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let composerFocused = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
@@ -156,7 +157,7 @@
 	let cursorPos = $state(0);
 	let composing = $state(false);
 	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
-	const goalFacts = $derived(discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
 	const goal = $derived(goalView(
 		goalFacts,
 		isProcessing() ? "busy" : currentSession?.status ?? "idle",
@@ -259,6 +260,8 @@
 		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
 	const composerDriver = $derived(composerInstance?.driver);
+	const composerTraits = $derived(getDriverTraits(composerDriver));
+	const composerPresentation = $derived(getProviderPresentation(composerDriver));
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -299,10 +302,10 @@
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
-			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message Claude… sends at ${sendAtTime}`
+			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-			composerDriver === "opencode" ? "Ask OpenCode…" : composerDriver === "claude" ? "Ask Claude…" : "Message…",
+			composerPresentation ? `Ask ${composerPresentation.label}…` : "Message…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -822,11 +825,12 @@
 				}
 				if (context !== sessionModeContext || resolution !== pendingDraftSessionMode || sessionState.currentId) return false;
 				if (!getEffectiveInstanceId()) {
+					const presentation = getProviderPresentation(discoveryState.defaultProviderId);
 					showToast({
 						title: "No account available",
 						variant: "error",
-						body: discoveryState.defaultProviderId === "claude"
-							? "Add a Claude account in Settings before sending."
+						body: getDriverTraits(discoveryState.defaultProviderId)?.accountKind === "config-directory" && presentation
+							? `Add a ${presentation.label} account in Settings before sending.`
 							: "Add an account in Settings before sending.",
 					});
 					return false;
@@ -895,12 +899,12 @@
 		}
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
-			sendMessageRpc({
+			rpc("input.submit", {
 				projectSlug,
 				sessionId: sentToSessionId,
 				text: messageText,
-				commandId,
-				...(delivery === "steer" ? { delivery } : {}),
+				inputId: commandId,
+				delivery,
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {
@@ -982,7 +986,8 @@
 		if (!sessionId || !projectSlug) return;
 		const accountId = currentSession?.accountId;
 		const driver = getInstanceById(accountId ?? "")?.driver;
-		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
+		const supportsTaskStop = getDriverTraits(driver)?.sessionCapabilities.supportsTaskStop;
+		const hadTasks = supportsTaskStop && (currentSession?.backgroundTasks?.length ?? 0) > 0;
 		void cancelSessionRpc({
 			projectSlug,
 			sessionId,
@@ -1030,7 +1035,7 @@
 	}
 
 	function handleAttachSetGoal(condition = "") {
-		if (discoveryState.currentProviderId !== "claude") return;
+		if (!discoveryState.currentTraits?.supportsGoalState) return;
 		inputText = `/goal ${condition}`;
 		cursorPos = inputText.length;
 		requestAnimationFrame(() => {
@@ -1043,7 +1048,7 @@
 	$effect(() => {
 		function handleGoalAction(event: CustomEvent<GoalComposerAction>) {
 			const { action, sessionId, condition } = event.detail;
-			if (discoveryState.currentProviderId !== "claude" || sessionId !== sessionState.currentId) return;
+			if (!discoveryState.currentTraits?.supportsGoalState || sessionId !== sessionState.currentId) return;
 			switch (action) {
 				case "pause": handleStop(); break;
 				case "resume": void sendMessage("Continue."); break;
@@ -1494,7 +1499,7 @@
 												workspaceMissing={session.workspaceMissing}
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
-												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { projectSlug: composerProjectSlug, sessionId: session.id }) : undefined}
 												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
 												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
 												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
@@ -1529,7 +1534,7 @@
 								workspaceMissing={session.workspaceMissing}
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
-								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { projectSlug: composerProjectSlug, sessionId: session.id }) : undefined}
 								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
 								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
 								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
@@ -1654,7 +1659,7 @@
 				{:else}
 				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
 					<InstanceModelPicker variant="words" />
-					{#if composerDriver !== "opencode"}
+					{#if (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
@@ -1672,7 +1677,7 @@
 									workspaceMissing={session.workspaceMissing}
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { projectSlug: composerProjectSlug, sessionId: session.id }) : undefined}
 									onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
 									onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
 									oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}

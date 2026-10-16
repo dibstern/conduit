@@ -43,6 +43,10 @@ import {
 	OpenCodeInstancesTag,
 	OpenCodeUnavailable,
 } from "../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RateLimiterLive } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { SessionWorkspaceLive } from "../../src/lib/domain/relay/Layers/session-workspace-layer.js";
@@ -939,6 +943,14 @@ export function makeTestHandlerLayer(
 		opts?.accountDirectory ?? makeMockAccountDirectory(),
 	);
 	const loggerLayer = Layer.succeed(LoggerTag, log);
+	const activityLayer = Layer.effect(SessionActivityTag, makeSessionActivity);
+	const backgroundLayer = Layer.effect(
+		BackgroundLivenessTag,
+		Effect.map(
+			SessionActivityTag,
+			(activity) => activity.background.backgroundOf,
+		),
+	).pipe(Layer.provide(activityLayer));
 	const orchestrationLayer = Layer.succeed(
 		OrchestrationEngineTag,
 		opts?.orchestrationEngine ??
@@ -1073,6 +1085,7 @@ export function makeTestHandlerLayer(
 					Layer.mergeAll(
 						openCodeApiLayer,
 						makeSessionManagerStateLive(),
+						activityLayer,
 						Layer.succeed(LoggerTag, log),
 						Layer.succeed(StatusPollerTag, statusPoller),
 						DaemonEventBusLive,
@@ -1081,7 +1094,6 @@ export function makeTestHandlerLayer(
 						wsHandlerLayer,
 						RelayStatusSnapshotLive,
 						openCodeInstancesLayer,
-						Layer.succeed(BackgroundLivenessTag, () => undefined),
 						overridesStateLayer,
 						sessionManagerOrchestrationLayer,
 						persistenceLayer,
@@ -1117,6 +1129,8 @@ export function makeTestHandlerLayer(
 
 	return Layer.mergeAll(
 		openCodeApiLayer,
+		activityLayer,
+		backgroundLayer,
 		SessionWorkspaceLive.pipe(
 			Layer.provide(
 				Layer.mergeAll(
@@ -1158,7 +1172,6 @@ export function makeTestHandlerLayer(
 		loggerLayer,
 		Layer.succeed(StatusPollerTag, statusPoller),
 		Layer.succeed(PollerManagerTag, pollerManager),
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
 		sessionTitleServiceLayer,
 		connectPtyUpstreamLayer,
 		orchestrationLayer,

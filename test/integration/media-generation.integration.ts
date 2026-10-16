@@ -1,6 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { userInfo } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -49,10 +49,13 @@ function playwrightBrowsersDir(): string {
 	const override = process.env["PLAYWRIGHT_BROWSERS_PATH"];
 	if (override) return override;
 	if (process.platform === "darwin")
-		return path.join(homedir(), "Library", "Caches", "ms-playwright");
+		return path.join(userInfo().homedir, "Library", "Caches", "ms-playwright");
 	if (process.platform === "win32")
-		return path.join(process.env["LOCALAPPDATA"] ?? homedir(), "ms-playwright");
-	return path.join(homedir(), ".cache", "ms-playwright");
+		return path.join(
+			process.env["LOCALAPPDATA"] ?? userInfo().homedir,
+			"ms-playwright",
+		);
+	return path.join(userInfo().homedir, ".cache", "ms-playwright");
 }
 
 const ROOT = path.resolve(import.meta.dirname, "../..");

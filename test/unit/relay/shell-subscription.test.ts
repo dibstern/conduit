@@ -19,6 +19,10 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { decodeProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
@@ -28,11 +32,9 @@ import {
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
-	SessionCompactionsTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	announceBackgroundWork,
@@ -68,8 +70,6 @@ import {
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
 import { defaultClaudeSessionForkSdk } from "../../../src/lib/provider/claude/claude-session-fork.js";
-import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
-import { makeSessionCompactions } from "../../../src/lib/session/session-compactions.js";
 import {
 	type SessionInfo,
 	SessionInfoSchema,
@@ -151,7 +151,7 @@ const makeShellTestLayer = (
 				}),
 			}),
 		),
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		Layer.succeed(
 			ConfigTag,
 			makeMockConfig({
@@ -1263,8 +1263,8 @@ describe("subscribeShell", () => {
 	it.scoped(
 		"background work starting and ending reaches a live subscriber",
 		() => {
-			const liveness = makeSessionBackgroundLiveness();
 			return Effect.gen(function* () {
+				const { background: liveness } = yield* SessionActivityTag;
 				yield* recoverProjections;
 				yield* commitThroughSeam([sessionCreated(SID)]);
 				const { q } = yield* openShell();
@@ -1293,10 +1293,7 @@ describe("subscribeShell", () => {
 				expect(yield* attentionAfter(["local_bash"])).toBe("monitoring");
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);
-			}).pipe(
-				Effect.provideService(BackgroundLivenessTag, liveness.backgroundOf),
-				Effect.provide(makeShellTestLayer()),
-			);
+			}).pipe(Effect.provide(makeShellTestLayer()));
 		},
 	);
 
@@ -1310,14 +1307,9 @@ describe("subscribeShell", () => {
 				const { q } = yield* openShell();
 				yield* takeN(q, 2);
 
-				yield* commitThroughSeam([
-					canonicalEvent(
-						"session.read",
-						"no-such-session",
-						{ sessionId: "no-such-session" },
-						{ provider: "claude", createdAt: 9_999_999 },
-					),
-				]);
+				expect(
+					yield* markSeen("no-such-session", Number.MAX_SAFE_INTEGER),
+				).toBe(false);
 				yield* Effect.yieldNow();
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),
@@ -1440,7 +1432,6 @@ describe("subscribeShell", () => {
 	// memory and is never appended; its outcome or the session going idle
 	// clears it.
 	it.scoped("a compaction in progress rides the shell row, not the log", () => {
-		const compactions = makeSessionCompactions();
 		return Effect.gen(function* () {
 			yield* recoverProjections;
 			yield* commit([sessionCreated(SID)]);
@@ -1501,10 +1492,15 @@ describe("subscribeShell", () => {
 				WHERE type = 'session.compaction'`;
 			expect(logged.map((event) => event.state)).toEqual(["completed"]);
 		}).pipe(
-			Effect.provideService(SessionCompactionsTag, compactions.compactingOf),
 			Effect.provide(
 				Layer.provideMerge(
-					makeProviderRuntimeIngestionLive({ compactions }),
+					Layer.unwrapEffect(
+						Effect.map(SessionActivityTag, (activity) =>
+							makeProviderRuntimeIngestionLive({
+								compactions: activity.compactions,
+							}),
+						),
+					),
 					makeShellTestLayer(),
 				),
 			),

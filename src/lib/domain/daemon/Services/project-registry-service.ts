@@ -35,6 +35,7 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	ProjectSaveRejected,
 	type ResolveSessionModeResponse,
@@ -822,7 +823,8 @@ export const openCodeInstanceFor = <
 	instances: readonly I[],
 ): I | undefined =>
 	instances.find((instance) => {
-		if (instance.driver === "claude") return false;
+		if (!getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer)
+			return false;
 		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
 		if (instance.url !== undefined)
 			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";

@@ -9,6 +9,7 @@ import {
 	Ref,
 	Schema,
 } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -42,10 +43,9 @@ import {
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
-import { translateDomainEventToRelay } from "../../../relay/domain-event-to-relay.js";
+import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
-import { tagWithSessionId } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
@@ -104,7 +104,9 @@ export class ProviderRuntimeIngestionTag extends Context.Tag(
 )<ProviderRuntimeIngestionTag, ProviderRuntimeIngestion>() {}
 
 export interface ProviderRuntimeRelayPublisher {
-	readonly publish: (message: RelayMessage) => Effect.Effect<void>;
+	readonly publish: (
+		message: Extract<RelayMessage, { type: "done" }>,
+	) => Effect.Effect<void>;
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
@@ -263,7 +265,8 @@ export const makeProviderRuntimeIngestionLive = (
 								if (options.usage)
 									for (const event of events) {
 										if (
-											event.providerId !== "claude" ||
+											getProviderDriver(event.providerId)?.usageHarness ===
+												undefined ||
 											(event.type !== "turn.completed" &&
 												event.type !== "turn.error" &&
 												event.type !== "turn.interrupted")
@@ -355,7 +358,11 @@ export const makeProviderRuntimeIngestionLive = (
 														message_id: string;
 													}>`SELECT message_id
 														FROM message_tombstones WHERE session_id = ${event.sessionId}
-														AND message_id = ${event.data.messageId}`;
+														AND message_id = ${event.data.messageId}
+														AND NOT EXISTS (
+															SELECT 1 FROM messages
+															WHERE id = message_tombstones.message_id
+																AND version > message_tombstones.version)`;
 													if (removed) continue;
 												}
 												if (
@@ -568,14 +575,8 @@ function publishRelayMessages(
 	return Effect.forEach(
 		events,
 		(event) => {
-			const translated = translateDomainEventToRelay(event);
-			if (translated.kind === "silent") return Effect.void;
-			return Effect.forEach(
-				translated.messages,
-				(message) =>
-					publisher.publish(tagWithSessionId(message, event.sessionId)),
-				{ discard: true },
-			);
+			const alert = turnEndedAlert(event);
+			return alert ? publisher.publish(alert) : Effect.void;
 		},
 		{ discard: true },
 	);

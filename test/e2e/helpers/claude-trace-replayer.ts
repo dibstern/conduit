@@ -56,6 +56,7 @@ export type ClaudeTraceName =
 	| "second-input-held-to-turn-end"
 	| "queued-input-promoted-to-steer"
 	| "side-thread-ask-turn"
+	| "side-thread-compacting-turn"
 	| "skill-loads-turn"
 	| "steer-during-tool-folds"
 	| "steer-misses-boundary"
@@ -84,10 +85,12 @@ export interface ClaudeReplayPlan {
 	/** Deliver agent steps only through captured transcript reads, exercising feeds. */
 	readonly transcriptOnlySubagents?: boolean;
 	/**
-	 * Hold this played trace (1-based, counted across sessions) before its
+	 * Hold each played trace (1-based, counted across sessions) before its
 	 * message-th line (1-based) until release(), e.g. mid-way through background work.
 	 */
-	readonly holdBefore?: { readonly turn: number; readonly message: number };
+	readonly holdBefore?:
+		| { readonly turn: number; readonly message: number }
+		| readonly { readonly turn: number; readonly message: number }[];
 	/** End the SDK stream after its trace, rather than awaiting another prompt. */
 	readonly endAfterTrace?: boolean;
 	/** Delay this agent's transcript reads once the trace reaches this line. */
@@ -520,8 +523,9 @@ export function createClaudeTraceReplayer(
 						if (interrupted) break;
 					}
 					if (
-						turn === plan.holdBefore?.turn &&
-						index + 1 === plan.holdBefore.message
+						[plan.holdBefore ?? []]
+							.flat()
+							.some((hold) => hold.turn === turn && hold.message === index + 1)
 					)
 						await waitForRelease();
 					if (interrupted) break;

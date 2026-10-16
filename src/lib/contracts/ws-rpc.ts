@@ -49,6 +49,7 @@ import {
 } from "./project-file.js";
 import {
 	AccountIdSchema,
+	BrowserDriverTraitsSchema,
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
@@ -793,10 +794,16 @@ const ProviderCapabilityMapSchema = Schema.Record({
 	value: Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 });
 
+const ProviderTraitsMapSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.suspend(() => BrowserDriverTraitsSchema),
+});
+
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
 	providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+	providerTraits: Schema.optional(ProviderTraitsMapSchema),
 	addedInstanceId: Schema.optional(Schema.String),
 });
 
@@ -1127,6 +1134,7 @@ export class GetCommands extends Schema.TaggedRequest<GetCommands>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(Schema.String),
+			instanceId: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -2627,7 +2635,8 @@ export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
 	},
 ) {}
 
-export const WsRpcRequest = Schema.Union(
+// Shared by CLI/IPC decoding and browser RPC registration; order has no meaning.
+const wsRpcRequestClasses = [
 	GetStatus,
 	SetPin,
 	SetKeepAwake,
@@ -2737,9 +2746,15 @@ export const WsRpcRequest = Schema.Union(
 	CancelSession,
 	StopBackgroundTask,
 	SetLogLevel,
-);
+] as const;
+
+export const WsRpcRequest = Schema.Union(...wsRpcRequestClasses);
 
 export type WsRpcRequest = typeof WsRpcRequest.Type;
+
+type WsRpcRequestRpc = {
+	[Request in (typeof wsRpcRequestClasses)[number] as Request["_tag"]]: Rpc.From<Request>;
+}[WsRpcRequest["_tag"]];
 
 export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
@@ -2877,6 +2892,7 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	success: Schema.Struct({
 		instances: Schema.Array(OpenCodeInstanceSchema),
 		providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+		providerTraits: Schema.optional(ProviderTraitsMapSchema),
 	}),
 	error: WsRpcError,
 	stream: true,
@@ -3077,115 +3093,8 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeUsage,
 	SubscribeServerStatus,
 	SubscribeProjects,
-	Rpc.fromTaggedRequest(GetStatus),
-	Rpc.fromTaggedRequest(SetPin),
-	Rpc.fromTaggedRequest(SetKeepAwake),
-	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
-	Rpc.fromTaggedRequest(SetTailscaleServe),
-	Rpc.fromTaggedRequest(Shutdown),
-	Rpc.fromTaggedRequest(SetAgent),
-	Rpc.fromTaggedRequest(RestartWithConfig),
-	Rpc.fromTaggedRequest(GetInstances),
-	Rpc.fromTaggedRequest(GetInstanceStatus),
-	Rpc.fromTaggedRequest(AttachProject),
-	Rpc.fromTaggedRequest(ResolveSession),
-	Rpc.fromTaggedRequest(GetGoalDetails),
-	Rpc.fromTaggedRequest(GetAgents),
-	Rpc.fromTaggedRequest(GetCommands),
-	Rpc.fromTaggedRequest(GetProjects),
-	Rpc.fromTaggedRequest(FindFolders),
-	Rpc.fromTaggedRequest(SwitchAgent),
-	Rpc.fromTaggedRequest(SwitchContextWindow),
-	Rpc.fromTaggedRequest(SwitchModel),
-	Rpc.fromTaggedRequest(SetDefaultModel),
-	Rpc.fromTaggedRequest(SetHarnessDefault),
-	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
-	Rpc.fromTaggedRequest(SetDefaultSessionMode),
-	Rpc.fromTaggedRequest(ResolveSessionMode),
-	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
-	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
-	Rpc.fromTaggedRequest(SetHiddenEntries),
-	Rpc.fromTaggedRequest(GetClaudeSettings),
-	Rpc.fromTaggedRequest(SetClaudeSettings),
-	Rpc.fromTaggedRequest(ResolveClaudeSettings),
-	Rpc.fromTaggedRequest(ReloadProviderSession),
-	Rpc.fromTaggedRequest(RenameSession),
-	Rpc.fromTaggedRequest(ListBranches),
-	Rpc.fromTaggedRequest(ListWorktrees),
-	Rpc.fromTaggedRequest(InspectSessionWorktrees),
-	Rpc.fromTaggedRequest(RenameSessionBranch),
-	Rpc.fromTaggedRequest(MoveSessionWorkspace),
-	Rpc.fromTaggedRequest(RecreateSessionWorktree),
-	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
-	Rpc.fromTaggedRequest(DismissWorkspaceHint),
-	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
-	Rpc.fromTaggedRequest(MarkSessionUnread),
-	Rpc.fromTaggedRequest(MarkSessionRead),
-	Rpc.fromTaggedRequest(MarkSessionSeen),
-	Rpc.fromTaggedRequest(SetSessionSettled),
-	Rpc.fromTaggedRequest(SetSessionPinned),
-	Rpc.fromTaggedRequest(SetSessionAutoSettle),
-	Rpc.fromTaggedRequest(SnoozeSession),
-	Rpc.fromTaggedRequest(UnsnoozeSession),
-	Rpc.fromTaggedRequest(DismissCutOff),
-	Rpc.fromTaggedRequest(ContinueSession),
-	Rpc.fromTaggedRequest(CancelContinuation),
-	Rpc.fromTaggedRequest(PreviewContinuation),
-	Rpc.fromTaggedRequest(QuotaForAccounts),
-	Rpc.fromTaggedRequest(GetContinuationHandoff),
-	Rpc.fromTaggedRequest(SwitchVariant),
-	Rpc.fromTaggedRequest(SwitchPermissionMode),
-	Rpc.fromTaggedRequest(GetFileTree),
-	Rpc.fromTaggedRequest(GetFileList),
-	Rpc.fromTaggedRequest(GetFileContent),
-	Rpc.fromTaggedRequest(GetToolDetails),
-	Rpc.fromTaggedRequest(GetSkillContent),
-	Rpc.fromTaggedRequest(GetSessionSkills),
-	Rpc.fromTaggedRequest(GetModels),
-	Rpc.fromTaggedRequest(SaveProject),
-	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(StartInstance),
-	Rpc.fromTaggedRequest(StopInstance),
-	Rpc.fromTaggedRequest(RemoveInstance),
-	Rpc.fromTaggedRequest(RenameInstance),
-	Rpc.fromTaggedRequest(AddInstance),
-	Rpc.fromTaggedRequest(UpdateInstance),
-	Rpc.fromTaggedRequest(SetDefault),
-	Rpc.fromTaggedRequest(GetAutoSettleSetting),
-	Rpc.fromTaggedRequest(SetAutoSettleSetting),
-	Rpc.fromTaggedRequest(GetWorktreeCleanupSetting),
-	Rpc.fromTaggedRequest(SetWorktreeCleanupSetting),
-	Rpc.fromTaggedRequest(CleanUpWorktreesNow),
-	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
-	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
-	Rpc.fromTaggedRequest(ScanNow),
-	Rpc.fromTaggedRequest(DetectProxy),
-	Rpc.fromTaggedRequest(ListPtys),
-	Rpc.fromTaggedRequest(CreatePty),
-	Rpc.fromTaggedRequest(ResizePty),
-	Rpc.fromTaggedRequest(ClosePty),
-	Rpc.fromTaggedRequest(PtyInput),
-	Rpc.fromTaggedRequest(ListDaemonSessions),
-	Rpc.fromTaggedRequest(CreateSession),
-	Rpc.fromTaggedRequest(ViewSession),
-	Rpc.fromTaggedRequest(PreWarmSession),
-	Rpc.fromTaggedRequest(PreWarmDraft),
-	Rpc.fromTaggedRequest(DeleteSession),
-	Rpc.fromTaggedRequest(ForkSession),
-	Rpc.fromTaggedRequest(StartSideThread),
-	Rpc.fromTaggedRequest(RespondPermission),
-	Rpc.fromTaggedRequest(AnswerQuestion),
-	Rpc.fromTaggedRequest(RejectQuestion),
-	Rpc.fromTaggedRequest(LoadMoreHistory),
-	Rpc.fromTaggedRequest(RewindSession),
-	Rpc.fromTaggedRequest(UndoRewind),
-	Rpc.fromTaggedRequest(SubmitInput),
-	Rpc.fromTaggedRequest(CancelInput),
-	Rpc.fromTaggedRequest(SendInputNow),
-	Rpc.fromTaggedRequest(SyncInputDraft),
-	Rpc.fromTaggedRequest(CancelSession),
-	Rpc.fromTaggedRequest(StopBackgroundTask),
-	Rpc.fromTaggedRequest(SetLogLevel),
+	// Array.map loses the correlation between each tag and its request schema.
+	...(wsRpcRequestClasses.map(Rpc.fromTaggedRequest) as WsRpcRequestRpc[]),
 );
 
 export type WsRpcGroup = typeof WsRpcGroup;

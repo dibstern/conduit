@@ -784,7 +784,7 @@ pnpm vitest run test/unit/ws-router-pty.test.ts
 
 **Run the full verification suite:**
 ```bash
-cd /Users/dstern/src/workspaces/conduit/conduit
+cd ~/src/workspaces/conduit/conduit
 
 # Type checking (both contexts)
 pnpm check

@@ -18,7 +18,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
@@ -91,7 +91,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 			const linkedWorktree = join(root, "repo-wt");
 			const enteredWorktree = join(repo, ".claude/worktrees", WORKTREE_NAME);
 			const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
-			const configDir = configuredDir ?? join(homedir(), ".claude");
+			const configDir = configuredDir ?? join(userInfo().homedir, ".claude");
 			const launchConfigDir =
 				configuredDir === undefined
 					? sdkDefaultClaudeConfigDir(configDir)
@@ -343,7 +343,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 						[root, "/tmp/conduit-worktree-capture"],
 						[temporaryRoot, "/tmp/conduit-worktree-capture"],
 						...(configDir ? [[configDir, "/home/test/.claude"]] : []),
-						[homedir(), "/home/test"],
+						[userInfo().homedir, "/home/test"],
 					]) {
 						if (from && to) fixture = fixture.replaceAll(from, to);
 					}

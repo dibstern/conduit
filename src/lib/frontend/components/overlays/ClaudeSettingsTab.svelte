@@ -37,6 +37,7 @@
 		setDefaultPermissionModeRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import Button from "../ui/Button.svelte";
 	import Select from "../ui/Select.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -131,10 +132,10 @@
 				availableInstances.find(
 					(instance) => instance.id === selectedId,
 				) ?? getCachedInstanceById(selectedId);
-			if (assigned?.driver === "claude") return assigned.id;
+			if (assigned && getProviderPresentation(assigned.driver)?.settingsTab === "claude") return assigned.id;
 		}
 		if (sessionId) return undefined;
-		return availableInstances.find((instance) => instance.driver === "claude" && instance.isDefault)
+		return availableInstances.find((instance) => getProviderPresentation(instance.driver)?.settingsTab === "claude" && instance.isDefault)
 			?.id;
 	});
 

@@ -15,7 +15,10 @@ import {
 	Schema,
 	Stream,
 } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+} from "../../../contracts/provider-instance.js";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
 import {
 	defaultDaemonConfig,
@@ -1118,7 +1121,8 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 	(instanceId) =>
 		Effect.gen(function* () {
 			const instances = Array.from(yield* getInstances).filter(
-				({ driver }) => (driver ?? "opencode") === "opencode",
+				({ driver }) =>
+					getProviderDriver(driver ?? "opencode")?.runsOpenCodeServer,
 			);
 			// The default id names the daemon's first OpenCode instance when no
 			// instance carries that id.
@@ -1157,7 +1161,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 			),
 			adopted: Effect.map(getInstances, (instances) =>
 				Array.from(instances).flatMap(({ id, driver, managed, status }) =>
-					(driver ?? "opencode") === "opencode" &&
+					getProviderDriver(driver ?? "opencode")?.runsOpenCodeServer &&
 					managed &&
 					status === "healthy"
 						? [id]
