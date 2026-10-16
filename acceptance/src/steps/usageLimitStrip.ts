@@ -248,7 +248,9 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "press Dismiss on the cut-off tag",
 		match: /^I press Dismiss on the cut-off tag$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("DismissCutOff", { ok: true });
+			requireRpcControl(world.page).setStubs({
+				DismissCutOff: () => ({ ok: true }),
+			});
 			await world.page.getByTestId("cut-off-dismiss").click();
 		},
 	},
