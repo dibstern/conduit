@@ -284,6 +284,7 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	usageEligible: Schema.optional(Schema.Boolean),
 	available: Schema.optional(Schema.Boolean),
 	unavailableReason: Schema.optional(Schema.String),
+	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),

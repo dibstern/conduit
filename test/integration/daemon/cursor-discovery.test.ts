@@ -163,6 +163,10 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 			});
 			if (scenario.reason)
 				expect(cursor?.unavailableReason).toBe(scenario.reason);
+			// Only an auth failure offers login as its remedy.
+			expect(cursor?.unavailableCode).toBe(
+				scenario.name === "no-credential" ? "auth_required" : undefined,
+			);
 
 			const catalogCursor = browser.frames.length;
 			await browser.getModels(accountId);

@@ -76,11 +76,12 @@ export function cursorModelInfo(model: CursorModel): ModelInfo {
 	};
 }
 
-const discoveryFailure = (reason: string, operation = "discover") =>
+const discoveryFailure = (reason: string, authRequired = false) =>
 	new ProviderInstanceFailure({
 		providerId: "cursor",
-		operation,
+		operation: "discover",
 		cause: new Error(reason),
+		...(authRequired ? { code: "auth_required" as const } : {}),
 	});
 
 let defaultPort: CursorSdkPort | undefined;
@@ -124,7 +125,7 @@ export const discoverCursorEffect = (
 			return yield* Effect.fail(
 				discoveryFailure(
 					"Cursor authentication required. Log in to Cursor in Settings.",
-					"discover.auth-required",
+					true,
 				),
 			);
 		// Keyed by credential, so a login or logout reads a fresh catalog.
@@ -152,7 +153,7 @@ export const discoverCursorEffect = (
 							authRequired
 								? "Cursor authentication failed. Log in to Cursor in Settings."
 								: "Cursor model list failed",
-							authRequired ? "discover.auth-required" : "discover",
+							authRequired,
 						);
 					},
 				}).pipe(
@@ -205,7 +206,7 @@ export const makeCursorRunnerDriver = (
 			const catalog = yield* discoverCursorEffect(port, input.account).pipe(
 				Effect.catchAll((failure) =>
 					// The runner owns the auth error and its durable turn terminal.
-					failure.operation === "discover.auth-required"
+					failure.code === "auth_required"
 						? Effect.succeed({ models: [] })
 						: Effect.fail(failure),
 				),

@@ -634,7 +634,11 @@ export const discoverInstances = Effect.gen(function* () {
 	const accounts = yield* (yield* AccountDirectory).list;
 	const availability = new Map<
 		string,
-		{ available: boolean; unavailableReason?: string }
+		{
+			available: boolean;
+			unavailableReason?: string;
+			unavailableCode?: "auth_required";
+		}
 	>();
 	for (const account of accounts) {
 		const discover = instanceDiscovery[account.driver];
@@ -650,6 +654,7 @@ export const discoverInstances = Effect.gen(function* () {
 							result.left.cause instanceof Error
 								? result.left.cause.message
 								: "Provider discovery failed",
+						...(result.left.code ? { unavailableCode: result.left.code } : {}),
 					},
 		);
 	}

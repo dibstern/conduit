@@ -76,7 +76,7 @@ Examples:
 Scenario Outline: an authentication discovery failure offers login directly
   Given the conduit app is served with the connected mockup
   And Cursor UI authentication is logged out
-  And a Cursor account is unavailable with reason Cursor authentication required. Log in to Cursor in Settings.
+  And a Cursor account needs login with reason Cursor authentication required. Log in to Cursor in Settings.
   And the harness logo is viewed in the <tier> tier
   When I start a new session
   And I open the model picker

@@ -824,6 +824,7 @@ export interface OpenCodeInstance {
 	usageEligible?: boolean;
 	available?: boolean;
 	unavailableReason?: string;
+	unavailableCode?: "auth_required";
 	id: string;
 	name: string;
 	port: number;

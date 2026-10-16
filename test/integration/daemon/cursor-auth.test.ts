@@ -324,6 +324,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			id: accountId,
 			available: false,
 			unavailableReason: expect.stringMatching(/log\s*in/i),
+			unavailableCode: "auth_required",
 		});
 		await completeLogin(fixture);
 		const loggedIn = (
@@ -647,6 +648,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 				unavailableReason: expect.stringMatching(
 					/authentication failed.*log\s*in/i,
 				),
+				unavailableCode: "auth_required",
 			}),
 		]);
 		invariants = {
