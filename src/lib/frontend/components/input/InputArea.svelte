@@ -255,14 +255,12 @@
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
-	// The settings row appears in one go. Until the daemon answers, models load
-	// and a session link resolves, each control would fill in on its own and
-	// guess (an empty store reads as OpenCode). "" is the undialled state, which
-	// only Storybook stays in.
+	// Wait for accounts and session placement before showing settings. Catalog
+	// loading belongs to the picker, which must stay available to switch accounts.
 	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
 	const routeSessionId = $derived(getCurrentSessionId());
 	const settingsPending = $derived(
-		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+		offline || (!sessionState.currentId && !instanceState.loaded) || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));

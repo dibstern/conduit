@@ -727,6 +727,15 @@ export const mockAppHandlers: StepHandler[] = [
 									instance["id"] === instanceId &&
 									instance["driver"] === "claude",
 							);
+						// Each server read refreshes Claude discovery on the settings stream.
+						if (claude && instanceId)
+							rpcControl.setProjectSetting({
+								_tag: "providerModels",
+								accountId: instanceId,
+								providers: providers.filter(
+									(provider) => provider.id === "claude",
+								),
+							});
 						return {
 							defaultOpenCodeInstanceId: "opencode",
 							projectSlug: "myapp",

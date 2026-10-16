@@ -518,12 +518,15 @@ export const providerInstancesHandlers: StepHandler[] = [
 				rpc.setDaemonList("SubscribeInstances", { instances: list });
 			}
 			rpc.setStubs({
-				GetModels: () => ({
-					defaultOpenCodeInstanceId: "opencode",
-					projectSlug: "myapp",
-					providers: [],
-					active: { model: "claude-sonnet-4-5", provider: "claude" },
-				}),
+				GetModels: () => {
+					publishClaudeCatalog(rpc, accountId);
+					return {
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug: "myapp",
+						providers: [],
+						active: { model: "claude-sonnet-4-5", provider: "claude" },
+					};
+				},
 			});
 			rpc.setStubs({
 				GetAgents: () => ({
@@ -1151,14 +1154,43 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
-				GetModels: () => ({
-					defaultOpenCodeInstanceId: "opencode",
-					projectSlug: "myapp",
-					providers: dualDriverProviders.filter(
-						(provider) => provider.id !== "claude",
-					),
-					active: { model: "claude-sonnet-4-5", provider: "claude" },
-				}),
+				GetModels: (payload) => {
+					const row =
+						"sessionId" in payload
+							? rpc.shellRows?.find(
+									(row) => isRecord(row) && row["id"] === payload.sessionId,
+								)
+							: undefined;
+					const accountId =
+						"sessionId" in payload
+							? isRecord(row)
+								? row["accountId"]
+								: undefined
+							: (payload.instanceId ??
+								mockInstances
+									.get(world.page)
+									?.find(
+										(instance) =>
+											instance["driver"] === "claude" &&
+											instance["isDefault"] === true,
+									)?.["id"]);
+					const account = mockInstances
+						.get(world.page)
+						?.find((instance) => instance["id"] === accountId);
+					if (typeof accountId === "string" && account?.["driver"] === "claude")
+						publishClaudeCatalog(rpc, accountId);
+					return {
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug: "myapp",
+						providers: dualDriverProviders.filter(
+							(provider) => provider.id !== "claude",
+						),
+						active:
+							account?.["driver"] === "opencode"
+								? { model: "claude-sonnet-4", provider: "anthropic" }
+								: { model: "claude-sonnet-4-5", provider: "claude" },
+					};
+				},
 			});
 			rpc.setProjectSetting({
 				_tag: "defaultModel",

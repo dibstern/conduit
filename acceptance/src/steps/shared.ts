@@ -3,6 +3,7 @@ import type {
 	GetModelsResponse,
 	GetSessionSkillsResponseSchema,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { isRecord } from "../../../src/lib/utils.js";
 import type { RpcMockControl } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
@@ -104,11 +105,55 @@ export async function serveModelCatalog(
 					(instance) =>
 						instance["id"] === instanceId && instance["driver"] === "claude",
 				);
+			const row =
+				"sessionId" in payload
+					? rpc.shellRows?.find(
+							(row) => isRecord(row) && row["id"] === payload.sessionId,
+						)
+					: undefined;
+			const catalogAccountId =
+				instanceId ??
+				binding?.instanceId ??
+				(isRecord(row) ? row["accountId"] : undefined) ??
+				(!("sessionId" in payload)
+					? mockInstances
+							.get(page)
+							?.find(
+								(instance) =>
+									instance["driver"] === "claude" &&
+									instance["isDefault"] === true,
+							)?.["id"]
+					: undefined);
+			if (
+				typeof catalogAccountId === "string" &&
+				mockInstances
+					.get(page)
+					?.some(
+						(instance) =>
+							instance["id"] === catalogAccountId &&
+							instance["driver"] === "claude",
+					)
+			)
+				rpc.setProjectSetting({
+					_tag: "providerModels",
+					accountId: catalogAccountId,
+					providers: response.providers.filter(
+						(provider) => provider.id === "claude",
+					),
+				});
 			return {
 				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "myapp",
 				...(typeof binding === "object" && binding !== null ? binding : {}),
 				...response,
+				...(response.variant && binding?.variant
+					? {
+							variant: {
+								...response.variant,
+								variant: binding.variant.variant,
+							},
+						}
+					: {}),
 				...(instanceId
 					? {
 							instanceId,
