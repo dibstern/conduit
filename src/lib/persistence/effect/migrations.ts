@@ -6,6 +6,7 @@ import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
+	DAEMON_STORE_IMPORTS_MIGRATION,
 	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
@@ -1199,12 +1200,15 @@ export const effectMigrationEntries = {
 		for (const statement of statements.slice(2))
 			yield* executeSqlStatements(statement);
 	}),
-	"0060_sessions_lineage": runAddColumnMigrationIfMissing(
+	"0060_daemon_store_imports": executeSqlStatements(
+		readMigrationSql(DAEMON_STORE_IMPORTS_MIGRATION),
+	),
+	"0061_sessions_lineage": runAddColumnMigrationIfMissing(
 		"sessions",
 		"forked_from",
 		readMigrationSql(SESSIONS_LINEAGE_MIGRATION),
 	),
-	"0061_legacy_forks": Effect.gen(function* () {
+	"0062_legacy_forks": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const changed = yield* sql.unsafe<{ id: string; side_thread: number }>(
 			readMigrationSql(LEGACY_FORKS_MIGRATION),

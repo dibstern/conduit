@@ -16,6 +16,7 @@ describe("hasContextWindowRow", () => {
 		"opus",
 		"haiku",
 		"default",
+		"fable",
 	])("reports a row for the catalogued id %s", (modelId) => {
 		expect(hasContextWindowRow(modelId)).toBe(true);
 	});
@@ -84,6 +85,11 @@ describe("1M inferred from an advertised [1m] suffix", () => {
 });
 
 describe("Claude context-window model capabilities", () => {
+	it("keeps the native 1M fable alias without a selector or suffix", () => {
+		expect(contextWindowOptionsForModel("fable")).toBeUndefined();
+		expect(claudeApiModelId("fable", "1m")).toBe("fable");
+	});
+
 	const options1mDefault = [
 		{ value: "200k", label: "200k" },
 		{ value: "1m", label: "1M", isDefault: true },

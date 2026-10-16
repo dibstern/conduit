@@ -2277,6 +2277,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'),
 						(SELECT MAX(requested_at) FROM turns WHERE session_id = ${sessionId}),
 						0))
+					OR EXISTS (SELECT 1 FROM events requeued WHERE session_id = ${sessionId}
+						AND type = 'input.requeued' AND json_extract(data, '$.reason') = 'failed'
+						AND sequence = (SELECT MIN(first.sequence) FROM events first
+							WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
+							AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
+						AND json_extract(data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
+							WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
+							AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
+						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId} AND (type = 'input.sent'
+								OR (type = 'session.resume_cancelled'
+									AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))
 					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
 					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open

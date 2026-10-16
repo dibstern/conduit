@@ -61,7 +61,7 @@ describe("session placement writers", () => {
 
 		expect(
 			outside,
-			"Placement belongs to session-handlers.ts; containment seeders cannot write lineage (ADR-0006).",
+			"Placement belongs to session-handlers.ts; containment seeders cannot write lineage (ADR-0007).",
 		).toEqual([]);
 	});
 

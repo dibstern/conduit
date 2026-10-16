@@ -144,6 +144,7 @@ describe("Persistence Effect", () => {
 			}).toEqual({
 				tables: [
 					"command_receipts",
+					"daemon_store_imports",
 					"events",
 					"message_part_tombstones",
 					"message_parts",
@@ -324,8 +325,9 @@ describe("Persistence Effect", () => {
 				{ migration_id: 57, name: "session_pick_backfill" },
 				{ migration_id: 58, name: "compact_redundant_events" },
 				{ migration_id: 59, name: "session_project_scope" },
-				{ migration_id: 60, name: "sessions_lineage" },
-				{ migration_id: 61, name: "legacy_forks" },
+				{ migration_id: 60, name: "daemon_store_imports" },
+				{ migration_id: 61, name: "sessions_lineage" },
+				{ migration_id: 62, name: "legacy_forks" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

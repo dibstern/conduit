@@ -1,4 +1,4 @@
-# ADR-0006: Containment and lineage are separate facts
+# ADR-0007: Containment and lineage are separate facts
 
 - Status: accepted
 - Date: 2026-10-16

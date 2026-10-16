@@ -12,12 +12,12 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type ClaudeRunnerHello,
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
-import type { ClaudeSessionTurn } from "../../../src/lib/provider/claude/claude-session-runner.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type {
+	RunnerHello,
+	RunnerMessage,
+} from "../../../src/lib/provider/runner/runner-protocol.js";
+import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
@@ -466,7 +466,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const upstreamPath = `${runner.socketPath}.upstream`;
 		const sockets = new Set<Socket>();
 		const held: string[] = [];
-		const wire: Array<{ direction: string; message: ClaudeRunnerMessage }> = [];
+		const wire: Array<{ direction: string; message: RunnerMessage }> = [];
 		let cachedReceived: (socket: Socket) => void = () => {};
 		const cachedReady = new Promise<Socket>((resolve) => {
 			cachedReceived = resolve;
@@ -496,7 +496,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					const boundary = incoming.indexOf("\n");
 					const line = incoming.slice(0, boundary);
 					incoming = incoming.slice(boundary + 1);
-					const message = JSON.parse(line) as ClaudeRunnerMessage;
+					const message = JSON.parse(line) as RunnerMessage;
 					wire.push({ direction: "server-to-runner", message });
 					if (released && message.type === "replay" && ++retries >= 2)
 						retriesReceived();
@@ -510,7 +510,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					const boundary = outgoing.indexOf("\n");
 					const line = outgoing.slice(0, boundary);
 					outgoing = outgoing.slice(boundary + 1);
-					const message = JSON.parse(line) as ClaudeRunnerMessage;
+					const message = JSON.parse(line) as RunnerMessage;
 					wire.push({ direction: "runner-to-server", message });
 					if (message.type === "hello" || released) client.write(`${line}\n`);
 					else held.push(`${line}\n`);
@@ -524,16 +524,16 @@ describe("Claude runners survive server replacement through built dist", () => {
 			});
 		});
 		let direct: ClaudeRunnerSocket | undefined;
-		let directHello: ClaudeRunnerHello | undefined;
+		let directHello: RunnerHello | undefined;
 		let cachedFailure: unknown;
 		let blockedState: ReturnType<typeof persisted> | undefined;
-		let burst: ClaudeRunnerMessage[] = [];
+		let burst: RunnerMessage[] = [];
 		try {
 			await harness.kill();
 			await pending;
 			const socket = createConnection(runner.socketPath);
 			const greeted = new Promise<{
-				hello: ClaudeRunnerHello;
+				hello: RunnerHello;
 				peer: ClaudeRunnerSocket;
 			}>((resolve, reject) => {
 				const peer = new ClaudeRunnerSocket(
@@ -586,7 +586,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 							sinkId: binding.sinkId,
 							aborted: false,
 							input: {
-								...(JSON.parse(command.payload_json) as ClaudeSessionTurn),
+								...(JSON.parse(command.payload_json) as SessionTurn),
 								commandAttempt: command.attempt_count,
 							},
 						},
@@ -613,7 +613,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			const downstream = await Effect.runPromise(
 				Effect.promise(() => cachedReady).pipe(Effect.timeout("15 seconds")),
 			);
-			burst = held.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+			burst = held.map((line) => JSON.parse(line) as RunnerMessage);
 			const terminalIndex = burst.findIndex(
 				(message) =>
 					message.type === "output" &&

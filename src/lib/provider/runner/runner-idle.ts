@@ -3,10 +3,10 @@ import {
 	loadDaemonConfigResult,
 } from "../../daemon/config-persistence.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
-import type { ClaudeSessionOutput } from "./claude-session-runner.js";
+import type { SessionOutput } from "./session-runner.js";
 
 /** Reuse the daemon's inactivity setting without adding a runner-specific knob. */
-export function makeClaudeRunnerIdleExit(
+export function makeRunnerIdleExit(
 	onIdle: () => void,
 	testIdleWindowMs?: number | null,
 	dayMs = 86_400_000,
@@ -63,7 +63,7 @@ export function makeClaudeRunnerIdleExit(
 			turns--;
 			lastActivityAt = Date.now();
 		},
-		activity(output?: ClaudeSessionOutput) {
+		activity(output?: SessionOutput) {
 			if (output?.type === "background-task") {
 				const live =
 					output.transition.kind === "snapshot" &&

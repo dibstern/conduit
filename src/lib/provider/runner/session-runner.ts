@@ -1,36 +1,34 @@
-import type { Settings } from "@anthropic-ai/claude-agent-sdk";
 import type { Effect } from "effect";
-import type { ClaudeSDKPermissionMode } from "../../contracts/providers/claude-agent-sdk.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
+import type { SessionPermissionMode } from "../../shared-types.js";
+import type {
+	LegacyRunnerPermissionMode as LegacyPermissionMode,
+	LegacyRunnerSettings as Settings,
+} from "../claude/claude-runner-snapshot.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
+	PreWarmSessionInput,
 	ProviderNativeSession,
 	QuestionRequest,
+	SendTurnInput,
 	TurnResult,
 } from "../types.js";
-import type { ClaudeRunnerSettingsSnapshot } from "./claude-runner-upgrade.js";
-import type {
-	ClaudePreWarmSessionInput,
-	ClaudeSendTurnInput,
-} from "./types.js";
+import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
-export type ClaudeSessionTurn = Omit<
-	ClaudeSendTurnInput,
-	"eventSink" | "abortSignal"
->;
+export type SessionTurn = Omit<SendTurnInput, "eventSink" | "abortSignal">;
 
-export type ClaudeSessionCommand =
+export type SessionCommand =
 	| {
 			readonly type: "pre-warm";
 			readonly sessionId: string;
-			readonly input: ClaudePreWarmSessionInput;
+			readonly input: PreWarmSessionInput;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
-			readonly settingsSnapshot?: ClaudeRunnerSettingsSnapshot;
+			readonly settingsSnapshot?: RunnerSettingsSnapshot;
 	  }
 	| {
 			readonly type: "send-turn";
@@ -38,7 +36,7 @@ export type ClaudeSessionCommand =
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
-			readonly input: ClaudeSessionTurn;
+			readonly input: SessionTurn;
 	  }
 	| {
 			readonly type: "answer-permission";
@@ -57,7 +55,7 @@ export type ClaudeSessionCommand =
 			readonly sinkId: string;
 			readonly requestId: string;
 			readonly kind: "permission" | "question";
-			readonly failure: ClaudeSessionFailure;
+			readonly failure: SessionFailure;
 	  }
 	| {
 			readonly type: "resolve-permission";
@@ -88,17 +86,18 @@ export type ClaudeSessionCommand =
 				readonly modelId?: string | undefined;
 				readonly contextWindow?: string | undefined;
 				readonly variant?: string | undefined;
+				readonly permissionMode?: SessionPermissionMode | undefined;
 			};
 	  }
 	| {
 			readonly type: "set-permission-mode";
 			readonly sessionId: string;
-			readonly mode: ClaudeSDKPermissionMode;
+			readonly mode: LegacyPermissionMode;
 	  }
 	| { readonly type: "shutdown" };
 
 /** Runtime events and the existing EventSink interaction operations, all data. */
-export type ClaudeSessionOutput =
+export type SessionOutput =
 	| {
 			readonly type: "background-task";
 			readonly transition: BackgroundTaskTransition;
@@ -148,10 +147,10 @@ export type ClaudeSessionOutput =
 	  ));
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
-export type ClaudeSessionOutputReply = Readonly<Record<string, never>>;
+export type SessionOutputReply = Readonly<Record<string, never>>;
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
-export interface ClaudeSessionFailure {
+export interface SessionFailure {
 	readonly operation: string;
 	readonly message: string;
 	readonly name?: string;
@@ -160,8 +159,8 @@ export interface ClaudeSessionFailure {
 }
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
-export interface ClaudeSessionRunner {
-	readonly recoverEffect?: Effect.Effect<void, ClaudeSessionFailure>;
+export interface SessionRunner {
+	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */
@@ -172,12 +171,12 @@ export interface ClaudeSessionRunner {
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined>;
 	executeEffect(
-		command: Extract<ClaudeSessionCommand, { type: "send-turn" }>,
-	): Effect.Effect<TurnResult, ClaudeSessionFailure>;
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<TurnResult, SessionFailure>;
 	executeEffect(
-		command: Exclude<ClaudeSessionCommand, { type: "send-turn" }>,
-	): Effect.Effect<void, ClaudeSessionFailure>;
+		command: Exclude<SessionCommand, { type: "send-turn" }>,
+	): Effect.Effect<void, SessionFailure>;
 	executeEffect(
-		command: ClaudeSessionCommand,
-	): Effect.Effect<TurnResult | undefined, ClaudeSessionFailure>;
+		command: SessionCommand,
+	): Effect.Effect<TurnResult | undefined, SessionFailure>;
 }

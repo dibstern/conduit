@@ -1,40 +1,26 @@
-import type { Settings } from "@anthropic-ai/claude-agent-sdk";
 import { Cause, Effect } from "effect";
-import type { ClaudeRunnerFileSettings } from "./claude-runner-settings.js";
-import type { ClaudeSessionFailure } from "./claude-session-runner.js";
-import type { ClaudePreWarmSessionInput, Options } from "./types.js";
+import type {
+	RunnerLiveQueryConfiguration,
+	RunnerSettingsSnapshot,
+} from "../claude/claude-runner-snapshot.js";
+import type { SessionFailure } from "./session-runner.js";
 
-/** Session launch data stays in memory, including across runner replacement. */
-export interface ClaudeRunnerSettingsSnapshot {
-	readonly input: ClaudePreWarmSessionInput;
-	readonly claudeSettingsOverrides?: Settings;
-	readonly options: Omit<
-		Options,
-		"abortController" | "canUseTool" | "resume" | "resumeSessionAt"
-	>;
-	readonly fileSettings?: ClaudeRunnerFileSettings;
-	/** Retain original launch directories across primary/extra folder swaps. */
-	readonly workspaceDirectories?: readonly string[];
-	readonly workspacePreviousRoot?: string;
-}
+export type {
+	RunnerLiveQueryConfiguration,
+	RunnerSettingsSnapshot,
+} from "../claude/claude-runner-snapshot.js";
 
-/** Mutable SDK controls travel separately from the session's launch snapshot. */
-export type ClaudeRunnerLiveQueryConfiguration = Pick<
-	ClaudePreWarmSessionInput,
-	"model" | "contextWindow" | "variant" | "permissionMode"
->;
-
-export interface ClaudeRunnerUpgradeState {
+export interface RunnerUpgradeState {
 	readonly quiescent: boolean;
 	readonly revision: number;
-	readonly snapshot?: ClaudeRunnerSettingsSnapshot;
+	readonly snapshot?: RunnerSettingsSnapshot;
 	readonly resumeSessionId?: string;
-	readonly liveConfiguration?: ClaudeRunnerLiveQueryConfiguration;
+	readonly liveConfiguration?: RunnerLiveQueryConfiguration;
 	readonly frozen?: boolean;
 }
 
-export interface ClaudeRunnerUpgrade {
-	state?: ClaudeRunnerUpgradeState | undefined;
+export interface RunnerUpgrade {
+	state?: RunnerUpgradeState | undefined;
 	activity: number;
 	inFlight: boolean;
 	failures: number;
@@ -46,8 +32,8 @@ export interface ClaudeRunnerUpgrade {
 }
 
 /** Warming is independent of admission. A send invalidates only the attempt. */
-export function makeClaudeRunnerUpgrade<
-	T extends { upgrade: ClaudeRunnerUpgrade },
+export function makeRunnerUpgrade<
+	T extends { upgrade: RunnerUpgrade },
 >(options: {
 	readonly eligible: (sessionId: string, runner: T) => boolean;
 	readonly create: (sessionId: string, runner: T) => Effect.Effect<T>;
@@ -55,13 +41,13 @@ export function makeClaudeRunnerUpgrade<
 		sessionId: string,
 		runner: T,
 		replacement: T,
-	) => Effect.Effect<void, ClaudeSessionFailure>;
+	) => Effect.Effect<void, SessionFailure>;
 	readonly commit: (
 		sessionId: string,
 		runner: T,
 		replacement: T,
 		activity: number,
-	) => Effect.Effect<boolean, ClaudeSessionFailure>;
+	) => Effect.Effect<boolean, SessionFailure>;
 	readonly stop: (runner: T) => Effect.Effect<void>;
 	readonly runFork: (effect: Effect.Effect<void>) => unknown;
 	readonly failed: (sessionId: string, runner: T, cause: unknown) => void;

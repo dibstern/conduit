@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
-import { CLAUDE_RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/claude/claude-runner-protocol.js";
+import { RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/runner/runner-protocol.js";
 import {
-	type ClaudeRunnerRegistration,
-	prepareClaudeRunnerDirectory,
-} from "../../src/lib/provider/claude/claude-runner-registry.js";
+	prepareRunnerDirectory,
+	type RunnerRegistration,
+} from "../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../src/lib/utils.js";
 
 export function testRunnerAlive(pid: number): boolean {
@@ -21,9 +21,9 @@ export function testRunnerAlive(pid: number): boolean {
 function registrations(
 	projectDir: string,
 	configDir: string,
-): ClaudeRunnerRegistration[] {
-	const directory = prepareClaudeRunnerDirectory(projectDir, configDir);
-	const entries: ClaudeRunnerRegistration[] = [];
+): RunnerRegistration[] {
+	const directory = prepareRunnerDirectory(projectDir, configDir);
+	const entries: RunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
 		const socketPath = join(directory, filename.slice(0, -5));
@@ -57,7 +57,7 @@ function registrations(
 // Never signal a PID from a file until the process identifies itself on its socket.
 function requestShutdown(
 	projectDir: string,
-	entry: ClaudeRunnerRegistration,
+	entry: RunnerRegistration,
 ): Promise<boolean> {
 	return new Promise((done) => {
 		const socket = createConnection(entry.socketPath);
@@ -77,7 +77,7 @@ function requestShutdown(
 		socket.once("close", finish);
 		socket.once("connect", () =>
 			socket.write(
-				`${JSON.stringify({ type: "hello", protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir } })}\n`,
+				`${JSON.stringify({ type: "hello", protocolVersion: RUNNER_PROTOCOL_VERSION, buildId: entry.buildId, config: { workspaceRoot: projectDir } })}\n`,
 			),
 		);
 		socket.on("data", (chunk: Buffer) => {
@@ -95,7 +95,7 @@ function requestShutdown(
 				}
 				if (isRecord(message) && message["type"] === "hello") {
 					if (
-						message["protocolVersion"] !== CLAUDE_RUNNER_PROTOCOL_VERSION ||
+						message["protocolVersion"] !== RUNNER_PROTOCOL_VERSION ||
 						message["buildId"] !== entry.buildId ||
 						message["runnerId"] !== entry.runnerId ||
 						message["sessionId"] !== entry.sessionId ||

@@ -105,7 +105,7 @@ _Avoid_: permissions setting
 
 ## Relationships
 
-- A **Fork** is a **Family Root**. Its **Source** is lineage, not containment, so a busy or unread Fork never marks its Source's row (ADR-0006).
+- A **Fork** is a **Family Root**. Its **Source** is lineage, not containment, so a busy or unread Fork never marks its Source's row (ADR-0007).
 - A **Side Thread** belongs to its **Source**'s **Family**.
 - Deleting a session deletes its **Family**, but never its **Forks**. A Fork whose Source was deleted keeps its transcript and fork point.
 - A **Provider Runtime** may request a **Session Approval** during a turn.

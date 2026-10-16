@@ -1,10 +1,10 @@
 import type { SqlClient } from "@effect/sql";
 import { type Deferred, Effect, FiberRef } from "effect";
 import type { PermissionResponse } from "../types.js";
-import type { ClaudeSessionOutputReply } from "./claude-session-runner.js";
+import type { SessionOutputReply } from "./session-runner.js";
 
 /** Only the server consumes this context and writes the durable checkpoint. */
-export interface ClaudeRunnerOutputReceipt {
+export interface RunnerOutputReceipt {
 	readonly runnerId: string;
 	readonly sequence: number;
 	readonly attachmentId: string;
@@ -14,11 +14,11 @@ export interface ClaudeRunnerOutputReceipt {
 	consumed: boolean;
 }
 
-export const currentClaudeRunnerOutput = FiberRef.unsafeMake<
-	ClaudeRunnerOutputReceipt | undefined
+export const currentRunnerOutput = FiberRef.unsafeMake<
+	RunnerOutputReceipt | undefined
 >(undefined);
 
-export const currentClaudeRunnerPermissionReply = FiberRef.unsafeMake<
+export const currentRunnerPermissionReply = FiberRef.unsafeMake<
 	| {
 			readonly sessionId: string;
 			readonly requestId: string;
@@ -27,15 +27,16 @@ export const currentClaudeRunnerPermissionReply = FiberRef.unsafeMake<
 	| undefined
 >(undefined);
 
-// Ingestion writes this table for every Claude runner, including in-process
+// Keep the persisted table names for retained runners and existing databases.
+// Ingestion writes this table for every runner, including in-process
 // ones that never build a receipt store, so both owners create it.
-export const createClaudeRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
+export const createRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
 	sql`CREATE TABLE IF NOT EXISTS claude_runner_permission_replies (
 		session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
 		PRIMARY KEY (session_id, request_id)
 	)`;
 
-export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
+export const makeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		yield* sql`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
 		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
@@ -46,7 +47,7 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 		}>`PRAGMA table_info(claude_runner_cursors)`;
 		if (!columns.some(({ name }) => name === "attachment_id"))
 			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN attachment_id TEXT NOT NULL DEFAULT ''`;
-		yield* createClaudeRunnerPermissionReplies(sql);
+		yield* createRunnerPermissionReplies(sql);
 		const read = (runnerId: string) =>
 			sql<{
 				sequence: number;
@@ -56,7 +57,7 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 					sequence: rows[0]?.sequence ?? 0,
 					result: JSON.parse(
 						rows[0]?.result_json ?? "{}",
-					) as ClaudeSessionOutputReply,
+					) as SessionOutputReply,
 				})),
 			);
 		return {
@@ -73,7 +74,7 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 			acknowledge: (
 				runnerId: string,
 				sequence: number,
-				result: ClaudeSessionOutputReply = {},
+				result: SessionOutputReply = {},
 				attachmentId: string,
 			) => {
 				const reply = JSON.stringify(result);
@@ -85,9 +86,9 @@ export const makeClaudeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 		};
 	});
 
-export const commitClaudeRunnerOutput = (
+export const commitRunnerOutput = (
 	sql: SqlClient.SqlClient,
-	receipt: ClaudeRunnerOutputReceipt,
+	receipt: RunnerOutputReceipt,
 ) =>
 	sql`UPDATE claude_runner_cursors SET sequence = ${receipt.sequence}, result_json = '{}'
 		WHERE runner_id = ${receipt.runnerId} AND attachment_id = ${receipt.attachmentId}
@@ -95,9 +96,9 @@ export const commitClaudeRunnerOutput = (
 		RETURNING sequence`.pipe(Effect.map((rows) => rows.length > 0));
 
 /** Later interaction events inherit an already-consumed output receipt. */
-export const ownsClaudeRunnerAttachment = (
+export const ownsRunnerAttachment = (
 	sql: SqlClient.SqlClient,
-	receipt: ClaudeRunnerOutputReceipt,
+	receipt: RunnerOutputReceipt,
 ) =>
 	sql`SELECT 1 FROM claude_runner_cursors WHERE runner_id = ${receipt.runnerId} AND attachment_id = ${receipt.attachmentId}`.pipe(
 		Effect.map((rows) => rows.length > 0),

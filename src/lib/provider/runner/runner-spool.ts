@@ -1,21 +1,18 @@
 import { appendFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { Deferred, Effect } from "effect";
+import type { RunnerMessage, RunnerSocket } from "./runner-protocol.js";
 import type {
-	ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "./claude-runner-protocol.js";
-import type {
-	ClaudeSessionFailure,
-	ClaudeSessionOutput,
-	ClaudeSessionOutputReply,
-} from "./claude-session-runner.js";
+	SessionFailure,
+	SessionOutput,
+	SessionOutputReply,
+} from "./session-runner.js";
 
-type OutputFrame = Extract<ClaudeRunnerMessage, { type: "output" }>;
+type OutputFrame = Extract<RunnerMessage, { type: "output" }>;
 
 /** The live runner owns the spool. It never opens Conduit's event store. */
-export class ClaudeRunnerSpool {
+export class RunnerSpool {
 	private sequence = 0;
-	private connection: ClaudeRunnerSocket | undefined;
+	private connection: RunnerSocket | undefined;
 	private spooled = false;
 	private spooledBytes = 0;
 	private acknowledgedBytes = 0;
@@ -24,11 +21,11 @@ export class ClaudeRunnerSpool {
 	private readonly drainWaiters = new Set<() => void>();
 	private readonly waiters = new Map<
 		number,
-		Deferred.Deferred<ClaudeSessionOutputReply, ClaudeSessionFailure>
+		Deferred.Deferred<SessionOutputReply, SessionFailure>
 	>();
 	private readonly pendingInteractions = new Map<
 		string,
-		{ sequence: number; output: ClaudeSessionOutput }
+		{ sequence: number; output: SessionOutput }
 	>();
 	constructor(private readonly filename: string) {
 		writeFileSync(filename, "", { mode: 0o600 });
@@ -40,7 +37,7 @@ export class ClaudeRunnerSpool {
 
 	get pendingOutputs(): readonly {
 		sequence: number;
-		output: ClaudeSessionOutput;
+		output: SessionOutput;
 	}[] {
 		return [...this.pendingInteractions.values()];
 	}
@@ -59,13 +56,13 @@ export class ClaudeRunnerSpool {
 		});
 	}
 
-	attach(connection: ClaudeRunnerSocket, acknowledgedSequence: number): void {
+	attach(connection: RunnerSocket, acknowledgedSequence: number): void {
 		this.connection = connection;
 		this.truncate(acknowledgedSequence);
 		for (const frame of this.retained.values()) connection.write(frame);
 	}
 
-	disconnect(connection: ClaudeRunnerSocket): void {
+	disconnect(connection: RunnerSocket): void {
 		if (this.connection !== connection) return;
 		this.connection = undefined;
 		this.writeSpool();
@@ -76,7 +73,7 @@ export class ClaudeRunnerSpool {
 		}
 	}
 
-	reply(message: Extract<ClaudeRunnerMessage, { type: "output-reply" }>): void {
+	reply(message: Extract<RunnerMessage, { type: "output-reply" }>): void {
 		if (message.sequence === undefined) return;
 		const waiter = this.waiters.get(message.sequence);
 		if (waiter)
@@ -91,8 +88,8 @@ export class ClaudeRunnerSpool {
 	}
 
 	emit(
-		output: ClaudeSessionOutput,
-	): Effect.Effect<ClaudeSessionOutputReply, ClaudeSessionFailure> {
+		output: SessionOutput,
+	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen(this, function* () {
 			// Cleanup and the idle tail must not hold the next SDK enqueue.
 			// Both notices remain retained until their durable acknowledgement.
@@ -108,10 +105,7 @@ export class ClaudeRunnerSpool {
 			// waiter registration and frame writing can run without interruption.
 			const waiter = notification
 				? undefined
-				: yield* Deferred.make<
-						ClaudeSessionOutputReply,
-						ClaudeSessionFailure
-					>();
+				: yield* Deferred.make<SessionOutputReply, SessionFailure>();
 			const sequence = ++this.sequence;
 			const frame: OutputFrame = {
 				type: "output",

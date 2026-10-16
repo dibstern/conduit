@@ -12,11 +12,16 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { Data } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { isRecord } from "../../utils.js";
-import { ClaudeRuntimeError } from "../event-sink-errors.js";
 
-export interface ClaudeRunnerRegistration {
+class RunnerRegistryError extends Data.TaggedError("RunnerRegistryError")<{
+	readonly message: string;
+}> {}
+
+export interface RunnerRegistration {
+	readonly driverKind?: string;
 	readonly runnerId: string;
 	readonly sessionId: string;
 	readonly socketPath: string;
@@ -25,7 +30,7 @@ export interface ClaudeRunnerRegistration {
 	readonly role?: "candidate" | "retiring";
 }
 
-function claudeRunnerTargetDirectory(
+function runnerTargetDirectory(
 	workspaceRoot: string,
 	configDir: string,
 ): string {
@@ -36,11 +41,11 @@ function claudeRunnerTargetDirectory(
 	return join(resolve(configDir), "r", project);
 }
 
-export function claudeRunnerDirectory(
+export function runnerDirectory(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
 ): string {
-	const directory = claudeRunnerTargetDirectory(workspaceRoot, configDir);
+	const directory = runnerTargetDirectory(workspaceRoot, configDir);
 	// Budget the separator and 12-character runner ID within Darwin's 103
 	// usable socket-path bytes. The alias keeps runner files in the config dir.
 	if (Buffer.byteLength(directory) + 1 + 12 < 104) return directory;
@@ -48,16 +53,17 @@ export function claudeRunnerDirectory(
 		.update(directory)
 		.digest("hex")
 		.slice(0, 16);
+	// Keep the existing alias so retained runners remain discoverable.
 	return `/tmp/conduit-claude-${process.getuid?.() ?? "user"}-${hash}`;
 }
 
-export function prepareClaudeRunnerDirectory(
+export function prepareRunnerDirectory(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
 ): string {
-	const target = claudeRunnerTargetDirectory(workspaceRoot, configDir);
+	const target = runnerTargetDirectory(workspaceRoot, configDir);
 	mkdirSync(target, { recursive: true, mode: 0o700 });
-	const directory = claudeRunnerDirectory(workspaceRoot, configDir);
+	const directory = runnerDirectory(workspaceRoot, configDir);
 	if (directory !== target) {
 		try {
 			symlinkSync(target, directory);
@@ -68,8 +74,8 @@ export function prepareClaudeRunnerDirectory(
 				readlinkSync(directory) !== target ||
 				lstatSync(directory).uid !== process.getuid?.()
 			) {
-				throw new ClaudeRuntimeError({
-					message: `Unsafe Claude runner socket alias: ${directory}`,
+				throw new RunnerRegistryError({
+					message: `Unsafe runner socket alias: ${directory}`,
 				});
 			}
 		}
@@ -77,7 +83,7 @@ export function prepareClaudeRunnerDirectory(
 	return directory;
 }
 
-export function registerClaudeRunner(entry: ClaudeRunnerRegistration): void {
+export function registerRunner(entry: RunnerRegistration): void {
 	const temporary = `${entry.socketPath}.json.tmp`;
 	writeFileSync(temporary, JSON.stringify(entry), { mode: 0o600 });
 	renameSync(temporary, `${entry.socketPath}.json`);
@@ -94,7 +100,7 @@ export function runnerPidAlive(pid: number): boolean {
 }
 
 export function runnerPidMatchesRegistration(
-	entry: ClaudeRunnerRegistration,
+	entry: RunnerRegistration,
 ): boolean {
 	try {
 		const command = execFileSync(
@@ -113,17 +119,17 @@ export function runnerPidMatchesRegistration(
 	}
 }
 
-export function removeClaudeRunner(socketPath: string): void {
+export function removeRunner(socketPath: string): void {
 	for (const suffix of ["", ".json", ".spool"])
 		rmSync(`${socketPath}${suffix}`, { force: true });
 }
 
-export function discoverClaudeRunners(
+export function discoverRunners(
 	workspaceRoot: string,
 	configDir = DEFAULT_CONFIG_DIR,
-): ClaudeRunnerRegistration[] {
-	const directory = prepareClaudeRunnerDirectory(workspaceRoot, configDir);
-	const entries: ClaudeRunnerRegistration[] = [];
+): RunnerRegistration[] {
+	const directory = prepareRunnerDirectory(workspaceRoot, configDir);
+	const entries: RunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
 		const socketPath = join(directory, filename.slice(0, -5));
@@ -142,10 +148,14 @@ export function discoverClaudeRunners(
 				value["pid"] <= 0 ||
 				!runnerPidAlive(value["pid"])
 			) {
-				removeClaudeRunner(socketPath);
+				removeRunner(socketPath);
 				continue;
 			}
 			entries.push({
+				driverKind:
+					typeof value["driverKind"] === "string"
+						? value["driverKind"]
+						: "claude",
 				runnerId: filename.slice(0, -5),
 				socketPath,
 				sessionId: value["sessionId"],
@@ -156,7 +166,7 @@ export function discoverClaudeRunners(
 					: {}),
 			});
 		} catch {
-			removeClaudeRunner(socketPath);
+			removeRunner(socketPath);
 		}
 	}
 	return entries.sort(

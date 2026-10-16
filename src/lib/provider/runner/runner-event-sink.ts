@@ -13,8 +13,9 @@ import {
 import type { PermissionResponse } from "../types.js";
 
 /** Restore live waiters without appending interactions already in the store. */
-export const makeRecoveredClaudeEventSink = (options: {
+export const makeRecoveredEventSink = (options: {
 	readonly sessionId: string;
+	readonly driverKind?: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly ingestion: ProviderRuntimeIngestion;
 	readonly pending: PendingInteractionService;
@@ -28,7 +29,7 @@ export const makeRecoveredClaudeEventSink = (options: {
 	const { sessionId, sql, ingestion, pending } = options;
 	return createRelayEventSink({
 		sessionId,
-		providerId: "claude",
+		providerId: options.driverKind ?? "claude",
 		...options.timeoutHooks,
 		ingestion: {
 			ingest: (event) =>
