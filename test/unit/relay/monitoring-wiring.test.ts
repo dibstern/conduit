@@ -636,8 +636,8 @@ describe("wireMonitoring shutdown", () => {
 			await harness.runtime?.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
-					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
-						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1)`;
+					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, project_id)
+						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1, 'test-project')`;
 				}),
 			);
 			// OpenCode answers 404 for sessions it does not own (live: NotFoundError).

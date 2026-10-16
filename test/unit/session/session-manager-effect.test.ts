@@ -902,8 +902,8 @@ describe("SessionManager Effect", () => {
 				yield* runner.markRecovered();
 				yield* sql`
 					INSERT INTO sessions (
-						id, provider, title, status, created_at, updated_at
-					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
+						id, provider, title, status, created_at, updated_at, project_id
+					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000, 'test-project')`;
 
 				const before = yield* listSessions("test-project", undefined, {
 					slug: "test-project",
