@@ -192,6 +192,15 @@ export function createTraceCursorSdkPort(
 					});
 				}
 				const runId = handle["id"];
+				const steers: {
+					resolve: (
+						outcome: "complete_delivered" | "revert_to_followup",
+					) => void;
+					reject: (cause: CursorSdkFailure) => void;
+				}[] = [];
+				const steerWaiters = new Map<number, () => void>();
+				let steerCallIndex = 0;
+				let steerAckIndex = 0;
 				const terminal = turn.find((row) => row.kind === "wait.result")?.data;
 				const needsCancel =
 					object(terminal) && terminal["status"] === "cancelled";
@@ -243,6 +252,31 @@ export function createTraceCursorSdkPort(
 						try {
 							for (const row of turn) {
 								if (
+									row.kind === "steer.call" &&
+									handle["steer"] === "function"
+								) {
+									const index = steerCallIndex++;
+									if (!steers[index])
+										await Promise.race([
+											new Promise<void>((resolve) =>
+												steerWaiters.set(index, resolve),
+											),
+											cancelled,
+										]);
+								}
+								if (row.kind === "steer.ack" && object(row.data)) {
+									const outcome = row.data["outcome"];
+									if (
+										outcome === "complete_delivered" ||
+										outcome === "revert_to_followup"
+									)
+										steers[steerAckIndex++]?.resolve(outcome);
+								}
+								if (row.kind === "steer.error")
+									steers[steerAckIndex++]?.reject(
+										cursorSdkFailure("run.steer", row.data),
+									);
+								if (
 									needsCancel &&
 									(row.kind === "wait.result" ||
 										(row.kind === "stream" &&
@@ -274,6 +308,20 @@ export function createTraceCursorSdkPort(
 					async cancel() {
 						cancel();
 					},
+					...(handle["steer"] === "function"
+						? {
+								steer(_text: string) {
+									return new Promise<
+										"complete_delivered" | "revert_to_followup"
+									>((resolve, reject) => {
+										const index = steers.length;
+										steers.push({ resolve, reject });
+										steerWaiters.get(index)?.();
+										steerWaiters.delete(index);
+									});
+								},
+							}
+						: {}),
 				};
 			},
 			async getUsage() {

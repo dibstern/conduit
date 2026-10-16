@@ -15,6 +15,7 @@ import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
 import { cursorModelParametersHandlers } from "./steps/cursorModelParameters.js";
 import { cursorSkillsHandlers } from "./steps/cursorSkills.js";
+import { cursorSteerHandlers } from "./steps/cursorSteer.js";
 import { cursorSubagentsHandlers } from "./steps/cursorSubagents.js";
 import { cursorToolsHandlers } from "./steps/cursorTools.js";
 import { cursorTurnHandlers } from "./steps/cursorTurn.js";
@@ -65,6 +66,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerSendAtResetHandlers,
 	...cursorModelParametersHandlers,
 	...cursorSkillsHandlers,
+	...cursorSteerHandlers,
 	...cursorTurnHandlers,
 	...cursorToolsHandlers,
 	...cursorSubagentsHandlers,

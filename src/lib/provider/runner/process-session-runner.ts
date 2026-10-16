@@ -525,7 +525,9 @@ export const makeProcessSessionRunner = (
 							received.event.type === "turn.error" &&
 							binding?.userMessageId &&
 							received.event.sessionId === binding.sessionId &&
-							isRecord(received.event.data)
+							isRecord(received.event.data) &&
+							// A payload can name a newer input delivered within this run.
+							typeof received.event.data["userMessageId"] !== "string"
 								? {
 										...received,
 										event: {

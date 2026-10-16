@@ -317,3 +317,77 @@ is `test-results/conduit-test-xqsg.13.json`. This proves command discovery and
 prompt delivery through Conduit, not SDK skill activation. None of the original
 captures contains a skill scenario. The opt-in `cursor-skills-real-sdk.test.ts`
 checks real activation separately and records a new trace when explicitly run.
+
+## Steer process replay (conduit-test-xqsg.12)
+
+`steer-shell.jsonl` is the real spike capture of steering a running shell.
+It was copied from `cursor-spike/fixtures/steer-shell.jsonl`, replacing only
+the private home prefix with `/home/test` and its encoded slug with `home-test`.
+The original shell reports success, exit 0 and empty output shortly before
+the delivered steer acknowledgement. It actually moved to a background
+terminal. Later captured read-only shell calls poll that terminal and the
+side-effect log, whose captured contents are exactly `ran\n`. No repeat of
+the mutating shell was observed. Conduit's moved-to-background marker is a
+conservative inference from this ordering, not an SDK field.
+
+`cursor-steer.test.ts` writes temporary derivatives beneath its isolated
+process root. Every derivative inserts the same inert credential-store result
+and unchanged `basic.jsonl` model catalogue used by the other process suites.
+The delivered and shell cases replay their real captures unchanged. The
+following cases are derived protocol/scheduling evidence, not live Cursor
+observations:
+
+- Declined: `steer.jsonl`, changing the acknowledgement outcome to the
+  captured post-terminal `revert_to_followup` value and removing the captured
+  steered `user-message-appended` delta and duplicate user stream message.
+- Pending at terminal: the same source, removing its steer acknowledgement
+  and both steered user-message rows. The captured terminal ends the pending
+  promise. The landed-before-terminal race removes only the acknowledgement,
+  retaining both captured user-message channels.
+- Delivered error: `steer.jsonl`, changing only `wait.result.status` to the
+  public `error` value and adding declared RunError `message` and
+  `code: connection_stalled`. The delivered input must own the error and
+  session's latest-turn pointer, with no requeue or second SDK send.
+- Identical text: `steer.jsonl`, copying its steer.call immediately after
+  itself while retaining only the original acknowledgement and user-message
+  channels. The replay gates both operations before delivering the original
+  receipt. It must consume only the first input, with the second declined at
+  terminal and run once by the inbox.
+- Images and missing method: the declined variant without `steer.call` or
+  `steer.ack` operation wrappers. Missing method also removes `run.handle.steer`.
+  The image is an explicit one-pixel PNG input to Conduit, never an invented
+  SDK steer field. A test-only wait delay keeps the turn running long enough
+  to submit these inputs and verify that neither invokes the SDK operation.
+- Pending interrupt: the pending variant changes only `wait.result.status`
+  to its public `cancelled` value and moves the original delivered
+  acknowledgement after that wait row. Replay gates cancelled waits on the
+  caller's cancel operation. The late acknowledgement races the settled
+  decline and must not deliver the input again. Stop keeps the inbox paused;
+  the test explicitly resumes its queued input and verifies one retry send.
+- Pending runner crash: the interrupt variant without the acknowledgement.
+  Its cancelled wait stays pending until cancellation, so the test kills only
+  its verified owned runner PID while the steer remains pending. Before
+  resuming the recovered input, it replaces the temporary trace with a basic
+  captured turn. This proves inbox recovery and exactly-once resubmission.
+- Background child wait: `subagent-background-follow-up.jsonl`, inserting
+  `steer.jsonl`'s real call, acknowledgement, user delta and user stream rows
+  immediately after the background Task completes. Only the user rows'
+  agent/run identities are changed to those of the parent capture, and
+  `run.handle.steer` is set to its captured `function` value. All child
+  content and Task fields stay from ticket .10's fixture. This proves
+  conduit's child-session and steer path together, but the spike did not
+  verify live steering during a background-child wait.
+
+All declined variants append the unchanged send-through-disposal segment of
+`basic.jsonl` for subsequent inbox-driven turns. The late-start case submits
+delivery `steer` after the missing-method run has completed, proving an idle
+session starts a normal turn without calling native steer. Playback gates the
+captured `steer.call` until Conduit invokes the operation. Missing acknowledgements
+leave its promise pending while the captured stream continues; they add no SDK
+wire fields. The suite writes durable input/turn/message state, actual port
+operations, capture provenance and owned-process cleanup to
+`test-results/conduit-test-xqsg.12.json`.
+The existing projector splits one native run at a delivered user's message.
+Delivered cases therefore assert two Conduit turn segments, the stored
+`steered` flag and subsequent assistant ownership, alongside exactly one SDK
+send. The extra transcript segment does not imply another native turn.

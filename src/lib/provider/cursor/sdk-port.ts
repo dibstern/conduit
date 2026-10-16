@@ -98,6 +98,7 @@ export interface CursorRun {
 	readonly stream: AsyncIterable<unknown>;
 	wait(): Promise<unknown>;
 	cancel(): Promise<void>;
+	steer?(text: string): Promise<"complete_delivered" | "revert_to_followup">;
 }
 
 export interface CursorAgent {
