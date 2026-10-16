@@ -32,6 +32,9 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   Then the Cursor edit row shows old value replaced by new value with 1 added and 1 removed
   And the Cursor write row shows its content and 2 added lines without a removed count
   And the Cursor delete row shows its path and 23 bytes without invented lines
+  When I scroll the transcript back to the bottom
+  Then the transcript is pinned to the bottom
+  And the jump-to-latest control is not visible
   And the messages region visually matches cursor-tools-file-changes at <threshold> percent
   When the Cursor relay publishes exploration tools
   Then all Cursor exploration tools have compact rows
@@ -44,6 +47,9 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   And the Cursor computer screenshot is attached
   And the Cursor generated image is attached to its generic row
   And the Cursor recording is attached to its generic row
+  When I scroll the transcript back to the bottom
+  Then the transcript is pinned to the bottom
+  And the jump-to-latest control is not visible
   And the messages region visually matches cursor-tools-media at <threshold> percent
   When the Cursor relay publishes unknown and truncated tools
   Then the unknown Cursor tool shows its arguments and result
