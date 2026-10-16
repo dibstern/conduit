@@ -1518,6 +1518,7 @@ Effect.runFork(Effect.flatMap(WorktreeServiceTag, (service) =>
 			parent.once("close", () => accept());
 			parent.once("error", reject);
 		});
+		const childPidFile = join(directory, "child.pid");
 		let groupPid: number | undefined;
 		try {
 			await expect
@@ -1527,7 +1528,12 @@ Effect.runFork(Effect.flatMap(WorktreeServiceTag, (service) =>
 							throw new Error(
 								`Fixture daemon exited before setup: ${parentStderr}`,
 							);
-						return existsSync(join(directory, "child.pid"));
+						// The shell creates child.pid before writing it. Killing the daemon
+						// inside that gap leaves an empty file, so wait for the whole pid.
+						return (
+							existsSync(childPidFile) &&
+							/^\d+\n$/.test(readFileSync(childPidFile, "utf8"))
+						);
 					},
 					// A cold tsx start takes seconds when the machine is busy.
 					{ timeout: 30_000 },
@@ -1538,7 +1544,7 @@ Effect.runFork(Effect.flatMap(WorktreeServiceTag, (service) =>
 			expect(parent.kill("SIGKILL")).toBe(true);
 			await parentExited;
 			await expectStopped(join(directory, "shell.pid"));
-			await expectStopped(join(directory, "child.pid"));
+			await expectStopped(childPidFile);
 		} finally {
 			parent.kill("SIGKILL");
 			await parentExited;
