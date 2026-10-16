@@ -110,7 +110,6 @@ it("leaves socket write missing when the browser leaves before assistant output"
 	expect(
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: "timeline-disconnect",
 				inputId,

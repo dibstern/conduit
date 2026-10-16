@@ -223,7 +223,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					evidence["sessionId"] = sessionId;
 					await Effect.runPromise(
 						browser.rpc.SwitchPermissionMode({
-							projectSlug: "process-test",
 							sessionId,
 							mode: "full",
 						}),

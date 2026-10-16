@@ -172,7 +172,10 @@ describe("file tree time limits", () => {
 					list,
 					read: () => Effect.succeed({ content: "" }),
 				}),
-				Effect.provideService(ConfigTag, makeMockConfig()),
+				Effect.provideService(
+					ConfigTag,
+					makeMockConfig({ slug: "private-project" }),
+				),
 				Effect.provide(AlertsLive),
 				Effect.provide(
 					makePersistenceEffectLayer(":memory:", "private-project"),

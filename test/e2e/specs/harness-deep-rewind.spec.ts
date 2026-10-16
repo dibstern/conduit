@@ -170,7 +170,6 @@ test("deep rewind pages every older message once and undo restores the transcrip
 				const pagesFrom = olderPages.length;
 				await Effect.runPromise(
 					control.rpc.RewindSession({
-						projectSlug: "process-test",
 						sessionId: SESSION,
 						messageId: messageId(cut),
 					}),
@@ -205,7 +204,6 @@ test("deep rewind pages every older message once and undo restores the transcrip
 				}
 				await Effect.runPromise(
 					control.rpc.UndoRewind({
-						projectSlug: "process-test",
 						sessionId: SESSION,
 					}),
 				);

@@ -94,18 +94,15 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const workspace = yield* SessionWorkspaceTag;
-			const directory =
-				request.sessionId === undefined
-					? undefined
-					: yield* workspace
-							.get(request.sessionId)
-							.pipe(
-								Effect.flatMap((path) =>
-									realWorkspacePath(path).pipe(
-										Effect.orElseSucceed(() => path),
-									),
-								),
-							);
+			const directory = !("sessionId" in request)
+				? undefined
+				: yield* workspace
+						.get(request.sessionId)
+						.pipe(
+							Effect.flatMap((path) =>
+								realWorkspacePath(path).pipe(Effect.orElseSucceed(() => path)),
+							),
+						);
 			return {
 				...(directory === undefined ? {} : { directory }),
 				worktrees: yield* listProjectWorktrees([
@@ -221,7 +218,12 @@ export const sessionsHandlers = {
 			const config = yield* ConfigTag;
 			const sessionManager = yield* SessionManagerServiceTag;
 			const exists = yield* sessionManager.sessionExists(request.sessionId);
-			return { projectSlug: exists ? config.slug : null };
+			if (!exists)
+				return yield* new WsRpcError({
+					message: `Unknown session: ${request.sessionId}`,
+					code: "unknown-session",
+				});
+			return { projectSlug: config.slug };
 		}).pipe(Effect.catchAll(mapRpcFailure("ResolveSession"))),
 	ListDaemonSessions: (request) =>
 		Effect.gen(function* () {
@@ -240,20 +242,22 @@ export const sessionsHandlers = {
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("ListDaemonSessions"))),
 	ReloadProviderSession: (request) =>
-		reloadProviderSessionForClient({
-			clientId: request.originId ?? "rpc",
-			sessionId: request.sessionId,
-			commandId: request.commandId,
-		}).pipe(
-			Effect.as({
-				projectSlug: request.projectSlug,
+		Effect.flatMap(ConfigTag, (config) =>
+			reloadProviderSessionForClient({
+				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
-			}),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `ReloadProviderSession failed: ${String(error)}`,
-					}),
+				commandId: request.commandId,
+			}).pipe(
+				Effect.as({
+					projectSlug: config.slug,
+					sessionId: request.sessionId,
+				}),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `ReloadProviderSession failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
@@ -702,42 +706,44 @@ export const sessionsHandlers = {
 			),
 		),
 	ForkSession: (request) =>
-		forkSessionForClient({
-			clientId: request.originId,
-			...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
-			...(request.messageId != null ? { messageId: request.messageId } : {}),
-		}).pipe(
-			Effect.flatMap((session) =>
-				session == null
-					? Effect.fail(
-							new WsRpcError({
-								message: "ForkSession failed: no active session",
-							}),
-						)
-					: Effect.succeed({
-							projectSlug: request.projectSlug,
-							sessionId: session.id,
-							parentId: session.parentId,
-							...(session.forkMessageId && {
-								forkMessageId: session.forkMessageId,
-							}),
-							...(session.forkPointTimestamp != null && {
-								forkPointTimestamp: session.forkPointTimestamp,
-							}),
-						}),
-			),
-			Effect.catchAll((error) =>
-				Effect.gen(function* () {
-					const log = yield* LoggerTag;
-					log.warn("ForkSession failed", { cause: error });
-					return yield* Effect.fail(
-						error instanceof WsRpcError || error instanceof AccountUnroutable
-							? error
-							: new WsRpcError({
-									message: `ForkSession failed: ${String(error)}`,
+		Effect.flatMap(ConfigTag, (config) =>
+			forkSessionForClient({
+				clientId: request.originId,
+				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
+				...(request.messageId != null ? { messageId: request.messageId } : {}),
+			}).pipe(
+				Effect.flatMap((session) =>
+					session == null
+						? Effect.fail(
+								new WsRpcError({
+									message: "ForkSession failed: no active session",
 								}),
-					);
-				}),
+							)
+						: Effect.succeed({
+								projectSlug: config.slug,
+								sessionId: session.id,
+								parentId: session.parentId,
+								...(session.forkMessageId && {
+									forkMessageId: session.forkMessageId,
+								}),
+								...(session.forkPointTimestamp != null && {
+									forkPointTimestamp: session.forkPointTimestamp,
+								}),
+							}),
+				),
+				Effect.catchAll((error) =>
+					Effect.gen(function* () {
+						const log = yield* LoggerTag;
+						log.warn("ForkSession failed", { cause: error });
+						return yield* Effect.fail(
+							error instanceof WsRpcError || error instanceof AccountUnroutable
+								? error
+								: new WsRpcError({
+										message: `ForkSession failed: ${String(error)}`,
+									}),
+						);
+					}),
+				),
 			),
 		),
 	StartSideThread: (request) =>
@@ -753,7 +759,7 @@ export const sessionsHandlers = {
 						AND json_extract(data, '$.startInputId') = ${request.inputId}
 					LIMIT 1`;
 				if (started) return started.session_id;
-				const session = yield* forkSession(request.parentSessionId, {
+				const session = yield* forkSession(request.sessionId, {
 					side: { title: request.title, inputId: request.inputId },
 				});
 				// Refresh now rather than on the next projection burst: the side
@@ -785,21 +791,23 @@ export const sessionsHandlers = {
 			),
 		),
 	LoadMoreHistory: (request) =>
-		loadMoreHistoryForSession({
-			sessionId: request.sessionId,
-			...(request.before ? { before: request.before } : {}),
-		}).pipe(
-			Effect.map((page) => ({
-				projectSlug: request.projectSlug,
-				sessionId: page.sessionId,
-				messages: page.messages,
-				hasMore: page.hasMore,
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `LoadMoreHistory failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			loadMoreHistoryForSession({
+				sessionId: request.sessionId,
+				...(request.before ? { before: request.before } : {}),
+			}).pipe(
+				Effect.map((page) => ({
+					projectSlug: config.slug,
+					sessionId: page.sessionId,
+					messages: page.messages,
+					hasMore: page.hasMore,
+				})),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `LoadMoreHistory failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),

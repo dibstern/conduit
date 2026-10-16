@@ -46,12 +46,11 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.GetToolDetails({
-				projectSlug: "project-a",
 				sessionId: "session-a",
 				toolIds: [ToolCallId.make("tool-1"), ToolCallId.make("missing")],
 			});
 			expect(details).toHaveBeenCalledWith("session-a", ["tool-1", "missing"]);
-			expect(result).toEqual({ projectSlug: "project-a", tools: [detail] });
+			expect(result).toEqual({ projectSlug: "test-project", tools: [detail] });
 		}).pipe(Effect.scoped, Effect.provide(serve(details)));
 	});
 
@@ -60,7 +59,6 @@ describe("WsRpcServerLayer GetToolDetails", () => {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* Effect.either(
 				client.GetToolDetails({
-					projectSlug: "project-a",
 					sessionId: "session-a",
 					toolIds: [ToolCallId.make("tool-1")],
 				}),

@@ -18,18 +18,26 @@ test("files, mentions and new terminals follow a session move and navigation", a
 	let terminalCount = 0;
 	const sessions = [
 		{
+			accountId: null,
 			id: "workspace-session",
 			title: "Workspace session",
 			status: "idle",
 			projectSlug,
 		},
-		{ id: "main-session", title: "Main session", status: "idle", projectSlug },
+		{
+			accountId: null,
+			id: "main-session",
+			title: "Main session",
+			status: "idle",
+			projectSlug,
+		},
 	];
 	let rpc: RpcMockControl;
 	const folder = (sessionId: unknown) =>
 		moved && sessionId === "workspace-session" ? worktree : main;
 	rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({
 				projects,
 				current: projectSlug,

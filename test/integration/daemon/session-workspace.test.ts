@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ListDaemonSessions,
 	ListWorktrees,
+	ListWorktreesForSession,
 	MoveSessionWorkspace,
 	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -180,7 +181,6 @@ describe("Session workspace through the built daemon", () => {
 			sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path,
 				}),
@@ -314,7 +314,6 @@ describe("Session workspace through the built daemon", () => {
 				sendRpcRequest(
 					socket,
 					new MoveSessionWorkspace({
-						projectSlug: "process-test",
 						sessionId,
 						path,
 					}),
@@ -339,7 +338,6 @@ describe("Session workspace through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -385,7 +383,6 @@ describe("Session workspace through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: linked,
 			}),
@@ -405,7 +402,6 @@ describe("Session workspace through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: extra,
 			}),
@@ -424,7 +420,6 @@ describe("Session workspace through the built daemon", () => {
 			await sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path: linked,
 				}),
@@ -456,7 +451,6 @@ describe("Session workspace through the built daemon", () => {
 			sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path,
 				}),
@@ -476,7 +470,7 @@ describe("Session workspace through the built daemon", () => {
 		expect(workspaceEvents(fixture)).toHaveLength(count);
 		const { worktrees, directory } = await sendRpcRequest(
 			socket,
-			new ListWorktrees({ projectSlug: "process-test", sessionId }),
+			new ListWorktreesForSession({ sessionId }),
 		);
 		expect(directory).toBe(primary);
 		expect(worktrees).toContainEqual({
@@ -513,7 +507,6 @@ describe("Session workspace through the built daemon", () => {
 				sendRpcRequest(
 					socket,
 					new MoveSessionWorkspace({
-						projectSlug: "process-test",
 						sessionId,
 						path,
 					}),

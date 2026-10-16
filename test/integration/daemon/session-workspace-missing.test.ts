@@ -196,7 +196,6 @@ describe("Missing session worktrees through the built daemon", () => {
 			await sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path: worktree,
 				}),
@@ -262,7 +261,6 @@ describe("Missing session worktrees through the built daemon", () => {
 			await sendRpcRequest(
 				socket,
 				new SubmitInput({
-					projectSlug: "process-test",
 					sessionId,
 					inputId: randomUUID(),
 					delivery: "queue",
@@ -317,7 +315,6 @@ describe("Missing session worktrees through the built daemon", () => {
 			await sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path: restored,
 				}),
@@ -434,7 +431,6 @@ describe("Missing session worktrees through the built daemon", () => {
 					socket,
 					provider === "claude"
 						? new MoveSessionWorkspace({
-								projectSlug: "process-test",
 								sessionId,
 								path: worktree,
 							})
@@ -590,7 +586,6 @@ describe("Missing session worktrees through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: worktree,
 			}),

@@ -125,7 +125,6 @@ function recordStopAndRun(harness: ProcessHarness, testInfo: TestInfo) {
 
 function cancel(browser: ProcessBrowser, sessionId: string) {
 	return browser.rpc.CancelSession({
-		projectSlug: "process-test",
 		sessionId,
 		commandId: randomUUID(),
 	});
@@ -253,7 +252,6 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 	expect(
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId,
@@ -586,7 +584,6 @@ test("correction: repeated cancel belongs to one input and Stop preserves the pe
 	expect(
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -642,7 +639,6 @@ test("correction: delayed cancel between a result and pending steer preserves th
 	expect(
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),

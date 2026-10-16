@@ -131,7 +131,6 @@ describe("shared two-socket RPC client in memory", () => {
 					);
 					yield* Effect.exit(
 						sockets.control("ViewSession", {
-							projectSlug: "alpha",
 							sessionId: "s1",
 							originId: "o1",
 						}),

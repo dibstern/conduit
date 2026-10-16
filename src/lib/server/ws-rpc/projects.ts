@@ -1,9 +1,5 @@
 import { Effect } from "effect";
-import {
-	type AttachProject,
-	ProjectSaveRejected,
-	WsRpcError,
-} from "../../contracts/ws-rpc.js";
+import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
@@ -11,14 +7,15 @@ import type { WsRpcHandlerMap } from "./shared.js";
 
 export const projectsHandlers = {
 	// A standalone relay serves one project, so every tab attaches to it.
-	AttachProject: (request: AttachProject) =>
+	AttachProject: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
 			const projectSlug = yield* projectService.currentSlug();
 			const read = yield* ReadQueryEffectTag;
-			const session = request.sessionId
-				? yield* read.getSession(request.sessionId)
-				: undefined;
+			const session =
+				"sessionId" in request
+					? yield* read.getSession(request.sessionId)
+					: undefined;
 			const response: {
 				readonly projectSlug: string | null;
 				readonly sessionSlug: string | null;
