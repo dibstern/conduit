@@ -86,9 +86,10 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			// read snapshot cannot upgrade after another connection commits.
 			yield* sql`UPDATE sessions SET project_id = project_id WHERE 0`;
 			for (const sessionId of new Set(sessionIds)) {
-				const [session] = yield* sql<{ project_id: string }>`
+				const [session] = yield* sql<{ project_id: string | null }>`
 					SELECT project_id FROM sessions WHERE id = ${sessionId}`;
-				if (session && session.project_id !== projectId)
+				// An unstamped row (NULL or '') has no owner yet; the provenance stamp claims it.
+				if (session?.project_id && session.project_id !== projectId)
 					return yield* new EventStoreError({
 						operation: "appendOwnership",
 						sessionId,

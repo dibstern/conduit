@@ -216,6 +216,8 @@ export const sessionHandlers = {
 				sql: `INSERT INTO sessions (id, project_id, provider, provider_sid, title, status, parent_id, fork_point_event, side_thread, permission_mode, created_at, updated_at)
 					 VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?)
 					 ON CONFLICT (id) DO UPDATE SET
+					     -- Claim an unowned row, but never move a session to another project.
+					     project_id = COALESCE(NULLIF(sessions.project_id, ''), excluded.project_id),
 					     provider = CASE
 					       WHEN EXISTS (
 					         SELECT 1 FROM session_providers
