@@ -22,10 +22,11 @@ const rows = [
 
 async function setup(page: import("@playwright/test").Page) {
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			AttachProject: ({ sessionId }) => ({
-				projectSlug,
-				sessionSlug: sessionId ? projectSlug : null,
+		stubs: {
+			"input.submit": () => ({
+				ok: true,
+				sessionId: materialized,
+				handedOff: true,
 			}),
 			ResolveSession: () => ({ projectSlug }),
 			ViewSession: ({ sessionId }) => ({
@@ -34,13 +35,18 @@ async function setup(page: import("@playwright/test").Page) {
 			}),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
 			ForkSession: () => ({ projectSlug, sessionId: forked, parentId: seed }),
-			"input.submit": () => ({ ok: true, sessionId: materialized }),
 			DeleteSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
+			}),
+		},
+		handlers: {
+			AttachProject: ({ sessionId }) => ({
+				projectSlug,
+				sessionSlug: sessionId ? projectSlug : null,
 			}),
 		},
 	});

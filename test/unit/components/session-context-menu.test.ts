@@ -2,12 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SessionContextMenu from "../../../src/lib/frontend/components/session/SessionContextMenu.svelte";
 import { openSnoozePicker } from "../../../src/lib/frontend/stores/snooze-picker.svelte.js";
-import {
-	setSessionAutoSettleRpc,
-	setSessionPinnedRpc,
-	setSessionSettledRpc,
-	unsnoozeSessionRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 vi.mock(
@@ -34,10 +29,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		setSessionAutoSettleRpc: vi.fn().mockResolvedValue(undefined),
-		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
-		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
-		unsnoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
+		rpc: vi.fn().mockResolvedValue(undefined),
 	}),
 );
 
@@ -137,7 +129,8 @@ describe("session triage menu", () => {
 		expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
 		expect(screen.getByTestId("session-ctx-rename")).toBeTruthy();
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
-		expect(setSessionSettledRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
 				sessionId: "a",
 				settled: true,
@@ -152,7 +145,8 @@ describe("session triage menu", () => {
 		});
 		expect(checkbox.getAttribute("aria-checked")).toBe("true");
 		await fireEvent.click(checkbox);
-		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionAutoSettle",
 			expect.objectContaining({
 				sessionId: "a",
 				disabled: true,
@@ -165,7 +159,8 @@ describe("session triage menu", () => {
 		});
 		expect(unchecked.getAttribute("aria-checked")).toBe("false");
 		await fireEvent.click(unchecked);
-		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionAutoSettle",
 			expect.objectContaining({
 				sessionId: "a",
 				disabled: false,
@@ -216,7 +211,8 @@ describe("session triage menu", () => {
 		cleanup();
 		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
-		expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"UnsnoozeSession",
 			expect.objectContaining({ sessionId: "a" }),
 		);
 	});
@@ -224,7 +220,8 @@ describe("session triage menu", () => {
 	it("un-settles a settled session", async () => {
 		openMenu({ id: "a", title: "Alpha", settledAt: 0 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsettle"));
-		expect(setSessionSettledRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
 				sessionId: "a",
 				settled: false,
@@ -235,7 +232,8 @@ describe("session triage menu", () => {
 	it("pins a session", async () => {
 		openMenu({ id: "a", title: "Alpha" });
 		await fireEvent.click(await screen.findByTestId("session-ctx-pin"));
-		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
 			expect.objectContaining({
 				sessionId: "a",
 				pinned: true,
@@ -253,9 +251,13 @@ describe("session triage menu", () => {
 		expect(settle.getAttribute("aria-disabled")).toBe("true");
 		expect(settle.textContent).toContain("Unpin to settle");
 		await fireEvent.click(settle);
-		expect(setSessionSettledRpc).not.toHaveBeenCalled();
+		expect(rpc).not.toHaveBeenCalledWith(
+			"SetSessionSettled",
+			expect.anything(),
+		);
 		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
-		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
 			expect.objectContaining({
 				sessionId: "a",
 				pinned: false,

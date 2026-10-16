@@ -22,7 +22,6 @@ import type {
 } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
-import type { ClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import {
 	type ClaudeSubagentSdk,
 	claudeSubagentSessionId,
@@ -36,6 +35,7 @@ import type {
 	SessionMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
+import type { SessionRunner } from "../../../../src/lib/provider/runner/session-runner.js";
 import type {
 	ModelInfo,
 	SendTurnInput,
@@ -1104,7 +1104,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			})(),
 		);
 		query.close = vi.fn(releaseStream);
-		let runner: ClaudeSessionRunner | undefined;
+		let runner: SessionRunner | undefined;
 		const finalized = vi.fn();
 		const onBackgroundTask = vi.fn();
 		const instance = makeTestClaudeProviderInstance({

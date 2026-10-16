@@ -418,6 +418,7 @@ for (const scenario of [
 					interruptTurn: () => Effect.void,
 				}),
 				Effect.provideService(SessionInboxTag, {
+					steerDeclined: () => Effect.void,
 					withSession: (sessionId, effect) =>
 						admission.withPermits(1)(
 							Effect.sync(() => admittedSessions.push(sessionId)).pipe(
@@ -462,7 +463,6 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 		const registry = new ProviderRegistry([
 			{
 				providerId: "claude",
-				steering: false,
 				discoverEffect: () => Effect.die("Prewarm must not discover"),
 				sendTurnEffect: () => Effect.die("Prewarm must not send a turn"),
 				preWarmSessionEffect: (input) =>

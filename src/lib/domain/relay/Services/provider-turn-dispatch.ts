@@ -30,6 +30,7 @@ import {
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import {
 	ReadQueryEffectTag,
@@ -37,7 +38,6 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
@@ -324,6 +324,21 @@ const loadClaudeHistoryMetadata = (sessionId: string) =>
 		return undefined;
 	});
 
+const hasNewerHandoff = (
+	input: ProviderTurnServiceSendInput,
+	sql: SqlClient.SqlClient,
+) => {
+	const handoff = input.events?.find((event) => event.type === "input.sent");
+	return handoff
+		? sql`SELECT 1 FROM events WHERE session_id = ${input.sessionId}
+		AND type = 'input.sent' AND sequence > (SELECT sequence FROM events
+			WHERE event_id = ${handoff.eventId}) LIMIT 1`.pipe(
+				Effect.map((rows) => rows.length > 0),
+				Effect.orElseSucceed(() => true),
+			)
+		: Effect.succeed(false);
+};
+
 /**
  * End a send that failed. Each failure gets exactly one turn.error: a provider
  * that already ended the turn it was handed (failed, interrupted or completed
@@ -342,8 +357,20 @@ const failUnfinishedSend = (
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		const sql = yield* SqlClient.SqlClient;
+		const handoff =
+			input.steer && input.events?.find((event) => event.type === "input.sent");
+		if (handoff) {
+			const [requeued] = yield* sql`SELECT 1 FROM events
+				WHERE session_id = ${input.sessionId} AND type = 'input.requeued'
+				AND json_extract(data, '$.sentSequence') = (SELECT sequence FROM events
+					WHERE event_id = ${handoff.eventId}) LIMIT 1`;
+			// Recovery can publish before this old dispatch unwinds. Its timeout
+			// and failure must never affect a turn the user has already retried.
+			if (requeued) return;
+		}
 		const failTurn = yield* makeFailTurn;
-		yield* clearProcessingTimeout(input.sessionId);
+		if (!input.steer && !(yield* hasNewerHandoff(input, sql)))
+			yield* clearProcessingTimeout(input.sessionId);
 		const inputId = input.continuation ? undefined : input.commandId;
 		const unplaced =
 			driver !== undefined &&
@@ -356,6 +383,18 @@ const failUnfinishedSend = (
 				Effect.orElseSucceed(() => false),
 			));
 		if (unplaced) {
+			// A failed steer stays in the inbox. Settlement requeues it only once
+			// its provider can no longer deliver it; no synthetic message consumes it.
+			if (input.steer) {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				yield* requeueFailedSteers(
+					sql,
+					persist,
+					input.sessionId,
+					input.commandId,
+				);
+				return;
+			}
 			const persist = yield* ClaudeEventPersistEffectTag;
 			yield* persist
 				.persistUserMessage(input.sessionId, input.text, {
@@ -478,8 +517,10 @@ const handleDispatchResult = (
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
-		// The steer-requeue ticket defines how declined inputs are rescheduled.
-		if (result.status === "steer-declined") return;
+		if (result.status === "steer-declined") {
+			yield* input.onSteerDeclined ?? Effect.void;
+			return;
+		}
 		// The interrupter already sent done; finalizing again can end a newer turn.
 		if (result.status === "interrupted" && !result.error) return;
 		// One provider result finalises once: the input that owns it does that,
@@ -535,20 +576,6 @@ const prepareEngineTurnInput = (
 		const driver = account.driver;
 		const providerId = account.id;
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
-		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
-		if (
-			traits.unavailableReason &&
-			(registry._tag === "None" || !registry.value.hasInstance(driver))
-		) {
-			yield* failUnfinishedSend(
-				resolvedInput,
-				driver,
-				false,
-				traits.unavailableReason,
-				"PROVIDER_UNAVAILABLE",
-			);
-			return undefined;
-		}
 		const readQuery = yield* ReadQueryEffectTag;
 		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
 		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
@@ -755,7 +782,12 @@ const dispatchEngineTurn = (
 			yield* orchestrationEngine.getProviderForSessionEffect(
 				resolvedInput.sessionId,
 			);
-		const restorePreviousBinding = Effect.sync(() => {
+		const restorePreviousBinding = Effect.gen(function* () {
+			// Steers share the running turn's binding. A later handoff owns any
+			// binding change made while an earlier dispatch unwinds.
+			if (resolvedInput.steer) return;
+			const sql = yield* SqlClient.SqlClient;
+			if (yield* hasNewerHandoff(resolvedInput, sql)) return;
 			if (previousProviderId) {
 				orchestrationEngine.bindSession(
 					resolvedInput.sessionId,
@@ -852,9 +884,14 @@ const dispatchEngineTurn = (
 			Effect.onInterrupt(() => restorePreviousBinding),
 			Effect.ensuring(Deferred.succeed(accepted, undefined)),
 		);
+		// A requeued input keeps its id, but its next handoff must not reuse
+		// the failed dispatch fiber while that fiber is still unwinding.
+		const handoffId =
+			events.find((event) => event.type === "input.sent")?.eventId ??
+			sendTurnInput.inputId;
 		const fiber = yield* FiberMap.run(
 			dispatchFibers,
-			`${resolvedInput.sessionId}:${sendTurnInput.inputId}`,
+			`${resolvedInput.sessionId}:${handoffId}`,
 			dispatchProgram,
 			{ onlyIfMissing: true },
 		);

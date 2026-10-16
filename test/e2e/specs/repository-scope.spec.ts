@@ -95,16 +95,7 @@ async function openList(
 		),
 	);
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			AttachProject: ({ projectSlug }) => ({
-				projectSlug: projectSlug ?? projects[0]?.slug ?? null,
-				sessionSlug: null,
-			}),
-			GetProjects: () => ({ projects, current: projects[0]?.slug ?? null }),
-			GetDefaultGroupingMode: () => ({
-				mode: projects[0]?.effectiveGroupingMode ?? "repository",
-			}),
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
+		stubs: {
 			ListDaemonSessions: ({ scope, search, cursor, exclude, limit }) => {
 				const members = projects
 					.filter(
@@ -142,9 +133,22 @@ async function openList(
 					availability: [],
 					hasMore,
 					nextCursor:
-						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
+						hasMore && last
+							? { updatedAt: Number(last.updatedAt), id: last.id }
+							: null,
 				};
 			},
+		},
+		handlers: {
+			AttachProject: ({ projectSlug }) => ({
+				projectSlug: projectSlug ?? projects[0]?.slug ?? null,
+				sessionSlug: null,
+			}),
+			GetProjects: () => ({ projects, current: projects[0]?.slug ?? null }),
+			GetDefaultGroupingMode: () => ({
+				mode: projects[0]?.effectiveGroupingMode ?? "repository",
+			}),
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 		},
 		streams: {
 			SubscribeShell: ({ projectSlug }) => [
@@ -425,7 +429,7 @@ for (const viewport of [
 				accountId: null,
 				id: "live-member",
 				title: "Live HTTPS session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug: secondary,
 				updatedAt: 2_000_000_001_000,
 				messageCount: 0,
@@ -434,7 +438,7 @@ for (const viewport of [
 				accountId: null,
 				id: "live-outside",
 				title: "Live library session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug: lone,
 				updatedAt: 2_000_000_002_000,
 				messageCount: 0,

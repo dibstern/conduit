@@ -137,7 +137,11 @@ test("typed and legacy entries coexist with control overrides", async ({
 	const control = await mockWsRpc(page, {
 		stubs: {
 			SetLogLevel: () => ({ ok: true }),
-			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+			"input.submit": ({ sessionId }) => ({
+				ok: true,
+				sessionId,
+				handedOff: true,
+			}),
 		},
 		handlers: { GetStatus: () => MOCK_SERVER_STATUS },
 	});
@@ -161,7 +165,7 @@ test("typed and legacy entries coexist with control overrides", async ({
 				delivery: "queue",
 			}),
 		),
-	).toEqual({ value: { ok: true, sessionId: "s" } });
+	).toEqual({ value: { ok: true, sessionId: "s", handedOff: true } });
 	expect(submitted).toMatchObject({
 		sessionId: "s",
 		inputId: "i",
@@ -178,12 +182,12 @@ test("typed and legacy entries coexist with control overrides", async ({
 
 test("a legacy invalid reply warns and becomes a defect", async ({ page }) => {
 	await mockWsRpc(page, {
-		handlers: { ListWorktrees: () => ({ worktrees: "invalid" }) },
+		handlers: {
+			GetStatus: () => ({ ...MOCK_SERVER_STATUS, clientCount: "invalid" }),
+		},
 	});
 	await openClient(page);
-	const result = await page.evaluate(() =>
-		window.callRpc("ListWorktrees", { projectSlug: "p" }),
-	);
+	const result = await page.evaluate(() => window.callRpc("GetStatus", {}));
 	expect(result).toHaveProperty("defect");
 });
 

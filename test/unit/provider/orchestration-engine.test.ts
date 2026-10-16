@@ -127,7 +127,6 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 } {
 	return {
 		providerId,
-		steering: false,
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],
@@ -323,7 +322,27 @@ describe("OrchestrationEngine", () => {
 			});
 
 			expect(opencode.discoverEffect).toHaveBeenCalledTimes(1);
+			expect(opencode.discoverEffect).toHaveBeenCalledWith(
+				undefined,
+				undefined,
+			);
 			expect(result).toMatchObject({ models: [] });
+		});
+
+		it("forwards an explicit catalog refresh to the provider instance", async () => {
+			const claude = makeStubInstance("claude");
+			registry.registerInstance(claude);
+			await dispatch(engine, {
+				type: "discover",
+				providerId: "claude",
+				workspaceRoot: "/tmp/worktree",
+				refresh: true,
+			});
+			expect(claude.discoverEffect).toHaveBeenCalledWith(
+				"/tmp/worktree",
+				undefined,
+				{ refresh: true },
+			);
 		});
 	});
 

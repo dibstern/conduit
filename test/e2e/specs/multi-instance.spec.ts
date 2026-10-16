@@ -87,18 +87,26 @@ function defaultAccountDaemon() {
 			instances.find((instance) => instance.isDefault)?.id ?? "claude";
 		let sessionAccount: string | undefined;
 		const rpc = await mockWsRpc(page, {
-			handlers: {
-				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
-				DetectProxy: () => ({ found: false, port: 8317 }),
+			stubs: {
+				"input.submit": () => ({
+					ok: true,
+					sessionId: "sess-first-send",
+					handedOff: true,
+				}),
+				CreateSession: (payload) => {
+					sessionAccount = String(payload["instanceId"]);
+					return { projectSlug: "myapp", sessionId: "sess-first-send" };
+				},
 				GetModels: (payload) => {
 					const id =
 						typeof payload["instanceId"] === "string"
 							? payload["instanceId"]
-							: payload["sessionId"]
+							: "sessionId" in payload && payload.sessionId
 								? (sessionAccount ?? defaultId())
 								: defaultId();
 					publishModels(id);
 					return {
+						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						instanceId: id,
 						providers: [],
@@ -122,11 +130,10 @@ function defaultAccountDaemon() {
 						},
 					],
 				}),
-				CreateSession: (payload) => {
-					sessionAccount = String(payload["instanceId"]);
-					return { projectSlug: "myapp", sessionId: "sess-first-send" };
-				},
-				"input.submit": () => ({ ok: true, sessionId: "sess-first-send" }),
+			},
+			handlers: {
+				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
+				DetectProxy: () => ({ found: false, port: 8317 }),
 			},
 		});
 		clients.push(rpc);

@@ -125,6 +125,8 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "auth_required"
+	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
 	| "interrupted"
@@ -340,14 +342,11 @@ export interface ProviderInstance {
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 
-	/** The provider reads an input handed off mid-turn at its next tool
-	 *  boundary and reports when it starts (a steer). */
-	readonly steering: boolean;
-
 	/** Query the provider for available models, commands, and capabilities */
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 
 	/** Send a user turn to the provider and stream response events via EventSink */

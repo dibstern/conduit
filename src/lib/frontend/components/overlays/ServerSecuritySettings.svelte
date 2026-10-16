@@ -2,6 +2,7 @@
 	import { tick } from "svelte";
 	import { refreshServerStatus, serverStatus } from "../../stores/server-status.svelte.js";
 	import { SetPinRejected, setPinRpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
@@ -40,6 +41,7 @@
 			return;
 		}
 		saving = true;
+		let wrongPin = false;
 		try {
 			await setPinRpc({ pin: form === "pin-remove" ? null : newPin, ...(form === "pin-set" ? {} : { currentPin }) });
 			if (openForm === form) onToggleForm(form);
@@ -47,12 +49,10 @@
 		} catch (cause: unknown) {
 			if (openForm !== form) return;
 			if (cause instanceof SetPinRejected) {
+				error = failureLine(cause, "Could not save PIN. Try again.");
 				if (cause.reason === "wrong_pin") {
-					error = "Wrong PIN. Try again.";
+					wrongPin = true;
 					currentPin = "";
-				} else {
-					const minutes = Math.max(1, Math.ceil((cause.retryAfterSeconds ?? 60) / 60));
-					error = `Too many tries. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
 				}
 			} else {
 				error = "Could not save PIN. Try again.";
@@ -60,7 +60,7 @@
 		} finally {
 			saving = false;
 		}
-		if (error === "Wrong PIN. Try again.") {
+		if (wrongPin) {
 			await tick();
 			if (openForm === form) currentInput?.focus();
 		}

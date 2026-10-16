@@ -11,8 +11,9 @@
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
+	import { AccountIdSchema } from "../../../contracts/provider-instance.js";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
-	import { formatErrorDetail } from "../../../errors-utils.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
@@ -82,7 +83,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -120,7 +121,7 @@
 	let draftNewWorktree = $state(false);
 	let draftWorktreeBase = $state<string | null>(null);
 	let draftModeChosen = $state(false);
-	let draftSessionMode = $state<Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined>();
+	let draftSessionMode = $state<Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined>();
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
@@ -140,9 +141,9 @@
 		pendingDraftSessionMode = undefined;
 		if (route.page !== "chat" || !route.draft || !projectSlug || untrack(() => sessionState.currentId)) return;
 		let current = true;
-		pendingDraftSessionMode = resolveSessionModeRpc(projectSlug)
+		pendingDraftSessionMode = rpc("ResolveSessionMode", { projectSlug })
 			.then((resolution) => { if (current) draftSessionMode = resolution; })
-			.catch(() => { if (current) showToast("Couldn't load default session mode", { variant: "error" }); });
+			.catch((error) => { if (current) toastFailure("Couldn't load default session mode")(error); });
 		return () => { current = false; };
 	});
 	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));
@@ -223,7 +224,7 @@
 		requestSessionPreWarm(sessionState.currentId);
 		return () => requestSessionPreWarm(null);
 	});
-	function draftSessionPayload(projectSlug: string | null): PreWarmDraftRpcInput | undefined {
+	function draftSessionPayload(projectSlug: string | null) {
 		const displayed = getDraftPick();
 		if (!projectSlug || !displayed) return undefined;
 		return {
@@ -231,6 +232,7 @@
 			originId: getBrowserClientId(),
 			draftId,
 			...displayed,
+			instanceId: AccountIdSchema.make(displayed.instanceId),
 			...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
 			...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 		};
@@ -598,10 +600,10 @@
 		);
 	}
 
-	function syncInputDraft(text: string): Promise<void> {
+	async function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		if (!sessionId) return Promise.resolve();
-		return syncInputDraftRpc({
+		if (!sessionId) return;
+		await rpc("SyncInputDraft", {
 			sessionId,
 			text,
 			originId: getBrowserClientId(),
@@ -730,7 +732,7 @@
 		startingSideThread = true;
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
-			const { sessionId } = await startSideThreadRpc({
+			const { sessionId } = await rpc("StartSideThread", {
 				sessionId: parentSessionId,
 				title: question,
 				inputId,
@@ -745,7 +747,7 @@
 			}
 			return true;
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+			toastFailure("Failed to start Side Thread")(error);
 			return false;
 		} finally {
 			startingSideThread = false;
@@ -846,7 +848,7 @@
 				}
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
-				const created = await createSessionRpc({
+				const created = await rpc("CreateSession", {
 					...payload,
 					...(draftNewWorktree ? { newWorktree: true } : {}),
 				});
@@ -857,18 +859,10 @@
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
 			} catch (error) {
-				if (Schema.is(WorktreeCreationError)(error)) {
-					showToast({ title: "Could not start session", variant: "error", body: error.message });
-				} else if (Schema.is(WorkspaceMoveError)(error)) {
-					const body = {
-						missing: "That worktree no longer exists.",
-						"not-a-worktree": "That folder is not a git worktree.",
-						"other-repository": "That worktree belongs to another repository.",
-						"unsupported-provider": "This provider does not support worktrees.",
-					}[error.reason];
-					showToast({ title: "Could not start session", variant: "error", body });
+				if (Schema.is(WorktreeCreationError)(error) || Schema.is(WorkspaceMoveError)(error)) {
+					toastFailure("Could not start session")(error);
 				} else {
-					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
+					toastFailure("Failed to create session")(error);
 				}
 				draftSend.message = null;
 				if (unsent && !sessionState.currentId && !inputText) {
@@ -912,10 +906,10 @@
 				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
 					switchToSession(response.sessionId, projectSlug ?? undefined, undefined, { replace: true });
 				resolve(true);
-			}).catch(() => {
+			}).catch((error) => {
 				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
 				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
-				showToast("Failed to send message", { variant: "error" });
+				toastFailure("Failed to send message")(error);
 				resolve(false);
 			});
 		}));
@@ -983,7 +977,7 @@
 		const driver = getInstanceById(accountId ?? "")?.driver;
 		const supportsTaskStop = getDriverTraits(driver)?.sessionCapabilities.supportsTaskStop;
 		const hadTasks = supportsTaskStop && (currentSession?.backgroundTasks?.length ?? 0) > 0;
-		void cancelSessionRpc({
+		void rpc("CancelSession", {
 			sessionId,
 			commandId: crypto.randomUUID(),
 		}).then(() => {
@@ -1001,9 +995,7 @@
 				} },
 			});
 			taskStopToast = { id, sessionId };
-		}).catch(() => {
-			showToast("Failed to stop session", { variant: "error" });
-		});
+		}).catch(toastFailure("Failed to stop session"));
 	}
 
 	function handleSendClick(e: MouseEvent) {
@@ -1494,11 +1486,11 @@
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
 												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-												onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
-												onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
-												oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
-												ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
-												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
+												onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+												onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+												oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+												ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+												onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 											>
 												{#snippet children(attention, checkout, warning)}
 													{@render phoneMore(rows, attention, checkout, warning)}
@@ -1529,11 +1521,11 @@
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
 								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-								onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
-								onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
-								oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
-								ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
-								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
+								onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+								onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+								oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+								ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+								onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 							/>
 						{/key}
 					{/if}
@@ -1672,11 +1664,11 @@
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
 									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-									onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
-									onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
-									oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
-									ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
+									onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
+									onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
+									oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
+									ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
+									onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}
@@ -1687,6 +1679,9 @@
 				</div>
 				{/if}
 			</div>
+		{/if}
+		{#if composerPresentation?.composerNotice}
+			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation.composerNotice}</p>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
 			<!-- One pulse per live background task; the header row lists them. -->

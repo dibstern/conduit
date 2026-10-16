@@ -36,7 +36,9 @@
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState } from "../../utils/session-lifecycle.js";
-	import { getGoalDetailsRpc, type GoalDetails } from "../../transport/ws-rpc-client.js";
+	import type { GoalDetails } from "../../transport/ws-rpc.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
@@ -67,7 +69,7 @@
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import { activeSessionView, sessionViews, viewShortcutHint } from "./session-views.js";
 
-	let { getGoalDetails = getGoalDetailsRpc }: { getGoalDetails?: typeof getGoalDetailsRpc | undefined } = $props();
+	let { getGoalDetails = (input) => rpc("GetGoalDetails", input) }: { getGoalDetails?: ((input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>) | undefined } = $props();
 
 	// "New Session" matches session/SessionItem.svelte, so an untitled session
 	// reads the same in the bar as it does in the list it came from.
@@ -112,7 +114,7 @@
 
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
-	let detailsFailed = $state(false);
+	let detailsFailed = $state("");
 	let detailsNow = $state(Date.now());
 	let detailsProjectSlug: string | null | undefined;
 
@@ -139,15 +141,15 @@
 		const sessionId = sessionState.currentId;
 		const facts = goalFacts;
 		details = null;
-		detailsFailed = false;
+		detailsFailed = "";
 		detailsLoading = false;
 		if (!goalDetails.open || !sessionId || !facts || (!facts.goal && !facts.endedGoal)) return;
 		let stale = false;
 		detailsLoading = true;
 		void getGoalDetails({ sessionId }).then((result) => {
 			if (!stale) details = result;
-		}).catch(() => {
-			if (!stale) detailsFailed = true;
+		}).catch((error) => {
+			if (!stale) detailsFailed = failureLine(error, "Could not load check history.");
 		}).finally(() => {
 			if (!stale) detailsLoading = false;
 		});
@@ -667,7 +669,7 @@
 				{#if detailsLoading}
 					<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
 				{:else if detailsFailed}
-					<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">Could not load check history.</span></li>
+					<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
 				{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
 					<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
 				{/if}

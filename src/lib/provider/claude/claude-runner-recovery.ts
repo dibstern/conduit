@@ -15,32 +15,20 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../persistence/effect/read-query-effect.js";
-import {
-	recoverRunnerCommands,
-	settleUnclaimedRunnerCommands,
-} from "../runner/runner-recovery.js";
+import { runnerFailure, runnerSinkId } from "../runner/runner-protocol.js";
+import { recoverRunnerCommands } from "../runner/runner-recovery.js";
+import type { SessionFailure, SessionTurn } from "../runner/session-runner.js";
 import type { ProviderNativeSession } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
-import {
-	type ClaudeRunnerSocket,
-	claudeRunnerFailure,
-	claudeRunnerSinkId,
-	normalizeClaudeSessionTurn,
-} from "./claude-runner-protocol.js";
+import type { ClaudeRunnerSocket } from "./claude-runner-protocol.js";
+import { normalizeClaudeSessionTurn } from "./claude-runner-wire.js";
 import { captureClaudeLaunchLogin } from "./claude-sdk-env.js";
-import type {
-	ClaudeSessionFailure,
-	ClaudeSessionTurn,
-} from "./claude-session-runner.js";
 import { sendPreparedClaudeTurn } from "./prepare-turn.js";
 export const recoverClaudeRunnerCommands = (
 	sql: SqlClient.SqlClient,
 	sessionId: string,
 	connection: ClaudeRunnerSocket,
-	failTurn: (
-		sinkId: string,
-		failure: ClaudeSessionFailure,
-	) => Effect.Effect<void>,
+	failTurn: (sinkId: string, failure: SessionFailure) => Effect.Effect<void>,
 	closing: () => boolean,
 	deps: ClaudeSessionRunnerDeps,
 	liveSession: Effect.Effect<
@@ -53,7 +41,7 @@ export const recoverClaudeRunnerCommands = (
 		attempt: number,
 		nativeResumeFallback?: boolean,
 	) => string = (commandId, _inputId, attempt, nativeResumeFallback) =>
-		claudeRunnerSinkId(commandId, attempt, nativeResumeFallback),
+		runnerSinkId(commandId, attempt, nativeResumeFallback),
 ) =>
 	Effect.gen(function* () {
 		const config = yield* Effect.suspend(() =>
@@ -71,7 +59,7 @@ export const recoverClaudeRunnerCommands = (
 			driverForAccount,
 			decodeInput: (row) => ({
 				...normalizeClaudeSessionTurn(
-					JSON.parse(row.payload_json) as ClaudeSessionTurn,
+					JSON.parse(row.payload_json) as SessionTurn,
 					() => resolveClaudeLaunchConfig(config),
 				),
 				commandAttempt: row.attempt_count,
@@ -158,9 +146,7 @@ export const recoverClaudeRunnerCommands = (
 					);
 				}).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
-					Effect.mapError((cause) =>
-						claudeRunnerFailure("recover turn", cause),
-					),
+					Effect.mapError((cause) => runnerFailure("recover turn", cause)),
 				);
 			},
 			onCompleted: (row, input, result) =>
@@ -175,39 +161,4 @@ export const recoverClaudeRunnerCommands = (
 						)
 					: Effect.void,
 		});
-	});
-
-export const settleUnclaimedClaudeRunnerCommands = <E>(
-	sql: SqlClient.SqlClient,
-	claimedSessions: ReadonlySet<string>,
-	failTurn: (
-		sinkId: string,
-		turn: {
-			sessionId: string;
-			userMessageId?: string;
-			messageId: string;
-			terminal: boolean;
-		},
-		failure: ClaudeSessionFailure,
-	) => Effect.Effect<void, E>,
-	daemonConfigDir?: string,
-) =>
-	Effect.gen(function* () {
-		const config = yield* Effect.suspend(() =>
-			loadDaemonConfigResult(daemonConfigDir),
-		).pipe(
-			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
-		);
-		const accounts = accountsStateFromConfig(
-			config,
-			captureClaudeLaunchLogin(process.env),
-		);
-		return yield* settleUnclaimedRunnerCommands(
-			sql,
-			claimedSessions,
-			"claude",
-			(id) =>
-				Either.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver,
-			failTurn,
-		);
 	});

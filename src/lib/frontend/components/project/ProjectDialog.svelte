@@ -3,6 +3,7 @@
 	import type { SessionMode } from "../../../contracts/project-file.js";
 	import type { GroupingMode } from "../../../shared-types.js";
 	import {
+		type FindFolders,
 		ProjectSaveRejected,
 		type FindFoldersResponse,
 		type SaveProjectResponse,
@@ -23,11 +24,11 @@
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import {
-		findFoldersRpc,
+		rpc,
 		saveProjectRpc,
-		type FindFoldersRpcInput,
 		type SaveProjectRpcInput,
 	} from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
@@ -48,7 +49,7 @@
 		onclose,
 		onsaved,
 		returnFocus,
-		findFolders = findFoldersRpc,
+		findFolders = (input) => rpc("FindFolders", input),
 		saveProject = saveProjectRpc,
 	}: {
 		open: boolean;
@@ -59,7 +60,7 @@
 		onclose: () => void;
 		onsaved?: (response: SaveProjectResponse) => void;
 		returnFocus?: () => HTMLElement | null;
-		findFolders?: (input: FindFoldersRpcInput) => Promise<FindFoldersResponse>;
+		findFolders?: (input: ConstructorParameters<typeof FindFolders>[0]) => Promise<FindFoldersResponse>;
 		saveProject?: (input: SaveProjectRpcInput) => Promise<SaveProjectResponse>;
 	} = $props();
 
@@ -185,7 +186,7 @@
 					// Suggestions are a convenience; only a failed path lookup is worth an error.
 					if (pathQuery) {
 						if (error instanceof ProjectSaveRejected) lookupIssues = error.issues;
-						else lookupError = error instanceof Error ? error.message : "Couldn't find folders. Try again.";
+						else lookupError = failureLine(error, "Couldn't find folders. Try again.");
 					}
 					searching = false;
 				},

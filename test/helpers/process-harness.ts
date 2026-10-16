@@ -608,6 +608,10 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"
 					| "CONDUIT_TRACE_SQL_MIN_MS"
+					| "CONDUIT_CURSOR_SDK_TRACE"
+					| "CONDUIT_CURSOR_SDK_CAPTURE"
+					| "CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS"
+					| "CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>
@@ -2343,6 +2347,7 @@ export class ProcessBrowser {
 		providerId: ProviderDriverKind = "claude",
 		draft: {
 			draftId?: string;
+			modelProviderId?: string;
 			modelId?: string;
 			variant?: string;
 			contextWindow?: string;
@@ -2386,7 +2391,9 @@ export class ProcessBrowser {
 			originId: this.originId,
 			providerId,
 			model: {
-				providerId: providerId === "opencode" ? "fake" : providerId,
+				providerId:
+					draft.modelProviderId ??
+					(providerId === "opencode" ? "fake" : providerId),
 				modelId:
 					draft.modelId ??
 					(providerId === "opencode" ? "fake-model" : "sonnet"),

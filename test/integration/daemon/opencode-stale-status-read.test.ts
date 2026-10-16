@@ -103,7 +103,11 @@ describe("a stale OpenCode status read", () => {
 				delivery: "queue",
 			}),
 		);
-		expect(accepted).toEqual({ ok: true, sessionId: running });
+		expect(accepted).toEqual({
+			ok: true,
+			sessionId: running,
+			handedOff: false,
+		});
 		await vi.waitFor(() =>
 			expect(ledger(fixture, running)).toEqual({
 				status: "busy",

@@ -1611,6 +1611,7 @@ export const makeInputProjector = defineProjector(() => ({
 	handles: [
 		"input.admitted",
 		"input.sent",
+		"input.requeued",
 		"input.cancelled",
 		"input.interrupt_requested",
 		"message.created",
@@ -1654,6 +1655,28 @@ export const makeInputProjector = defineProjector(() => ({
 					yield* sql<OwnedRow>`
 						UPDATE pending_inputs SET state = 'removed', version = ${ctx.version}
 						WHERE input_id = ${event.data.inputId} AND state = 'queued'
+						RETURNING session_id`,
+				);
+			}
+
+			if (isEventType(event, "input.requeued")) {
+				return owners(
+					yield* sql<OwnedRow>`
+						UPDATE pending_inputs SET state = 'queued', version = ${ctx.version},
+							admitted_at = (SELECT COALESCE(MIN(admitted_at), ${event.createdAt}) - 1
+								FROM pending_inputs WHERE session_id = ${event.sessionId}
+								AND state IN ('queued', 'steering'))
+						WHERE input_id = ${event.data.inputId} AND session_id = ${event.sessionId}
+							AND state = 'steering'
+							AND ${event.data.sentSequence} = (SELECT MAX(sequence) FROM events
+								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
+								AND json_extract(data, '$.inputId') = ${event.data.inputId}
+								AND sequence < ${event.sequence})
+							AND (${ctx.replaying ? 1 : 0} = 1 OR NOT EXISTS (SELECT 1 FROM events
+								WHERE session_id = ${event.sessionId} AND type = 'input.sent'
+								AND json_extract(data, '$.inputId') = ${event.data.inputId}
+								AND sequence > ${event.data.sentSequence}))
+							AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = ${event.data.inputId})
 						RETURNING session_id`,
 				);
 			}

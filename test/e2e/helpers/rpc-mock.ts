@@ -5,6 +5,9 @@ import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js"
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	GetAgentsResponseSchema,
+	GetCommandsResponseSchema,
+	GetModelsResponseSchema,
 	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
@@ -149,6 +152,12 @@ export class RpcMockControl {
 		this.responseHandlers.set(tag, handler);
 	}
 
+	stubs: StubTable = {};
+
+	setStubs(stubs: StubTable): void {
+		Object.assign(this.stubs, stubs);
+	}
+
 	getResponseHandler(tag: string): RpcHandler | undefined {
 		return this.responseHandlers.get(tag) ?? this.initialHandlers[tag];
 	}
@@ -180,6 +189,56 @@ export class RpcMockControl {
 					agents.at(-1)),
 			});
 		return undefined;
+	}
+
+	catalogStubs(): Required<
+		Pick<StubTable, "GetModels" | "GetCommands" | "GetAgents">
+	> {
+		return {
+			GetModels: (payload) => {
+				const {
+					providers,
+					agents: _agents,
+					commands: _commands,
+					...modelState
+				} = this.catalog;
+				if (!providers && !Object.keys(modelState).length)
+					return new Promise<never>(() => {});
+				return Schema.decodeUnknownSync(GetModelsResponseSchema)({
+					projectSlug: this.projectSlug,
+					defaultOpenCodeInstanceId: "opencode",
+					providers: providers ?? [],
+					...modelState,
+					...("sessionId" in payload &&
+					payload.sessionId &&
+					modelState.instanceId === undefined
+						? {
+								instanceId:
+									(modelState.active as { provider?: string } | undefined)
+										?.provider === "claude"
+										? "claude"
+										: "opencode",
+							}
+						: {}),
+				});
+			},
+			GetCommands: () =>
+				this.catalog.commands
+					? Schema.decodeUnknownSync(GetCommandsResponseSchema)({
+							projectSlug: this.projectSlug,
+							commands: this.catalog.commands,
+						})
+					: new Promise<never>(() => {}),
+			GetAgents: ({ instanceId }) =>
+				this.catalog.agents?.length
+					? Schema.decodeUnknownSync(GetAgentsResponseSchema)({
+							projectSlug: this.projectSlug,
+							...(this.catalog.agents.find(
+								(list) => list.providerScope.id === instanceId,
+							) ?? this.catalog.agents.at(-1)),
+						})
+					: new Promise<never>(() => {}),
+		};
 	}
 
 	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
@@ -665,10 +724,6 @@ function defaultHandler(
 	control: RpcMockControl,
 ): RpcHandler | undefined {
 	return (
-		control.catalogHandler(tag) ??
-		(tag === "ResolveSessionMode"
-			? () => ({ mode: "local", source: "global" })
-			: undefined) ??
 		(tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 		(tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
 		(tag === "GetDefaultGroupingMode"
@@ -683,24 +738,18 @@ function defaultHandler(
 			? () => ({
 					usageLimits: { autoResume: false, autoSwitch: false, order: [] },
 				})
-			: tag === "ResolveSession"
-				? () => ({ projectSlug: control.projectSlug })
-				: tag === "AttachProject"
-					? ({ projectSlug, sessionId }) => ({
-							projectSlug:
-								typeof projectSlug === "string"
-									? projectSlug
-									: control.projectSlug,
-							sessionSlug:
-								typeof sessionId === "string" ? control.projectSlug : null,
-						})
-					: tag === "ViewSession"
-						? () => ({ ok: true })
-						: tag === "InspectSessionWorktrees"
-							? () => ({ worktrees: [], removeWorktrees: false })
-							: tag === "input.submit"
-								? ({ sessionId }) => ({ ok: true, sessionId })
-								: undefined)
+			: tag === "AttachProject"
+				? ({ projectSlug, sessionId }) => ({
+						projectSlug:
+							typeof projectSlug === "string"
+								? projectSlug
+								: control.projectSlug,
+						sessionSlug:
+							typeof sessionId === "string" ? control.projectSlug : null,
+					})
+				: tag === "InspectSessionWorktrees"
+					? () => ({ worktrees: [], removeWorktrees: false })
+					: undefined)
 	);
 }
 
@@ -742,7 +791,7 @@ function socketTable(
 	requests: Map<string, EffectRpcRequest[]>,
 ): StubTable {
 	// Iterating the group erases the tag/payload correlation checked by StubTable.
-	const stubs = (options.stubs ?? {}) as Readonly<
+	const stubs = control.stubs as Readonly<
 		Record<string, ((payload: Record<string, unknown>) => unknown) | undefined>
 	>;
 	const table: Record<string, (payload: never) => unknown> = {};
@@ -872,6 +921,18 @@ export async function mockWsRpc(
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.initialHandlers = options.handlers ?? {};
+	control.stubs = {
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
+		ResolveSession: () => ({ projectSlug: control.projectSlug }),
+		ViewSession: () => ({ ok: true }),
+		...control.catalogStubs(),
+		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		...options.stubs,
+	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {
@@ -952,25 +1013,21 @@ export async function ensureMockTranscriptRpc(
 	const control = controls.get(page);
 	if (control) return control;
 	return mockWsRpc(page, {
-		handlers: {
+		stubs: {
+			LoadMoreHistory: ({ sessionId, before }) => ({
+				projectSlug: "e2e-replay",
+				sessionId,
+				...mockDetailPage(page, sessionId, before),
+			}),
 			ViewSession: () => ({ ok: true }),
-			ResolveSession: ({ projectSlug }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
+			ResolveSession: () => ({
+				projectSlug: "e2e-replay",
 			}),
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
-			}),
-			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
-				sessionId: String(sessionId ?? ""),
-				...mockDetailPage(
-					page,
-					String(sessionId ?? ""),
-					typeof before === "string" ? before : undefined,
-				),
 			}),
 		},
 	});

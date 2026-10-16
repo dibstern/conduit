@@ -84,6 +84,13 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 		},
 	];
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			"input.submit": ({ sessionId }) => ({
+				ok: true,
+				sessionId,
+				handedOff: true,
+			}),
+		},
 		handlers: {
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects: [] }),
@@ -341,10 +348,25 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		return { instances };
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ResolveSession: () => ({ projectSlug: "myapp" }),
-			GetProjects: () => ({ projects: [project], current: "myapp" }),
-			DetectProxy: () => ({ found: false, port: 8317 }),
+			CreateSession: (payload) => {
+				const id = payload["instanceId"];
+				if (typeof id !== "string") throw new Error("Missing account id");
+				const account = Either.getOrThrowWith(
+					resolveAccount(state, { _tag: "Id", id }),
+					(error) => error,
+				);
+				rpc.upsertShellRow({
+					id: "sess-restored",
+					accountId: account.id,
+					title: "Restored draft",
+					status: "idle",
+					projectSlug: "myapp",
+					updatedAt: Date.now(),
+				});
+				return { projectSlug: "myapp", sessionId: "sess-restored" };
+			},
 			GetModels: (payload) => {
 				const id =
 					typeof payload["instanceId"] === "string"
@@ -352,11 +374,17 @@ test("deleting Claude defaults follows usage order and adding an account restore
 						: list(state).find(
 								(account) => account.driver === "claude" && account.isDefault,
 							)?.id;
-				if (!id) return { projectSlug: "myapp", providers: [] };
+				if (!id)
+					return {
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug: "myapp",
+						providers: [],
+					};
 				const catalogue = catalogues[id];
 				if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
 				publishCatalogue(id);
 				return {
+					defaultOpenCodeInstanceId: "opencode",
 					projectSlug: "myapp",
 					instanceId: id,
 					providers: providersForAccount(id),
@@ -382,6 +410,10 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects: [project], current: "myapp" }),
+			DetectProxy: () => ({ found: false, port: 8317 }),
 			GetUsageLimitsSetting: () => ({
 				usageLimits: {
 					autoResume: false,
@@ -400,27 +432,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				if (typeof name !== "string") throw new Error("Missing account name");
 				return refreshAccounts({ _tag: "Add", name, driver: "claude" });
 			},
-			CreateSession: (payload) => {
-				const id = payload["instanceId"];
-				if (typeof id !== "string") throw new Error("Missing account id");
-				const account = Either.getOrThrowWith(
-					resolveAccount(state, { _tag: "Id", id }),
-					(error) => error,
-				);
-				rpc.upsertShellRow({
-					id: "sess-restored",
-					accountId: account.id,
-					title: "Restored draft",
-					status: "idle",
-					projectSlug: "myapp",
-					updatedAt: Date.now(),
-				});
-				return { projectSlug: "myapp", sessionId: "sess-restored" };
-			},
-			"input.submit": (payload) => ({
-				ok: true,
-				sessionId: payload["sessionId"],
-			}),
 		},
 	});
 	const publishCatalogue = (id: string) => {

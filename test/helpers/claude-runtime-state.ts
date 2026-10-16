@@ -11,8 +11,7 @@ import type { TurnResult } from "../../src/lib/provider/types.js";
 function stateRefFor(
 	instance: ClaudeProviderInstance,
 ): Ref.Ref<ClaudeProviderRuntimeState> {
-	const runtime = (instance as unknown as { runtime: ClaudeProviderRuntime })
-		.runtime;
+	const runtime: ClaudeProviderRuntime = instance;
 	return (
 		runtime as unknown as {
 			runner: { stateRef: Ref.Ref<ClaudeProviderRuntimeState> };
