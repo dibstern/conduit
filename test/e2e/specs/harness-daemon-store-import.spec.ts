@@ -77,11 +77,14 @@ test("imports both daemon-written project histories after shutdown", async ({
 		);
 		if (!savedSlug) throw new Error("Project B has no slug");
 		const driverB = await harness.connect(undefined, undefined, savedSlug);
+		// B runs on OpenCode so a byte copy of its store has no store-wide
+		// Claude runner cursor to collide with the imported original (C2).
 		await driverB.startInstance("opencode");
 		const sessionB = await driverB.createSession(
 			"Import project B",
 			"opencode",
 			"opencode",
+			{ modelProviderId: "opencode", modelId: "nemotron-3-super-free" },
 		);
 		const a = await driverA.send(sessionA, "import-history-a");
 		const b = await driverB.send(
@@ -230,6 +233,9 @@ test("imports both daemon-written project histories after shutdown", async ({
 				? normalize(result.backupError.message)
 				: null,
 		});
+		// Raw hashes cover live session ids, so the artifact names each distinct
+		// manifest by first appearance to keep its bytes repeatable.
+		const hashes: string[] = [];
 		for (const run of [0, 1]) {
 			const imported = await Effect.runPromise(
 				importRegisteredProjectStores(harness.configDir, registered, {
@@ -244,7 +250,11 @@ test("imports both daemon-written project histories after shutdown", async ({
 						"utf8",
 					),
 				),
-				manifestHash: daemonStoreManifest(destination).hash,
+				manifestHash: (() => {
+					const hash = daemonStoreManifest(destination).hash;
+					if (!hashes.includes(hash)) hashes.push(hash);
+					return `<manifest-${hashes.indexOf(hash) + 1}>`;
+				})(),
 			});
 			expect(imported.slice(0, 2).map((result) => result.outcome)).toEqual([
 				"skipped",
@@ -267,7 +277,7 @@ test("imports both daemon-written project histories after shutdown", async ({
 				"not a SQLite store\n",
 			);
 		}
-		expect(failures.runs[1]?.manifestHash).toBe(failures.runs[0]?.manifestHash);
+		expect(hashes).toHaveLength(1);
 		failures.passed = true;
 	} finally {
 		writeImportArtifact(artifact, evidence);
