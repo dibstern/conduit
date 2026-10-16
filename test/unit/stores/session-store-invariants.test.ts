@@ -1,5 +1,4 @@
 import {
-	applyFamilyFeedChange,
 	applySessionChange,
 	applySessionRemoved,
 	applySessionSnapshot,
@@ -115,38 +114,6 @@ describe("the server half holds only rows the server sent", () => {
 		});
 		expect(sessionState.currentParentId).toBeNull();
 		expect(sessionState.currentFork?.forkedFrom).toBe("ses_parent");
-	});
-
-	it("reads fork lineage from the family row when the shell still has a stale root row", () => {
-		applySessionSnapshot(
-			[
-				{
-					projectSlug: "p",
-					accountId: null,
-					id: "fork",
-					title: "Fork",
-					status: "idle",
-				},
-			],
-			"complete",
-		);
-		sessionState.currentId = "fork";
-		applyFamilyFeedChange({
-			_tag: "snapshot",
-			rows: [
-				{
-					id: "fork",
-					title: "Fork",
-					forkedFrom: "source",
-					forkMessageId: "boundary",
-				},
-			],
-		});
-		expect(sessionState.currentFork).toMatchObject({
-			forkedFrom: "source",
-			forkMessageId: "boundary",
-		});
-		expect(sessionState.currentParentId).toBeNull();
 	});
 });
 

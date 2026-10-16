@@ -5,6 +5,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { EffectSessionSeeder } from "../../../src/lib/persistence/effect/session-seeder-effect.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -489,6 +490,104 @@ describe("session read-model contract", () => {
 			});
 		}),
 	);
+	describe("shell feed", () => {
+		// What an open sidebar reads next: the families that moved, and the ones
+		// that left, past the version it last read.
+		const shellChange = (after: {
+			rows: readonly { item: { id: string } }[];
+			removed?: readonly { id: string; deleted: boolean }[];
+		}) => ({
+			upserts: after.rows.map(({ item }) => item.id).sort(),
+			removes: (after.removed ?? []).map(({ id, deleted }) => ({
+				id,
+				deleted,
+			})),
+		});
+
+		it.effect(
+			"removes a provider-stream root once session.created contains it",
+			() =>
+				Effect.gen(function* () {
+					const store = yield* EventStoreEffectTag;
+					const runner = yield* ProjectionRunnerEffectTag;
+					const readQuery = yield* ReadQueryEffectTag;
+					yield* runner.recover();
+					yield* runner.projectEvent(yield* store.append(source));
+					// OpenCode streams a new Side Thread before Conduit records it,
+					// so it is seeded with no owner and listed as a root.
+					yield* new EffectSessionSeeder().ensureSession(
+						"side-thread",
+						"opencode",
+					);
+					yield* runner.projectEvent(
+						yield* store.append(makeSessionStatusEvent("side-thread", "busy")),
+					);
+					const before = yield* readQuery.readSessionList();
+					expect(before.rows.map(({ item }) => item.id).sort()).toStrictEqual([
+						"side-thread",
+						"source",
+					]);
+					yield* runner.projectEvent(
+						yield* store.append(sideThreadOf("side-thread", "source")),
+					);
+					expect(
+						shellChange(
+							yield* readQuery.readSessionList({ after: before.version }),
+						),
+					).toStrictEqual({
+						// A Side Thread's activity stays off its owner's row.
+						upserts: [],
+						removes: [{ id: "side-thread", deleted: false }],
+					});
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
+					),
+				),
+		);
+
+		it.effect("upserts a contained session once session.forked frees it", () =>
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const readQuery = yield* ReadQueryEffectTag;
+				yield* runner.recover();
+				for (const event of [
+					source,
+					canonicalEvent("session.created", "fork", {
+						sessionId: "fork",
+						title: "fork",
+						provider: "opencode",
+						parentId: "source",
+					}),
+				])
+					yield* runner.projectEvent(yield* store.append(event));
+				const before = yield* readQuery.readSessionList();
+				expect(before.rows.map(({ item }) => item.id)).toStrictEqual([
+					"source",
+				]);
+				yield* runner.projectEvent(
+					yield* store.append(
+						canonicalEvent("session.forked", "fork", {
+							sessionId: "fork",
+							parentId: "source",
+						}),
+					),
+				);
+				expect(
+					shellChange(
+						yield* readQuery.readSessionList({ after: before.version }),
+					),
+				).toStrictEqual({
+					upserts: ["fork", "source"],
+					removes: [],
+				});
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		);
+	});
+
 	describe("legacy events", () => {
 		// Before Forks recorded lineage, a Fork was created contained in its
 		// Source with a fork point and no Side Thread flag.

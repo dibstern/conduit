@@ -235,14 +235,10 @@ export const sessionState = {
 	},
 	get currentFork() {
 		const id = clientSession.currentId;
-		if (clientSession.announcedFork?.sessionId === id)
-			return clientSession.announcedFork;
-		// OpenCode creation can reach the shell before lineage is recorded.
-		// Prefer the family row so a stale shell row cannot hide the divider.
-		const row =
-			familySessions.find((row) => row.id === id) ??
-			serverSessions.get(id ?? "");
-		return row?.forkedFrom ? row : null;
+		// Stands in until the Fork's row arrives with its lineage.
+		return clientSession.announcedFork?.sessionId === id
+			? clientSession.announcedFork
+			: null;
 	},
 	set currentId(id: string | null) {
 		clientSession.currentId = id;
