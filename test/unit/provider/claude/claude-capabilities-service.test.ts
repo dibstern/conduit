@@ -82,6 +82,157 @@ describe("ClaudeCapabilitiesService", () => {
 		);
 	});
 
+	it.effect(
+		"refreshes a fresh value and serves the new value on later gets",
+		() =>
+			Effect.gen(function* () {
+				const refreshed = capabilities("new");
+				const probe = vi
+					.fn()
+					.mockResolvedValueOnce(capabilities("old"))
+					.mockResolvedValueOnce(refreshed);
+				__setProbeOverrideForTesting(probe);
+				const service = yield* makeClaudeCapabilitiesService({ launchConfig });
+				yield* service.get("/tmp/workspace");
+				yield* TestClock.adjust("1 minute");
+
+				expect(yield* service.get("/tmp/workspace", { refresh: true })).toEqual(
+					refreshed,
+				);
+				expect(yield* service.get("/tmp/workspace")).toEqual(refreshed);
+				expect(probe).toHaveBeenCalledTimes(2);
+			}),
+	);
+
+	it.effect("persists the refreshed value before returning", () =>
+		Effect.gen(function* () {
+			const cacheDir = yield* tempDir();
+			const refreshed = capabilities("new");
+			const probe = vi
+				.fn()
+				.mockResolvedValueOnce(capabilities("old"))
+				.mockResolvedValueOnce(refreshed);
+			__setProbeOverrideForTesting(probe);
+			const service = yield* makeClaudeCapabilitiesService({
+				launchConfig,
+				cacheDir,
+			});
+			yield* service.get("/tmp/workspace");
+			yield* service.get("/tmp/workspace", { refresh: true });
+
+			const persisted = yield* Effect.tryPromise(() =>
+				readFile(cacheFile(cacheDir), "utf8"),
+			);
+			expect(JSON.parse(persisted)).toMatchObject({
+				version: 1,
+				result: refreshed,
+			});
+			expect(probe).toHaveBeenCalledTimes(2);
+		}),
+	);
+
+	for (const inFlight of ["cold", "background", "refresh"] as const) {
+		it.effect(`joins an in-flight ${inFlight} probe when refreshing`, () =>
+			Effect.gen(function* () {
+				const release = yield* Deferred.make<void>();
+				const refreshed = capabilities("shared");
+				const probe = vi.fn(async () => {
+					await Effect.runPromise(Deferred.await(release));
+					return refreshed;
+				});
+				__setProbeOverrideForTesting(probe);
+				const service = yield* makeClaudeCapabilitiesService({ launchConfig });
+				if (inFlight !== "cold") {
+					probe.mockResolvedValueOnce(capabilities("old"));
+					yield* service.get("/tmp/workspace");
+					probe.mockClear();
+				}
+				if (inFlight === "background") yield* TestClock.adjust("6 minutes");
+
+				yield* Effect.gen(function* () {
+					const first = yield* Effect.fork(
+						service.get(
+							"/tmp/workspace",
+							inFlight === "refresh" ? { refresh: true } : undefined,
+						),
+					);
+					yield* waitUntil(Effect.sync(() => probe.mock.calls.length === 1));
+					const second = yield* Effect.fork(
+						service.get("/tmp/workspace", { refresh: true }),
+					);
+					yield* Effect.yieldNow();
+					expect(Option.isNone(yield* Fiber.poll(second))).toBe(true);
+					expect(probe).toHaveBeenCalledTimes(1);
+					yield* Deferred.succeed(release, undefined);
+					expect(yield* Fiber.join(second)).toEqual(refreshed);
+					expect(yield* Fiber.join(first)).toEqual(
+						inFlight === "background" ? capabilities("old") : refreshed,
+					);
+					expect(probe).toHaveBeenCalledTimes(1);
+				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+			}),
+		);
+	}
+
+	it.effect(
+		"propagates refresh failures and preserves the previous cached value",
+		() =>
+			Effect.gen(function* () {
+				const original = capabilities("old");
+				const cause = new Error("refresh failed");
+				const probe = vi
+					.fn()
+					.mockResolvedValueOnce(original)
+					.mockRejectedValueOnce(cause);
+				__setProbeOverrideForTesting(probe);
+				const service = yield* makeClaudeCapabilitiesService({ launchConfig });
+				yield* service.get("/tmp/workspace");
+
+				const failed = yield* Effect.either(
+					service.get("/tmp/workspace", { refresh: true }),
+				);
+				expect(Either.isLeft(failed)).toBe(true);
+				if (Either.isLeft(failed)) {
+					expect(failed.left).toBeInstanceOf(ClaudeBoundaryError);
+					expect(failed.left.cause).toBe(cause);
+				}
+				expect(yield* service.get("/tmp/workspace")).toEqual(original);
+				expect(probe).toHaveBeenCalledTimes(2);
+			}),
+	);
+
+	it.effect("serves the cached value immediately during a refresh", () =>
+		Effect.gen(function* () {
+			const release = yield* Deferred.make<void>();
+			const original = capabilities("old");
+			const probe = vi
+				.fn()
+				.mockResolvedValueOnce(original)
+				.mockImplementationOnce(async () => {
+					await Effect.runPromise(Deferred.await(release));
+					return capabilities("new");
+				});
+			__setProbeOverrideForTesting(probe);
+			const service = yield* makeClaudeCapabilitiesService({ launchConfig });
+			yield* service.get("/tmp/workspace");
+
+			yield* Effect.gen(function* () {
+				const refresh = yield* Effect.fork(
+					service.get("/tmp/workspace", { refresh: true }),
+				);
+				yield* Effect.yieldNow();
+				expect(probe).toHaveBeenCalledTimes(2);
+				const plain = yield* Effect.fork(service.get("/tmp/workspace"));
+				yield* waitUntil(Fiber.poll(plain).pipe(Effect.map(Option.isSome)));
+				expect(yield* Fiber.join(plain)).toEqual(original);
+				expect(Option.isNone(yield* Fiber.poll(refresh))).toBe(true);
+				expect(probe).toHaveBeenCalledTimes(2);
+				yield* Deferred.succeed(release, undefined);
+				expect(yield* Fiber.join(refresh)).toEqual(capabilities("new"));
+			}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+		}),
+	);
+
 	it.effect("serves stale values while one background probe refreshes", () =>
 		Effect.gen(function* () {
 			const release = yield* Deferred.make<void>();
