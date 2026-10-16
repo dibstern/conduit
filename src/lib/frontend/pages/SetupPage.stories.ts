@@ -98,6 +98,14 @@ export const TailscaleServe: Story = {
  * cross-origin ts.net URL threw a SecurityError (conduit-test-6qyv). */
 export const DoneOnLocalhost: Story = {
 	args: { initialSetupInfo: serveSetupInfo },
+	beforeEach: () => {
+		const requestPermission = Notification.requestPermission;
+		// Exercise "Finish anyway" without waiting on a real browser prompt.
+		Notification.requestPermission = async () => "denied";
+		return () => {
+			Notification.requestPermission = requestPermission;
+		};
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const startUrl = location.href;

@@ -14,6 +14,7 @@ describe.skipIf(!process.env["CURSOR_API_KEY"])(
 	() => {
 		it(
 			"captures the live catalog and stored-login status without sending a turn",
+			{ timeout: 60_000 },
 			async () => {
 				mkdirSync("test-results", { recursive: true });
 				const capture = resolve("test-results/xqsg-22-cursor-sdk-live.jsonl");
@@ -47,7 +48,6 @@ describe.skipIf(!process.env["CURSOR_API_KEY"])(
 					vi.unstubAllEnvs();
 				}
 			},
-			{ timeout: 60_000 },
 		);
 	},
 );

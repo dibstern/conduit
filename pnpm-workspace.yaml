@@ -8,6 +8,11 @@ overrides:
 publicHoistPattern:
   - '@cursor/sdk-*'
 
+peerDependencyRules:
+  allowedVersions:
+    # @effect/vitest 0.29 works with Vitest 4 despite declaring a Vitest 3 peer.
+    '@effect/vitest>vitest': '4'
+
 allowBuilds:
   '@evilmartians/lefthook': false
   '@parcel/watcher': false
