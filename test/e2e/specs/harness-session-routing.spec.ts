@@ -105,11 +105,18 @@ test("session RPCs use the owner even when the page attaches to another project"
 						clearTimeout(timer);
 						socket.removeEventListener("message", receive);
 						if (frame.exit?._tag === "Success") resolve(frame.exit.value);
-						else reject(new Error(`${tag} failed`));
+						else
+							reject(new Error(`${tag} failed: ${JSON.stringify(frame.exit)}`));
 					};
 					socket.addEventListener("message", receive);
 					socket.send(
-						JSON.stringify({ _tag: "Request", id, tag, payload, headers: [] }),
+						JSON.stringify({
+							_tag: "Request",
+							id,
+							tag,
+							payload: { _tag: tag, ...payload },
+							headers: [],
+						}),
 					);
 				});
 			try {
