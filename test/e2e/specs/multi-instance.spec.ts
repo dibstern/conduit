@@ -88,7 +88,11 @@ function defaultAccountDaemon() {
 		let sessionAccount: string | undefined;
 		const rpc = await mockWsRpc(page, {
 			stubs: {
-				"input.submit": () => ({ ok: true, sessionId: "sess-first-send" }),
+				"input.submit": () => ({
+					ok: true,
+					sessionId: "sess-first-send",
+					handedOff: true,
+				}),
 				CreateSession: (payload) => {
 					sessionAccount = String(payload["instanceId"]);
 					return { projectSlug: "myapp", sessionId: "sess-first-send" };

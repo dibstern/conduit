@@ -123,7 +123,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 						inputId,
 						text,
 					});
-					return { ok: true, sessionId };
+					return { ok: true, sessionId, handedOff: false };
 				},
 				"input.cancel": ({ sessionId, inputId }) => {
 					relay.sendMessage({
