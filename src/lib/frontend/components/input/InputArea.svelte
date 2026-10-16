@@ -269,9 +269,7 @@
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
 	const readOnlySubagent = $derived(
 		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
-		!currentSession?.sideThread && !currentSession?.forkMessageId &&
-		!currentSession?.forkPointTimestamp && !sessionState.currentFork?.forkMessageId &&
-		!sessionState.currentFork?.forkPointTimestamp,
+		!currentSession?.sideThread,
 	);
 	const composerNotices: Partial<Record<SessionPermissionMode, string>> | undefined = $derived(composerPresentation?.composerNotice);
 	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);

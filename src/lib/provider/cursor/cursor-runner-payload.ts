@@ -683,7 +683,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 								: result.status === "interrupted"
 									? "interrupted"
 									: "error",
-							false,
 						);
 						yield* events.endThinking();
 						if (result.status === "completed")

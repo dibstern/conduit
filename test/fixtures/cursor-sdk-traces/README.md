@@ -179,32 +179,29 @@ never the SDK child agent ID or a custom-tool context's parent session ID.
 The following are replay derivatives, not new live observations. Each uses the
 foreground capture's complete rows and envelopes except for these edits:
 
-- `subagent-reconcile.jsonl` removes the first whole live child assistant text
-  span, leaving its completion snapshot unchanged, and repeats the Task's
-  completed delta once. It removes
+- `subagent-reconcile.jsonl` repeats the Task's completed delta once, keeping
+  all live child content and the completion snapshot unchanged. It removes
   `args.model` from the initial partial Task, then sets the started/completed
   Task's model to `composer-2.5-fast`, a value observed in the spike's excluded
   `subagent-background-default.jsonl`. This pins a later SDK-reported model
   replacing the initial inherited parent pick, plus idempotent reconciliation.
-- `subagent-reconcile-partial.jsonl` drops only the first child text delta,
-  `Executing`, and repeats the completed Task delta. Its untouched snapshot
-  pins repairing a missing prefix within a live part without duplicating the
-  remaining text. Canonical snapshot replacement also restores part order and
-  preserves the mapped live tools' timings, status and media.
+  Foreground reconciliation reuses live text and thinking part IDs positionally
+  by kind and fills the three snapshot-only generic tools in snapshot order.
+  There is no derived callback-gap case: the spike did not observe missing
+  live text callbacks.
 - `subagent-background-follow-up.jsonl` sets the completed Task's declared
   `isBackground` field to true, including its duplicate stream envelope, and
   copies the capture's existing `turn-ended` delta immediately after the Task
   completion. The subsequent, unchanged parent thinking and `done` text thus
   arrive as a follow-up turn on that same run. After that text, three copied
   child taskUpdates (thinking, thinking-completed, and text `Executing`) pin
-  live child continuation after the background Task returned. The first child
-  text delta `Executing` is omitted, and the identical completed background
-  Task delta is repeated after the late child updates. Together these edits
-  pin missing-prefix repair plus later continuation and duplicate completion,
-  while preserving the original receipt-time text offsets. This is a scheduling
-  example derived from foreground data. The spike did not observe successful background
-  follow-up ordering, terminal status or final usage ordering. The mapper keeps
-  the child busy until authoritative `Run.wait()` resolution.
+  live child continuation after the background Task returned. All original
+  live updates remain. The stale background snapshot is never reconciled.
+  This is a scheduling example derived from foreground data. The spike did not
+  observe successful background follow-up ordering, terminal status or final
+  usage ordering. The mapper keeps the child busy until authoritative
+  `Run.wait()` resolution and trusts its
+  live content, without adding snapshot-only steps.
 - `subagent-interrupt.jsonl` retains foreground rows through the first child
   text span, then substitutes its original wait result's status with
   `cancelled` and removes the finished response text. The captured `stream.end`

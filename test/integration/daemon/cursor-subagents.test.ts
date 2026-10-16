@@ -267,6 +267,50 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 		expect(events.filter(({ type }) => type === "tool.completed")).toHaveLength(
 			10,
 		);
+		expect(
+			events.filter(({ type }) => type === "message.snapshot"),
+		).toHaveLength(1);
+		const parts = (await browser.history(child.id)).flatMap(
+			({ parts }) => parts ?? [],
+		);
+		for (const kind of ["text", "thinking"] as const) {
+			expect(
+				parts.filter(({ type }) => type === kind).map(({ id }) => id),
+			).toEqual([
+				...new Set(
+					events
+						.filter(({ type }) => type === `${kind}.delta`)
+						.map(({ data }) => data["partId"]),
+				),
+			]);
+		}
+		expect(
+			parts.filter(({ tool }) => tool === "getMcpToolsToolCall"),
+		).toHaveLength(3);
+		expect(parts.slice(0, 7).map(({ type, tool }) => tool ?? type)).toEqual([
+			"thinking",
+			"text",
+			"getMcpToolsToolCall",
+			"getMcpToolsToolCall",
+			"getMcpToolsToolCall",
+			"Read",
+			"Bash",
+		]);
+		expect(
+			parts.find(({ tool }) => tool === "Bash")?.state?.["metadata"],
+		).toMatchObject({
+			cursorToolType: "shell",
+			exitCode: 0,
+		});
+		expect(
+			parts.find(({ tool }) => tool === "Bash")?.state?.["metadata"],
+		).not.toHaveProperty("output");
+		expect(
+			parts.find(({ tool }) => tool === "Bash")?.state?.["output"],
+		).toEqual({
+			_tag: "whole",
+			text: "hi\n",
+		});
 		const parent = state.events.filter((event) => event.sessionId === id);
 		const task = parent.find(
 			({ type, data }) =>
@@ -329,36 +373,25 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 		).toBe(false);
 	}, 300_000);
 
-	it.each([
-		{
-			name: "missing span",
-			trace: "subagent-reconcile",
-			model: "composer-2.5-fast",
-			missingCharacters: 0,
-		},
-		{
-			name: "missing prefix",
-			trace: "subagent-reconcile-partial",
-			model: "composer-2.5",
-			missingCharacters: "Executing".length,
-		},
-	])("reconciles repeated conversationSteps with $name without repeating child text or calls", async ({
-		trace,
-		model,
-		missingCharacters,
-	}) => {
-		const { fixture, browser, id } = await start(trace, trace);
+	it("reconciles repeated conversationSteps once without repeating child text or calls", async () => {
+		const { fixture, browser, id } = await start(
+			"reconcile",
+			"subagent-reconcile",
+		);
 		const child = await waitChild(fixture, id);
 		await waitTurn(fixture, id, "completed");
 		expect(
 			snapshot(fixture).sessions.find((row) => row.id === child.id)?.model_id,
-		).toBe(model);
+		).toBe("composer-2.5-fast");
 		const events = snapshot(fixture).events.filter(
 			(event) => event.sessionId === child.id,
 		);
-		expect(content(events, "text.delta")).toHaveLength(
-			capturedChildContent("text-delta").length - missingCharacters,
+		expect(content(events, "text.delta")).toBe(
+			capturedChildContent("text-delta"),
 		);
+		expect(
+			events.filter(({ type }) => type === "message.snapshot"),
+		).toHaveLength(1);
 		const history = await browser.history(child.id);
 		expect(
 			history
@@ -410,9 +443,7 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 						.filter(({ type }) => type === "text")
 						.map(({ text }) => text)
 						.join(""),
-				).toBe(
-					`${capturedChildContent("text-delta").slice("Executing".length)}Executing`,
-				);
+				).toBe(`${capturedChildContent("text-delta")}Executing`);
 			},
 			{ timeout: TIMEOUT },
 		);
@@ -425,6 +456,15 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 				.map(({ text }) => text)
 				.join(""),
 		).toBe(`${capturedChildContent("text-delta")}Executing`);
+		const childEvents = snapshot(fixture).events.filter(
+			({ sessionId: owner }) => owner === child.id,
+		);
+		expect(
+			childEvents.filter(({ type }) => type === "message.snapshot"),
+		).toEqual([]);
+		expect(
+			childEvents.filter(({ type }) => type === "tool.started"),
+		).toHaveLength(7);
 		const history = await browser.history(id);
 		expect(history.filter(({ role }) => role === "assistant")).toHaveLength(2);
 		expect(
