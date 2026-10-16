@@ -147,10 +147,6 @@ async function setup(
 				current: "myapp",
 			}),
 		},
-		handlers: {
-			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
-			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
-		},
 	});
 	const bound = initMessages !== unboundInit;
 	await page.goto(`${BASE}${bound ? PROJECT_URL : "/"}`);

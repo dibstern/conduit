@@ -139,9 +139,6 @@ async function openCheckout(
 			}),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
-		handlers: {
-			GetInstances: () => instances,
-		},
 		...(options.viewActivity
 			? {
 					streams: {
