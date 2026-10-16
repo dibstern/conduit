@@ -493,3 +493,25 @@ The existing projector splits one native run at a delivered user's message.
 Delivered cases therefore assert two Conduit turn segments, the stored
 `steered` flag and subsequent assistant ownership, alongside exactly one SDK
 send. The extra transcript segment does not imply another native turn.
+
+## Fork process replay (conduit-test-xqsg.14)
+
+`cursor-fork.test.ts` uses `basic.jsonl` and `tools-project.jsonl`, adding the
+same inert credential-store result and captured model catalog as the turn
+suite. After completing the source session, it rebinds that capture's agent ID
+to a fresh UUID in the temporary replay file. No SDK envelope or event kind
+changes. This lets the test distinguish a newly created fork agent from a
+resume of the source while retaining the captured turn contents.
+
+The suite checks copied history, explicit cutoffs, source event equality,
+separate stores, bounded redacted context, restart before the first fork input,
+and delivery of the hidden digest until the first accepted input. The rejected
+first-send case temporarily inserts the existing `send.error` port envelope
+with `authRequired: true`, as the auth suite does. It removes that envelope and
+restarts the owned fork runner before submitting a new input. This injects an
+operation failure without adding a stream kind. Scenario invariants
+and owned-process cleanup go to `test-results/conduit-test-xqsg.14.json`.
+The separate `cursor-fork-live-sdk.test.ts` requires both an explicit
+`CURSOR_API_KEY` and `RUN_CURSOR_LIVE_SMOKE=1`. It asks a fresh fork to recall a
+random marker present only in the source conversation and writes
+`test-results/conduit-test-xqsg.14-live.json` plus a redacted SDK trace.
