@@ -147,9 +147,18 @@ export function cursorToolInput(call: CursorToolCall): {
 			return { toolName: "CreatePlan", input: unknown("CreatePlan") };
 		case "computerUse":
 			return { toolName: "ComputerUse", input: unknown("ComputerUse") };
-		case "task":
-			// .10 will connect this generic call to live child-session ownership.
-			return { toolName: "cursor.task", input: unknown("task") };
+		case "task": {
+			const type = toRecord(args["subagentType"]);
+			return {
+				toolName: "Task",
+				input: {
+					tool: "Task",
+					description: str(args, "description"),
+					prompt: str(args, "prompt"),
+					subagentType: str(type, "name") || str(type, "kind") || "unknown",
+				},
+			};
+		}
 		default:
 			return { toolName: call.type, input: unknown(call.type) };
 	}
@@ -222,6 +231,12 @@ export class CursorToolResults {
 			}
 			if (success) {
 				switch (call.type) {
+					case "task": {
+						// conversationSteps belong only to the child transcript.
+						result = value["resultSuffix"] ?? "";
+						metadata["backgrounded"] = value["isBackground"] === true;
+						break;
+					}
 					case "shell":
 						metadata["exitCode"] = value["exitCode"];
 						metadata["isError"] =

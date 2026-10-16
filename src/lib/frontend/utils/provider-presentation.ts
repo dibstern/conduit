@@ -13,6 +13,7 @@ export const PROVIDER_PRESENTATION = {
 		namePlaceholder: "Work Claude",
 		configDirPlaceholder: "~/.config/claude/work",
 		composerNotice: undefined,
+		subagentNotice: undefined,
 	},
 	opencode: {
 		logo: "opencode",
@@ -21,6 +22,7 @@ export const PROVIDER_PRESENTATION = {
 		namePlaceholder: "Staging OC",
 		configDirPlaceholder: undefined,
 		composerNotice: undefined,
+		subagentNotice: undefined,
 	},
 	cursor: {
 		logo: "cursor",
@@ -38,6 +40,7 @@ export const PROVIDER_PRESENTATION = {
 			plan: "Cursor plans without per-call approval, inside its sandbox.",
 			full: "Cursor runs every call with no approval and no sandbox.",
 		},
+		subagentNotice: "Subagent sessions are read-only.",
 	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
@@ -50,6 +53,7 @@ export const PROVIDER_PRESENTATION = {
 		readonly composerNotice:
 			| Partial<Record<SessionPermissionMode, string>>
 			| undefined;
+		readonly subagentNotice: string | undefined;
 	}
 >;
 

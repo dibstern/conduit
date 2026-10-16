@@ -60,6 +60,8 @@ export function createTraceCursorSdkPort(
 	playback: {
 		readonly closeDelayMs?: number;
 		readonly disposeDelayMs?: number;
+		readonly deltaDelayMs?: number;
+		readonly waitDelayMs?: number;
 		readonly cancelTerminalDelayMs?: number;
 		readonly cancelNeverSettles?: boolean;
 	} = {},
@@ -249,7 +251,11 @@ export function createTraceCursorSdkPort(
 											row.data["status"] !== "RUNNING"))
 								)
 									await waiting;
-								if (row.kind === "delta") onDelta(row.data);
+								if (row.kind === "delta") {
+									if (playback.deltaDelayMs)
+										await setTimeout(playback.deltaDelayMs);
+									onDelta(row.data);
+								}
 								if (row.kind === "stream") yield row.data;
 								if (row.kind === "stream.error") {
 									throw cursorSdkFailure("run.stream", row.data);
@@ -260,7 +266,11 @@ export function createTraceCursorSdkPort(
 							complete();
 						}
 					})(),
-					wait: () => waiting,
+					async wait() {
+						await streamed;
+						if (playback.waitDelayMs) await setTimeout(playback.waitDelayMs);
+						return waiting;
+					},
 					async cancel() {
 						cancel();
 					},

@@ -186,6 +186,11 @@
 				</button>
 			{/if}
 		</div>
+		{#if childSession && (typeof part.metadata?.['subagentModel'] === "string" || typeof part.metadata?.['subagentMode'] === "string")}
+			<div class="subagent-details ml-7 mr-1 pb-1 text-xs text-text-muted break-words">
+				{[part.metadata?.['subagentModel'], part.metadata?.['subagentMode']].filter((value) => typeof value === "string").join(" · ")}
+			</div>
+		{/if}
 		{#if !launch && expanded && isSkill}
 			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
 		{:else if !launch && expanded && (part.result || command || cursorDetail)}
