@@ -132,7 +132,8 @@
 	});
 	$effect(() => {
 		const route = getCurrentRoute();
-		const projectSlug = route.page === "chat" && route.draft && !sessionState.currentId &&
+		// Desktop's "/" shows the same sendable draft composer as "/new".
+		const projectSlug = route.page === "chat" && !route.sessionId && !sessionState.currentId &&
 			(discoveryState.defaultsLoaded || discoveryState.hasInstanceChoice)
 			? getDraftProject() : null;
 		const instanceId = getEffectiveInstanceId();
