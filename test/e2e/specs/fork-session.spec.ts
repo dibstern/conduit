@@ -20,7 +20,7 @@
 
 import { writeFileSync } from "node:fs";
 import { Socket } from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
+import { RpcClient, type RpcClientError, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
 import NodeWebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
@@ -28,12 +28,18 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-async function forkSessionViaRpc(
+// The replay harness hosts one project; the daemon /rpc routes by slug.
+const projectSlug = "e2e-replay";
+
+async function callRpc<A>(
 	relayUrl: string,
-	sessionId: string,
-): Promise<string> {
-	// The replay harness hosts one project; the daemon /rpc routes by slug.
-	const projectSlug = "e2e-replay";
+	call: (
+		client: RpcClient.FromGroup<
+			typeof WsRpcGroup,
+			RpcClientError.RpcClientError
+		>,
+	) => Effect.Effect<A, unknown>,
+): Promise<A> {
 	const url = new URL(relayUrl);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	url.pathname = "/rpc";
@@ -44,17 +50,7 @@ async function forkSessionViaRpc(
 		NodeWebSocket as unknown as typeof globalThis.WebSocket;
 	try {
 		return await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const client = yield* RpcClient.make(WsRpcGroup);
-					const result = yield* client.ForkSession({
-						projectSlug,
-						sessionId,
-						originId: crypto.randomUUID(),
-					});
-					return result.sessionId;
-				}),
-			).pipe(
+			Effect.scoped(Effect.flatMap(RpcClient.make(WsRpcGroup), call)).pipe(
 				Effect.provide(RpcClient.layerProtocolSocket()),
 				Effect.provide(Socket.layerWebSocket(url.toString())),
 				Effect.provide(Socket.layerWebSocketConstructorGlobal),
@@ -77,7 +73,7 @@ async function setupForkSession(
 	app: AppPage,
 	chat: ChatPage,
 	relayUrl: string,
-): Promise<void> {
+): Promise<{ sourceId: string; forkId: string }> {
 	await app.goto(relayUrl);
 
 	await app.sendMessage(
@@ -98,7 +94,11 @@ async function setupForkSession(
 	if (!sessionId) throw new Error("Missing source session route");
 
 	// Fork: whole-session fork (no messageId)
-	const forkedSessionId = await forkSessionViaRpc(relayUrl, sessionId);
+	const forkedSessionId = await callRpc(relayUrl, (client) =>
+		client
+			.ForkSession({ projectSlug, sessionId, originId: crypto.randomUUID() })
+			.pipe(Effect.map((result) => result.sessionId)),
+	);
 	await page.evaluate((sessionId) => {
 		const route = new URL(window.location.href);
 		route.pathname = `/s/${encodeURIComponent(sessionId)}`;
@@ -126,6 +126,7 @@ async function setupForkSession(
 	// the session's forkMessageId is set.
 	const forkDivider = page.locator(".fork-divider");
 	await forkDivider.waitFor({ state: "visible", timeout: 30_000 });
+	return { sourceId: sessionId, forkId: forkedSessionId };
 }
 
 test.describe("Fork Session Rendering", () => {
@@ -213,6 +214,63 @@ test.describe("Fork Session Rendering", () => {
 			writeFileSync(
 				testInfo.outputPath("fork-in-sidebar.json"),
 				JSON.stringify({ forkId, sidebarIds }, null, 2),
+			);
+		}
+	});
+
+	test("deleting the source keeps the fork", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+
+		const { sourceId, forkId } = await setupForkSession(
+			page,
+			app,
+			chat,
+			relayUrl,
+		);
+		await callRpc(relayUrl, (client) =>
+			client.DeleteSession({
+				projectSlug,
+				sessionId: sourceId,
+				originId: crypto.randomUUID(),
+			}),
+		);
+
+		const divider = page.locator(".fork-divider");
+		try {
+			await expect(
+				page.locator(`#session-list [data-session-id="${sourceId}"]`),
+			).toHaveCount(0);
+			await expect(
+				page.locator(`#session-list [data-session-id="${forkId}"]`),
+			).toBeVisible();
+			await expect(divider).toHaveText("Forked from a deleted session");
+			await expect(divider.getByRole("button")).toHaveCount(0);
+		} finally {
+			// Record the sidebar and divider whether or not the fork survived.
+			const sidebarIds = await page
+				.locator("#session-list [data-session-id]")
+				.evaluateAll((rows) =>
+					rows.map((row) => row.getAttribute("data-session-id")),
+				);
+			await page.screenshot({
+				path: testInfo.outputPath("fork-after-source-deleted.png"),
+			});
+			writeFileSync(
+				testInfo.outputPath("fork-after-source-deleted.json"),
+				JSON.stringify(
+					{
+						sourceId,
+						forkId,
+						sidebarIds,
+						divider: (await divider.textContent())?.trim() ?? null,
+					},
+					null,
+					2,
+				),
 			);
 		}
 	});
