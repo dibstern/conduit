@@ -64,11 +64,11 @@ export const cursorTurnHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert Cursor approval notice",
-		match: /^the composer explains that Cursor runs without per-call approval$/,
-		run: async ({ world }) => {
+		match: /^the Cursor notice reads (.+)$/,
+		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("composer-provider-notice"),
-			).toHaveText("Cursor runs without per-call approval.");
+			).toHaveText(match[1] ?? "");
 		},
 	},
 	{
