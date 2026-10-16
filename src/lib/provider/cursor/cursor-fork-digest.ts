@@ -1,5 +1,5 @@
 import type { MessageWithParts } from "../../persistence/read-model-types.js";
-import { historicalMessageText } from "../claude/prepare-turn.js";
+import { historicalMessageText } from "../historical-message-text.js";
 import { redactCursorText } from "./sdk-trace.js";
 
 export const CURSOR_FORK_DIGEST_MAX_CHARACTERS = 32_000;

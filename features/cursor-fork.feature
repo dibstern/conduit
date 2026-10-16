@@ -9,6 +9,7 @@ Scenario Outline: fork a completed reply and continue without changing its sourc
   When I fork the completed reply
   Then the relay receives the selected fork point
   And the fork opens with collapsed prior conversation and a source link
+  And the messages region visually matches <shot> at <threshold> percent
   And the fork composer keeps the <provider> account
   When I expand the fork's prior conversation
   Then the fork shows only context through the selected reply
@@ -18,10 +19,10 @@ Scenario Outline: fork a completed reply and continue without changing its sourc
   Then the source conversation still has its original messages
 
 Examples:
-  | tier  | provider |
-  | wide  | Cursor   |
-  | phone | Cursor   |
-  | wide  | Claude   |
-  | phone | Claude   |
-  | wide  | OpenCode |
-  | phone | OpenCode |
+  | tier  | provider | shot                       | threshold |
+  | wide  | Cursor   | cursor-fork-cursor-wide    | 98        |
+  | phone | Cursor   | cursor-fork-cursor-phone   | 98        |
+  | wide  | Claude   | cursor-fork-claude-wide    | 98        |
+  | phone | Claude   | cursor-fork-claude-phone   | 98        |
+  | wide  | OpenCode | cursor-fork-opencode-wide  | 98        |
+  | phone | OpenCode | cursor-fork-opencode-phone | 98        |
