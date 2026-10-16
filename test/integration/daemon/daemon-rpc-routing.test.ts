@@ -343,9 +343,16 @@ describe("daemon shared RPC routing", () => {
 								makeTestHandlerLayer({
 									config: makeMockConfig({
 										slug,
-										getProjects: () =>
-											projects.filter((project) => project.slug === slug),
 									}),
+									projectManagementService: {
+										currentSlug: () => Effect.succeed(slug),
+										list: () =>
+											Effect.succeed(
+												projects.filter((project) => project.slug === slug),
+											),
+										save: () => Effect.dieMessage("unused save"),
+										remove: () => Effect.dieMessage("unused remove"),
+									},
 								}),
 								makeWsTransportLive({ noServer: true }),
 							),

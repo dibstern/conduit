@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, Queue, Ref } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Queue, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
 import {
@@ -22,7 +22,9 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import {
+	DaemonEvent,
 	DaemonEventBusLive,
+	DaemonEventBusTag,
 	subscribeToDaemonEvents,
 } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
@@ -30,7 +32,9 @@ import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Ser
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	addWithoutRelay,
+	broadcastProjectList,
 	makeProjectRegistryLive,
+	ProjectRegistryTag,
 	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
@@ -228,16 +232,16 @@ describe("RelayFactoryTag", () => {
 				yield* Ref.set(serverRef, server);
 				const factory = yield* RelayFactoryTag;
 				yield* factory.create({ slug: "a", title: "A", folders: [root] });
-				const resolve =
-					createProjectRelayMock.mock.calls.at(-1)?.[0].resolveSessionProject;
-				if (!resolve) throw new Error("Missing session resolution callback");
+				const config = createProjectRelayMock.mock.calls.at(-1)?.[0];
+				const context = config?.daemonConfigContext;
+				if (!context) throw new Error("Missing daemon Effect context");
+				expect(config).not.toHaveProperty("resolveSessionProject");
+				const relayDirectory = Option.getOrThrow(
+					Context.getOption(context, SessionDirectory),
+				);
+				expect(relayDirectory).toBe(directory);
 				expect(
-					yield* Effect.either(
-						Effect.tryPromise({
-							try: () => resolve("shared"),
-							catch: (error) => error,
-						}),
-					),
+					yield* Effect.either(relayDirectory.projectOf("shared")),
 				).toMatchObject({
 					_tag: "Left",
 					left: {
@@ -249,7 +253,9 @@ describe("RelayFactoryTag", () => {
 					},
 				});
 				yield* directory.removeProject("b");
-				expect(yield* Effect.tryPromise(() => resolve("shared"))).toBe("a");
+				expect(yield* relayDirectory.projectOf("shared")).toEqual(
+					Option.some("a"),
+				);
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
@@ -301,13 +307,23 @@ describe("RelayFactoryTag", () => {
 				const factory = yield* RelayFactoryTag;
 				yield* factory.create(project);
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
-				expect(config?.refreshSessionGit).toBeTypeOf("function");
-				if (!config?.refreshSessionGit || !config.broadcastSessionListChanged)
-					throw new Error("Missing git publication callbacks");
+				const context = config?.daemonConfigContext;
+				if (!context) throw new Error("Missing daemon Effect context");
+				expect(config).not.toHaveProperty("broadcastSessionListChanged");
+				expect(config).not.toHaveProperty("publishProjectList");
+				const bus = Option.getOrThrow(
+					Context.getOption(context, DaemonEventBusTag),
+				);
+				const registry = Option.getOrThrow(
+					Context.getOption(context, ProjectRegistryTag),
+				);
 
 				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
-				yield* Effect.promise(config.refreshSessionGit);
-				yield* Effect.promise(config.broadcastSessionListChanged);
+				yield* broadcastProjectList.pipe(
+					Effect.provideService(ProjectRegistryTag, registry),
+					Effect.provideService(DaemonEventBusTag, bus),
+				);
+				yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 				const first = yield* Queue.take(subscription);
 				expect(first).toMatchObject({ _tag: "ProjectsChanged" });
 				expect(yield* projectInfos).toMatchObject([
@@ -318,8 +334,11 @@ describe("RelayFactoryTag", () => {
 
 				writeFileSync(join(directory, "untracked"), "changed");
 				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
-				yield* Effect.promise(config.refreshSessionGit);
-				yield* Effect.promise(config.broadcastSessionListChanged);
+				yield* broadcastProjectList.pipe(
+					Effect.provideService(ProjectRegistryTag, registry),
+					Effect.provideService(DaemonEventBusTag, bus),
+				);
+				yield* PubSub.publish(bus, DaemonEvent.DaemonSessionsChanged());
 				const changed = yield* Queue.take(subscription);
 				expect(changed).toMatchObject({ _tag: "ProjectsChanged" });
 				expect(yield* projectInfos).toMatchObject([

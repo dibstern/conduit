@@ -9,11 +9,9 @@ import {
 	Data,
 	Deferred,
 	Effect,
-	Exit,
 	Layer,
 	PubSub,
 	Ref,
-	Runtime,
 	Stream,
 } from "effect";
 import { accountsStateFromConfig } from "../../../account-directory.js";
@@ -92,7 +90,7 @@ import {
 	makeProjectRegistryFromDaemonStateLive,
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
-	ProjectSaveLockTag,
+	type ProjectSaveLockTag,
 	removeProjectFromEffectRegistry,
 	saveProject,
 } from "../Services/project-registry-service.js";
@@ -353,26 +351,15 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 		Effect.gen(function* () {
 			const relayFactory = yield* RelayFactoryTag;
 			const projectRegistry = yield* ProjectRegistryTag;
-			const projectSaveLock = yield* ProjectSaveLockTag;
-			const configRef = yield* DaemonConfigRefTag;
-			const eventBus = yield* DaemonEventBusTag;
-			const configPersistence = yield* ConfigPersistenceTag;
-			const daemonState = yield* DaemonStateTag;
-			const runtime = yield* Effect.runtime<never>();
+			const daemonContext = yield* Effect.context<
+				| ProjectRegistryTag
+				| ProjectSaveLockTag
+				| DaemonConfigRefTag
+				| DaemonEventBusTag
+				| ConfigPersistenceTag
+				| DaemonStateTag
+			>();
 			let relayCache: RelayCache | undefined;
-
-			const runCallback = <A>(effect: Effect.Effect<A, unknown>) =>
-				new Promise<A>((resolve, reject) => {
-					Runtime.runCallback(runtime)(effect, {
-						onExit: (exit) => {
-							if (Exit.isSuccess(exit)) {
-								resolve(exit.value);
-								return;
-							}
-							reject(Cause.squash(exit.cause));
-						},
-					});
-				});
 
 			const provideProjectMutationDeps = <A, E>(
 				effect: Effect.Effect<
@@ -391,13 +378,8 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					return Effect.dieMessage("Relay cache not initialized");
 				}
 				return effect.pipe(
-					Effect.provideService(ProjectRegistryTag, projectRegistry),
-					Effect.provideService(ProjectSaveLockTag, projectSaveLock),
-					Effect.provideService(DaemonConfigRefTag, configRef),
-					Effect.provideService(DaemonEventBusTag, eventBus),
-					Effect.provideService(ConfigPersistenceTag, configPersistence),
 					Effect.provideService(RelayCacheTag, relayCache),
-					Effect.provideService(DaemonStateTag, daemonState),
+					Effect.provide(daemonContext),
 				);
 			};
 
@@ -410,19 +392,13 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 						saveProject: (
 							input: import("../../../contracts/ws-rpc.js").SaveProjectInput,
 						) =>
-							runCallback(
-								provideProjectMutationDeps(
-									saveProject(input).pipe(
-										Effect.tap(() => broadcastProjectList),
-									),
-								),
+							provideProjectMutationDeps(
+								saveProject(input).pipe(Effect.tap(() => broadcastProjectList)),
 							),
 						removeProject: (projectSlug: string) =>
-							runCallback(
-								provideProjectMutationDeps(
-									removeProjectFromEffectRegistry(projectSlug).pipe(
-										Effect.tap(() => broadcastProjectList),
-									),
+							provideProjectMutationDeps(
+								removeProjectFromEffectRegistry(projectSlug).pipe(
+									Effect.tap(() => broadcastProjectList),
 								),
 							),
 					};
