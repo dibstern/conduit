@@ -13,7 +13,9 @@ for (const multiple of [true, false]) {
 			const projectSlug = "e2e-replay";
 			const primary = "/workspace/web";
 			const secondary = "/workspace/api";
-			const folders = multiple ? [primary, secondary] : [primary];
+			const folders: [string, ...string[]] = multiple
+				? [primary, secondary]
+				: [primary];
 			const projects = [
 				{ slug: projectSlug, title: "Folders project", folders },
 			];
@@ -86,8 +88,6 @@ for (const multiple of [true, false]) {
 						providerScope: { id: "claude", name: "Claude" },
 						instanceId: "claude",
 					}),
-				},
-				handlers: {
 					GetProjects: () => ({ projects, current: projectSlug }),
 				},
 			});

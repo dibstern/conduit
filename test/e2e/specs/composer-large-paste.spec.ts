@@ -23,9 +23,9 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 }) => {
 	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
 	await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			GetProjects: async () => ({
-				projects: [{ slug: "myapp", name: "myapp", path: "/tmp/myapp" }],
+				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 			}),
 		},
 	});

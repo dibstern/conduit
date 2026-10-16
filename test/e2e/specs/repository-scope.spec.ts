@@ -142,13 +142,14 @@ async function openList(
 							: null,
 				};
 			},
-		},
-		handlers: {
-			AttachProject: ({ projectSlug }) => ({
-				projectSlug: projectSlug ?? projects[0]?.slug ?? null,
+			AttachProject: (payload) => ({
+				projectSlug:
+					("projectSlug" in payload ? payload.projectSlug : undefined) ??
+					projects[0]?.slug ??
+					null,
 				sessionSlug: null,
 			}),
-			GetProjects: () => ({ projects, current: projects[0]?.slug ?? null }),
+			GetProjects: () => ({ projects, current: projects[0]?.slug }),
 		},
 		streams: {
 			SubscribeShell: ({ projectSlug }) => [

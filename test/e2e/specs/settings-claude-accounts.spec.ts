@@ -90,8 +90,6 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 				sessionId,
 				handedOff: true,
 			}),
-		},
-		handlers: {
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects: [] }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
@@ -306,7 +304,11 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		5,
 		{ defaultClaudeId: "claude", usageOrder },
 	);
-	const project = { slug: "myapp", title: "myapp", folders: ["/myapp"] };
+	const project = {
+		slug: "myapp",
+		title: "myapp",
+		folders: ["/myapp"] as const,
+	};
 	const refreshAccounts = (change?: AccountChange) => {
 		if (change)
 			state = Either.getOrThrowWith(
@@ -418,8 +420,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects: [project], current: "myapp" }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
 			RemoveInstance: (payload) => {
