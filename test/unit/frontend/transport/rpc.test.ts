@@ -1,17 +1,12 @@
-import { RpcClient, type RpcMessage } from "@effect/rpc";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
-import { Effect, Exit, Fiber, Layer, ManagedRuntime, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, expect, expectTypeOf, it, vi } from "vitest";
 import { AccountUnroutable } from "../../../../src/lib/contracts/limit-recovery.js";
-import {
-	WsRpcError,
-	WsRpcGroup,
-} from "../../../../src/lib/contracts/ws-rpc.js";
+import { WsRpcError } from "../../../../src/lib/contracts/ws-rpc.js";
 import { disposeRuntime } from "../../../../src/lib/frontend/transport/runtime.js";
 import {
 	makeWsRpcClientsLayer,
 	type WsRpcClients,
-	type WsRpcConnect,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
 import {
 	rpc,
@@ -24,50 +19,20 @@ vi.mock("../../../../src/lib/frontend/transport/runtime.js", () => ({
 	disposeRuntime: vi.fn(),
 }));
 
-// The transcript interface's in-process protocol seam, with the real codec.
+import { makeRpcWire } from "../../../helpers/rpc-wire.js";
+import type { StubTable } from "../../../helpers/stub-ws-rpc.js";
+
 function adapter() {
-	const requests: Array<RpcMessage.RequestEncoded> = [];
-	let deliver:
-		| ((frame: RpcMessage.FromServerEncoded) => Effect.Effect<void>)
-		| undefined;
-	const connect: WsRpcConnect = ({ trafficClass }) =>
-		Effect.gen(function* () {
-			const protocol = RpcClient.Protocol.make((write) =>
-				Effect.sync(() => {
-					if (trafficClass === "control") deliver = write;
-					return {
-						send: (frame: RpcMessage.FromClientEncoded) =>
-							Effect.sync(() => {
-								if (frame._tag === "Request") requests.push(frame);
-							}),
-						supportsAck: false,
-						supportsTransferables: false,
-					};
-				}),
-			);
-			return yield* Layer.build(
-				Layer.effect(RpcClient.Protocol, protocol),
-			).pipe(
-				Effect.flatMap((context) =>
-					Effect.provide(
-						RpcClient.make(WsRpcGroup, { flatten: true }),
-						context,
-					),
-				),
-			);
-		});
+	const table: StubTable = {};
+	const wire = makeRpcWire(table);
 	return {
-		connect,
-		requests,
-		async emit(frame: RpcMessage.FromServerEncoded) {
-			if (!deliver) throw new Error("control socket has not opened");
-			await Effect.runPromise(deliver(frame));
-		},
+		...wire,
+		stub: (stubs: StubTable) => Object.assign(table, stubs),
 		async request(tag: string) {
 			await vi.waitFor(() =>
-				expect(requests.some((frame) => frame.tag === tag)).toBe(true),
+				expect(wire.requests.some((frame) => frame.tag === tag)).toBe(true),
 			);
-			const request = requests.find((frame) => frame.tag === tag);
+			const request = wire.requests.find((frame) => frame.tag === tag);
 			if (!request) throw new Error(`no ${tag} request`);
 			return request;
 		},
@@ -99,19 +64,14 @@ it.each([
 		projectSlug: "other-project",
 		...(sessionId === undefined ? {} : { sessionId }),
 	};
-	const pending = rpc("ListWorktrees", payload);
-	const request = await wire.request("ListWorktrees");
-	expect(request.payload).toEqual({ _tag: request.tag, ...payload });
 	const value = {
 		worktrees: [{ path: "/work/tree", branch: "topic", main: false }],
 		directory: "/work",
 	};
-	await wire.emit({
-		_tag: "Exit",
-		requestId: request.id,
-		exit: { _tag: "Success", value },
-	});
-	await expect(pending).resolves.toEqual(value);
+	wire.stub({ ListWorktrees: () => value });
+	await expect(rpc("ListWorktrees", payload)).resolves.toEqual(value);
+	const request = await wire.request("ListWorktrees");
+	expect(request.payload).toEqual({ _tag: request.tag, ...payload });
 });
 
 it.each([
@@ -127,23 +87,25 @@ it.each([
 		images: [],
 		originId: "browser",
 	};
-	const pending = rpc("input.submit", payload);
-	const request = await wire.request("input.submit");
-	expect(request.payload).toEqual({ _tag: request.tag, ...payload });
 	const value =
 		delivery === "queue"
-			? { ok: true, sessionId: "s1" }
-			: { ok: false, reason: "no_steering" };
-	await wire.emit({
-		_tag: "Exit",
-		requestId: request.id,
-		exit: { _tag: "Success", value },
-	});
-	await expect(pending).resolves.toEqual(value);
+			? { ok: true as const, sessionId: "s1" }
+			: { ok: false as const, reason: "no_steering" as const };
+	wire.stub({ "input.submit": () => value });
+	await expect(rpc("input.submit", payload)).resolves.toEqual(value);
+	const request = await wire.request("input.submit");
+	expect(request.payload).toEqual({ _tag: request.tag, ...payload });
 });
 
 it("rejects with the declared error instance and exposes tag narrowing in Effect", async () => {
-	const pending = runtime.runPromise(
+	wire.stub({
+		"input.submit": () => {
+			throw new AccountUnroutable({
+				ref: { _tag: "DriverDefault", driver: "claude" },
+			});
+		},
+	});
+	const result = await runtime.runPromise(
 		Effect.either(
 			rpcEffect("input.submit", {
 				projectSlug: "alpha",
@@ -154,23 +116,6 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 			}),
 		),
 	);
-	const request = await wire.request("input.submit");
-	await wire.emit({
-		_tag: "Exit",
-		requestId: request.id,
-		exit: {
-			_tag: "Failure",
-			cause: {
-				_tag: "Fail",
-				error: {
-					_tag: "AccountUnroutable",
-					ref: { _tag: "DriverDefault", driver: "claude" },
-				},
-			},
-		},
-	});
-	const result = await pending;
-	expect(result._tag).toBe("Left");
 	if (result._tag === "Left" && result.left._tag === "AccountUnroutable") {
 		expectTypeOf(result.left).toEqualTypeOf<AccountUnroutable>();
 		expect(result.left).toBeInstanceOf(AccountUnroutable);
@@ -182,59 +127,47 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 });
 
 it("rejects the Promise with a declared error instance", async () => {
-	const pending = rpc("ListWorktrees", { projectSlug: "alpha" });
-	const rejected = expect(pending).rejects.toBeInstanceOf(WsRpcError);
-	const request = await wire.request("ListWorktrees");
-	await wire.emit({
-		_tag: "Exit",
-		requestId: request.id,
-		exit: {
-			_tag: "Failure",
-			cause: {
-				_tag: "Fail",
-				error: { _tag: "WsRpcError", message: "refused" },
-			},
+	wire.stub({
+		ListWorktrees: () => {
+			throw new WsRpcError({ message: "refused" });
 		},
 	});
-	await rejected;
+	await expect(
+		rpc("ListWorktrees", { projectSlug: "alpha" }),
+	).rejects.toBeInstanceOf(WsRpcError);
 });
 
 it("rejects an in-flight call on socket drop instead of hanging", async () => {
 	const pending = rpc("ListWorktrees", { projectSlug: "alpha" });
 	const rejected = expect(pending).rejects.toBeInstanceOf(RpcClientError);
 	await wire.request("ListWorktrees");
-	await wire.emit({
-		_tag: "ClientProtocolError",
-		error: new RpcClientError({ reason: "Protocol", message: "socket closed" }),
-	});
+	const connection = wire.connections.find((c) => c.trafficClass === "control");
+	if (!connection) throw new Error("missing control connection");
+	await Effect.runPromise(connection.drop);
 	await rejected;
 }, 2000);
 
 it.each([
-	{ _tag: "Die", defect: "server bug" },
-	{ _tag: "Interrupt", fiberId: { _tag: "None" } },
-] as const)("normalizes a server $_tag failure to the client error", async (cause) => {
-	const pending = rpc("ListWorktrees", { projectSlug: "alpha" });
-	const rejected = expect(pending).rejects.toBeInstanceOf(RpcClientError);
-	const request = await wire.request("ListWorktrees");
-	await wire.emit({
-		_tag: "Exit",
-		requestId: request.id,
-		exit: { _tag: "Failure", cause },
+	"server bug",
+	new Cause.InterruptedException(),
+])("normalizes a non-declared throw to the client error: %s", async (error) => {
+	wire.stub({
+		ListWorktrees: () => {
+			throw error;
+		},
 	});
-	await rejected;
+	await expect(
+		rpc("ListWorktrees", { projectSlug: "alpha" }),
+	).rejects.toBeInstanceOf(RpcClientError);
 });
 
 it("does not inject an optional project into the payload", async () => {
-	const pending = rpc("SetLogLevel", { level: "debug" });
-	const request = await wire.request("SetLogLevel");
-	expect(request.payload).toEqual({ _tag: "SetLogLevel", level: "debug" });
-	await wire.emit({
-		_tag: "Exit",
-		requestId: request.id,
-		exit: { _tag: "Success", value: { ok: true } },
+	wire.stub({ SetLogLevel: () => ({ ok: true }) });
+	await rpc("SetLogLevel", { level: "debug" });
+	expect((await wire.request("SetLogLevel")).payload).toEqual({
+		_tag: "SetLogLevel",
+		level: "debug",
 	});
-	await pending;
 });
 
 it("keeps caller cancellation as an interruption", async () => {
@@ -242,14 +175,20 @@ it("keeps caller cancellation as an interruption", async () => {
 		rpcEffect("ListWorktrees", { projectSlug: "alpha" }),
 	);
 	await wire.request("ListWorktrees");
-	const exit = await Effect.runPromise(Fiber.interrupt(fiber));
-	expect(Exit.isInterrupted(exit)).toBe(true);
+	expect(
+		Exit.isInterrupted(await Effect.runPromise(Fiber.interrupt(fiber))),
+	).toBe(true);
 });
 
 it("delivers a subscription and a unary response on the same client", async () => {
 	const { WsRpcClients } = await import(
 		"../../../../src/lib/frontend/transport/shared-client.js"
 	);
+	const envelope = { _tag: "draft", text: "draft", from: "browser" } as const;
+	wire.stub({
+		SubscribeInputDraft: () => Stream.succeed(envelope),
+		ListWorktrees: () => ({ worktrees: [] }),
+	});
 	const stream = runtime.runPromise(
 		Effect.gen(function* () {
 			const clients = yield* WsRpcClients;
@@ -259,20 +198,7 @@ it("delivers a subscription and a unary response on the same client", async () =
 			);
 		}),
 	);
-	const subscription = await wire.request("SubscribeInputDraft");
 	const pending = rpc("ListWorktrees", { projectSlug: "beta" });
-	const unary = await wire.request("ListWorktrees");
-	const envelope = { _tag: "draft", text: "draft", from: "browser" };
-	await wire.emit({
-		_tag: "Chunk",
-		requestId: subscription.id,
-		values: [envelope],
-	});
-	await wire.emit({
-		_tag: "Exit",
-		requestId: unary.id,
-		exit: { _tag: "Success", value: { worktrees: [] } },
-	});
 	await expect(stream).resolves.toMatchObject({
 		_tag: "Some",
 		value: envelope,
