@@ -1,5 +1,4 @@
 import { expect, type Page } from "@playwright/test";
-import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -71,10 +70,11 @@ export const harnessHandlers: StepHandler[] = [
 			const rpc = requireRpcControl(world.page);
 			rpc.setDaemonList("SubscribeInstances", { instances });
 			if (!available) return;
+			// Mirrors publishDiscoveredModels: one account-scoped Cursor catalogue.
 			rpc.setProjectSetting({
 				_tag: "providerModels",
+				accountId: "cursor-work",
 				providers: [
-					...dualDriverProviders.filter((provider) => provider.id === "claude"),
 					{
 						id: "cursor",
 						name: "Cursor",
