@@ -6,6 +6,7 @@ import { SessionDirectory } from "../../domain/daemon/Services/session-directory
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import { contentionMetrics } from "../contention-metrics.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
 import type { EventStoreError } from "./event-store-effect.js";
 import { EventStoreEffectTag } from "./event-store-effect.js";
@@ -130,7 +131,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 		permit = Effect.unsafeMakeSemaphore(1);
 		commitPermits.set(sql, permit);
 	}
-	const withCommitPermit = permit.withPermits(1);
+	const withPermit = permit.withPermits(1);
+	const withCommitPermit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+		contentionMetrics
+			? contentionMetrics.withCommitPermit(withPermit, effect)
+			: withPermit(effect);
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
