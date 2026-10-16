@@ -100,6 +100,8 @@ export type InputAdmittedPayload = PayloadOf<"input.admitted">;
 
 export type InputSentPayload = PayloadOf<"input.sent">;
 
+export type InputRequeuedPayload = PayloadOf<"input.requeued">;
+
 export type InputCancelledPayload = PayloadOf<"input.cancelled">;
 
 export type InputInterruptRequestedPayload =
@@ -637,6 +639,14 @@ export const CanonicalEvents = {
 			workspaceMoveSequence: Schema.optionalWith(Schema.Number, {
 				exact: true,
 			}),
+		}),
+	),
+	"input.requeued": live(
+		Schema.Struct({
+			sessionId: Schema.String,
+			inputId: Schema.String,
+			sentSequence: Schema.Number,
+			reason: Schema.Literal("declined", "failed"),
 		}),
 	),
 	"input.cancelled": live(
