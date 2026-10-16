@@ -108,6 +108,12 @@ const allowedPlainErrorThrows: readonly AllowedPlainThrow[] = [
 			"storybook play() guard that narrows goal fixture state, not executable production code",
 	},
 	{
+		path: "src/lib/frontend/components/input/InputArea.stories.ts",
+		snippetPattern: /composer layers not found/,
+		reason:
+			"storybook play() guard that narrows the composer layer queries, not executable production code",
+	},
+	{
 		path: "src/lib/frontend/components/layout/SessionBar.stories.ts",
 		snippetPattern: /Checking spinner is missing/,
 		reason:

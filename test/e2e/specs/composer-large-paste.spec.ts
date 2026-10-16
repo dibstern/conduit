@@ -18,9 +18,7 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 /** Comfortably past the composer's 20k-char highlight limit. */
 const LARGE_DRAFT = "conduit relay event log line\n".repeat(4_000);
 
-test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
-	page,
-}) => {
+test.beforeEach(async ({ page }) => {
 	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
 	await mockWsRpc(page, {
 		handlers: {
@@ -29,10 +27,14 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 			}),
 		},
 	});
-
 	await page.goto("/s/sess-mockup-001");
+	await page.locator("#input").waitFor({ state: "visible", timeout: 20_000 });
+});
+
+test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
+	page,
+}) => {
 	const textarea = page.locator("#input");
-	await textarea.waitFor({ state: "visible", timeout: 20_000 });
 
 	// A small draft is mirrored: the textarea's own text stays transparent.
 	await textarea.fill("/commit the fix");
@@ -59,4 +61,36 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 		.toBe(120);
 	// The draft itself is untouched.
 	expect(await textarea.inputValue()).toBe(LARGE_DRAFT);
+});
+
+// Crossing the limit swaps scrollers: the outer field stops scrolling and the
+// textarea scrolls itself from the top, so the browser's own reveal (made in the
+// outer field) is lost and the caret ends up thousands of pixels below the view.
+test("@large-paste the caret stays visible when an insert crosses the highlight limit", async ({
+	page,
+}) => {
+	const textarea = page.locator("#input");
+	await textarea.evaluate((el: HTMLTextAreaElement) => {
+		el.focus();
+		el.value = "conduit relay event log line\n".repeat(700).slice(0, 20_000);
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+	await expect(textarea).toHaveClass(/text-transparent/);
+
+	// One character through the native editing path, at the end of the draft.
+	await textarea.evaluate(() => document.execCommand("insertText", false, "z"));
+	await expect(textarea).not.toHaveClass(/text-transparent/);
+
+	// The caret is at the end, so the textarea is scrolled to its bottom.
+	await expect
+		.poll(() =>
+			textarea.evaluate(
+				(el: HTMLTextAreaElement) =>
+					el.scrollHeight - el.clientHeight - el.scrollTop,
+			),
+		)
+		.toBeLessThanOrEqual(1);
+	expect(
+		await textarea.evaluate((el: HTMLTextAreaElement) => el.scrollTop),
+	).toBeGreaterThan(0);
 });

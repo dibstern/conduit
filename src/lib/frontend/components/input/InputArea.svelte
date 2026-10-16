@@ -148,6 +148,7 @@
 	});
 	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let fieldScroller: HTMLDivElement | undefined = $state();
 	let composerFocused = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
@@ -614,6 +615,7 @@
 		if (textareaEl) {
 			cursorPos = textareaEl.selectionStart ?? 0;
 		}
+		void tick().then(revealCaret);
 		lastLocalEditAt = Date.now();
 		steerRefusal = null;
 
@@ -624,6 +626,41 @@
 			if (sessionState.currentId) void syncInputDraft(inputText).catch(() => undefined);
 			else storeNewSessionDraft(inputText);
 		}, 300);
+	}
+
+	/**
+	 * Bring the caret's line into the composer's scroll window. The browser does
+	 * this itself as part of an edit, but for some edits (IME commits, dictation,
+	 * `insertText`) it does so before the mirror has grown the row to fit the new
+	 * text, while the scroller is still too short to reach the caret, and nothing
+	 * scrolls again once the row grows. So once the mirror has caught up, measure
+	 * the caret with a probe laid out exactly like both layers and scroll to it.
+	 * Past HIGHLIGHT_MAX_CHARS the textarea is its own scroller, and crossing the
+	 * limit swaps scrollers without the browser revealing the caret in the new one.
+	 */
+	function revealCaret() {
+		const scroller = plainText ? textareaEl : fieldScroller;
+		if (!textareaEl || !scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+		const { value, selectionEnd, clientWidth } = textareaEl;
+		const probe = document.createElement("div");
+		probe.className = "composer-text-metrics";
+		probe.style.cssText = `position: absolute; inset: 0 auto auto 0; width: ${clientWidth}px; box-sizing: border-box; visibility: hidden`;
+		// The whole draft, so text after the caret wraps the caret's word as it does
+		// in the field; an empty marker adds no break opportunity of its own.
+		const caret = document.createElement("span");
+		probe.append(value.slice(0, selectionEnd), caret, value.slice(selectionEnd));
+		textareaEl.after(probe);
+		const { lineHeight, paddingTop } = getComputedStyle(probe);
+		// An empty marker's box is the line's top edge, or its glyph box inside text.
+		const top = caret.getBoundingClientRect().top - (plainText ? textareaEl.scrollTop : 0);
+		probe.remove();
+		// The field's own padding as margin, so the caret's line never sits on the clip edge.
+		const margin = parseFloat(paddingTop);
+		const view = scroller.getBoundingClientRect();
+		const below = top + parseFloat(lineHeight) + margin - view.bottom;
+		const above = view.top - (top - margin);
+		if (below > 0) scroller.scrollTop += below;
+		else if (above > 0) scroller.scrollTop -= above;
 	}
 
 	function handleKeyup() {
@@ -1367,10 +1404,11 @@
 					     caps and scrolls it, and the textarea is stretched over the mirror at
 					     the full content height so it never scrolls on its own. One scroll
 					     position for the whole composer means the caret cannot end up on a
-					     different line from the text it sits in.
+					     different line from the text it sits in. The one JS piece is
+					     revealCaret(), for edits the browser reveals before the row grows.
 					     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
 					     the textarea but not the mirror, which would wrap them differently. -->
-					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]">
+					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
 						<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
