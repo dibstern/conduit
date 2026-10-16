@@ -3,6 +3,7 @@
 // the command and model lists (GetCommands/GetModels) once this returns.
 
 import { Effect } from "effect";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
@@ -40,7 +41,10 @@ export const reloadProviderSessionForClient = (
 								_tag: "Id",
 								id: instanceId,
 							});
-				if (account?.driver === "opencode") {
+				if (
+					account !== undefined &&
+					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
+				) {
 					// Refresh is an explicit user action; its subsequent catalog reads are passive.
 					yield* (yield* OpenCodeInstancesTag).use(account.id);
 				}

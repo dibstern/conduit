@@ -1,4 +1,5 @@
 import { Data, Either } from "effect";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import type { RelaySettings } from "../relay/relay-settings.js";
 import {
 	claudeApiModelId,
@@ -57,7 +58,8 @@ export function harnessDefaultPick(
 		const legacy = parse(settings.defaultModel);
 		if (legacy && harnessForModelProvider(legacy.providerId) === harness)
 			model = legacy;
-		else if (harness === "opencode") model = parse(nativeDefaultModel);
+		else if (PROVIDER_DRIVERS[harness].runsOpenCodeServer)
+			model = parse(nativeDefaultModel);
 	}
 	if (!model) return undefined;
 	return {
@@ -143,7 +145,7 @@ export function findCatalogModel(
 				entry.id === model.modelId ||
 				entry.routingOptions?.some((option) => option.value === model.modelId),
 		) ??
-		(harness === "claude"
+		(PROVIDER_DRIVERS[harness].modelIdFormat === "context-window-suffix"
 			? candidates.find((entry) => isSameModelIdentity(entry.id, model.modelId))
 			: undefined)
 	);
@@ -172,7 +174,7 @@ export function resolveTurnSettings(
 	// A "[1m]" id matched to its base model asks for the 1m window, which the
 	// base must then offer; an explicit window still wins.
 	const askedFor1m =
-		pick.harness === "claude" &&
+		PROVIDER_DRIVERS[pick.harness].modelIdFormat === "context-window-suffix" &&
 		!isRoutingOption &&
 		model.id !== pick.model.modelId &&
 		model.id === claudeApiModelId(pick.model.modelId, "200k");

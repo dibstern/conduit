@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { Account } from "../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
@@ -65,7 +66,8 @@ const listSessionCommands = (
 						),
 					);
 			});
-		if (account.driver === "claude") return yield* listClaudeCommands(account);
+		if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
+			return yield* listClaudeCommands(account);
 		const result = yield* Effect.either(
 			(yield* OpenCodeSettingsServiceTag).listCommands({
 				startIfStopped: !tolerateClaudeFailure,

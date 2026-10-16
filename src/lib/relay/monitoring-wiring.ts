@@ -7,6 +7,7 @@
 import { SqlClient } from "@effect/sql";
 import { Cause, Deferred, Effect, FiberId, Option, Runtime } from "effect";
 import type { Account, AccountRef } from "../contracts/account.js";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
@@ -168,7 +169,7 @@ export function createMonitoringWiringState(): MonitoringWiringStateAccess {
 }
 
 const providerStreamsLifecycle = (account: Account | undefined): boolean =>
-	account?.driver === "claude";
+	getProviderDriver(account?.driver)?.streamsSessionLifecycle === true;
 
 const processAndApplyDoneEffect = (
 	sessionId: string,
