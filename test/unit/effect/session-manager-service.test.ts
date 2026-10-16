@@ -37,6 +37,10 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
@@ -44,7 +48,6 @@ import {
 	RelayStatusSnapshotTag,
 } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -417,7 +420,7 @@ const requiredSessionServices = Layer.mergeAll(
 	sessionLoggerLayer,
 	Layer.succeed(OpenCodeAPITag, openCodeApi),
 	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-	Layer.succeed(BackgroundLivenessTag, () => undefined),
+	Layer.effect(SessionActivityTag, makeSessionActivity),
 	RelayStatusSnapshotLive,
 	makeOverridesStateLive(),
 	Layer.succeed(
@@ -2467,11 +2470,15 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project", {
-				statuses: {
-					"child-1": { type: "busy" } as SessionStatus,
+			const sessions = yield* listSessions(
+				"test-project",
+				{
+					statuses: {
+						"child-1": { type: "busy" } as SessionStatus,
+					},
 				},
-			});
+				{ slug: "test-project", folders: [tmpdir()] },
+			);
 			const stateRef = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(stateRef);
 
@@ -2525,7 +2532,10 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project");
+			const sessions = yield* listSessions("test-project", undefined, {
+				slug: "test-project",
+				folders: [tmpdir()],
+			});
 
 			expect(readQuery.listSessionInfos).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
@@ -2535,6 +2545,9 @@ describe("SessionManagerService", () => {
 					id: "forked-1",
 					accountId: null,
 					projectSlug: "test-project",
+					canRenameBranch: false,
+					workspaceMismatch: undefined,
+					workspaceMissing: undefined,
 					title: "Forked",
 					status: "idle",
 					createdAt: 100,
@@ -2879,7 +2892,10 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project");
+			const sessions = yield* listSessions("test-project", undefined, {
+				slug: "test-project",
+				folders: [tmpdir()],
+			});
 
 			expect(sessions[0]?.pendingQuestionCount).toBe(1);
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
@@ -2904,14 +2920,23 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* listSessions("test-project", { roots: true });
+			yield* listSessions(
+				"test-project",
+				{ roots: true },
+				{ slug: "test-project", folders: [tmpdir()] },
+			);
 			const stateRef = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(stateRef);
 
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
 				["child-1", "root-1"],
 			]);
-			expect(readQuery.listSessionInfos).toHaveBeenCalledWith({ roots: true });
+			const activity = yield* SessionActivityTag;
+			expect(readQuery.listSessionInfos).toHaveBeenCalledWith({
+				roots: true,
+				backgroundOf: activity.background.backgroundOf,
+				hintDismissals: activity.hintDismissals,
+			});
 			expect(api.session.list).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});

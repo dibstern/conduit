@@ -2995,7 +2995,9 @@ describe("ClaudeEventTranslator", () => {
 		const liveness = makeSessionBackgroundLiveness();
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
-			onBackgroundTask: liveness.record,
+			onBackgroundTask: (input) => {
+				liveness.record(input);
+			},
 		});
 		const nestedCtx = makeCtx({
 			subagentTasks: new Map([
@@ -3068,7 +3070,9 @@ describe("ClaudeEventTranslator", () => {
 			const liveness = makeSessionBackgroundLiveness();
 			const instance = new ClaudeEventTranslator({
 				getSink: () => sink,
-				onBackgroundTask: liveness.record,
+				onBackgroundTask: (input) => {
+					liveness.record(input);
+				},
 			});
 			const context = makeCtx({
 				subagentTasks: new Map(),
@@ -3320,7 +3324,9 @@ describe("ClaudeEventTranslator", () => {
 		const liveness = makeSessionBackgroundLiveness(undefined, () => 200);
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
-			onBackgroundTask: liveness.record,
+			onBackgroundTask: (input) => {
+				liveness.record(input);
+			},
 		});
 		const snapshot = (
 			tasks: ReadonlyArray<Record<string, unknown>>,

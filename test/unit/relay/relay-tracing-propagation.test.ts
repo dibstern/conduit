@@ -28,6 +28,10 @@ import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -66,6 +70,7 @@ describe("relay tracing propagation", () => {
 				DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 				ConfigPersistenceNoopLive,
 				DaemonEventBusLive,
+				Layer.effect(SessionActivityTag, makeSessionActivity),
 				makeProjectRegistryLive(),
 				makeInstanceManagerStateLive(undefined, [], {
 					launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
