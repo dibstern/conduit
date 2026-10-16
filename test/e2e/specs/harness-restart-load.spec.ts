@@ -387,7 +387,9 @@ test("opens the heavy session after a restart under load", async ({
 
 	// Seed into the store the first daemon created, then start on it.
 	await harness.terminate();
-	const fixture = await seedSessionLoadFixture(harness.projectStorePath());
+	const fixture = await seedSessionLoadFixture(harness.projectStorePath(), {
+		projectId: "process-test",
+	});
 	const storeBytes = statSync(harness.projectStorePath()).size;
 	const warmMetrics = join(harness.root, "server-metrics-warm.json");
 	// The harness probe opens a detail stream per sidebar row; skip it here and
