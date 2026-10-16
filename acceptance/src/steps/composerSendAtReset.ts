@@ -355,23 +355,22 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setUsageReadings(readings);
-			rpc.setResponse(
-				"QuotaForAccounts",
-				readings.map((reading) =>
-					reading.accountId === "blocked"
-						? { ...reading, status: "limited" }
-						: reading,
-				),
-			);
+			rpc.setStubs({
+				QuotaForAccounts: () =>
+					readings.map((reading) =>
+						reading.accountId === "blocked"
+							? { ...reading, status: "limited" }
+							: reading,
+					),
+			});
 		},
 	},
 	{
 		name: "accept a menu switch and project its destination account",
 		match: /^the mock relay accepts send-menu switches$/,
 		run: ({ world }) => {
-			requireRpcControl(world.page).setHandler(
-				"ContinueSession",
-				({ sessionId, instanceId, expectedInstanceId }) => {
+			requireRpcControl(world.page).setStubs({
+				ContinueSession: ({ sessionId, instanceId, expectedInstanceId }) => {
 					if (
 						typeof sessionId !== "string" ||
 						typeof instanceId !== "string" ||
@@ -391,7 +390,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 					});
 					return { ok: true };
 				},
-			);
+			});
 		},
 	},
 	{

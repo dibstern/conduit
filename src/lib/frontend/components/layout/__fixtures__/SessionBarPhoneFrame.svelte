@@ -4,7 +4,7 @@
   phone get its own truncation assertion.
 -->
 <script lang="ts">
-	import type { getGoalDetailsRpc } from "../../../transport/ws-rpc-client.js";
+	import type { rpc } from "../../../transport/ws-rpc-client.js";
 	import Banners from "../../overlays/Banners.svelte";
 	import SessionBar from "../SessionBar.svelte";
 
@@ -15,7 +15,7 @@
 	}: {
 		width?: number;
 		island?: boolean;
-		getGoalDetails?: typeof getGoalDetailsRpc;
+		getGoalDetails?: (input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => ReturnType<typeof rpc<"GetGoalDetails">>;
 	} = $props();
 </script>
 

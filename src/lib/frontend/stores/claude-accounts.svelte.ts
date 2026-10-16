@@ -3,10 +3,7 @@ import type {
 	LimitRecovery,
 	UsageReading,
 } from "../../contracts/limit-recovery.js";
-import {
-	previewContinuationRpc,
-	quotaForAccountsRpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import {
 	showAccountSwitchRefusal,
 	switchSessionAccount,
@@ -110,7 +107,7 @@ class ClaudeAccounts {
 		let checked: readonly UsageReading[] = [];
 		let refreshed = false;
 		try {
-			checked = await quotaForAccountsRpc({
+			checked = await rpc("QuotaForAccounts", {
 				projectSlug: this.projectSlug,
 				originId: getBrowserClientId(),
 			});
@@ -243,7 +240,7 @@ class ClaudeAccounts {
 		};
 		this.handoff = { kind: "previewing", ...context };
 		try {
-			const summary = await previewContinuationRpc({
+			const summary = await rpc("PreviewContinuation", {
 				projectSlug: this.projectSlug,
 				sessionId,
 				instanceId: targetId,

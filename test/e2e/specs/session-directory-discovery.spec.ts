@@ -66,11 +66,11 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
+			}),
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",
 				agents: [],
@@ -86,26 +86,6 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					commands: [
 						{ name: directory === worktree ? "worktree-only" : "main-only" },
 					],
-				};
-			},
-			GetClaudeSettings: () => ({ projectSlug: "e2e-replay", overrides: {} }),
-			ResolveClaudeSettings: ({ sessionId }) => {
-				const directory = recordDirectory("ResolveClaudeSettings", sessionId);
-				return {
-					projectSlug: "e2e-replay",
-					instanceId: "claude",
-					resolved: {
-						attribution: {},
-						autoCompactEnabled: {},
-						autoCompactWindow: {},
-						cleanupPeriodDays: {},
-						disableAllHooks: {},
-						alwaysThinkingEnabled: {
-							value: directory === worktree,
-							source: "project",
-							path: `${directory}/.claude/settings.json`,
-						},
-					},
 				};
 			},
 			GetSessionSkills: () => ({
@@ -127,6 +107,30 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					name,
 					path: `${directory}/.claude/skills/${String(name)}/SKILL.md`,
 					content: `Skill instructions from ${directory}`,
+				};
+			},
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
+			GetClaudeSettings: () => ({ projectSlug: "e2e-replay", overrides: {} }),
+			ResolveClaudeSettings: ({ sessionId }) => {
+				const directory = recordDirectory("ResolveClaudeSettings", sessionId);
+				return {
+					projectSlug: "e2e-replay",
+					instanceId: "claude",
+					resolved: {
+						attribution: {},
+						autoCompactEnabled: {},
+						autoCompactWindow: {},
+						cleanupPeriodDays: {},
+						disableAllHooks: {},
+						alwaysThinkingEnabled: {
+							value: directory === worktree,
+							source: "project",
+							path: `${directory}/.claude/settings.json`,
+						},
+					},
 				};
 			},
 		},

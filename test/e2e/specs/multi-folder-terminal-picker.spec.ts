@@ -84,16 +84,20 @@ for (const scenario of [
 						hasMore: false,
 						nextCursor: null,
 					}),
-				},
-				handlers: {
-					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-					GetProjects: () => ({ projects, current: projectSlug }),
+					GetModels: ({ projectSlug }) => ({
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug,
+						providers: [],
+					}),
 					GetAgents: () => ({
 						projectSlug,
 						agents: [],
 						providerScope: { id: "claude", name: "Claude" },
 						instanceId: "claude",
 					}),
+				},
+				handlers: {
+					GetProjects: () => ({ projects, current: projectSlug }),
 					CreatePty: ({ root }) => {
 						const id = `pty-${++terminalCount}`;
 						rpc.sendChunk("SubscribePtys", [

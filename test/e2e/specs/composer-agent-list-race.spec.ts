@@ -39,7 +39,7 @@ test("a late agent list from the previous session leaves the new session's agent
 	let heldReplySent = false;
 
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			GetAgents: async (params) => {
 				if (!(holdSessionA && params["sessionId"] === SESSION_A))
 					return agentsFor(params["sessionId"]);

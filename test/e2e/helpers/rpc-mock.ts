@@ -5,6 +5,9 @@ import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js"
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import {
 	type Alert,
+	GetAgentsResponseSchema,
+	GetCommandsResponseSchema,
+	GetModelsResponseSchema,
 	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
@@ -186,6 +189,54 @@ export class RpcMockControl {
 					agents.at(-1)),
 			});
 		return undefined;
+	}
+
+	catalogStubs(): Required<
+		Pick<StubTable, "GetModels" | "GetCommands" | "GetAgents">
+	> {
+		return {
+			GetModels: ({ sessionId }) => {
+				const {
+					providers,
+					agents: _agents,
+					commands: _commands,
+					...modelState
+				} = this.catalog;
+				if (!providers && !Object.keys(modelState).length)
+					return new Promise<never>(() => {});
+				return Schema.decodeUnknownSync(GetModelsResponseSchema)({
+					projectSlug: this.projectSlug,
+					defaultOpenCodeInstanceId: "opencode",
+					providers: providers ?? [],
+					...modelState,
+					...(sessionId && modelState.instanceId === undefined
+						? {
+								instanceId:
+									(modelState.active as { provider?: string } | undefined)
+										?.provider === "claude"
+										? "claude"
+										: "opencode",
+							}
+						: {}),
+				});
+			},
+			GetCommands: () =>
+				this.catalog.commands
+					? Schema.decodeUnknownSync(GetCommandsResponseSchema)({
+							projectSlug: this.projectSlug,
+							commands: this.catalog.commands,
+						})
+					: new Promise<never>(() => {}),
+			GetAgents: ({ instanceId }) =>
+				this.catalog.agents?.length
+					? Schema.decodeUnknownSync(GetAgentsResponseSchema)({
+							projectSlug: this.projectSlug,
+							...(this.catalog.agents.find(
+								(list) => list.providerScope.id === instanceId,
+							) ?? this.catalog.agents.at(-1)),
+						})
+					: new Promise<never>(() => {}),
+		};
 	}
 
 	setDetailRows(sessionId: string, rows: readonly unknown[]): void {
@@ -671,10 +722,6 @@ function defaultHandler(
 	control: RpcMockControl,
 ): RpcHandler | undefined {
 	return (
-		control.catalogHandler(tag) ??
-		(tag === "ResolveSessionMode"
-			? () => ({ mode: "local", source: "global" })
-			: undefined) ??
 		(tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 		(tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
 		(tag === "GetDefaultGroupingMode"
@@ -876,6 +923,8 @@ export async function mockWsRpc(
 		"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
 		ViewSession: () => ({ ok: true }),
+		...control.catalogStubs(),
+		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
 		...options.stubs,
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;

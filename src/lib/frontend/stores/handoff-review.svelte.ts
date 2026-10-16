@@ -3,7 +3,8 @@ import type {
 	SessionResume,
 } from "../../contracts/limit-recovery.js";
 import { openSettings } from "../components/layout/chrome-actions.js";
-import { getContinuationHandoffRpc } from "../transport/ws-rpc-client.js";
+import { toastFailure } from "../transport/rpc-errors.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
 import { limitWindowName } from "../utils/continuation.js";
 import { getBrowserClientId } from "./client-identity.js";
@@ -23,7 +24,7 @@ export async function reviewHandoff(
 	resume: SessionResume,
 ): Promise<void> {
 	try {
-		const response = await getContinuationHandoffRpc({
+		const response = await rpc("GetContinuationHandoff", {
 			projectSlug,
 			sessionId,
 			instanceId: resume.instanceId,
@@ -34,8 +35,8 @@ export async function reviewHandoff(
 			to: resume.instanceId,
 			summary: response.handoff,
 		};
-	} catch {
-		showToast("Couldn't load what carried over", { variant: "error" });
+	} catch (error) {
+		toastFailure("Couldn't load what carried over")(error);
 	}
 }
 

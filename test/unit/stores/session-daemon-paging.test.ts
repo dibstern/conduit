@@ -15,11 +15,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getAgentsRpc: vi.fn(),
-	getCommandsRpc: vi.fn(),
-	getModelsRpc: vi.fn(),
 	rpc: vi.fn(),
-	switchPermissionModeRpc: vi.fn(),
 }));
 
 import {

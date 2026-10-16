@@ -36,10 +36,6 @@ test("a draft offers and highlights its own account's skills", async ({
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",
 				agents: [],
@@ -55,6 +51,10 @@ test("a draft offers and highlights its own account's skills", async ({
 					},
 				],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {

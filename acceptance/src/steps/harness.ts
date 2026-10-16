@@ -139,7 +139,7 @@ export const harnessHandlers: StepHandler[] = [
 			const reply = new Promise<{ ok: true }>((resolve) => {
 				heldAccountSwitches.set(world.page, () => resolve({ ok: true }));
 			});
-			requireRpcControl(world.page).setHandler("ContinueSession", () => reply);
+			requireRpcControl(world.page).setStubs({ ContinueSession: () => reply });
 		},
 	},
 	{

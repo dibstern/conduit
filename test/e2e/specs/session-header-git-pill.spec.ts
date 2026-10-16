@@ -107,10 +107,11 @@ async function openCheckout(
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
+			}),
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",
 				agents: [],
@@ -120,7 +121,6 @@ async function openCheckout(
 				},
 				instanceId: options.provider ?? "opencode",
 			}),
-			GetInstances: () => instances,
 			GetSessionSkills: () => ({
 				loads: options.skills
 					? [
@@ -135,6 +135,10 @@ async function openCheckout(
 						]
 					: [],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 		...(options.viewActivity
 			? {

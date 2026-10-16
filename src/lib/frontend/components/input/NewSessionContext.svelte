@@ -8,7 +8,7 @@
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { rpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
@@ -26,7 +26,7 @@
 		newWorktree?: boolean;
 		worktreeBase?: string | null;
 		modeChosen?: boolean;
-		sessionModeDefault?: Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined;
+		sessionModeDefault?: Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined;
 		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
 		loadBranches?: (projectSlug: string) => ReturnType<typeof rpc<"ListBranches">>;
 	} = $props();

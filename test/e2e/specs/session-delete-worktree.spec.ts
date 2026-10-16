@@ -108,9 +108,13 @@ async function setup(
 				rpc.setShellRows(options.foreign ? [] : sessions);
 				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
+			GetModels: ({ projectSlug }) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug,
+				providers: [],
+			}),
 		},
 		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetWorktreeCleanupSetting: () => {
 				if (options.failCleanupSetting)

@@ -45,9 +45,13 @@ async function openHint(page: Page, relayBaseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
+			}),
 		},
 		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});

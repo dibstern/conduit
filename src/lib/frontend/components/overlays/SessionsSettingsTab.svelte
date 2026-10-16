@@ -9,7 +9,8 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { rpc, getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc, setDefaultSessionModeRpc, getWorktreeCleanupSettingRpc, setWorktreeCleanupSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc, getWorktreeCleanupSettingRpc, setWorktreeCleanupSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { applyDefaultSessionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
@@ -140,9 +141,9 @@
 					const projectSlug = getDraftProject() ?? getCurrentSlug();
 					if (!projectSlug || (mode !== "local" && mode !== "worktree")) return;
 					state.sessionModeSaving = true;
-					void setDefaultSessionModeRpc({ projectSlug, mode })
+					void rpc("SetDefaultSessionMode", { projectSlug, mode })
 						.then((response) => applyDefaultSessionMode(response.mode))
-						.catch(() => showToast("Couldn't save default session mode", { variant: "error" }))
+						.catch(toastFailure("Couldn't save default session mode"))
 						.finally(() => { state.sessionModeSaving = false; });
 				}}
 			>

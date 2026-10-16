@@ -57,12 +57,7 @@
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { openSettings } from "../layout/chrome-actions.js";
-	import {
-		getAgentsRpc,
-		getModelsRpc,
-		setDefaultModelRpc,
-		switchAgentRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { AgentInfo, Immutable, InstanceStatus, ModelCost, ModelInfo, ProviderGroup } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -216,7 +211,7 @@
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
 		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ projectSlug, sessionId })
+		void rpc("GetModels", { projectSlug, sessionId })
 			.then((response) => {
 				if (sessionState.currentId === sessionId) {
 					applyModels(response);
@@ -277,7 +272,7 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void switchAgentRpc({ projectSlug, sessionId, agentId: agent.id }).catch(undoAgent);
+			void rpc("SwitchAgent", { projectSlug, sessionId, agentId: agent.id }).catch(undoAgent);
 		}
 	}
 
@@ -384,10 +379,10 @@
 		selectInstance(instance.id);
 		const projectSlug = getDraftProject();
 		const applyModels = followModelsRead();
-		if (projectSlug) void getModelsRpc({ projectSlug, instanceId: instance.id })
+		if (projectSlug) void rpc("GetModels", { projectSlug, instanceId: instance.id })
 			.then(applyModels)
 			.catch(() => undefined);
-		if (projectSlug) void getAgentsRpc({ projectSlug, instanceId: instance.id })
+		if (projectSlug) void rpc("GetAgents", { projectSlug, instanceId: instance.id })
 			.then((response) => {
 				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
 					applyGetAgentsResponse(response);
@@ -435,7 +430,7 @@
 		});
 		const projectSlug = getCurrentSlug();
 		if (projectSlug) {
-			void setDefaultModelRpc({
+			void rpc("SetDefaultModel", {
 				projectSlug,
 				model: model.id,
 				provider: model.provider,

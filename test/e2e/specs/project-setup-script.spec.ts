@@ -63,9 +63,13 @@ async function openSession(
 				hasMore: false,
 				nextCursor: null,
 			}),
+			GetModels: ({ projectSlug }) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug,
+				providers: [],
+			}),
 		},
 		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects: [project], current: slug }),
 			SaveProject: ({ setupScript }) => {
 				const { setupScript: _previous, ...rest } = project;

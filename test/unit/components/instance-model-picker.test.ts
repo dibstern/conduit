@@ -74,12 +74,21 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getAgentsRpc: (input: unknown) => getAgentsRpcSpy(input),
-	rpc: reloadSessionSpy,
-	setDefaultModelRpc: (input: { model: string; provider: string }) =>
-		setDefaultModelRpcSpy(input),
-	switchModelRpc: (input: { modelId: string; providerId: string }) =>
-		switchModelRpcSpy(input),
+	rpc: (
+		tag:
+			| "GetAgents"
+			| "SetDefaultModel"
+			| "SwitchModel"
+			| "ReloadProviderSession",
+		input: never,
+	) =>
+		tag === "ReloadProviderSession"
+			? reloadSessionSpy(tag, input)
+			: {
+					GetAgents: getAgentsRpcSpy,
+					SetDefaultModel: setDefaultModelRpcSpy,
+					SwitchModel: switchModelRpcSpy,
+				}[tag](input),
 }));
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastSpy,

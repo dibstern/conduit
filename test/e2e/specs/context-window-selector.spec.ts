@@ -1,6 +1,8 @@
 // Tests context-window controls in the harness and model picker.
 
 import { expect, type Page, test } from "@playwright/test";
+import { Schema } from "effect";
+import { ContextWindowOptionSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	contextWindowInitMessages,
 	type MockMessage,
@@ -28,14 +30,16 @@ async function setup(
 		(message) => message.type === "context_window_info",
 	);
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			SwitchContextWindow: (params) => {
 				const contextWindow = String(params["contextWindow"] ?? "");
 				if (contextInfo) contextInfo["contextWindow"] = contextWindow;
 				return {
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
 					contextWindow,
-					options: contextInfo?.["options"] ?? [],
+					options: Schema.decodeUnknownSync(
+						Schema.Array(ContextWindowOptionSchema),
+					)(contextInfo?.["options"] ?? []),
 				};
 			},
 		},

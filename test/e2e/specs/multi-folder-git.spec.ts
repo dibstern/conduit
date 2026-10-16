@@ -102,16 +102,20 @@ for (const scenario of [
 					hasMore: false,
 					nextCursor: null,
 				}),
-			},
-			handlers: {
-				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-				GetProjects: () => ({ projects: [project], current: slug }),
+				GetModels: ({ projectSlug }) => ({
+					defaultOpenCodeInstanceId: "opencode",
+					projectSlug,
+					providers: [],
+				}),
 				GetAgents: () => ({
 					projectSlug: slug,
 					agents: [],
 					providerScope: { id: "claude", name: "Claude" },
 					instanceId: "claude",
 				}),
+			},
+			handlers: {
+				GetProjects: () => ({ projects: [project], current: slug }),
 			},
 		});
 		await mockRelayWebSocket(page, {

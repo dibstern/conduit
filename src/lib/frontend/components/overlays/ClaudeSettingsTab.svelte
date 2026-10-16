@@ -32,10 +32,10 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import {
+		rpc,
 		getClaudeSettingsRpc,
 		resolveClaudeSettingsRpc,
 		setClaudeSettingsRpc,
-		setDefaultPermissionModeRpc,
 	} from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
@@ -274,11 +274,11 @@
 		const projectSlug = getCurrentSlug();
 		if (!mode || !projectSlug) return;
 		const undoDefaultMode = chooseDefaultPermissionMode(mode);
-		void setDefaultPermissionModeRpc({ projectSlug, mode })
+		void rpc("SetDefaultPermissionMode", { projectSlug, mode })
 			.then((response) => applyDefaultPermissionMode(response.mode))
-			.catch(() => {
+			.catch((error) => {
 				undoDefaultMode();
-				showToast("Failed to save default approval mode", { variant: "warn" });
+				toastFailure("Failed to save default approval mode", "warn")(error);
 			});
 	}
 

@@ -16,23 +16,24 @@ import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpcSpy = vi.hoisted(() =>
-	vi.fn(async (_tag: string, _input: unknown) => ({ ok: true as const })),
+	vi.fn(async (tag: string, _input: unknown) => {
+		switch (tag) {
+			case "GetAgents":
+				return { projectSlug: "project-a", agents: [] };
+			case "GetCommands":
+				return { projectSlug: "project-a", commands: [] };
+			case "GetModels":
+				throw new Error("models unavailable in test");
+			case "SwitchPermissionMode":
+				return { projectSlug: "project-a", mode: "ask" };
+			default:
+				return { ok: true as const };
+		}
+	}),
 );
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getAgentsRpc: vi.fn(async () => ({ projectSlug: "project-a", agents: [] })),
-	getCommandsRpc: vi.fn(async () => ({
-		projectSlug: "project-a",
-		commands: [],
-	})),
-	getModelsRpc: vi.fn(async () => {
-		throw new Error("models unavailable in test");
-	}),
 	rpc: rpcSpy,
-	switchPermissionModeRpc: vi.fn(async () => ({
-		projectSlug: "project-a",
-		mode: "ask",
-	})),
 }));
 
 // Imports (after mocks)

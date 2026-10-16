@@ -3,21 +3,14 @@ import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { Cause, Effect, Either, HashSet } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
-import type { SessionMode } from "../../contracts/project-file.js";
 import type { WorktreeCleanup } from "../../contracts/worktree.js";
 import {
-	type GetSessionSkillsResponse,
-	type GetSkillContentResponse,
-	type GoalDetails,
 	RpcLogLevelSchema,
 	type SaveProjectInput,
 	type SetKeepAwakeResponse,
 	type WsRpcGroup,
 } from "../../contracts/ws-rpc.js";
-import type {
-	GroupingMode,
-	SessionPermissionMode,
-} from "../../shared-types.js";
+import type { GroupingMode } from "../../shared-types.js";
 import { getCurrentSlug } from "../stores/router.svelte.js";
 import { runTransportEffect } from "./runtime.js";
 import { type WsRpcClient, WsRpcClients } from "./shared-client.js";
@@ -29,28 +22,15 @@ export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 
 import type {
 	ClaudeSettingsResponse,
-	ContinuationHandoffResponse,
 	DetectProxyResponse,
-	GetAgentsResponse,
-	GetCommandsResponse,
-	GetModelsResponse,
 	GetProjectsResponse,
 	InstanceListResponse,
-	PreviewContinuationResponse,
 	ProjectMutationResponse,
-	QuotaForAccountsResponse,
 	ResolveClaudeSettingsResponse,
 	RpcLogLevel,
 	SaveProjectResponse,
 	ScanNowResponse,
-	SetDefaultModelResponse,
-	SetDefaultPermissionModeResponse,
-	SetHarnessDefaultResponse,
 	SetHiddenEntriesResponse,
-	SwitchContextWindowResponse,
-	SwitchModelResponse,
-	SwitchPermissionModeResponse,
-	SwitchVariantResponse,
 } from "./ws-rpc.js";
 
 type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
@@ -100,24 +80,6 @@ export async function rpc<T extends UnaryTag>(
 	);
 	if (Either.isLeft(result)) throw result.left;
 	return result.right;
-}
-
-export interface GetModelsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
-
-export interface GetAgentsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
-
-export interface GetCommandsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
 }
 
 export interface GetProjectsRpcInput {
@@ -201,62 +163,6 @@ export interface AttachProjectRpcInput {
 	readonly originId: string;
 }
 
-export interface GetSkillContentRpcInput {
-	readonly projectSlug: string;
-	readonly name: string;
-	readonly sessionId?: string;
-}
-
-export interface GetSessionSkillsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}
-
-export interface SwitchAgentRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly agentId: string;
-	readonly originId?: string;
-}
-
-export interface SwitchContextWindowRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly contextWindow: string;
-	readonly originId?: string;
-}
-
-export interface SwitchModelRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly modelId: string;
-	readonly providerId: string;
-	readonly originId?: string;
-}
-
-export interface SetDefaultModelRpcInput {
-	readonly projectSlug: string;
-	readonly model: string;
-	readonly provider: string;
-	readonly originId?: string;
-}
-
-export interface SetHarnessDefaultRpcInput {
-	readonly projectSlug: string;
-	readonly harness: "claude" | "opencode";
-	readonly providerId: string;
-	readonly modelId: string;
-	readonly effort?: string;
-	readonly contextWindow: string;
-	readonly originId?: string;
-}
-
-export interface SetDefaultPermissionModeRpcInput {
-	readonly projectSlug: string;
-	readonly mode: SessionPermissionMode;
-	readonly originId?: string;
-}
-
 export interface SetHiddenEntriesRpcInput {
 	readonly projectSlug: string;
 	readonly hiddenModels?: readonly string[];
@@ -278,52 +184,6 @@ export interface ResolveClaudeSettingsRpcInput {
 	readonly projectSlug: string;
 	readonly instanceId: string;
 	readonly sessionId?: string;
-}
-
-export interface ContinueSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly instanceId: string;
-	readonly expectedInstanceId: string;
-	readonly at?: number;
-	readonly originId?: string;
-}
-
-export interface CancelContinuationRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
-export interface PreviewContinuationRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly instanceId: string;
-	readonly originId?: string;
-}
-
-export interface QuotaForAccountsRpcInput {
-	readonly projectSlug: string;
-	readonly originId?: string;
-}
-
-export interface GetContinuationHandoffRpcInput
-	extends PreviewContinuationRpcInput {
-	readonly at: number;
-}
-
-export interface SwitchVariantRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly variant: string;
-	readonly originId?: string;
-}
-
-export interface SwitchPermissionModeRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly mode: SessionPermissionMode;
-	readonly originId?: string;
 }
 
 export const LOG_LEVELS = RpcLogLevelSchema.literals;
@@ -391,32 +251,6 @@ export async function setPinRpc(input: {
 	return result.right;
 }
 
-export async function resolveSessionModeRpc(projectSlug: string) {
-	return runTransportEffect(
-		callDaemon((client) => client("ResolveSessionMode", { projectSlug })),
-	);
-}
-
-export async function setDefaultSessionModeRpc(input: {
-	readonly projectSlug: string;
-	readonly mode: SessionMode;
-}) {
-	return runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("SetDefaultSessionMode", input),
-		),
-	);
-}
-
-const callGetModels = (input: GetModelsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetModels", input));
-
-const callGetAgents = (input: GetAgentsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetAgents", input));
-
-const callGetCommands = (input: GetCommandsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetCommands", input));
-
 const callGetProjects = (input: GetProjectsRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetProjects", input));
 
@@ -481,69 +315,6 @@ const callClosePty = (input: ClosePtyRpcInput) =>
 const callAttachProject = (input: AttachProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client("AttachProject", input));
 
-const callGetSkillContent = (input: GetSkillContentRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetSkillContent", input));
-
-const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetSessionSkills", input));
-
-const callSwitchAgent = (input: SwitchAgentRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SwitchAgent", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			agentId: input.agentId,
-			...(input.originId ? { originId: input.originId } : {}),
-		}).pipe(Effect.asVoid),
-	);
-
-const callSwitchContextWindow = (input: SwitchContextWindowRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SwitchContextWindow", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			contextWindow: input.contextWindow,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
-const callSwitchModel = (input: SwitchModelRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SwitchModel", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			modelId: input.modelId,
-			providerId: input.providerId,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
-const callSetDefaultModel = (input: SetDefaultModelRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SetDefaultModel", {
-			projectSlug: input.projectSlug,
-			model: input.model,
-			provider: input.provider,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
-const callSetHarnessDefault = (input: SetHarnessDefaultRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SetHarnessDefault", input),
-	);
-
-const callSetDefaultPermissionMode = (
-	input: SetDefaultPermissionModeRpcInput,
-) =>
-	callControl(input.projectSlug, (client) =>
-		client("SetDefaultPermissionMode", {
-			projectSlug: input.projectSlug,
-			mode: input.mode,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
 const callSetHiddenEntries = (input: SetHiddenEntriesRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client("SetHiddenEntries", {
@@ -573,26 +344,6 @@ const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
 		client("ResolveClaudeSettings", input),
 	);
 
-const callSwitchVariant = (input: SwitchVariantRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SwitchVariant", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			variant: input.variant,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
-const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SwitchPermissionMode", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			mode: input.mode,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client("SetLogLevel", input).pipe(Effect.asVoid));
 
@@ -600,33 +351,6 @@ const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
 	callDaemon((client) =>
 		client("SetTailscaleServe", input).pipe(Effect.asVoid),
 	);
-
-export async function getModelsRpc(
-	input: GetModelsRpcInput,
-): Promise<GetModelsResponse> {
-	return await runTransportEffect(callGetModels(input));
-}
-
-export async function getGoalDetailsRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}): Promise<GoalDetails> {
-	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("GetGoalDetails", input)),
-	);
-}
-
-export async function getAgentsRpc(
-	input: GetAgentsRpcInput,
-): Promise<GetAgentsResponse> {
-	return await runTransportEffect(callGetAgents(input));
-}
-
-export async function getCommandsRpc(
-	input: GetCommandsRpcInput,
-): Promise<GetCommandsResponse> {
-	return await runTransportEffect(callGetCommands(input));
-}
 
 export async function getProjectsRpc(
 	input: GetProjectsRpcInput,
@@ -743,54 +467,6 @@ export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
 	return runTransportEffect(callAttachProject(input));
 }
 
-export async function getSkillContentRpc(
-	input: GetSkillContentRpcInput,
-): Promise<GetSkillContentResponse> {
-	return await runTransportEffect(callGetSkillContent(input));
-}
-
-export async function getSessionSkillsRpc(
-	input: GetSessionSkillsRpcInput,
-): Promise<GetSessionSkillsResponse> {
-	return await runTransportEffect(callGetSessionSkills(input));
-}
-
-export async function switchAgentRpc(
-	input: SwitchAgentRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSwitchAgent(input));
-}
-
-export async function switchContextWindowRpc(
-	input: SwitchContextWindowRpcInput,
-): Promise<SwitchContextWindowResponse> {
-	return await runTransportEffect(callSwitchContextWindow(input));
-}
-
-export async function switchModelRpc(
-	input: SwitchModelRpcInput,
-): Promise<SwitchModelResponse> {
-	return await runTransportEffect(callSwitchModel(input));
-}
-
-export async function setDefaultModelRpc(
-	input: SetDefaultModelRpcInput,
-): Promise<SetDefaultModelResponse> {
-	return await runTransportEffect(callSetDefaultModel(input));
-}
-
-export async function setHarnessDefaultRpc(
-	input: SetHarnessDefaultRpcInput,
-): Promise<SetHarnessDefaultResponse> {
-	return await runTransportEffect(callSetHarnessDefault(input));
-}
-
-export async function setDefaultPermissionModeRpc(
-	input: SetDefaultPermissionModeRpcInput,
-): Promise<SetDefaultPermissionModeResponse> {
-	return await runTransportEffect(callSetDefaultPermissionMode(input));
-}
-
 export async function getDefaultGroupingModeRpc(): Promise<GroupingMode> {
 	const response = await runTransportEffect(
 		callControl("", (client) => client("GetDefaultGroupingMode", {})),
@@ -894,71 +570,6 @@ export async function setUsageLimitsSettingRpc(
 	);
 	const result = await request;
 	return result.usageLimits;
-}
-
-export async function continueSessionRpc(
-	input: ContinueSessionRpcInput,
-): Promise<void> {
-	const result = await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("ContinueSession", input).pipe(Effect.asVoid, Effect.either),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
-}
-
-export async function cancelContinuationRpc(
-	input: CancelContinuationRpcInput,
-): Promise<void> {
-	await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("CancelContinuation", input).pipe(Effect.asVoid),
-		),
-	);
-}
-
-export async function previewContinuationRpc(
-	input: PreviewContinuationRpcInput,
-): Promise<PreviewContinuationResponse> {
-	const result = await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("PreviewContinuation", input).pipe(Effect.either),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
-	return result.right;
-}
-
-export async function quotaForAccountsRpc(
-	input: QuotaForAccountsRpcInput,
-): Promise<QuotaForAccountsResponse> {
-	return await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("QuotaForAccounts", input),
-		),
-	);
-}
-
-export async function getContinuationHandoffRpc(
-	input: GetContinuationHandoffRpcInput,
-): Promise<ContinuationHandoffResponse> {
-	return await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("GetContinuationHandoff", input),
-		),
-	);
-}
-
-export async function switchVariantRpc(
-	input: SwitchVariantRpcInput,
-): Promise<SwitchVariantResponse> {
-	return await runTransportEffect(callSwitchVariant(input));
-}
-
-export async function switchPermissionModeRpc(
-	input: SwitchPermissionModeRpcInput,
-): Promise<SwitchPermissionModeResponse> {
-	return await runTransportEffect(callSwitchPermissionMode(input));
 }
 
 export async function setLogLevelRpc(

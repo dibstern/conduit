@@ -83,7 +83,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { resolveSessionModeRpc, rpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -121,7 +121,7 @@
 	let draftNewWorktree = $state(false);
 	let draftWorktreeBase = $state<string | null>(null);
 	let draftModeChosen = $state(false);
-	let draftSessionMode = $state<Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined>();
+	let draftSessionMode = $state<Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined>();
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftRoute.page === "chat" && draftRoute.draft ? "draft" : "session"}`);
@@ -141,9 +141,9 @@
 		pendingDraftSessionMode = undefined;
 		if (route.page !== "chat" || !route.draft || !projectSlug || untrack(() => sessionState.currentId)) return;
 		let current = true;
-		pendingDraftSessionMode = resolveSessionModeRpc(projectSlug)
+		pendingDraftSessionMode = rpc("ResolveSessionMode", { projectSlug })
 			.then((resolution) => { if (current) draftSessionMode = resolution; })
-			.catch(() => { if (current) showToast("Couldn't load default session mode", { variant: "error" }); });
+			.catch((error) => { if (current) toastFailure("Couldn't load default session mode")(error); });
 		return () => { current = false; };
 	});
 	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));

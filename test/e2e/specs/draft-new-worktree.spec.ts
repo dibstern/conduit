@@ -218,11 +218,8 @@ async function openDraft(
 			},
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
 			GetModels: ({ projectSlug, instanceId }) => ({
+				defaultOpenCodeInstanceId: "opencode",
 				projectSlug,
 				providers: modelProviders.filter(
 					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
@@ -234,6 +231,10 @@ async function openDraft(
 				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
 				agents: [],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {

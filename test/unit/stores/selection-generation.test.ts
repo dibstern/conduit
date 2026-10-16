@@ -6,11 +6,28 @@ import type {
 	GetModelsResponse,
 	ViewSessionResponse,
 } from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	getAgentsRpc,
-	getCommandsRpc,
-	getModelsRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+
+const { getAgentsRpc, getCommandsRpc, getModelsRpc } = vi.hoisted(() => ({
+	getAgentsRpc:
+		vi.fn<
+			(
+				input: Parameters<typeof rpc<"GetAgents">>[1],
+			) => Promise<GetAgentsResponse>
+		>(),
+	getCommandsRpc:
+		vi.fn<
+			(
+				input: Parameters<typeof rpc<"GetCommands">>[1],
+			) => Promise<GetCommandsResponse>
+		>(),
+	getModelsRpc:
+		vi.fn<
+			(
+				input: Parameters<typeof rpc<"GetModels">>[1],
+			) => Promise<GetModelsResponse>
+		>(),
+}));
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -18,9 +35,12 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		getAgentsRpc: vi.fn(),
-		getCommandsRpc: vi.fn(),
-		getModelsRpc: vi.fn(),
+		rpc: (tag: "GetAgents" | "GetCommands" | "GetModels", input: never) =>
+			({
+				GetAgents: getAgentsRpc,
+				GetCommands: getCommandsRpc,
+				GetModels: getModelsRpc,
+			})[tag](input),
 	}),
 );
 

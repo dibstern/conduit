@@ -24,9 +24,16 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		rpc: vi.fn(),
-		getAgentsRpc: vi.fn().mockReturnValue(new Promise(() => undefined)),
-		getCommandsRpc: vi.fn().mockReturnValue(new Promise(() => undefined)),
+		// Discovery never answers, so only the fork and its view settle.
+		rpc: vi.fn((tag: string) =>
+			tag === "GetAgents" || tag === "GetCommands"
+				? new Promise(() => undefined)
+				: Promise.resolve({
+						projectSlug: "current-project",
+						sessionId: "fork",
+						parentId: "other",
+					}),
+		),
 	}),
 );
 
@@ -64,11 +71,6 @@ describe("SessionList fork", () => {
 	// Nothing else announces the fork, so the list must open it itself once
 	// ForkSession answers.
 	it("opens the fork of a session that is not the open one", async () => {
-		vi.mocked(rpc).mockResolvedValue({
-			projectSlug: "current-project",
-			sessionId: "fork",
-			parentId: "other",
-		});
 		render(SessionList);
 		const row = screen.getByText("Other work").closest("a");
 		if (!row) throw new Error("Missing row");

@@ -13,9 +13,10 @@
 	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
 	import { applyGetAgentsResponse, followModelsRead, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
-	import { getAgentsRpc, getModelsRpc, setHarnessDefaultRpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let modelsFetchPending = $state(false);
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
@@ -98,14 +99,14 @@
 		if (!pick) return;
 		saving[harness] = true;
 		try {
-			applyHarnessDefaultSet(await setHarnessDefaultRpc({ projectSlug, harness, ...pick }));
-		} catch {
+			applyHarnessDefaultSet(await rpc("SetHarnessDefault", { projectSlug, harness, ...pick }));
+		} catch (error) {
 			// Restore the server value, including when the native select changed first.
 			const current = discoveryState.harnessDefaults[harness].pick;
 			select.value = setting === "model"
 				? current ? `${current.providerId}/${current.modelId}` : ""
 				: current?.[setting] ?? "";
-			showToast("Failed to save default model", { variant: "warn" });
+			toastFailure("Failed to save default model", "warn")(error);
 		} finally {
 			saving[harness] = false;
 		}
@@ -121,7 +122,7 @@
 			// project default.
 			const sessionId = sessionState.currentId;
 			const applyModels = followModelsRead(sessionId ?? undefined);
-			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+			void rpc("GetModels", { projectSlug, ...(sessionId ? { sessionId } : {}) })
 				.then((response) => {
 					if (sessionState.currentId === sessionId) applyModels(response);
 				})
@@ -129,7 +130,7 @@
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-			void getAgentsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+			void rpc("GetAgents", { projectSlug, ...(sessionId ? { sessionId } : {}) })
 				.then((response) => {
 					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
 				})

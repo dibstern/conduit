@@ -97,11 +97,8 @@ async function openDraft(
 			}),
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: slug }),
-			GetInstances: () => instances,
 			GetModels: ({ projectSlug, instanceId }) => ({
+				defaultOpenCodeInstanceId: "opencode",
 				projectSlug,
 				providers: modelProviders.filter(
 					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
@@ -125,6 +122,10 @@ async function openDraft(
 				rpc.setProjectSetting({ _tag: "defaultSessionMode", mode });
 				return { mode };
 			},
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: slug }),
+			GetInstances: () => instances,
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			SaveProject: ({ slug: editedSlug, sessionMode, title, folders }) => {
 				const savedSlug = typeof editedSlug === "string" ? editedSlug : "added";

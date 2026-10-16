@@ -441,9 +441,9 @@ describe("switchToSession", () => {
 	it("ignores session discovery returned after attaching another project", async () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		let finish: (
-			response: Awaited<ReturnType<typeof sessionRpc.getAgentsRpc>>,
+			response: Awaited<ReturnType<typeof sessionRpc.rpc<"GetAgents">>>,
 		) => void = () => {};
-		const spy = vi.spyOn(sessionRpc, "getAgentsRpc").mockImplementationOnce(
+		const spy = vi.spyOn(sessionRpc, "rpc").mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
 					finish = resolve;
@@ -554,9 +554,7 @@ describe("switchToSession", () => {
 
 	it("applies the returned draft without sending a session permission switch", async () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		const sendMode = vi
-			.spyOn(sessionRpc, "switchPermissionModeRpc")
-			.mockResolvedValue({ projectSlug: "project-a", mode: "acceptEdits" });
+		const sendMode = vi.spyOn(sessionRpc, "rpc");
 		try {
 			choosePermissionMode("acceptEdits");
 			switchToSession("draft-session", "project-a", () =>
@@ -565,7 +563,10 @@ describe("switchToSession", () => {
 			await Promise.resolve();
 			expect(inputSyncState.text).toBe("saved text");
 			expect(sessionState.currentId).toBe("draft-session");
-			expect(sendMode).not.toHaveBeenCalled();
+			expect(sendMode).not.toHaveBeenCalledWith(
+				"SwitchPermissionMode",
+				expect.anything(),
+			);
 		} finally {
 			sendMode.mockRestore();
 			vi.unstubAllGlobals();

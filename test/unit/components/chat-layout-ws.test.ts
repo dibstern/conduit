@@ -285,15 +285,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		projectSlug: null as string | null,
 		sessionSlug: null as string | null,
 	})),
-	getAgentsRpc: vi.fn(async () => {
-		throw new Error("agents temporarily unavailable");
-	}),
-	getModelsRpc: vi.fn(async () => {
-		throw new Error("models temporarily unavailable");
-	}),
-	getCommandsRpc: vi.fn(async () => {
-		throw new Error("commands temporarily unavailable");
-	}),
 	getProjectsRpc: vi.fn(async () => ({
 		projectSlug: "test-project",
 		projects: [],
@@ -308,6 +299,9 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 				hasMore: false,
 				nextCursor: null,
 			});
+		if (["GetAgents", "GetModels", "GetCommands"].includes(tag)) {
+			return Promise.reject(new Error("discovery temporarily unavailable"));
+		}
 		return Promise.resolve({ projectSlug: "test-project", files: [] });
 	}),
 }));

@@ -93,10 +93,6 @@ function defaultAccountDaemon() {
 					sessionAccount = String(payload["instanceId"]);
 					return { projectSlug: "myapp", sessionId: "sess-first-send" };
 				},
-			},
-			handlers: {
-				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
-				DetectProxy: () => ({ found: false, port: 8317 }),
 				GetModels: (payload) => {
 					const id =
 						typeof payload["instanceId"] === "string"
@@ -106,6 +102,7 @@ function defaultAccountDaemon() {
 								: defaultId();
 					publishModels(id);
 					return {
+						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						instanceId: id,
 						providers: [],
@@ -129,6 +126,10 @@ function defaultAccountDaemon() {
 						},
 					],
 				}),
+			},
+			handlers: {
+				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
+				DetectProxy: () => ({ found: false, port: 8317 }),
 			},
 		});
 		clients.push(rpc);

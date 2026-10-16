@@ -59,9 +59,13 @@ for (const viewport of [
 						hasMore: false,
 						nextCursor: null,
 					}),
+					GetModels: ({ projectSlug }) => ({
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug,
+						providers: [],
+					}),
 				},
 				handlers: {
-					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 					GetProjects: () => ({
 						projects,
 						current: projectSlug,

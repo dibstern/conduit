@@ -21,12 +21,7 @@ import type {
 	ForkSessionResponse,
 	ListDaemonSessionsResponse,
 } from "../transport/ws-rpc.js";
-import {
-	getAgentsRpc,
-	getCommandsRpc,
-	getModelsRpc,
-	rpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	AttentionGroups,
 	DateGroups,
@@ -1071,7 +1066,7 @@ export function switchToSession(
 	}
 	if (slug) {
 		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-		void getAgentsRpc({ projectSlug: slug, sessionId })
+		void rpc("GetAgents", { projectSlug: slug, sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1081,7 +1076,7 @@ export function switchToSession(
 					applyGetAgentsResponse(response, sessionId);
 			})
 			.catch(() => undefined);
-		void getCommandsRpc({ projectSlug: slug, sessionId })
+		void rpc("GetCommands", { projectSlug: slug, sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1096,7 +1091,7 @@ export function switchToSession(
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
 		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ projectSlug: slug, sessionId })
+		void rpc("GetModels", { projectSlug: slug, sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1125,8 +1120,8 @@ export async function reloadProviderSession(
 	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
 	const applyModels = followModelsRead(sessionId);
 	const [commands, models] = await Promise.all([
-		getCommandsRpc({ projectSlug, sessionId }),
-		getModelsRpc({ projectSlug, sessionId }),
+		rpc("GetCommands", { projectSlug, sessionId }),
+		rpc("GetModels", { projectSlug, sessionId }),
 	]);
 	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
 		return;

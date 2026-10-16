@@ -109,24 +109,22 @@ export const claudeSettingsHandlers: StepHandler[] = [
 				},
 				opencode: { status: "missing" },
 			});
-			requireRpcControl(world.page).setHandler(
-				"SwitchModel",
-				({ projectSlug, providerId, modelId }) => ({
+			requireRpcControl(world.page).setStubs({
+				SwitchModel: ({ projectSlug, providerId, modelId }) => ({
 					projectSlug,
 					provider: providerId,
 					model: modelId,
 					variant: "",
 					variants: [],
 				}),
-			);
-			requireRpcControl(world.page).setHandler(
-				"SetHarnessDefault",
-				({
+			});
+			requireRpcControl(world.page).setStubs({
+				SetHarnessDefault: ({
 					projectSlug,
 					harness,
 					providerId,
 					modelId,
-					effort,
+					effort = "",
 					contextWindow,
 				}) => ({
 					projectSlug,
@@ -136,7 +134,7 @@ export const claudeSettingsHandlers: StepHandler[] = [
 						status: "ok",
 					},
 				}),
-			);
+			});
 		},
 	},
 	{

@@ -8,7 +8,7 @@
 	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
-	import { rpc, attachProjectRpc, getAgentsRpc, getCommandsRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, attachProjectRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -116,14 +116,14 @@
 		// OpenCode draft models arrive through viewDraftModels; agents have no subscription.
 		if (draftNeedsDiscovery) {
 			const applyModels = followModelsRead();
-			void getModelsRpc({ projectSlug, instanceId })
+			void rpc("GetModels", { projectSlug, instanceId })
 				.then((response) => { if (active) applyModels(response); })
 				.catch(() => undefined);
 		}
-		void getAgentsRpc({ projectSlug, instanceId })
+		void rpc("GetAgents", { projectSlug, instanceId })
 			.then((response) => { if (active) applyGetAgentsResponse(response); })
 			.catch(() => undefined);
-		void getCommandsRpc({ projectSlug, instanceId })
+		void rpc("GetCommands", { projectSlug, instanceId })
 			.then((response) => { if (active) applyGetCommandsResponse(response); })
 			.catch(() => undefined);
 		return () => { active = false; };
@@ -169,7 +169,7 @@
 		if (!projectSlug) return;
 		let active = true;
 		const instanceId = sessionId ? undefined : getEffectiveInstanceId();
-		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}), ...(instanceId ? { instanceId } : {}) }).then((response) => {
+		void rpc("GetCommands", { projectSlug, ...(sessionId ? { sessionId } : {}), ...(instanceId ? { instanceId } : {}) }).then((response) => {
 			if (active && (sessionId || instanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 		}).catch(() => undefined);
 		return () => { active = false; };
@@ -490,7 +490,7 @@
 				routeSessionId == null
 					? getEffectiveInstanceId()
 					: undefined;
-			void getAgentsRpc({
+			void rpc("GetAgents", {
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
@@ -504,7 +504,7 @@
 				})
 				.catch(() => undefined);
 			const applyModels = followModelsRead(routeSessionId ?? undefined);
-			void getModelsRpc({
+			void rpc("GetModels", {
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
@@ -513,7 +513,7 @@
 					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyModels(response);
 				})
 				.catch(() => undefined);
-			void getCommandsRpc({
+			void rpc("GetCommands", {
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
@@ -686,10 +686,10 @@
 					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
 						const draftInstanceId = getEffectiveInstanceId();
 						const applyModels = followModelsRead();
-						void getModelsRpc({ projectSlug: attachedSlug, ...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}) })
+						void rpc("GetModels", { projectSlug: attachedSlug, ...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}) })
 							.then(applyModels)
 								.catch(() => undefined);
-						void getAgentsRpc({
+						void rpc("GetAgents", {
 							projectSlug: attachedSlug,
 							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 						})

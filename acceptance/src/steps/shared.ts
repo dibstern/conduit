@@ -1,5 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import type { GetModelsResponse } from "../../../src/lib/contracts/ws-rpc.js";
+import type {
+	GetModelsResponse,
+	GetSessionSkillsResponseSchema,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import type { RpcMockControl } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
@@ -14,7 +17,10 @@ export const detailFeeds = new WeakMap<Page, RpcMockControl["detailFeed"]>();
 export const createSessionDelays = new WeakMap<Page, number>();
 export const inheritedClaudeCommitAttribution = "Inherited commit attribution";
 /** GetSessionSkills loads served by the mock app; empty unless a scenario seeds them. */
-export const mockSessionSkills = new WeakMap<Page, readonly unknown[]>();
+export const mockSessionSkills = new WeakMap<
+	Page,
+	(typeof GetSessionSkillsResponseSchema.Type)["loads"]
+>();
 /** Per-page mock instance list — mutated by the Add/Update/Remove RPC handlers
  *  so the SettingsPanel editor and the composer rail see consistent state. */
 export const mockInstances = new WeakMap<
@@ -83,39 +89,41 @@ export async function serveModelCatalog(
 	response: Omit<GetModelsResponse, "projectSlug">,
 ): Promise<void> {
 	const rpc = requireRpcControl(page);
-	const previous =
-		rpc.getResponseHandler("GetModels") ?? rpc.catalogHandler("GetModels");
-	rpc.setHandler("GetModels", async (payload, request) => {
-		const binding = payload["sessionId"]
-			? await previous?.(payload, request)
-			: undefined;
-		const instanceId =
-			!payload["sessionId"] && typeof payload["instanceId"] === "string"
-				? payload["instanceId"]
+	const previous = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+	rpc.setStubs({
+		GetModels: async (payload) => {
+			const binding = payload["sessionId"]
+				? await previous(payload)
 				: undefined;
-		const claude = mockInstances
-			.get(page)
-			?.some(
-				(instance) =>
-					instance["id"] === instanceId && instance["driver"] === "claude",
-			);
-		return {
-			projectSlug: "myapp",
-			...(typeof binding === "object" && binding !== null ? binding : {}),
-			...response,
-			...(instanceId
-				? {
-						instanceId,
-						active:
-							(response.active?.provider === "claude") === Boolean(claude)
-								? response.active
-								: undefined,
-					}
-				: {}),
-			providers: claude
-				? []
-				: response.providers.filter((provider) => provider.id !== "claude"),
-		};
+			const instanceId =
+				!payload["sessionId"] && typeof payload["instanceId"] === "string"
+					? payload["instanceId"]
+					: undefined;
+			const claude = mockInstances
+				.get(page)
+				?.some(
+					(instance) =>
+						instance["id"] === instanceId && instance["driver"] === "claude",
+				);
+			return {
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "myapp",
+				...(typeof binding === "object" && binding !== null ? binding : {}),
+				...response,
+				...(instanceId
+					? {
+							instanceId,
+							active:
+								(response.active?.provider === "claude") === Boolean(claude)
+									? response.active
+									: undefined,
+						}
+					: {}),
+				providers: claude
+					? []
+					: response.providers.filter((provider) => provider.id !== "claude"),
+			};
+		},
 	});
 	rpc.setProjectSetting({
 		_tag: "providerModels",

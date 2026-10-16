@@ -77,18 +77,22 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-			GetProjects: () => ({
-				projects,
-				current: projectSlug,
+			GetModels: ({ projectSlug }) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug,
+				providers: [],
 			}),
 			GetAgents: () => ({
 				projectSlug,
 				agents: [],
 				providerScope: { id: "claude", name: "Claude" },
 				instanceId: "claude",
+			}),
+		},
+		handlers: {
+			GetProjects: () => ({
+				projects,
+				current: projectSlug,
 			}),
 			CreatePty: ({ sessionId }) => {
 				const id = `pty-${++terminalCount}`;

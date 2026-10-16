@@ -363,10 +363,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				});
 				return { projectSlug: "myapp", sessionId: "sess-restored" };
 			},
-		},
-		handlers: {
-			GetProjects: () => ({ projects: [project], current: "myapp" }),
-			DetectProxy: () => ({ found: false, port: 8317 }),
 			GetModels: (payload) => {
 				const id =
 					typeof payload["instanceId"] === "string"
@@ -374,11 +370,17 @@ test("deleting Claude defaults follows usage order and adding an account restore
 						: list(state).find(
 								(account) => account.driver === "claude" && account.isDefault,
 							)?.id;
-				if (!id) return { projectSlug: "myapp", providers: [] };
+				if (!id)
+					return {
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug: "myapp",
+						providers: [],
+					};
 				const catalogue = catalogues[id];
 				if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
 				publishCatalogue(id);
 				return {
+					defaultOpenCodeInstanceId: "opencode",
 					projectSlug: "myapp",
 					instanceId: id,
 					providers: providersForAccount(id),
@@ -404,6 +406,10 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects: [project], current: "myapp" }),
+			DetectProxy: () => ({ found: false, port: 8317 }),
 			GetUsageLimitsSetting: () => ({
 				usageLimits: {
 					autoResume: false,
