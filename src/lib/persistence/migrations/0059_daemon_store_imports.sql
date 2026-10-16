@@ -1,4 +1,4 @@
-CREATE TABLE daemon_store_imports (
+CREATE TABLE IF NOT EXISTS daemon_store_imports (
     project_id TEXT PRIMARY KEY NOT NULL,
     method TEXT NOT NULL CHECK (method IN ('seeded', 'imported')),
     source_path TEXT NOT NULL,
