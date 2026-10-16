@@ -25,9 +25,9 @@ Scenario Outline: answer a Cursor question from desktop or phone
   And the messages region visually matches cursor-question-<tier>-<kind> at <threshold> percent
   When I answer the Cursor question with <kind> <answer>
   Then the relay receives the Cursor question answer <answer>
-  And the Cursor question is cleared after answering
   When the Cursor relay continues after the answer <answer>
-  Then the transcript shows Using <answer>.
+  Then the Cursor question is cleared after answering
+  And the transcript shows Using <answer>.
   When the Cursor relay completes the turn
   Then the Cursor composer is idle
   And the Cursor question has no answer controls

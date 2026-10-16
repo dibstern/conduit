@@ -45,26 +45,19 @@ export const cursorQuestionHandlers: StepHandler[] = [
 					type: "tool_start",
 					sessionId,
 					id: toolUseId,
-					name: "mcp",
+					name: "AskUserQuestion",
 				},
 				{
 					type: "tool_executing",
 					sessionId,
 					id: toolUseId,
-					name: "mcp",
+					name: "AskUserQuestion",
 					input: {
-						tool: "Unknown",
-						name: "mcp",
-						raw: {
-							providerIdentifier: "custom-user-tools",
-							toolName: "ask_user",
-							args: {
-								questions: approval.questions.map((question) => ({
-									...question,
-									header: "Database",
-								})),
-							},
-						},
+						tool: "AskUserQuestion",
+						questions: approval.questions.map((question) => ({
+							...question,
+							header: "Database",
+						})),
 					},
 				},
 			]);
@@ -146,7 +139,7 @@ export const cursorQuestionHandlers: StepHandler[] = [
 			await expect(world.page.locator(".question-card")).toHaveCount(0);
 			await expect(
 				world.page.locator(`[data-tool-id="${toolUseId}"]`),
-			).toHaveAttribute("data-tool-status", "running");
+			).toHaveAttribute("data-tool-status", "completed");
 		},
 	},
 	{

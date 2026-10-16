@@ -118,6 +118,18 @@ export function cursorToolInput(call: CursorToolCall): {
 			};
 		}
 		case "mcp": {
+			// Conduit's own ask_user renders as the question card, like Claude's.
+			if (
+				args["providerIdentifier"] === "custom-user-tools" &&
+				args["toolName"] === "ask_user"
+			)
+				return {
+					toolName: "AskUserQuestion",
+					input: {
+						tool: "AskUserQuestion",
+						questions: toRecord(args["args"])["questions"] ?? null,
+					},
+				};
 			const name = `mcp__${str(args, "providerIdentifier")}__${str(args, "toolName")}`;
 			return {
 				toolName: name,
