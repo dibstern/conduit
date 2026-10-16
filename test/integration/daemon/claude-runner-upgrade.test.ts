@@ -293,6 +293,15 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
 			buildId: OLD_BUILD,
+			capabilityModels: ["sonnet", "claude-sonnet-4", "claude-opus-4"].map(
+				(id) => ({
+					id,
+					name: id,
+					providerId: "claude",
+					variants: { medium: {}, high: {} },
+					contextWindowOptions: [{ value: "200k", label: "200K" }],
+				}),
+			),
 			...options,
 		});
 		const details: Record<string, unknown> = {};

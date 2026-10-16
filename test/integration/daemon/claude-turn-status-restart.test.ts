@@ -11,6 +11,13 @@ import {
 	responseChunks,
 } from "../../helpers/process-harness.js";
 
+const capabilityModels = ["sonnet", "claude-sonnet-4"].map((id) => ({
+	id,
+	name: id,
+	providerId: "claude",
+	contextWindowOptions: [{ value: "200k", label: "200K" }],
+}));
+
 async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 	const envelopes = await Effect.runPromise(
 		browser.rpc
@@ -102,6 +109,7 @@ describe("running Claude turn status across restart", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			foregroundCli: true,
 			restartProof: true,
+			capabilityModels,
 			...(opencodeAvailable && { opencodeRecording: "chat-simple" }),
 		});
 		const browser = await harness.connect();
@@ -226,6 +234,7 @@ describe("Claude turn status before the model streams", () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
+			capabilityModels,
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Local work");
@@ -295,6 +304,7 @@ describe("Claude turn status before the model streams", () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
+			capabilityModels,
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Mode change");
