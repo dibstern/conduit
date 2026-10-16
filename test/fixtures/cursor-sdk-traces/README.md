@@ -219,3 +219,80 @@ these are test-only scheduling controls, never SDK wire fields. They make live
 child visibility and the gap before `Run.wait()` deterministic. The test writes
 child events, no-duplicate assertions, child/account/model identity, terminal
 states and owned process cleanup to `test-results/conduit-test-xqsg.10.json`.
+## Usage, error and interrupt replay cases (conduit-test-xqsg.19)
+
+These derivatives keep `basic.jsonl`'s wire envelopes and change only their
+scenario header and the edits below. They are synthetic reconciliation cases,
+not evidence that a live background task produced a particular sequence.
+
+- `turn-usage-followup.jsonl`: duplicates the basic usage stream row, replacing
+  only its token counts with the first usage row's counts from
+  `workspace-resume.jsonl`. Both messages retain the basic agent and run IDs.
+  The final `RunResult.usage` is the field-wise sum of these two messages. This
+  represents two per-turn usage messages, such as a background follow-up on
+  the same run, using the public SDKUsageMessage shape without inventing a
+  background-only stream kind. The latest request owns context fill.
+- `turn-usage-final-extra.jsonl`: doubles the basic final RunResult's usage
+  counts, leaving its single streamed usage row unchanged. The unstreamed
+  remainder must be reconciled without counting the original message twice.
+
+`cursor-usage-errors.test.ts` also writes temporary derivatives in the isolated
+process root. It inserts the redacted credential result and missing model
+catalog exactly as the turn suite does. Error cases insert `send.error`
+operation wrappers containing the installed SDK's declared error class name,
+code, message and retry flag. Those wrappers inject operation failures, not
+new stream union members. All eight cases preserve the diagnostic string and
+require exactly one send for one input.
+
+Three further temporary derivatives exercise errors after a send succeeds.
+The first changes the captured `wait.result` status to `error` and adds only
+the declared RunError fields `{message, code: "connection_stalled"}`. The
+second replaces that row with `wait.result.error`, wrapping a declared
+`NetworkError` with code `unavailable`. The third removes `wait.result` and
+inserts `stream.error` before the captured `stream.end`, wrapping a declared
+`NetworkError` with code `connection_stalled`. The multiline diagnostics must
+survive exactly. All failure cases inspect the durable command outbox to
+require one failed attempt and no scheduled retry.
+
+Optional-cost cases insert `usage` and `usage.error` operation replies, whose
+shape comes from SDK 1.0.37's `AgentUsage` and declared SDK error classes.
+There is no live getUsage capture in this corpus. The six synthetic cases
+cover missing cost, denied access with `feature_unavailable`, aggregate-only
+cost growth, late billing for an earlier usage entry, a new matching billed
+entry and a new matching plan-included entry. The first four omit Conduit
+cost. The last two report $0.255 and $0 from per-turn `chargedCents` values
+of 25.5 and 0. Deliberately different `rawCostCents` values ensure the actual
+charge, rather than the undiscounted total, is used.
+
+The local per-turn billing UUIDs differ from SDK run-handle IDs. The public
+SDK exposes no direct link between them. Attribution therefore requires new
+entries whose summed usage matches both the turn and the whole-agent usage
+delta, unchanged earlier entries and matching charged-cost deltas. This is a
+conservative inference, not live correlation proof. A previously unseen late
+bill with identical token counts remains indistinguishable from current usage.
+
+Interrupt cases use unchanged `cancel.jsonl`. Test-only playback scheduling
+delays its first cancelled wait by 10,500 ms, or never settles that first run.
+This preserves the captured wire result rather than inventing a terminal
+status. A late wait is captured after the 10-second fallback and must not
+reopen the stored turn. In the never-settling case the next input arrives
+while the original runner is alive; replacing that controller and resuming
+with `local.force` selects the capture's next actual send and answer. These
+schedules model a failure the live spike did not reproduce. A force resume
+within the same playback process still fails while its old run is live, and
+closing that agent does not settle it.
+
+The suite writes stored events, terminal states, actual SDK-port calls,
+process identities, assertions and failures to
+`test-results/conduit-test-xqsg.19.json`.
+
+## Skill command process replay (conduit-test-xqsg.13)
+
+`cursor-skills.test.ts` derives a temporary replay from `basic.jsonl` by adding
+only the redacted `credential.store` result described above. Its tee records the
+actual `/nested release` prompt received by the runner. The filesystem skills
+are created under the harness's isolated workspace and home; the JSON evidence
+is `test-results/conduit-test-xqsg.13.json`. This proves command discovery and
+prompt delivery through Conduit, not SDK skill activation. None of the original
+captures contains a skill scenario. The opt-in `cursor-skills-real-sdk.test.ts`
+checks real activation separately and records a new trace when explicitly run.

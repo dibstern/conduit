@@ -3,6 +3,7 @@ import {
 	type KnownProviderDriverKind,
 } from "../../contracts/provider-instance.js";
 import type { SettingsSection } from "../components/layout/chrome-actions.js";
+import type { SessionPermissionMode } from "../types.js";
 
 export const PROVIDER_PRESENTATION = {
 	claude: {
@@ -29,7 +30,16 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "server",
 		namePlaceholder: "Work Cursor",
 		configDirPlaceholder: "~/.config/cursor/work",
-		composerNotice: "Cursor runs without per-call approval.",
+		// Cursor has no per-call approval hook (spike conduit-test-xqsg.3), so each
+		// mode says what cursor-session-config.ts actually enforces instead.
+		composerNotice: {
+			ask: "Cursor can't ask per call. Its auto-review decides in the sandbox and can let calls through.",
+			acceptEdits:
+				"Cursor applies edits without asking. Commands run in its sandbox.",
+			auto: "Cursor's auto-review decides in the sandbox and can let calls through.",
+			plan: "Cursor plans without per-call approval, inside its sandbox.",
+			full: "Cursor runs every call with no approval and no sandbox.",
+		},
 		subagentNotice: "Subagent sessions are read-only.",
 	},
 } as const satisfies Record<
@@ -40,7 +50,9 @@ export const PROVIDER_PRESENTATION = {
 		readonly settingsTab: SettingsSection;
 		readonly namePlaceholder: string;
 		readonly configDirPlaceholder: string | undefined;
-		readonly composerNotice: string | undefined;
+		readonly composerNotice:
+			| Partial<Record<SessionPermissionMode, string>>
+			| undefined;
 		readonly subagentNotice: string | undefined;
 	}
 >;

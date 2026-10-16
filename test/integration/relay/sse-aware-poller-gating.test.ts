@@ -259,23 +259,12 @@ async function createTestHarness(
 							sessionId: session.id,
 							title: session.title,
 							provider: "opencode",
+							// A subagent is contained by its parent; session.forked would make it a Fork.
+							...(session.parentID != null && { parentId: session.parentID }),
 						},
 						{ provider: "opencode" },
 					),
 				);
-				if (session.parentID) {
-					yield* store.append(
-						canonicalEvent(
-							"session.forked",
-							session.id,
-							{
-								sessionId: session.id,
-								parentId: session.parentID,
-							},
-							{ provider: "opencode" },
-						),
-					);
-				}
 			}
 		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, slug))),
 	);

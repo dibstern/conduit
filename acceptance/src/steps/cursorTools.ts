@@ -19,6 +19,8 @@ const fullCommand = `printf '${"x".repeat(2200)}' # ${fullCommandSuffix}`;
 const image =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const recording = "data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29t";
+// Date is pinned just after the snapshot times so elapsed timers render a short, stable duration.
+const toolsClock = new Date("2026-10-02T00:00:05Z");
 const row = (page: Page, id: string) =>
 	page.locator(`.tool-item[data-tool-id="cursor-tools-${id}"]`);
 
@@ -57,7 +59,7 @@ function publish(page: Page, added: HistoryMessagePart[]): void {
 		{
 			id: "cursor-tools-user",
 			role: "user",
-			time: { created: 1 },
+			time: { created: toolsClock.getTime() - 5_000 },
 			parts: [
 				{
 					id: "cursor-tools-prompt",
@@ -66,7 +68,12 @@ function publish(page: Page, added: HistoryMessagePart[]): void {
 				},
 			],
 		},
-		{ id: messageId, role: "assistant", time: { created: 2 }, parts: next },
+		{
+			id: messageId,
+			role: "assistant",
+			time: { created: toolsClock.getTime() - 4_000 },
+			parts: next,
+		},
 	];
 	requireRelayControl(page).sendMessage({
 		type: "mock_transcript_snapshot",
@@ -143,7 +150,8 @@ export const cursorToolsHandlers: StepHandler[] = [
 	{
 		name: "start Cursor shell tool",
 		match: /^the Cursor shell starts with command (.+)$/,
-		run: ({ world, match }) => {
+		run: async ({ world, match }) => {
+			await world.page.clock.setFixedTime(toolsClock);
 			parts.set(world.page, []);
 			publish(world.page, [
 				tool(

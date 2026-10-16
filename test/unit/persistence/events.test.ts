@@ -32,6 +32,24 @@ describe("Stored event factory", () => {
 
 describe("Canonical Event Types", () => {
 	it.each([
+		{},
+		{ parentId: "owner" },
+		{ parentId: "source", sideThread: true, forkPointEvent: "boundary" },
+		{ forkedFrom: "source" },
+	])("round-trips flat session.created placement %j", (placement) => {
+		const event = canonicalEvent("session.created", "session", {
+			sessionId: "session",
+			title: "Session",
+			provider: "claude",
+			...placement,
+		});
+		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
+		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
+			event,
+		);
+	});
+
+	it.each([
 		"/repo/worktree",
 		null,
 	])("does not lose a workspace hint path=%s in canonical round-trip", (path) => {

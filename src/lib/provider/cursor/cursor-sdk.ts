@@ -23,6 +23,13 @@ export function createCursorSdkPort(): CursorSdkPort {
 								waitDelayMs: Number(
 									process.env["CONDUIT_TEST_CURSOR_WAIT_DELAY_MS"] ?? 0,
 								),
+								cancelTerminalDelayMs: Number(
+									process.env["CONDUIT_TEST_CURSOR_CANCEL_TERMINAL_DELAY_MS"] ??
+										0,
+								),
+								cancelNeverSettles:
+									process.env["CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"] ===
+									"1",
 							}
 						: {},
 				)

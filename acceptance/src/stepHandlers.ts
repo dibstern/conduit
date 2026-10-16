@@ -15,7 +15,9 @@ import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
 import { cursorSubagentsHandlers } from "./steps/cursorSubagents.js";
 import { cursorToolsHandlers } from "./steps/cursorTools.js";
+import { cursorSkillsHandlers } from "./steps/cursorSkills.js";
 import { cursorTurnHandlers } from "./steps/cursorTurn.js";
+import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
@@ -60,9 +62,11 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...usageSettingsHandlers,
 	...usageWarningStripHandlers,
 	...composerSendAtResetHandlers,
+	...cursorSkillsHandlers,
 	...cursorTurnHandlers,
 	...cursorToolsHandlers,
 	...cursorSubagentsHandlers,
+	...cursorUsageErrorsHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".
