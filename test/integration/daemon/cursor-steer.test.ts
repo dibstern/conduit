@@ -805,12 +805,17 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		);
 		await browser.sendNow(id, inputId);
 		await turns(fixture, id, ["error", "completed"]);
-		const state = oneMessage(fixture, id, inputId);
-		expect(
-			state.commands
-				.filter((row) => row.command_id === inputId)
-				.map((row) => row.status),
-		).toEqual(["failed", "completed"]);
+		oneMessage(fixture, id, inputId);
+		// The outbox row completes after sendTurn returns, just behind the turn row.
+		await vi.waitFor(
+			() =>
+				expect(
+					snapshot(fixture, id)
+						.commands.filter((row) => row.command_id === inputId)
+						.map((row) => row.status),
+				).toEqual(["failed", "completed"]),
+			{ timeout: TIMEOUT },
+		);
 		expect(fixture.runnerPids()).toHaveLength(2);
 		observations["killedOwnedRunnerPid"] = pid;
 		observations["recoveredOnceByInbox"] = true;
