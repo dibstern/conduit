@@ -48,7 +48,7 @@ function capture(name: string) {
 	return rows(resolve(`test/fixtures/cursor-sdk-traces/${name}.jsonl`));
 }
 function snapshot(harness: ProcessHarness, id: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db
@@ -348,7 +348,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 	afterEach(async ({ task }) => {
 		if (!harness) return;
 		const fixture = harness;
-		const state = existsSync(fixture.projectStorePath())
+		const state = existsSync(fixture.daemonStorePath())
 			? snapshot(fixture, sessionId)
 			: undefined;
 		const captured = rows(capturePath);
