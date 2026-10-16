@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import type { PreWarmDraft } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
@@ -42,7 +43,7 @@ export const preWarmDraft = (request: PreWarmDraft) =>
 			if (request.worktreeBase !== undefined) return;
 			const account = yield* resolveSessionCreationAccount(request);
 			const drafts = yield* DraftPreWarmTag;
-			if (account.driver === "claude") {
+			if (PROVIDER_DRIVERS[account.driver].supportsNativeResume) {
 				const creation = yield* resolveSessionCreation({ ...request, account });
 				const launch = yield* resolveDraftLaunchInput(
 					creation,
@@ -52,7 +53,7 @@ export const preWarmDraft = (request: PreWarmDraft) =>
 					...launch,
 					providerState: {},
 				});
-			} else if (account.driver === "opencode") {
+			} else if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 				const config = yield* ConfigTag;
 				const directory = request.worktreePath ?? config.projectDir;
 				const instances = yield* OpenCodeInstancesTag;

@@ -12,7 +12,11 @@
 import { randomUUID } from "node:crypto";
 import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
-import type { Account, OpenCodeAccount } from "../../../contracts/account.js";
+import type { Account } from "../../../contracts/account.js";
+import {
+	getProviderDriver,
+	PROVIDER_DRIVERS,
+} from "../../../contracts/provider-instance.js";
 import {
 	type AutoTitleSource,
 	UNTITLED_SESSION_TITLE,
@@ -299,9 +303,10 @@ export const applySessionCommand = (
 					? options.upstreamAdapter
 					: command.type === "session.renamed" ||
 							command.type === "session.deleted"
-						? account?.driver === "claude"
-							? claudeUpstreamAdapter
-							: openCodeUpstreamAdapter(api)
+						? getProviderDriver(account?.driver ?? "opencode")
+								?.runsOpenCodeServer
+							? openCodeUpstreamAdapter(api)
+							: claudeUpstreamAdapter
 						: null;
 
 			if (adapter !== null) {
@@ -310,7 +315,8 @@ export const applySessionCommand = (
 					options.upstreamAdapter === undefined &&
 					(command.type === "session.renamed" ||
 						command.type === "session.deleted") &&
-					account?.driver === "opencode" &&
+					account !== undefined &&
+					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer &&
 					instances._tag === "Some"
 						? Effect.scoped(
 								Effect.flatMap(instances.value.use(account.id), (client) =>
@@ -429,7 +435,7 @@ export const createOpenCodeSession = (
  */
 export const forkOpenCodeSession = (
 	parentSessionId: string,
-	account: OpenCodeAccount,
+	account: Account,
 	messageId?: string,
 	side?: { title: string; inputId: string },
 ) =>
@@ -645,7 +651,7 @@ const forkSessionInWorkspace = (
 			}
 		}
 		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
-		if (account.driver === "opencode") {
+		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 			// A native OpenCode fork needs only the Side Thread's mid-turn cut.
 			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 			const messageId =
@@ -691,6 +697,14 @@ const forkSessionInWorkspace = (
 				provider: "opencode" as const,
 			};
 		}
+		if (
+			!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+			!("folder" in account)
+		)
+			return yield* new SessionCommandError({
+				operation: "session.forked.unsupported_account",
+				cause: account.driver,
+			});
 		if (!parent)
 			return yield* new SessionCommandError({
 				operation: "session.forked.parent_not_found",
@@ -750,7 +764,11 @@ const forkSessionInWorkspace = (
 				_tag: "Id",
 				id: instanceId,
 			});
-			if (historical.driver !== "claude") continue;
+			if (
+				!PROVIDER_DRIVERS[historical.driver].supportsNativeResume ||
+				!("folder" in historical)
+			)
+				continue;
 			const thread = yield* state.nativeThread(parentSessionId, historical.id);
 			if (
 				thread &&

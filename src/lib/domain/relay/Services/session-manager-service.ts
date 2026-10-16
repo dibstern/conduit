@@ -14,7 +14,11 @@ import {
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
-import type { AccountId } from "../../../contracts/provider-instance.js";
+import {
+	type AccountId,
+	getProviderDriver,
+	PROVIDER_DRIVERS,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
 	SessionDetail,
@@ -260,7 +264,7 @@ export const createLocalSessionId = (): string =>
 
 const createLocalSession = (
 	title: string | undefined,
-	account: Extract<Account, { driver: "claude" }>,
+	account: Account,
 	reservedSessionId: string | undefined,
 	pick: TurnSettings,
 	permissionMode: SessionPermissionMode,
@@ -439,7 +443,7 @@ export const deleteSession = (sessionId: string) =>
 					}
 				}
 
-				if (provider === "opencode") {
+				if (getProviderDriver(provider)?.runsOpenCodeServer) {
 					const providerDeleteExit = yield* Effect.exit(
 						Effect.gen(function* () {
 							let deleteApi = api;
@@ -472,7 +476,9 @@ export const deleteSession = (sessionId: string) =>
 			});
 
 		const upstreamAdapter: SessionUpstreamAdapter = {
-			provider: provider === "claude" ? "claude" : "opencode",
+			provider: getProviderDriver(provider)?.usesLocalSessions
+				? "claude"
+				: "opencode",
 			sync: (command) =>
 				Effect.gen(function* () {
 					const cleanupExit = yield* Effect.exit(
@@ -716,7 +722,7 @@ const makeServiceCreateSession = ({
 				options?.permissionMode ?? (yield* getDefaultPermissionMode());
 			const session = yield* Effect.scoped(
 				Effect.gen(function* () {
-					if (account.driver === "claude")
+					if (PROVIDER_DRIVERS[account.driver].usesLocalSessions)
 						return yield* createLocalSession(
 							title,
 							account,
@@ -724,14 +730,20 @@ const makeServiceCreateSession = ({
 							pick,
 							permissionMode,
 						);
-					const instanceApi = yield* instanceClients.use(instanceId);
-					return yield* createOpenCodeSession(
-						title,
-						instanceId,
-						pick,
-						options?.sessionId,
-						permissionMode,
-					).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
+					if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+						const instanceApi = yield* instanceClients.use(instanceId);
+						return yield* createOpenCodeSession(
+							title,
+							instanceId,
+							pick,
+							options?.sessionId,
+							permissionMode,
+						).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
+					}
+					return yield* new SessionManagerError({
+						operation: "createSession",
+						cause: `Driver "${account.driver}" does not support session creation`,
+					});
 				}),
 			).pipe(
 				Effect.provideService(AccountDirectory, accounts),
@@ -1185,7 +1197,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								);
 					const instanceApi =
-						account?.driver === "opencode"
+						account !== undefined &&
+						PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
 							? yield* instanceClients.use(account.id).pipe(
 									Effect.mapError(
 										(cause) =>

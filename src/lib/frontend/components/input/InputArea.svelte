@@ -82,7 +82,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -892,11 +892,11 @@
 		}
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
-			sendMessageRpc({
+			rpc("input.submit", {
 				sessionId: sentToSessionId,
 				text: messageText,
-				commandId,
-				...(delivery === "steer" ? { delivery } : {}),
+				inputId: commandId,
+				delivery,
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {
@@ -1488,7 +1488,7 @@
 												workspaceMissing={session.workspaceMissing}
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
-												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
 												onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
 												onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
 												oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
@@ -1523,7 +1523,7 @@
 								workspaceMissing={session.workspaceMissing}
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
-								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
 								onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
 								onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
 								oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
@@ -1666,7 +1666,7 @@
 									workspaceMissing={session.workspaceMissing}
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
+									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
 									onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
 									onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
 									oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}

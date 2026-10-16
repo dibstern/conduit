@@ -953,6 +953,13 @@ export async function createRelayStack(
 					}),
 				undefined,
 				config.slug,
+			).pipe(
+				Effect.provideServiceEffect(
+					SessionDirectory,
+					Effect.map(relay.effectRuntime.runtime.runtimeEffect, (runtime) =>
+						Context.get(runtime.context, SessionDirectory),
+					),
+				),
 			),
 		),
 	);

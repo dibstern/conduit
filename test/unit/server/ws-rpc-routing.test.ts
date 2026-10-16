@@ -476,7 +476,7 @@ describe("routed RPC server", () => {
 			const scope = yield* Scope.make();
 			yield* makeRoutedWsRpcWebSocketHandler(() =>
 				Effect.fail(new WsRpcError({ message: "unused" })),
-			).pipe(Scope.extend(scope));
+			).pipe(Effect.provide(sessionDirectory), Scope.extend(scope));
 			expect(close).not.toHaveBeenCalled();
 			yield* Scope.close(scope, Exit.void);
 			expect(close).toHaveBeenCalledTimes(1);

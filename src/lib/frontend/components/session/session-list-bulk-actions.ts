@@ -25,7 +25,6 @@ export async function runBulkChange(
 	const pinned = !unpinSelected;
 	const skipped = selectedCount - eligible.length;
 	const input = eligible.map((session) => ({
-		projectSlug: session.projectSlug,
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 	}));

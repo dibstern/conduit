@@ -5,7 +5,7 @@ import { Cause, Effect, Either, Layer, Schema } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import {
 	isKnownDriverKind,
-	PROVIDER_SESSION_CAPABILITIES,
+	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import {
 	type SessionWorkspace as RecordedWorkspace,
@@ -141,13 +141,15 @@ export const SessionWorkspaceLive = Layer.effect(
 				if (
 					!driver ||
 					!isKnownDriverKind(driver) ||
-					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
+					(!PROVIDER_DRIVERS[driver].sessionCapabilities.supportsWorktree &&
 						!(
-							(PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree &&
+							(PROVIDER_DRIVERS[driver].sessionCapabilities
+								.supportsNewWorktree &&
 								cause === "launch" &&
 								origin === "conduit") ||
 							// OpenCode declarations acknowledge an already observed workspace.
-							(driver === "opencode" &&
+							(PROVIDER_DRIVERS[driver].worktreeMoves ===
+								"server-declaration" &&
 								(cause === "agent" ||
 									(cause === "missing" &&
 										path === config.projectDir &&

@@ -1136,6 +1136,7 @@ export class GetCommands extends Schema.TaggedRequest<GetCommands>()(
 		success: GetCommandsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
+			instanceId: Schema.optional(Schema.String),
 		},
 	},
 ) {}
@@ -1146,7 +1147,10 @@ export class GetCommandsForSession extends Schema.TaggedRequest<GetCommandsForSe
 	{
 		failure: GetCommands.failure,
 		success: GetCommands.success,
-		payload: { sessionId: NonEmptyString },
+		payload: {
+			sessionId: NonEmptyString,
+			instanceId: Schema.optional(Schema.String),
+		},
 	},
 ) {}
 
@@ -2724,7 +2728,9 @@ export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
 	},
 ) {}
 
-export const WsRpcRequest = Schema.Union(
+// One registration per RPC tag, shared by CLI/IPC decoding and browser RPC.
+// Paired forms share one wire tag while keeping their Request constructors.
+const wsRpcRequests = [
 	GetStatus,
 	SetPin,
 	SetKeepAwake,
@@ -2735,14 +2741,59 @@ export const WsRpcRequest = Schema.Union(
 	RestartWithConfig,
 	GetInstances,
 	GetInstanceStatus,
-	AttachProjectForSession,
-	AttachProject,
+	{
+		requests: [AttachProjectForSession, AttachProject],
+		rpc: Rpc.make(AttachProject._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...AttachProjectForSession.fields,
+					_tag: Schema.optional(Schema.Literal(AttachProjectForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...AttachProject.fields,
+					_tag: Schema.optional(Schema.Literal(AttachProject._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: AttachProject.success,
+			error: AttachProject.failure,
+		}),
+	},
 	ResolveSession,
 	GetGoalDetails,
-	GetAgentsForSession,
-	GetAgents,
-	GetCommandsForSession,
-	GetCommands,
+	{
+		requests: [GetAgentsForSession, GetAgents],
+		rpc: Rpc.make(GetAgents._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetAgentsForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetAgentsForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetAgents.fields,
+					_tag: Schema.optional(Schema.Literal(GetAgents._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetAgents.success,
+			error: GetAgents.failure,
+		}),
+	},
+	{
+		requests: [GetCommandsForSession, GetCommands],
+		rpc: Rpc.make(GetCommands._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetCommandsForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetCommandsForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetCommands.fields,
+					_tag: Schema.optional(Schema.Literal(GetCommands._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetCommands.success,
+			error: GetCommands.failure,
+		}),
+	},
 	GetProjects,
 	FindFolders,
 	SwitchAgent,
@@ -2758,13 +2809,83 @@ export const WsRpcRequest = Schema.Union(
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
-	ResolveClaudeSettingsForSession,
-	ResolveClaudeSettings,
+	{
+		requests: [ResolveClaudeSettingsForSession, ResolveClaudeSettings],
+		rpc: Rpc.make(ResolveClaudeSettings._tag, {
+			payload: Schema.transformOrFail(
+				Schema.Union(
+					Schema.Struct({
+						...ResolveClaudeSettingsForSession.fields,
+						_tag: Schema.optional(
+							Schema.Literal(ResolveClaudeSettingsForSession._tag),
+						),
+					})
+						.omit("accountRef")
+						.annotations({ parseOptions: { onExcessProperty: "error" } }),
+					Schema.Struct({
+						...ResolveClaudeSettingsWire.fields,
+						_tag: Schema.optional(
+							Schema.Literal(ResolveClaudeSettingsWire._tag),
+						),
+					}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				),
+				Schema.Union(
+					Schema.Struct({
+						...ResolveClaudeSettingsForSession.fields,
+						_tag: Schema.optional(
+							Schema.Literal(ResolveClaudeSettingsForSession._tag),
+						),
+					}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+					Schema.Struct({
+						...ResolveClaudeSettings.fields,
+						_tag: Schema.optional(Schema.Literal(ResolveClaudeSettings._tag)),
+					}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				),
+				{
+					decode: (wire) =>
+						Effect.succeed({
+							...wire,
+							accountRef: { _tag: "Id" as const, id: wire.instanceId },
+						}),
+					encode: ({ accountRef, ...wire }, _options, ast) =>
+						accountRef?._tag === "DriverDefault"
+							? Effect.fail(
+									new ParseResult.Type(
+										ast,
+										accountRef,
+										"ResolveClaudeSettings requires an explicit account Id",
+									),
+								)
+							: Effect.succeed({
+									...wire,
+									instanceId: accountRef?.id ?? wire.instanceId,
+								}),
+				},
+			),
+			success: ResolveClaudeSettings.success,
+			error: ResolveClaudeSettings.failure,
+		}),
+	},
 	ReloadProviderSession,
 	RenameSession,
 	ListBranches,
-	ListWorktreesForSession,
-	ListWorktrees,
+	{
+		requests: [ListWorktreesForSession, ListWorktrees],
+		rpc: Rpc.make(ListWorktrees._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...ListWorktreesForSession.fields,
+					_tag: Schema.optional(Schema.Literal(ListWorktreesForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...ListWorktrees.fields,
+					_tag: Schema.optional(Schema.Literal(ListWorktrees._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: ListWorktrees.success,
+			error: ListWorktrees.failure,
+		}),
+	},
 	InspectSessionWorktrees,
 	RenameSessionBranch,
 	MoveSessionWorkspace,
@@ -2788,18 +2909,93 @@ export const WsRpcRequest = Schema.Union(
 	GetContinuationHandoff,
 	SwitchVariant,
 	SwitchPermissionMode,
-	GetFileTreeForSession,
-	GetFileTree,
-	GetFileListForSession,
-	GetFileList,
-	GetFileContentForSession,
-	GetFileContent,
+	{
+		requests: [GetFileTreeForSession, GetFileTree],
+		rpc: Rpc.make(GetFileTree._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetFileTreeForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetFileTreeForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetFileTree.fields,
+					_tag: Schema.optional(Schema.Literal(GetFileTree._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetFileTree.success,
+			error: GetFileTree.failure,
+		}),
+	},
+	{
+		requests: [GetFileListForSession, GetFileList],
+		rpc: Rpc.make(GetFileList._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetFileListForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetFileListForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetFileList.fields,
+					_tag: Schema.optional(Schema.Literal(GetFileList._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetFileList.success,
+			error: GetFileList.failure,
+		}),
+	},
+	{
+		requests: [GetFileContentForSession, GetFileContent],
+		rpc: Rpc.make(GetFileContent._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetFileContentForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetFileContentForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetFileContent.fields,
+					_tag: Schema.optional(Schema.Literal(GetFileContent._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetFileContent.success,
+			error: GetFileContent.failure,
+		}),
+	},
 	GetToolDetails,
-	GetSkillContentForSession,
-	GetSkillContent,
+	{
+		requests: [GetSkillContentForSession, GetSkillContent],
+		rpc: Rpc.make(GetSkillContent._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetSkillContentForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetSkillContentForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetSkillContent.fields,
+					_tag: Schema.optional(Schema.Literal(GetSkillContent._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetSkillContent.success,
+			error: GetSkillContent.failure,
+		}),
+	},
 	GetSessionSkills,
-	GetModelsForSession,
-	GetModels,
+	{
+		requests: [GetModelsForSession, GetModels],
+		rpc: Rpc.make(GetModels._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...GetModelsForSession.fields,
+					_tag: Schema.optional(Schema.Literal(GetModelsForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...GetModels.fields,
+					_tag: Schema.optional(Schema.Literal(GetModels._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: GetModels.success,
+			error: GetModels.failure,
+		}),
+	},
 	SaveProject,
 	RemoveProject,
 	StartInstance,
@@ -2819,8 +3015,23 @@ export const WsRpcRequest = Schema.Union(
 	ScanNow,
 	DetectProxy,
 	ListPtys,
-	CreatePtyForSession,
-	CreatePty,
+	{
+		requests: [CreatePtyForSession, CreatePty],
+		rpc: Rpc.make(CreatePty._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...CreatePtyForSession.fields,
+					_tag: Schema.optional(Schema.Literal(CreatePtyForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...CreatePty.fields,
+					_tag: Schema.optional(Schema.Literal(CreatePty._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: CreatePty.success,
+			error: CreatePty.failure,
+		}),
+	},
 	ResizePty,
 	ClosePty,
 	PtyInput,
@@ -2830,8 +3041,23 @@ export const WsRpcRequest = Schema.Union(
 	PreWarmSession,
 	PreWarmDraft,
 	DeleteSession,
-	ForkSessionForSession,
-	ForkSession,
+	{
+		requests: [ForkSessionForSession, ForkSession],
+		rpc: Rpc.make(ForkSession._tag, {
+			payload: Schema.Union(
+				Schema.Struct({
+					...ForkSessionForSession.fields,
+					_tag: Schema.optional(Schema.Literal(ForkSessionForSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...ForkSession.fields,
+					_tag: Schema.optional(Schema.Literal(ForkSession._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			success: ForkSession.success,
+			error: ForkSession.failure,
+		}),
+	},
 	StartSideThread,
 	RespondPermission,
 	AnswerQuestion,
@@ -2846,9 +3072,31 @@ export const WsRpcRequest = Schema.Union(
 	CancelSession,
 	StopBackgroundTask,
 	SetLogLevel,
+] as const;
+
+type WsRpcRequestEntry = (typeof wsRpcRequests)[number];
+type WsRpcRequestSchema<Entry = WsRpcRequestEntry> = Entry extends {
+	readonly requests: readonly (infer Request)[];
+}
+	? Request
+	: Entry;
+
+const wsRpcRequestSchemas = wsRpcRequests.flatMap(
+	(entry): readonly WsRpcRequestSchema[] =>
+		"requests" in entry ? entry.requests : [entry],
 );
 
+export const WsRpcRequest = Schema.Union(...wsRpcRequestSchemas);
+
 export type WsRpcRequest = typeof WsRpcRequest.Type;
+
+type WsRpcRequestRpc<Entry = WsRpcRequestEntry> = Entry extends {
+	readonly rpc: infer RequestRpc;
+}
+	? RequestRpc
+	: Entry extends Rpc.AnyTaggedRequestSchema
+		? Rpc.From<Entry>
+		: never;
 
 export const SubscribeShell = Rpc.make("SubscribeShell", {
 	payload: {
@@ -3183,309 +3431,10 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeUsage,
 	SubscribeServerStatus,
 	SubscribeProjects,
-	Rpc.fromTaggedRequest(GetStatus),
-	Rpc.fromTaggedRequest(SetPin),
-	Rpc.fromTaggedRequest(SetKeepAwake),
-	Rpc.fromTaggedRequest(SetKeepAwakeCommand),
-	Rpc.fromTaggedRequest(SetTailscaleServe),
-	Rpc.fromTaggedRequest(Shutdown),
-	Rpc.fromTaggedRequest(SetAgent),
-	Rpc.fromTaggedRequest(RestartWithConfig),
-	Rpc.fromTaggedRequest(GetInstances),
-	Rpc.fromTaggedRequest(GetInstanceStatus),
-	Rpc.make(AttachProject._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...AttachProjectForSession.fields,
-				_tag: Schema.optional(Schema.Literal(AttachProjectForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...AttachProject.fields,
-				_tag: Schema.optional(Schema.Literal(AttachProject._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: AttachProject.success,
-		error: AttachProject.failure,
-	}),
-	Rpc.fromTaggedRequest(ResolveSession),
-	Rpc.fromTaggedRequest(GetGoalDetails),
-	Rpc.make(GetAgents._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetAgentsForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetAgentsForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetAgents.fields,
-				_tag: Schema.optional(Schema.Literal(GetAgents._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetAgents.success,
-		error: GetAgents.failure,
-	}),
-	Rpc.make(GetCommands._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetCommandsForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetCommandsForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetCommands.fields,
-				_tag: Schema.optional(Schema.Literal(GetCommands._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetCommands.success,
-		error: GetCommands.failure,
-	}),
-	Rpc.fromTaggedRequest(GetProjects),
-	Rpc.fromTaggedRequest(FindFolders),
-	Rpc.fromTaggedRequest(SwitchAgent),
-	Rpc.fromTaggedRequest(SwitchContextWindow),
-	Rpc.fromTaggedRequest(SwitchModel),
-	Rpc.fromTaggedRequest(SetDefaultModel),
-	Rpc.fromTaggedRequest(SetHarnessDefault),
-	Rpc.fromTaggedRequest(SetDefaultPermissionMode),
-	Rpc.fromTaggedRequest(SetDefaultSessionMode),
-	Rpc.fromTaggedRequest(ResolveSessionMode),
-	Rpc.fromTaggedRequest(SetDefaultGroupingMode),
-	Rpc.fromTaggedRequest(GetDefaultGroupingMode),
-	Rpc.fromTaggedRequest(SetHiddenEntries),
-	Rpc.fromTaggedRequest(GetClaudeSettings),
-	Rpc.fromTaggedRequest(SetClaudeSettings),
-	Rpc.make(ResolveClaudeSettings._tag, {
-		payload: Schema.transformOrFail(
-			Schema.Union(
-				Schema.Struct({
-					...ResolveClaudeSettingsForSession.fields,
-					_tag: Schema.optional(
-						Schema.Literal(ResolveClaudeSettingsForSession._tag),
-					),
-				})
-					.omit("accountRef")
-					.annotations({ parseOptions: { onExcessProperty: "error" } }),
-				Schema.Struct({
-					...ResolveClaudeSettingsWire.fields,
-					_tag: Schema.optional(Schema.Literal(ResolveClaudeSettingsWire._tag)),
-				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			),
-			Schema.Union(
-				Schema.Struct({
-					...ResolveClaudeSettingsForSession.fields,
-					_tag: Schema.optional(
-						Schema.Literal(ResolveClaudeSettingsForSession._tag),
-					),
-				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-				Schema.Struct({
-					...ResolveClaudeSettings.fields,
-					_tag: Schema.optional(Schema.Literal(ResolveClaudeSettings._tag)),
-				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			),
-			{
-				decode: (wire) =>
-					Effect.succeed({
-						...wire,
-						accountRef: { _tag: "Id" as const, id: wire.instanceId },
-					}),
-				encode: ({ accountRef, ...wire }, _options, ast) =>
-					accountRef?._tag === "DriverDefault"
-						? Effect.fail(
-								new ParseResult.Type(
-									ast,
-									accountRef,
-									"ResolveClaudeSettings requires an explicit account Id",
-								),
-							)
-						: Effect.succeed({
-								...wire,
-								instanceId: accountRef?.id ?? wire.instanceId,
-							}),
-			},
-		),
-		success: ResolveClaudeSettings.success,
-		error: ResolveClaudeSettings.failure,
-	}),
-	Rpc.fromTaggedRequest(ReloadProviderSession),
-	Rpc.fromTaggedRequest(RenameSession),
-	Rpc.fromTaggedRequest(ListBranches),
-	Rpc.make(ListWorktrees._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...ListWorktreesForSession.fields,
-				_tag: Schema.optional(Schema.Literal(ListWorktreesForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...ListWorktrees.fields,
-				_tag: Schema.optional(Schema.Literal(ListWorktrees._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: ListWorktrees.success,
-		error: ListWorktrees.failure,
-	}),
-	Rpc.fromTaggedRequest(InspectSessionWorktrees),
-	Rpc.fromTaggedRequest(RenameSessionBranch),
-	Rpc.fromTaggedRequest(MoveSessionWorkspace),
-	Rpc.fromTaggedRequest(RecreateSessionWorktree),
-	Rpc.fromTaggedRequest(ContinueSessionInMainFolder),
-	Rpc.fromTaggedRequest(DismissWorkspaceHint),
-	Rpc.fromTaggedRequest(OpenCodeUseWorktree),
-	Rpc.fromTaggedRequest(MarkSessionUnread),
-	Rpc.fromTaggedRequest(MarkSessionRead),
-	Rpc.fromTaggedRequest(MarkSessionSeen),
-	Rpc.fromTaggedRequest(SetSessionSettled),
-	Rpc.fromTaggedRequest(SetSessionPinned),
-	Rpc.fromTaggedRequest(SetSessionAutoSettle),
-	Rpc.fromTaggedRequest(SnoozeSession),
-	Rpc.fromTaggedRequest(UnsnoozeSession),
-	Rpc.fromTaggedRequest(DismissCutOff),
-	Rpc.fromTaggedRequest(ContinueSession),
-	Rpc.fromTaggedRequest(CancelContinuation),
-	Rpc.fromTaggedRequest(PreviewContinuation),
-	Rpc.fromTaggedRequest(QuotaForAccounts),
-	Rpc.fromTaggedRequest(GetContinuationHandoff),
-	Rpc.fromTaggedRequest(SwitchVariant),
-	Rpc.fromTaggedRequest(SwitchPermissionMode),
-	Rpc.make(GetFileTree._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetFileTreeForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetFileTreeForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetFileTree.fields,
-				_tag: Schema.optional(Schema.Literal(GetFileTree._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetFileTree.success,
-		error: GetFileTree.failure,
-	}),
-	Rpc.make(GetFileList._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetFileListForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetFileListForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetFileList.fields,
-				_tag: Schema.optional(Schema.Literal(GetFileList._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetFileList.success,
-		error: GetFileList.failure,
-	}),
-	Rpc.make(GetFileContent._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetFileContentForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetFileContentForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetFileContent.fields,
-				_tag: Schema.optional(Schema.Literal(GetFileContent._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetFileContent.success,
-		error: GetFileContent.failure,
-	}),
-	Rpc.fromTaggedRequest(GetToolDetails),
-	Rpc.make(GetSkillContent._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetSkillContentForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetSkillContentForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetSkillContent.fields,
-				_tag: Schema.optional(Schema.Literal(GetSkillContent._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetSkillContent.success,
-		error: GetSkillContent.failure,
-	}),
-	Rpc.fromTaggedRequest(GetSessionSkills),
-	Rpc.make(GetModels._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...GetModelsForSession.fields,
-				_tag: Schema.optional(Schema.Literal(GetModelsForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...GetModels.fields,
-				_tag: Schema.optional(Schema.Literal(GetModels._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: GetModels.success,
-		error: GetModels.failure,
-	}),
-	Rpc.fromTaggedRequest(SaveProject),
-	Rpc.fromTaggedRequest(RemoveProject),
-	Rpc.fromTaggedRequest(StartInstance),
-	Rpc.fromTaggedRequest(StopInstance),
-	Rpc.fromTaggedRequest(RemoveInstance),
-	Rpc.fromTaggedRequest(RenameInstance),
-	Rpc.fromTaggedRequest(AddInstance),
-	Rpc.fromTaggedRequest(UpdateInstance),
-	Rpc.fromTaggedRequest(SetDefault),
-	Rpc.fromTaggedRequest(GetAutoSettleSetting),
-	Rpc.fromTaggedRequest(SetAutoSettleSetting),
-	Rpc.fromTaggedRequest(GetWorktreeCleanupSetting),
-	Rpc.fromTaggedRequest(SetWorktreeCleanupSetting),
-	Rpc.fromTaggedRequest(CleanUpWorktreesNow),
-	Rpc.fromTaggedRequest(GetUsageLimitsSetting),
-	Rpc.fromTaggedRequest(SetUsageLimitsSetting),
-	Rpc.fromTaggedRequest(ScanNow),
-	Rpc.fromTaggedRequest(DetectProxy),
-	Rpc.fromTaggedRequest(ListPtys),
-	Rpc.make(CreatePty._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...CreatePtyForSession.fields,
-				_tag: Schema.optional(Schema.Literal(CreatePtyForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...CreatePty.fields,
-				_tag: Schema.optional(Schema.Literal(CreatePty._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: CreatePty.success,
-		error: CreatePty.failure,
-	}),
-	Rpc.fromTaggedRequest(ResizePty),
-	Rpc.fromTaggedRequest(ClosePty),
-	Rpc.fromTaggedRequest(PtyInput),
-	Rpc.fromTaggedRequest(ListDaemonSessions),
-	Rpc.fromTaggedRequest(CreateSession),
-	Rpc.fromTaggedRequest(ViewSession),
-	Rpc.fromTaggedRequest(PreWarmSession),
-	Rpc.fromTaggedRequest(PreWarmDraft),
-	Rpc.fromTaggedRequest(DeleteSession),
-	Rpc.make(ForkSession._tag, {
-		payload: Schema.Union(
-			Schema.Struct({
-				...ForkSessionForSession.fields,
-				_tag: Schema.optional(Schema.Literal(ForkSessionForSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-			Schema.Struct({
-				...ForkSession.fields,
-				_tag: Schema.optional(Schema.Literal(ForkSession._tag)),
-			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-		),
-		success: ForkSession.success,
-		error: ForkSession.failure,
-	}),
-	Rpc.fromTaggedRequest(StartSideThread),
-	Rpc.fromTaggedRequest(RespondPermission),
-	Rpc.fromTaggedRequest(AnswerQuestion),
-	Rpc.fromTaggedRequest(RejectQuestion),
-	Rpc.fromTaggedRequest(LoadMoreHistory),
-	Rpc.fromTaggedRequest(RewindSession),
-	Rpc.fromTaggedRequest(UndoRewind),
-	Rpc.fromTaggedRequest(SubmitInput),
-	Rpc.fromTaggedRequest(CancelInput),
-	Rpc.fromTaggedRequest(SendInputNow),
-	Rpc.fromTaggedRequest(SyncInputDraft),
-	Rpc.fromTaggedRequest(CancelSession),
-	Rpc.fromTaggedRequest(StopBackgroundTask),
-	Rpc.fromTaggedRequest(SetLogLevel),
+	// Array.map loses the correlation between each tag and its request schema.
+	...(wsRpcRequests.map((entry) =>
+		"rpc" in entry ? entry.rpc : Rpc.fromTaggedRequest(entry),
+	) as WsRpcRequestRpc[]),
 );
 
 export type WsRpcGroup = typeof WsRpcGroup;

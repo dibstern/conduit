@@ -54,6 +54,7 @@ export const modelsHandlers = {
 		Effect.flatMap(ConfigTag, (config) =>
 			getCommandsForSession(
 				"sessionId" in request ? request.sessionId : undefined,
+				request.instanceId,
 			).pipe(
 				Effect.map((commands) => ({
 					projectSlug: config.slug,

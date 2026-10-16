@@ -85,7 +85,10 @@ function adapter() {
 				Layer.effect(RpcClient.Protocol, protocol),
 			).pipe(
 				Effect.flatMap((context) =>
-					Effect.provide(RpcClient.make(WsRpcGroup), context),
+					Effect.provide(
+						RpcClient.make(WsRpcGroup, { flatten: true }),
+						context,
+					),
 				),
 			);
 		});
@@ -386,7 +389,6 @@ describe("transcript feed interface", () => {
 		const two = loadOlderTranscript("A");
 		expect(two).toBe(one);
 		expect(pageMock.loadMoreHistoryRpc).toHaveBeenCalledExactlyOnceWith({
-			projectSlug: "project",
 			sessionId: "A",
 			before: "u2",
 		});

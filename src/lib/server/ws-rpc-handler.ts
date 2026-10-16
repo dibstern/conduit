@@ -442,19 +442,13 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			Effect.provide(transportContext),
 		);
 		const scope = yield* Effect.scope;
-		const directory = yield* Effect.serviceOption(SessionDirectory);
+		const directory = yield* SessionDirectory;
 		const serverLayer = makeRoutedWsRpcServerLayer(
 			resolveContext,
 			daemonHandlers,
 			defaultProjectSlug,
 			attachProject,
-		).pipe(
-			Layer.provide(
-				Option.isSome(directory)
-					? Layer.succeed(SessionDirectory, directory.value)
-					: Layer.empty,
-			),
-		);
+		).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory)));
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Runtime.runFork(runtime),

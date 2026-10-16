@@ -87,6 +87,7 @@ beforeEach(() => {
 				| ((requestId: RpcMessage.RequestId) => Effect.Effect<void>)
 				| undefined;
 			const built = yield* RpcClient.makeNoSerialization(WsRpcGroup, {
+				flatten: true,
 				onFromClient: ({ message }) =>
 					message._tag === "Request"
 						? Effect.suspend(() => {

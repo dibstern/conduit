@@ -2,6 +2,7 @@ import { Cause, Effect, Either } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
@@ -127,7 +128,7 @@ const shouldStartOpenCodePoller = (sessionId: string) =>
 		if (rowResult._tag === "Left") return true;
 
 		const row = rowResult.right;
-		return !row || row.provider === "opencode";
+		return !row || getProviderDriver(row.provider)?.runsOpenCodeServer === true;
 	});
 
 const switchClientToSession = (

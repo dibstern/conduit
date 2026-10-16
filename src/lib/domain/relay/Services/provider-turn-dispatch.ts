@@ -13,7 +13,11 @@ import {
 	Schema,
 } from "effect";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
-import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	PROVIDER_DRIVERS,
+	type ProviderDriverKind,
+} from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import {
 	type SessionWorkspace,
@@ -304,7 +308,7 @@ export class ProviderTurnTimeoutRuntimeTag extends Context.Tag(
 export function isProviderTurnInterruptProvider(
 	driver: ProviderDriverKind,
 ): boolean {
-	return driver === CLAUDE_PROVIDER_ID;
+	return getProviderDriver(driver)?.interruptViaEngine === true;
 }
 
 export function isClaudeDriver(driver: ProviderDriverKind): boolean {
@@ -543,7 +547,8 @@ const prepareEngineTurnInput = (
 			yield* clearProcessingTimeout(resolvedInput.sessionId);
 			return undefined;
 		}
-		const harness = isClaudeDriver(driver) ? "claude" : "opencode";
+		const traits = PROVIDER_DRIVERS[driver];
+		const harness = driver;
 		const pick = storedSessionPick(sessionRow, harness);
 		if (!pick) {
 			yield* clearProcessingTimeout(resolvedInput.sessionId);
@@ -557,7 +562,7 @@ const prepareEngineTurnInput = (
 			return undefined;
 		}
 		let catalog: readonly ModelInfo[] | undefined;
-		if (harness === "claude") {
+		if (traits.catalogSource === "discovery") {
 			const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 			const catalogues =
 				projectSettings._tag === "Some"
@@ -611,7 +616,7 @@ const prepareEngineTurnInput = (
 			return undefined;
 		}
 		const settings = resolved.right;
-		const priorHistoryMetadata = isClaudeDriver(driver)
+		const priorHistoryMetadata = traits.needsPriorHistoryMetadata
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
 		const folders = yield* resolveSessionFolders(
@@ -624,7 +629,7 @@ const prepareEngineTurnInput = (
 				recreateMissingWorktree: true,
 			},
 		);
-		if (driver === "opencode") {
+		if (traits.runsOpenCodeServer) {
 			const stream = yield* Effect.serviceOption(SSEStreamTag);
 			if (stream._tag === "Some")
 				yield* stream.value.includeDirectory(folders.workspaceRoot);
@@ -653,7 +658,7 @@ const prepareEngineTurnInput = (
 				: undefined;
 		let workspaceMoveSequence: number | undefined;
 		let workspaceMoveDirective: string | undefined;
-		if (isClaudeDriver(driver) && !resolvedInput.steer) {
+		if (traits.worktreeMoves === "tool-directive" && !resolvedInput.steer) {
 			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			if (workspace._tag === "Some") {
 				const state = yield* workspace.value.claudeWorktreeState(
@@ -678,7 +683,7 @@ const prepareEngineTurnInput = (
 		}
 		// The committed turn owns its account even before a runner has a snapshot.
 		let turnAccount = account;
-		if (resolvedInput.steer && account.driver === "claude") {
+		if (resolvedInput.steer) {
 			const sql = yield* SqlClient.SqlClient;
 			const [turn] = yield* sql<{ account_json: string | null }>`
 				SELECT json_extract(payload_json, '$.account') AS account_json
@@ -711,10 +716,10 @@ const prepareEngineTurnInput = (
 				folders,
 				resolvedInput.agent,
 			),
-			...(isClaudeDriver(driver) && sessionRow
+			...(traits.supportsGoalState && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),
-			...(isClaudeDriver(driver)
+			...(traits.needsPriorHistoryMetadata
 				? {
 						cumulativeTokens: priorHistoryMetadata?.cumulativeTokens ?? 0,
 					}
