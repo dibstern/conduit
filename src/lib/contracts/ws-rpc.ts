@@ -1,5 +1,5 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
-import { Effect, ParseResult, Schema } from "effect";
+import { Effect, ParseResult, Record, Schema } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { FolderIssue } from "../project-folders.js";
 import {
@@ -46,6 +46,8 @@ import { type SessionMode, SessionModeSchema } from "./project-file.js";
 import {
 	AccountIdSchema,
 	BrowserDriverTraitsSchema,
+	KnownProviderDriverKindSchema,
+	PROVIDER_DRIVERS,
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
@@ -274,6 +276,8 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 	isDefault: Schema.optional(Schema.Boolean),
 	usageEligible: Schema.optional(Schema.Boolean),
+	available: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -513,7 +517,7 @@ export type HarnessDefaultState = typeof HarnessDefaultStateSchema.Type;
 
 export const SetHarnessDefaultResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
-	harness: Schema.Literal("claude", "opencode"),
+	harness: Schema.suspend(() => KnownProviderDriverKindSchema),
 	state: HarnessDefaultStateSchema,
 });
 export type SetHarnessDefaultResponse =
@@ -1513,7 +1517,7 @@ export class SetHarnessDefault extends Schema.TaggedRequest<SetHarnessDefault>()
 		success: SetHarnessDefaultResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			harness: Schema.Literal("claude", "opencode"),
+			harness: Schema.suspend(() => KnownProviderDriverKindSchema),
 			providerId: NonEmptyString,
 			modelId: NonEmptyString,
 			/** Omitted: the effort last saved for this model, if still offered. */
@@ -2986,10 +2990,14 @@ export const ProjectSettingSchema = Schema.Union(
 		providers: Schema.Array(ProviderInfoSchema),
 		accountId: Schema.optional(Schema.String),
 	}),
-	Schema.TaggedStruct("harnessDefaults", {
-		claude: HarnessDefaultStateSchema,
-		opencode: HarnessDefaultStateSchema,
-	}),
+	Schema.suspend(() =>
+		Schema.TaggedStruct(
+			"harnessDefaults",
+			Record.map(PROVIDER_DRIVERS, () =>
+				Schema.optionalWith(HarnessDefaultStateSchema, { exact: true }),
+			),
+		),
+	),
 );
 export type ProjectSetting = typeof ProjectSettingSchema.Type;
 /** Persisted settings shared by all projects; live facts stay per relay. */

@@ -176,6 +176,7 @@ class ClaudeAccounts {
 			if (
 				reading.accountId === currentId ||
 				!instance ||
+				// driver-dispatch-ok: narrows the usage reading's harness, not a driver.
 				quota?.harness !== "claude" ||
 				quota.status !== "available" ||
 				quotaBlocksSwitch(quota)

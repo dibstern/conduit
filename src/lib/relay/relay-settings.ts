@@ -9,6 +9,7 @@ import {
 	type SessionMode,
 	SessionModeSchema,
 } from "../contracts/project-file.js";
+import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
 import type { ModelOverride } from "../domain/relay/Services/session-overrides-state.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
 import {
@@ -20,10 +21,12 @@ import {
 
 export interface RelaySettings {
 	defaultModel?: string;
-	harnessDefaults?: {
-		claude?: { providerId: string; modelId: string; contextWindow: string };
-		opencode?: { providerId: string; modelId: string; contextWindow: string };
-	};
+	harnessDefaults?: Partial<
+		Record<
+			KnownProviderDriverKind,
+			{ providerId: string; modelId: string; contextWindow: string }
+		>
+	>;
 	defaultPermissionMode?: SessionPermissionMode;
 	defaultSessionMode?: SessionMode;
 	defaultGroupingMode?: GroupingMode;

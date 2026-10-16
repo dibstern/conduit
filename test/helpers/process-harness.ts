@@ -2387,7 +2387,7 @@ export class ProcessBrowser {
 			originId: this.originId,
 			providerId,
 			model: {
-				providerId: providerId === "opencode" ? "fake" : "claude",
+				providerId: providerId === "opencode" ? "fake" : providerId,
 				modelId:
 					draft.modelId ??
 					(providerId === "opencode" ? "fake-model" : "sonnet"),

@@ -120,11 +120,20 @@
 	);
 	const selectedLogoInstanceId = $derived(selectedId);
 	const harnesses = $derived(
-		[...new Set(instances.map((instance) => instance.driver))].map((driver) => ({
-			value: driver,
-			label: driverLabel(driver),
-			locked: locked && driver !== selectedDriver,
-		})),
+		[...new Set(instances.map((instance) => instance.driver))].map((driver) => {
+			const accounts = instances.filter((instance) => instance.driver === driver);
+			const unavailable = accounts.every((account) => account.available === false);
+			const unavailableReason = unavailable
+				? accounts.find((account) => account.unavailableReason)?.unavailableReason ?? "Runtime unavailable"
+				: undefined;
+			return {
+				value: driver,
+				label: driverLabel(driver),
+				locked: unavailable || (locked && driver !== selectedDriver),
+				lockedReason: unavailableReason,
+				unavailableReason,
+			};
+		}),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
 	const needsAccount = $derived(selectedTraits?.accountKind === "config-directory" && driverInstances.length === 0);
@@ -159,7 +168,7 @@
 		return driverInstances.map((instance) => ({
 			value: instance.id,
 			label: accounts.nameOf(instance.id, instance.label),
-			locked,
+			locked: locked || instance.available === false,
 			kind: "status",
 			// Built-in instances carry no managed status; they serve the catalog, so they're up.
 			status: instance.status ?? "healthy",
@@ -397,7 +406,7 @@
 	}
 
 	function handleHarnessSelect(driver: ProviderDriverKind) {
-		if (locked) return;
+		if (locked || harnesses.find((harness) => harness.value === driver)?.locked) return;
 		const instance = instanceForDriver(driver);
 		if (instance) handleInstanceSelect(instance);
 	}
@@ -543,7 +552,7 @@
 		</div>
 		<div class="min-h-0 overflow-y-auto">
 			{#if view === "root"}
-				{#if harnesses.length > 1 || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
+				{#if harnesses.length > 1 || harnesses.some((harness) => harness.unavailableReason) || (harnesses.length > 0 && !harnesses.some((harness) => harness.value === selectedDriver))}
 					<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[4px]">
 						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
 							<span>Harness</span>
@@ -576,6 +585,9 @@
 								{#if option.locked}<Icon name="lock" size={10} />{/if}
 							{/snippet}
 						</OptionRow>
+						{#each harnesses.filter((harness) => harness.unavailableReason) as harness (harness.value)}
+							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] text-[11px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
+						{/each}
 					</section>
 				{/if}
 				{#if accountCards.length > 1}
