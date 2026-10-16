@@ -43,6 +43,10 @@ import {
 	UsageReadingSchema,
 } from "./limit-recovery.js";
 import {
+	MessageSurfacingPatchSchema,
+	MessageSurfacingStatusSchema,
+} from "./message-surfacing.js";
+import {
 	DefaultSessionModeSchema,
 	type SessionMode,
 	SessionModeSchema,
@@ -1621,6 +1625,31 @@ export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroup
 	},
 ) {}
 
+export class GetMessageSurfacing extends Schema.TaggedRequest<GetMessageSurfacing>()(
+	"GetMessageSurfacing",
+	{ failure: WsRpcError, success: MessageSurfacingStatusSchema, payload: {} },
+) {}
+
+export class UpdateMessageSurfacing extends Schema.TaggedRequest<UpdateMessageSurfacing>()(
+	"UpdateMessageSurfacing",
+	{
+		failure: WsRpcError,
+		success: MessageSurfacingStatusSchema,
+		payload: MessageSurfacingPatchSchema.fields,
+	},
+	[
+		{ message: () => "Invalid message surfacing settings" },
+		undefined,
+		// RpcServer formats encoded payload failures before calling the handler.
+		{
+			message: () => ({
+				message: "Invalid message surfacing settings",
+				override: true,
+			}),
+		},
+	],
+) {}
+
 export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 	"SetHiddenEntries",
 	{
@@ -2752,6 +2781,8 @@ const wireTag = <Tag extends string>(tag: Tag) =>
 // One registration per RPC tag, shared by CLI/IPC decoding and browser RPC.
 // Paired forms share one wire tag while keeping their Request constructors.
 const wsRpcRequests = [
+	GetMessageSurfacing,
+	UpdateMessageSurfacing,
 	GetStatus,
 	SetPin,
 	SetKeepAwake,

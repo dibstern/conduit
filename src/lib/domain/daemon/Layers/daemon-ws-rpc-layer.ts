@@ -80,6 +80,10 @@ import {
 	requestManagedOpenCodeShutdown,
 	updateInstance,
 } from "../Services/instance-manager-service.js";
+import {
+	isSurfacingLoopback,
+	MessageSurfacingSettings,
+} from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
 import {
 	allProjects,
@@ -136,6 +140,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
+		const messageSurfacing = yield* MessageSurfacingSettings;
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Effect.makeSemaphore(1);
 		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
@@ -683,6 +688,29 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			GetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.GetAutoSettleSetting(request)),
+			GetMessageSurfacing: () => messageSurfacing.get,
+			UpdateMessageSurfacing: (request) =>
+				Effect.gen(function* () {
+					if (request.apiKey !== undefined) {
+						const caller = yield* RpcCaller;
+						if (
+							caller.kind === "browser" &&
+							!caller.secure &&
+							!isSurfacingLoopback(caller.ip)
+						) {
+							return yield* new WsRpcError({
+								message: "Saving a TypeSafe key requires TLS or loopback",
+							});
+						}
+					}
+					return yield* messageSurfacing
+						.update(request)
+						.pipe(
+							Effect.mapError(
+								(error) => new WsRpcError({ message: error.message }),
+							),
+						);
+				}),
 			SetAutoSettleSetting: (request) =>
 				run(wsRpcHandlers.SetAutoSettleSetting(request)),
 			GetWorktreeCleanupSetting: (request) =>

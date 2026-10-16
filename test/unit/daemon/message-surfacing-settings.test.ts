@@ -1,0 +1,476 @@
+import {
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+} from "node:fs";
+import { join } from "node:path";
+import { RpcTest } from "@effect/rpc";
+import { describe, it } from "@effect/vitest";
+import { Deferred, Effect, Exit, Fiber } from "effect";
+import { afterEach, expect, vi } from "vitest";
+import {
+	UpdateMessageSurfacing,
+	WsRpcGroup,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
+import { makeMessageSurfacingSettings } from "../../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
+import {
+	makeRoutedWsRpcServerLayer,
+	RpcCaller,
+} from "../../../src/lib/server/ws-rpc.js";
+import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+
+// Failure modes: secret leakage, insecure inbound/outbound transport, bad keys,
+// network failures, partial/concurrent patches, restart after 401, stale 401s,
+// env precedence, credential removal, file permissions, and disabling mid-call.
+// Received 401s must survive cancellation during body cleanup or while a failed
+// replacement holds the lock, and must remain invalid after restarting.
+const directories: string[] = [];
+const directory = () => {
+	const dir = mkdtempSync("/tmp/message-surfacing-");
+	directories.push(dir);
+	return dir;
+};
+afterEach(() => {
+	for (const dir of directories.splice(0))
+		rmSync(dir, { recursive: true, force: true });
+});
+const validTransport = () =>
+	vi.fn(async () => new Response("{}", { status: 200 }));
+
+describe("message surfacing settings", () => {
+	it.effect(
+		"defaults off and merges nested and concurrent patches durably",
+		() =>
+			Effect.gen(function* () {
+				const dir = directory();
+				const transport = validTransport();
+				const settings = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport,
+				});
+				expect(yield* settings.get).toEqual({
+					enabled: false,
+					active: false,
+					key: { state: "none" },
+					defaultLevel: "balanced",
+					recap: { model: "sonnet", when: "turn-end" },
+					tuningModel: "opus",
+				});
+				yield* Effect.all(
+					[
+						settings.update({ enabled: true, recap: { model: "off" } }),
+						settings.update({
+							defaultLevel: "key",
+							recap: { when: "on-request" },
+						}),
+					],
+					{ concurrency: 2 },
+				);
+				const restarted = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport,
+				});
+				expect(yield* restarted.get).toMatchObject({
+					enabled: true,
+					active: false,
+					defaultLevel: "key",
+					recap: { model: "off", when: "on-request" },
+				});
+				expect(transport).not.toHaveBeenCalled();
+			}),
+	);
+	it.effect("validates once, stores privately and never returns the key", () =>
+		Effect.gen(function* () {
+			const dir = directory();
+			const transport = validTransport();
+			const settings = yield* makeMessageSurfacingSettings(dir, {
+				env: { TYPESAFE_BASE_URL: "http://127.0.0.1:4198" },
+				transport,
+			});
+			const result = yield* settings.update({
+				enabled: true,
+				apiKey: "fake-secret-canary",
+			});
+			expect(result).toMatchObject({ active: true, key: { state: "valid" } });
+			expect(JSON.stringify(result)).not.toContain("fake-secret-canary");
+			expect(transport).toHaveBeenCalledTimes(1);
+			expect(transport).toHaveBeenCalledWith(
+				"http://127.0.0.1:4198/v1/systemone",
+				expect.objectContaining({
+					method: "POST",
+					redirect: "error",
+					headers: {
+						authorization: "Bearer fake-secret-canary",
+						"content-type": "application/json",
+					},
+				}),
+			);
+			expect(statSync(join(dir, "credentials")).mode & 0o777).toBe(0o700);
+			expect(statSync(join(dir, "credentials/typesafe")).mode & 0o777).toBe(
+				0o600,
+			);
+			expect(readdirSync(join(dir, "credentials"))).toEqual(["typesafe"]);
+			const restarted = yield* makeMessageSurfacingSettings(dir, {
+				env: {},
+				transport,
+			});
+			expect(yield* restarted.get).toEqual(result);
+			yield* restarted.update({ apiKey: null });
+			expect(yield* restarted.get).toMatchObject({
+				enabled: true,
+				active: false,
+				key: { state: "none" },
+			});
+			expect(
+				readFileSync(join(dir, "credentials/typesafe"), "utf8"),
+			).not.toContain("fake-secret-canary");
+		}),
+	);
+	it.effect(
+		"rejects a failed validation without replacing an existing key or patch",
+		() =>
+			Effect.gen(function* () {
+				const transport = validTransport();
+				const settings = yield* makeMessageSurfacingSettings(directory(), {
+					env: {},
+					transport,
+				});
+				yield* settings.update({ apiKey: "fake-original" });
+				transport.mockImplementationOnce(
+					async () => new Response("fake-rejected", { status: 401 }),
+				);
+				const failure = yield* Effect.either(
+					settings.update({ apiKey: "fake-rejected", enabled: true }),
+				);
+				expect(failure._tag).toBe("Left");
+				expect(JSON.stringify(failure)).not.toContain("fake-rejected");
+				expect(yield* settings.get).toMatchObject({
+					enabled: false,
+					key: { state: "valid" },
+				});
+			}),
+	);
+	it.effect(
+		"persists runtime 401 and stops requests until a key is saved",
+		() =>
+			Effect.gen(function* () {
+				const dir = directory();
+				const transport = validTransport();
+				const settings = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport,
+				});
+				yield* settings.update({ enabled: true, apiKey: "fake-key" });
+				transport.mockImplementationOnce(
+					async () => new Response(null, { status: 401 }),
+				);
+				yield* Effect.either(settings.post({ state: "test" }));
+				expect(yield* settings.get).toMatchObject({
+					active: false,
+					key: { state: "invalid" },
+				});
+				const restarted = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport,
+				});
+				yield* Effect.either(restarted.post({}));
+				yield* restarted.update({ enabled: false });
+				yield* restarted.update({ enabled: true });
+				expect(yield* restarted.get).toMatchObject({
+					active: false,
+					key: { state: "invalid" },
+				});
+				expect(transport).toHaveBeenCalledTimes(2);
+				yield* restarted.update({ apiKey: "fake-key" });
+				expect(yield* restarted.get).toMatchObject({
+					active: true,
+					key: { state: "valid" },
+				});
+			}),
+	);
+	for (const cancelDuring of ["body cleanup", "lock acquisition"] as const) {
+		it.effect(
+			`persists a received 401 despite cancellation during ${cancelDuring}`,
+			() =>
+				Effect.gen(function* () {
+					const dir = directory();
+					const transport = validTransport();
+					const settings = yield* makeMessageSurfacingSettings(dir, {
+						env: {},
+						transport,
+					});
+					yield* settings.update({ enabled: true, apiKey: "fake-original" });
+					const runtimeStarted = yield* Deferred.make<void>();
+					const runtimeReply = yield* Deferred.make<Response>();
+					transport.mockImplementationOnce(() =>
+						Effect.runPromise(
+							Deferred.succeed(runtimeStarted, undefined).pipe(
+								Effect.zipRight(Deferred.await(runtimeReply)),
+							),
+						),
+					);
+					const request = yield* Effect.fork(settings.post({}));
+					yield* Deferred.await(runtimeStarted);
+					const replacementStarted = yield* Deferred.make<void>();
+					const replacementReply = yield* Deferred.make<Response>();
+					transport.mockImplementationOnce(() =>
+						Effect.runPromise(
+							Deferred.succeed(replacementStarted, undefined).pipe(
+								Effect.zipRight(Deferred.await(replacementReply)),
+							),
+						),
+					);
+					const replacement = yield* Effect.fork(
+						settings.update({ apiKey: "fake-rejected" }).pipe(Effect.either),
+					);
+					yield* Deferred.await(replacementStarted);
+					const cleanupStarted = yield* Deferred.make<void>();
+					const cleanupFinished = yield* Deferred.make<void>();
+					yield* Deferred.succeed(
+						runtimeReply,
+						new Response(
+							new ReadableStream({
+								cancel() {
+									return Effect.runPromise(
+										Deferred.succeed(cleanupStarted, undefined).pipe(
+											Effect.zipRight(Deferred.await(cleanupFinished)),
+										),
+									);
+								},
+							}),
+							{ status: 401 },
+						),
+					);
+					yield* Deferred.await(cleanupStarted);
+					if (cancelDuring === "lock acquisition") {
+						yield* Deferred.succeed(cleanupFinished, undefined);
+						// Let the response cleanup settle before interrupting the lock waiter.
+						yield* Effect.promise(
+							() => new Promise<void>((resolve) => setImmediate(resolve)),
+						);
+					}
+					yield* Fiber.interruptFork(request);
+					yield* Effect.yieldNow();
+					yield* Deferred.succeed(cleanupFinished, undefined);
+					yield* Deferred.succeed(
+						replacementReply,
+						new Response(null, { status: 401 }),
+					);
+					expect(yield* Fiber.join(replacement)).toMatchObject({
+						_tag: "Left",
+					});
+					expect(Exit.isInterrupted(yield* Fiber.await(request))).toBe(true);
+					expect(yield* settings.get).toMatchObject({
+						active: false,
+						key: { state: "invalid" },
+					});
+					const restarted = yield* makeMessageSurfacingSettings(dir, {
+						env: {},
+						transport,
+					});
+					expect(yield* restarted.get).toMatchObject({
+						active: false,
+						key: { state: "invalid" },
+					});
+					yield* Effect.either(restarted.post({}));
+					expect(transport).toHaveBeenCalledTimes(3);
+				}),
+		);
+	}
+	it.effect(
+		"env overrides storage and a rejected env key stays invalid after restart",
+		() =>
+			Effect.gen(function* () {
+				const dir = directory();
+				const transport = validTransport();
+				const stored = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport,
+				});
+				yield* stored.update({ enabled: true, apiKey: "fake-stored" });
+				const env = { TYPESAFE_API_KEY: "fake-env" };
+				const settings = yield* makeMessageSurfacingSettings(dir, {
+					env,
+					transport,
+				});
+				expect(yield* settings.get).toMatchObject({
+					active: true,
+					key: { state: "env" },
+				});
+				expect(
+					(yield* Effect.either(settings.update({ apiKey: null })))._tag,
+				).toBe("Left");
+				transport.mockImplementationOnce(
+					async () => new Response(null, { status: 401 }),
+				);
+				yield* Effect.either(settings.post({}));
+				const restarted = yield* makeMessageSurfacingSettings(dir, {
+					env,
+					transport,
+				});
+				expect(yield* restarted.get).toMatchObject({
+					active: false,
+					key: { state: "invalid" },
+				});
+				yield* Effect.either(restarted.post({}));
+				expect(transport).toHaveBeenCalledTimes(2);
+				expect(
+					readFileSync(join(dir, "credentials/typesafe"), "utf8"),
+				).not.toContain("fake-env");
+				const changed = yield* makeMessageSurfacingSettings(dir, {
+					env: { TYPESAFE_API_KEY: "fake-new-env" },
+					transport,
+				});
+				expect(yield* changed.get).toMatchObject({
+					active: true,
+					key: { state: "env" },
+				});
+				const withoutEnv = yield* makeMessageSurfacingSettings(dir, {
+					env: {},
+					transport,
+				});
+				expect(yield* withoutEnv.get).toMatchObject({
+					active: true,
+					key: { state: "valid" },
+				});
+			}),
+	);
+	it.effect(
+		"blocks remote HTTP before transport and sanitizes transport exceptions",
+		() =>
+			Effect.gen(function* () {
+				const transport = validTransport();
+				const unsafe = yield* makeMessageSurfacingSettings(directory(), {
+					env: { TYPESAFE_BASE_URL: "http://example.com" },
+					transport,
+				});
+				expect(
+					(yield* Effect.either(unsafe.update({ apiKey: "fake-secret" })))._tag,
+				).toBe("Left");
+				expect(transport).not.toHaveBeenCalled();
+				const settings = yield* makeMessageSurfacingSettings(directory(), {
+					env: {},
+					transport: async () => {
+						throw new Error("fake-secret in an upstream error");
+					},
+				});
+				const failure = yield* Effect.either(
+					settings.update({ apiKey: "fake-secret" }),
+				);
+				expect(failure._tag).toBe("Left");
+				expect(JSON.stringify(failure)).not.toContain("fake-secret");
+			}),
+	);
+	it.effect(
+		"lets an in-flight request finish after disabling and ignores stale 401s",
+		() =>
+			Effect.gen(function* () {
+				let complete: (response: Response) => void = () => {
+					throw new Error("Not started");
+				};
+				let started: () => void = () => {};
+				const pending = new Promise<void>((resolve) => {
+					started = resolve;
+				});
+				const transport = validTransport();
+				const settings = yield* makeMessageSurfacingSettings(directory(), {
+					env: {},
+					transport,
+				});
+				yield* settings.update({ enabled: true, apiKey: "fake-old" });
+				transport.mockImplementationOnce(
+					() =>
+						new Promise<Response>((resolve) => {
+							complete = resolve;
+							started();
+						}),
+				);
+				const request = yield* Effect.fork(
+					settings.post({}).pipe(Effect.either),
+				);
+				yield* Effect.promise(() => pending);
+				yield* settings.update({ enabled: false, apiKey: "fake-new" });
+				complete(new Response(null, { status: 401 }));
+				yield* request.await;
+				expect(yield* settings.get).toMatchObject({
+					enabled: false,
+					key: { state: "valid" },
+				});
+				yield* Effect.either(settings.post({}));
+				expect(transport).toHaveBeenCalledTimes(3);
+			}),
+	);
+	it.scoped(
+		"routes RPCs without a project, guards key writes and returns only status",
+		() =>
+			Effect.gen(function* () {
+				const handlers = yield* DaemonWsRpcHandlersTag;
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(
+							() => Effect.die("Unexpected relay"),
+							handlers,
+						),
+					),
+				);
+				expect(yield* client.GetMessageSurfacing({})).toMatchObject({
+					enabled: false,
+					key: { state: "none" },
+				});
+				expect(
+					yield* client.UpdateMessageSurfacing({
+						enabled: true,
+						recap: { model: "opus" },
+					}),
+				).toMatchObject({
+					enabled: true,
+					active: false,
+					recap: { model: "opus", when: "turn-end" },
+				});
+				const denied = yield* Effect.either(
+					handlers
+						.UpdateMessageSurfacing(
+							new UpdateMessageSurfacing({ apiKey: "fake-secret" }),
+						)
+						.pipe(
+							Effect.provideService(RpcCaller, {
+								kind: "browser",
+								ip: "192.0.2.1",
+							}),
+						),
+				);
+				expect(denied).toMatchObject({
+					_tag: "Left",
+					left: { message: "Saving a TypeSafe key requires TLS or loopback" },
+				});
+				for (const caller of [
+					{ kind: "cli" } as const,
+					{ kind: "browser", ip: "127.0.0.1" } as const,
+					{ kind: "browser", ip: "::1" } as const,
+					{ kind: "browser", ip: "::ffff:127.0.0.1" } as const,
+					{ kind: "browser", ip: "192.0.2.1", secure: true } as const,
+				]) {
+					const result = yield* handlers
+						.UpdateMessageSurfacing(
+							new UpdateMessageSurfacing({ apiKey: "fake-secret" }),
+						)
+						.pipe(Effect.provideService(RpcCaller, caller));
+					expect(result).toMatchObject({
+						active: true,
+						key: { state: "valid" },
+					});
+					expect(JSON.stringify(result)).not.toContain("fake-secret");
+				}
+			}).pipe(
+				Effect.provide(
+					makeDaemonRpcTestLayer([], undefined, {
+						configDir: directory(),
+						messageSurfacing: { env: {}, transport: validTransport() },
+					}),
+				),
+			),
+	);
+});

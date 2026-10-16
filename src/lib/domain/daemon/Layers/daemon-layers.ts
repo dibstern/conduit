@@ -118,6 +118,7 @@ import {
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
+import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
@@ -820,9 +821,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(registries),
 	);
 
-	const withKeepAwake = makeKeepAwakeLive(options.keepAwake).pipe(
-		Layer.provideMerge(withRelayCache),
-	);
+	const withKeepAwake = Layer.merge(
+		makeKeepAwakeLive(options.keepAwake),
+		MessageSurfacingSettingsLive,
+	).pipe(Layer.provideMerge(withRelayCache));
 	const withDaemonControl = DaemonHandleLive.pipe(
 		Layer.provideMerge(withKeepAwake),
 	);
