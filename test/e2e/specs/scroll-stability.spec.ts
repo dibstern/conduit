@@ -1148,6 +1148,29 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		expect(afterCount).toBeGreaterThan(initialCount);
 	});
 
+	test("a first page shorter than the pane keeps loading older pages", async ({
+		page,
+		relayUrl,
+	}) => {
+		// The whole first page fits, so the history sentinel is on screen from
+		// the start and never scrolls in. Older pages must load anyway.
+		await page.setViewportSize({ width: 1280, height: 12_000 });
+		await mockRelayWebSocket(page, {
+			initMessages: createInitMessages(30),
+			responses: new Map(),
+		});
+
+		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await page.locator("#connect-overlay").waitFor({
+			state: "hidden",
+			timeout: 15_000,
+		});
+		await waitForInitialMessages(page);
+
+		// 30 turns exceed the 50-row first page, so the start is only reached by paging.
+		await expect(page.locator(".history-beginning")).toBeAttached();
+	});
+
 	test("session switch while scrolled up resets to bottom on new session", async ({
 		page,
 		relayUrl,
