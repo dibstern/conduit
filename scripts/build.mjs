@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+	existsSync,
 	mkdirSync,
 	readFileSync,
 	renameSync,
@@ -8,6 +9,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 
 // Concurrent builds (pre-commit, dev:all, agents) would interleave dist/ and
@@ -77,6 +79,29 @@ function run(...args) {
 // Copy first: migrations now also contain TS modules emitted by tsgo.
 run("copy:assets");
 run("exec", "tsgo");
+// Keep SDK JS external. Its native helpers are found from the absolute runner
+// entry, so a bundled SDK alone would silently break sandbox support.
+const runnerEntry = resolve("dist/src/bin/claude-session-runner.js");
+const helperName = `@cursor/sdk-${process.platform}-${process.arch}`;
+let ancestor = dirname(runnerEntry);
+let cursorHelpers;
+while (true) {
+	const candidate = join(ancestor, "node_modules", helperName, "bin");
+	if (existsSync(candidate)) {
+		cursorHelpers = candidate;
+		break;
+	}
+	const parent = dirname(ancestor);
+	if (parent === ancestor) break;
+	ancestor = parent;
+}
+if (cursorHelpers) {
+	console.log(`[build] Cursor helpers: ${cursorHelpers}`);
+} else {
+	console.warn(
+		`[build] Optional ${helperName} helpers missing; Cursor discovery will report unavailable`,
+	);
+}
 writeFileSync(
 	"dist/src/lib/build-id.js",
 	`export const BUILD_ID = ${JSON.stringify(buildId)};\n`,

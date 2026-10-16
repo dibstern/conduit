@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -43,9 +44,11 @@ async function openPickerAgentView(page: Page): Promise<void> {
 
 export const harnessHandlers: StepHandler[] = [
 	{
-		name: "register a Cursor account without a runtime",
-		match: /^a Cursor account is registered without a runtime$/,
-		run: ({ world }) => {
+		name: "register Cursor discovery",
+		match:
+			/^a Cursor account is (available with its live models|unavailable with reason (.+))$/,
+		run: ({ world, match }) => {
+			const available = match[1] === "available with its live models";
 			const instances = [
 				...(mockInstances.get(world.page) ?? []),
 				{
@@ -54,20 +57,92 @@ export const harnessHandlers: StepHandler[] = [
 					driver: "cursor",
 					isDefault: true,
 					usageEligible: false,
-					available: false,
-					unavailableReason: "Cursor runtime not installed",
+					available,
+					...(available ? {} : { unavailableReason: match[2] }),
 					configDir: "/tmp/cursor-work",
 					port: 0,
 					managed: false,
-					status: "stopped",
+					status: available ? "healthy" : "stopped",
 					restartCount: 0,
 					createdAt: 1,
 				},
 			];
 			mockInstances.set(world.page, instances);
-			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
-				instances,
+			const rpc = requireRpcControl(world.page);
+			rpc.setDaemonList("SubscribeInstances", { instances });
+			if (!available) return;
+			rpc.setProjectSetting({
+				_tag: "providerModels",
+				providers: [
+					...dualDriverProviders.filter((provider) => provider.id === "claude"),
+					{
+						id: "cursor",
+						name: "Cursor",
+						configured: true,
+						models: [
+							{ id: "composer-2.5", name: "Composer 2.5", provider: "cursor" },
+							{ id: "grok-4.7", name: "Grok 4.7", provider: "cursor" },
+						],
+					},
+				],
 			});
+			const getModels = rpc.getResponseHandler("GetModels");
+			rpc.setHandler("GetModels", (payload, request) =>
+				payload["instanceId"] === "cursor-work"
+					? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
+					: getModels?.(payload, request),
+			);
+			const getAgents = rpc.getResponseHandler("GetAgents");
+			rpc.setHandler("GetAgents", (payload, request) =>
+				payload["instanceId"] === "cursor-work"
+					? {
+							projectSlug: "myapp",
+							instanceId: "cursor-work",
+							providerScope: { id: "cursor", name: "Cursor" },
+							agents: [],
+						}
+					: getAgents?.(payload, request),
+			);
+		},
+	},
+	{
+		name: "assert available Cursor provider rail",
+		match: /^the Cursor provider rail choice is available$/,
+		run: async ({ world }) => {
+			const choice = world.page.getByTestId("picker-harness-cursor");
+			await expect(choice).toBeVisible();
+			await expect(choice).toHaveAccessibleName("Cursor");
+			await expect(choice).toBeEnabled();
+			await expect(
+				world.page.getByTestId("picker-harness-cursor-unavailable"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert Cursor live model catalog",
+		match: /^the Cursor model list contains exactly (.+)$/,
+		run: async ({ world, match }) => {
+			const models = world.page.locator("#model-picker .model-item");
+			const names = (match[1] ?? "").split(", ");
+			await expect(models).toHaveCount(names.length);
+			for (const name of names) {
+				await expect(models.filter({ hasText: name })).toBeVisible();
+			}
+		},
+	},
+	{
+		name: "assert Cursor draft model binding",
+		match: /^the draft composer uses Cursor with model (\S+)$/,
+		run: async ({ world, match }) => {
+			const trigger = world.page
+				.locator(
+					'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
+				)
+				.first();
+			await expect(trigger).toHaveAttribute("data-instance-id", "cursor-work");
+			await expect(trigger).toHaveAttribute("data-shown-harness", "cursor");
+			await expect(trigger).toHaveAttribute("data-shown-provider", "cursor");
+			await expect(trigger).toHaveAttribute("data-shown-model", match[1] ?? "");
 		},
 	},
 	{

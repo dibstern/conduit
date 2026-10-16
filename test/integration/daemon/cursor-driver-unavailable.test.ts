@@ -122,7 +122,8 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 		expect(cursor).toMatchObject({
 			driver: "cursor",
 			available: false,
-			unavailableReason: "Cursor runtime not installed",
+			unavailableReason:
+				"Cursor has no credential; set CURSOR_API_KEY or log in with the Cursor SDK",
 			usageEligible: false,
 		});
 		evidence["discovery"] = cursor;
@@ -220,7 +221,7 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 			cursorState.events.find(({ type }) => type === "turn.error")?.data[
 				"error"
 			],
-		).toContain("Cursor runtime not installed");
+		).toContain("Cursor turn preparation not installed");
 		expect(
 			cursorState.events.filter(
 				({ provider }) => provider === "opencode" || provider === "claude",
