@@ -89,11 +89,13 @@ it(
 				).rejects.toBeDefined();
 			}
 			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(changed);
+			await harness.terminate();
 			await harness.restart();
 			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(changed);
 			const filename = join(harness.configDir, "surfacing/categories.json");
 			const corrupt = "{ damaged categories";
 			writeFileSync(filename, corrupt);
+			await harness.terminate();
 			await harness.restart();
 			expect(await harness.requestRpc(new GetCategorySet({}))).toEqual(
 				DEFAULT_CATEGORY_SET,
