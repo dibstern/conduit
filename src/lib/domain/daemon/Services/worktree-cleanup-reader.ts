@@ -30,6 +30,8 @@ export const readColdWorktreeCleanupCandidates = (
 				SELECT session_id, requested_at, started_at, completed_at,
 					ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY requested_at DESC, rowid DESC) AS rank
 				FROM turns
+				-- A shared store holds every project's turns; rank only this project's.
+				WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ${project.slug})
 			)
 			SELECT DISTINCT events.session_id, mapping.value AS path
 			FROM events, json_each(events.data, '$.worktrees') AS mapping
