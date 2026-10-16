@@ -17,8 +17,8 @@
 //
 // The commit seam publishes advances in commit order. Bounded reads cannot
 // retire queued removals; each upsert retains its row version for resume dedup.
-// A dropped bus publication forces a fresh snapshot for sources whose live
-// removal signal may have been lost.
+// A dropped bus publication catches up through durable tombstones, or forces a
+// fresh snapshot when the source cannot cover the missing removal signals.
 //
 // Because every subscriber asks the same question, devices watching the same
 // thing ask it with the same window: subscribers of one shareable source share
@@ -177,7 +177,7 @@ export interface SubscriptionSource<T, E = never> {
 export interface ReadModelRead {
 	/** The source's {@link SubscriptionSource.name}. */
 	readonly source: string;
-	readonly kind: "base" | "resume" | "replacement" | "window";
+	readonly kind: "base" | "resume" | "replacement" | "window" | "overflow";
 	readonly range?: VersionRange;
 }
 
@@ -250,8 +250,9 @@ const deltaEnvelopes = <T>(
  * filter afterwards: the base carries the version it was read at, and an
  * advance at or below it is by definition already accounted for in the base —
  * a row it moved is in the base, and a row it removed is absent from it.
- * A bus overflow replaces the view with another snapshot and synchronized
- * boundary. Lifecycle is the ambient Scope of the running stream.
+ * A bus overflow catches up through a shared window when the source's durable
+ * tombstones cover the cursor; otherwise it replaces the view with a snapshot
+ * and synchronized boundary. Lifecycle is the ambient Scope of the stream.
  */
 export const stream = <T, E = never>(options: {
 	readonly source: SubscriptionSource<T, E>;
@@ -317,9 +318,9 @@ export const stream = <T, E = never>(options: {
 			const readWindow = (
 				after: number,
 				through: number,
+				kind: "window" | "overflow" = "window",
 			): Effect.Effect<SourceRead, E> => {
-				if (shared === undefined)
-					return readRequired("window", { after, through });
+				if (shared === undefined) return readRequired(kind, { after, through });
 				// Uninterruptible from the miss until the read settles, so an asker
 				// interrupted after publishing its window cannot strand a joiner.
 				// Only a joiner's wait stays interruptible. A joiner shares the
@@ -342,7 +343,7 @@ export const stream = <T, E = never>(options: {
 						const window = { after, through, read: Deferred.await(deferred) };
 						shared.latest = window;
 						// A failure is not kept for later readers.
-						return readRequired("window", { after, through }).pipe(
+						return readRequired(kind, { after, through }).pipe(
 							Effect.exit,
 							Effect.tap((exit) => {
 								if (exit._tag === "Failure" && shared.latest === window)
@@ -400,38 +401,46 @@ export const stream = <T, E = never>(options: {
 				...(checksum === undefined ? {} : { checksum }),
 			});
 
+			const replace = Effect.gen(function* () {
+				const replacement = yield* readRequired("replacement");
+				yield* Ref.set(seen, replacement.version);
+				yield* Ref.set(baseFloor, replacement.version);
+				return Chunk.unsafeFromArray<Envelope<T>>([
+					{
+						_tag: "snapshot",
+						rows: replacement.rows.map(({ item }) => item),
+						sequence: replacement.version,
+						...(replacement.hasMore === undefined
+							? {}
+							: { hasMore: replacement.hasMore }),
+						...(replacement.cursor === undefined
+							? {}
+							: { cursor: replacement.cursor }),
+					},
+					{ _tag: "synchronized" },
+				]);
+			});
+
 			// A chunk is every advance already queued, so a burst costs one read.
 			const live = Stream.mapChunksEffect(
 				advances,
 				(chunk): Effect.Effect<Chunk.Chunk<Envelope<T>>, E> =>
 					Effect.gen(function* () {
-						// A publication gap can hide a deletion, which a range read
-						// cannot recover. Replace the entire view; read after every
-						// advance in the chunk was published, it covers them all.
-						if (Chunk.some(chunk, (advance) => advance.dropped === true)) {
-							const replacement = yield* readRequired("replacement");
-							yield* Ref.set(seen, replacement.version);
-							yield* Ref.set(baseFloor, replacement.version);
-							return Chunk.unsafeFromArray<Envelope<T>>([
-								{
-									_tag: "snapshot",
-									rows: replacement.rows.map(({ item }) => item),
-									sequence: replacement.version,
-									...(replacement.hasMore === undefined
-										? {}
-										: { hasMore: replacement.hasMore }),
-									...(replacement.cursor === undefined
-										? {}
-										: { cursor: replacement.cursor }),
-								},
-								{ _tag: "synchronized" },
-							]);
-						}
+						// A publication gap can hide any move or removal. Catch up
+						// through durable tombstones, replacing only when unsupported
+						// or when their coverage does not reach the cursor.
+						const overflow = Chunk.some(
+							chunk,
+							(advance) => advance.dropped === true,
+						);
+						if (overflow && options.source.resume !== "catchUp")
+							return yield* replace;
 						const floor = yield* Ref.get(baseFloor);
 						// The commit seam publishes in commit order. The chunk's window
-						// closes at its newest routed advance and opens where the last
-						// window closed, never past an unrouted advance: a commit that
-						// publishes nothing may still have stamped a row in between.
+						// closes at its newest routed advance, or newest advance after
+						// overflow, where a gap may hide a routed move. It opens where
+						// the last window closed: a commit that publishes nothing may
+						// still have stamped a row in between.
 						let through: number | undefined;
 						const removed: { id: string; version: number }[] = [];
 						for (const advance of chunk) {
@@ -447,7 +456,7 @@ export const stream = <T, E = never>(options: {
 									options.source.collections.includes(collection),
 								);
 							// Cascaded removals still reach each subscriber's held ids.
-							if (moved || route.removed.length > 0) {
+							if (overflow || moved || route.removed.length > 0) {
 								through = advance.version;
 								for (const id of route.removed)
 									removed.push({ id, version: advance.version });
@@ -459,7 +468,14 @@ export const stream = <T, E = never>(options: {
 						// moving the watermark past it. Removals sort first within a
 						// version: the client should drop before it adds, so a delete
 						// and a re-create that land together settle on the survivor.
-						const window = yield* readWindow(yield* Ref.get(seen), through);
+						const cursor = yield* Ref.get(seen);
+						const window = yield* readWindow(
+							cursor,
+							through,
+							overflow ? "overflow" : "window",
+						);
+						if (overflow && cursor < (window.removedSince ?? cursor))
+							return yield* replace;
 						yield* Ref.set(seen, through);
 						return Chunk.unsafeFromArray(
 							deltaEnvelopes(window.rows, [

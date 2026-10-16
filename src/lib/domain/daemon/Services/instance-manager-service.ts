@@ -628,6 +628,18 @@ export const getManagedOpenCodeProcessEnv = (instanceId: string) =>
 		return Option.isSome(record) ? record.value.env : undefined;
 	});
 
+export const getManagedOpenCodeProcessIdentity = (instanceId: string) =>
+	Effect.gen(function* () {
+		const state = yield* Ref.get(yield* InstanceManagerStateTag);
+		const record = HashMap.get(
+			state.managedProcesses ?? HashMap.empty(),
+			instanceId,
+		);
+		return Option.isSome(record)
+			? record.value.processIdentity?.token
+			: undefined;
+	});
+
 /** Accounts own configuration; OpenCode contributes only process recovery data. */
 export function persistedInstanceConfigs(
 	accounts: ReadonlyArray<Account>,

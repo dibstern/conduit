@@ -1,6 +1,5 @@
 import { SqlClient } from "@effect/sql";
 import { Effect, Schema } from "effect";
-import { accountRefFromSelection } from "../../account-directory.js";
 import {
 	AccountUnroutable,
 	type ContinuationError,
@@ -23,6 +22,10 @@ import {
 	previewContinuation,
 } from "../../domain/relay/Services/continuation.js";
 import { DaemonSessionQueryServiceTag } from "../../domain/relay/Services/daemon-session-query-service.js";
+import {
+	DraftPreWarmTag,
+	draftLaunchKey,
+} from "../../domain/relay/Services/draft-prewarm.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
@@ -58,6 +61,8 @@ import {
 	markSessionSeenForClient,
 	markSessionUnreadForClient,
 	renameSessionForClient,
+	resolveSessionCreation,
+	resolveSessionCreationAccount,
 	setSessionAutoSettleForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
@@ -65,6 +70,10 @@ import {
 	unsnoozeSessionForClient,
 	viewSessionForClient,
 } from "../../handlers/session.js";
+import {
+	preWarmDraft,
+	resolveDraftLaunchInput,
+} from "../../handlers/session-draft-prewarm.js";
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
@@ -202,6 +211,7 @@ export const sessionsHandlers = {
 		preWarmSession(request.sessionId).pipe(
 			Effect.catchAll(mapRpcFailure("PreWarmSession")),
 		),
+	PreWarmDraft: preWarmDraft,
 	ResolveSession: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
@@ -461,25 +471,48 @@ export const sessionsHandlers = {
 				return yield* new PickRequired();
 			const workspace = yield* SessionWorkspaceTag;
 			const path = request.worktreePath;
-			const account = yield* (yield* AccountDirectory).resolve(
-				request.accountRef ??
-					accountRefFromSelection({
-						instanceId: request.instanceId,
-						providerId: request.providerId,
-						model:
-							request.model === undefined
-								? undefined
-								: { providerID: request.model.providerId },
-					}),
-			);
+			const account = yield* resolveSessionCreationAccount(request);
+			const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
+			const draftId = request.draftId;
+			const resolvedCreation =
+				draftId && !request.newWorktree && account.driver === "claude"
+					? yield* resolveSessionCreation({ ...request, account }).pipe(
+							Effect.onError(() =>
+								drafts._tag === "Some"
+									? drafts.value
+											.take(request.originId, draftId, undefined)
+											.pipe(Effect.asVoid)
+									: Effect.void,
+							),
+						)
+					: undefined;
+			const launchKey = resolvedCreation
+				? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
+						Effect.map(draftLaunchKey),
+						Effect.catchAllCause((cause) =>
+							Effect.gen(function* () {
+								const log = yield* LoggerTag;
+								log.debug(`Draft launch comparison failed: ${String(cause)}`);
+								return undefined;
+							}),
+						),
+					)
+				: undefined;
+			// A mismatched or missing key discards the reservation instead of adopting it.
+			const takeReservation =
+				draftId && drafts._tag === "Some"
+					? drafts.value.take(request.originId, draftId, launchKey)
+					: Effect.succeed(undefined);
 			const options = {
 				clientId: request.originId,
 				account,
 				...(request.title != null ? { title: request.title } : {}),
 				...(request.model != null ? { model: request.model } : {}),
 				permissionMode: request.permissionMode,
+				...(resolvedCreation === undefined ? {} : { resolvedCreation }),
 			};
 			if (request.newWorktree) {
+				yield* takeReservation;
 				if (path !== undefined)
 					return yield* new WsRpcError({
 						message: "Choose either a new worktree or an existing worktree.",
@@ -548,18 +581,35 @@ export const sessionsHandlers = {
 				);
 				return { projectSlug: request.projectSlug, sessionId: session.id };
 			}
-			const create = createSessionForClient({
-				...options,
-				...(path === undefined
-					? {}
-					: {
-							initializeWorkspace: (sessionId: string) =>
-								workspace.move(sessionId, path, "launch").pipe(Effect.asVoid),
-						}),
-			});
-			const session = yield* path === undefined
-				? create
-				: workspace.withLaunch(create);
+			// Taking a reservation and arming its rollback must not be split by interruption.
+			const session = yield* Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const reservedSessionId = yield* takeReservation;
+					const create = createSessionForClient({
+						...options,
+						...(reservedSessionId === undefined
+							? {}
+							: { sessionId: reservedSessionId }),
+						...(path === undefined
+							? {}
+							: {
+									initializeWorkspace: (sessionId: string) =>
+										workspace
+											.move(sessionId, path, "launch")
+											.pipe(Effect.asVoid),
+								}),
+					});
+					return yield* restore(
+						path === undefined ? create : workspace.withLaunch(create),
+					).pipe(
+						Effect.onError(() =>
+							reservedSessionId && drafts._tag === "Some"
+								? drafts.value.discardSession(reservedSessionId)
+								: Effect.void,
+						),
+					);
+				}),
+			);
 			return {
 				projectSlug: request.projectSlug,
 				sessionId: session.id,
@@ -755,6 +805,7 @@ export const sessionsHandlers = {
 	WsRpcHandlerMap,
 	| "GetGoalDetails"
 	| "PreWarmSession"
+	| "PreWarmDraft"
 	| "ResolveSession"
 	| "ListDaemonSessions"
 	| "ReloadProviderSession"

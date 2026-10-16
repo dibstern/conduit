@@ -18,8 +18,9 @@ export interface SessionEventFilter {
  * blocking the publisher; the durable, sequence-addressed event store is the
  * replay/resume source, so a subscriber that falls behind recovers missing
  * events by store replay. Advance subscribers detect dropped publications and
- * re-snapshot the read model, including deletions. This bus is
- * a live change-signal, never the backlog.
+ * catch up through shared read-model windows with durable tombstones. Sources
+ * without catch-up support or tombstones covering the cursor re-snapshot the
+ * read model. This bus is a live change-signal, never the backlog.
  */
 export interface SessionEventBus {
 	readonly publish: (events: readonly StoredEvent[]) => Effect.Effect<void>;
@@ -63,10 +64,19 @@ export const makeSessionEventBusLive = (
 		Effect.gen(function* () {
 			const capacity = options.capacity ?? SESSION_EVENT_BUS_CAPACITY;
 			const pubsub = yield* PubSub.sliding<StoredEvent>({ capacity });
+			const configuredAdvanceCapacity =
+				process.env["NODE_ENV"] === "test"
+					? Number(process.env["CONDUIT_TEST_ADVANCE_BUS_CAPACITY"] ?? capacity)
+					: capacity;
+			const advanceCapacity =
+				Number.isSafeInteger(configuredAdvanceCapacity) &&
+				configuredAdvanceCapacity > 0
+					? configuredAdvanceCapacity
+					: capacity;
 			const advances = yield* PubSub.sliding<{
 				readonly advance: ReadModelAdvance;
 				readonly ordinal: number;
-			}>({ capacity });
+			}>({ capacity: advanceCapacity });
 			// Versions can skip within a commit; only a bus-local ordinal identifies
 			// a lost publication. Acquire and capture it under the same permit.
 			const publication = yield* Effect.makeSemaphore(1);

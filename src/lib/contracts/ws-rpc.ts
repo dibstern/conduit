@@ -2201,6 +2201,24 @@ export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>
 	},
 ) {}
 
+const draftSessionPayload = {
+	projectSlug: NonEmptyString,
+	originId: NonEmptyString,
+	instanceId: Schema.optional(Schema.String.pipe(Schema.brand("AccountId"))),
+	providerId: Schema.optional(Schema.String),
+	worktreePath: Schema.optional(NonEmptyString),
+	worktreeBase: Schema.optional(NonEmptyString),
+	permissionMode: SessionPermissionModeSchema,
+	model: Schema.optional(
+		Schema.Struct({
+			modelId: Schema.String,
+			providerId: Schema.String,
+			variant: Schema.optional(Schema.String),
+			contextWindow: Schema.optional(Schema.String),
+		}),
+	),
+};
+
 class CreateSessionWire extends Schema.TaggedRequest<CreateSessionWire>()(
 	"CreateSession",
 	{
@@ -2212,27 +2230,10 @@ class CreateSessionWire extends Schema.TaggedRequest<CreateSessionWire>()(
 		),
 		success: CreateSessionResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
-			originId: NonEmptyString,
+			...draftSessionPayload,
+			draftId: Schema.optional(NonEmptyString),
 			title: Schema.optional(Schema.String),
-			instanceId: Schema.optional(
-				Schema.String.pipe(Schema.brand("AccountId")),
-			),
-			providerId: Schema.optional(Schema.String),
-			worktreePath: Schema.optional(NonEmptyString),
 			newWorktree: Schema.optional(Schema.Boolean),
-			// Local base for the primary folder; requires newWorktree.
-			worktreeBase: Schema.optional(NonEmptyString),
-			// The composer's displayed pick. The handler requires a real model.
-			permissionMode: SessionPermissionModeSchema,
-			model: Schema.optional(
-				Schema.Struct({
-					modelId: Schema.String,
-					providerId: Schema.String,
-					variant: Schema.optional(Schema.String),
-					contextWindow: Schema.optional(Schema.String),
-				}),
-			),
 		},
 	},
 ) {}
@@ -2292,6 +2293,15 @@ export class PreWarmSession extends Schema.TaggedRequest<PreWarmSession>()(
 			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 		},
+	},
+) {}
+
+export class PreWarmDraft extends Schema.TaggedRequest<PreWarmDraft>()(
+	"PreWarmDraft",
+	{
+		failure: WsRpcError,
+		success: Schema.Void,
+		payload: { ...draftSessionPayload, draftId: NonEmptyString },
 	},
 ) {}
 
@@ -2706,6 +2716,7 @@ export const WsRpcRequest = Schema.Union(
 	CreateSession,
 	ViewSession,
 	PreWarmSession,
+	PreWarmDraft,
 	DeleteSession,
 	ForkSession,
 	StartSideThread,
@@ -3154,6 +3165,7 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(CreateSession),
 	Rpc.fromTaggedRequest(ViewSession),
 	Rpc.fromTaggedRequest(PreWarmSession),
+	Rpc.fromTaggedRequest(PreWarmDraft),
 	Rpc.fromTaggedRequest(DeleteSession),
 	Rpc.fromTaggedRequest(ForkSession),
 	Rpc.fromTaggedRequest(StartSideThread),

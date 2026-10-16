@@ -50,6 +50,16 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 Before relays start, a one-time migration checkpoints and copies legacy `<project>/.conduit/events.db` stores, verifies each copy, and archives the originals as `events.db.migrated`; failed copies keep using the legacy store and retry on the next startup.
 Each storage directory records its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs; removing a project keeps its history.
 
+Read-model subscribers detect dropped advance publications after a bus overflow.
+Catch-up sources read a shared window through the newest queued advance, including
+unrouted advances, and send row deltas plus durable tombstones. They replace the
+view with a snapshot only when tombstones cannot cover the cursor or the source
+requires a rebase. `CONDUIT_TEST_ADVANCE_BUS_CAPACITY` changes only the advances
+buffer capacity, and only with `NODE_ENV=test`.
+Detail windows conservatively require replacement after overflow: recreating a
+message clears its tombstone after cascading its old parts, so a range cannot
+recover every part removal. Ordinary detail resumes keep their existing policy.
+
 ## Effect Ownership Guardrails
 
 - Daemon and relay internals should be owned by scoped Effect Layers and services. Do not add app-internal `Effect.runPromise`, `Effect.runSync`, `Runtime.runPromise`, `Runtime.runSync`, or object `.runPromise` / `.runSync` calls.
