@@ -33,7 +33,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	CreateSession,
 	DeleteSession,
-	ForkSession,
+	ForkSessionForSession,
 	InspectSessionWorktrees,
 	ListDaemonSessions,
 	MoveSessionWorkspace,
@@ -823,7 +823,6 @@ process.exit(result.status ?? 1);
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: session.id,
 				path: realpathSync(path),
 			}),
@@ -854,8 +853,7 @@ process.exit(result.status ?? 1);
 		await browser.send(parent.id, "Reply with pong.", 120_000);
 		const fork = await sendRpcRequest(
 			socket,
-			new ForkSession({
-				projectSlug: "process-test",
+			new ForkSessionForSession({
 				sessionId: parent.id,
 				originId: browser.originId,
 			}),
@@ -904,7 +902,6 @@ process.exit(result.status ?? 1);
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: session.id,
 				path: existing,
 			}),
@@ -981,7 +978,6 @@ process.exit(result.status ?? 1);
 		const inspection = await sendRpcRequest(
 			socket,
 			new InspectSessionWorktrees({
-				projectSlug: "process-test",
 				sessionId: session.id,
 			}),
 		);
@@ -1000,7 +996,6 @@ process.exit(result.status ?? 1);
 		const response = await sendRpcRequest(
 			socket,
 			new DeleteSession({
-				projectSlug: "process-test",
 				sessionId: session.id,
 				removeWorktrees: true,
 			}),

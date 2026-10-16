@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+	appendFileSync,
 	chmodSync,
 	copyFileSync,
 	existsSync,
@@ -16,7 +17,7 @@ import {
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { homedir, userInfo } from "node:os";
+import { userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Socket } from "@effect/platform";
@@ -249,6 +250,7 @@ export class ProcessHarness {
 		managedOpenCodeId = "managed-test",
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
 		private readonly opencodeInitiallyIdle = false,
+		private readonly draftPreWarmTtlMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -286,7 +288,7 @@ export class ProcessHarness {
 		if (realSdk && process.platform === "darwin") {
 			mkdirSync(join(this.root, "home", "Library"));
 			symlinkSync(
-				join(homedir(), "Library", "Keychains"),
+				join(userInfo().homedir, "Library", "Keychains"),
 				join(this.root, "home", "Library", "Keychains"),
 			);
 		}
@@ -491,6 +493,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			pauseOpenCodeSupervisor?: boolean;
 			runnerLifecycle?: ProcessHarness["runnerLifecycle"];
 			queryInitializationDelayMs?: number;
+			/** Keep draft reservation expiry observable without a ten-minute wait. */
+			draftPreWarmTtlMs?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -556,6 +560,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.managedOpenCodeId,
 			options.opencodeBorrowIdleTimeoutMs,
 			options.opencodeInitiallyIdle,
+			options.draftPreWarmTtlMs,
 		);
 	}
 
@@ -597,6 +602,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
 					| "CONDUIT_SERVER_BUILD_ID"
+					| "CONDUIT_SLOW_RPC_MS"
+					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
+					| "CONDUIT_TRACE_ENABLED"
+					| "CONDUIT_TRACE_FILE"
+					| "CONDUIT_TRACE_MAX_BYTES"
+					| "CONDUIT_TRACE_SQL_MIN_MS"
+					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>
 			>;
@@ -611,6 +623,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			 * file, flushed every 250ms.
 			 */
 			metricsFile?: string;
+			/** Retain complete daemon output instead of only its 8 KB log tail. */
+			logFile?: string;
 			/**
 			 * With `metricsFile`, also append SQLite statements of 1ms or more to
 			 * `<metricsFile>.statements.jsonl`, and record a CPU profile between the
@@ -783,7 +797,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 								),
 							}),
 					CLAUDE_CONFIG_DIR: this.realSdk
-						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
+						? (process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
+							join(userInfo().homedir, ".claude"))
 						: join(this.root, "claude"),
 					OPENCODE_URL: this.defaultOpenCodeUrl,
 					...(this.opencodeRecording
@@ -796,7 +811,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 								USER: userInfo().username,
 								CLAUDE_SECURESTORAGE_CONFIG_DIR:
 									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
-									process.env["CLAUDE_CONFIG_DIR"] ??
+									process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
 									"",
 							}
 						: {}),
@@ -935,6 +950,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 						options.queryInitializationDelayMs ??
 							this.queryInitializationDelayMs,
 					),
+					...(this.draftPreWarmTtlMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_DRAFT_PREWARM_TTL_MS: String(
+									this.draftPreWarmTtlMs,
+								),
+							}),
 					...(this.buildId ? { CONDUIT_TEST_BUILD_ID: this.buildId } : {}),
 					...(this.upgradeSinkProof
 						? { CONDUIT_TEST_UPGRADE_SINK_PROOF: "1" }
@@ -979,9 +1001,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.child = child;
 		child.stdout?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
+			if (options.logFile) appendFileSync(options.logFile, data);
 		});
 		child.stderr?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
+			if (options.logFile) appendFileSync(options.logFile, data);
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;
@@ -2150,7 +2174,6 @@ export class ProcessBrowser {
 				this.watch(
 					this.rpc
 						.SubscribeSessionDetail({
-							projectSlug: this.projectSlug,
 							sessionId,
 						})
 						.pipe(decodeSessionDetail),
@@ -2195,7 +2218,6 @@ export class ProcessBrowser {
 			this.familyFibers.add(
 				this.watch(
 					this.rpc.SubscribeSessionFamily({
-						projectSlug: this.projectSlug,
 						sessionId,
 					}),
 					(envelope) =>
@@ -2269,6 +2291,31 @@ export class ProcessBrowser {
 		);
 	}
 
+	async borrowDraftModels(instanceId: string): Promise<() => Promise<void>> {
+		const cursor = this.frames.length;
+		const fiber = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeDraftModels({
+					projectSlug: this.projectSlug,
+					instanceId,
+				}),
+				(response) =>
+					Effect.sync(() =>
+						this.record({ type: "draft_models", instanceId, ...response }),
+					),
+			),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "draft_models" &&
+				message["instanceId"] === instanceId,
+			cursor,
+		);
+		return async () => {
+			await this.run(Fiber.interrupt(fiber));
+		};
+	}
+
 	async updateInstance(
 		instanceId: string,
 		updates: { driver?: "opencode" | "claude"; env?: Record<string, string> },
@@ -2294,25 +2341,62 @@ export class ProcessBrowser {
 		title?: string,
 		instanceId?: string,
 		providerId: ProviderDriverKind = "claude",
+		draft: {
+			draftId?: string;
+			modelId?: string;
+			variant?: string;
+			contextWindow?: string;
+			permissionMode?: "ask" | "full";
+			worktreePath?: string;
+		} = {},
 	): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
-				permissionMode: "ask",
-				projectSlug: this.projectSlug,
-				providerId,
-				model: {
-					providerId: providerId === "opencode" ? "fake" : "claude",
-					modelId: providerId === "opencode" ? "fake-model" : "sonnet",
-					variant: "",
-					contextWindow: providerId === "opencode" ? "" : "200k",
-				},
-				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+				...this.draftSessionPayload(providerId, instanceId, draft),
+				...(draft.draftId ? { draftId: draft.draftId } : {}),
 				...(title !== undefined ? { title } : {}),
-				originId: this.originId,
 			}),
 		);
 		await this.view(result.sessionId);
 		return result.sessionId;
+	}
+
+	async preWarmDraft(
+		draftId: string,
+		draft: Parameters<ProcessBrowser["createSession"]>[3] = {},
+		instanceId?: string,
+		providerId: ProviderDriverKind = "claude",
+	): Promise<void> {
+		await this.run(
+			this.rpc.PreWarmDraft({
+				...this.draftSessionPayload(providerId, instanceId, draft),
+				draftId,
+			}),
+		);
+	}
+
+	private draftSessionPayload(
+		providerId: ProviderDriverKind,
+		instanceId: string | undefined,
+		draft: NonNullable<Parameters<ProcessBrowser["createSession"]>[3]>,
+	) {
+		return {
+			permissionMode: draft.permissionMode ?? "ask",
+			projectSlug: this.projectSlug,
+			originId: this.originId,
+			providerId,
+			model: {
+				providerId: providerId === "opencode" ? "fake" : providerId,
+				modelId:
+					draft.modelId ??
+					(providerId === "opencode" ? "fake-model" : "sonnet"),
+				variant: draft.variant ?? "",
+				contextWindow:
+					draft.contextWindow ?? (providerId === "opencode" ? "" : "200k"),
+			},
+			...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+			...(draft.worktreePath ? { worktreePath: draft.worktreePath } : {}),
+		};
 	}
 
 	async createPty(): Promise<PtyInfo> {
@@ -2373,7 +2457,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.ViewSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -2386,10 +2469,7 @@ export class ProcessBrowser {
 		timeoutMs = TIMEOUT_MS,
 	): Promise<void> {
 		await this.followSession(sessionId);
-		await this.run(
-			this.rpc.PreWarmSession({ projectSlug: this.projectSlug, sessionId }),
-			timeoutMs,
-		);
+		await this.run(this.rpc.PreWarmSession({ sessionId }), timeoutMs);
 	}
 
 	async send(
@@ -2417,7 +2497,6 @@ export class ProcessBrowser {
 		const cursor = this.frames.length;
 		const result = await this.run(
 			this.rpc.input.submit({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 				inputId: randomUUID(),
@@ -2508,11 +2587,7 @@ export class ProcessBrowser {
 
 	async history(sessionId: string) {
 		await this.followSession(sessionId);
-		return (
-			await this.run(
-				this.rpc.LoadMoreHistory({ projectSlug: this.projectSlug, sessionId }),
-			)
-		).messages;
+		return (await this.run(this.rpc.LoadMoreHistory({ sessionId }))).messages;
 	}
 
 	async setAutoSettle(days: number | null): Promise<void> {
@@ -2529,7 +2604,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.DeleteSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -2540,7 +2614,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.SwitchAgent({
-				projectSlug: this.projectSlug,
 				sessionId,
 				agentId,
 				originId: this.originId,
@@ -2552,7 +2625,6 @@ export class ProcessBrowser {
 	async sendNow(sessionId: string, inputId: string): Promise<void> {
 		const result = await this.run(
 			this.rpc.input.sendNow({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 				inputId,
@@ -2566,7 +2638,6 @@ export class ProcessBrowser {
 		await this.runtime.runPromise(
 			this.rpc
 				.ReloadProviderSession({
-					projectSlug: this.projectSlug,
 					sessionId,
 					originId: this.originId,
 					commandId: randomUUID(),

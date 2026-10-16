@@ -34,7 +34,7 @@ await Effect.runPromise(
 		operation = "session-page";
 		yield* read.readSessionTranscriptPage(sessionId, { limit: 50 });
 		operation = "sidebar";
-		yield* read.readSessionList();
+		yield* read.readSessionList({ projectIds: [store.projectId] });
 		operation = "stream-version";
 		yield* store.getNextStreamVersion(sessionId);
 	}).pipe(

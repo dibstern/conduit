@@ -4,10 +4,14 @@ import { Effect, Either, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
-import type { SessionMode } from "../../contracts/project-file.js";
-import type {
-	ProviderDriverKind,
-	ProviderSessionCapabilities,
+import type { DefaultSessionMode } from "../../contracts/project-file.js";
+import {
+	type BrowserDriverTraits,
+	isKnownDriverKind,
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+	type ProviderDriverKind,
+	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
 import {
 	catalogFromProviderList,
@@ -44,8 +48,11 @@ import type {
 	SessionInfo,
 	SessionPermissionMode,
 } from "../types.js";
-import { instanceState } from "./instance.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
+import {
+	getDriverTraits,
+	getInstanceTraits,
+	instanceState,
+} from "./instance.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 import { accountSnapshotChangedListeners } from "./ws-listeners.js";
@@ -143,6 +150,8 @@ export interface InstanceOption {
 	readonly isNew?: boolean;
 	/** Live status from the configured-instance source, when known. */
 	readonly status?: InstanceStatus;
+	readonly available?: boolean | undefined;
+	readonly unavailableReason?: string | undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
@@ -151,6 +160,14 @@ export interface InstanceOption {
 // is actually running with. Only the `handle*` and `apply*` functions in this
 // module write it; `discoveryState` hands it out with no setters, so nothing
 // outside can.
+
+const missingHarnessDefaults = () =>
+	Object.fromEntries(
+		Object.keys(PROVIDER_DRIVERS).map((driver) => [
+			driver,
+			{ status: "missing" },
+		]),
+	) as Record<KnownProviderDriverKind, HarnessDefaultState>;
 
 const serverDiscovery = $state({
 	agents: [] as AgentInfo[],
@@ -170,10 +187,7 @@ const serverDiscovery = $state({
 	defaultVariant: "" as string,
 	defaultsLoaded: false,
 	defaultOpenCodeInstanceId: null as string | null,
-	harnessDefaults: {
-		claude: { status: "missing" },
-		opencode: { status: "missing" },
-	} as Record<"claude" | "opencode", HarnessDefaultState>,
+	harnessDefaults: missingHarnessDefaults(),
 	currentVariant: "" as string,
 	availableVariants: [] as string[],
 	currentContextWindow: "" as string,
@@ -181,7 +195,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
-	defaultSessionMode: "local" as SessionMode,
+	defaultSessionMode: "local" as DefaultSessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -221,21 +235,27 @@ interface DraftPick {
 
 const draft = $state<{
 	instanceId: string | null;
-	driver: "claude" | "opencode" | null;
+	driver: ProviderDriverKind | null;
 	model: DraftPick["model"] | null;
 	permissionMode: SessionPermissionMode;
 }>({ instanceId: null, driver: null, model: null, permissionMode: "ask" });
 let draftPermissionChosen = false;
+/** Like the permission mode, an untouched draft pick follows the server default. */
+let draftPickChosen = false;
 const instanceCatalogs = $state<Record<string, ProviderInfo[]>>({});
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
+	const pinned = draft.instanceId;
+	// A removed account, or an untouched draft's former default, falls back to its driver's default.
 	if (
-		draft.instanceId &&
+		pinned &&
 		draft.driver !== null &&
-		!getAvailableInstances().some((account) => account.id === draft.instanceId)
+		(!draftPickChosen ||
+			!getAvailableInstances().some((account) => account.id === pinned))
 	) {
 		draft.instanceId = null;
-		draft.model = null;
+		if (getEffectiveInstanceId() === pinned) draft.instanceId = pinned;
+		else draft.model = null;
 	}
 	fillDraftDefault();
 });
@@ -260,7 +280,7 @@ export function viewDraftModels(
 		projectSlug &&
 		instanceId &&
 		instanceState.loaded &&
-		draftDriver(instanceId) === "opencode"
+		getInstanceTraits(instanceId)?.catalogSource === "server"
 			? { projectSlug, instanceId }
 			: null;
 	if (
@@ -425,7 +445,26 @@ export function getSessionDriver(
 	const provider =
 		serverDiscovery.sessionProviderIds[sessionId] ??
 		getSessionPick(sessionId)?.providerId;
-	return provider ? (provider === "claude" ? "claude" : "opencode") : undefined;
+	return driverForProvider(provider);
+}
+
+/** Model namespaces name local drivers; server catalogs use their owning instance. */
+function driverForProvider(
+	provider: string | undefined,
+): ProviderDriverKind | undefined {
+	if (!provider) return undefined;
+	if (isKnownDriverKind(provider)) return provider;
+	const instanceId = serverDiscovery.providers.find(
+		(entry) => entry.id === provider,
+	)?.instanceId;
+	return (
+		instanceState.instances.find((instance) => instance.id === instanceId)
+			?.driver ??
+		instanceState.instances.find(
+			(instance) => getDriverTraits(instance.driver)?.runsOpenCodeServer,
+		)?.driver ??
+		"opencode"
+	);
 }
 
 /** Order reads at dispatch independently of clicks and their acknowledgements. */
@@ -461,9 +500,9 @@ export function followSessionPickChange(
 	};
 }
 
-function refreshSessionPick(projectSlug: string, sessionId: string): void {
+function refreshSessionPick(sessionId: string): void {
 	const apply = followModelsRead(sessionId);
-	void getModelsRpc({ projectSlug, sessionId })
+	void getModelsRpc({ sessionId })
 		.then(apply)
 		.catch(() => undefined);
 }
@@ -474,7 +513,6 @@ function chooseSessionPick(
 ): UndoChoice {
 	const state = sessionPicks[sessionId];
 	if (!state?.pick) return () => {};
-	const projectSlug = getCurrentSlug();
 	const clickId = Symbol();
 	const fields = Object.keys(patch) as (keyof SessionPick)[];
 	for (const field of fields) {
@@ -489,7 +527,7 @@ function chooseSessionPick(
 				if (state.choice[field]?.clickId === clickId)
 					delete state.choice[field];
 			}
-			if (projectSlug) refreshSessionPick(projectSlug, sessionId);
+			refreshSessionPick(sessionId);
 		},
 		{ clickId },
 	);
@@ -500,6 +538,20 @@ function chooseSessionPick(
  *  ahead of the server read through `choice` first — see the `choose*`
  *  actions. */
 export const discoveryState = {
+	get currentDriver(): ProviderDriverKind | undefined {
+		return sessionState.currentId
+			? getSessionDriver(sessionState.currentId)
+			: (getAvailableInstances().find(
+					(instance) => instance.id === getEffectiveInstanceId(),
+				)?.driver ??
+					draft.driver ??
+					driverForProvider(this.currentProviderId || this.defaultProviderId));
+	},
+	get currentTraits(): BrowserDriverTraits | undefined {
+		return this.currentProviderId
+			? getDriverTraits(this.currentDriver)
+			: undefined;
+	},
 	// Server-owned.
 	get agents(): readonly Immutable<AgentInfo>[] {
 		return serverDiscovery.agents;
@@ -529,7 +581,7 @@ export const discoveryState = {
 		return serverDiscovery.defaultVariant;
 	},
 	get harnessDefaults(): Readonly<
-		Record<"claude" | "opencode", HarnessDefaultState>
+		Record<KnownProviderDriverKind, HarnessDefaultState>
 	> {
 		return serverDiscovery.harnessDefaults;
 	},
@@ -596,7 +648,7 @@ export const discoveryState = {
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
 	},
-	get defaultSessionMode(): SessionMode {
+	get defaultSessionMode(): DefaultSessionMode {
 		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
@@ -705,13 +757,21 @@ export function getAvailableInstances(): InstanceOption[] {
 			isDefault: inst.isDefault ?? false,
 			isCustom: !inst.isDefault,
 			status: inst.status,
+			available: inst.available,
+			unavailableReason: inst.unavailableReason,
 			capabilities:
-				inst.capabilities ?? instanceState.providerCapabilities[driver],
+				inst.capabilities ??
+				instanceState.providerCapabilities[driver] ??
+				getDriverTraits(driver)?.sessionCapabilities,
 		};
 	});
 	const rank = (i: InstanceOption) => {
-		if (i.isDefault && i.driver === "claude") return 0;
-		if (i.isDefault && i.driver === "opencode") return 1;
+		if (
+			i.isDefault &&
+			getDriverTraits(i.driver)?.accountKind === "config-directory"
+		)
+			return 0;
+		if (i.isDefault && getDriverTraits(i.driver)?.runsOpenCodeServer) return 1;
 		return 2;
 	};
 	return available.sort(
@@ -728,7 +788,6 @@ export function getProviderGroupsForInstance(
 		(instance) => instance.id === instanceId,
 	)?.driver;
 	if (!driver) return [];
-	const claude = driver === "claude";
 	const cached = !sessionState.currentId && instanceCatalogs[instanceId];
 	if (cached) {
 		const groups = cached.map((provider) => ({
@@ -750,10 +809,9 @@ export function getProviderGroupsForInstance(
 	}
 	if (!sessionState.currentId) return [];
 	return getVisibleProviderGroups().filter((g) =>
-		g.provider.id === "claude"
-			? claude
-			: g.provider.instanceId === instanceId ||
-				(driver === "opencode" && g.provider.instanceId === undefined),
+		g.provider.instanceId !== undefined
+			? g.provider.instanceId === instanceId
+			: driverForProvider(g.provider.id) === driver,
 	);
 }
 
@@ -763,11 +821,9 @@ export function getEffectiveInstanceId(): string | undefined {
 	if (draft.instanceId !== null)
 		return available.find((account) => account.id === draft.instanceId)?.id;
 	const provider = discoveryState.defaultProviderId;
-	const driver =
-		draft.driver ??
-		(provider ? (provider === "claude" ? "claude" : "opencode") : undefined);
+	const driver = draft.driver ?? driverForProvider(provider);
 	if (
-		driver === "opencode" &&
+		getDriverTraits(driver)?.runsOpenCodeServer &&
 		serverDiscovery.defaultOpenCodeInstanceId &&
 		available.some(
 			(account) =>
@@ -787,11 +843,11 @@ export function getSessionInstanceId(sessionId: string): string {
 	return findSession(sessionId)?.accountId ?? "";
 }
 
-function draftDriver(instanceId: string | undefined): "claude" | "opencode" {
-	return instanceState.instances.find((instance) => instance.id === instanceId)
-		?.driver === "claude"
-		? "claude"
-		: "opencode";
+function draftDriver(instanceId: string | undefined): KnownProviderDriverKind {
+	const driver = instanceState.instances.find(
+		(instance) => instance.id === instanceId,
+	)?.driver;
+	return isKnownDriverKind(driver) ? driver : "opencode";
 }
 
 /** Fill only an empty draft from the selected harness's resolved default. */
@@ -808,7 +864,7 @@ function fillDraftDefault(): void {
 	const defaults = serverDiscovery.harnessDefaults[draftDriver(instanceId)];
 	if (
 		draft.instanceId === null &&
-		draftDriver(instanceId) === "opencode" &&
+		getInstanceTraits(instanceId)?.runsOpenCodeServer &&
 		serverDiscovery.defaultOpenCodeInstanceId === null
 	)
 		return;
@@ -893,6 +949,7 @@ function setDraftModel(
 
 /** A different instance starts with its own default, never a neighboring model. */
 export function selectInstance(instanceId: string): void {
+	draftPickChosen = true;
 	const available = getAvailableInstances();
 	const ref = accountRefFromSelection({ providerId: instanceId });
 	const selected =
@@ -908,14 +965,14 @@ export function selectInstance(instanceId: string): void {
 		draft.model = null;
 		return;
 	}
-	if (selected.driver !== "claude" && selected.driver !== "opencode") return;
 	if (draft.instanceId === selected.id) return;
 	draft.instanceId = selected.id;
 	draft.driver = selected.driver;
 	draft.model = null;
 	if (
-		selected.driver !== "claude" &&
-		["plan", "auto", "dontAsk"].includes(draft.permissionMode)
+		!getDriverTraits(selected.driver)?.permissionModes.includes(
+			draft.permissionMode,
+		)
 	)
 		draft.permissionMode = "ask";
 	fillDraftDefault();
@@ -928,6 +985,7 @@ export function clearDraftSelection(): void {
 	draft.model = null;
 	draft.permissionMode = serverDiscovery.defaultPermissionMode;
 	draftPermissionChosen = false;
+	draftPickChosen = false;
 }
 
 /** Format agent label for display. */
@@ -1062,21 +1120,28 @@ export function handleModelList({
 	const catalog = providersFromGetModelsResponse(providers);
 	const catalogAccountId =
 		accountId ??
-		(catalog.some((provider) => provider.id === "claude")
-			? getAvailableInstances().find(
-					(account) => account.driver === "claude" && account.isDefault,
-				)?.id
-			: undefined);
+		getAvailableInstances().find(
+			(account) =>
+				account.isDefault &&
+				getDriverTraits(account.driver)?.catalogSource === "discovery" &&
+				catalog.some((provider) => provider.id === account.driver),
+		)?.id;
 	// Project settings can arrive before the daemon's account snapshot.
 	if (
 		catalogAccountId &&
 		!instanceState.instances.some(
 			(account) =>
-				account.id === catalogAccountId && account.driver !== "claude",
+				account.id === catalogAccountId &&
+				getDriverTraits(account.driver)?.catalogSource === "server",
 		)
 	) {
-		instanceCatalogs[catalogAccountId] = catalog.filter(
-			(provider) => provider.id === "claude",
+		const driver = instanceState.instances.find(
+			(account) => account.id === catalogAccountId,
+		)?.driver;
+		instanceCatalogs[catalogAccountId] = catalog.filter((provider) =>
+			driver === undefined
+				? getDriverTraits(provider.id)?.catalogSource === "discovery"
+				: provider.id === driver,
 		);
 		if (
 			!sessionState.currentId &&
@@ -1139,30 +1204,34 @@ export function applyGetModelsResponse(
 		serverDiscovery.defaultOpenCodeInstanceId =
 			response.defaultOpenCodeInstanceId;
 	serverDiscovery.modelsLoaded = true;
-	// Account-scoped Claude catalogues arrive on the providerModels stream.
+	// Account-scoped discovery catalogues arrive on the providerModels stream.
 	const scopedDraft =
 		response.instanceId !== undefined &&
 		!sessionState.currentId &&
 		response.instanceId === getEffectiveInstanceId();
-	const claudeScope = instanceState.instances.some(
+	const discoveryScope = instanceState.instances.some(
 		(account) =>
-			account.id === response.instanceId && account.driver === "claude",
+			account.id === response.instanceId &&
+			getDriverTraits(account.driver)?.catalogSource === "discovery",
 	);
 	if (
 		sessionId ||
 		response.instanceId === undefined ||
-		(scopedDraft && !claudeScope)
+		(scopedDraft && !discoveryScope)
 	) {
 		// The retained shared Claude tail is display data, not this reply's catalog.
 		const cachedClaude = serverDiscovery.providers.filter(
 			(provider) =>
-				provider.id === "claude" &&
-				!response.providers.some((next) => next.id === "claude"),
+				getDriverTraits(provider.id)?.catalogSource === "discovery" &&
+				!response.providers.some((next) => next.id === provider.id),
 		);
 		handleModelList({
 			providers: response.providers,
 			...(response.instanceId !== undefined &&
-			response.providers.some((provider) => provider.id === "claude")
+			response.providers.some(
+				(provider) =>
+					getDriverTraits(provider.id)?.catalogSource === "discovery",
+			)
 				? { accountId: response.instanceId }
 				: {}),
 		});
@@ -1173,7 +1242,7 @@ export function applyGetModelsResponse(
 	}
 	if (!sessionId) {
 		if (response.instanceId !== undefined) {
-			if (draftDriver(response.instanceId) === "opencode")
+			if (getInstanceTraits(response.instanceId)?.catalogSource === "server")
 				instanceCatalogs[response.instanceId] = providersFromGetModelsResponse(
 					response.providers,
 				);
@@ -1246,6 +1315,15 @@ export function handleDefaultModelInfo(msg: {
 	readonly provider?: string | undefined;
 	readonly variant?: string | undefined;
 }): void {
+	if (
+		!draftPickChosen &&
+		((msg.model ?? "") !== serverDiscovery.defaultModelId ||
+			(msg.provider ?? "") !== serverDiscovery.defaultProviderId)
+	) {
+		draft.instanceId = null;
+		draft.driver = null;
+		draft.model = null;
+	}
 	serverDiscovery.defaultModelId = msg.model ?? "";
 	serverDiscovery.defaultProviderId = msg.provider ?? "";
 	serverDiscovery.defaultVariant = msg.variant ?? "";
@@ -1258,9 +1336,10 @@ export function handleDefaultModelInfo(msg: {
 export function handleHarnessDefaults(
 	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
 ): void {
+	const { _tag, ...defaults } = setting;
 	serverDiscovery.harnessDefaults = {
-		claude: setting.claude,
-		opencode: setting.opencode,
+		...missingHarnessDefaults(),
+		...defaults,
 	};
 	fillDraftDefault();
 }
@@ -1324,10 +1403,9 @@ export function followSessionModelSettings(
 		row.resumes?.at(-1)?.instanceId === previous.resumes?.at(-1)?.instanceId
 	)
 		return;
-	const projectSlug = getCurrentSlug();
 	const sessionId = sessionState.currentId;
-	if (!projectSlug || !sessionId) return;
-	refreshSessionPick(projectSlug, sessionId);
+	if (!sessionId) return;
+	refreshSessionPick(sessionId);
 }
 
 export function handlePermissionModeInfo(msg: {
@@ -1415,6 +1493,7 @@ export function chooseModel(model: {
 				: "",
 		});
 	}
+	draftPickChosen = true;
 	setDraftModel(model);
 	return () => {};
 }
@@ -1427,6 +1506,7 @@ export function chooseVariant(variant: string): UndoChoice {
 		(variant === "" || getActiveModelVariants().includes(variant))
 	) {
 		draft.model.variant = variant;
+		draftPickChosen = true;
 		rememberDraftModel();
 	}
 	return () => {};
@@ -1443,6 +1523,7 @@ export function chooseContextWindow(contextWindow: string): UndoChoice {
 			))
 	) {
 		draft.model.contextWindow = contextWindow;
+		draftPickChosen = true;
 		rememberDraftModel();
 	}
 	return () => {};
@@ -1532,7 +1613,7 @@ export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	if (!draft.model && !draftPermissionChosen) draft.permissionMode = mode;
 }
 
-export function applyDefaultSessionMode(mode: SessionMode): void {
+export function applyDefaultSessionMode(mode: DefaultSessionMode): void {
 	serverDiscovery.defaultSessionMode = mode;
 }
 
@@ -1555,10 +1636,7 @@ export function clearDiscoveryState(): void {
 	serverDiscovery.defaultVariant = "";
 	serverDiscovery.defaultsLoaded = false;
 	serverDiscovery.defaultOpenCodeInstanceId = null;
-	serverDiscovery.harnessDefaults = {
-		claude: { status: "missing" },
-		opencode: { status: "missing" },
-	};
+	serverDiscovery.harnessDefaults = missingHarnessDefaults();
 	serverDiscovery.currentVariant = "";
 	serverDiscovery.availableVariants = [];
 	serverDiscovery.currentContextWindow = "";

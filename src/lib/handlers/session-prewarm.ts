@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { Account } from "../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { resolveSessionFolders } from "../domain/relay/Services/provider-turn-dispatch.js";
@@ -31,12 +32,17 @@ export const preWarmSession = (sessionId: string, resolvedAccount?: Account) =>
 				_tag: "Id",
 				id: providerId,
 			}));
-		if (account.driver !== "claude") return;
+		if (
+			!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+			!("folder" in account)
+		)
+			return;
 		const instance = registry.getInstance(account.driver);
 		if (!instance?.preWarmSessionEffect) return;
 
 		const model = yield* getModel(sessionId);
-		if (model && harnessForModelProvider(model.providerID) !== "claude") return;
+		if (model && harnessForModelProvider(model.providerID) !== account.driver)
+			return;
 		const providerState = yield* ProviderStateEffectTag;
 		const agentService = yield* AgentServiceTag;
 		const agent = yield* agentService.getActiveAgent(sessionId);

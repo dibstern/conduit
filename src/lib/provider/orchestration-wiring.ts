@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Context, Effect, Layer, Option, type Scope } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
 	loadDaemonConfigResult,
@@ -172,7 +173,7 @@ const createOrchestrationComponentsEffect = (
 					),
 				),
 				Effect.flatMap((account) =>
-					account.driver === "opencode"
+					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
 						? instances.use(account.id)
 						: Effect.fail(
 								new Error("OpenCode session requires an OpenCode account"),

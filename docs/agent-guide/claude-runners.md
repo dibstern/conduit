@@ -12,6 +12,13 @@ remaining initialization time. Failed warming or changes to launch options and
 inherited settings can discard the warm SDK query. An exited runner also makes
 the next send spawn a fresh process unless another open or focus hint warms it.
 
+A focused draft also warms its selected provider. Claude reserves the future
+session ID in the relay, without writing a session. Matching creation consumes
+that reservation. Changed launch settings, a replacement draft, ten minutes
+without a refresh, or relay disposal stop unused draft runners. Each origin can
+hold one reservation, with eight per relay. Recovery verifies and stops runners
+whose reserved session was never persisted. New-worktree drafts skip warming.
+
 The project runtime directory is `<config>/r/<project-path-sha256-prefix>/`.
 Each runner has a short Unix socket name, a matching `.json` registration with
 its runner ID, session ID, build ID and PID, and a `.spool` file. The directory
@@ -195,6 +202,10 @@ node --import tsx test/bench/claude-prewarm.ts \
   --baseline-dist /tmp/85kb-15-baseline-dist --dist dist \
   --output test-results/85kb-15-prewarm.json
 ```
+
+To compare a fresh session's first event with and without draft warming in the
+current build, run `node --import tsx test/bench/claude-prewarm.ts --draft --dist dist`.
+It writes `test-results/85kb-15-prewarm-draft.json` using synthetic SDK startup.
 
 The real-SDK smoke is opt-in and uses the user's existing Claude login with an
 isolated server config and project. Its session query uses the real SDK, while

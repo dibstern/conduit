@@ -7,7 +7,11 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 
 import { SqlClient } from "@effect/sql";
 import { Data, Effect, Option } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
+} from "../contracts/provider-instance.js";
 import { WsRpcError } from "../contracts/ws-rpc.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../domain/relay/Services/pending-interaction-service.js";
@@ -334,13 +338,13 @@ export const handlePermissionResponse = (
 			);
 
 			const engine = yield* OrchestrationEngineTag;
-			const isClaudeSession =
-				(yield* engine.getProviderForSessionEffect(sessionId)) === "claude";
+			const bindingId = yield* engine.getProviderForSessionEffect(sessionId);
+			const traits = getProviderDriver(bindingId) ?? PROVIDER_DRIVERS.opencode;
 
 			// The adapter owns the reply: it scopes "always" to the session.
-			const opencode = isClaudeSession
-				? undefined
-				: (yield* ProviderRegistryTag).getInstance("opencode");
+			const opencode = traits.runsOpenCodeServer
+				? (yield* ProviderRegistryTag).getInstance("opencode")
+				: undefined;
 			if (opencode) {
 				yield* Effect.either(
 					opencode.resolvePermissionEffect(sessionId, requestId, result.mapped),
@@ -348,7 +352,11 @@ export const handlePermissionResponse = (
 			}
 
 			// Persist to opencode.jsonc when the user chose "Always Allow"
-			if (decision === "allow_always" && persistScope && !isClaudeSession) {
+			if (
+				decision === "allow_always" &&
+				persistScope &&
+				traits.runsOpenCodeServer
+			) {
 				yield* persistPermissionRule(
 					result.toolName,
 					persistScope,
@@ -453,7 +461,10 @@ export const handleAskUserResponse = (
 						yield* engineOption.value.getProviderForSessionEffect(
 							questionSessionId,
 						);
-					if (providerId !== "claude") {
+					if (
+						(getProviderDriver(providerId) ?? PROVIDER_DRIVERS.opencode)
+							.interactionSink !== "permission-asking"
+					) {
 						log.warn(
 							`client=${clientId} session=${questionSessionId} service-owned question ${toolId} resolved for provider=${providerId ?? "unknown"}`,
 						);
@@ -564,7 +575,9 @@ export const handleQuestionReject = (
 								questionSessionId,
 							)
 						: undefined;
-				if (providerId === "claude") {
+				if (
+					getProviderDriver(providerId)?.interactionSink === "permission-asking"
+				) {
 					log.warn(
 						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
 					);
@@ -591,7 +604,10 @@ export const handleQuestionReject = (
 						yield* engineOption.value.getProviderForSessionEffect(
 							questionSessionId,
 						);
-					if (providerId !== "claude") {
+					if (
+						(getProviderDriver(providerId) ?? PROVIDER_DRIVERS.opencode)
+							.interactionSink !== "permission-asking"
+					) {
 						log.warn(
 							`client=${clientId} session=${questionSessionId} service-owned question reject ${toolId} resolved for provider=${providerId ?? "unknown"}`,
 						);

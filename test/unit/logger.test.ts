@@ -1,9 +1,20 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	_getOutputStream,
 	createLogger,
 	createSilentLogger,
 	createTestLogger,
+	setLogFile,
 	setLogFormat,
 	setLogLevel,
 } from "../../src/lib/logger.js";
@@ -263,5 +274,171 @@ describe("createTestLogger", () => {
 		const child = log.child("x");
 		expect(child).toBeDefined();
 		expect(() => child.info("test")).not.toThrow();
+	});
+});
+
+describe("log file", () => {
+	let tempDir: string;
+	let logPath: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "conduit-logger-"));
+		logPath = join(tempDir, "daemon.log");
+		setLogLevel("debug");
+		setLogFormat("json");
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("writes only warn and error JSON records, including existing loggers' components", () => {
+		const log = createLogger("daemon").child("startup");
+		const lines = collectLines();
+		setLogFile(logPath);
+
+		log.debug("debug");
+		log.verbose("verbose");
+		log.info("info");
+		log.warn("warning");
+		log.error("error");
+
+		const records = readFileSync(logPath, "utf8").trim().split("\n");
+		expect(records).toHaveLength(2);
+		expect(JSON.parse(line(records, 0))).toMatchObject({
+			level: 40,
+			component: ["daemon", "startup"],
+			msg: "warning",
+		});
+		expect(JSON.parse(line(records, 1))).toMatchObject({
+			level: 50,
+			component: ["daemon", "startup"],
+			msg: "error",
+		});
+		expect(lines).toHaveLength(5);
+	});
+
+	it.each([
+		"json",
+		"pretty",
+	] as const)("preserves stdout filtering at every level in %s format", (format) => {
+		setLogFormat(format);
+		setLogFile(logPath);
+		const levels = ["debug", "verbose", "info", "warn", "error"] as const;
+
+		for (const [index, level] of levels.entries()) {
+			setLogLevel(level);
+			const lines = collectLines();
+			const log = createLogger("test");
+			for (const messageLevel of levels) log[messageLevel](messageLevel);
+
+			const expected = levels.slice(index);
+			expect(lines).toHaveLength(expected.length);
+			for (const [messageIndex, message] of expected.entries()) {
+				const output = line(lines, messageIndex);
+				if (format === "json") {
+					expect(JSON.parse(output).msg).toBe(message);
+				} else {
+					expect(output).toContain("[test]");
+					expect(output).toContain(message);
+					expect(() => JSON.parse(output)).toThrow();
+				}
+			}
+		}
+
+		const records = readFileSync(logPath, "utf8").trim().split("\n");
+		expect(records.map((record) => JSON.parse(record).level)).toEqual([
+			40, 50, 40, 50, 40, 50, 40, 50, 40, 50,
+		]);
+	});
+
+	it("keeps the file attached across level and format changes", () => {
+		setLogFile(logPath);
+		collectLines();
+		const existing = createLogger("test");
+		existing.warn("before");
+		setLogLevel("verbose");
+		collectLines();
+		existing.warn("existing");
+		createLogger("test").warn("level");
+		setLogFormat("pretty");
+		collectLines();
+		createLogger("test").warn("format");
+
+		const records = readFileSync(logPath, "utf8").trim().split("\n");
+		expect(records.map((record) => JSON.parse(record).msg)).toEqual([
+			"before",
+			"existing",
+			"level",
+			"format",
+		]);
+	});
+
+	it("appends to an existing file", () => {
+		const original = '{"level":40,"component":["old"],"msg":"kept"}\n';
+		writeFileSync(logPath, original);
+		setLogFile(logPath);
+		collectLines();
+		createLogger("test").warn("appended");
+
+		const content = readFileSync(logPath, "utf8");
+		expect(content.startsWith(original)).toBe(true);
+		expect(JSON.parse(content.slice(original.length)).msg).toBe("appended");
+	});
+
+	it("rotates at the byte limit using the existing size and replaces its only backup", () => {
+		const cap = 512;
+		const original = "old\n".repeat(128);
+		writeFileSync(logPath, original);
+		writeFileSync(`${logPath}.1`, "stale backup\n");
+		setLogFile(logPath, cap);
+		collectLines();
+		const log = createLogger("test");
+
+		log.warn(`first ${"🙂".repeat(50)}`);
+		const first = readFileSync(logPath, "utf8");
+		expect(readFileSync(`${logPath}.1`, "utf8")).toBe(original);
+		expect(JSON.parse(first).msg).toBe(`first ${"🙂".repeat(50)}`);
+		expect(Buffer.byteLength(first)).toBeLessThanOrEqual(cap);
+
+		log.error(`second ${"🙂".repeat(50)}`);
+		expect(readFileSync(`${logPath}.1`, "utf8")).toBe(first);
+		const second = readFileSync(logPath, "utf8");
+		expect(JSON.parse(second).msg).toBe(`second ${"🙂".repeat(50)}`);
+		expect(readdirSync(tempDir).sort()).toEqual(["daemon.log", "daemon.log.1"]);
+	});
+
+	it("ignores an unwritable path and keeps stdout logging", () => {
+		const blocker = join(tempDir, "regular-file");
+		writeFileSync(blocker, "not a directory");
+		const lines = collectLines();
+		expect(() => setLogFile(join(blocker, "daemon.log"))).not.toThrow();
+		const log = createLogger("test");
+		expect(() => {
+			log.info("info");
+			log.warn("warning");
+			log.error("error");
+		}).not.toThrow();
+		expect(lines.map((output) => JSON.parse(output).msg)).toEqual([
+			"info",
+			"warning",
+			"error",
+		]);
+	});
+
+	it("ignores write failures after attachment and keeps stdout logging", () => {
+		setLogFile(logPath);
+		rmSync(logPath);
+		mkdirSync(logPath);
+		const lines = collectLines();
+		const log = createLogger("test");
+		expect(() => {
+			log.warn("warning");
+			log.error("error");
+		}).not.toThrow();
+		expect(lines.map((output) => JSON.parse(output).msg)).toEqual([
+			"warning",
+			"error",
+		]);
 	});
 });

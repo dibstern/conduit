@@ -26,7 +26,6 @@ const resume = async (
 					return yield* Stream.runCollect(
 						Stream.take(
 							rpc.SubscribeSessionDetail({
-								projectSlug: "integration-test",
 								sessionId,
 								resumeFromSequence: cursor,
 							}),

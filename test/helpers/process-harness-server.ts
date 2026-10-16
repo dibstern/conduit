@@ -33,6 +33,7 @@ function recordServerMetrics(
 		{ reads: Record<string, number>; windows: Set<number>; ranges: Set<string> }
 	> = {};
 	const sidebarReads: { at: number; ms: number; rows: number }[] = [];
+	const readModelReads: { at: number; source: string; kind: string }[] = [];
 	subscribe("conduit:sidebar-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
@@ -47,6 +48,11 @@ function recordServerMetrics(
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
+		readModelReads.push({
+			at: performance.timeOrigin + performance.now(),
+			source: read.source,
+			kind: read.kind,
+		});
 		const source = (sources[read.source] ??= {
 			reads: {},
 			windows: new Set(),
@@ -54,7 +60,10 @@ function recordServerMetrics(
 		});
 		reads[read.kind] = (reads[read.kind] ?? 0) + 1;
 		source.reads[read.kind] = (source.reads[read.kind] ?? 0) + 1;
-		if (read.kind === "window" && read.range?.through !== undefined) {
+		if (
+			(read.kind === "window" || read.kind === "overflow") &&
+			read.range?.through !== undefined
+		) {
 			windows.add(read.range.through);
 			source.windows.add(read.range.through);
 			source.ranges.add(`${read.range.after}-${read.range.through}`);
@@ -105,6 +114,7 @@ function recordServerMetrics(
 					]),
 				),
 				sidebarReads,
+				readModelReads,
 				gitRefreshes,
 				...(timed && { familyReads: timed.familyReads }),
 				...(timed && { streamingWrites: timed.streamingWrites }),
@@ -351,6 +361,15 @@ async function main(): Promise<void> {
 				)) as typeof import("../../src/lib/persistence/session-family-query.js")
 			).sessionFamilyWindowQuery,
 		);
+	const readCapabilitiesFixture =
+		(): import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult => {
+			const resultPath = join(root, "capabilities-probe-result.json");
+			return existsSync(resultPath)
+				? (JSON.parse(
+						readFileSync(resultPath, "utf8"),
+					) as import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult)
+				: { models: [], agents: [], commands: [] };
+		};
 	if (existsSync(join(root, "capabilities-probe-gated"))) {
 		const { ClaudeDriver } = (await import(
 			pathToFileURL(
@@ -395,6 +414,9 @@ async function main(): Promise<void> {
 						capabilitiesService: {
 							get: (workspaceRoot) =>
 								Effect.gen(function* () {
+									// Session creation validates the pick before the test arms discovery.
+									if (!existsSync(join(root, "capabilities-probe-armed")))
+										return readCapabilitiesFixture();
 									const id = ++consumerId;
 									const request = yield* Effect.fork(
 										service.get(workspaceRoot),
@@ -432,12 +454,7 @@ async function main(): Promise<void> {
 			while (!existsSync(join(root, "capabilities-probe-release")))
 				await new Promise<void>((done) => setTimeout(done, 10));
 		}
-		const resultPath = join(root, "capabilities-probe-result.json");
-		return existsSync(resultPath)
-			? (JSON.parse(
-					readFileSync(resultPath, "utf8"),
-				) as import("../../src/lib/provider/claude/claude-capabilities-probe.js").ProbeResult)
-			: { models: [], agents: [], commands: [] };
+		return readCapabilitiesFixture();
 	});
 	const { startForegroundDaemon } = (await import(
 		pathToFileURL(

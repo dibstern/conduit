@@ -19,6 +19,7 @@ import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	createSessionDelays,
 	detailFeeds,
 	effortOptions,
 	inheritedClaudeCommitAttribution,
@@ -289,14 +290,20 @@ export const mockAppHandlers: StepHandler[] = [
 				instances,
 			});
 			const drivers = configured.map(([, driver]) => driver);
-			const claude = drivers.includes("claude");
+			const active = drivers.includes("claude")
+				? { model: "claude-sonnet-4-5", provider: "claude" }
+				: { model: "claude-sonnet-4", provider: "anthropic" };
 			await serveModelCatalog(world.page, {
 				providers: dualDriverProviders.filter((provider) =>
 					drivers.includes(provider.id === "claude" ? "claude" : "opencode"),
 				),
-				active: claude
-					? { model: "claude-sonnet-4-5", provider: "claude" }
-					: { model: "claude-sonnet-4", provider: "anthropic" },
+				active,
+			});
+			// The project's default model, not GetModels' active pick, picks a draft's harness.
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "defaultModel",
+				...active,
+				variant: "",
 			});
 		},
 	},
@@ -362,6 +369,7 @@ export const mockAppHandlers: StepHandler[] = [
 				id: sessionId,
 				title: `${match[1]} session`,
 				status: "idle",
+				accountId: match[1] === "Claude" ? "claude" : "opencode",
 				updatedAt: PINNED_CLOCK_MS,
 			});
 			await openSessionRoute(world.page, sessionId);
@@ -399,6 +407,7 @@ export const mockAppHandlers: StepHandler[] = [
 				id: sessionId,
 				title: `${match[1]} offline session`,
 				status: "idle",
+				accountId: instanceId,
 				updatedAt: PINNED_CLOCK_MS,
 			});
 			await openSessionRoute(world.page, sessionId);
@@ -802,6 +811,9 @@ export const mockAppHandlers: StepHandler[] = [
 						};
 					},
 					CreateSession: async (payload) => {
+						await new Promise((resolve) =>
+							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
+						);
 						createdSessionInstance =
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]

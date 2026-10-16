@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -50,7 +51,7 @@ describe.skipIf(process.platform === "win32")(
 		});
 
 		it("completes turns, re-adopts and upgrades through the same short alias", async () => {
-			const prefix = "/tmp/conduit-runner-long-";
+			const prefix = join(realpathSync("/tmp"), "conduit-runner-long-");
 			const rootPrefix =
 				prefix +
 				"x".repeat(85 - Buffer.byteLength(prefix) - 6 - "/config".length);

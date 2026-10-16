@@ -174,19 +174,21 @@ export const settingsHandlers = {
 			),
 		),
 	ResolveClaudeSettings: (request) =>
-		resolveClaudeSettingsForInstance(request).pipe(
-			Effect.map((resolved) => ({
-				projectSlug: request.projectSlug,
-				instanceId: request.instanceId,
-				resolved,
-			})),
-			Effect.mapError((error) =>
-				error instanceof ClaudeSettingsResolveError ||
-				error instanceof AccountUnroutable
-					? error
-					: new WsRpcError({
-							message: `ResolveClaudeSettings failed: ${String(error)}`,
-						}),
+		Effect.flatMap(ConfigTag, (config) =>
+			resolveClaudeSettingsForInstance(request).pipe(
+				Effect.map((resolved) => ({
+					projectSlug: config.slug,
+					instanceId: request.instanceId,
+					resolved,
+				})),
+				Effect.mapError((error) =>
+					error instanceof ClaudeSettingsResolveError ||
+					error instanceof AccountUnroutable
+						? error
+						: new WsRpcError({
+								message: `ResolveClaudeSettings failed: ${String(error)}`,
+							}),
+				),
 			),
 		),
 	SetLogLevel: (request) =>

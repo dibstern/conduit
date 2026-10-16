@@ -19,6 +19,14 @@ const worktrees: readonly WorktreeInfo[] = [
 	{ path: docsLinked, branch: "feature/docs", main: false },
 ];
 const controls = new WeakMap<Page, RpcMockControl>();
+const modelProviders = ["claude", "anthropic"].map((id) => ({
+	id,
+	name: id === "claude" ? "Claude" : "Anthropic",
+	configured: true,
+	models: [
+		{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: id },
+	],
+}));
 
 async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	const provider = supportsWorktree ? "claude" : "opencode";
@@ -42,6 +50,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				id: provider,
 				name: "Draft provider",
 				driver: provider,
+				isDefault: true,
 				port: 0,
 				managed: false,
 				status: "healthy",
@@ -56,7 +65,12 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
+			GetModels: ({ projectSlug, instanceId }) => ({
+				projectSlug,
+				providers: modelProviders.filter(
+					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",
 				instanceId: provider,
@@ -98,6 +112,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				return { projectSlug, sessionId: "draft-session" };
 			},
 			PreWarmSession: () => ({ ok: true }),
+			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -108,6 +123,41 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 		responses: new Map(),
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
+	for (const account of instances.instances.filter(
+		({ driver }) => driver === "claude",
+	))
+		rpc.setProjectSetting({
+			_tag: "providerModels",
+			accountId: account.id,
+			providers: modelProviders.filter(({ id }) => id === "claude"),
+		});
+	rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-4-5",
+		provider: provider === "claude" ? "claude" : "anthropic",
+		variant: "",
+	});
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
 	const picker = page.locator(

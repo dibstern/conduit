@@ -19,20 +19,18 @@
  *   turn.completed (result)
  *   workspace.changed (startup cwd, declared worktree results)
  *
- * All payloads match the EventPayloadMap interfaces.
+ * All payloads match the ProviderRuntimeEventPayloadMap types.
  */
 import { randomUUID } from "node:crypto";
 import { Clock, Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
+	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
 import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { createLogger, type Logger } from "../../logger.js";
-import type {
-	CanonicalToolInput,
-	EventPayloadMap,
-} from "../../persistence/events.js";
+import type { CanonicalToolInput } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import type { EventSinkError } from "../event-sink-errors.js";
@@ -62,6 +60,8 @@ import type {
 
 const PROVIDER = "claude" as const;
 const defaultLog = createLogger("claude-event-translator");
+// Keep hidden-thinking keepalives well inside the 2-minute processing timeout.
+const THINKING_KEEPALIVE_INTERVAL_MS = 30_000;
 
 // Events are provider ingress envelopes. The EventSink owns conversion to
 // durable domain events before append/projection.
@@ -69,7 +69,7 @@ const defaultLog = createLogger("claude-event-translator");
 function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: ProviderRuntimeEventPayloadMap[K],
 	metadata?: Readonly<Record<string, unknown>>,
 ) {
 	return {
@@ -402,6 +402,10 @@ export class ClaudeEventTranslator {
 	// Who each block of assistant text is, and what of it has already been
 	// sent. Identity is positional, so no rewrite of the text can change it.
 	private readonly ledger = new AssistantTextLedger();
+	private readonly thinkingKeepaliveTimes = new WeakMap<
+		ClaudeSessionContext,
+		Map<number, number>
+	>();
 	private bufferedWrites: Effect.Effect<void, EventSinkError>[] | undefined;
 	private announcedMessageIds = new Set<string>();
 	// The SDK's last live set. firstSeenAt: the runner outlives server
@@ -1360,6 +1364,7 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const index = event.index;
+			this.thinkingKeepaliveTimes.get(ctx)?.delete(index);
 			const tool = ctx.inFlightTools.get(index);
 			if (!tool) return;
 
@@ -1449,6 +1454,12 @@ export class ClaudeEventTranslator {
 						partialInputJson: "",
 					};
 					ctx.inFlightTools.set(index, tool);
+					if (block.type === "thinking") {
+						const times =
+							this.thinkingKeepaliveTimes.get(ctx) ?? new Map<number, number>();
+						times.set(index, Date.now());
+						this.thinkingKeepaliveTimes.set(ctx, times);
+					}
 					const initial =
 						block.type === "thinking" ? block.thinking : block.text;
 					yield* this.emitLedger(ctx, messageId, [
@@ -1507,7 +1518,35 @@ export class ClaudeEventTranslator {
 				case "thinking_delta": {
 					const text =
 						delta.type === "text_delta" ? delta.text : delta.thinking;
-					if (text.length === 0) return;
+					if (text.length === 0) {
+						if (
+							delta.type !== "thinking_delta" ||
+							tool?.toolName !== "__thinking"
+						) {
+							return;
+						}
+						const partId = this.ledger.openThinkingPartId(index);
+						const times = this.thinkingKeepaliveTimes.get(ctx);
+						const lastKeepaliveAt = times?.get(index);
+						const now = Date.now();
+						if (
+							partId === undefined ||
+							lastKeepaliveAt === undefined ||
+							now - lastKeepaliveAt < THINKING_KEEPALIVE_INTERVAL_MS
+						) {
+							return;
+						}
+						times?.set(index, now);
+						yield* this.push(
+							ctx,
+							makeProviderRuntimeEvent("thinking.delta", ctx.sessionId, {
+								messageId: this.currentAssistantMessageId || tool.itemId,
+								partId,
+								text: "",
+							}),
+						);
+						return;
+					}
 
 					const type = delta.type === "text_delta" ? "text" : "thinking";
 					const partId = tool ? tool.itemId : this.nextPartId();

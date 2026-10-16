@@ -22,6 +22,7 @@ import {
 	SessionBusy,
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
@@ -117,7 +118,11 @@ export const previewContinuation = (
 			accountRef._tag === "Id" && session.provider === accountRef.id
 				? account
 				: yield* directory.resolve({ _tag: "Id", id: session.provider });
-		if (account.driver !== "claude" || source.driver !== "claude")
+		if (
+			!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+			!PROVIDER_DRIVERS[source.driver].supportsNativeResume ||
+			!("folder" in account)
+		)
 			return yield* new DriverMismatch({ sessionId, instanceId });
 		return yield* previewContinuationForAccount(session, account);
 	});
@@ -274,7 +279,11 @@ export const makeContinuation = Effect.gen(function* () {
 							_tag: "Id",
 							id: initialSession.provider,
 						});
-			if (account.driver !== "claude" || source.driver !== "claude")
+			if (
+				!PROVIDER_DRIVERS[account.driver].supportsNativeResume ||
+				!PROVIDER_DRIVERS[source.driver].supportsNativeResume ||
+				!("folder" in account)
+			)
 				return yield* new DriverMismatch({
 					sessionId,
 					instanceId: options.instanceId,

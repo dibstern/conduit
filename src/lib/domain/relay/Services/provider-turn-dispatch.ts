@@ -13,9 +13,16 @@ import {
 	Schema,
 } from "effect";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
-import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
+import {
+	PROVIDER_DRIVERS,
+	type ProviderDriverKind,
+	type ProviderDriverTraits,
+} from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
-import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import {
+	type SessionWorkspace,
+	SessionWorkspaceSchema,
+} from "../../../contracts/session-workspace.js";
 import {
 	MissingWorktreeError,
 	WorktreeRecoveryError,
@@ -30,12 +37,14 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
 	harnessForModelProvider,
 	ModelNotInCatalog,
 	resolveTurnSettings,
+	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type {
 	ModelInfo,
@@ -83,6 +92,72 @@ import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
+
+/** The launch fields shared by a draft warm and its eventual first send. */
+export const buildSessionLaunchInput = (
+	account: Account,
+	pick: TurnSettings,
+	permissionMode: NonNullable<SendTurnInput["permissionMode"]>,
+	folders: {
+		readonly workspaceRoot: string;
+		readonly extraFolders: readonly string[];
+	},
+	agent?: string,
+) => ({
+	account,
+	instanceId: account.id,
+	model: pick.model,
+	...folders,
+	...(account.driver === "claude"
+		? { configDir: account.folder, folderSource: "account" as const }
+		: {}),
+	permissionMode,
+	...(agent ? { agent } : {}),
+	variant: pick.effort,
+	contextWindow: pick.contextWindow,
+});
+
+/** Apply the same folder mapping and missing-extra-folder policy before any launch. */
+export const resolveLaunchFolders = (
+	state: SessionWorkspace | null,
+	sessionId?: string,
+	workingDirectory?: string,
+) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const workspaceRoot =
+			workingDirectory ?? effectiveWorkingDirectory(config.projectDir, state);
+		const effectiveFolders = effectiveSessionFolders(
+			[config.projectDir, ...(config.extraFolders ?? [])],
+			state,
+		);
+		const extraFolders: string[] = [];
+		const launchFolders = state
+			? effectiveFolders
+					.map(({ directory }) => directory)
+					.filter((folder) => folder !== workspaceRoot)
+			: (config.extraFolders ?? []);
+		for (const folder of launchFolders) {
+			if (existsSync(folder)) extraFolders.push(folder);
+			else {
+				const message = `Extra folder "${folder}" does not exist and was skipped.`;
+				const log = yield* LoggerTag;
+				if (sessionId === undefined) {
+					log.debug(message);
+					continue;
+				}
+				log.warn(`session=${sessionId} ${message}`);
+				yield* publishAlert({
+					_tag: "alert",
+					kind: "warning",
+					alertId: randomUUID(),
+					sessionId,
+					message,
+				});
+			}
+		}
+		return { workspaceRoot, extraFolders, effectiveFolders };
+	});
 
 /** Shared folder mapping for launches and browser requests; recheck session folders at launch. */
 export const resolveSessionFolders = (
@@ -189,34 +264,7 @@ export const resolveSessionFolders = (
 			);
 			state = null;
 		}
-		const effectiveFolders = effectiveSessionFolders(
-			[config.projectDir, ...(config.extraFolders ?? [])],
-			state,
-		);
-		const extraFolders: string[] = [];
-		const launchFolders = state
-			? effectiveFolders
-					.map(({ directory }) => directory)
-					.filter((folder) => folder !== workspaceRoot)
-			: (config.extraFolders ?? []);
-		for (const folder of launchFolders) {
-			if (existsSync(folder)) extraFolders.push(folder);
-			else {
-				// Not the turn's failure: the launch goes on without the folder, so
-				// the user is warned rather than shown a failed turn.
-				const message = `Extra folder "${folder}" does not exist and was skipped.`;
-				const log = yield* LoggerTag;
-				log.warn(`session=${session.id} ${message}`);
-				yield* publishAlert({
-					_tag: "alert",
-					kind: "warning",
-					alertId: randomUUID(),
-					sessionId: session.id,
-					message,
-				});
-			}
-		}
-		return { workspaceRoot, extraFolders, effectiveFolders };
+		return yield* resolveLaunchFolders(state, session.id, workspaceRoot);
 	});
 
 /** Browser requests identify a session; project-level requests keep the primary folder. */
@@ -257,16 +305,6 @@ export class ProviderTurnTimeoutRuntimeTag extends Context.Tag(
 		readonly overridesRef: Ref.Ref<OverridesState>;
 	}
 >() {}
-
-export function isProviderTurnInterruptProvider(
-	driver: ProviderDriverKind,
-): boolean {
-	return driver === CLAUDE_PROVIDER_ID;
-}
-
-export function isClaudeDriver(driver: ProviderDriverKind): boolean {
-	return driver === CLAUDE_PROVIDER_ID;
-}
 
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -440,6 +478,8 @@ const handleDispatchResult = (
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
+		// The steer-requeue ticket defines how declined inputs are rescheduled.
+		if (result.status === "steer-declined") return;
 		// The interrupter already sent done; finalizing again can end a newer turn.
 		if (result.status === "interrupted" && !result.error) return;
 		// One provider result finalises once: the input that owns it does that,
@@ -494,13 +534,28 @@ const prepareEngineTurnInput = (
 	Effect.gen(function* () {
 		const driver = account.driver;
 		const providerId = account.id;
+		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
+		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		if (
+			traits.unavailableReason &&
+			(registry._tag === "None" || !registry.value.hasInstance(driver))
+		) {
+			yield* failUnfinishedSend(
+				resolvedInput,
+				driver,
+				false,
+				traits.unavailableReason,
+				"PROVIDER_UNAVAILABLE",
+			);
+			return undefined;
+		}
 		const readQuery = yield* ReadQueryEffectTag;
 		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
 		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
 			yield* clearProcessingTimeout(resolvedInput.sessionId);
 			return undefined;
 		}
-		const harness = isClaudeDriver(driver) ? "claude" : "opencode";
+		const harness = driver;
 		const pick = storedSessionPick(sessionRow, harness);
 		if (!pick) {
 			yield* clearProcessingTimeout(resolvedInput.sessionId);
@@ -514,7 +569,7 @@ const prepareEngineTurnInput = (
 			return undefined;
 		}
 		let catalog: readonly ModelInfo[] | undefined;
-		if (harness === "claude") {
+		if (traits.catalogSource === "discovery") {
 			const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
 			const catalogues =
 				projectSettings._tag === "Some"
@@ -568,7 +623,7 @@ const prepareEngineTurnInput = (
 			return undefined;
 		}
 		const settings = resolved.right;
-		const priorHistoryMetadata = isClaudeDriver(driver)
+		const priorHistoryMetadata = traits.needsPriorHistoryMetadata
 			? yield* loadClaudeHistoryMetadata(resolvedInput.sessionId)
 			: undefined;
 		const folders = yield* resolveSessionFolders(
@@ -581,7 +636,7 @@ const prepareEngineTurnInput = (
 				recreateMissingWorktree: true,
 			},
 		);
-		if (driver === "opencode") {
+		if (traits.runsOpenCodeServer) {
 			const stream = yield* Effect.serviceOption(SSEStreamTag);
 			if (stream._tag === "Some")
 				yield* stream.value.includeDirectory(folders.workspaceRoot);
@@ -610,7 +665,7 @@ const prepareEngineTurnInput = (
 				: undefined;
 		let workspaceMoveSequence: number | undefined;
 		let workspaceMoveDirective: string | undefined;
-		if (isClaudeDriver(driver) && !resolvedInput.steer) {
+		if (traits.worktreeMoves === "tool-directive" && !resolvedInput.steer) {
 			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			if (workspace._tag === "Some") {
 				const state = yield* workspace.value.claudeWorktreeState(
@@ -635,7 +690,7 @@ const prepareEngineTurnInput = (
 		}
 		// The committed turn owns its account even before a runner has a snapshot.
 		let turnAccount = account;
-		if (resolvedInput.steer && account.driver === "claude") {
+		if (resolvedInput.steer) {
 			const sql = yield* SqlClient.SqlClient;
 			const [turn] = yield* sql<{ account_json: string | null }>`
 				SELECT json_extract(payload_json, '$.account') AS account_json
@@ -661,29 +716,25 @@ const prepareEngineTurnInput = (
 				: {}),
 			history: [],
 			providerState,
-			account: turnAccount,
-			instanceId: account.id,
-			model: settings.model,
-			...folders,
-			...(turnAccount.driver === "claude"
-				? { configDir: turnAccount.folder, folderSource: "account" as const }
-				: {}),
-			...(isClaudeDriver(driver) && sessionRow
+			...buildSessionLaunchInput(
+				turnAccount,
+				settings,
+				yield* getPermissionMode(resolvedInput.sessionId),
+				folders,
+				resolvedInput.agent,
+			),
+			...(traits.supportsGoalState && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),
-			...(isClaudeDriver(driver)
+			...(traits.needsPriorHistoryMetadata
 				? {
 						cumulativeTokens: priorHistoryMetadata?.cumulativeTokens ?? 0,
 					}
 				: {}),
 			eventSink,
 			abortSignal: new AbortController().signal,
-			permissionMode: yield* getPermissionMode(resolvedInput.sessionId),
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
-			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-			variant: settings.effort,
-			contextWindow: settings.contextWindow,
 		};
 
 		return { sendTurnInput, workspaceMoveSequence };

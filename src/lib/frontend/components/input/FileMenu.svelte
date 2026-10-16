@@ -14,6 +14,7 @@
 		onSelect,
 		onClose,
 		loading = false,
+		dividerAt = 0,
 		activeIndex = $bindable(0),
 	}: {
 		listboxId: string;
@@ -23,10 +24,13 @@
 		onSelect: (path: string) => void;
 		onClose: () => void;
 		loading?: boolean | undefined;
+		/** Number of immediate children; 0 and entries.length hide the divider. */
+		dividerAt?: number | undefined;
 		activeIndex?: number | undefined;
 	} = $props();
 
 	const isVisible = $derived(visible && (entries.length > 0 || loading));
+	const showDivider = $derived(dividerAt > 0 && dividerAt < entries.length);
 
 	$effect(() => {
 		void entries.length;
@@ -120,6 +124,16 @@
 			{:else}
 				{#each entries as entry, i}
 						{@const lastSlash = entry.lastIndexOf("/", entry.endsWith("/") ? entry.length - 2 : entry.length - 1)}
+						{#if showDivider && i === dividerAt}
+							<div
+								role="presentation"
+								aria-hidden="true"
+								data-testid="file-menu-divider"
+								class="mt-1 border-t border-border py-1.5 px-3.5 text-text-muted text-xs max-sm:px-2.5"
+							>
+								in subfolders
+							</div>
+						{/if}
 						<div
 							class="file-item flex items-center gap-2 py-2 px-3.5 cursor-pointer transition-colors duration-100 max-sm:py-1.5 max-sm:px-2.5 max-sm:gap-1.5 {i === activeIndex ? 'bg-accent-bg hover:bg-accent-bg' : 'hover:bg-bg-alt'}"
 							id="{listboxId}-option-{i}"
@@ -144,7 +158,10 @@
 								class="file-path flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-base max-sm:text-xs"
 							>
 								{#if lastSlash >= 0}
-									<span class="text-text-muted"
+									<span
+										class={i === activeIndex
+											? "text-text-secondary"
+											: "text-text-muted"}
 										>{entry.slice(0, lastSlash + 1)}</span
 									><span class="text-text"
 										>{entry.slice(lastSlash + 1)}</span

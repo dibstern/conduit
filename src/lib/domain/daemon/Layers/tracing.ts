@@ -125,6 +125,7 @@ export const makeDaemonTracingLive = (
 		maxBytes: config.maxBytes,
 		maxFiles: config.maxFiles,
 		batchWindowMs: config.batchWindowMs,
+		sqlMinMs: config.sqlMinMs,
 	};
 
 	if (!hasOtel) {

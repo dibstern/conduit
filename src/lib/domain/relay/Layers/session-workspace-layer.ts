@@ -2,9 +2,10 @@ import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
 import { Cause, Effect, Either, Layer, Schema } from "effect";
+import type { Account } from "../../../contracts/account.js";
 import {
 	isKnownDriverKind,
-	PROVIDER_SESSION_CAPABILITIES,
+	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import {
 	type SessionWorkspace as RecordedWorkspace,
@@ -109,37 +110,46 @@ export const SessionWorkspaceLive = Layer.effect(
 			delete worktrees[target.projectFolder];
 			return worktrees;
 		};
-		const resolve: SessionWorkspace["resolve"] = (
-			sessionId,
-			path,
-			cause,
-			origin = "existing",
-			requestedFolder,
+		const resolve = (
+			sessionId: string | Account,
+			path: string,
+			cause: RecordedWorkspace["cause"],
+			origin: RecordedWorkspace["origin"] = "existing",
+			requestedFolder?: string,
 		) =>
 			Effect.gen(function* () {
-				const { row, workspace: previous } = yield* readWorkspace(sessionId);
-				const account = yield* accounts
-					.resolve({ _tag: "Id", id: row.provider })
-					.pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionCommandError({
-									operation: "workspace.resolve",
-									cause,
-								}),
-						),
-					);
+				const { row, workspace: previous } =
+					typeof sessionId === "string"
+						? yield* readWorkspace(sessionId)
+						: {
+								row: { provider: sessionId.id, workspace_hint: null },
+								workspace: null,
+							};
+				const account =
+					typeof sessionId !== "string"
+						? sessionId
+						: yield* accounts.resolve({ _tag: "Id", id: row.provider }).pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionCommandError({
+											operation: "workspace.resolve",
+											cause,
+										}),
+								),
+							);
 				const driver = account.driver;
 				if (
 					!driver ||
 					!isKnownDriverKind(driver) ||
-					(!PROVIDER_SESSION_CAPABILITIES[driver].supportsWorktree &&
+					(!PROVIDER_DRIVERS[driver].sessionCapabilities.supportsWorktree &&
 						!(
-							(PROVIDER_SESSION_CAPABILITIES[driver].supportsNewWorktree &&
+							(PROVIDER_DRIVERS[driver].sessionCapabilities
+								.supportsNewWorktree &&
 								cause === "launch" &&
 								origin === "conduit") ||
 							// OpenCode declarations acknowledge an already observed workspace.
-							(driver === "opencode" &&
+							(PROVIDER_DRIVERS[driver].worktreeMoves ===
+								"server-declaration" &&
 								(cause === "agent" ||
 									(cause === "missing" &&
 										path === config.projectDir &&
@@ -466,6 +476,12 @@ export const SessionWorkspaceLive = Layer.effect(
 					),
 				),
 			resolve,
+			preview: (account, path) =>
+				Effect.map(resolve(account, path, "launch"), (target) => ({
+					cause: "launch" as const,
+					origin: target.origin,
+					worktrees: worktreesFor(target, null, "launch"),
+				})),
 			record,
 			inherit,
 			move: (sessionId, path, cause, origin, projectFolder, ownership) =>

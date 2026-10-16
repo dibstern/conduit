@@ -188,6 +188,7 @@ export type ProcessMark =
 	| {
 			kind: "query";
 			queryId: string;
+			runnerSessionId?: string;
 			at: string;
 			sessionId: string;
 			pid: number;
@@ -677,6 +678,9 @@ function query(params: {
 	mark({
 		kind: "query",
 		queryId,
+		...(params.options?.env?.["CONDUIT_SESSION_ID"]
+			? { runnerSessionId: params.options.env["CONDUIT_SESSION_ID"] }
+			: {}),
 		at: process.hrtime.bigint().toString(),
 		sessionId,
 		pid: process.pid,
@@ -1817,6 +1821,22 @@ function query(params: {
 				} as unknown as SDKMessage;
 			}
 			if (request === "review-subagent-finalizer") {
+				// The SDK emits the Agent tool call before its task lifecycle messages.
+				yield stream(sessionId, {
+					type: "content_block_start",
+					index: 1,
+					content_block: {
+						type: "tool_use",
+						id: "review-finalizer-tool",
+						name: "Agent",
+						input: {
+							description: "Finalizer child",
+							prompt: "Review the changes",
+							subagent_type: "general-purpose",
+						},
+					},
+				});
+				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				yield {
 					type: "system",
 					subtype: "task_started",

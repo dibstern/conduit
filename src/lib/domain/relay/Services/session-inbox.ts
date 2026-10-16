@@ -18,6 +18,7 @@ import {
 	Stream,
 } from "effect";
 import type { Account } from "../../../contracts/account.js";
+import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
 	type InputAdmittedPayload,
 	type InputCancelledPayload,
@@ -32,6 +33,7 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import {
 	type ProviderRegistry,
@@ -365,6 +367,7 @@ export const SessionInboxLive = Layer.scoped(
 	Effect.gen(function* () {
 		const accounts = yield* AccountDirectory;
 		const sql = yield* SqlClient.SqlClient;
+		const eventStore = yield* EventStoreEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		const overrides = yield* OverridesStateTag;
@@ -700,7 +703,9 @@ export const SessionInboxLive = Layer.scoped(
 		const drainSessions = (sessionIds?: readonly string[]) =>
 			Effect.gen(function* () {
 				const rows = yield* sql<{ session_id: string }>`
-					SELECT DISTINCT session_id FROM pending_inputs WHERE state = 'queued'`;
+					SELECT DISTINCT pending.session_id FROM pending_inputs pending
+					JOIN sessions ON sessions.id = pending.session_id
+					WHERE pending.state = 'queued' AND sessions.project_id = ${eventStore.projectId}`;
 				const wanted = sessionIds && new Set(sessionIds);
 				yield* Effect.forEach(
 					rows.filter((row) => !wanted || wanted.has(row.session_id)),
@@ -726,7 +731,9 @@ export const SessionInboxLive = Layer.scoped(
 					Stream.runForEach(advances, (advance) =>
 						advance.dropped
 							? drainSessions()
-							: advance.sessionIds.length > 0
+							: advanceTouchesScope(advance, {
+										projectIds: [eventStore.projectId],
+									}) && advance.sessionIds.length > 0
 								? drainSessions(advance.sessionIds)
 								: Effect.void,
 					),

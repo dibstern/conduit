@@ -4,6 +4,7 @@
 <script module lang="ts">
 	// A composer remount must not repeat the same turn's diagnostic.
 	const reportedMissingPrompts = new Set<string>();
+	let draftId = crypto.randomUUID();
 </script>
 
 <script lang="ts">
@@ -41,7 +42,7 @@
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
-	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
@@ -70,7 +71,7 @@
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
@@ -81,12 +82,13 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
-	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
+	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { PendingImage } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -143,8 +145,9 @@
 			.catch(() => { if (current) showToast("Couldn't load default session mode", { variant: "error" }); });
 		return () => { current = false; };
 	});
-	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
+	const isGoalCommand = $derived(discoveryState.currentTraits?.supportsGoalState && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let composerFocused = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
@@ -154,7 +157,7 @@
 	let cursorPos = $state(0);
 	let composing = $state(false);
 	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
-	const goalFacts = $derived(discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
 	const goal = $derived(goalView(
 		goalFacts,
 		isProcessing() ? "busy" : currentSession?.status ?? "idle",
@@ -217,8 +220,28 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
-		return () => requestSessionPreWarm(null, null);
+		requestSessionPreWarm(sessionState.currentId);
+		return () => requestSessionPreWarm(null);
+	});
+	function draftSessionPayload(projectSlug: string | null): PreWarmDraftRpcInput | undefined {
+		const displayed = getDraftPick();
+		if (!projectSlug || !displayed) return undefined;
+		return {
+			projectSlug,
+			originId: getBrowserClientId(),
+			draftId,
+			...displayed,
+			...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
+			...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
+		};
+	}
+	$effect(() => {
+		requestDraftPreWarm(
+			composerFocused && draftRoute.page === "chat" && draftRoute.draft &&
+			!sessionState.currentId && !draftNewWorktree && (draftModeChosen || draftSessionMode !== undefined)
+				? draftSessionPayload(getDraftProject()) : undefined,
+		);
+		return () => requestDraftPreWarm();
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
@@ -237,6 +260,8 @@
 		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
 	const composerDriver = $derived(composerInstance?.driver);
+	const composerTraits = $derived(getDriverTraits(composerDriver));
+	const composerPresentation = $derived(getProviderPresentation(composerDriver));
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -277,10 +302,10 @@
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
-			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message Claude… sends at ${sendAtTime}`
+			? sessionViewState.compact ? `Sends at ${sendAtTime}` : `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
-			composerDriver === "opencode" ? "Ask OpenCode…" : composerDriver === "claude" ? "Ask Claude…" : "Message…",
+			composerPresentation ? `Ask ${composerPresentation.label}…` : "Message…",
 	);
 
 	// Each session keeps its own unsent input text. Switching sessions saves the
@@ -448,10 +473,12 @@
 	);
 	const fileQuery = $derived(atQuery?.query ?? "");
 	const filteredFiles = $derived(
-		fileMenuVisible ? filterFiles(fileTreeState.entries, fileQuery) : [],
+		fileMenuVisible
+			? filterFiles(fileTreeState.entries, fileQuery)
+			: { entries: [], dividerAt: 0 },
 	);
 	const fileListboxVisible = $derived(
-		fileMenuVisible && (filteredFiles.length > 0 || fileTreeState.loading),
+		fileMenuVisible && (filteredFiles.entries.length > 0 || fileTreeState.loading),
 	);
 	const activeListboxId = $derived(
 		commandListboxVisible
@@ -463,7 +490,7 @@
 	const activeOptionId = $derived(
 		commandListboxVisible
 			? `${commandListboxId}-option-${commandMenuActiveIndex}`
-			: fileListboxVisible && filteredFiles.length > 0
+			: fileListboxVisible && filteredFiles.entries.length > 0
 				? `${fileListboxId}-option-${fileMenuActiveIndex}`
 				: undefined,
 	);
@@ -480,8 +507,8 @@
 			return `${commandCount} command${commandCount === 1 ? "" : "s"} available`;
 		}
 		if (fileListboxVisible) {
-			if (filteredFiles.length === 0) return "Loading files";
-			const fileCount = filteredFiles.length;
+			if (filteredFiles.entries.length === 0) return "Loading files";
+			const fileCount = filteredFiles.entries.length;
 			return `${fileCount} file${fileCount === 1 ? "" : "s"} available`;
 		}
 		return "";
@@ -573,10 +600,8 @@
 
 	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return Promise.resolve();
+		if (!sessionId) return Promise.resolve();
 		return syncInputDraftRpc({
-			projectSlug,
 			sessionId,
 			text,
 			originId: getBrowserClientId(),
@@ -662,7 +687,7 @@
 		const images = pendingImages;
 		switchingAccount = true;
 		try {
-			if (!(await switchSessionAccount({ projectSlug, sessionId, instanceId, expectedInstanceId }))) return false;
+			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
 			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingImages !== images) return false;
@@ -687,7 +712,7 @@
 		if (startingSideThread) return false;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
-		if (!parentSessionId || !projectSlug) {
+		if (!parentSessionId) {
 			showToast("Open a session to start a Side Thread", { variant: "error" });
 			return false;
 		}
@@ -706,8 +731,7 @@
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
 			const { sessionId } = await startSideThreadRpc({
-				projectSlug,
-				parentSessionId,
+				sessionId: parentSessionId,
 				title: question,
 				inputId,
 				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
@@ -717,7 +741,7 @@
 			sideThreadAttempt = undefined;
 			if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
 				clearComposer();
-				switchToSession(sessionId, projectSlug);
+				switchToSession(sessionId, projectSlug ?? undefined);
 			}
 			return true;
 		} catch (error) {
@@ -776,16 +800,17 @@
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
 		const projectSlug = sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!projectSlug) {
-			showToast("No active project", { variant: "error" });
-			return false;
-		}
 		if (!sid) {
+			if (!projectSlug) {
+				showToast("No active project", { variant: "error" });
+				return false;
+			}
 			// First send with no active session: create one bound to the selected
 			// harness instance (the picker's pre-creation draft), then send into it.
 			// A second Enter before the create lands would make a second session.
 			if (creatingSession) return false;
 			creatingSession = true;
+			let unsent: { text: string; images: typeof pendingImages } | undefined;
 			try {
 				// Sending before the default arrives must use the same workspace as
 				// the chip. An explicit choice already supplies that workspace.
@@ -797,29 +822,37 @@
 				}
 				if (context !== sessionModeContext || resolution !== pendingDraftSessionMode || sessionState.currentId) return false;
 				if (!getEffectiveInstanceId()) {
+					const presentation = getProviderPresentation(discoveryState.defaultProviderId);
 					showToast({
 						title: "No account available",
 						variant: "error",
-						body: discoveryState.defaultProviderId === "claude"
-							? "Add a Claude account in Settings before sending."
+						body: getDriverTraits(discoveryState.defaultProviderId)?.accountKind === "config-directory" && presentation
+							? `Add a ${presentation.label} account in Settings before sending.`
 							: "Add an account in Settings before sending.",
 					});
 					return false;
 				}
-				const displayed = getDraftPick();
-				if (!displayed) {
+				const payload = draftSessionPayload(projectSlug);
+				if (!payload) {
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
+				requestDraftPreWarm();
+				// The message leaves the composer now and shows in the pane until
+				// the new session places it; a failed create puts it back.
+				if (textOverride === undefined) {
+					unsent = { text: inputText, images: pendingImages };
+					clearComposer();
+				}
+				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
+				draftSend.sessionId = null;
 				const created = await createSessionRpc({
-					projectSlug,
-					originId: getBrowserClientId(),
-					...displayed,
-					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
+					...payload,
 					...(draftNewWorktree ? { newWorktree: true } : {}),
-					...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 				});
+				draftId = crypto.randomUUID();
 				sid = created.sessionId;
+				draftSend.sessionId = sid;
 				storeNewSessionDraft("");
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
@@ -836,6 +869,12 @@
 					showToast({ title: "Could not start session", variant: "error", body });
 				} else {
 					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
+				}
+				draftSend.message = null;
+				if (unsent && !sessionState.currentId && !inputText) {
+					inputText = unsent.text;
+					cursorPos = unsent.text.length;
+					pendingImages = unsent.images;
 				}
 				return false;
 			} finally {
@@ -857,23 +896,24 @@
 		}
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
-			sendMessageRpc({
-				projectSlug,
+			rpc("input.submit", {
 				sessionId: sentToSessionId,
 				text: messageText,
-				commandId,
-				...(delivery === "steer" ? { delivery } : {}),
+				inputId: commandId,
+				delivery,
 				...(imageUrls ? { images: imageUrls } : {}),
 				originId: getBrowserClientId(),
 			}).then((response) => {
 				if (!response.ok) {
+					if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
 					steerRefusal = { sessionId: sentToSessionId, reason: response.reason };
 					return resolve(false);
 				}
 				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
-					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
+					switchToSession(response.sessionId, projectSlug ?? undefined, undefined, { replace: true });
 				resolve(true);
 			}).catch(() => {
+				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
 				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
 				showToast("Failed to send message", { variant: "error" });
 				resolve(false);
@@ -916,13 +956,13 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
-	let taskStopToast: { id: string; sessionId: string; projectSlug: string } | null = $state(null);
+	let taskStopToast: { id: string; sessionId: string } | null = $state(null);
 	let composerDestroyed = false;
 	$effect(() => {
 		const offer = taskStopToast;
 		if (!offer) return;
 		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId && currentSession?.projectSlug === offer.projectSlug;
+		const active = sessionState.currentId === offer.sessionId;
 		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
 		untrack(() => {
 			if (!active || count === 0 || !toast) {
@@ -938,30 +978,29 @@
 
 	function handleStop() {
 		const sessionId = sessionState.currentId;
-		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
+		if (!sessionId) return;
 		const accountId = currentSession?.accountId;
 		const driver = getInstanceById(accountId ?? "")?.driver;
-		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
+		const supportsTaskStop = getDriverTraits(driver)?.sessionCapabilities.supportsTaskStop;
+		const hadTasks = supportsTaskStop && (currentSession?.backgroundTasks?.length ?? 0) > 0;
 		void cancelSessionRpc({
-			projectSlug,
 			sessionId,
 			commandId: crypto.randomUUID(),
 		}).then(() => {
 			// An interrupt can end a turn the row never reported busy for, so
 			// nothing else would end it. A still-busy row ends it on idle.
 			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || currentSession?.projectSlug !== projectSlug) return;
+			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId) return;
 			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
 			if (count === 0) return;
 			if (taskStopToast) dismissToast(taskStopToast.id);
 			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
 				duration: 6000,
 				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId && currentSession?.projectSlug === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
+					if (sessionState.currentId === sessionId) void stopBackgroundTasks(sessionId);
 				} },
 			});
-			taskStopToast = { id, sessionId, projectSlug };
+			taskStopToast = { id, sessionId };
 		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});
@@ -990,7 +1029,7 @@
 	}
 
 	function handleAttachSetGoal(condition = "") {
-		if (discoveryState.currentProviderId !== "claude") return;
+		if (!discoveryState.currentTraits?.supportsGoalState) return;
 		inputText = `/goal ${condition}`;
 		cursorPos = inputText.length;
 		requestAnimationFrame(() => {
@@ -1003,7 +1042,7 @@
 	$effect(() => {
 		function handleGoalAction(event: CustomEvent<GoalComposerAction>) {
 			const { action, sessionId, condition } = event.detail;
-			if (discoveryState.currentProviderId !== "claude" || sessionId !== sessionState.currentId) return;
+			if (!discoveryState.currentTraits?.supportsGoalState || sessionId !== sessionState.currentId) return;
 			switch (action) {
 				case "pause": handleStop(); break;
 				case "resume": void sendMessage("Continue."); break;
@@ -1180,7 +1219,8 @@
 			listboxId={fileListboxId}
 			query={fileQuery}
 			visible={fileMenuVisible}
-			entries={filteredFiles}
+			entries={filteredFiles.entries}
+			dividerAt={filteredFiles.dividerAt}
 			onSelect={handleFileSelect}
 			onClose={handleFileMenuClose}
 			loading={fileTreeState.loading}
@@ -1250,7 +1290,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1386,7 +1426,11 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
-								onfocus={() => requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId)}
+								onfocus={() => {
+									composerFocused = true;
+									requestSessionPreWarm(sessionState.currentId);
+								}}
+								onblur={() => { composerFocused = false; }}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}
@@ -1449,12 +1493,12 @@
 												workspaceMissing={session.workspaceMissing}
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
-												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+												onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
+												onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
+												oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
+												ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
+												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
 											>
 												{#snippet children(attention, checkout, warning)}
 													{@render phoneMore(rows, attention, checkout, warning)}
@@ -1484,12 +1528,12 @@
 								workspaceMissing={session.workspaceMissing}
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
-								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+								onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
+								onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
+								oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
+								ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
+								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
 							/>
 						{/key}
 					{/if}
@@ -1609,7 +1653,7 @@
 				{:else}
 				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 shrink-0 items-center gap-[5px]">
 					<InstanceModelPicker variant="words" />
-					{#if composerDriver !== "opencode"}
+					{#if (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
 						<span aria-hidden="true" class="text-border-chip">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
@@ -1627,12 +1671,12 @@
 									workspaceMissing={session.workspaceMissing}
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-									onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
+									onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
+									onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
+									oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
+									ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
+									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}
@@ -1653,7 +1697,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 	</div>
 </div>

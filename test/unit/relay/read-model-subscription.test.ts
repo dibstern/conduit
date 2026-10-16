@@ -39,6 +39,7 @@ const advance = (
 	collections: readonly ReadModelCollection[] = ["messages"],
 ): ReadModelAdvance => ({
 	version,
+	projectIds: ["test-project"],
 	sessionIds,
 	removedSessionIds,
 	collections,
@@ -858,6 +859,42 @@ describe("ReadModelSubscription", () => {
 // device disconnects) before its read settles the answer. Every later joiner of
 // that source on that bus then waits forever on an answer nobody will give.
 describe("ReadModelSubscription shared windows", () => {
+	it.scoped("isolates shared windows by project on one bus", () =>
+		Effect.gen(function* () {
+			const bus = yield* SessionEventBusTag;
+			const a = yield* makeFakeSource<Row>();
+			const b = yield* makeFakeSource<Row>();
+			const sourceA = {
+				...a.source,
+				name: "shell",
+				shareReads: true,
+				shareKey: "shell/A",
+			};
+			const sourceB = {
+				...b.source,
+				name: "shell",
+				shareReads: true,
+				shareKey: "shell/B",
+			};
+			const first = yield* subscribe({ source: sourceA, bus });
+			const second = yield* subscribe({ source: sourceB, bus });
+			yield* Queue.take(first.queue);
+			yield* Queue.take(first.queue);
+			yield* Queue.take(second.queue);
+			yield* Queue.take(second.queue);
+			yield* a.commit(1, row("Project A"));
+			yield* b.commit(1, row("Project B"));
+			yield* bus.publishAdvance(advance(1));
+			expect(yield* Queue.take(first.queue)).toMatchObject({
+				_tag: "upsert",
+				item: { title: "Project A" },
+			});
+			expect(yield* Queue.take(second.queue)).toMatchObject({
+				_tag: "upsert",
+				item: { title: "Project B" },
+			});
+		}).pipe(Effect.provide(SessionEventBusLive)),
+	);
 	it.live("an asker interrupted mid-read never strands a joiner", () =>
 		Effect.gen(function* () {
 			const stranded: { readonly ops: number; readonly yields: number }[] = [];

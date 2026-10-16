@@ -12,7 +12,6 @@ describe("WsRpcServerLayer SwitchAgent", () => {
 		Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			yield* client.SwitchAgent({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				agentId: "plan",
 				originId: "browser-1",

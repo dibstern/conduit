@@ -532,7 +532,9 @@ describe("OrchestrationEngine", () => {
 			engine.bindSession("s1", "opencode");
 			engine.bindSession("s2", "opencode");
 
-			const sessions = Effect.runSync(engine.listBoundSessionsEffect());
+			const sessions = Effect.runSync(
+				engine.listBoundSessionsEffect({ projectIds: ["test-project"] }),
+			);
 			expect(sessions).toEqual(
 				expect.arrayContaining([
 					{ sessionId: "s1", providerId: "opencode" },
@@ -721,7 +723,11 @@ describe("OrchestrationEngine", () => {
 			expect(
 				Effect.runSync(engine.getProviderForSessionEffect("s2")),
 			).toBeUndefined();
-			expect(Effect.runSync(engine.listBoundSessionsEffect())).toEqual([]);
+			expect(
+				Effect.runSync(
+					engine.listBoundSessionsEffect({ projectIds: ["test-project"] }),
+				),
+			).toEqual([]);
 		});
 	});
 

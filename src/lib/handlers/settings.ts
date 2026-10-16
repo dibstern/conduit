@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { Account } from "../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	ConfigTag,
@@ -24,6 +25,7 @@ export const normalizeProjectTitle = (title: string): string =>
 const listSessionCommands = (
 	activeSessionId: string | undefined,
 	tolerateClaudeFailure = true,
+	draftInstanceId?: string,
 ) =>
 	Effect.gen(function* () {
 		const engine = yield* OrchestrationEngineTag;
@@ -31,10 +33,12 @@ const listSessionCommands = (
 		const boundId = activeSessionId
 			? yield* engine.getProviderForSessionEffect(activeSessionId)
 			: undefined;
+		// A draft has no session yet; the account it picked owns its catalogue.
+		const accountId = boundId ?? draftInstanceId;
 		const account = yield* directory.resolve(
-			boundId === undefined
+			accountId === undefined
 				? { _tag: "DriverDefault", driver: "opencode" }
-				: { _tag: "Id", id: boundId },
+				: { _tag: "Id", id: accountId },
 		);
 		const listClaudeCommands = (claude: Account) =>
 			Effect.gen(function* () {
@@ -62,7 +66,8 @@ const listSessionCommands = (
 						),
 					);
 			});
-		if (account.driver === "claude") return yield* listClaudeCommands(account);
+		if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
+			return yield* listClaudeCommands(account);
 		const result = yield* Effect.either(
 			(yield* OpenCodeSettingsServiceTag).listCommands({
 				startIfStopped: !tolerateClaudeFailure,
@@ -78,8 +83,11 @@ const listSessionCommands = (
 		);
 	});
 
-export const getCommandsForSession = (activeSessionId: string | undefined) =>
-	listSessionCommands(activeSessionId).pipe(
+export const getCommandsForSession = (
+	activeSessionId: string | undefined,
+	draftInstanceId?: string,
+) =>
+	listSessionCommands(activeSessionId, true, draftInstanceId).pipe(
 		Effect.map((commands) =>
 			commands.map((command) => ({
 				name: command.name,

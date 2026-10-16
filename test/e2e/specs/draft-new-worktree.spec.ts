@@ -13,6 +13,14 @@ const shared = "/workspace/docs";
 const isolated = "/conduit/worktrees/e2e-replay/draft-session/app";
 const branch = "conduit/session-draft";
 const controls = new WeakMap<Page, RpcMockControl>();
+const modelProviders = ["claude", "anthropic"].map((id) => ({
+	id,
+	name: id === "claude" ? "Claude" : "Anthropic",
+	configured: true,
+	models: [
+		{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: id },
+	],
+}));
 
 async function openDraft(
 	page: Page,
@@ -95,19 +103,24 @@ async function openDraft(
 						},
 					]
 				: []),
-		].map(({ supportsWorktree, supportsNewWorktree, ...instance }) => ({
-			...instance,
-			port: 0,
-			managed: false,
-			status: "healthy",
-			restartCount: 0,
-			createdAt: 0,
-			capabilities: {
-				supportsMultiFolder: true,
-				supportsWorktree,
-				supportsNewWorktree,
-			},
-		})),
+		].map(
+			({ supportsWorktree, supportsNewWorktree, ...instance }, index, all) => ({
+				...instance,
+				// The daemon marks one default account per harness; drafts resolve to it.
+				isDefault:
+					all.findIndex(({ driver }) => driver === instance.driver) === index,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 0,
+				capabilities: {
+					supportsMultiFolder: true,
+					supportsWorktree,
+					supportsNewWorktree,
+				},
+			}),
+		),
 	};
 	let sessions: readonly Record<string, unknown>[] = [];
 	let workspaceCreated = false;
@@ -115,7 +128,12 @@ async function openDraft(
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
+			GetModels: ({ projectSlug, instanceId }) => ({
+				projectSlug,
+				providers: modelProviders.filter(
+					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
 			GetAgents: ({ instanceId }) => ({
 				projectSlug: "e2e-replay",
 				instanceId: instanceId ?? provider,
@@ -175,6 +193,7 @@ async function openDraft(
 				sessions = [
 					{
 						id: "draft-session",
+						accountId: provider,
 						title: "New workspace",
 						status: "idle",
 						projectSlug,
@@ -211,6 +230,7 @@ async function openDraft(
 				return { projectSlug, sessionId: "draft-session" };
 			},
 			PreWarmSession: () => ({ ok: true }),
+			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -221,6 +241,41 @@ async function openDraft(
 		responses: new Map(),
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
+	for (const account of instances.instances.filter(
+		({ driver }) => driver === "claude",
+	))
+		rpc.setProjectSetting({
+			_tag: "providerModels",
+			accountId: account.id,
+			providers: modelProviders.filter(({ id }) => id === "claude"),
+		});
+	rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-4-5",
+		provider: provider === "claude" ? "claude" : "anthropic",
+		variant: "",
+	});
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=e2e-replay`);
 	await expect(page.getByTestId("draft-start-chip")).toHaveText(

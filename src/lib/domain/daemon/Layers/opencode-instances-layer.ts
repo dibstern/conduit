@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
@@ -14,7 +15,10 @@ import {
 	Schema,
 	Stream,
 } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+} from "../../../contracts/provider-instance.js";
 import type { OpenCodeConnectionStatus } from "../../../contracts/ws-rpc.js";
 import {
 	defaultDaemonConfig,
@@ -39,6 +43,7 @@ import {
 	getInstances,
 	getInstanceUrl,
 	getManagedOpenCodeProcessEnv,
+	getManagedOpenCodeProcessIdentity,
 	scheduleRestart,
 	startInstance,
 	stopInstance,
@@ -72,6 +77,7 @@ const decodeEnvelope = Schema.decodeUnknownEither(
 );
 
 export type OpenCodeEndpoint = {
+	readonly processIdentity?: string | undefined;
 	/** Registered identity, including when the caller used the default alias. */
 	readonly instanceId?: string;
 	readonly url: string;
@@ -113,6 +119,7 @@ const endpointKey = (endpoint: OpenCodeEndpoint | undefined) =>
 	]);
 
 type InstanceStream = {
+	identity: string;
 	readonly key: string;
 	readonly managed: boolean;
 	readonly source: SSEStream;
@@ -321,6 +328,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						log,
 					});
 					const stream: InstanceStream = {
+						identity: randomUUID(),
 						key,
 						managed: endpoint?.managed === true,
 						source,
@@ -349,6 +357,9 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					// managed one still running just reconnects unnoticed.
 					const lost = () => {
 						if (!current()) return;
+						// External servers expose no process token. A lost connection
+						// invalidates directory warmth conservatively for that generation.
+						if (!stream.managed) stream.identity = randomUUID();
 						broadcast({
 							_tag: "disconnected",
 							instanceId,
@@ -617,13 +628,24 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					}`,
 				});
 
-			const clientFor = (endpoint: OpenCodeEndpoint, directory?: string) => {
+			const clientFor = (
+				endpoint: OpenCodeEndpoint,
+				directory: string | undefined,
+				instanceId: string,
+			) => {
 				const { client: sdk, authHeaders } = createSdkClient({
 					baseUrl: endpoint.url,
 					...(endpoint.auth ? { auth: endpoint.auth } : {}),
 					...(directory !== undefined ? { directory } : {}),
 				});
-				return new OpenCodeAPI({ sdk, baseUrl: endpoint.url, authHeaders });
+				return new OpenCodeAPI({
+					sdk,
+					baseUrl: endpoint.url,
+					authHeaders,
+					processIdentity:
+						endpoint.processIdentity ??
+						streams.get(endpoint.instanceId ?? instanceId)?.identity,
+				});
 			};
 
 			const spawnFailed = (instanceId: string, cause: unknown) =>
@@ -783,7 +805,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					const opened = yield* gate.withPermits(1)(
 						ensureStream(instanceId, endpoint),
 					);
-					const client = clientFor(endpoint, directory);
+					const client = clientFor(endpoint, directory, instanceId);
 					const stream = streams.get(instanceId);
 					if (stream?.source.isConnected()) {
 						setState(instanceId, "connected");
@@ -1075,7 +1097,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								);
 								yield* settle(instanceId);
 								yield* ensureStream(instanceId, endpoint);
-								return Option.some(clientFor(endpoint, directory));
+								return Option.some(clientFor(endpoint, directory, instanceId));
 							}),
 						),
 					),
@@ -1086,7 +1108,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 							endpoint &&
 							endpoint.status !== "stopped" &&
 							!stopping.has(instanceId)
-								? Option.some(clientFor(endpoint, directory))
+								? Option.some(clientFor(endpoint, directory, instanceId))
 								: Option.none(),
 						),
 					),
@@ -1099,7 +1121,8 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 	(instanceId) =>
 		Effect.gen(function* () {
 			const instances = Array.from(yield* getInstances).filter(
-				({ driver }) => (driver ?? "opencode") === "opencode",
+				({ driver }) =>
+					getProviderDriver(driver ?? "opencode")?.runsOpenCodeServer,
 			);
 			// The default id names the daemon's first OpenCode instance when no
 			// instance carries that id.
@@ -1115,6 +1138,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 			);
 			return {
 				instanceId: instance.id,
+				processIdentity: yield* getManagedOpenCodeProcessIdentity(instance.id),
 				url,
 				status: instance.status,
 				managed: instance.managed,
@@ -1137,7 +1161,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 			),
 			adopted: Effect.map(getInstances, (instances) =>
 				Array.from(instances).flatMap(({ id, driver, managed, status }) =>
-					(driver ?? "opencode") === "opencode" &&
+					getProviderDriver(driver ?? "opencode")?.runsOpenCodeServer &&
 					managed &&
 					status === "healthy"
 						? [id]

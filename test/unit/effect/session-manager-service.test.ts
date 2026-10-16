@@ -37,6 +37,10 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
@@ -44,7 +48,6 @@ import {
 	RelayStatusSnapshotTag,
 } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -161,6 +164,7 @@ function makeReadQueryEffect(
 	pendingApprovalCounts: readonly PendingApprovalCountRow[] = [],
 ): ReadQueryEffect {
 	return {
+		listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 		readToolDetails: vi.fn(() => Effect.succeed([])),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 		getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -176,7 +180,7 @@ function makeReadQueryEffect(
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
-		listSessionInfos: vi.fn((options) => {
+		listSessionInfos: vi.fn((_scope, options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots
 				? rows.filter((row) => row.parent_id === null)
@@ -417,7 +421,7 @@ const requiredSessionServices = Layer.mergeAll(
 	sessionLoggerLayer,
 	Layer.succeed(OpenCodeAPITag, openCodeApi),
 	Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-	Layer.succeed(BackgroundLivenessTag, () => undefined),
+	Layer.effect(SessionActivityTag, makeSessionActivity),
 	RelayStatusSnapshotLive,
 	makeOverridesStateLive(),
 	Layer.succeed(
@@ -2467,11 +2471,15 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project", {
-				statuses: {
-					"child-1": { type: "busy" } as SessionStatus,
+			const sessions = yield* listSessions(
+				"test-project",
+				{
+					statuses: {
+						"child-1": { type: "busy" } as SessionStatus,
+					},
 				},
-			});
+				{ slug: "test-project", folders: [tmpdir()] },
+			);
 			const stateRef = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(stateRef);
 
@@ -2525,7 +2533,10 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project");
+			const sessions = yield* listSessions("test-project", undefined, {
+				slug: "test-project",
+				folders: [tmpdir()],
+			});
 
 			expect(readQuery.listSessionInfos).toHaveBeenCalled();
 			expect(api.session.list).not.toHaveBeenCalled();
@@ -2535,6 +2546,9 @@ describe("SessionManagerService", () => {
 					id: "forked-1",
 					accountId: null,
 					projectSlug: "test-project",
+					canRenameBranch: false,
+					workspaceMismatch: undefined,
+					workspaceMissing: undefined,
 					title: "Forked",
 					status: "idle",
 					createdAt: 100,
@@ -2576,8 +2590,8 @@ describe("SessionManagerService", () => {
 			yield* projectionRunner.markRecovered();
 			yield* sql`
 					INSERT INTO sessions
-					(id, provider, title, status, created_at, updated_at)
-					VALUES ('session-1', 'opencode', 'Warm session', 'idle', 1, 1)`;
+					(id, project_id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'test-project', 'opencode', 'Warm session', 'idle', 1, 1)`;
 
 			const questionAsked = yield* store.append(
 				canonicalEvent(
@@ -2879,7 +2893,10 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions("test-project");
+			const sessions = yield* listSessions("test-project", undefined, {
+				slug: "test-project",
+				folders: [tmpdir()],
+			});
 
 			expect(sessions[0]?.pendingQuestionCount).toBe(1);
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
@@ -2904,14 +2921,26 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			yield* listSessions("test-project", { roots: true });
+			yield* listSessions(
+				"test-project",
+				{ roots: true },
+				{ slug: "test-project", folders: [tmpdir()] },
+			);
 			const stateRef = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(stateRef);
 
 			expect(Array.from(HashMap.toEntries(state.cachedParentMap))).toEqual([
 				["child-1", "root-1"],
 			]);
-			expect(readQuery.listSessionInfos).toHaveBeenCalledWith({ roots: true });
+			const activity = yield* SessionActivityTag;
+			expect(readQuery.listSessionInfos).toHaveBeenCalledWith(
+				{ projectIds: [makeMockConfig().slug] },
+				{
+					roots: true,
+					backgroundOf: activity.background.backgroundOf,
+					hintDismissals: activity.hintDismissals,
+				},
+			);
 			expect(api.session.list).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
@@ -3084,7 +3113,7 @@ describe("snooze session commands", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const service = yield* SessionManagerServiceTag;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 				if (reason === "pinned")
 					yield* sql`UPDATE sessions SET pinned_at = 2 WHERE id = 's1'`;
 				if (reason === "settled")
@@ -3116,7 +3145,7 @@ describe("snooze session commands", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const store = yield* EventStoreEffectTag;
 			const service = yield* SessionManagerServiceTag;
-			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+			yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			const firstUntil = Date.now() + 60_000;
 			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(true);
 			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(false);
@@ -3140,7 +3169,7 @@ describe("snooze session commands", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const service = yield* SessionManagerServiceTag;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 				yield* service.snoozeSession("s1", null);
 				if (action === "settle")
 					yield* service.setSessionSettled("s1", { settled: true });

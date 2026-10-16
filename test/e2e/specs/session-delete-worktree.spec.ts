@@ -59,6 +59,7 @@ async function setup(
 	];
 	let sessions = [
 		{
+			accountId: null,
 			id: "delete-session",
 			title: "Delete this session",
 			status: "idle",
@@ -77,6 +78,7 @@ async function setup(
 		...(options.bulk
 			? [
 					{
+						accountId: null,
 						id: "local-session",
 						title: "Local session",
 						status: "idle",
@@ -87,6 +89,7 @@ async function setup(
 	];
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetWorktreeCleanupSetting: () => {
 				if (options.failCleanupSetting)

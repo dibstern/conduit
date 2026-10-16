@@ -207,10 +207,7 @@ process.exit(result.status ?? 1);
 			return session;
 		};
 		const recreate = (sessionId: string) =>
-			sendRpcRequest(
-				socket,
-				new RecreateSessionWorktree({ projectSlug: "process-test", sessionId }),
-			);
+			sendRpcRequest(socket, new RecreateSessionWorktree({ sessionId }));
 		return { fixture, socket, extra, row, create, recreate, failMarker };
 	}
 
@@ -571,7 +568,6 @@ process.exit(result.status ?? 1);
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: reader.id,
 				path,
 			}),

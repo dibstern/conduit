@@ -3,6 +3,10 @@ import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceTag,
@@ -31,7 +35,10 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import {
+	ProjectManagementServiceLive,
+	ProjectManagementServiceTag,
+} from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ProjectSettingsLive,
 	publishProjectSetting,
@@ -51,7 +58,6 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -371,18 +377,22 @@ describe("GetAgents", () => {
 });
 
 describe("GetProjects", () => {
-	it.effect("uses config.getProjects when available", () => {
+	it.effect("uses the provided project service", () => {
 		const ws = mockWsHandler();
 		const projects = [
 			{ slug: "proj-1", title: "Project 1", folders: ["/path"] as const },
 		];
-		const config = mockConfig({
-			getProjects: () => projects,
-		});
+		const config = mockConfig();
 		const client = makeHandlerOpenCodeAPI();
 
 		const layer = Layer.mergeAll(
 			projectManagementLayer(client, config),
+			Layer.succeed(ProjectManagementServiceTag, {
+				currentSlug: () => Effect.succeed(config.slug),
+				list: () => Effect.succeed(projects),
+				save: () => Effect.die("Unexpected save"),
+				remove: () => Effect.die("Unexpected remove"),
+			}),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -391,7 +401,7 @@ describe("GetProjects", () => {
 			Effect.tap((reply) => {
 				expect(reply).toEqual({
 					projectSlug: "test-project",
-					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
+					projects,
 					current: "test-project",
 				});
 			}),
@@ -822,6 +832,7 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2350,6 +2361,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2454,6 +2466,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2752,6 +2765,7 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
+			listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2913,7 +2927,7 @@ describe("sendMessageToSession", () => {
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, ws),
-						Layer.succeed(BackgroundLivenessTag, () => undefined),
+Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
 						Layer.succeed(
@@ -3339,6 +3353,7 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3602,6 +3617,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),

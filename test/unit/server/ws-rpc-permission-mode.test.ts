@@ -82,24 +82,21 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.SwitchPermissionMode({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				mode: "full",
 				originId: "browser-1",
 			});
 
-			expect(result).toEqual({ projectSlug: "project-a", mode: "full" });
+			expect(result).toEqual({ projectSlug: "test-project", mode: "full" });
 			expect(yield* getPermissionMode("session-1")).toBe("full");
 
 			const models = yield* client.GetModels({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 			expect(models.permissionMode).toBe("full");
 			expect(setSdkPermissionMode).toHaveBeenCalledWith("session-1", "full");
 
 			yield* client.SwitchPermissionMode({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				mode: "auto",
 				originId: "browser-1",
@@ -152,7 +149,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			yield* client.SwitchPermissionMode({
-				projectSlug: "project-a",
 				sessionId,
 				mode: "auto",
 				originId: "browser-1",
@@ -220,7 +216,6 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const result = yield* Effect.either(
 					client.SwitchPermissionMode({
-						projectSlug: "project-a",
 						sessionId,
 						mode: "full",
 						originId: "browser-1",

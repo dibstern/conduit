@@ -77,8 +77,11 @@ describe("WsRpcServerLayer ResolveSession", () => {
 			expect(yield* client.ResolveSession({ sessionId: "existing" })).toEqual({
 				projectSlug: "project-a",
 			});
-			expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
-				projectSlug: null,
+			expect(
+				yield* Effect.either(client.ResolveSession({ sessionId: "missing" })),
+			).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "WsRpcError", message: "Unknown session: missing" },
 			});
 			expect(sessionExists).toHaveBeenCalledWith("existing");
 			expect(sessionExists).toHaveBeenCalledWith("missing");
@@ -94,23 +97,28 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
 			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at, version)
-				VALUES ('root', 'claude', 'Root', 1, 1, 1)`;
+			yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at, version)
+				VALUES ('root', 'test-project', 'claude', 'Root', 1, 1, 1)`;
 			yield* sql`INSERT INTO sessions
-				(id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
-				VALUES ('child', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
+				(id, project_id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
+				VALUES ('child', 'test-project', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
 			yield* sql`UPDATE read_model_counter SET value = 1 WHERE id = 1`;
 			yield* sql`UPDATE sessions SET root_id = 'root'`;
 			yield* refreshSidebar(["root"], 1);
 			const reader = yield* ReadQueryEffectTag;
-			const before = yield* reader.readSessionList();
+			const before = yield* reader.readSessionList({
+				projectIds: ["test-project"],
+			});
 			expect(before.rows.map(({ item }) => item.id)).toEqual(["root"]);
 			expect(before.rows[0]?.version).toBe(1);
 			yield* sql`UPDATE sessions SET woken_at = 3, woken_reason = 'activity', version = 2
 				WHERE id = 'child'`;
 			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
 			yield* refreshSidebar(["child"], 2);
-			const after = yield* reader.readSessionList({ after: 1 });
+			const after = yield* reader.readSessionList(
+				{ projectIds: ["test-project"] },
+				{ after: 1 },
+			);
 			expect(after).toEqual({
 				rows: [],
 				version: 2,
@@ -319,13 +327,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 			yield* client.SyncInputDraft({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "saved draft",
 			});
 
 			const result = yield* client.ViewSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			});
@@ -355,7 +361,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.DeleteSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			});
@@ -382,7 +387,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.DeleteSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			});
@@ -441,14 +445,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.ForkSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				messageId: "message-1",
 				originId: "browser-tab-a",
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				sessionId: "session-forked",
 				parentId: "session-1",
 				forkMessageId: "message-1",
@@ -799,7 +802,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				]);
 				const client = yield* rpcClient;
 				const result = yield* client.ForkSession({
-					projectSlug: "project-a",
 					sessionId: "ses-parent",
 					messageId: "api-first",
 					originId: "browser-tab-a",
@@ -887,7 +889,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const sessionCount = () =>
 					sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions`;
 				const resultOnlyFork = yield* client.ForkSession({
-					projectSlug: "project-a",
 					sessionId: "ses-parent",
 					messageId: "result-only",
 					originId: "browser-tab-a",
@@ -907,7 +908,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const beforeMissingPoint = (yield* sessionCount())[0]?.count;
 				const missingPoint = yield* Effect.either(
 					client.ForkSession({
-						projectSlug: "project-a",
 						sessionId: "ses-parent",
 						messageId: "not-in-history",
 						originId: "browser-tab-a",
@@ -934,7 +934,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 					);
 				const rolledBack = yield* Effect.either(
 					client.ForkSession({
-						projectSlug: "project-a",
 						sessionId: "ses-parent",
 						originId: "browser-tab-a",
 					}),
@@ -954,7 +953,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				});
 				const missing = yield* Effect.either(
 					client.ForkSession({
-						projectSlug: "project-a",
 						sessionId: "ses-no-transcript",
 						originId: "browser-tab-a",
 					}),
@@ -1107,13 +1105,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const response = yield* client.LoadMoreHistory({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				before: "message-2",
 			});
 
 			expect(response).toMatchObject({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				sessionId: "session-1",
 				messages: [
 					{

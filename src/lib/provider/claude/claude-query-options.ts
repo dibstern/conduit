@@ -1,4 +1,5 @@
 import type { Settings } from "@anthropic-ai/claude-agent-sdk";
+import { getProviderDriver } from "../../contracts/provider-instance.js";
 import { ClaudeRuntimeError } from "../event-sink-errors.js";
 import { claudeApiModelId } from "./claude-api-model-id.js";
 import { makeClaudeSdkEnv } from "./claude-sdk-env.js";
@@ -37,7 +38,10 @@ export function buildClaudeQueryOptions(
 			configDir: input.configDir,
 			baseEnv: shellEnv,
 			accountEnv:
-				input.account?.driver === "claude" ? input.account.env : undefined,
+				getProviderDriver(input.account?.driver)?.accountKind ===
+				"config-directory"
+					? input.account?.env
+					: undefined,
 		}),
 		includePartialMessages: true,
 		forwardSubagentText: true,

@@ -116,7 +116,11 @@ async function setup(
 				sessionId: params["sessionId"],
 			}),
 			ViewSession: () => ({ ok: true }),
-			GetAgents: () => ({ projectSlug: "myapp", agents: [] }),
+			GetAgents: () => ({
+				projectSlug: "myapp",
+				providerScope: { id: "opencode", name: "OpenCode" },
+				agents: [],
+			}),
 			GetCommands: () => ({ projectSlug: "myapp", commands: [] }),
 			GetModels: (params) => ({
 				projectSlug: "myapp",

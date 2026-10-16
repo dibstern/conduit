@@ -60,12 +60,11 @@ describe("a session from another project (all-projects view)", () => {
 		);
 	});
 
-	it("sends the change to the session's own project, then refreshes its row", async () => {
+	it("addresses the change by session, then refreshes the foreign row", async () => {
 		await sessionCommandActions.settle(foreign, true);
 		expect(rpc.setSessionSettledRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "elsewhere",
-				sessionId: "s1",
+				sessionId: foreign.id,
 				settled: true,
 			}),
 		);
@@ -75,7 +74,7 @@ describe("a session from another project (all-projects view)", () => {
 	it("does not refresh for a session of the attached project", async () => {
 		await sessionCommandActions.pin({ ...foreign, projectSlug: "home" }, true);
 		expect(rpc.setSessionPinnedRpc).toHaveBeenCalledWith(
-			expect.objectContaining({ projectSlug: "home", pinned: true }),
+			expect.objectContaining({ sessionId: foreign.id, pinned: true }),
 		);
 		expect(list.refreshListedSessions).not.toHaveBeenCalled();
 	});

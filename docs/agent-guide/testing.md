@@ -165,6 +165,47 @@ registration. Evidence and cleanup results go to
 `test-results/85kb-16-serve.json`. Inspect `ps -axo pid,command` for processes
 started by the tests; never signal processes belonging to the user's live server.
 
+#### Restart and create latency under load
+
+`harness-restart-load.spec.ts` seeds approximately 10,000 sessions, connects
+browser devices and streams fake Claude writes while checking restart and
+read-sharing behaviour. Run it with one worker to keep timings comparable:
+
+```sh
+export npm_config_verify_deps_before_run=false pnpm_config_verify_deps_before_run=false
+pnpm build </dev/null
+CONDUIT_TEST_DIST=dist pnpm exec playwright test --config test/e2e/playwright-harness.config.ts \
+  --project=desktop --workers=1 harness-restart-load.spec.ts </dev/null
+```
+
+The create-latency gate reuses that isolated store and fake streams. It sends
+raw CreateSession RPCs 200 ms apart while four desktop devices hold the sidebar
+open. Its clock includes the first rendered row on each device, measured by
+observers armed before each RPC.
+
+```sh
+export npm_config_verify_deps_before_run=false pnpm_config_verify_deps_before_run=false
+pnpm test:perf:create </dev/null
+```
+
+Parameters are `CREATE_LATENCY_DEVICES` (4), `CREATE_LATENCY_CREATES` (50),
+`CREATE_LATENCY_P90_BUDGET_MS` (50), and
+`CREATE_LATENCY_ARRIVAL_TIMEOUT_MS` (5000). The test always uses three existing
+100 ms fake Claude streams, `CONDUIT_SLOW_RPC_MS=1`, and
+`CONDUIT_TRACE_SQL_MIN_MS=5` in its isolated daemon.
+
+The 50 ms budget is the worst p90 of three runs (30.7 ms on an M-series Mac)
+multiplied by 1.5 and rounded up to a multiple of 25 ms. Recalibrate the same
+way after an intended change to the create or sidebar path.
+
+The attached `test-results/create-latency.desktop.json` records parameters,
+budget, every RPC and device arrival, p50/p90/max, achieved persisted write rate,
+shell read and replacement counts, and CreateSession/SubscribeShell slow logs.
+An arrival or p90 failure means creates failed to reach all sidebars promptly.
+A write-rate failure means the intended background load was not sustained;
+replacement reads indicate a shell subscription regression. Missing slow logs
+or short SQL trace spans indicate broken request logging or file sampling.
+
 `opencode-real-lifecycle.test.ts` runs the real `opencode` (PATH or `CONDUIT_TEST_REAL_OPENCODE`; skipped unless it
 matches `@opencode-ai/sdk`) behind a logging proxy, never prompting: lazy spawn, one process and `/global/event` stream
 for two projects, per-project routing, idle stop. Evidence: `test-results/pa3r-10-real-lifecycle.json`.

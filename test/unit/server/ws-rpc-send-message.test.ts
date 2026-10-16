@@ -46,7 +46,6 @@ describe("WsRpcServerLayer input.submit", () => {
 			});
 
 			yield* client.input.submit({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "hello",
 				originId: "browser-tab-a",
@@ -105,7 +104,6 @@ describe("WsRpcServerLayer input.submit", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.input.submit({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "hello",
 				images: ["data:image/png;base64,abc"],
@@ -168,7 +166,6 @@ describe("WsRpcServerLayer input.submit", () => {
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 			yield* client.input.submit({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "first",
 				originId: "browser-tab-a",
@@ -178,7 +175,6 @@ describe("WsRpcServerLayer input.submit", () => {
 
 			const second = yield* Effect.either(
 				client.input.submit({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 					text: "second",
 					originId: "browser-tab-a",

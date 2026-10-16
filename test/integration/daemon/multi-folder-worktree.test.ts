@@ -11,10 +11,10 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	CreatePty,
+	CreatePtyForSession,
 	CreateSession,
-	GetFileContent,
-	GetFileTree,
+	GetFileContentForSession,
+	GetFileTreeForSession,
 	GetProjects,
 	ListDaemonSessions,
 	SaveProject,
@@ -588,8 +588,8 @@ process.exit(result.status ?? 1);
 				additionalDirectories: [secondaryWorktree, scratch],
 			},
 		]);
-		const scope = { projectSlug: "process-test", sessionId: isolated.id };
-		const tree = await sendRpcRequest(socket, new GetFileTree(scope));
+		const scope = { sessionId: isolated.id };
+		const tree = await sendRpcRequest(socket, new GetFileTreeForSession(scope));
 		evidence["fileTreeRoots"] = tree.roots;
 		expect(tree.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
@@ -601,7 +601,11 @@ process.exit(result.status ?? 1);
 				(
 					await sendRpcRequest(
 						socket,
-						new GetFileContent({ ...scope, root, path: "tracked.txt" }),
+						new GetFileContentForSession({
+							...scope,
+							root,
+							path: "tracked.txt",
+						}),
 					)
 				).content,
 			).toBe(`${prompt}\n`);
@@ -609,7 +613,7 @@ process.exit(result.status ?? 1);
 				(
 					await sendRpcRequest(
 						socket,
-						new GetFileContent({
+						new GetFileContentForSession({
 							...scope,
 							sessionId: local.id,
 							root,
@@ -623,7 +627,11 @@ process.exit(result.status ?? 1);
 			(
 				await sendRpcRequest(
 					socket,
-					new GetFileContent({ ...scope, root: scratch, path: "shared.txt" }),
+					new GetFileContentForSession({
+						...scope,
+						root: scratch,
+						path: "shared.txt",
+					}),
 				)
 			).content,
 		).toBe("shared notes\n");
@@ -636,7 +644,7 @@ process.exit(result.status ?? 1);
 			const cursor = browser.frames.length;
 			await sendRpcRequest(
 				socket,
-				new CreatePty({ ...scope, originId: browser.originId, root }),
+				new CreatePtyForSession({ ...scope, originId: browser.originId, root }),
 			);
 			const envelope = ptyEnvelope(
 				await browser.waitFor(
@@ -683,7 +691,7 @@ process.exit(result.status ?? 1);
 			(
 				await sendRpcRequest(
 					socket,
-					new GetFileTree({ ...scope, sessionId: local.id }),
+					new GetFileTreeForSession({ ...scope, sessionId: local.id }),
 				)
 			).roots,
 		).toEqual([
@@ -710,8 +718,11 @@ process.exit(result.status ?? 1);
 		const later = join(fixture.root, "later");
 		seedRepository(fixture, later);
 		await saveFolders([fixture.projectDir, secondary, scratch, later]);
-		const scope = { projectSlug: "process-test", sessionId: isolated.id };
-		const attached = await sendRpcRequest(socket, new GetFileTree(scope));
+		const scope = { sessionId: isolated.id };
+		const attached = await sendRpcRequest(
+			socket,
+			new GetFileTreeForSession(scope),
+		);
 		expect(attached.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
 			{ root: secondary, label: "library" },
@@ -753,7 +764,11 @@ process.exit(result.status ?? 1);
 		const cursor = browser.frames.length;
 		await sendRpcRequest(
 			socket,
-			new CreatePty({ ...scope, originId: browser.originId, root: later }),
+			new CreatePtyForSession({
+				...scope,
+				originId: browser.originId,
+				root: later,
+			}),
 		);
 		const terminal = ptyEnvelope(
 			await browser.waitFor(
@@ -768,7 +783,10 @@ process.exit(result.status ?? 1);
 		);
 		await browser.closePty(terminal.item.id);
 		await saveFolders([fixture.projectDir, scratch, later]);
-		const detached = await sendRpcRequest(socket, new GetFileTree(scope));
+		const detached = await sendRpcRequest(
+			socket,
+			new GetFileTreeForSession(scope),
+		);
 		evidence["attachedRoots"] = attached.roots;
 		evidence["detachedRoots"] = detached.roots;
 		expect(detached.roots).toEqual([
@@ -789,7 +807,7 @@ process.exit(result.status ?? 1);
 		await expect(
 			sendRpcRequest(
 				socket,
-				new CreatePty({
+				new CreatePtyForSession({
 					...scope,
 					originId: browser.originId,
 					root: secondary,
@@ -799,7 +817,11 @@ process.exit(result.status ?? 1);
 		await expect(
 			sendRpcRequest(
 				socket,
-				new GetFileContent({ ...scope, root: secondary, path: "tracked.txt" }),
+				new GetFileContentForSession({
+					...scope,
+					root: secondary,
+					path: "tracked.txt",
+				}),
 			),
 		).rejects.toThrow(/Unknown file root/);
 		await vi.waitFor(
@@ -821,7 +843,10 @@ process.exit(result.status ?? 1);
 			exists: true,
 		};
 		await saveFolders([scratch]);
-		const onlyShared = await sendRpcRequest(socket, new GetFileTree(scope));
+		const onlyShared = await sendRpcRequest(
+			socket,
+			new GetFileTreeForSession(scope),
+		);
 		const retainedWorkspace = (await sessions()).find(
 			({ id }) => id === isolated.id,
 		)?.workspace;
@@ -880,7 +905,7 @@ process.exit(result.status ?? 1);
 		).toEqual([{ cwd: scratch, additionalDirectories: [secondaryWorktree] }]);
 		const tree = await sendRpcRequest(
 			socket,
-			new GetFileTree({ projectSlug: "process-test", sessionId: isolated.id }),
+			new GetFileTreeForSession({ sessionId: isolated.id }),
 		);
 		expect(tree.roots).toEqual([
 			{ root: scratch, label: "notes", shared: true },
@@ -966,8 +991,8 @@ process.exit(result.status ?? 1);
 				additionalDirectories: [secondaryWorktree, scratch],
 			},
 		]);
-		const scope = { projectSlug: "process-test", sessionId: isolated.id };
-		const tree = await sendRpcRequest(socket, new GetFileTree(scope));
+		const scope = { sessionId: isolated.id };
+		const tree = await sendRpcRequest(socket, new GetFileTreeForSession(scope));
 		expect(tree.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
 			{ root: linked, label: "linked" },
@@ -977,14 +1002,22 @@ process.exit(result.status ?? 1);
 		evidence["fileTreeRoots"] = tree.roots;
 		const opened = await sendRpcRequest(
 			socket,
-			new GetFileContent({ ...scope, root: linked, path: "tracked.txt" }),
+			new GetFileContentForSession({
+				...scope,
+				root: linked,
+				path: "tracked.txt",
+			}),
 		);
 		expect(opened.content).toBe(`${prompt}\n`);
 		evidence["linkedRootContent"] = opened;
 		const cursor = browser.frames.length;
 		await sendRpcRequest(
 			socket,
-			new CreatePty({ ...scope, originId: browser.originId, root: linked }),
+			new CreatePtyForSession({
+				...scope,
+				originId: browser.originId,
+				root: linked,
+			}),
 		);
 		const terminal = ptyEnvelope(
 			await browser.waitFor(

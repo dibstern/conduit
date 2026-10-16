@@ -704,7 +704,14 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		match: /^I open the phone usage sheet$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("usage-phone-dock").click();
-			await expect(world.page.getByTestId("usage-sheet")).toBeVisible();
+			const sheet = world.page.getByTestId("usage-sheet");
+			await expect(sheet).toBeVisible();
+			// A tap raises the sheet out of the dock; let it arrive.
+			await sheet.evaluate((node) =>
+				Promise.all(
+					(node.parentElement?.getAnimations() ?? []).map((a) => a.finished),
+				),
+			);
 			await expect(
 				world.page.getByRole("dialog", { name: "Usage" }),
 			).toBeVisible();
@@ -712,13 +719,13 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the usage sheet lists every account by harness",
-		match: /^the usage sheet groups read CLAUDE, CODEX, CURSOR with rows (.+)$/,
+		match: /^the usage sheet groups read (.+) with rows (.+)$/,
 		run: async ({ world, match }) => {
 			const sheet = world.page.getByTestId("usage-sheet");
 			await expect(
 				sheet.locator('[data-testid^="usage-sheet-heading-"]'),
-			).toHaveText(["CLAUDE", "CODEX", "CURSOR"]);
-			const expected = (match[1] ?? "").split(", ");
+			).toHaveText((match[1] ?? "").split(", "));
+			const expected = (match[2] ?? "").split(", ");
 			const rows = sheet.locator('[data-testid^="usage-sheet-row-"]');
 			await expect(rows).toHaveCount(expected.length);
 			for (const [index, accountId] of expected.entries())
@@ -782,7 +789,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	{
 		name: "the usage sheet folds into the dock rather than off screen",
 		match:
-			/^the usage sheet dragged down past the phone usage dock stops on it, faded into it$/,
+			/^the usage sheet dragged down past the phone usage dock lands on it row for row$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("usage-sheet");
 			// A drag moves the sheet from where it rests, so let the opening glide finish first.
@@ -809,18 +816,41 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				await expect
 					.poll(async () => (await sheet.boundingBox())?.y)
 					.toBeCloseTo(dock.y, 0);
-				// Resting on the dock, nothing of the sheet or its scrim is left to vanish on close.
+				// Resting on the dock, the sheet's top is the dock, pixel for pixel, and
+				// its scrim is gone, so closing there changes nothing on screen.
 				await expect
 					.poll(() =>
-						sheet.evaluate((node) => {
-							const dialog = node.closest("dialog");
-							return [
-								getComputedStyle(node.parentElement ?? node).opacity,
-								dialog ? getComputedStyle(dialog, "::backdrop").opacity : "",
+						world.page.evaluate(() => {
+							const dockParts = [
+								...document.querySelectorAll(
+									'[data-testid="usage-footer-phone"] [data-testid^="usage-footer-row-"], [data-testid="usage-phone-more"]',
+								),
 							];
+							const misses = dockParts.map((part) => {
+								const twin = document.querySelector(
+									`[data-testid="${part.getAttribute("data-testid")?.replace(/^usage-(footer|phone)-/, "usage-sheet-")}"]`,
+								);
+								if (!twin) return Number.POSITIVE_INFINITY;
+								const a = part.getBoundingClientRect();
+								const b = twin.getBoundingClientRect();
+								return Math.max(
+									Math.abs(a.x - b.x),
+									Math.abs(a.y - b.y),
+									Math.abs(a.width - b.width),
+									Math.abs(a.height - b.height),
+								);
+							});
+							const dialog = document.querySelector("dialog[open]");
+							return {
+								parts: dockParts.length,
+								miss: Math.round(Math.max(...misses)),
+								scrim: dialog
+									? getComputedStyle(dialog, "::backdrop").opacity
+									: "",
+							};
 						}),
 					)
-					.toEqual(["0", "0"]);
+					.toEqual({ parts: 2, miss: 0, scrim: "0" });
 			} finally {
 				await finger.lift();
 			}

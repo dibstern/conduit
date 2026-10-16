@@ -95,7 +95,6 @@ const pending = new Map<
 function send(sessionId: string, projectSlug: string, upTo: number): void {
 	pending.delete(sessionId);
 	markSessionSeenRpc({
-		projectSlug,
 		sessionId,
 		upTo,
 		originId: getBrowserClientId(),

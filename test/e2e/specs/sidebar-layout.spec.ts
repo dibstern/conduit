@@ -55,6 +55,8 @@ test("shell feed adds and removes sidebar roots", async ({
 			_tag: "upsert",
 			sequence: 2,
 			item: {
+				accountId: null,
+				projectSlug: "e2e-replay",
 				id: "feed-root",
 				title: "Feed root",
 				status: "idle",

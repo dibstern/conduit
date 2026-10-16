@@ -123,13 +123,9 @@ function isForeignSession(session: SessionInfo): boolean {
 	);
 }
 
-// The server routes each call to the project named in it, so a session from
-// another project is changed in place.
+// The server routes each call to the session's project.
 function rpcInput(session: SessionInfo) {
-	const projectSlug = session.projectSlug ?? getCurrentSlug();
-	return projectSlug
-		? { projectSlug, sessionId: session.id, originId: getBrowserClientId() }
-		: null;
+	return { sessionId: session.id, originId: getBrowserClientId() };
 }
 
 // This socket only hears live updates for its own project.
@@ -201,7 +197,6 @@ async function rename(session: SessionInfo, title: string) {
 	if (!input) return;
 	try {
 		await renameSessionRpc({
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			title,
 		});

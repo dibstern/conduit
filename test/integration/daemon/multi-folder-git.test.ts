@@ -289,7 +289,6 @@ describe("Multi-folder git through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: worktree,
 			}),
@@ -359,7 +358,6 @@ describe("Multi-folder git through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: worktree,
 			}),
@@ -446,7 +444,6 @@ describe("Multi-folder git through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new SetSessionSettled({
-				projectSlug: "process-test",
 				sessionId,
 				settled: true,
 			}),

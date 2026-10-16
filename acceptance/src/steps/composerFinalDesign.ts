@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openComposerMoreSheet,
@@ -514,9 +515,73 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert quiet checkout yields room before left controls",
-		match: /^the icons checkout is a quiet shrinking control before send$/,
+		name: "set a desktop composer width",
+		match: /^the desktop composer is (\d+) pixels wide$/,
+		run: async ({ world, match }) => {
+			await world.driver.setViewport(world.page, DESKTOP_VIEWPORT);
+			await world.page.locator("#input-wrapper").evaluate((element, width) => {
+				element.style.width = `${width}px`;
+			}, Number(match[1]));
+		},
+	},
+	{
+		name: "move the desktop composer to the window's left edge",
+		match: /^the desktop composer sits at the window's left edge$/,
 		run: async ({ world }) => {
+			// A closed sidebar with Files open leaves the composer at the window's left edge.
+			await world.page.locator("#input-wrapper").evaluate((element) => {
+				element.style.left = `${12 - element.getBoundingClientRect().left}px`;
+			});
+		},
+	},
+	{
+		name: "assert the desktop model picker stays inside the window",
+		match: /^the model picker stays inside the window$/,
+		run: async ({ world }) => {
+			const picker = await box(world.page.getByTestId("model-picker"));
+			const width = world.page.viewportSize()?.width ?? 0;
+			expect(picker.x).toBeGreaterThanOrEqual(8 - 0.5);
+			expect(picker.x + picker.width).toBeLessThanOrEqual(width - 8 + 0.5);
+		},
+	},
+	{
+		name: "assert a thin composer folds the harness into the model control",
+		match: /^the icons model control reads (\S+) beside the harness logo$/,
+		run: async ({ world, match }) => {
+			const model = world.page.getByTestId(iconsControls.model);
+			await expect(model.getByTestId("harness-logo")).toBeVisible();
+			await expect(model.locator(".model-label")).toHaveText(match[1] ?? "");
+			await expect(model.getByTestId("picker-selected-context")).toHaveCount(0);
+			await expect(world.page.getByTestId(iconsControls.harness)).toHaveCount(
+				0,
+			);
+			await expect(
+				world.page.getByTestId("composer-control-divider"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert which checkout labels fit beside send",
+		match: /^the composer checkout labels are (.+)$/,
+		run: async ({ world, match }) => {
+			const shown = match[1] === "none" ? [] : (match[1] ?? "").split(", ");
+			const checkout = world.page.getByTestId("composer-checkout");
+			for (const part of ["project", "branch", "upstream"]) {
+				await expect(checkout.locator(`[data-part="${part}"]`)).toHaveCount(
+					shown.includes(part) ? 1 : 0,
+				);
+			}
+			// The icon, its dirty mark and the chevron survive every width.
+			await expect(checkout.locator("[data-icon] svg")).toBeVisible();
+			await expect(checkout.locator('[data-part="dirty"]')).toBeVisible();
+			await expect(checkout.locator('[data-part="chevron"]')).toBeVisible();
+		},
+	},
+	{
+		name: "assert quiet checkout yields room before left controls",
+		match:
+			/^the icons checkout is a quiet shrinking control before send( after the combined model control)?$/,
+		run: async ({ world, match }) => {
 			const layout = world.page.getByTestId("composer-layout");
 			const right = layout.locator('[data-slot="send"]');
 			const checkout = right.getByTestId("composer-checkout");
@@ -530,7 +595,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(checkout.locator("..")).toHaveCSS("min-width", "0px");
 			const footer = [
 				world.page.locator("#attach-btn"),
-				...Object.values(iconsControls).map((id) => world.page.getByTestId(id)),
+				...Object.values(iconsControls)
+					.filter((id) => !match[1] || id !== iconsControls.harness)
+					.map((id) => world.page.getByTestId(id)),
 				checkout,
 				right.locator("#send"),
 			];

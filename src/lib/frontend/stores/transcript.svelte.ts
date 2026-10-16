@@ -24,6 +24,7 @@ import { renderMarkdown } from "../utils/markdown.js";
 import {
 	advanceTurnIfNewMessage,
 	clearSessionChatState,
+	draftSend,
 	getOrCreateSessionSlot,
 	historyState,
 	type PendingInput,
@@ -684,6 +685,12 @@ function install(
 		entry,
 		slot.messages.messages,
 	);
+	// The placed send takes over from the draft's copy in the same frame.
+	if (
+		draftSend.sessionId === sessionId &&
+		slot.messages.messages.some((message) => message.type === "user")
+	)
+		draftSend.message = null;
 	slot.messages.historyHasMore = entry.hasMore;
 	slot.messages.loadLifecycle = "ready";
 	if (sessionState.currentId === sessionId)
@@ -1025,7 +1032,6 @@ export function loadOlderTranscript(sessionId: string): Promise<void> {
 	slot.messages.historyLoading = true;
 	if (sessionState.currentId === sessionId) historyState.loading = true;
 	const request = loadMoreHistoryRpc({
-		projectSlug: entry.project,
 		sessionId,
 		before: entry.rows[0].id,
 	})

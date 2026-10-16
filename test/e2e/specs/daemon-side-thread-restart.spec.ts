@@ -96,8 +96,7 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 					},
 				});
 				const side = yield* client.StartSideThread({
-					projectSlug,
-					parentSessionId: parent.sessionId,
+					sessionId: parent.sessionId,
 					title: "What is in this project?",
 					inputId: randomUUID(),
 					text: "Reply with exactly READY. Do not use tools.",
@@ -130,7 +129,6 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		// rather than re-derived from the default.
 		await rpc(daemon, (client) =>
 			client.SwitchPermissionMode({
-				projectSlug,
 				sessionId: sideId,
 				mode: "plan",
 			}),
@@ -142,7 +140,7 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 			projectSlug,
 		);
 		const restored = await rpc(daemon, (client) =>
-			client.GetModels({ projectSlug, sessionId: sideId }),
+			client.GetModels({ sessionId: sideId }),
 		);
 		expect(restored.permissionMode).toBe("plan");
 		expect(restored.active).toMatchObject({

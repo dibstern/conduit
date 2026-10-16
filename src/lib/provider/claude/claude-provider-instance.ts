@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import type { Account } from "../../contracts/account.js";
-import { PROVIDER_SESSION_CAPABILITIES } from "../../contracts/provider-instance.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type { ProviderInstanceFailure } from "../errors.js";
 import type {
@@ -123,7 +123,7 @@ export class ClaudeProviderInstance implements ProviderInstance {
 
 export const ClaudeDriver: ProviderDriver<ClaudeProviderInstanceDeps> = {
 	providerId: "claude",
-	capabilities: PROVIDER_SESSION_CAPABILITIES.claude,
+	capabilities: PROVIDER_DRIVERS.claude.sessionCapabilities,
 	create: (deps) =>
 		makeClaudeProviderRuntime(deps).pipe(
 			Effect.map((runtime) => new ClaudeProviderInstance(runtime)),

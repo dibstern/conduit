@@ -15,6 +15,11 @@ vi.resetModules();
 const testEnvironment = mkdtempSync(join(tmpdir(), "conduit-test-env-"));
 process.env["HOME"] = join(testEnvironment, "home");
 process.env["CONDUIT_CONFIG_DIR"] = join(testEnvironment, "conduit");
+// Real-SDK E2E runs still need the reviewer's login folder. They read it under
+// this test-only name, so no SDK or config reader can inherit it by accident.
+const reviewerClaudeConfigDir = process.env["CLAUDE_CONFIG_DIR"];
+if (reviewerClaudeConfigDir !== undefined)
+	process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] = reviewerClaudeConfigDir;
 delete process.env["CLAUDE_CONFIG_DIR"];
 mkdirSync(process.env["HOME"], { recursive: true });
 afterAll(() => rmSync(testEnvironment, { recursive: true, force: true }));

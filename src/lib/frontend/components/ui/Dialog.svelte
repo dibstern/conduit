@@ -191,13 +191,13 @@
 
 	/* ::backdrop inherits the dialog's theme tokens; the scrim stays dark in
 	   both themes, unlike --overlay-rgb's contrast wash. */
-	/* A sheet being dragged sets --scrim-opacity on its dialog, so the scrim
+	/* A sheet being dragged sets --sheet-raised on its dialog, so the scrim
 	   fades with the sheet rather than vanishing when it closes. */
 	dialog::backdrop {
 		background: var(--color-backdrop);
 		backdrop-filter: blur(2px);
-		opacity: var(--scrim-opacity, 1);
-		transition: opacity var(--scrim-transition, 0s);
+		opacity: var(--sheet-raised, 1);
+		transition: opacity var(--sheet-transition, 0s);
 	}
 
 	dialog[data-backdrop="dark"]::backdrop {

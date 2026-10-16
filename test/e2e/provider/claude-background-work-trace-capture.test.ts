@@ -24,7 +24,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import {
 	getSubagentMessages,
@@ -63,7 +63,7 @@ type TranscriptRead = {
 
 const redact = (text: string): string =>
 	text
-		.replaceAll(homedir(), "/home/test")
+		.replaceAll(userInfo().homedir, "/home/test")
 		.replace(
 			/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
 			"redacted@example.test",
@@ -224,7 +224,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					evidence["sessionId"] = sessionId;
 					await Effect.runPromise(
 						browser.rpc.SwitchPermissionMode({
-							projectSlug: "process-test",
 							sessionId,
 							mode: "full",
 						}),

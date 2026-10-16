@@ -185,7 +185,6 @@ export class TestWsClient {
 		this.turnCursors.set(sessionId, cursor);
 		const result = await this.rpcCall((client) =>
 			client.input.submit({
-				projectSlug: this.projectSlug,
 				sessionId,
 				text,
 				inputId: opts.commandId ?? randomUUID(),
@@ -298,7 +297,6 @@ export class TestWsClient {
 		const clientId = this.clientId;
 		const result = await this.rpcCall((client) =>
 			client.ViewSession({
-				projectSlug,
 				sessionId,
 				originId: clientId,
 			}),
@@ -327,7 +325,6 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId, projectSlug);
 		return await this.rpcCall((client) =>
 			client.LoadMoreHistory({
-				projectSlug,
 				sessionId,
 				...(before ? { before } : {}),
 			}),
@@ -338,7 +335,6 @@ export class TestWsClient {
 		const clientId = this.clientId;
 		await this.rpcCall((client) =>
 			client.DeleteSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: clientId,
 			}),
@@ -353,9 +349,8 @@ export class TestWsClient {
 		if (sessionId) await this.subscribeSessionDetail(sessionId);
 		const result = await this.rpcCall((client) =>
 			client.ForkSession({
-				projectSlug: this.projectSlug,
+				...(sessionId ? { sessionId } : { projectSlug: this.projectSlug }),
 				originId: clientId,
-				...(sessionId ? { sessionId } : {}),
 				...(opts.messageId != null ? { messageId: opts.messageId } : {}),
 			}),
 		);
@@ -378,7 +373,6 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId);
 		await this.rpcCall((client) =>
 			client.SyncInputDraft({
-				projectSlug: this.projectSlug,
 				sessionId,
 				text,
 				...(opts.originId ? { originId: opts.originId } : {}),
@@ -393,7 +387,6 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId);
 		await this.rpcCall((client) =>
 			client.CancelSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				commandId: crypto.randomUUID(),
 			}),
@@ -410,7 +403,6 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId);
 		await this.rpcCall((client) =>
 			client.SwitchAgent({
-				projectSlug: this.projectSlug,
 				sessionId,
 				agentId,
 			}),
@@ -428,7 +420,6 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId);
 		await this.rpcCall((client) =>
 			client.SwitchModel({
-				projectSlug: this.projectSlug,
 				sessionId,
 				modelId,
 				providerId,
@@ -441,8 +432,7 @@ export class TestWsClient {
 	): Promise<GetAgentsResponse> {
 		return await this.rpcCall((client) =>
 			client.GetAgents({
-				projectSlug: this.projectSlug,
-				...(sessionId ? { sessionId } : {}),
+				...(sessionId ? { sessionId } : { projectSlug: this.projectSlug }),
 			}),
 		);
 	}
@@ -452,8 +442,7 @@ export class TestWsClient {
 	): Promise<GetCommandsResponse> {
 		return await this.rpcCall((client) =>
 			client.GetCommands({
-				projectSlug: this.projectSlug,
-				...(sessionId ? { sessionId } : {}),
+				...(sessionId ? { sessionId } : { projectSlug: this.projectSlug }),
 			}),
 		);
 	}
@@ -463,8 +452,7 @@ export class TestWsClient {
 	): Promise<GetModelsResponse> {
 		return await this.rpcCall((client) =>
 			client.GetModels({
-				projectSlug: this.projectSlug,
-				...(sessionId ? { sessionId } : {}),
+				...(sessionId ? { sessionId } : { projectSlug: this.projectSlug }),
 			}),
 		);
 	}
@@ -682,7 +670,7 @@ export class TestWsClient {
 	): Promise<void> {
 		await this.follow(
 			"family",
-			(client) => client.SubscribeSessionFamily({ projectSlug, sessionId }),
+			(client) => client.SubscribeSessionFamily({ sessionId }),
 			{ projectSlug, familyOf: sessionId },
 			(envelope) => {
 				const rows =
@@ -793,9 +781,7 @@ export class TestWsClient {
 		await this.follow(
 			"session_detail",
 			(client) =>
-				client
-					.SubscribeSessionDetail({ projectSlug, sessionId })
-					.pipe(decodeSessionDetail),
+				client.SubscribeSessionDetail({ sessionId }).pipe(decodeSessionDetail),
 			scope,
 			(envelope) => {
 				const items =
@@ -857,7 +843,7 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId, projectSlug);
 		await this.follow(
 			"input_draft",
-			(client) => client.SubscribeInputDraft({ projectSlug, sessionId }),
+			(client) => client.SubscribeInputDraft({ sessionId }),
 			{ projectSlug, sessionId },
 		);
 	}
@@ -886,7 +872,6 @@ export class TestWsClient {
 		await this.subscribeSessionDetail(sessionId);
 		await this.rpcCall((client) =>
 			client.RenameSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				title,
 			}),

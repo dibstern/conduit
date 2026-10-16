@@ -13,7 +13,7 @@ const CCS_DEFAULT_PORT = 8317;
 
 const instanceServiceOrFail = (operation: string) =>
 	Effect.gen(function* () {
-		// Relays without instance-management config omit this service.
+		// Some test and compatibility contexts omit instance management entirely.
 		const serviceOption = yield* Effect.serviceOption(
 			InstanceManagementServiceTag,
 		);
@@ -27,15 +27,34 @@ const instanceServiceOrFail = (operation: string) =>
 		return serviceOption.value;
 	});
 
-const accountMutationFailure = (id: string) => (error: unknown) => {
-	const cause =
-		error instanceof InstanceManagementServiceError ? error.cause : error;
-	return Effect.fail(
-		cause instanceof AccountChangeRejected
-			? cause
-			: new AccountChangeRejected({ id, reason: formatErrorDetail(cause) }),
+const accountMutationFailure =
+	(id: string, operation: string) => (error: unknown) => {
+		const cause =
+			error instanceof InstanceManagementServiceError ? error.cause : error;
+		return Effect.fail(
+			cause instanceof AccountChangeRejected
+				? cause
+				: new AccountChangeRejected({
+						id,
+						reason:
+							error instanceof InstanceManagementServiceError &&
+							cause instanceof WsRpcError
+								? `${operation} failed: ${cause.message}`
+								: formatErrorDetail(cause),
+					}),
+		);
+	};
+
+// The service wraps daemon RPC errors; surface their message, not the wrapper.
+const instanceFailure = (operation: string) => (error: unknown) =>
+	mapRpcFailure(operation)(
+		error instanceof InstanceManagementServiceError &&
+			error.cause instanceof WsRpcError
+			? new WsRpcError({
+					message: `${operation} failed: ${error.cause.message}`,
+				})
+			: error,
 	);
-};
 
 export const instancesHandlers = {
 	StartInstance: (request) =>
@@ -46,7 +65,7 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("StartInstance"))),
+		}).pipe(Effect.catchAll(instanceFailure("StartInstance"))),
 	StopInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("StopInstance");
@@ -55,7 +74,7 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(mapRpcFailure("StopInstance"))),
+		}).pipe(Effect.catchAll(instanceFailure("StopInstance"))),
 	RemoveInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("RemoveInstance");
@@ -64,7 +83,11 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
+		}).pipe(
+			Effect.catchAll(
+				accountMutationFailure(request.instanceId, "RemoveInstance"),
+			),
+		),
 	RenameInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("RenameInstance");
@@ -76,7 +99,11 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
+		}).pipe(
+			Effect.catchAll(
+				accountMutationFailure(request.instanceId, "RenameInstance"),
+			),
+		),
 	AddInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("AddInstance");
@@ -95,7 +122,9 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(accountMutationFailure(request.name))),
+		}).pipe(
+			Effect.catchAll(accountMutationFailure(request.name, "AddInstance")),
+		),
 	UpdateInstance: (request) =>
 		Effect.gen(function* () {
 			const instanceService = yield* instanceServiceOrFail("UpdateInstance");
@@ -112,7 +141,11 @@ export const instancesHandlers = {
 				projectSlug: request.projectSlug,
 				instances,
 			};
-		}).pipe(Effect.catchAll(accountMutationFailure(request.instanceId))),
+		}).pipe(
+			Effect.catchAll(
+				accountMutationFailure(request.instanceId, "UpdateInstance"),
+			),
+		),
 	SetDefault: (request) =>
 		Effect.fail(
 			new AccountChangeRejected({

@@ -51,6 +51,7 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 				move: () => Effect.succeed("/session-worktree"),
 				inherit: () => Effect.die("unused"),
 				resolve: () => Effect.die("unused"),
+				preview: () => Effect.die("unused"),
 				record: () => Effect.die("unused"),
 				claudeWorktreeState: () => Effect.die("unused"),
 				withLaunch: (effect) => effect,

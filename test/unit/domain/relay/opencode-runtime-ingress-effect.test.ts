@@ -276,6 +276,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 		projectEvent: vi.fn(() =>
 			Effect.succeed({
 				version: 0,
+				projectIds: [],
 				sessionIds: [],
 				removedSessionIds: [],
 				collections: [],
@@ -284,6 +285,7 @@ function makeProjectionRunner(): ProjectionRunnerEffect {
 		projectBatch: vi.fn(() =>
 			Effect.succeed({
 				version: 0,
+				projectIds: [],
 				sessionIds: [],
 				removedSessionIds: [],
 				collections: [],
@@ -334,6 +336,7 @@ function makeFakeIngress(options?: {
 	} satisfies ProviderRuntimeIngestion;
 	const log = makeLogger();
 	const hook = new EffectOpenCodeRuntimeIngress({
+		projectId: "test-project",
 		sql: ((strings: TemplateStringsArray, ...values: unknown[]) =>
 			Effect.succeed(
 				strings.join("?").includes("FROM sessions") &&
