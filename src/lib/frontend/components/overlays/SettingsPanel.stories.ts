@@ -73,6 +73,7 @@ function populateInstances() {
 				id: "claude",
 				name: "Personal Claude",
 				driver: "claude",
+				isDefault: true,
 				configDir: "~/.claude",
 				port: 0,
 				managed: false,

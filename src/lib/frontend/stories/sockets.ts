@@ -19,8 +19,10 @@
 type Listener = (event?: unknown) => void;
 
 // Module scope, not per socket: the RPC client outlives a story and keeps the
-// socket an earlier story opened, so a story cannot swap in a failing one.
+// socket an earlier story opened, so a story's configuration must reach sockets
+// it did not create.
 const failingRequests = new Set<string>();
+let sessionProject: string | null = null;
 
 /**
  * Answers every `tag` request on the fake sockets with a WsRpcError until the
@@ -34,14 +36,13 @@ export function failRpc(tag: string): () => void {
 /**
  * Replaces `globalThis.WebSocket` with a socket that opens on the next tick and
  * stays open. Returns a cleanup that restores the original, suitable for
- * returning straight from a story's `beforeEach`. `sessionProject` is the
+ * returning straight from a story's `beforeEach`. `project` is the
  * project AttachProject reports for a session route, whose transcript then
  * opens empty and settled; null means the session does not exist.
  */
-export function connectedSocket(
-	sessionProject: string | null = null,
-): () => void {
+export function connectedSocket(project: string | null = null): () => void {
 	const RealWebSocket = globalThis.WebSocket;
+	sessionProject = project;
 
 	class OpenSocket {
 		static readonly CONNECTING = 0;
@@ -171,5 +172,6 @@ export function connectedSocket(
 	globalThis.WebSocket = OpenSocket as unknown as typeof WebSocket;
 	return () => {
 		globalThis.WebSocket = RealWebSocket;
+		sessionProject = null;
 	};
 }

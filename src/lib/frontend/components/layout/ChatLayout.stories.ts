@@ -3,6 +3,8 @@ import { expect, waitFor } from "storybook/test";
 import {
 	applyGetModelsResponse,
 	clearDiscoveryState,
+	handleDefaultModelInfo,
+	handleHarnessDefaults,
 	handleModelList,
 } from "../../stores/discovery.svelte.js";
 import { clearFileTreeState } from "../../stores/file-tree.svelte.js";
@@ -31,11 +33,17 @@ import { connectedSocket, failRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import ChatLayout from "./ChatLayout.svelte";
 
+const claudeModel = {
+	id: "claude-sonnet-5",
+	name: "Sonnet 5",
+	provider: "claude",
+};
+
 const claudeProvider = {
 	id: "claude",
 	name: "Claude",
 	configured: true,
-	models: [{ id: "story-model", name: "Story model", provider: "claude" }],
+	models: [claudeModel],
 };
 
 /**
@@ -93,15 +101,29 @@ const meta = {
 		routerState.search = "?p=test-project";
 		attachedProjectState.slug = null;
 		// The fake socket answers no queries, so seed what the server would send:
-		// the project list, an account with its models, and an empty, settled
-		// session list.
+		// the project list, a loaded account with its models, the model a new
+		// session starts on, and an empty, settled session list.
 		const projects = projectState.projects;
-		const instances = instanceState.instances;
+		const { instances, loaded } = instanceState;
 		projectState.projects = [
 			{ slug: "test-project", title: "test-project", folders: ["/src/test"] },
 		];
 		instanceState.instances = [mockClaudeAccount];
+		instanceState.loaded = true;
 		handleModelList({ providers: [claudeProvider] });
+		handleDefaultModelInfo({ model: claudeModel.id, provider: "claude" });
+		handleHarnessDefaults({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "ok",
+				pick: {
+					providerId: "claude",
+					modelId: claudeModel.id,
+					effort: "",
+					contextWindow: "",
+				},
+			},
+		});
 		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
 		applySessionChange({ _tag: "synchronized" });
 		// Static Storybook hosting needs a socket that completes its connection.
@@ -112,6 +134,7 @@ const meta = {
 			restoreSocket();
 			projectState.projects = projects;
 			instanceState.instances = instances;
+			instanceState.loaded = loaded;
 			clearDiscoveryState();
 			attachedProjectState.slug = null;
 			routerState.search = "";
@@ -147,7 +170,18 @@ const expectLayoutVisible: NonNullable<Story["play"]> = async ({
 };
 
 /** On a phone, `/` is the session list screen: the list fills the viewport. */
-export const Default: Story = { play: expectLayoutVisible };
+export const Default: Story = {
+	play: async (context) => {
+		await expectLayoutVisible(context);
+		await waitFor(() => {
+			expect(context.canvasElement.textContent).toContain(
+				"No sessions in test-project",
+			);
+			// A new session starts on the project's default model.
+			expect(context.canvasElement.textContent).not.toContain("Select model");
+		});
+	},
+};
 
 /**
  * The stories below open a session, because on a phone both states belong to the
@@ -182,18 +216,30 @@ function openStorySession(): void {
 			projectSlug: "test-project",
 			instanceId: mockClaudeAccount.id,
 			providers: [claudeProvider],
-			active: { model: "story-model", provider: "claude" },
+			active: { model: claudeModel.id, provider: "claude" },
 		},
 		"story-session",
 	);
 }
+
+/**
+ * A session that fails to attach redirects to `/` with a toast, which still
+ * passes expectLayoutVisible; assert the session's own transcript instead.
+ */
+const expectSessionVisible: NonNullable<Story["play"]> = async (context) => {
+	await expectLayoutVisible(context);
+	await waitFor(() => {
+		expect(routerState.path).toBe(SESSION_PATH);
+		expect(context.canvasElement.textContent).toContain("Beginning of session");
+	});
+};
 
 export const SidebarCollapsed: Story = {
 	beforeEach: () => {
 		uiState.sidebarCollapsed = true;
 		openStorySession();
 	},
-	play: expectLayoutVisible,
+	play: expectSessionVisible,
 };
 
 /**
@@ -209,7 +255,7 @@ export const WithRewindBanner: Story = {
 		openStorySession();
 	},
 	play: async (context) => {
-		await expectLayoutVisible(context);
+		await expectSessionVisible(context);
 		// The banner and transcript use web fonts; capture after they settle.
 		await document.fonts.ready;
 		uiState.rewindActive = true;
@@ -225,7 +271,7 @@ export const WithRewindBanner: Story = {
 async function showFilesTree(
 	context: Parameters<NonNullable<Story["play"]>>[0],
 ): Promise<void> {
-	await expectLayoutVisible(context);
+	await expectSessionVisible(context);
 	setFilesOpen(true);
 	// The pane mounts before its lazily imported panel, which is what listens
 	// for the listing.
