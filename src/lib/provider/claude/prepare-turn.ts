@@ -80,7 +80,12 @@ function objectJson(value: string | null): Record<string, unknown> {
 	}
 }
 
-function historicalPart(part: MessagePartRow): string {
+function historicalPart(part: MessagePartRow, summarizeTools = false): string {
+	if (part.type === "tool" && summarizeTools)
+		return `Tool: ${part.tool_name ?? "unknown"} (${part.status ?? "unknown"})`.replace(
+			/\s+/g,
+			" ",
+		);
 	switch (part.type) {
 		case "text":
 		case "error":
@@ -123,9 +128,15 @@ function historicalPart(part: MessagePartRow): string {
 	}
 }
 
-export const historicalMessageText = (message: MessageWithParts): string =>
+export const historicalMessageText = (
+	message: MessageWithParts,
+	options?: { readonly summarizeTools: boolean },
+): string =>
 	message.parts.length > 0
-		? message.parts.map(historicalPart).filter(Boolean).join("\n")
+		? message.parts
+				.map((part) => historicalPart(part, options?.summarizeTools))
+				.filter(Boolean)
+				.join("\n")
 		: message.text;
 
 /** All decisions stay here; undefined messages asks the caller to page history. */

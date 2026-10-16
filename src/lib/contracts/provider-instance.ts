@@ -45,6 +45,8 @@ export interface ProviderDriverTraits {
 	readonly interactionSink: "permission-asking" | "auto-approving";
 	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
 	readonly supportsNativeResume: boolean;
+	/** session-workspace-fork.test.ts and cursor-fork.test.ts pin native versus digest seeding. */
+	readonly forkStrategy: "native" | "transcript-digest";
 	/** provider-turn-service.test.ts pins cumulative tokens from stored history metadata. */
 	readonly needsPriorHistoryMetadata: boolean;
 	/** AccountSchema pins config-directory logins versus server connection accounts. */
@@ -94,6 +96,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: "claude",
 		interactionSink: "permission-asking",
 		supportsNativeResume: true,
+		forkStrategy: "native",
 		needsPriorHistoryMetadata: true,
 		accountKind: "config-directory",
 		defaultAccountSource: "selection",
@@ -129,6 +132,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: undefined,
 		interactionSink: "auto-approving",
 		supportsNativeResume: false,
+		forkStrategy: "native",
 		needsPriorHistoryMetadata: false,
 		accountKind: "server",
 		defaultAccountSource: "managed",
@@ -163,6 +167,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
 		interactionSink: "auto-approving", // cursor-session-config allows gated calls; sandbox is the interim boundary.
 		supportsNativeResume: false, // cursor-recovery.test.ts pins owned-store resume; cross-account native-thread transfer is unproven.
+		forkStrategy: "transcript-digest", // cursor-fork.test.ts pins isolated agents seeded from bounded, redacted history.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
 		accountKind: "config-directory", // Keep runner account configuration separate from servers.
 		defaultAccountSource: "selection", // Cursor owns its selected account default.

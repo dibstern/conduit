@@ -45,6 +45,7 @@ import {
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
+import { renderCursorForkDigest } from "../../../provider/cursor/cursor-fork-digest.js";
 import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
@@ -732,6 +733,131 @@ const forkSessionInWorkspace = (
 			return {
 				...forked,
 				provider: "opencode" as const,
+			};
+		}
+		if (PROVIDER_DRIVERS[account.driver].forkStrategy === "transcript-digest") {
+			const state = yield* Effect.serviceOption(ProviderStateEffectTag);
+			const projections = yield* Effect.serviceOption(
+				ProjectionRunnerEffectTag,
+			);
+			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+			if (
+				!parent ||
+				readOption._tag === "None" ||
+				eventStore._tag === "None" ||
+				state._tag === "None" ||
+				projections._tag === "None" ||
+				sql._tag === "None"
+			)
+				return yield* new SessionCommandError({
+					operation: "session.forked.transcript",
+					cause: "Transcript fork requires a persisted parent session",
+				});
+			const source = yield* readForkSource(parentSessionId, {
+				...(options?.messageId !== undefined && {
+					messageId: options.messageId,
+				}),
+				sideThread: options?.side !== undefined,
+			}).pipe(
+				Effect.catchTag("ForkRefusal", (cause) =>
+					Effect.fail(
+						new SessionCommandError({
+							operation: "session.forked.transcript",
+							cause,
+							message:
+								cause.reason === "no_transcript"
+									? "This session has no transcript yet. Send a message first."
+									: cause.reason === "no_completed_turn"
+										? "This session has no completed turn yet. Wait for its first reply."
+										: `Fork point ${cause.messageId} was not found in the session history`,
+						}),
+					),
+				),
+				Effect.provideService(SqlClient.SqlClient, sql.value),
+			);
+			const id = randomUUID();
+			const side = options?.side;
+			const title = side
+				? sideThreadTitle(side.title)
+				: `${parent.title} (fork)`;
+			const history = yield* source
+				.copy(id)
+				.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
+			const pick = yield* loadServerSessionPick(
+				account.driver,
+				account.id,
+				parent,
+			);
+			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+			const commitAndSignal = yield* makeCommitAndSignal.pipe(
+				Effect.provideService(EventStoreEffectTag, eventStore.value),
+				Effect.provideService(ProjectionRunnerEffectTag, projections.value),
+				Effect.provideService(SqlClient.SqlClient, sql.value),
+			);
+			yield* commitAndSignal.write((project) =>
+				Effect.gen(function* () {
+					yield* eventStore.value
+						.appendBatch([
+							canonicalEvent(
+								"session.created",
+								id,
+								{
+									sessionId: id,
+									title,
+									provider: account.id,
+									...forkPlacement(parentSessionId, Boolean(side)),
+									...(side
+										? {
+												permissionMode: "ask" as const,
+												startInputId: side.inputId,
+											}
+										: {}),
+									forkPointEvent: source.boundary.messageId,
+									forkPointMessageId: `${source.boundary.messageId}_${id}`,
+									forkPointTimestamp: source.boundary.createdAt,
+								},
+								{ provider: account.id, metadata: { source: "relay" } },
+							),
+							...sessionPickEvents(id, pick),
+						])
+						.pipe(Effect.flatMap(project));
+					if (workspace._tag === "Some")
+						yield* workspace.value.inherit(id, parentSessionId, { project });
+					yield* eventStore.value
+						.appendBatch([
+							...history,
+							canonicalEvent(
+								"session.status",
+								id,
+								{ sessionId: id, status: "idle" },
+								{ provider: account.id, metadata: { source: "relay" } },
+							),
+						])
+						.pipe(Effect.flatMap(project));
+					const messages =
+						yield* readOption.value.getSessionMessagesWithParts(id);
+					yield* state.value.saveUpdates(id, [
+						{
+							key: "cursor.forkDigest",
+							value: renderCursorForkDigest(messages),
+						},
+					]);
+					if (side) yield* setPermissionMode(id, "ask");
+				}),
+			);
+			yield* markSeen(id, Number.MAX_SAFE_INTEGER).pipe(
+				Effect.provideService(EventStoreEffectTag, eventStore.value),
+				Effect.provideService(ProjectionRunnerEffectTag, projections.value),
+				Effect.provideService(SqlClient.SqlClient, sql.value),
+			);
+			const now = Date.now();
+			return {
+				id,
+				title,
+				time: { created: now, updated: now },
+				provider: account.driver,
+				forkMessageId: source.boundary.messageId,
+				forkPointTimestamp: source.boundary.createdAt,
 			};
 		}
 		if (
