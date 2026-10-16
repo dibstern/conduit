@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
@@ -555,6 +556,19 @@ export function daemonStoreAssertions(
 	} finally {
 		db.close();
 	}
+}
+
+export function projectStoreBackup(filename: string): string {
+	const prefix = `${basename(filename)}.imported-`;
+	const backups = readdirSync(dirname(filename)).filter(
+		(name) =>
+			name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)),
+	);
+	if (backups.length !== 1)
+		throw new Error(
+			`Expected one backup of ${filename}, found ${backups.length}`,
+		);
+	return join(dirname(filename), backups[0] ?? "");
 }
 
 export function sourceChecksums(filename: string): {

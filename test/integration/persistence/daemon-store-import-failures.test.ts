@@ -1,16 +1,23 @@
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
+	copyFileSync,
 	existsSync,
+	linkSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
+	renameSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	truncateSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
 import { afterAll, afterEach, beforeEach, expect, it } from "vitest";
@@ -19,6 +26,8 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
+	DaemonStoreImportError,
+	formatDaemonStoreImportReport,
 	importRegisteredProjectStores,
 	type ProjectStoreImportResult,
 	type ProjectStoreSource,
@@ -29,6 +38,7 @@ import {
 	daemonStoreManifest,
 	createProjectStoreFixture as fixture,
 	projectManifest,
+	projectStoreBackup,
 	sourceChecksums,
 	storeTableCounts,
 	writeImportArtifact,
@@ -221,7 +231,9 @@ for (const mode of ["seeded", "imported"] as const) {
 				"SELECT * FROM events WHERE project_id = 'empty'",
 			),
 		).toEqual([]);
-		expect(sourceChecksums(project.sourcePath)).toEqual(before);
+		expect(sourceChecksums(projectStoreBackup(project.sourcePath))).toEqual(
+			before,
+		);
 	});
 
 	it.each([
@@ -291,7 +303,9 @@ for (const mode of ["seeded", "imported"] as const) {
 			projectManifest(daemonStorePath(configDir), project.projectId, expected)
 				.tables,
 		).toEqual(expected.tables);
-		expect(sourceChecksums(project.sourcePath)).toEqual(before);
+		expect(sourceChecksums(projectStoreBackup(project.sourcePath))).toEqual(
+			before,
+		);
 	});
 
 	it(`S7 NULL owners and legacy folder keys are stamped on the ${mode} copy`, async () => {
@@ -308,7 +322,9 @@ for (const mode of ["seeded", "imported"] as const) {
 			projectManifest(daemonStorePath(configDir), project.projectId, expected)
 				.tables,
 		).toEqual(expected.tables);
-		expect(sourceChecksums(project.sourcePath)).toEqual(before);
+		expect(sourceChecksums(projectStoreBackup(project.sourcePath))).toEqual(
+			before,
+		);
 	});
 
 	it(`S8 an unprojected tail is recovered only on the ${mode} copy`, async () => {
@@ -323,10 +339,12 @@ for (const mode of ["seeded", "imported"] as const) {
 				"SELECT title FROM sessions WHERE id = 'ses_tail'",
 			),
 		).toEqual([{ title: "Unprojected tail" }]);
-		expect(sourceChecksums(project.sourcePath)).toEqual(before);
+		expect(sourceChecksums(projectStoreBackup(project.sourcePath))).toEqual(
+			before,
+		);
 		expect(
 			query(
-				project.sourcePath,
+				projectStoreBackup(project.sourcePath),
 				"SELECT title FROM sessions WHERE id = 'ses_tail'",
 			),
 		).toEqual([{ title: "Imported history" }]);
@@ -362,7 +380,9 @@ for (const mode of ["seeded", "imported"] as const) {
 					"SELECT source_path FROM daemon_store_imports WHERE project_id = 'wal'",
 				),
 			).toEqual([{ source_path: project.sourcePath }]);
-			expect(sourceChecksums(project.sourcePath)).toEqual(before);
+			expect(sourceChecksums(projectStoreBackup(project.sourcePath))).toEqual(
+				before,
+			);
 		} finally {
 			writer.close();
 		}
@@ -457,10 +477,10 @@ it("C1 excludes a shared session from every populated scoped table and imports i
 			].includes(name),
 	)) {
 		expect(storeTableCounts(daemonStorePath(configDir))[table], table).toBe(
-			storeTableCounts(owner.sourcePath)[table],
+			storeTableCounts(projectStoreBackup(owner.sourcePath))[table],
 		);
 	}
-	expect(sourceChecksums(later.sourcePath)).toEqual(before);
+	expect(sourceChecksums(projectStoreBackup(later.sourcePath))).toEqual(before);
 });
 
 it("C2 a source containing only shared sessions imports zero events and gets a marker", async () => {
@@ -669,18 +689,543 @@ it("R2 a repaired source imports on retry while healthy marked sources skip norm
 		bad.sourcePath,
 		"DELETE FROM effect_sql_migrations WHERE migration_id = 9999",
 	);
-	// A marker is checked before the hot-journal guard or any copy/migration.
-	writeFileSync(
-		`${good.sourcePath}-journal`,
-		"do not normalize a marked source",
-	);
+	const normalised: string[] = [];
 	const second = await Effect.runPromise(
-		importRegisteredProjectStores(configDir, [bad, good]),
+		runDriver(configDir, [bad, good], {
+			checkpoint: (name, projectId) => {
+				if (name === "normalised") normalised.push(projectId);
+			},
+		}),
 	);
 	for (const result of second) record("R2", result);
 	expect(second.map((r) => r.outcome)).toEqual(["imported", "skipped"]);
-	const expected = projectManifest(bad.sourcePath, bad.projectId);
+	expect(normalised).toEqual([bad.projectId]);
+	const expected = projectManifest(
+		projectStoreBackup(bad.sourcePath),
+		bad.projectId,
+	);
 	expect(
 		projectManifest(daemonStorePath(configDir), bad.projectId, expected).tables,
 	).toEqual(expected.tables);
+});
+
+const completedAt = 1_792_108_800_000;
+const runDriver = importRegisteredProjectStores;
+const backupPath = (project: ProjectStoreSource) =>
+	`${project.sourcePath}.imported-${completedAt}`;
+
+function completedBackup(project: ProjectStoreSource, before: Buffer): void {
+	expect(existsSync(project.sourcePath)).toBe(false);
+	expect(readFileSync(backupPath(project))).toEqual(before);
+	const prefix = `${basename(project.sourcePath)}.imported-`;
+	expect(
+		readdirSync(dirname(project.sourcePath)).filter(
+			(name) =>
+				name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)),
+		),
+	).toEqual([`${prefix}${completedAt}`]);
+}
+
+for (const mode of ["seeded", "imported"] as const) {
+	it(`S9 a source changed at normalised is rejected before it is ${mode}, then retries`, async () => {
+		if (mode === "imported") await seed();
+		const project = await fixture(root, "changing");
+		let writes = 0;
+		const [changed] = await Effect.runPromise(
+			runDriver(configDir, [project], {
+				now: () => completedAt,
+				checkpoint: (name, projectId) => {
+					if (name === "normalised" && projectId === project.projectId) {
+						writes++;
+						edit(
+							project.sourcePath,
+							"UPDATE sessions SET title = 'Concurrent writer'",
+						);
+					}
+				},
+			}),
+		);
+		expect(writes).toBe(1);
+		expect(changed).toMatchObject({ outcome: "source-changed" });
+		noMarker(project.projectId);
+		expect(existsSync(project.sourcePath)).toBe(true);
+		if (changed) record("S9", changed);
+		const beforeRetry = readFileSync(project.sourcePath);
+		const [retried] = await Effect.runPromise(
+			runDriver(configDir, [project], { now: () => completedAt }),
+		);
+		expect(retried).toMatchObject({
+			outcome: mode,
+			backup: backupPath(project),
+		});
+		completedBackup(project, beforeRetry);
+		if (retried) record("S9", retried);
+	});
+}
+
+const crashCases = [
+	["K1", "normalised", "seed"],
+	["K2", "seed-marked", "seed"],
+	["K3", "seed-promoted", "seed"],
+	["K4", "import-copied", "second"],
+	["K5", "import-committed", "second"],
+	["K6", "backup-sidecars", "second"],
+] as const;
+for (const [row, checkpoint, projectId] of crashCases) {
+	it(`${row} recovers a SIGKILL at ${checkpoint} with one complete backup per source`, async () => {
+		const projects = [
+			await fixture(root, "seed", { large: true }),
+			await fixture(root, "second"),
+		] as const;
+		if (checkpoint === "backup-sidecars") {
+			const source = projects[1].sourcePath;
+			const writer = new Database(source);
+			let files: { suffix: string; bytes: Buffer }[];
+			try {
+				writer.pragma("wal_autocheckpoint = 0");
+				writer.exec("UPDATE sessions SET title = 'Committed WAL history'");
+				expect(readFileSync(`${source}-wal`).length).toBeGreaterThan(0);
+				files = ["", "-wal", "-shm"].map((suffix) => ({
+					suffix,
+					bytes: readFileSync(`${source}${suffix}`),
+				}));
+			} finally {
+				writer.close();
+			}
+			// Restore a valid crash snapshot with committed frames and no writer.
+			for (const { suffix, bytes } of files)
+				writeFileSync(`${source}${suffix}`, bytes);
+		}
+		// An empty rollback sidecar is valid and makes K6 a partial backup.
+		for (const project of projects)
+			writeFileSync(`${project.sourcePath}-journal`, "");
+		const originals = projects.map((project) => ({
+			project,
+			bytes: readFileSync(project.sourcePath),
+		}));
+		const uninterrupted = join(root, "uninterrupted");
+		mkdirSync(uninterrupted);
+		const expected = await Effect.runPromise(
+			runDriver(uninterrupted, projects, { now: () => completedAt }),
+		);
+		expect(expected.map((result) => result.outcome)).toEqual([
+			"seeded",
+			"imported",
+		]);
+		const expectedManifest = daemonStoreManifest(
+			daemonStorePath(uninterrupted),
+		);
+		for (const { project, bytes } of originals) {
+			completedBackup(project, bytes);
+			for (const suffix of ["-wal", "-shm", "-journal", ""])
+				if (existsSync(`${backupPath(project)}${suffix}`))
+					renameSync(
+						`${backupPath(project)}${suffix}`,
+						`${project.sourcePath}${suffix}`,
+					);
+		}
+		const child = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"test/helpers/daemon-store-import-crash-child.ts",
+				JSON.stringify({
+					configDir,
+					projects,
+					now: completedAt,
+					checkpoint,
+					projectId,
+				}),
+			],
+			{
+				cwd: process.cwd(),
+				encoding: "utf8",
+				timeout: 25_000,
+				maxBuffer: 64 * 1024,
+			},
+		);
+		expect(child.error, child.stderr.slice(-4000)).toBeUndefined();
+		expect(child.signal, child.stderr.slice(-4000)).toBe("SIGKILL");
+		if (checkpoint === "backup-sidecars") {
+			const second = projects[1];
+			expect(existsSync(`${backupPath(second)}-wal`)).toBe(true);
+			expect(existsSync(`${second.sourcePath}-wal`)).toBe(false);
+			expect(existsSync(`${backupPath(second)}-journal`)).toBe(true);
+			expect(existsSync(backupPath(second))).toBe(false);
+			expect(existsSync(second.sourcePath)).toBe(true);
+		}
+		// K4 deliberately performs no parent read of the daemon store before rerun.
+		const recovered = await Effect.runPromise(
+			runDriver(configDir, projects, { now: () => completedAt }),
+		);
+		expect(
+			recovered.every((result) => !result.error && !result.backupError),
+		).toBe(true);
+		expect(daemonStoreManifest(daemonStorePath(configDir)).hash).toBe(
+			expectedManifest.hash,
+		);
+		for (const { project, bytes } of originals) completedBackup(project, bytes);
+		expect(readdirSync(join(configDir, "daemon-store-import"))).toEqual([]);
+		expect(
+			readdirSync(configDir).filter((name) => name.includes(".tmp")),
+		).toEqual([]);
+		for (const result of recovered) record(row, result);
+	});
+}
+
+it("K6 a link-then-unlink interruption finishes an identical-inode backup", async () => {
+	const project = await fixture(root, "hard-link");
+	const original = readFileSync(project.sourcePath);
+	await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	linkSync(backupPath(project), project.sourcePath);
+	expect(statSync(project.sourcePath).ino).toBe(
+		statSync(backupPath(project)).ino,
+	);
+	const [result] = await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	expect(result).toMatchObject({
+		outcome: "skipped",
+		backup: backupPath(project),
+	});
+	expect(result?.backupError).toBeUndefined();
+	completedBackup(project, original);
+	if (result) record("K6", result);
+});
+
+it("E2 removes only stale import scratch and UUID seed temps before touching projects", async () => {
+	const project = await fixture(root, "preserved");
+	const original = readFileSync(project.sourcePath);
+	await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	const daemon = daemonStorePath(configDir);
+	const daemonBefore = readFileSync(daemon);
+	// Restore the source to prove cleanup itself preserves registered sources.
+	renameSync(backupPath(project), project.sourcePath);
+	const scratch = join(configDir, "daemon-store-import");
+	mkdirSync(join(scratch, "old-nested"), { recursive: true });
+	writeFileSync(join(scratch, "old.db"), "stale copy");
+	writeFileSync(join(scratch, "old-nested", "leftover"), "stale nested file");
+	const stale = `${daemon}.${randomUUID()}.tmp`;
+	for (const suffix of ["", "-wal", "-shm", "-journal"])
+		writeFileSync(`${stale}${suffix}`, "stale seed");
+	const keep = [
+		`${daemon}.not-a-uuid.tmp`,
+		`${daemon}.${randomUUID()}.tmp.extra`,
+		join(configDir, "other.tmp"),
+	];
+	for (const filename of keep) writeFileSync(filename, "keep");
+	const [result] = await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	expect(result?.outcome).toBe("skipped");
+	expect(readFileSync(daemon)).toEqual(daemonBefore);
+	completedBackup(project, original);
+	for (const suffix of ["", "-wal", "-shm", "-journal"])
+		expect(existsSync(`${stale}${suffix}`)).toBe(false);
+	for (const filename of keep)
+		expect(readFileSync(filename, "utf8")).toBe("keep");
+	expect(readdirSync(scratch)).toEqual([]);
+	if (result) record("E2", result);
+});
+
+it.each([
+	"",
+	"-wal",
+	"-shm",
+	"-journal",
+])("E3 an existing %s backup target moves nothing after committing the import", async (suffix) => {
+	const project = await fixture(root, "blocked-backup");
+	writeFileSync(`${project.sourcePath}-journal`, "");
+	const original = readFileSync(project.sourcePath);
+	const target = `${backupPath(project)}${suffix}`;
+	writeFileSync(target, "existing backup bytes");
+	const [result] = await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	expect(result).toMatchObject({
+		outcome: "seeded",
+		backupError: { kind: "io" },
+	});
+	expect(result?.backup).toBeUndefined();
+	expect(readFileSync(project.sourcePath)).toEqual(original);
+	expect(existsSync(`${project.sourcePath}-journal`)).toBe(true);
+	expect(readFileSync(target, "utf8")).toBe("existing backup bytes");
+	for (const other of ["", "-wal", "-shm", "-journal"].filter(
+		(item) => item !== suffix,
+	))
+		expect(existsSync(`${backupPath(project)}${other}`)).toBe(false);
+	expect(
+		query(
+			daemonStorePath(configDir),
+			"SELECT project_id, completed_at FROM daemon_store_imports",
+		),
+	).toEqual([{ project_id: project.projectId, completed_at: completedAt }]);
+	expect(
+		readFileSync(join(configDir, "daemon-store-import-report.txt"), "utf8"),
+	).toContain("backup failed:");
+	if (result) record("E3", result);
+});
+
+it.each([
+	"scratch",
+	"legacy-seed-temp",
+])("E2 preserves a registered source matching the %s cleanup pattern", async (location) => {
+	const project = await fixture(root, "registered-source");
+	await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	const original = readFileSync(backupPath(project));
+	const sourcePath =
+		location === "scratch"
+			? join(configDir, "daemon-store-import", "registered.db")
+			: `${daemonStorePath(configDir)}.${randomUUID()}.tmp`;
+	copyFileSync(backupPath(project), sourcePath);
+	const daemonBefore = readFileSync(daemonStorePath(configDir));
+	try {
+		const [result] = await Effect.runPromise(
+			runDriver(configDir, [{ ...project, sourcePath }], {
+				now: () => completedAt,
+			}),
+		);
+		expect(result?.outcome).toBe("source-changed");
+		expect(readFileSync(sourcePath)).toEqual(original);
+		expect(readFileSync(daemonStorePath(configDir))).toEqual(daemonBefore);
+		if (result) record("E2", result);
+	} finally {
+		rmSync(sourcePath, { force: true });
+	}
+});
+
+it.each([
+	"-wal",
+	"-shm",
+	"-journal",
+])("E3 an unrelated %s backup target stays blocked on a marked rerun", async (suffix) => {
+	const project = await fixture(root, "blocked-sidecar-retry");
+	const original = readFileSync(project.sourcePath);
+	expect(existsSync(`${project.sourcePath}${suffix}`)).toBe(false);
+	expect(existsSync(`${project.sourcePath}-journal`)).toBe(false);
+	const target = `${backupPath(project)}${suffix}`;
+	writeFileSync(target, "unrelated nonempty backup sidecar");
+	const [first] = await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	expect(first).toMatchObject({
+		outcome: "seeded",
+		backupError: { kind: "io" },
+	});
+	const [second] = await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	expect(second).toMatchObject({
+		outcome: "skipped",
+		backupError: { kind: "io" },
+	});
+	expect(second?.backup).toBeUndefined();
+	expect(readFileSync(project.sourcePath)).toEqual(original);
+	expect(readFileSync(target, "utf8")).toBe(
+		"unrelated nonempty backup sidecar",
+	);
+	expect(existsSync(`${project.sourcePath}${suffix}`)).toBe(false);
+	expect(existsSync(backupPath(project))).toBe(false);
+	if (first) record("E3", first);
+	if (second) record("E3", second);
+});
+
+it("E2 preserves a completed canonical backup after its outside source alias dangles", async () => {
+	const project = await fixture(root, "aliased-source");
+	const original = readFileSync(project.sourcePath);
+	const scratch = join(realpathSync(configDir), "daemon-store-import");
+	mkdirSync(scratch, { recursive: true });
+	const canonical = join(scratch, "registered.db");
+	renameSync(project.sourcePath, canonical);
+	const alias = join(root, "outside-source-alias.db");
+	symlinkSync(canonical, alias);
+	const registered = { ...project, sourcePath: alias };
+	const backup = `${canonical}.imported-${completedAt}`;
+	try {
+		const [first] = await Effect.runPromise(
+			runDriver(configDir, [registered], { now: () => completedAt }),
+		);
+		expect(first).toMatchObject({ outcome: "seeded", backup });
+		expect(readFileSync(backup)).toEqual(original);
+		expect(existsSync(alias)).toBe(false);
+		const [second] = await Effect.runPromise(
+			runDriver(configDir, [registered], { now: () => completedAt }),
+		);
+		expect(second?.outcome).toBe("skipped");
+		expect(readFileSync(backup)).toEqual(original);
+		if (first) record("E2", first);
+		if (second) record("E2", second);
+	} finally {
+		for (const source of [canonical, backup])
+			for (const suffix of ["", "-wal", "-shm", "-journal"])
+				rmSync(`${source}${suffix}`, { force: true });
+	}
+});
+
+it("R1 a successful rerun skips every project and preserves daemon and report bytes and mtime", async () => {
+	const projects = [
+		await fixture(root, "first", { large: true }),
+		await fixture(root, "second"),
+	];
+	await Effect.runPromise(
+		runDriver(configDir, projects, { now: () => completedAt }),
+	);
+	const daemonBefore = readFileSync(daemonStorePath(configDir));
+	const report = join(configDir, "daemon-store-import-report.txt");
+	const reportBefore = readFileSync(report);
+	const mtime = statSync(report).mtimeMs;
+	const results = await Effect.runPromise(
+		runDriver(configDir, projects, { now: () => completedAt + 1000 }),
+	);
+	expect(results.map((result) => result.outcome)).toEqual([
+		"skipped",
+		"skipped",
+	]);
+	expect(results.every((result) => !result.backup && !result.backupError)).toBe(
+		true,
+	);
+	expect(readFileSync(daemonStorePath(configDir))).toEqual(daemonBefore);
+	expect(readFileSync(report)).toEqual(reportBefore);
+	expect(statSync(report).mtimeMs).toBe(mtime);
+	for (const result of results) record("R1", result);
+});
+
+it("R3 a fresh source after a completed backup is source-changed and left untouched", async () => {
+	const project = await fixture(root, "recreated");
+	await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt }),
+	);
+	const backupBefore = readFileSync(backupPath(project));
+	await fixture(root, "recreated");
+	await append(project, "fresh-session");
+	const freshBefore = sourceChecksums(project.sourcePath);
+	const manifestBefore = daemonStoreManifest(daemonStorePath(configDir)).hash;
+	const [result] = await Effect.runPromise(
+		runDriver(configDir, [project], { now: () => completedAt + 1000 }),
+	);
+	expect(result?.outcome).toBe("source-changed");
+	expect(result?.backup).toBeUndefined();
+	expect(sourceChecksums(project.sourcePath)).toEqual(freshBefore);
+	expect(readFileSync(backupPath(project))).toEqual(backupBefore);
+	expect(daemonStoreManifest(daemonStorePath(configDir)).hash).toBe(
+		manifestBefore,
+	);
+	expect(
+		readFileSync(join(configDir, "daemon-store-import-report.txt"), "utf8"),
+	).toContain("recreated: source-changed");
+	if (result) record("R3", result);
+});
+
+it("R1 report formatter preserves registration order and exact optional fields", () => {
+	const error = new DaemonStoreImportError({
+		projectId: "bad",
+		kind: "corrupt",
+		message: "invalid database",
+	});
+	const backupError = new DaemonStoreImportError({
+		projectId: "copy",
+		kind: "io",
+		message: "target exists",
+	});
+	expect(
+		formatDaemonStoreImportReport(
+			[
+				{
+					projectId: "copy",
+					outcome: "imported",
+					importedEvents: 0,
+					sharedSessions: ["session-a", "session-b"],
+					backupError,
+				},
+				{
+					projectId: "seed",
+					outcome: "seeded",
+					importedEvents: 34,
+					sharedSessions: [],
+					backup: "/data/events.db.imported-123",
+				},
+				{ projectId: "bad", outcome: "failed", error },
+				{ projectId: "missing", outcome: "absent" },
+				{ projectId: "done", outcome: "skipped" },
+			],
+			0,
+		),
+	).toBe(
+		"Daemon store import 1970-01-01T00:00:00.000Z\n" +
+			"copy: imported, 0 events, shared sessions left out: session-a,session-b, backup failed: target exists\n" +
+			"seed: seeded, 34 events, backup /data/events.db.imported-123\n" +
+			"bad: failed, error corrupt: invalid database\n" +
+			"missing: absent\n" +
+			"done: skipped\n",
+	);
+});
+
+it("C2 a literal byte copy keeps its first owner's sessions and imports zero events", async () => {
+	const owner = await fixture(root, "original", { sessionId: "ses_shared" });
+	const copied = {
+		projectId: "copied",
+		sourcePath: join(realpathSync(root), "copied.db"),
+	};
+	copyFileSync(owner.sourcePath, copied.sourcePath);
+	const original = readFileSync(copied.sourcePath);
+	await Effect.runPromise(
+		runDriver(configDir, [owner], { now: () => completedAt }),
+	);
+	const [result] = await Effect.runPromise(
+		runDriver(configDir, [copied], { now: () => completedAt }),
+	);
+	expect(result).toMatchObject({
+		outcome: "imported",
+		importedEvents: 0,
+		sharedSessions: shared,
+		backup: backupPath(copied),
+	});
+	completedBackup(copied, original);
+	expect(
+		query(
+			daemonStorePath(configDir),
+			"SELECT project_id FROM sessions WHERE id = 'ses_shared'",
+		),
+	).toEqual([{ project_id: "original" }]);
+	if (result) record("C2", result);
+});
+
+it.each([
+	"claude_runner_cursors",
+	"session_git_published",
+])("C3 a fully shared byte copy with differing %s content still collides", async (table) => {
+	const owner = await fixture(root, "original", { sessionId: "ses_shared" });
+	const copied = { projectId: "copied", sourcePath: join(root, "copied.db") };
+	copyFileSync(owner.sourcePath, copied.sourcePath);
+	edit(
+		copied.sourcePath,
+		table === "claude_runner_cursors"
+			? "UPDATE claude_runner_cursors SET result_json = '{\"changed\":true}'"
+			: 'UPDATE session_git_published SET git = \'{"branch":"changed"}\'',
+	);
+	await Effect.runPromise(
+		runDriver(configDir, [owner], { now: () => completedAt }),
+	);
+	const manifestBefore = daemonStoreManifest(daemonStorePath(configDir)).hash;
+	const sourceBefore = sourceChecksums(copied.sourcePath);
+	const [result] = await Effect.runPromise(
+		runDriver(configDir, [copied], { now: () => completedAt }),
+	);
+	expect(result).toMatchObject({
+		outcome: "failed",
+		error: { kind: "collision" },
+	});
+	expect(daemonStoreManifest(daemonStorePath(configDir)).hash).toBe(
+		manifestBefore,
+	);
+	expect(sourceChecksums(copied.sourcePath)).toEqual(sourceBefore);
+	noMarker(copied.projectId);
+	if (result) record("C3", result);
 });

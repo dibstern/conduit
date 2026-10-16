@@ -3,15 +3,20 @@ import {
 	closeSync,
 	existsSync,
 	fsyncSync,
+	linkSync,
+	lstatSync,
 	mkdirSync,
 	openSync,
+	readdirSync,
 	readSync,
 	realpathSync,
 	renameSync,
+	rmSync,
 	statSync,
 	unlinkSync,
+	writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { Data, Effect } from "effect";
@@ -24,6 +29,22 @@ import { daemonStorePath } from "../project-storage.js";
 export interface ProjectStoreSource {
 	readonly projectId: string;
 	readonly sourcePath: string;
+}
+
+export type DaemonStoreImportCheckpoint =
+	| "normalised"
+	| "seed-marked"
+	| "seed-promoted"
+	| "import-copied"
+	| "import-committed"
+	| "backup-sidecars";
+
+export interface DaemonStoreImportOptions {
+	readonly now?: () => number;
+	readonly checkpoint?: (
+		name: DaemonStoreImportCheckpoint,
+		projectId: string,
+	) => void;
 }
 
 export class DaemonStoreImportError extends Data.TaggedError(
@@ -55,6 +76,8 @@ export interface ProjectStoreImportResult {
 	readonly importedEvents?: number;
 	readonly sharedSessions?: readonly string[];
 	readonly error?: DaemonStoreImportError;
+	readonly backup?: string;
+	readonly backupError?: DaemonStoreImportError;
 }
 
 const copiedTables = [
@@ -151,9 +174,13 @@ function reject(
 	});
 }
 
-function fingerprint(filename: string, project: ProjectStoreSource): string {
+function fingerprint(
+	filename: string,
+	project: ProjectStoreSource,
+	suffixes: readonly string[] = ["", "-wal"],
+): string {
 	return JSON.stringify(
-		["", "-wal"].map((suffix) => {
+		suffixes.map((suffix) => {
 			const path = `${filename}${suffix}`;
 			if (!existsSync(path)) return null;
 			const before = statSync(path);
@@ -183,13 +210,14 @@ function fingerprint(filename: string, project: ProjectStoreSource): string {
 	);
 }
 
-function sourceUri(filename: string): string {
+function sourceUri(filename: string, offline = true): string {
 	const uri = pathToFileURL(resolve(filename));
 	uri.searchParams.set("mode", "ro");
 	// SQLite otherwise creates an empty WAL for a checkpointed WAL-mode source.
 	// Offline sources without a WAL can be read immutably; existing WALs must
 	// still be read through ordinary read-only locking to include their frames.
-	if (!existsSync(`${filename}-wal`)) uri.searchParams.set("immutable", "1");
+	if (offline && !existsSync(`${filename}-wal`))
+		uri.searchParams.set("immutable", "1");
 	return uri.href;
 }
 
@@ -352,21 +380,36 @@ function verifySourcePath(
 	return filename;
 }
 
+function readMarker(db: DatabaseSync, projectId: string) {
+	return rows<{
+		source_path: string;
+		source_fingerprint: string;
+		completed_at: number;
+	}>(
+		db,
+		"SELECT source_path, source_fingerprint, completed_at FROM daemon_store_imports WHERE project_id = ?",
+		projectId,
+	)[0];
+}
+
+function sourceFingerprintOf(markerFingerprint: string): string {
+	return JSON.stringify(
+		(JSON.parse(markerFingerprint) as readonly unknown[]).slice(0, 2),
+	);
+}
+
 function markerStatus(
 	db: DatabaseSync,
 	project: ProjectStoreSource,
 ): ProjectStoreImportResult | undefined {
-	const marker = rows<{ source_path: string; source_fingerprint: string }>(
-		db,
-		"SELECT source_path, source_fingerprint FROM daemon_store_imports WHERE project_id = ?",
-		project.projectId,
-	)[0];
+	const marker = readMarker(db, project.projectId);
 	if (!marker) return undefined;
 	return {
 		projectId: project.projectId,
 		outcome:
 			marker.source_path === project.sourcePath &&
-			marker.source_fingerprint === fingerprint(project.sourcePath, project)
+			sourceFingerprintOf(marker.source_fingerprint) ===
+				fingerprint(project.sourcePath, project)
 				? "skipped"
 				: "source-changed",
 	};
@@ -378,6 +421,7 @@ function writeMarker(
 	method: "seeded" | "imported",
 	sourceFingerprint: string,
 	offsets: Offsets,
+	completedAt: number,
 ): void {
 	db.prepare(`INSERT INTO daemon_store_imports
 		(project_id, method, source_path, source_fingerprint, event_offset, outbox_offset, version_offset, rowid_offsets, completed_at)
@@ -385,12 +429,17 @@ function writeMarker(
 		project.projectId,
 		method,
 		project.sourcePath,
-		sourceFingerprint,
+		JSON.stringify([
+			...(JSON.parse(sourceFingerprint) as readonly unknown[]),
+			...(JSON.parse(
+				fingerprint(project.sourcePath, project, ["-shm", "-journal"]),
+			) as readonly unknown[]),
+		]),
 		offsets.event,
 		offsets.outbox,
 		offsets.version,
 		JSON.stringify(offsets.rowid),
-		Date.now(),
+		completedAt,
 	);
 }
 
@@ -420,6 +469,7 @@ function seed(
 	project: ProjectStoreSource,
 	temporary: string,
 	before: string,
+	options: DaemonStoreImportOptions,
 ): ProjectStoreImportResult {
 	const filename = verifySourcePath(configDir, project);
 	if (existsSync(filename))
@@ -442,16 +492,24 @@ function seed(
 							.run(project.projectId);
 				}
 			}
-			writeMarker(copy, project, "seeded", before, {
-				event: 0,
-				outbox: 0,
-				version: 0,
-				rowid: {},
-			});
+			writeMarker(
+				copy,
+				project,
+				"seeded",
+				before,
+				{
+					event: 0,
+					outbox: 0,
+					version: 0,
+					rowid: {},
+				},
+				(options.now ?? Date.now)(),
+			);
 		});
 	} finally {
 		copy.close();
 	}
+	options.checkpoint?.("seed-marked", project.projectId);
 	const fd = openSync(temporary, "r+");
 	try {
 		fsyncSync(fd);
@@ -461,6 +519,7 @@ function seed(
 	if (existsSync(filename))
 		reject(project, "collision", "Daemon store appeared during seed");
 	renameSync(temporary, filename);
+	options.checkpoint?.("seed-promoted", project.projectId);
 	return {
 		projectId: project.projectId,
 		outcome: "seeded",
@@ -498,7 +557,9 @@ function excludeSharedSessions(
 	const db = new DatabaseSync(copyPath);
 	try {
 		db.exec("PRAGMA foreign_keys = OFF");
-		db.prepare("ATTACH DATABASE ? AS daemon").run(sourceUri(destination));
+		db.prepare("ATTACH DATABASE ? AS daemon").run(
+			sourceUri(destination, false),
+		);
 		const shared = rows<{ id: string }>(
 			db,
 			`SELECT s.id FROM (${sessionIds(db, "main")}) s JOIN (${sessionIds(db, "daemon")}) d ON s.id = d.id ORDER BY s.id`,
@@ -540,6 +601,36 @@ function excludeSharedSessions(
 			});
 			if (conditions.length > 0)
 				db.exec(`DELETE FROM ${quote(table)} WHERE ${conditions.join(" OR ")}`);
+		}
+		// A literal copy can also repeat store-independent cache/runner rows.
+		// Only exact duplicates from an entirely shared history are explained by
+		// that copy; conflicting values still reach collisions().
+		if (
+			!rows(
+				db,
+				`SELECT 1 FROM (${sessionIds(db, "main")}) WHERE id IS NOT NULL LIMIT 1`,
+			).length
+		) {
+			for (const table of ["session_git_published", "claude_runner_cursors"]) {
+				if (
+					!tables(db, "main").includes(table) ||
+					!tables(db, "daemon").includes(table)
+				)
+					continue;
+				const fields = columns(db, "main", table).filter(
+					({ hidden }) => hidden === 0,
+				);
+				if (
+					JSON.stringify(fields) !==
+					JSON.stringify(
+						columns(db, "daemon", table).filter(({ hidden }) => hidden === 0),
+					)
+				)
+					continue;
+				db.exec(
+					`DELETE FROM main.${table} AS s WHERE EXISTS (SELECT 1 FROM daemon.${table} d WHERE ${fields.map(({ name }) => `s.${quote(name)} IS d.${quote(name)}`).join(" AND ")})`,
+				);
+			}
 		}
 		return shared;
 	} finally {
@@ -769,6 +860,7 @@ function importOne(
 	project: ProjectStoreSource,
 	copyPath: string,
 	before: string,
+	options: DaemonStoreImportOptions,
 ): ProjectStoreImportResult {
 	const filename = verifySourcePath(configDir, project);
 	if (!existsSync(filename))
@@ -782,7 +874,7 @@ function importOne(
 		const sharedSessions = excludeSharedSessions(copyPath, filename);
 		// Unlike better-sqlite3's default build, node:sqlite enables URI filenames.
 		db.prepare("ATTACH DATABASE ? AS source").run(sourceUri(copyPath));
-		return transaction(db, () => {
+		const result = transaction(db, () => {
 			verifyStore(db, "main", project);
 			const names = verifySource(db, "source", project, true);
 			for (const [table, ddl] of Object.entries(runnerTables)) {
@@ -855,6 +947,7 @@ function importOne(
 					"Translated counters exceed the safe integer range",
 				);
 			copyProject(db, project, names, offsets);
+			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =
 					table === "events"
@@ -897,10 +990,17 @@ function importOne(
 				);
 			if (fingerprint(project.sourcePath, project) !== before)
 				reject(project, "source-changed", "Source changed during import");
-			writeMarker(db, project, "imported", before, offsets);
+			writeMarker(
+				db,
+				project,
+				"imported",
+				before,
+				offsets,
+				(options.now ?? Date.now)(),
+			);
 			return {
 				projectId: project.projectId,
-				outcome: "imported",
+				outcome: "imported" as const,
 				importedEvents: number(
 					db,
 					"SELECT COUNT(*) AS value FROM source.events",
@@ -908,6 +1008,8 @@ function importOne(
 				sharedSessions,
 			};
 		});
+		options.checkpoint?.("import-committed", project.projectId);
+		return result;
 	} finally {
 		db.close();
 	}
@@ -946,6 +1048,7 @@ const attempt = <A>(project: ProjectStoreSource, body: () => A) =>
 function withNormalisedSource(
 	configDir: string,
 	project: ProjectStoreSource,
+	options: DaemonStoreImportOptions,
 	use: (
 		copyPath: string,
 		sourceFingerprint: string,
@@ -1025,6 +1128,7 @@ function withNormalisedSource(
 					Effect.mapError((cause) => importError(project, cause)),
 				);
 				return yield* attempt(project, () => {
+					options.checkpoint?.("normalised", project.projectId);
 					if (fingerprint(project.sourcePath, project) !== before)
 						reject(
 							project,
@@ -1033,7 +1137,7 @@ function withNormalisedSource(
 						);
 					const copy = new DatabaseSync(copyPath, { readOnly: true });
 					try {
-						verifySource(copy, "main", project, false);
+						verifyStore(copy, "main", project);
 					} finally {
 						copy.close();
 					}
@@ -1053,6 +1157,7 @@ function withNormalisedSource(
 export const seedDaemonStore = (
 	configDir: string,
 	source: ProjectStoreSource,
+	options: DaemonStoreImportOptions = {},
 ) =>
 	Effect.gen(function* () {
 		const project = yield* attempt(source, () =>
@@ -1066,13 +1171,17 @@ export const seedDaemonStore = (
 			if (existsSync(verifySourcePath(configDir, project)))
 				reject(project, "collision", "Daemon store already exists");
 		});
-		return yield* withNormalisedSource(configDir, project, (copy, before) =>
-			seed(configDir, project, copy, before),
+		return yield* withNormalisedSource(
+			configDir,
+			project,
+			options,
+			(copy, before) => seed(configDir, project, copy, before, options),
 		);
 	});
 export const importProjectStore = (
 	configDir: string,
 	source: ProjectStoreSource,
+	options: DaemonStoreImportOptions = {},
 ) =>
 	Effect.gen(function* () {
 		const project = yield* attempt(source, () =>
@@ -1098,18 +1207,280 @@ export const importProjectStore = (
 			}
 		});
 		if (marked) return marked;
-		return yield* withNormalisedSource(configDir, project, (copy, before) =>
-			importOne(configDir, project, copy, before),
+		return yield* withNormalisedSource(
+			configDir,
+			project,
+			options,
+			(copy, before) => importOne(configDir, project, copy, before, options),
 		);
 	});
+
+const backupSuffixes = ["-wal", "-shm", "-journal", ""] as const;
+
+function sameFile(a: string, b: string): boolean {
+	if (!existsSync(a) || !existsSync(b)) return false;
+	const left = lstatSync(a);
+	const right = lstatSync(b);
+	return left.dev === right.dev && left.ino === right.ino;
+}
+
+function backupSource(
+	project: ProjectStoreSource,
+	completedAt: number,
+	options: DaemonStoreImportOptions,
+	partial = false,
+): Pick<ProjectStoreImportResult, "backup" | "backupError"> {
+	const backup = `${project.sourcePath}.imported-${completedAt}`;
+	try {
+		// Check every destination before moving the first sidecar. lstat also
+		// catches dangling symlinks, which linkSync would refuse to overwrite.
+		for (const suffix of backupSuffixes) {
+			const source = `${project.sourcePath}${suffix}`;
+			const target = `${backup}${suffix}`;
+			if (!lstatSync(target, { throwIfNoEntry: false })) continue;
+			if (sameFile(source, target)) continue;
+			if (partial && suffix !== "" && !existsSync(source)) continue;
+			throw new DaemonStoreImportError({
+				projectId: project.projectId,
+				kind: "io",
+				message: `Backup target already exists: ${target}`,
+			});
+		}
+		for (const suffix of backupSuffixes) {
+			if (suffix === "")
+				options.checkpoint?.("backup-sidecars", project.projectId);
+			const source = `${project.sourcePath}${suffix}`;
+			if (!existsSync(source)) continue;
+			const target = `${backup}${suffix}`;
+			if (!sameFile(source, target)) linkSync(source, target);
+			unlinkSync(source);
+		}
+		return { backup };
+	} catch (cause) {
+		return {
+			backupError: new DaemonStoreImportError({
+				projectId: project.projectId,
+				kind: "io",
+				message: cause instanceof Error ? cause.message : String(cause),
+				cause,
+			}),
+		};
+	}
+}
+
+function finishBackup(
+	configDir: string,
+	source: ProjectStoreSource,
+	options: DaemonStoreImportOptions,
+	result?: ProjectStoreImportResult,
+): ProjectStoreImportResult | undefined {
+	const filename = daemonStorePath(configDir);
+	if (!existsSync(filename)) return result;
+	const db = new DatabaseSync(filename);
+	let marker: ReturnType<typeof readMarker>;
+	try {
+		marker = readMarker(db, source.projectId);
+	} finally {
+		db.close();
+	}
+	if (!marker) return result;
+	const skipped: ProjectStoreImportResult = result ?? {
+		projectId: source.projectId,
+		outcome: "skipped",
+	};
+	if (!existsSync(source.sourcePath)) return skipped;
+	const project = { ...source, sourcePath: realpathSync(source.sourcePath) };
+	if (result)
+		return {
+			...result,
+			...backupSource(project, marker.completed_at, options),
+		};
+	const backup = `${marker.source_path}.imported-${marker.completed_at}`;
+	const partial =
+		(!existsSync(backup) &&
+			backupSuffixes.some(
+				(suffix) => suffix !== "" && existsSync(`${backup}${suffix}`),
+			)) ||
+		sameFile(project.sourcePath, backup);
+	if (partial) {
+		// Check moved backup files, never the partially moved source. Original
+		// SHM/journal evidence is appended to the .4 main/WAL fingerprint.
+		const expected = JSON.parse(
+			marker.source_fingerprint,
+		) as readonly unknown[];
+		const moved = ["-wal", "-shm", "-journal"];
+		const actual = JSON.parse(
+			fingerprint(backup, project, moved),
+		) as readonly unknown[];
+		for (const [index, suffix] of moved.entries()) {
+			if (
+				existsSync(`${backup}${suffix}`) &&
+				!existsSync(`${project.sourcePath}${suffix}`) &&
+				JSON.stringify(expected[index + 1]) !== JSON.stringify(actual[index])
+			)
+				return {
+					...skipped,
+					backupError: new DaemonStoreImportError({
+						projectId: project.projectId,
+						kind: "io",
+						message: `Backup sidecar does not match the imported source: ${backup}${suffix}`,
+					}),
+				};
+		}
+	}
+
+	if (
+		project.sourcePath === marker.source_path &&
+		(partial ||
+			fingerprint(project.sourcePath, project) ===
+				sourceFingerprintOf(marker.source_fingerprint))
+	)
+		return {
+			...skipped,
+			...backupSource(project, marker.completed_at, options, partial),
+		};
+	return { projectId: project.projectId, outcome: "source-changed" };
+}
+
+function clearImportScratch(
+	configDir: string,
+	projects: readonly ProjectStoreSource[],
+): void {
+	mkdirSync(configDir, { recursive: true });
+	const directory = realpathSync(configDir);
+	// Registered names and their resolved aliases take precedence over scratch
+	// patterns. Preserve their sidecars and completed backups on later runs too.
+	const sources = projects.flatMap(({ sourcePath }) => [
+		resolve(sourcePath),
+		...(existsSync(sourcePath) ? [realpathSync(sourcePath)] : []),
+	]);
+	const filename = daemonStorePath(directory);
+	if (existsSync(filename)) {
+		const db = new DatabaseSync(filename);
+		try {
+			for (const { source_path } of rows<{ source_path: string }>(
+				db,
+				"SELECT source_path FROM daemon_store_imports",
+			))
+				sources.push(source_path);
+		} finally {
+			db.close();
+		}
+	}
+	const remove = (filename: string): void => {
+		const path = resolve(filename);
+		if (
+			sources.some(
+				(source) =>
+					path === source ||
+					backupSuffixes.some((suffix) => path === `${source}${suffix}`) ||
+					(path.startsWith(`${source}.imported-`) &&
+						/^\d+(?:-(?:wal|shm|journal))?$/.test(
+							path.slice(`${source}.imported-`.length),
+						)),
+			)
+		)
+			return;
+		if (sources.some((source) => source.startsWith(`${path}${sep}`))) {
+			if (lstatSync(filename).isDirectory())
+				for (const name of readdirSync(filename)) remove(join(filename, name));
+			return;
+		}
+		rmSync(filename, { recursive: true, force: true });
+	};
+	const folder = join(directory, "daemon-store-import");
+	if (existsSync(folder)) remove(folder);
+	if (!existsSync(folder)) mkdirSync(folder);
+	const prefix = `${basename(daemonStorePath(directory))}.`;
+	const temporary =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp(?:-(?:wal|shm|journal))?$/i;
+	for (const name of readdirSync(directory)) {
+		const filename = join(directory, name);
+		if (
+			name.startsWith(prefix) &&
+			temporary.test(name.slice(prefix.length)) &&
+			!lstatSync(filename).isDirectory()
+		)
+			remove(filename);
+	}
+}
+
+export function formatDaemonStoreImportReport(
+	results: readonly ProjectStoreImportResult[],
+	timestamp: number,
+): string {
+	return `${[
+		`Daemon store import ${new Date(timestamp).toISOString()}`,
+		...results.map(
+			(result) =>
+				`${result.projectId}: ${result.outcome}` +
+				(result.importedEvents === undefined
+					? ""
+					: `, ${result.importedEvents} events`) +
+				(result.sharedSessions?.length
+					? `, shared sessions left out: ${result.sharedSessions.join(",")}`
+					: "") +
+				(result.error
+					? `, error ${result.error.kind}: ${result.error.message}`
+					: "") +
+				(result.backup ? `, backup ${result.backup}` : "") +
+				(result.backupError
+					? `, backup failed: ${result.backupError.message}`
+					: ""),
+		),
+	].join("\n")}\n`;
+}
+
+function writeReport(
+	configDir: string,
+	results: readonly ProjectStoreImportResult[],
+	options: DaemonStoreImportOptions,
+): void {
+	if (
+		!results.some(
+			(result) =>
+				!["skipped", "absent"].includes(result.outcome) ||
+				result.backup ||
+				result.backupError,
+		)
+	)
+		return;
+	const filename = join(configDir, "daemon-store-import-report.txt");
+	const temporary = `${filename}.${randomUUID()}.tmp`;
+	try {
+		const fd = openSync(temporary, "wx", 0o600);
+		try {
+			writeFileSync(
+				fd,
+				formatDaemonStoreImportReport(results, (options.now ?? Date.now)()),
+			);
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+		renameSync(temporary, filename);
+	} finally {
+		if (existsSync(temporary)) unlinkSync(temporary);
+	}
+}
 
 /** Only the supplied registered sources participate; failed projects stay isolated. */
 export const importRegisteredProjectStores = (
 	configDir: string,
 	projects: readonly ProjectStoreSource[],
+	options: DaemonStoreImportOptions = {},
 ): Effect.Effect<readonly ProjectStoreImportResult[]> =>
 	Effect.gen(function* () {
+		yield* Effect.sync(() => clearImportScratch(configDir, projects));
 		const results = new Map<string, ProjectStoreImportResult>();
+		const failed = (
+			project: ProjectStoreSource,
+			error: DaemonStoreImportError,
+		): ProjectStoreImportResult => ({
+			projectId: project.projectId,
+			outcome: error.kind === "source-changed" ? "source-changed" : "failed",
+			error,
+		});
 		if (!existsSync(daemonStorePath(configDir))) {
 			const sized = projects
 				.map((project) => {
@@ -1125,39 +1496,59 @@ export const importRegisteredProjectStores = (
 						a.project.projectId.localeCompare(b.project.projectId),
 				);
 			for (const { project } of sized) {
-				const result = yield* seedDaemonStore(configDir, project).pipe(
+				const result = yield* seedDaemonStore(configDir, project, options).pipe(
 					Effect.either,
 				);
 				if (result._tag === "Right") {
-					results.set(project.projectId, result.right);
+					const completed = yield* attempt(project, () =>
+						finishBackup(configDir, project, options, result.right),
+					).pipe(Effect.either);
+					results.set(
+						project.projectId,
+						completed._tag === "Right"
+							? (completed.right ?? result.right)
+							: failed(project, completed.left),
+					);
 					if (result.right.outcome === "seeded") break;
-					continue;
-				}
-				results.set(project.projectId, {
-					projectId: project.projectId,
-					outcome: "failed",
-					error: result.left,
-				});
+				} else results.set(project.projectId, failed(project, result.left));
 			}
 		}
 		for (const project of projects) {
 			if (results.has(project.projectId)) continue;
-			const result = yield* importProjectStore(configDir, project).pipe(
-				Effect.either,
-			);
+			const marked = yield* attempt(project, () =>
+				finishBackup(configDir, project, options),
+			).pipe(Effect.either);
+			if (marked._tag === "Left") {
+				results.set(project.projectId, failed(project, marked.left));
+				continue;
+			}
+			if (marked.right) {
+				results.set(project.projectId, marked.right);
+				continue;
+			}
+			const result = yield* importProjectStore(
+				configDir,
+				project,
+				options,
+			).pipe(Effect.either);
+			if (result._tag === "Left") {
+				results.set(project.projectId, failed(project, result.left));
+				continue;
+			}
+			const completed = yield* attempt(project, () =>
+				finishBackup(configDir, project, options, result.right),
+			).pipe(Effect.either);
 			results.set(
 				project.projectId,
-				result._tag === "Right"
-					? result.right
-					: {
-							projectId: project.projectId,
-							outcome: "failed",
-							error: result.left,
-						},
+				completed._tag === "Right"
+					? (completed.right ?? result.right)
+					: failed(project, completed.left),
 			);
 		}
-		return projects.flatMap((project) => {
+		const ordered = projects.flatMap((project) => {
 			const result = results.get(project.projectId);
 			return result ? [result] : [];
 		});
+		yield* Effect.sync(() => writeReport(configDir, ordered, options));
+		return ordered;
 	});

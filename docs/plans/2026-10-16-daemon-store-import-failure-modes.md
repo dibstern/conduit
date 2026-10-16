@@ -44,6 +44,13 @@ the driver is rerun in process. For each checkpoint, the rerun must leave:
 - every source backed up exactly once;
 - no stale temp files.
 
+Backups move `-wal`, `-shm`, `-journal`, then the main file to
+`<source>.imported-<completed_at><suffix>`. Every target is checked before
+anything moves. Each move links the target, then unlinks the source. A retry
+finishes a partial sidecar backup without checking the source fingerprint;
+moved sidecars must match the marker's recorded fingerprints. If both names
+have the same device and inode, it unlinks the source name.
+
 | # | Checkpoint |
 |---|------------|
 | K1 | `normalised`: the copy is migrated and recovered, nothing promoted |
@@ -58,8 +65,8 @@ the driver is rerun in process. For each checkpoint, the rerun must leave:
 | # | Failure | Expected |
 |---|---------|----------|
 | E1 | A statement fails mid-transaction (disk full, I/O). Simulated by a destination trigger that raises. | That project rolls back. The daemon store is logically unchanged and later projects still import. |
-| E2 | Stale temp files from an earlier crash (`daemon-store-import/`, the seed temp) | Removed at the start of the driver. Never mistaken for a source or the daemon store. |
-| E3 | The backup name already exists | That project's backup fails and is reported, and nothing is overwritten. The import itself stays committed. |
+| E2 | Stale temp files from an earlier crash (`daemon-store-import/`, the seed temp) | Removed at the start of the driver. Registered sources, resolved aliases and marked backups survive even if their paths match a temp pattern. |
+| E3 | Any backup main or sidecar target already exists | Every target is checked before moving anything. That project's backup fails and moves nothing; nothing is overwritten. The import stays committed and the failure is reported. |
 | E4 | The largest store fails to seed | The next largest seeds. The failed one is reported, and it is retried on the next run. |
 
 ## Retries and idempotency

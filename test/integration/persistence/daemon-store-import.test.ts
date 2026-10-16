@@ -5,7 +5,6 @@ import {
 	copyFileSync,
 	mkdirSync,
 	mkdtempSync,
-	realpathSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -32,6 +31,7 @@ import {
 	type ProjectManifest,
 	type ProjectStoreFixture,
 	projectManifest,
+	projectStoreBackup,
 	sourceChecksums,
 	storeImportPosition,
 	storeTableCounts,
@@ -192,8 +192,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		}
 		evidence.sourceChecksums = projects.every(
 			(project, index) =>
-				JSON.stringify(sourceChecksums(project.sourcePath)) ===
-				JSON.stringify(checksums[index]),
+				JSON.stringify(
+					sourceChecksums(projectStoreBackup(project.sourcePath)),
+				) === JSON.stringify(checksums[index]),
 		);
 		expect(evidence.sourceChecksums).toBe(true);
 		const counts = storeTableCounts(destination);
@@ -240,7 +241,10 @@ it("imports complete projects without changing sources and rolls back rejected p
 			independent.map((entry) => entry.outcome),
 			JSON.stringify(independent),
 		).toEqual(["skipped", "imported"]);
-		const deltaBefore = projectManifest(delta.sourcePath, delta.projectId);
+		const deltaBefore = projectManifest(
+			projectStoreBackup(delta.sourcePath),
+			delta.projectId,
+		);
 		expect(
 			projectManifest(destination, delta.projectId, deltaBefore).tables,
 		).toEqual(deltaBefore.tables);
@@ -375,9 +379,17 @@ it("imports complete projects without changing sources and rolls back rejected p
 			cleanupRetained.close();
 		}
 
-		walWriter
-			.prepare("UPDATE sessions SET history_complete = 1 WHERE id = ?")
-			.run("ses_beta");
+		walWriter.close();
+		walWriter = undefined;
+		copyFileSync(projectStoreBackup(beta.sourcePath), beta.sourcePath);
+		const recreated = new Database(beta.sourcePath);
+		try {
+			recreated
+				.prepare("UPDATE sessions SET history_complete = 1 WHERE id = ?")
+				.run("ses_beta");
+		} finally {
+			recreated.close();
+		}
 		const changed = await Effect.runPromise(
 			importRegisteredProjectStores(configDir, [beta]),
 		);
@@ -520,7 +532,7 @@ it("imports complete projects without changing sources and rolls back rejected p
 				projectManifest(symlinkDestination, source.projectId, prior).tables,
 				`WAL frames for ${source.projectId}`,
 			).toEqual(prior.tables);
-			expect(sourceChecksums(source.sourcePath)).toEqual(
+			expect(sourceChecksums(projectStoreBackup(source.sourcePath))).toEqual(
 				symlinkChecksums[index],
 			);
 		}
@@ -540,7 +552,7 @@ it("imports complete projects without changing sources and rolls back rejected p
 							"SELECT source_path FROM daemon_store_imports WHERE project_id = ?",
 						)
 						.get(source.projectId),
-				).toEqual({ source_path: realpathSync(source.sourcePath) });
+				).toEqual({ source_path: source.sourcePath });
 		} finally {
 			markers.close();
 		}

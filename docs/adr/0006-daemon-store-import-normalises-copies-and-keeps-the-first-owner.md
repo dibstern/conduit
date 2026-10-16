@@ -45,21 +45,33 @@ ownership.
   is left out. That covers the session row and every row scoped to it,
   including its messages and parts. The copy stays in that project's backup,
   and the report names it.
+- An entirely shared byte copy also leaves out identical Git cache and runner
+  cursor rows already in the daemon store. Different values still collide.
 - First means the seed (the largest store), then registration order.
 - Any other key collision fails that project and rolls it back. Such
   collisions mean duplicated or corrupt data, and no rule can merge them
   safely.
 
 **Backups.** After a project's marker commits, its source files are renamed in
-place to `<name>.imported-<completed_at>`. The sidecars move first (`-wal`,
-`-shm`, `-journal`) and the main file last. An existing file is never
-overwritten.
+place to `<name>.imported-<completed_at>`. They move in the order `-wal`,
+`-shm`, `-journal`, then the main file, so the backup keeps its SQLite sidecar
+names. Every target is checked before anything moves. An existing target
+stops the backup without moving any files; the import stays committed.
+Each move links the target, then unlinks the source, so nothing is overwritten.
+If a crash leaves both names on the same device and inode, the retry unlinks
+the source name. The marker records sidecar fingerprints too, so an unrelated
+target cannot become a trusted partial backup on retry.
 
 On the next run, a project that has a marker is handled in this order:
 
-1. A partial backup is finished first, before any fingerprint check.
-2. If its source is still at the original path with a different fingerprint,
-   the project reports `source-changed` and the source is left untouched.
+1. An absent source main means the project is skipped.
+2. A backup sidecar without its backup main means the partial backup is
+   finished without checking the source fingerprint. Moved sidecars must
+   match the marker. A linked main with both names on the same device and
+   inode is finished too.
+3. An unchanged source is backed up using the marker's `completed_at`.
+4. A source with a different fingerprint reports `source-changed` and is
+   left untouched.
 
 **Report.** A run that changes or fails anything writes
 `<configDir>/daemon-store-import-report.txt` atomically. It has one line per
