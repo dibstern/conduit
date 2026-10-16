@@ -55,7 +55,7 @@ export function cursorSessionConfig(input: {
 				"task",
 			],
 			disallowedTools: ["askQuestion"],
-			customToolNames: [],
+			customToolNames: ["ask_user"],
 			subagentInherit: { reportedWorkspacePath: input.workspaceRoot },
 			credentialFingerprint: input.credential.fingerprint,
 		},

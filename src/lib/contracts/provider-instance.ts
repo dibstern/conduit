@@ -178,8 +178,8 @@ export const PROVIDER_DRIVERS = {
 		// Cloud runs, handles reacquired after restart and images get revert_to_followup and requeue (xqsg.20).
 		steering: "native",
 		readOnlySubagents: true, // cursor-subagents.test.ts pins rejection of child input.
-		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
-		promptsSurviveRestart: false,
+		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.
+		promptsSurviveRestart: true,
 	},
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 
