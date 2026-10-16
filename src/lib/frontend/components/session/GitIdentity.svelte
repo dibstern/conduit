@@ -171,15 +171,32 @@
 	const noticeLabels = $derived([warningLabel, movedBack ? movedBackLabel : undefined, workspaceMissing ? missingLabel : undefined].filter((notice) => notice !== undefined));
 	const projectFloor = $derived(Math.min(project.length, 4.5));
 	const branchFloor = $derived(Math.min(checkout?.length ?? 0, 6.5));
-	// Floor = labels + slash, icon, padding, divider and fixed marks. It wins over the nominal cap for long operation labels.
-	const minimumWidth = $derived.by(() => {
-		const marks = [
-			!phone && upstreamMark ? `${upstreamMark.length}ch` : null,
-			operation ? `${operation.length}ch` : null,
-			showMerged ? "6ch" : null,
+	// A thin control drops the project, then the branch and marks, rather than run under send.
+	type Fit = "full" | "branch" | "icon";
+	// Floor = labels + slash and fixed marks in ch, plus icon, gaps, padding, chevron and notices in px. It wins over the nominal cap for long operation labels.
+	function floor(fit: Fit) {
+		const marks = fit === "icon" ? [] : [
+			!phone && upstreamMark ? upstreamMark.length : null,
+			operation ? operation.length : null,
+			showMerged ? 6 : null,
 		].filter((width) => width !== null);
-		const gaps = 5 * (1 + (checkout ? 2 : 0) + marks.length + (control ? 1 : 0));
-		return `calc(${projectFloor + (checkout ? 1 + branchFloor : 0)}ch + 12px + ${control ? 22 : 0}px + ${gaps}px${noticeLabels.map(() => " + 17px").join("")}${marks.map((width) => ` + ${width}`).join("")})`;
+		const labels = fit === "icon" ? [] : fit === "branch" ? [branchFloor] : checkout ? [projectFloor, 1, branchFloor] : [projectFloor];
+		const widths = [...labels, ...marks];
+		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 22 + 5 : 0) + 17 * noticeLabels.length };
+	}
+	let room = $state(0);
+	let hundredCh = $state(0);
+	const fit = $derived.by((): Fit => {
+		if (!control || !room || !hundredCh) return "full";
+		const fits = (candidate: Fit) => {
+			const { ch, px } = floor(candidate);
+			return (ch * hundredCh) / 100 + px <= room;
+		};
+		return fits("full") ? "full" : checkout && fits("branch") ? "branch" : "icon";
+	});
+	const minimumWidth = $derived.by(() => {
+		const { ch, px } = floor(fit);
+		return `calc(${ch}ch + ${px}px)`;
 	});
 
 	async function copy(text: string) {
@@ -204,16 +221,20 @@
 					<span data-part="dirty" class="absolute -right-[2px] -bottom-[1px] size-[6px] rounded-full bg-warning ring-[1.5px] {row ? 'ring-bg-surface' : 'ring-input-bg'}" title="Uncommitted changes"><span class="sr-only">Uncommitted changes</span></span>
 				{/if}
 			</span>
-			<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
-			{#if checkout}
-				<span class="shrink-0 text-text-dimmer" aria-hidden="true">/</span>
-				<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+			{#if fit === "full"}
+				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
+				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">/</span>{/if}
 			{/if}
-			{#if !phone && upstreamMark}
-				<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
+			{#if fit !== "icon"}
+				{#if checkout}
+					<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+				{/if}
+				{#if !phone && upstreamMark}
+					<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
+				{/if}
+				{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
+				{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{/if}
-			{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
-			{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{#if warningLabel}
 				<span data-part="warning" class="inline-flex shrink-0 text-warning" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
 			{/if}
@@ -239,8 +260,8 @@
 			</Button>
 		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
-			<!-- The wrapper and button share a font size so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control' : ''} text-[11.5px] inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`}><Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="muted" hoverFill="none" touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : "max-w-full gap-[5px] font-normal font-brand"}
+			<!-- The wrapper, ruler and button share a font so the ch floors agree. -->
+			<span class="git-pill {control ? 'git-control' : ''} text-[11.5px] font-brand inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} bind:clientWidth={room}>{#if control}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="muted" hoverFill="none" touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : "max-w-full gap-[5px] font-normal font-brand"}
 				style={`min-width: ${minimumWidth}`}
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				{@render identity()}
@@ -371,7 +392,10 @@
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
 	.git-pill { max-width: 100%; flex-shrink: 1; }
-	.git-pill.git-control { min-width: 0; }
+	/* A control fills the room beside send, so its width is the room fit compares floors against. */
+	.git-pill.git-control { position: relative; flex: 1 1 0; min-width: 0; justify-content: end; }
+	/* 100ch in the pill's font turns ch floors into px. It extends left from the pill, so it never adds scroll. */
+	.ruler { position: absolute; top: 0; right: 0; width: 100ch; height: 0; visibility: hidden; pointer-events: none; }
 	.commit-icon { display: flex; align-items: center; width: 12px; }
 	.commit-icon::before, .commit-icon::after { content: ""; flex: 1; border-top: 1px solid currentColor; }
 </style>
