@@ -15,30 +15,31 @@ export const cursorTurnHandlers: StepHandler[] = [
 		match: /^the Cursor turn relay is ready$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			const getModels = rpc.getResponseHandler("GetModels");
-			rpc.setHandler("GetModels", (payload, request) =>
-				payload["sessionId"] === sessionId ||
-				payload["instanceId"] === "cursor-work"
-					? {
-							projectSlug: "myapp",
-							instanceId: "cursor-work",
-							providers: [],
-							active: { provider: "cursor", model: "composer-2.5" },
-						}
-					: getModels?.(payload, request),
-			);
-			const getAgents = rpc.getResponseHandler("GetAgents");
-			rpc.setHandler("GetAgents", (payload, request) =>
-				payload["sessionId"] === sessionId ||
-				payload["instanceId"] === "cursor-work"
-					? {
-							projectSlug: "myapp",
-							instanceId: "cursor-work",
-							providerScope: { id: "cursor", name: "Cursor" },
-							agents: [],
-						}
-					: getAgents?.(payload, request),
-			);
+			const { GetModels: getModels, GetAgents: getAgents } = rpc.stubs;
+			if (!getModels || !getAgents)
+				throw new Error("The Cursor turn wraps the mockup's catalogue stubs");
+			rpc.setStubs({
+				GetModels: (payload) =>
+					("sessionId" in payload && payload.sessionId === sessionId) ||
+					payload.instanceId === "cursor-work"
+						? {
+								projectSlug: "myapp",
+								instanceId: "cursor-work",
+								providers: [],
+								active: { provider: "cursor", model: "composer-2.5" },
+							}
+						: getModels(payload),
+				GetAgents: (payload) =>
+					("sessionId" in payload && payload.sessionId === sessionId) ||
+					payload.instanceId === "cursor-work"
+						? {
+								projectSlug: "myapp",
+								instanceId: "cursor-work",
+								providerScope: { id: "cursor", name: "Cursor" },
+								agents: [],
+							}
+						: getAgents(payload),
+			});
 			rpc.setResponse("CancelSession", { ok: true });
 		},
 	},

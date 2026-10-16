@@ -14,6 +14,7 @@ Scenario Outline: send with the selected Cursor model and receive a streamed rep
   And I close the model picker
   Then the draft composer uses Cursor with model composer-2.5
   And the composer explains that Cursor runs without per-call approval
+  And the composer region visually matches cursor-turn-composer at <threshold> percent
   When I type Say hello into the composer
   And I send the composer message
   Then the relay creates a Cursor session with model composer-2.5
@@ -33,9 +34,9 @@ Scenario Outline: send with the selected Cursor model and receive a streamed rep
   And the composer explains that Cursor runs without per-call approval
 
 Examples:
-  | tier  |
-  | wide  |
-  | phone |
+  | tier  | threshold |
+  | wide  | 98        |
+  | phone | 98        |
 
 Scenario Outline: interrupt a streaming Cursor reply
   Given the conduit app is served with the connected mockup

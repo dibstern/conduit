@@ -86,23 +86,26 @@ export const harnessHandlers: StepHandler[] = [
 					},
 				],
 			});
-			const getModels = rpc.getResponseHandler("GetModels");
-			rpc.setHandler("GetModels", (payload, request) =>
-				payload["instanceId"] === "cursor-work"
-					? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
-					: getModels?.(payload, request),
-			);
-			const getAgents = rpc.getResponseHandler("GetAgents");
-			rpc.setHandler("GetAgents", (payload, request) =>
-				payload["instanceId"] === "cursor-work"
-					? {
-							projectSlug: "myapp",
-							instanceId: "cursor-work",
-							providerScope: { id: "cursor", name: "Cursor" },
-							agents: [],
-						}
-					: getAgents?.(payload, request),
-			);
+			// Wrap the mockup's typed stubs: a handler override would answer every
+			// other account with nothing, failing its requests.
+			const { GetModels: getModels, GetAgents: getAgents } = rpc.stubs;
+			if (!getModels || !getAgents)
+				throw new Error("Cursor discovery wraps the mockup's catalogue stubs");
+			rpc.setStubs({
+				GetModels: (payload) =>
+					payload.instanceId === "cursor-work"
+						? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
+						: getModels(payload),
+				GetAgents: (payload) =>
+					payload.instanceId === "cursor-work"
+						? {
+								projectSlug: "myapp",
+								instanceId: "cursor-work",
+								providerScope: { id: "cursor", name: "Cursor" },
+								agents: [],
+							}
+						: getAgents(payload),
+			});
 		},
 	},
 	{

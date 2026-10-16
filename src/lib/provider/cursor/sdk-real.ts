@@ -246,12 +246,12 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 						reason: "Cursor SDK sandbox initialization API changed",
 					});
 				}
-				await agent.getExecutor();
-			} catch {
-				throw new CursorSdkFailure({
-					operation: "sandbox.prime",
-					reason:
-						"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.",
+				await agent.getExecutor().catch(() => {
+					throw new CursorSdkFailure({
+						operation: "sandbox.prime",
+						reason:
+							"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.",
+					});
 				});
 			} finally {
 				await wrapAgent(agent).close();
