@@ -54,6 +54,24 @@ function tsFiles(dir: string): string[] {
 }
 
 describe("ProviderRuntimeEvent contracts", () => {
+	it("rejects daemon-owned text.surfaced verdicts as provider ingress", () => {
+		expect(
+			Either.isLeft(
+				decodeEither({
+					...baseEvent,
+					type: "text.surfaced",
+					data: {
+						messageId: "m1",
+						partId: "p1",
+						ordinal: 1,
+						categorySetVersion: 1,
+						model: "jev",
+						probabilities: null,
+					},
+				}),
+			),
+		).toBe(true);
+	});
 	it("keeps canonical and provider-runtime payload vocabularies separate", () => {
 		expectTypeOf<keyof EventPayloadMap>().toEqualTypeOf<CanonicalEventType>();
 		expectTypeOf<

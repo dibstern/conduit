@@ -51,6 +51,8 @@ export type MessageSnapshotPayload = PayloadOf<"message.snapshot">;
 
 export type TextDeltaPayload = PayloadOf<"text.delta">;
 
+export type TextSurfacedPayload = PayloadOf<"text.surfaced">;
+
 export type ThinkingStartPayload = PayloadOf<"thinking.start">;
 
 export type ThinkingDeltaPayload = PayloadOf<"thinking.delta">;
@@ -508,6 +510,21 @@ export const CanonicalEvents = {
 			messageId: Schema.String,
 			partId: Schema.String,
 			text: Schema.String,
+		}),
+	),
+	"text.surfaced": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			partId: Schema.String,
+			/** Stable 1-based position among all of the turn's mid-turn text parts. */
+			ordinal: Schema.Int.pipe(Schema.positive()),
+			/** Provenance only; consumers use the current category set for levels. */
+			categorySetVersion: Schema.Number,
+			model: Schema.String,
+			/** Null records a failed judgment, distinct from no verdict yet. */
+			probabilities: Schema.NullOr(
+				Schema.Record({ key: Schema.String, value: Schema.Number }),
+			),
 		}),
 	),
 	"thinking.start": live(
@@ -975,6 +992,9 @@ export type EventPayloadMap = { [K in CanonicalEventType]: PayloadOf<K> };
 export const CANONICAL_EVENT_TYPES = Object.keys(
 	CanonicalEvents,
 ) as readonly CanonicalEventType[];
+
+export const TextSurfacedPayloadSchema =
+	CanonicalEvents["text.surfaced"].payload;
 
 export const SessionGoalChangedPayloadSchema =
 	CanonicalEvents["session.goal_changed"].payload;

@@ -221,6 +221,18 @@ function convertAssistantParts(
 					html,
 					finalized: settled,
 					partId: part.id,
+					...(part.surfacingOrdinal !== undefined && {
+						surfacingOrdinal: part.surfacingOrdinal,
+					}),
+					...(part.surfacingProbabilities !== undefined && {
+						surfacingProbabilities: part.surfacingProbabilities,
+					}),
+					...(part.surfacingSetVersion !== undefined && {
+						surfacingSetVersion: part.surfacingSetVersion,
+					}),
+					...(part.surfacingModel !== undefined && {
+						surfacingModel: part.surfacingModel,
+					}),
 					...(messageId != null && part === replyPart && { messageId }),
 					...(partCreatedAt != null && { createdAt: partCreatedAt }),
 					...(partEndedAt != null && { endedAt: partEndedAt }),

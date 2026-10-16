@@ -118,6 +118,10 @@ export interface AssistantMessage {
 	finalized: boolean;
 	messageId?: string;
 	partId?: string;
+	surfacingOrdinal?: number;
+	surfacingProbabilities?: Record<string, number> | null;
+	surfacingSetVersion?: number;
+	surfacingModel?: string;
 	needsRender?: boolean;
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
 	createdAt?: number;

@@ -33,6 +33,7 @@ describe("Schema Migration", () => {
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
 					[61, "goal_check_metadata"],
+					[62, "message_part_surfacing"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

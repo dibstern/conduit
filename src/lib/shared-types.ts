@@ -452,6 +452,10 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
+	surfacingOrdinal?: number;
+	surfacingProbabilities?: Record<string, number> | null;
+	surfacingSetVersion?: number;
+	surfacingModel?: string;
 	type: PartType | "thinking" | "error" | "setup";
 	/** Daemon setup notice, carried by the normal durable transcript. */
 	setup?: ProjectSetupState;

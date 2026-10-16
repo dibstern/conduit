@@ -68,6 +68,7 @@ import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
 	STEER_BLOCKERS,
+	TextSurfacedPayloadSchema,
 } from "./stored-event.js";
 import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
 
@@ -330,6 +331,21 @@ export const PtyInfoSchema = Schema.Struct({
 export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
+	surfacingOrdinal: Schema.optionalWith(
+		TextSurfacedPayloadSchema.fields.ordinal,
+		{ exact: true },
+	),
+	surfacingProbabilities: Schema.optionalWith(
+		TextSurfacedPayloadSchema.fields.probabilities,
+		{ exact: true },
+	),
+	surfacingSetVersion: Schema.optionalWith(
+		TextSurfacedPayloadSchema.fields.categorySetVersion,
+		{ exact: true },
+	),
+	surfacingModel: Schema.optionalWith(TextSurfacedPayloadSchema.fields.model, {
+		exact: true,
+	}),
 	text: Schema.optional(Schema.String),
 	renderedHtml: Schema.optional(Schema.String),
 	state: Schema.optional(
