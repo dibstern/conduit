@@ -38,7 +38,7 @@ async function mockSessions(
 			accountId: null,
 			id: `sess-${String(index).padStart(3, "0")}`,
 			title: `Session ${index}`,
-			status: "idle",
+			status: "idle" as const,
 			projectSlug:
 				parentID === undefined && foreign(index) ? "other-proj" : LOCAL,
 			updatedAt: now - 1000 - index,
@@ -50,7 +50,7 @@ async function mockSessions(
 	const requested: string[] = [];
 	let exhausted = false;
 	await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ListDaemonSessions: async (params) => {
 				await new Promise((resolve) => setTimeout(resolve, 300));
 				const limit = Number(params["limit"]);

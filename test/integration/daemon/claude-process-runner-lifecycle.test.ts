@@ -14,17 +14,17 @@ import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Cause, Deferred, Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	CLAUDE_RUNNER_PROTOCOL_VERSION,
-	ClaudeRunnerSocket,
-	claudeRunnerIdleFailure,
-} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
-import {
-	claudeRunnerDirectory,
-	discoverClaudeRunners,
-	registerClaudeRunner,
-} from "../../../src/lib/provider/claude/claude-runner-registry.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	RUNNER_PROTOCOL_VERSION,
+	runnerIdleFailure,
+} from "../../../src/lib/provider/runner/runner-protocol.js";
+import {
+	discoverRunners,
+	registerRunner,
+	runnerDirectory,
+} from "../../../src/lib/provider/runner/runner-registry.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
@@ -144,12 +144,12 @@ describe("Claude runner admission socket probes", () => {
 		);
 		const sessionId = "socket-probe-session";
 		const runnerId = "abcdefabcdef";
-		const directory = claudeRunnerDirectory(workspaceRoot, configDir);
+		const directory = runnerDirectory(workspaceRoot, configDir);
 		mkdirSync(directory, { recursive: true });
 		const socketPath = join(directory, runnerId);
 		const sockets = new Set<Socket>();
 		const commands: string[] = [];
-		const outputs: import("../../../src/lib/provider/claude/claude-session-runner.js").ClaudeSessionOutput[] =
+		const outputs: import("../../../src/lib/provider/runner/session-runner.js").SessionOutput[] =
 			[];
 		const received = await Effect.runPromise(Deferred.make<void>());
 		let attempts = 0;
@@ -158,7 +158,7 @@ describe("Claude runner admission socket probes", () => {
 		const replyHello = (peer: ClaudeRunnerSocket) =>
 			peer.write({
 				type: "hello",
-				protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
+				protocolVersion: RUNNER_PROTOCOL_VERSION,
 				buildId: BUILD_ID,
 				runnerId,
 				sessionId,
@@ -166,7 +166,7 @@ describe("Claude runner admission socket probes", () => {
 			});
 		let pending:
 			| Extract<
-					import("../../../src/lib/provider/claude/claude-runner-protocol.js").ClaudeRunnerMessage,
+					import("../../../src/lib/provider/runner/runner-protocol.js").RunnerMessage,
 					{ type: "command" }
 			  >
 			| undefined;
@@ -201,12 +201,12 @@ describe("Claude runner admission socket probes", () => {
 							peer.write({
 								type: "command-reply",
 								commandId: pending.commandId,
-								failure: claudeRunnerIdleFailure(),
+								failure: runnerIdleFailure(),
 							});
 						peer.write({
 							type: "command-reply",
 							commandId: message.commandId,
-							failure: claudeRunnerIdleFailure(),
+							failure: runnerIdleFailure(),
 						});
 					} else if (message.command.type === "shutdown") {
 						void exited.then(() =>
@@ -226,7 +226,7 @@ describe("Claude runner admission socket probes", () => {
 			server.once("error", fail);
 			server.listen(socketPath, done);
 		});
-		registerClaudeRunner({
+		registerRunner({
 			runnerId,
 			sessionId,
 			socketPath,
@@ -291,7 +291,7 @@ describe("Claude runner admission socket probes", () => {
 				},
 			},
 			recordPids() {
-				for (const entry of discoverClaudeRunners(workspaceRoot, configDir))
+				for (const entry of discoverRunners(workspaceRoot, configDir))
 					runnerPids.add(entry.pid);
 			},
 		};
@@ -416,7 +416,7 @@ describe("Claude runner admission socket probes", () => {
 					expect(fixture.commands).toEqual([]);
 					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
 					expect(
-						discoverClaudeRunners(fixture.workspaceRoot, fixture.configDir),
+						discoverRunners(fixture.workspaceRoot, fixture.configDir),
 					).toHaveLength(1);
 				}),
 			),
@@ -446,7 +446,7 @@ describe("Claude runner admission socket probes", () => {
 					expect(fixture.commands).toEqual([]);
 					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
 					expect(
-						discoverClaudeRunners(fixture.workspaceRoot, fixture.configDir),
+						discoverRunners(fixture.workspaceRoot, fixture.configDir),
 					).toHaveLength(1);
 				}),
 			),

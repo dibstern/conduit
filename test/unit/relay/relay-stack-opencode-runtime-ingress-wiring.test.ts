@@ -42,9 +42,9 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import {
-	currentClaudeRunnerOutput,
-	makeClaudeRunnerReceiptStore,
-} from "../../../src/lib/provider/claude/claude-runner-receipts.js";
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+} from "../../../src/lib/provider/runner/runner-receipts.js";
 import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -440,7 +440,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 						{ upstreamAdapter: null },
 					);
 					const sql = yield* SqlClient.SqlClient;
-					const receipts = yield* makeClaudeRunnerReceiptStore(sql);
+					const receipts = yield* makeRunnerReceiptStore(sql);
 					const runnerId = "workspace-race-runner";
 					const attachmentId = "workspace-race-attachment";
 					yield* receipts.attach(runnerId, attachmentId);
@@ -483,7 +483,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 										status: "busy",
 									}),
 								])
-								.pipe(Effect.locally(currentClaudeRunnerOutput, receipt)),
+								.pipe(Effect.locally(currentRunnerOutput, receipt)),
 						);
 						yield* Deferred.await(resolved);
 						yield* applySessionCommand(

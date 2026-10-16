@@ -196,7 +196,7 @@ test.describe("Subagent navigation", () => {
 
 		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: (params) => {
 					if (params["sessionId"] === snapshot.childSession.id) {
 						void control.sendMessages(childSwitchMessages);
@@ -310,7 +310,7 @@ test.describe("Subagent navigation", () => {
 
 		let control!: Awaited<ReturnType<typeof mockRelayWebSocket>>;
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: (params) => {
 					if (params["sessionId"] === snapshot.parentSession.id) {
 						void control.sendMessages(parentSwitchMessages);

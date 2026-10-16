@@ -154,7 +154,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const rpc = requireRpcControl(world.page);
 			const id = sessionIdOf(world.page.url());
-			rpc.setResponse("CancelSession", { ok: true });
+			rpc.setStubs({ CancelSession: () => ({ ok: true }) });
 			setSessionRowStatus(world.page, id, "busy");
 			await world.page.locator("#stop").click();
 			await rpc.waitForRequest(
@@ -203,8 +203,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "stop tasks from composer toast",
 		match: /^I press Stop them in the turn-stopped toast$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
-				ok: true,
+			requireRpcControl(world.page).setStubs({
+				StopBackgroundTask: () => ({ ok: true }),
 			});
 			await world.page
 				.getByTestId("toast")
@@ -470,8 +470,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "stop a named background task",
 		match: /^I stop the background task (.+)$/,
 		run: async ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
-				ok: true,
+			requireRpcControl(world.page).setStubs({
+				StopBackgroundTask: () => ({ ok: true }),
 			});
 			await world.page
 				.getByRole("button", { name: `Stop ${match[1]}`, exact: true })
@@ -500,8 +500,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "press Stop all",
 		match: /^I press Stop all in the background tasks pull-down$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setResponse("StopBackgroundTask", {
-				ok: true,
+			requireRpcControl(world.page).setStubs({
+				StopBackgroundTask: () => ({ ok: true }),
 			});
 			await world.page.getByTestId("background-tasks-stop-all").click();
 		},

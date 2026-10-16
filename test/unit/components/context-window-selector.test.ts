@@ -7,11 +7,11 @@ import {
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
-interface SwitchContextWindowInput {
-	readonly sessionId: string;
-	readonly contextWindow: string;
-}
+type SwitchContextWindowInput = Parameters<
+	typeof rpc<"SwitchContextWindow">
+>[1];
 
 const switchContextWindowRpcSpy = vi.hoisted(() =>
 	vi.fn(async (input: SwitchContextWindowInput) => ({
@@ -36,8 +36,13 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	switchContextWindowRpc: (input: SwitchContextWindowInput) =>
-		switchContextWindowRpcSpy(input),
+	rpc: (
+		tag: "SwitchContextWindow" | "QuotaForAccounts",
+		input: SwitchContextWindowInput,
+	) =>
+		tag === "QuotaForAccounts"
+			? Promise.resolve([])
+			: switchContextWindowRpcSpy(input),
 }));
 
 describe("InstanceModelPicker context window", () => {

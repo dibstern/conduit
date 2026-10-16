@@ -21,13 +21,7 @@ import {
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { WsRpcError } from "../../../src/lib/frontend/transport/ws-rpc.js";
-import {
-	markSessionSeenRpc,
-	setSessionPinnedRpc,
-	setSessionSettledRpc,
-	snoozeSessionRpc,
-	unsnoozeSessionRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	formatSnoozeTime,
 	formatTimeAgo,
@@ -46,11 +40,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		markSessionSeenRpc: vi.fn().mockResolvedValue(undefined),
-		setSessionSettledRpc: vi.fn().mockResolvedValue(undefined),
-		setSessionPinnedRpc: vi.fn().mockResolvedValue(undefined),
-		snoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
-		unsnoozeSessionRpc: vi.fn().mockResolvedValue(undefined),
+		rpc: vi.fn().mockResolvedValue(undefined),
 	}),
 );
 
@@ -170,7 +160,8 @@ describe("session triage list", () => {
 		await touchSwipe(row, -120);
 		const tomorrow = new Date(2026, 9, 6, 9).getTime();
 		await waitFor(() =>
-			expect(snoozeSessionRpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				"SnoozeSession",
 				expect.objectContaining({ sessionId: "idle", until: tomorrow }),
 			),
 		);
@@ -331,11 +322,11 @@ describe("session triage list", () => {
 		if (!row) throw new Error("Missing row");
 		await fireEvent.contextMenu(row);
 		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
-		const rpc =
-			command === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
+		const tag = command === "settle" ? "SetSessionSettled" : "SetSessionPinned";
 		const key = command === "settle" ? "settled" : "pinned";
 		await waitFor(() =>
-			expect(rpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				tag,
 				expect.objectContaining({
 					sessionId: "idle",
 					[key]: true,
@@ -351,7 +342,8 @@ describe("session triage list", () => {
 		expect(uiState.toasts[0]?.duration).toBe(5000);
 		await fireEvent.click(screen.getByTestId("toast-action"));
 		await waitFor(() =>
-			expect(rpc).toHaveBeenLastCalledWith(
+			expect(callRpc).toHaveBeenLastCalledWith(
+				tag,
 				expect.objectContaining({ sessionId: "idle", [key]: false }),
 			),
 		);
@@ -362,9 +354,7 @@ describe("session triage list", () => {
 		"settle",
 		"pin",
 	] as const)("reports a failed %s without a success toast", async (command) => {
-		const rpc =
-			command === "settle" ? setSessionSettledRpc : setSessionPinnedRpc;
-		vi.mocked(rpc).mockRejectedValueOnce(new Error("offline"));
+		vi.mocked(callRpc).mockRejectedValueOnce(new Error("offline"));
 		render(SessionList);
 		render(Toast);
 		const row = screen.getByText("Idle work").closest("a");
@@ -425,10 +415,11 @@ describe("session triage list", () => {
 			screen.getByRole("button", { name: `More options for ${title}` }),
 		);
 		await fireEvent.click(await screen.findByTestId(`session-ctx-${command}`));
-		const rpc =
-			command === "unsettle" ? setSessionSettledRpc : setSessionPinnedRpc;
+		const tag =
+			command === "unsettle" ? "SetSessionSettled" : "SetSessionPinned";
 		await waitFor(() =>
-			expect(rpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				tag,
 				expect.objectContaining(
 					command === "unsettle" ? { settled: false } : { pinned: false },
 				),
@@ -454,9 +445,10 @@ describe("session triage list", () => {
 			"Moved “New Session” to Settled",
 		);
 		attachedProjectState.slug = "another-project";
-		vi.mocked(setSessionSettledRpc).mockRejectedValueOnce(new Error("offline"));
+		vi.mocked(callRpc).mockRejectedValueOnce(new Error("offline"));
 		await fireEvent.click(screen.getByTestId("toast-action"));
-		expect(setSessionSettledRpc).toHaveBeenLastCalledWith(
+		expect(callRpc).toHaveBeenLastCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
 				sessionId: "empty-title",
 				settled: false,
@@ -481,7 +473,8 @@ describe("session triage list", () => {
 		if (!row) throw new Error("Missing foreign row");
 		await fireEvent.contextMenu(row);
 		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
-		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
+		expect(callRpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
 			expect.objectContaining({
 				sessionId: "foreign",
 				pinned: false,
@@ -505,7 +498,8 @@ describe("session triage list", () => {
 		expect(screen.getByText("Snooze until…")).toBeTruthy();
 		await fireEvent.click(screen.getByTestId("snooze-option-1h"));
 		await waitFor(() =>
-			expect(snoozeSessionRpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				"SnoozeSession",
 				expect.objectContaining({
 					sessionId: "idle",
 					until: now + 3_600_000,
@@ -518,7 +512,8 @@ describe("session triage list", () => {
 		expect(uiState.toasts[0]?.duration).toBe(5000);
 		await fireEvent.click(screen.getByTestId("toast-action"));
 		await waitFor(() =>
-			expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				"UnsnoozeSession",
 				expect.objectContaining({
 					sessionId: "idle",
 				}),
@@ -542,26 +537,31 @@ describe("session triage list", () => {
 		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
 		await fireEvent.click(screen.getByTestId("snooze-option-3h"));
 		await waitFor(() =>
-			expect(snoozeSessionRpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				"SnoozeSession",
 				expect.objectContaining({ until: now + 10_800_000 }),
 			),
 		);
 		await fireEvent.click(screen.getByTestId("toast-action"));
 		await waitFor(() =>
-			expect(snoozeSessionRpc).toHaveBeenLastCalledWith(
+			expect(callRpc).toHaveBeenLastCalledWith(
+				"SnoozeSession",
 				expect.objectContaining({
 					sessionId: "sleeping",
 					until: previousUntil,
 				}),
 			),
 		);
-		expect(unsnoozeSessionRpc).not.toHaveBeenCalled();
+		expect(callRpc).not.toHaveBeenCalledWith(
+			"UnsnoozeSession",
+			expect.anything(),
+		);
 	});
 
 	it("reports RPC refusal text, transport failure, and failed Undo", async () => {
 		const now = new Date(2026, 9, 5, 9).getTime();
 		vi.spyOn(Date, "now").mockReturnValue(now);
-		vi.mocked(snoozeSessionRpc).mockRejectedValueOnce(
+		vi.mocked(callRpc).mockRejectedValueOnce(
 			new WsRpcError({ message: "Waiting on you" }),
 		);
 		render(SessionList);
@@ -576,7 +576,7 @@ describe("session triage list", () => {
 			"Waiting on you",
 		);
 		uiState.toasts = [];
-		vi.mocked(snoozeSessionRpc).mockRejectedValueOnce(new Error("offline"));
+		vi.mocked(callRpc).mockRejectedValueOnce(new Error("offline"));
 		await fireEvent.click(
 			screen.getByRole("button", { name: "More options for Idle work" }),
 		);
@@ -592,7 +592,7 @@ describe("session triage list", () => {
 		await fireEvent.click(await screen.findByTestId("session-ctx-snooze"));
 		await fireEvent.click(screen.getByTestId("snooze-option-1h"));
 		await screen.findByRole("status");
-		vi.mocked(unsnoozeSessionRpc).mockRejectedValueOnce(new Error("offline"));
+		vi.mocked(callRpc).mockRejectedValueOnce(new Error("offline"));
 		await fireEvent.click(screen.getByTestId("toast-action"));
 		expect((await screen.findByRole("alert")).textContent).toContain(
 			"Couldn't undo",
@@ -608,7 +608,8 @@ describe("session triage list", () => {
 		);
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
 		await waitFor(() =>
-			expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
+			expect(callRpc).toHaveBeenCalledWith(
+				"UnsnoozeSession",
 				expect.objectContaining({ sessionId: "sleeping" }),
 			),
 		);
@@ -649,7 +650,7 @@ describe("sidebar pick", () => {
 		sessionState.currentId = "unread";
 		render(SessionList);
 		await pick("unread");
-		expect(markSessionSeenRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(callRpc).toHaveBeenCalledExactlyOnceWith("MarkSessionSeen", {
 			sessionId: "unread",
 			upTo: 7,
 			originId: expect.any(String),
@@ -660,6 +661,9 @@ describe("sidebar pick", () => {
 		render(SessionList);
 		await pick("read");
 		await tick();
-		expect(markSessionSeenRpc).not.toHaveBeenCalled();
+		expect(callRpc).not.toHaveBeenCalledWith(
+			"MarkSessionSeen",
+			expect.anything(),
+		);
 	});
 });

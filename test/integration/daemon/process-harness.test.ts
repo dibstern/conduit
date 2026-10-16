@@ -3,10 +3,8 @@ import { createConnection } from "node:net";
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import type { RunnerMessage } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
 	type ProcessBrowser,
@@ -290,7 +288,7 @@ describe("foreground daemon process harness", () => {
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing background runner proof");
 		await harness.kill();
-		const frames: ClaudeRunnerMessage[] = [];
+		const frames: RunnerMessage[] = [];
 		const { projectDir, configDir } = harness;
 		const socket = createConnection(runner.socketPath);
 		const peer = new ClaudeRunnerSocket(
@@ -355,7 +353,7 @@ describe("foreground daemon process harness", () => {
 						.trim()
 						.split("\n")
 						.filter(Boolean)
-						.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+						.map((line) => JSON.parse(line) as RunnerMessage);
 					sequences = retained.flatMap((frame) =>
 						frame.type === "output" && frame.output.type === "background-task"
 							? [frame.sequence]
@@ -423,7 +421,7 @@ describe("foreground daemon process harness", () => {
 						.trim()
 						.split("\n")
 						.filter(Boolean)
-						.map((line) => JSON.parse(line) as ClaudeRunnerMessage);
+						.map((line) => JSON.parse(line) as RunnerMessage);
 					expect(
 						frames
 							.reverse()

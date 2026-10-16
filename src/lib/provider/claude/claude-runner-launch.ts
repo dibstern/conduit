@@ -19,6 +19,10 @@ import type {
 	RunnerLaunchCallbacks,
 } from "../runner/runner-host.js";
 import { runnerFailure } from "../runner/runner-protocol.js";
+import type {
+	RunnerLiveQueryConfiguration,
+	RunnerSettingsSnapshot,
+} from "../runner/runner-upgrade.js";
 import type { SessionFailure } from "../runner/session-runner.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -30,10 +34,6 @@ import {
 	claudeRunnerFileSettingsFingerprint,
 	replayClaudeRunnerFileSettings,
 } from "./claude-runner-settings.js";
-import type {
-	ClaudeRunnerLiveQueryConfiguration,
-	ClaudeRunnerSettingsSnapshot,
-} from "./claude-runner-upgrade.js";
 import {
 	makeClaudeRunnerWire,
 	normalizeClaudeLaunchInput,
@@ -89,8 +89,8 @@ export const makeClaudeRunnerLaunch = (
 			}));
 		}
 		let shellEnv: Readonly<Record<string, string | undefined>> = process.env;
-		let snapshot: ClaudeRunnerSettingsSnapshot | undefined;
-		let frozenSnapshot: ClaudeRunnerSettingsSnapshot | undefined;
+		let snapshot: RunnerSettingsSnapshot | undefined;
+		let frozenSnapshot: RunnerSettingsSnapshot | undefined;
 		let fileSettings: ClaudeRunnerFileSettings | undefined;
 		let fileSettingsPreparation: Promise<void> | undefined;
 		let replayedSettings:
@@ -98,9 +98,9 @@ export const makeClaudeRunnerLaunch = (
 			| undefined;
 		let launchInput: ClaudePreWarmSessionInput | undefined;
 		let daemonConfigDir: string | undefined;
-		let launchSettings: ClaudeRunnerSettingsSnapshot["claudeSettingsOverrides"];
+		let launchSettings: RunnerSettingsSnapshot["claudeSettingsOverrides"];
 		let resumeSessionId: string | undefined;
-		let liveConfiguration: ClaudeRunnerLiveQueryConfiguration | undefined;
+		let liveConfiguration: RunnerLiveQueryConfiguration | undefined;
 		const createQuery: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]> = (
 			params,
 		) => {
@@ -264,7 +264,7 @@ export const makeClaudeRunnerLaunch = (
 						options: frozenSnapshot ? effectiveLaunch : launch,
 						...(capturedFiles ? { fileSettings: capturedFiles } : {}),
 					}),
-				) as ClaudeRunnerSettingsSnapshot);
+				) as RunnerSettingsSnapshot);
 			if (
 				!restoring &&
 				queryOptions.settingSources?.length !== 0 &&

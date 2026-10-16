@@ -1,18 +1,3 @@
-export {
-	RUNNER_PROTOCOL_VERSION as CLAUDE_RUNNER_PROTOCOL_VERSION,
-	type RunnerHello as ClaudeRunnerHello,
-	type RunnerMessage as ClaudeRunnerMessage,
-	runnerBuildId as claudeRunnerBuildId,
-	runnerFailure as claudeRunnerFailure,
-	runnerHelloFailure as claudeRunnerHelloFailure,
-	runnerIdleFailure as claudeRunnerIdleFailure,
-	runnerSinkId as claudeRunnerSinkId,
-} from "../runner/runner-protocol.js";
-export {
-	normalizeClaudeLaunchInput,
-	normalizeClaudeSessionTurn,
-} from "./claude-runner-wire.js";
-
 import type { Socket } from "node:net";
 import type { Effect } from "effect";
 import { type RunnerMessage, RunnerSocket } from "../runner/runner-protocol.js";

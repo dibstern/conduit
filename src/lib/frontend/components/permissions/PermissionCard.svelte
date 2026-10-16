@@ -11,10 +11,7 @@
 	import { renderMarkdown } from "../../utils/markdown.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import Surface from "../ui/Surface.svelte";
-	import {
-		respondPermissionRpc,
-		type RespondPermissionRpcInput,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	let { request }: { request: PermissionRequest } = $props();
 
 	let resolved = $state<"allow" | "allow_always" | "deny" | null>(null);
@@ -126,13 +123,13 @@
 
 	function sendPermissionResponse(
 		input: Omit<
-			RespondPermissionRpcInput,
+			Parameters<typeof rpc<"RespondPermission">>[1],
 			"projectSlug" | "originId" | "commandId"
 		>,
 	) {
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
-		void respondPermissionRpc({
+		void rpc("RespondPermission", {
 			projectSlug,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),

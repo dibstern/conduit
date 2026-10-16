@@ -22,18 +22,18 @@ vi.mock("../../../../src/lib/env.js", async (importOriginal) => ({
 
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
 import { makeProcessClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-process-session-runner.js";
+import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
 import {
-	CLAUDE_RUNNER_PROTOCOL_VERSION,
-	type ClaudeRunnerMessage,
-	ClaudeRunnerSocket,
-} from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
+	RUNNER_PROTOCOL_VERSION,
+	type RunnerMessage,
+} from "../../../../src/lib/provider/runner/runner-protocol.js";
 import {
-	claudeRunnerDirectory,
-	discoverClaudeRunners,
-	registerClaudeRunner,
+	discoverRunners,
+	registerRunner,
+	runnerDirectory,
 	runnerPidAlive,
-} from "../../../../src/lib/provider/claude/claude-runner-registry.js";
-import type { ClaudeSessionOutput } from "../../../../src/lib/provider/claude/claude-session-runner.js";
+} from "../../../../src/lib/provider/runner/runner-registry.js";
+import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
 
 const observations: Record<string, unknown>[] = [];
 const servers: Server[] = [];
@@ -90,13 +90,13 @@ async function runnerSocket(options: {
 	const workspaceRoot = join(config.root, `project-${++cases}`);
 	const runnerId = "abcdefabcdef";
 	const sessionId = "adoption-session";
-	const directory = claudeRunnerDirectory(workspaceRoot);
+	const directory = runnerDirectory(workspaceRoot);
 	mkdirSync(directory, { recursive: true });
 	const socketPath = join(directory, runnerId);
 	const pid = options.child?.pid ?? process.pid;
 	const spool = '{"sequence":1,"output":"pending approval"}\n';
 	writeFileSync(`${socketPath}.spool`, spool);
-	registerClaudeRunner({
+	registerRunner({
 		runnerId,
 		sessionId,
 		socketPath,
@@ -104,8 +104,8 @@ async function runnerSocket(options: {
 		pid,
 	});
 	const attempts: Array<{ at: number; filesIntact: boolean }> = [];
-	const commands: ClaudeRunnerMessage[] = [];
-	const pending: ClaudeSessionOutput = {
+	const commands: RunnerMessage[] = [];
+	const pending: SessionOutput = {
 		type: "permission-request",
 		sinkId: "adoption-sink",
 		request: {
@@ -141,7 +141,7 @@ async function runnerSocket(options: {
 				if (message.type === "hello")
 					peer.write({
 						type: "hello",
-						protocolVersion: CLAUDE_RUNNER_PROTOCOL_VERSION,
+						protocolVersion: RUNNER_PROTOCOL_VERSION,
 						buildId: BUILD_ID,
 						runnerId,
 						sessionId,
@@ -186,7 +186,7 @@ describe("Claude runner adoption", () => {
 			throw Object.assign(new Error("PID probe denied"), { code });
 		});
 		expect(runnerPidAlive(process.pid)).toBe(true);
-		expect(discoverClaudeRunners(fixture.workspaceRoot)).toHaveLength(1);
+		expect(discoverRunners(fixture.workspaceRoot)).toHaveLength(1);
 		for (const suffix of ["", ".json", ".spool"])
 			expect(existsSync(`${fixture.socketPath}${suffix}`)).toBe(true);
 		observations.push({ case: "unverifiable PID", code, filesPreserved: true });
@@ -215,7 +215,7 @@ describe("Claude runner adoption", () => {
 		children.push(child);
 		const fixture = await runnerSocket({ rejections: 2, child });
 		const kill = vi.spyOn(process, "kill");
-		const emitted: ClaudeSessionOutput[] = [];
+		const emitted: SessionOutput[] = [];
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
