@@ -25,11 +25,12 @@ Scenario Outline: a delivered Cursor steer leaves the tray and is labelled in th
   Then the pending-input tray is not visible
   And the last user message is labelled Steered
   And the Cursor transcript contains Use the staging database exactly once
+  And the messages region visually matches cursor-steer-delivered-<tier> at <threshold> percent
 
 Examples:
-  | tier  |
-  | wide  |
-  | phone |
+  | tier  | threshold |
+  | wide  | 98        |
+  | phone | 98        |
 
 Scenario Outline: a declined Cursor steer returns ahead of queued input and runs next
   Given the conduit app is served with the connected mockup
@@ -90,8 +91,9 @@ Scenario Outline: a Cursor shell handed off during steering says it moved to the
   When I expand the backgrounded Cursor shell
   Then the Cursor shell detail explains the background handoff
   And the backgrounded Cursor shell does not claim an exit code
+  And the messages region visually matches cursor-steer-shell-<tier> at <threshold> percent
 
 Examples:
-  | tier  |
-  | wide  |
-  | phone |
+  | tier  | threshold |
+  | wide  | 98        |
+  | phone | 98        |
