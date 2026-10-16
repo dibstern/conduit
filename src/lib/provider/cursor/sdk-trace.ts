@@ -86,6 +86,10 @@ export function teeCursorSdkPort(
 	metadata?: CursorTraceMetadata,
 ): CursorSdkPort {
 	const trace = createCursorSdkTrace(path, metadata);
+	const authRequired = (cause: unknown) =>
+		cause instanceof CursorSdkFailure && cause.authRequired
+			? { authRequired: true as const }
+			: {};
 	if (!port.replay) {
 		const apiKey = process.env["CURSOR_API_KEY"]?.trim();
 		if (apiKey) trace.protect(apiKey);
@@ -114,8 +118,12 @@ export function teeCursorSdkPort(
 				cause instanceof CursorSdkFailure
 					? cause.reason
 					: `Cursor ${kind} failed`;
-			trace.record(`${kind}.error`, { message });
-			throw new CursorSdkFailure({ operation: kind, reason: message });
+			trace.record(`${kind}.error`, { message, ...authRequired(cause) });
+			throw new CursorSdkFailure({
+				operation: kind,
+				reason: message,
+				...authRequired(cause),
+			});
 		}
 	};
 	const stores = new WeakMap<CursorStore, CursorStore>();
@@ -156,24 +164,30 @@ export function teeCursorSdkPort(
 									yield message;
 								}
 								trace.record("stream.end", {});
-							} catch {
+							} catch (cause) {
 								trace.record("stream.error", {
 									message: "Cursor stream failed",
+									...authRequired(cause),
 								});
 								throw new CursorSdkFailure({
 									operation: "run.stream",
 									reason: "Cursor stream failed",
+									...authRequired(cause),
 								});
 							}
 						})(),
 						wait: () => call("wait.result", {}, () => run.wait()),
 						cancel: () => call("cancel", { runId: run.id }, () => run.cancel()),
 					};
-				} catch {
-					trace.record("send.error", { message: "Cursor send failed" });
+				} catch (cause) {
+					trace.record("send.error", {
+						message: "Cursor send failed",
+						...authRequired(cause),
+					});
 					throw new CursorSdkFailure({
 						operation: "agent.send",
 						reason: "Cursor send failed",
+						...authRequired(cause),
 					});
 				}
 			},
@@ -188,7 +202,26 @@ export function teeCursorSdkPort(
 	return {
 		...(port.replay ? { replay: true } : {}),
 		probeRuntime: () => call("runtime.probe", {}, () => port.probeRuntime()),
+		authLogin: (options) => {
+			const onAbort = () =>
+				trace.record("auth.login.abort", { aborted: options.signal.aborted });
+			options.signal.addEventListener("abort", onAbort, { once: true });
+			if (options.signal.aborted) onAbort();
+			return call(
+				"auth.login",
+				{ openBrowser: options.openBrowser, apiKeyName: options.apiKeyName },
+				() =>
+					port.authLogin({
+						...options,
+						onLoginUrl(url) {
+							trace.record("auth.loginUrl", url);
+							options.onLoginUrl(url);
+						},
+					}),
+			).finally(() => options.signal.removeEventListener("abort", onAbort));
+		},
 		authStatus: () => call("auth.status", {}, () => port.authStatus()),
+		authLogout: () => call("auth.logout", {}, () => port.authLogout()),
 		storedCredential: () =>
 			call("credential.store", {}, () => port.storedCredential()),
 		modelsList: (credential) => {
@@ -227,11 +260,18 @@ export function teeCursorSdkPort(
 			try {
 				await port.primeSandbox(options, credential, unwrapStore(store));
 				trace.record("sandbox.prime", {});
-			} catch {
+			} catch (cause) {
 				const reason =
 					"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.";
-				trace.record("sandbox.prime.error", { message: reason });
-				throw new CursorSdkFailure({ operation: "sandbox.prime", reason });
+				trace.record("sandbox.prime.error", {
+					message: reason,
+					...authRequired(cause),
+				});
+				throw new CursorSdkFailure({
+					operation: "sandbox.prime",
+					reason,
+					...authRequired(cause),
+				});
 			}
 		},
 		async createAgent(options, credential, store, customTools) {
@@ -246,13 +286,15 @@ export function teeCursorSdkPort(
 				);
 				trace.record("created", { agentId: agent.id });
 				return wrapAgent(agent);
-			} catch {
+			} catch (cause) {
 				trace.record("create.error", {
 					message: "Cursor agent creation failed",
+					...authRequired(cause),
 				});
 				throw new CursorSdkFailure({
 					operation: "agent.create",
 					reason: "Cursor agent creation failed",
+					...authRequired(cause),
 				});
 			}
 		},
@@ -272,11 +314,15 @@ export function teeCursorSdkPort(
 				);
 				trace.record("resumed", { agentId: agent.id });
 				return wrapAgent(agent);
-			} catch {
-				trace.record("resume.error", { message: "Cursor agent resume failed" });
+			} catch (cause) {
+				trace.record("resume.error", {
+					message: "Cursor agent resume failed",
+					...authRequired(cause),
+				});
 				throw new CursorSdkFailure({
 					operation: "agent.resume",
 					reason: "Cursor agent resume failed",
+					...authRequired(cause),
 				});
 			}
 		},

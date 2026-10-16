@@ -931,6 +931,12 @@ export async function mockWsRpc(
 		ViewSession: () => ({ ok: true }),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		GetCursorAuth: () => ({
+			source: "none",
+			status: "logged-out",
+			expiresSoon: false,
+			login: { state: "idle" },
+		}),
 		...options.stubs,
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;

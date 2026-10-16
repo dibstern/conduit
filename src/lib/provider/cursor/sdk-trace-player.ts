@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { CursorSdkFailure } from "./sdk-error.js";
 import type {
@@ -25,6 +26,9 @@ export function createTraceCursorSdkPort(
 	playback: {
 		readonly closeDelayMs?: number;
 		readonly disposeDelayMs?: number;
+		readonly authStatePath?: string;
+		readonly loginDelayMs?: number;
+		readonly loginUrlDelayMs?: number;
 	} = {},
 ): CursorSdkPort {
 	let contents: string | undefined;
@@ -92,8 +96,58 @@ export function createTraceCursorSdkPort(
 			throw new CursorSdkFailure({
 				operation: kind,
 				reason: `Cursor ${kind} failed`,
+				...(object(row.data) && row.data["authRequired"] === true
+					? { authRequired: true }
+					: {}),
 			});
 		return row?.data;
+	};
+	const readAuthState = (): Record<string, unknown> | undefined => {
+		if (!playback.authStatePath) return undefined;
+		try {
+			const state: unknown = JSON.parse(
+				readFileSync(playback.authStatePath, "utf8"),
+			);
+			if (object(state)) return state;
+		} catch (cause) {
+			if (
+				cause instanceof Error &&
+				"code" in cause &&
+				cause.code === "ENOENT"
+			) {
+				return { status: { status: "logged-out" }, credential: null };
+			}
+		}
+		throw new CursorSdkFailure({
+			operation: "auth.replay",
+			reason: "Invalid Cursor replay auth state",
+		});
+	};
+	const writeAuthState = (status: unknown, credential: unknown) => {
+		if (!playback.authStatePath) return;
+		const temporary = `${playback.authStatePath}.${process.pid}.tmp`;
+		mkdirSync(dirname(playback.authStatePath), {
+			recursive: true,
+			mode: 0o700,
+		});
+		writeFileSync(
+			temporary,
+			JSON.stringify({
+				status,
+				credential: object(credential)
+					? {
+							...credential,
+							apiKey:
+								typeof credential["apiKey"] === "string" &&
+								/^\[REDACTED(?::[a-zA-Z0-9_-]+)?\]$/.test(credential["apiKey"])
+									? credential["apiKey"]
+									: "[REDACTED]",
+						}
+					: null,
+			}),
+			{ mode: 0o600 },
+		);
+		renameSync(temporary, playback.authStatePath);
 	};
 	const agent = (id: string, options: CursorAgentOptions): CursorAgent => {
 		let closed: Promise<void> | undefined;
@@ -122,6 +176,17 @@ export function createTraceCursorSdkPort(
 					});
 				}
 				const turn = rows.slice(start, starts[startIndex + 1] ?? rows.length);
+				const sendError = turn.find((row) => row.kind === "send.error");
+				if (sendError) {
+					throw new CursorSdkFailure({
+						operation: "agent.send",
+						reason: "Cursor captured send failed",
+						...(object(sendError.data) &&
+						sendError.data["authRequired"] === true
+							? { authRequired: true }
+							: {}),
+					});
+				}
 				const handle = turn.find((row) => row.kind === "run.handle")?.data;
 				if (!object(handle) || typeof handle["id"] !== "string") {
 					throw new CursorSdkFailure({
@@ -153,6 +218,9 @@ export function createTraceCursorSdkPort(
 									throw new CursorSdkFailure({
 										operation: "run.stream",
 										reason: "Cursor captured stream failed",
+										...(object(row.data) && row.data["authRequired"] === true
+											? { authRequired: true }
+											: {}),
 									});
 								}
 								if (row.kind === "stream.end") break;
@@ -164,15 +232,18 @@ export function createTraceCursorSdkPort(
 					async wait() {
 						await streamed;
 						if (needsCancel) await cancelled;
-						if (
-							turn.some(
-								(row) =>
-									row.kind === "wait.error" || row.kind === "wait.result.error",
-							)
-						) {
+						const waitError = turn.find(
+							(row) =>
+								row.kind === "wait.error" || row.kind === "wait.result.error",
+						);
+						if (waitError) {
 							throw new CursorSdkFailure({
 								operation: "run.wait",
 								reason: "Cursor captured wait failed",
+								...(object(waitError.data) &&
+								waitError.data["authRequired"] === true
+									? { authRequired: true }
+									: {}),
 							});
 						}
 						if (
@@ -201,6 +272,33 @@ export function createTraceCursorSdkPort(
 	};
 	return {
 		replay: true,
+		async authLogin(options) {
+			const url = result("auth.loginUrl");
+			if (typeof url !== "string") {
+				throw new CursorSdkFailure({
+					operation: "auth.login",
+					reason: "Cursor trace contains no login URL",
+				});
+			}
+			// Delayed callbacks deliberately outlive cancellation to test the host.
+			const callback = setTimeout(playback.loginUrlDelayMs ?? 0).then(() =>
+				options.onLoginUrl(url),
+			);
+			void callback.catch(() => {});
+			try {
+				await setTimeout(playback.loginDelayMs ?? 0, undefined, {
+					signal: options.signal,
+				});
+				options.signal.throwIfAborted();
+			} catch {
+				throw new CursorSdkFailure({
+					operation: "auth.login",
+					reason: "Cursor login cancelled",
+				});
+			}
+			result("auth.login");
+			writeAuthState(result("auth.status"), result("credential.store"));
+		},
 		async probeRuntime(): Promise<CursorRuntimeProbe> {
 			const data = result("runtime.probe");
 			// Spike captures predate the discovery probe; their SDK was loaded.
@@ -219,10 +317,14 @@ export function createTraceCursorSdkPort(
 			};
 		},
 		async authStatus(): Promise<CursorAuthStatus> {
-			const data = result("auth.status");
+			const state = readAuthState();
+			const data = state ? state["status"] : result("auth.status");
 			if (
 				data === undefined ||
-				(object(data) && data["status"] === "logged-out")
+				(object(data) &&
+					(data["status"] === "logged-out" ||
+						(typeof data["apiKeyExpiresAtMs"] === "number" &&
+							data["apiKeyExpiresAtMs"] <= Date.now())))
 			) {
 				return { status: "logged-out" };
 			}
@@ -245,8 +347,13 @@ export function createTraceCursorSdkPort(
 					: {}),
 			};
 		},
+		async authLogout() {
+			result("auth.logout");
+			writeAuthState({ status: "logged-out" }, null);
+		},
 		async storedCredential(): Promise<CursorStoredCredential | undefined> {
-			const data = result("credential.store");
+			const state = readAuthState();
+			const data = state ? state["credential"] : result("credential.store");
 			if (data === undefined || data === null) return undefined;
 			if (!object(data) || typeof data["apiKey"] !== "string") {
 				throw new CursorSdkFailure({

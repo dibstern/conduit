@@ -4,6 +4,7 @@ import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ProviderCapabilities } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
+import { CursorSdkFailure } from "./sdk-error.js";
 import type { CursorSdkPort } from "./sdk-port.js";
 
 let defaultPort: CursorSdkPort | undefined;
@@ -38,12 +39,17 @@ export const discoverCursorEffect = (
 		if (!credential)
 			return yield* Effect.fail(
 				discoveryFailure(
-					"Cursor has no credential; set CURSOR_API_KEY or log in with the Cursor SDK",
+					"Cursor authentication required. Log in to Cursor in Settings.",
 				),
 			);
 		const models = yield* Effect.tryPromise({
 			try: () => sdk.modelsList(credential),
-			catch: () => discoveryFailure("Cursor model list failed"),
+			catch: (cause) =>
+				discoveryFailure(
+					cause instanceof CursorSdkFailure && cause.authRequired
+						? "Cursor authentication failed. Log in to Cursor in Settings."
+						: "Cursor model list failed",
+				),
 		}).pipe(
 			Effect.timeoutFail({
 				duration: "15 seconds",

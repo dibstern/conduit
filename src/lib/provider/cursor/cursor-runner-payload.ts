@@ -75,13 +75,17 @@ const sdkCall = <A>(operation: string, run: () => Promise<A>) =>
 		catch: (cause): SessionFailure => ({
 			operation,
 			message:
-				cause instanceof CursorSdkFailure
-					? cause.reason
-					: `Cursor ${operation} failed`,
-			...(cause instanceof CursorSdkFailure &&
-			cause.operation === "sandbox.prime"
-				? { code: "sandbox_unavailable", retryable: false }
-				: {}),
+				cause instanceof CursorSdkFailure && cause.authRequired
+					? "Cursor authentication failed. Log in to Cursor in Settings."
+					: cause instanceof CursorSdkFailure
+						? cause.reason
+						: `Cursor ${operation} failed`,
+			...(cause instanceof CursorSdkFailure && cause.authRequired
+				? { code: "auth_required", retryable: false }
+				: cause instanceof CursorSdkFailure &&
+						cause.operation === "sandbox.prime"
+					? { code: "sandbox_unavailable", retryable: false }
+					: {}),
 		}),
 	});
 
@@ -175,7 +179,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						return yield* finish(
 							"error",
 							"auth_required",
-							"Cursor requires a credential; set CURSOR_API_KEY or log in with the Cursor SDK",
+							"Cursor authentication required. Log in to Cursor in Settings.",
 						);
 					if (!input.model)
 						return yield* finish(
@@ -226,9 +230,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 									this.sdk.primeSandbox(config.agent, credential, store),
 								),
 							).pipe(
-								Effect.tapError(() =>
+								Effect.tapError((failure) =>
 									Effect.sync(() => {
-										this.sandboxFailed = true;
+										if (failure.code !== "auth_required")
+											this.sandboxFailed = true;
 									}),
 								),
 							);
@@ -336,7 +341,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 						if (Either.isLeft(update.result))
 							return yield* finish(
 								"error",
-								"provider_error",
+								update.result.left.code === "auth_required"
+									? "auth_required"
+									: "provider_error",
 								update.result.left.message,
 							);
 						const terminal = decodeTerminal(update.result.right);
@@ -352,10 +359,15 @@ export class CursorRunnerPayload implements RunnerPayload {
 							return yield* finish("completed");
 						if (terminal.right.status === "cancelled")
 							return yield* finish("interrupted");
+						// SDK 1.0.37 toRunError preserves Connect's authentication code.
+						const authRequired =
+							terminal.right.error?.code === "unauthenticated";
 						return yield* finish(
 							"error",
-							"provider_error",
-							terminal.right.error?.message ?? "Cursor run failed",
+							authRequired ? "auth_required" : "provider_error",
+							authRequired
+								? "Cursor authentication failed. Log in to Cursor in Settings."
+								: (terminal.right.error?.message ?? "Cursor run failed"),
 						);
 					}
 				}).pipe(
@@ -364,7 +376,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 							"error",
 							"code" in failure && failure.code === "sandbox_unavailable"
 								? "sandbox_unavailable"
-								: "provider_error",
+								: "code" in failure && failure.code === "auth_required"
+									? "auth_required"
+									: "provider_error",
 							"message" in failure
 								? String(failure.message)
 								: "Cursor turn failed",
