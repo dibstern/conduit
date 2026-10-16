@@ -5,7 +5,6 @@ import { Deferred, Effect, Exit, Fiber, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import * as configPersistence from "../../../../src/lib/daemon/config-persistence.js";
-import { ClaudeProviderInstance } from "../../../../src/lib/provider/claude/claude-provider-instance.js";
 import {
 	makeClaudeProviderRuntime,
 	makeClaudeSessionRunner,
@@ -307,7 +306,7 @@ describe("Claude provider runtime boundary", () => {
 					workspaceRoot: "/tmp/ws",
 					queryFactory: () => query,
 				}).pipe(Effect.provideService(Scope.Scope, scope));
-				const instance = new ClaudeProviderInstance(runtime);
+				const instance = runtime;
 
 				const turnFiber = yield* Effect.fork(
 					instance
@@ -354,7 +353,7 @@ describe("Claude provider runtime boundary", () => {
 							return query;
 						},
 					});
-					const instance = new ClaudeProviderInstance(runtime);
+					const instance = runtime;
 					const turn = yield* Effect.fork(
 						instance
 							.sendTurnEffect(

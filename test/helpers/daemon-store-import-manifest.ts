@@ -20,8 +20,8 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../src/lib/persistence/events.js";
-import { makeClaudeRunnerReceiptStore } from "../../src/lib/provider/claude/claude-runner-receipts.js";
 import { DurableCommandCommitRepository } from "../../src/lib/provider/orchestration-command-commit.js";
+import { makeRunnerReceiptStore } from "../../src/lib/provider/runner/runner-receipts.js";
 
 type Row = Record<string, unknown>;
 type NumberDomain = "event" | "outbox" | "version";
@@ -1045,7 +1045,7 @@ export async function createProjectStoreFixture(
 						},
 					],
 				});
-				const receipts = yield* makeClaudeRunnerReceiptStore(sql);
+				const receipts = yield* makeRunnerReceiptStore(sql);
 				yield* receipts.attach(`${projectId}_runner`, "fixture-attachment");
 				yield* receipts.acknowledge(
 					`${projectId}_runner`,

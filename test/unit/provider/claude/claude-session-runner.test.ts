@@ -5,18 +5,18 @@ import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
-import { makeClaudeRunnerIdleExit } from "../../../../src/lib/provider/claude/claude-runner-idle.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
-import type {
-	ClaudeSessionCommand,
-	ClaudeSessionOutput,
-} from "../../../../src/lib/provider/claude/claude-session-runner.js";
 import { claudeSubagentSessionId } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
 	PermissionResult,
 	SDKMessage,
 } from "../../../../src/lib/provider/claude/types.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
+import { makeRunnerIdleExit } from "../../../../src/lib/provider/runner/runner-idle.js";
+import type {
+	SessionCommand,
+	SessionOutput,
+} from "../../../../src/lib/provider/runner/session-runner.js";
 import {
 	createMockQuery,
 	makeSuccessResult,
@@ -28,7 +28,7 @@ function roundTrip<T>(message: T): T {
 
 const send = (
 	inputId: string,
-): Extract<ClaudeSessionCommand, { type: "send-turn" }> => ({
+): Extract<SessionCommand, { type: "send-turn" }> => ({
 	type: "send-turn",
 	sinkId: inputId,
 	aborted: false,
@@ -63,12 +63,7 @@ describe("Claude runner idle exit", () => {
 	])("stays alive for %s tasks and starts the idle window when they finish", (type) => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
-		const idle = makeClaudeRunnerIdleExit(
-			onIdle,
-			100,
-			undefined,
-			getConfigDir(),
-		);
+		const idle = makeRunnerIdleExit(onIdle, 100, undefined, getConfigDir());
 		try {
 			idle.activity({
 				type: "background-task",
@@ -99,12 +94,7 @@ describe("Claude runner idle exit", () => {
 	it("does not extend the idle window for empty snapshots", () => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
-		const idle = makeClaudeRunnerIdleExit(
-			onIdle,
-			100,
-			undefined,
-			getConfigDir(),
-		);
+		const idle = makeRunnerIdleExit(onIdle, 100, undefined, getConfigDir());
 		try {
 			vi.advanceTimersByTime(99);
 			idle.activity({
@@ -122,7 +112,7 @@ describe("Claude runner idle exit", () => {
 
 describe("in-process Claude session runner", () => {
 	it("routes subagent persistence and background bookkeeping through JSON messages", async () => {
-		const outputs: ClaudeSessionOutput[] = [];
+		const outputs: SessionOutput[] = [];
 		const onBackgroundTask = vi.fn();
 		const ensureClaudeSubagentSession = vi.fn(() => Effect.void);
 		const childSessionId = claudeSubagentSessionId({
@@ -254,18 +244,14 @@ describe("in-process Claude session runner", () => {
 	});
 
 	it("sends turns, answers an approval and interrupts using only messages", async () => {
-		const outputs: ClaudeSessionOutput[] = [];
+		const outputs: SessionOutput[] = [];
 		const prompts: string[] = [];
 		const permissions: Array<PermissionResult | null> = [];
 		const approval = await Effect.runPromise(
-			Deferred.make<
-				Extract<ClaudeSessionOutput, { type: "permission-request" }>
-			>(),
+			Deferred.make<Extract<SessionOutput, { type: "permission-request" }>>(),
 		);
 		const question = await Effect.runPromise(
-			Deferred.make<
-				Extract<ClaudeSessionOutput, { type: "question-request" }>
-			>(),
+			Deferred.make<Extract<SessionOutput, { type: "question-request" }>>(),
 		);
 		const secondTurn = await Effect.runPromise(Deferred.make<void>());
 		const stop = await Effect.runPromise(Deferred.make<void>());
@@ -373,7 +359,7 @@ describe("in-process Claude session runner", () => {
 							sinkId: request.sinkId,
 							requestId: request.request.requestId,
 							response: { decision: "once" },
-						} satisfies ClaudeSessionCommand),
+						} satisfies SessionCommand),
 					);
 					const questionRequest = yield* Deferred.await(question);
 					yield* runner.executeEffect(
@@ -382,7 +368,7 @@ describe("in-process Claude session runner", () => {
 							sinkId: questionRequest.sinkId,
 							requestId: questionRequest.request.requestId,
 							answers: { "0": "Yes" },
-						} satisfies ClaudeSessionCommand),
+						} satisfies SessionCommand),
 					);
 					expect(roundTrip(yield* Fiber.join(first)).status).toBe("completed");
 					expect(permissions[0]).toEqual({
@@ -402,7 +388,7 @@ describe("in-process Claude session runner", () => {
 						roundTrip({
 							type: "interrupt",
 							sessionId: "session-1",
-						} satisfies ClaudeSessionCommand),
+						} satisfies SessionCommand),
 					);
 					expect(roundTrip(yield* Fiber.join(second)).status).toBe(
 						"interrupted",

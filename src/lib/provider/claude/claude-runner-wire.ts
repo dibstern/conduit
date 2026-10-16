@@ -10,7 +10,8 @@ import type {
 	RunnerMessage,
 	RunnerWireCodec,
 } from "../runner/runner-protocol.js";
-import type { ClaudeRunnerSettingsSnapshot } from "./claude-runner-upgrade.js";
+import type { RunnerSettingsSnapshot } from "../runner/runner-upgrade.js";
+import type { SessionTurn } from "../runner/session-runner.js";
 import {
 	type ClaudeConfigDir,
 	ClaudeConfigDirSchema,
@@ -20,7 +21,6 @@ import {
 	configuredClaudeConfigDir,
 	makeClaudeSdkEnv,
 } from "./claude-sdk-env.js";
-import type { ClaudeSessionTurn } from "./claude-session-runner.js";
 /** Missing legacy folders preserve the carried account, then use the default. Explicit blanks are invalid. */
 export function normalizeClaudeLaunchInput<
 	T extends {
@@ -84,7 +84,7 @@ export function normalizeClaudeLaunchInput<
 }
 
 export function normalizeClaudeSessionTurn(
-	input: Omit<ClaudeSessionTurn, "inputId" | "configDir" | "folderSource"> & {
+	input: Omit<SessionTurn, "inputId" | "configDir" | "folderSource"> & {
 		readonly configDir?: ClaudeConfigDir | string | undefined;
 		readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 		readonly inputId?: string;
@@ -93,7 +93,7 @@ export function normalizeClaudeSessionTurn(
 		readonly turnId?: string;
 	},
 	defaultFolder?: () => ClaudeLaunchConfig,
-): ClaudeSessionTurn & ClaudeLaunchConfig {
+): SessionTurn & ClaudeLaunchConfig {
 	const { inputId, userMessageId, commandId, turnId, ...turn } = input;
 	const id = inputId ?? userMessageId ?? commandId ?? turnId;
 	if (id === undefined)
@@ -105,7 +105,7 @@ export function normalizeClaudeSessionTurn(
 }
 
 function normalizeClaudeSnapshotInput(
-	snapshot: ClaudeRunnerSettingsSnapshot,
+	snapshot: RunnerSettingsSnapshot,
 	defaultFolder: () => ClaudeLaunchConfig,
 ) {
 	return normalizeClaudeLaunchInput(snapshot.input, () => {
