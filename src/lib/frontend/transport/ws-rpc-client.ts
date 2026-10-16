@@ -3,7 +3,7 @@ import { RpcClientError } from "@effect/rpc/RpcClientError";
 import { Cause, Effect, Either, HashSet } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
-import type { SessionMode } from "../../contracts/project-file.js";
+import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import {
 	AccountIdSchema,
 	type KnownProviderDriverKind,
@@ -78,6 +78,10 @@ import type {
 	ViewSessionResponse,
 } from "./ws-rpc.js";
 
+type RpcScope =
+	| { readonly projectSlug: string; readonly sessionId?: never }
+	| { readonly sessionId: string; readonly projectSlug?: never };
+
 type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
 type UnaryTag = {
 	[T in Rpcs["_tag"]]: [Rpc.IsStream<Rpcs, T>] extends [never] ? T : never;
@@ -128,34 +132,20 @@ export async function rpc<T extends UnaryTag>(
 }
 
 export interface CancelSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly commandId: string;
 }
 
 export interface StopBackgroundTaskRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly taskId: string;
 }
 
-export interface GetModelsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
+export type GetModelsRpcInput = RpcScope & { readonly instanceId?: string };
 
-export interface GetAgentsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
+export type GetAgentsRpcInput = RpcScope & { readonly instanceId?: string };
 
-export interface GetCommandsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly instanceId?: string;
-}
+export type GetCommandsRpcInput = RpcScope & { readonly instanceId?: string };
 
 export interface GetProjectsRpcInput {
 	readonly projectSlug: string;
@@ -211,13 +201,11 @@ export interface PtyInputRpcInput {
 	readonly data: string;
 }
 
-export interface CreatePtyRpcInput {
-	readonly projectSlug: string;
+export type CreatePtyRpcInput = RpcScope & {
 	readonly originId: string;
-	readonly sessionId?: string;
 	readonly accountId?: string;
 	readonly root?: string;
-}
+};
 
 export interface ResizePtyRpcInput {
 	readonly projectSlug: string;
@@ -254,13 +242,11 @@ export interface CreateSessionRpcInput {
 }
 
 export interface ViewSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId: string;
 }
 
 export interface PreWarmSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }
 
@@ -269,29 +255,24 @@ export type PreWarmDraftRpcInput = Omit<
 	"title" | "newWorktree" | "draftId"
 > & { readonly draftId: string };
 
-export interface AttachProjectRpcInput {
-	readonly projectSlug?: string;
-	readonly sessionId?: string;
-	readonly originId: string;
-}
+export type AttachProjectRpcInput = (
+	| { readonly projectSlug?: string; readonly sessionId?: never }
+	| { readonly sessionId: string; readonly projectSlug?: never }
+) & { readonly originId: string };
 
 export interface DeleteSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
 	readonly removeWorktrees?: boolean;
 }
 
-export interface ForkSessionRpcInput {
-	readonly projectSlug: string;
+export type ForkSessionRpcInput = RpcScope & {
 	readonly originId: string;
-	readonly sessionId?: string;
 	readonly messageId?: string;
-}
+};
 
 export interface StartSideThreadRpcInput {
-	readonly projectSlug: string;
-	readonly parentSessionId: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly inputId: string;
 	readonly text: string;
@@ -325,39 +306,26 @@ export interface RejectQuestionRpcInput {
 	readonly toolId: string;
 }
 
-export interface GetFileTreeRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-}
+export type GetFileTreeRpcInput = RpcScope;
 
-export interface GetFileListRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
+export type GetFileListRpcInput = RpcScope & {
 	readonly root?: string;
 	readonly path?: string;
-}
+};
 
-export interface GetFileContentRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
+export type GetFileContentRpcInput = RpcScope & {
 	readonly root?: string;
 	readonly path: string;
-}
+};
 
 export interface GetToolDetailsRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly toolIds: readonly [ToolCallId, ...ToolCallId[]];
 }
 
-export interface GetSkillContentRpcInput {
-	readonly projectSlug: string;
-	readonly name: string;
-	readonly sessionId?: string;
-}
+export type GetSkillContentRpcInput = RpcScope & { readonly name: string };
 
 export interface GetSessionSkillsRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }
 
@@ -367,21 +335,18 @@ export interface FindFoldersRpcInput {
 }
 
 export interface SwitchAgentRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly agentId: string;
 	readonly originId?: string;
 }
 
 export interface SwitchContextWindowRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly contextWindow: string;
 	readonly originId?: string;
 }
 
 export interface SwitchModelRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly modelId: string;
 	readonly providerId: string;
@@ -428,28 +393,23 @@ export interface SetClaudeSettingsRpcInput {
 	readonly originId?: string;
 }
 
-export interface ResolveClaudeSettingsRpcInput {
-	readonly projectSlug: string;
+export type ResolveClaudeSettingsRpcInput = RpcScope & {
 	readonly instanceId: string;
-	readonly sessionId?: string;
-}
+};
 
 export interface ReloadProviderSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly commandId: string;
 	readonly originId?: string;
 }
 
 export interface RenameSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly title: string;
 	readonly originId?: string;
 }
 
 export interface MarkSessionReadRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
 }
@@ -459,47 +419,40 @@ export interface MarkSessionSeenRpcInput extends MarkSessionReadRpcInput {
 }
 
 export interface SetSessionSettledRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly settled: boolean;
 	readonly originId?: string;
 }
 
 export interface SetSessionPinnedRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly pinned: boolean;
 	readonly originId?: string;
 }
 
 export interface SetSessionAutoSettleRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly disabled: boolean;
 	readonly originId?: string;
 }
 
 export interface SnoozeSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly until: number | null;
 	readonly originId?: string;
 }
 
 export interface UnsnoozeSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
 }
 
 export interface DismissCutOffRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
 }
 
 export interface ContinueSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly instanceId: string;
 	readonly expectedInstanceId: string;
@@ -508,13 +461,11 @@ export interface ContinueSessionRpcInput {
 }
 
 export interface CancelContinuationRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly originId?: string;
 }
 
 export interface PreviewContinuationRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly instanceId: string;
 	readonly originId?: string;
@@ -531,14 +482,12 @@ export interface GetContinuationHandoffRpcInput
 }
 
 export interface SwitchVariantRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly variant: string;
 	readonly originId?: string;
 }
 
 export interface SwitchPermissionModeRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly mode: SessionPermissionMode;
 	readonly originId?: string;
@@ -558,24 +507,20 @@ export interface ListDaemonSessionsRpcInput {
 }
 
 export interface LoadMoreHistoryRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly before?: string;
 }
 
 export interface RewindSessionRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly messageId: string;
 }
 
 export interface UndoRewindRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }
 
 export interface SyncInputDraftRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly text: string;
 	readonly originId?: string;
@@ -662,7 +607,7 @@ export async function resolveSessionModeRpc(projectSlug: string) {
 
 export async function setDefaultSessionModeRpc(input: {
 	readonly projectSlug: string;
-	readonly mode: SessionMode;
+	readonly mode: DefaultSessionMode;
 }) {
 	return runTransportEffect(
 		callControl(input.projectSlug, (client) =>
@@ -672,53 +617,45 @@ export async function setDefaultSessionModeRpc(input: {
 }
 
 export async function inspectSessionWorktreesRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }) {
 	return runTransportEffect(
-		callControl(input.projectSlug, (client) =>
+		callControl(undefined, (client) =>
 			client("InspectSessionWorktrees", input),
 		),
 	);
 }
 
 export async function moveSessionWorkspaceRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly path: string;
 }): Promise<void> {
 	const result = await runTransportEffect(
 		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("MoveSessionWorkspace", input),
-			),
+			callControl(undefined, (client) => client("MoveSessionWorkspace", input)),
 		),
 	);
 	if (Either.isLeft(result)) throw result.left;
 }
 
 export async function renameSessionBranchRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly branchName: string;
 }): Promise<void> {
 	const result = await runTransportEffect(
 		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("RenameSessionBranch", input),
-			),
+			callControl(undefined, (client) => client("RenameSessionBranch", input)),
 		),
 	);
 	if (Either.isLeft(result)) throw result.left;
 }
 
 export async function recreateSessionWorktreeRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }): Promise<void> {
 	const result = await runTransportEffect(
 		Effect.either(
-			callControl(input.projectSlug, (client) =>
+			callControl(undefined, (client) =>
 				client("RecreateSessionWorktree", input),
 			),
 		),
@@ -727,12 +664,11 @@ export async function recreateSessionWorktreeRpc(input: {
 }
 
 export async function continueSessionInMainFolderRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }): Promise<void> {
 	const result = await runTransportEffect(
 		Effect.either(
-			callControl(input.projectSlug, (client) =>
+			callControl(undefined, (client) =>
 				client("ContinueSessionInMainFolder", input),
 			),
 		),
@@ -741,22 +677,19 @@ export async function continueSessionInMainFolderRpc(input: {
 }
 
 export async function dismissWorkspaceHintRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly path: string;
 }): Promise<void> {
 	const result = await runTransportEffect(
 		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("DismissWorkspaceHint", input),
-			),
+			callControl(undefined, (client) => client("DismissWorkspaceHint", input)),
 		),
 	);
 	if (Either.isLeft(result)) throw result.left;
 }
 
 const callCancelSession = (input: CancelSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("CancelSession", input).pipe(Effect.asVoid),
 	);
 
@@ -764,7 +697,7 @@ export async function stopBackgroundTaskRpc(
 	input: StopBackgroundTaskRpcInput,
 ): Promise<void> {
 	await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
+		callControl(undefined, (client) =>
 			client("StopBackgroundTask", input).pipe(Effect.asVoid),
 		),
 	);
@@ -864,10 +797,10 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 	);
 
 const callViewSession = (input: ViewSessionRpcInput) =>
-	callControl(input.projectSlug, (client) => client("ViewSession", input));
+	callControl(undefined, (client) => client("ViewSession", input));
 
 const callPreWarmSession = (input: PreWarmSessionRpcInput) =>
-	callControl(input.projectSlug, (client) => client("PreWarmSession", input));
+	callControl(undefined, (client) => client("PreWarmSession", input));
 
 const callPreWarmDraft = (input: PreWarmDraftRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -894,9 +827,8 @@ const callAttachProject = (input: AttachProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client("AttachProject", input));
 
 const callDeleteSession = (input: DeleteSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("DeleteSession", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			...(input.originId != null ? { originId: input.originId } : {}),
 			...(input.removeWorktrees === undefined
@@ -906,17 +838,10 @@ const callDeleteSession = (input: DeleteSessionRpcInput) =>
 	);
 
 const callForkSession = (input: ForkSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("ForkSession", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
-			...(input.messageId != null ? { messageId: input.messageId } : {}),
-		}),
-	);
+	callControl(input.projectSlug, (client) => client("ForkSession", input));
 
 const callStartSideThread = (input: StartSideThreadRpcInput) =>
-	callControl(input.projectSlug, (client) => client("StartSideThread", input));
+	callControl(undefined, (client) => client("StartSideThread", input));
 
 const callRespondPermission = (input: RespondPermissionRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -969,21 +894,20 @@ const callGetFileContent = (input: GetFileContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetFileContent", input));
 
 const callGetToolDetails = (input: GetToolDetailsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetToolDetails", input));
+	callControl(undefined, (client) => client("GetToolDetails", input));
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetSkillContent", input));
 
 const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetSessionSkills", input));
+	callControl(undefined, (client) => client("GetSessionSkills", input));
 
 const callFindFolders = (input: FindFoldersRpcInput) =>
 	callControl(input.projectSlug, (client) => client("FindFolders", input));
 
 const callSwitchAgent = (input: SwitchAgentRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SwitchAgent", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			agentId: input.agentId,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -991,9 +915,8 @@ const callSwitchAgent = (input: SwitchAgentRpcInput) =>
 	);
 
 const callSwitchContextWindow = (input: SwitchContextWindowRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SwitchContextWindow", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			contextWindow: input.contextWindow,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1001,9 +924,8 @@ const callSwitchContextWindow = (input: SwitchContextWindowRpcInput) =>
 	);
 
 const callSwitchModel = (input: SwitchModelRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SwitchModel", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			modelId: input.modelId,
 			providerId: input.providerId,
@@ -1067,9 +989,8 @@ const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
 	);
 
 const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("ReloadProviderSession", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			commandId: input.commandId,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1077,9 +998,8 @@ const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
 	);
 
 const callRenameSession = (input: RenameSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("RenameSession", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			title: input.title,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1087,49 +1007,48 @@ const callRenameSession = (input: RenameSessionRpcInput) =>
 	);
 
 const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SetSessionSettled", input).pipe(Effect.asVoid),
 	);
 
 const callMarkSessionUnread = (input: MarkSessionReadRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("MarkSessionUnread", input).pipe(Effect.asVoid),
 	);
 
 const callMarkSessionRead = (input: MarkSessionReadRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("MarkSessionRead", input).pipe(Effect.asVoid),
 	);
 
 const callMarkSessionSeen = (input: MarkSessionSeenRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("MarkSessionSeen", input).pipe(Effect.asVoid),
 	);
 
 const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SetSessionPinned", input).pipe(Effect.asVoid),
 	);
 
 const callSetSessionAutoSettle = (input: SetSessionAutoSettleRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SetSessionAutoSettle", input).pipe(Effect.asVoid),
 	);
 
 const callSnoozeSession = (input: SnoozeSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SnoozeSession", input).pipe(Effect.asVoid),
 	);
 
 const callUnsnoozeSession = (input: UnsnoozeSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("UnsnoozeSession", input).pipe(Effect.asVoid),
 	);
 
 const callSwitchVariant = (input: SwitchVariantRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SwitchVariant", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			variant: input.variant,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1137,9 +1056,8 @@ const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 	);
 
 const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SwitchPermissionMode", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			mode: input.mode,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1152,18 +1070,17 @@ const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
 	);
 
 const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
-	callControl(input.projectSlug, (client) => client("LoadMoreHistory", input));
+	callControl(undefined, (client) => client("LoadMoreHistory", input));
 
 const callRewindSession = (input: RewindSessionRpcInput) =>
-	callControl(input.projectSlug, (client) => client("RewindSession", input));
+	callControl(undefined, (client) => client("RewindSession", input));
 
 const callUndoRewind = (input: UndoRewindRpcInput) =>
-	callControl(input.projectSlug, (client) => client("UndoRewind", input));
+	callControl(undefined, (client) => client("UndoRewind", input));
 
 const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
-	callControl(input.projectSlug, (client) =>
+	callControl(undefined, (client) =>
 		client("SyncInputDraft", {
-			projectSlug: input.projectSlug,
 			sessionId: input.sessionId,
 			text: input.text,
 			...(input.originId ? { originId: input.originId } : {}),
@@ -1191,11 +1108,10 @@ export async function getModelsRpc(
 }
 
 export async function getGoalDetailsRpc(input: {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 }): Promise<GoalDetails> {
 	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("GetGoalDetails", input)),
+		callControl(undefined, (client) => client("GetGoalDetails", input)),
 	);
 }
 
@@ -1668,7 +1584,7 @@ export async function dismissCutOffRpc(
 	input: DismissCutOffRpcInput,
 ): Promise<void> {
 	await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
+		callControl(undefined, (client) =>
 			client("DismissCutOff", input).pipe(Effect.asVoid),
 		),
 	);
@@ -1678,7 +1594,7 @@ export async function continueSessionRpc(
 	input: ContinueSessionRpcInput,
 ): Promise<void> {
 	const result = await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
+		callControl(undefined, (client) =>
 			client("ContinueSession", input).pipe(Effect.asVoid, Effect.either),
 		),
 	);
@@ -1689,7 +1605,7 @@ export async function cancelContinuationRpc(
 	input: CancelContinuationRpcInput,
 ): Promise<void> {
 	await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
+		callControl(undefined, (client) =>
 			client("CancelContinuation", input).pipe(Effect.asVoid),
 		),
 	);
@@ -1699,7 +1615,7 @@ export async function previewContinuationRpc(
 	input: PreviewContinuationRpcInput,
 ): Promise<PreviewContinuationResponse> {
 	const result = await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
+		callControl(undefined, (client) =>
 			client("PreviewContinuation", input).pipe(Effect.either),
 		),
 	);
@@ -1721,9 +1637,7 @@ export async function getContinuationHandoffRpc(
 	input: GetContinuationHandoffRpcInput,
 ): Promise<ContinuationHandoffResponse> {
 	return await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("GetContinuationHandoff", input),
-		),
+		callControl(undefined, (client) => client("GetContinuationHandoff", input)),
 	);
 }
 
@@ -1740,7 +1654,6 @@ export async function switchPermissionModeRpc(
 }
 
 export interface ResolveSessionRpcInput {
-	readonly projectSlug?: string;
 	readonly sessionId: string;
 }
 
@@ -1748,7 +1661,7 @@ export async function resolveSessionRpc(
 	input: ResolveSessionRpcInput,
 ): Promise<{ readonly projectSlug: string | null }> {
 	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("ResolveSession", input)),
+		callControl(undefined, (client) => client("ResolveSession", input)),
 	);
 }
 
@@ -1777,7 +1690,6 @@ export async function undoRewindRpc(
 }
 
 export interface InboxCommandRpcInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly inputId: string;
 }
@@ -1787,7 +1699,7 @@ export async function cancelInputRpc(
 	input: InboxCommandRpcInput,
 ): Promise<InboxCommandResponse> {
 	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("input.cancel", input)),
+		callControl(undefined, (client) => client("input.cancel", input)),
 	);
 }
 
@@ -1797,7 +1709,7 @@ export async function sendInputNowRpc(
 	input: InboxCommandRpcInput,
 ): Promise<InboxCommandResponse> {
 	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("input.sendNow", input)),
+		callControl(undefined, (client) => client("input.sendNow", input)),
 	);
 }
 

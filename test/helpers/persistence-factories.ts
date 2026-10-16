@@ -129,7 +129,7 @@ export function makeSessionStatusEvent(
 	);
 }
 
-export function makeStored<T extends StoredEvent["type"]>(
+export function makeStored<T extends CanonicalEvent["type"]>(
 	type: T,
 	sessionId: string,
 	data: EventPayloadMap[T],

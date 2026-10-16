@@ -58,7 +58,6 @@ describe("queued input across a restart", () => {
 		const sessionId = await browser.createSession("Queue across restart");
 		await Effect.runPromise(
 			browser.rpc.SwitchModel({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				providerId: "claude",
@@ -79,7 +78,6 @@ describe("queued input across a restart", () => {
 		const queuedId = randomUUID();
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId: queuedId,

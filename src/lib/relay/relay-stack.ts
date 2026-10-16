@@ -27,6 +27,7 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	Option,
 	Schedule,
 } from "effect";
 import { AuthManager } from "../auth.js";
@@ -35,6 +36,7 @@ import { AccountDirectory } from "../domain/daemon/Services/account-directory.js
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
+import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	ProjectSettingsTag,
@@ -828,14 +830,23 @@ export async function createRelayStack(
 				dirname(config.persistenceDbPath),
 				`${slug}.events.db`,
 			);
+			const parentContext = (await relay.effectRuntime.runtime.runtime())
+				.context;
+			const sessionDirectory = Context.getOption(
+				parentContext,
+				SessionDirectory,
+			);
+			const daemonContext = Context.pick(
+				DaemonConfigRefTag,
+				ConfigPersistenceTag,
+				AccountDirectory,
+				SessionActivityTag,
+			)(parentContext);
 			const newRelay = await createProjectRelay({
 				httpServer,
-				daemonConfigContext: Context.pick(
-					DaemonConfigRefTag,
-					ConfigPersistenceTag,
-					AccountDirectory,
-					SessionActivityTag,
-				)((await relay.effectRuntime.runtime.runtime()).context),
+				daemonConfigContext: Option.isSome(sessionDirectory)
+					? Context.add(daemonContext, SessionDirectory, sessionDirectory.value)
+					: daemonContext,
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
 				slug,
@@ -940,6 +951,13 @@ export async function createRelayStack(
 					}),
 				undefined,
 				config.slug,
+			).pipe(
+				Effect.provideServiceEffect(
+					SessionDirectory,
+					Effect.map(relay.effectRuntime.runtime.runtimeEffect, (runtime) =>
+						Context.get(runtime.context, SessionDirectory),
+					),
+				),
 			),
 		),
 	);

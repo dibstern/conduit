@@ -195,7 +195,6 @@ describe("Project provenance through the built daemon", () => {
 				sendRpcRequest(
 					join(fixture.configDir, "relay.sock"),
 					new SubmitInput({
-						projectSlug: slug,
 						sessionId,
 						originId: `provenance-${slug}`,
 						inputId: commandId ?? "missing-command",

@@ -34,7 +34,7 @@
 		skillDoc = null;
 		skillState = projectSlug && requestedName ? "loading" : "missing";
 		if (projectSlug && requestedName) {
-			void getSkillContentRpc({ projectSlug, name: requestedName, ...(sessionId ? { sessionId } : {}) })
+			void getSkillContentRpc({ ...(sessionId ? { sessionId } : { projectSlug }), name: requestedName })
 				.then((response) => {
 					if (!active || workspace !== requestedWorkspace) return;
 					// Markdown would read YAML frontmatter as a rule and a heading.

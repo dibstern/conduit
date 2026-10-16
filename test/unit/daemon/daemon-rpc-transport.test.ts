@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RpcServer } from "@effect/rpc";
-import { Deferred, Effect, Mailbox, Option, Ref } from "effect";
+import { Deferred, Effect, Layer, Mailbox, Option, Ref } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	GetProjects,
@@ -28,6 +28,7 @@ import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { makeSessionDirectoryLive } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
@@ -208,7 +209,7 @@ describe("daemon Unix RPC transport", () => {
 			// This fixture exercises only these daemon methods; all other routes
 			// retain the existing handlers and fail at the resolver above.
 			daemonHandlers as unknown as DaemonRpcHandlers,
-		);
+		).pipe(Layer.provide(makeSessionDirectoryLive(directory, [])));
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {

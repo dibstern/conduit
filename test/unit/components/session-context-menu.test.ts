@@ -139,7 +139,6 @@ describe("session triage menu", () => {
 		await fireEvent.click(screen.getByTestId("session-ctx-settle"));
 		expect(setSessionSettledRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				settled: true,
 			}),
@@ -155,7 +154,6 @@ describe("session triage menu", () => {
 		await fireEvent.click(checkbox);
 		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				disabled: true,
 			}),
@@ -169,7 +167,6 @@ describe("session triage menu", () => {
 		await fireEvent.click(unchecked);
 		expect(setSessionAutoSettleRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				disabled: false,
 			}),
@@ -220,7 +217,7 @@ describe("session triage menu", () => {
 		openMenu({ id: "a", title: "Alpha", snoozedAt: 1 });
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
 		expect(unsnoozeSessionRpc).toHaveBeenCalledWith(
-			expect.objectContaining({ projectSlug: "test", sessionId: "a" }),
+			expect.objectContaining({ sessionId: "a" }),
 		);
 	});
 
@@ -229,7 +226,6 @@ describe("session triage menu", () => {
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsettle"));
 		expect(setSessionSettledRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				settled: false,
 			}),
@@ -241,7 +237,6 @@ describe("session triage menu", () => {
 		await fireEvent.click(await screen.findByTestId("session-ctx-pin"));
 		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				pinned: true,
 			}),
@@ -262,7 +257,6 @@ describe("session triage menu", () => {
 		await fireEvent.click(screen.getByTestId("session-ctx-unpin"));
 		expect(setSessionPinnedRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				pinned: false,
 			}),

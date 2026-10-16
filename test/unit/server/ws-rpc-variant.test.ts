@@ -51,14 +51,13 @@ describe("WsRpcServerLayer SwitchVariant", () => {
 					VALUES ('session-1', 'opencode', 'Stored session', 'openai', 'gpt-4', 'standard', '', 1, 1)`;
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const result = yield* client.SwitchVariant({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 					variant: "fast",
 					originId: "browser-1",
 				});
 
 				expect(result).toEqual({
-					projectSlug: "project-a",
+					projectSlug: "test-project",
 					variant: "fast",
 					variants: ["standard", "fast"],
 				});

@@ -302,7 +302,7 @@ test("an OpenCode model runs at the effort conduit shows for it", async ({
 				}),
 			);
 			await Effect.runPromise(
-				browser.rpc.SwitchVariant({ projectSlug, sessionId, variant: "high" }),
+				browser.rpc.SwitchVariant({ sessionId, variant: "high" }),
 			);
 		},
 	);
@@ -316,7 +316,7 @@ test("an OpenCode model runs at the effort conduit shows for it", async ({
 	if (!setup) throw new Error("openDraft never ran its setup");
 	const sessionId = /\/s\/([^/?]+)/.exec(page.url())?.[1] ?? "";
 	const { variant } = await Effect.runPromise(
-		setup.browser.rpc.GetModels({ projectSlug: setup.projectSlug, sessionId }),
+		setup.browser.rpc.GetModels({ sessionId }),
 	);
 	expect
 		.soft(variant?.variant, "conduit shows the model's saved effort")
@@ -909,7 +909,6 @@ test.describe("effort", () => {
 		);
 		const stored = await Effect.runPromise(
 			setup.browser.rpc.GetModels({
-				projectSlug: setup.projectSlug,
 				sessionId,
 			}),
 		);

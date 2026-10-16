@@ -609,7 +609,6 @@ describe("Claude session process runner", () => {
 				cancelCommandIds.map((commandId) =>
 					Effect.runPromise(
 						browser.rpc.CancelSession({
-							projectSlug: "process-test",
 							sessionId,
 							commandId,
 						}),
@@ -648,7 +647,6 @@ describe("Claude session process runner", () => {
 			// turn or add another terminal event after notification cleanup.
 			await Effect.runPromise(
 				browser.rpc.CancelSession({
-					projectSlug: "process-test",
 					sessionId,
 					commandId: randomUUID(),
 				}),

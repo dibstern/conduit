@@ -69,7 +69,6 @@
 		}
 
 		void rewindSessionRpc({
-			projectSlug,
 			sessionId,
 			messageId: message.messageId,
 		})
@@ -97,7 +96,7 @@
 		if (!pendingMessageId || !sessionId || !projectSlug || undoing) return;
 		undoing = true;
 		try {
-			await undoRewindRpc({ projectSlug, sessionId });
+			await undoRewindRpc({ sessionId });
 		} catch {
 			if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
 				showToast("Could not undo the rewind.", { variant: "warn" });

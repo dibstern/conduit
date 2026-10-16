@@ -7,8 +7,8 @@
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 	ToolStartedPayload,
 } from "../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
@@ -54,10 +54,7 @@ const turn = (
 ): CanonicalEvent[] => {
 	const userId = `${sessionId}-u${at}`;
 	const assistantId = `${sessionId}-a${at}`;
-	const event = <T extends CanonicalEventType>(
-		type: T,
-		data: EventPayloadMap[T],
-	) =>
+	const event = <T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 		canonicalEvent(type, sessionId, data, {
 			provider: "claude",
 			createdAt: at,

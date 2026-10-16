@@ -121,7 +121,7 @@
 			// project default.
 			const sessionId = sessionState.currentId;
 			const applyModels = followModelsRead(sessionId ?? undefined);
-			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+			void getModelsRpc({ ...(sessionId ? { sessionId } : { projectSlug }) })
 				.then((response) => {
 					if (sessionState.currentId === sessionId) applyModels(response);
 				})
@@ -129,7 +129,7 @@
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-			void getAgentsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+			void getAgentsRpc({ ...(sessionId ? { sessionId } : { projectSlug }) })
 				.then((response) => {
 					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
 				})

@@ -196,7 +196,6 @@ it("keeps B's GetModels pick when A's row changes model last", async () => {
 	expect(discoveryState.currentModelId).toBe("model-b0");
 	expect(getModelsRpc).toHaveBeenCalledTimes(2);
 	expect(getModelsRpc).toHaveBeenLastCalledWith({
-		projectSlug: "project-a",
 		sessionId: "B",
 	});
 	refresh.resolve({
