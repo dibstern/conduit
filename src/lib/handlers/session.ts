@@ -38,18 +38,76 @@ interface ViewSessionPayload {
 	readonly sessionId: string;
 }
 
-interface NewSessionPayload {
-	readonly title?: string;
-	readonly instanceId?: AccountId;
-	readonly providerId?: string;
+export interface NewSessionPayload {
+	readonly title?: string | undefined;
+	readonly instanceId?: AccountId | undefined;
+	readonly providerId?: string | undefined;
 	readonly permissionMode: SessionPermissionMode;
-	readonly model?: {
-		readonly modelId: string;
-		readonly providerId: string;
-		readonly variant?: string;
-		readonly contextWindow?: string;
-	};
+	readonly model?:
+		| {
+				readonly modelId: string;
+				readonly providerId: string;
+				readonly variant?: string | undefined;
+				readonly contextWindow?: string | undefined;
+		  }
+		| undefined;
 }
+
+/** Resolve the composer's pick once for both draft warming and creation. */
+export const resolveSessionCreationAccount = (
+	input: NewSessionPayload & {
+		readonly accountRef?: AccountRef | undefined;
+		readonly account?: Account | undefined;
+	},
+) =>
+	Effect.gen(function* () {
+		const accounts = yield* AccountDirectory;
+		return (
+			input.account ??
+			(yield* accounts.resolve(
+				input.accountRef ??
+					accountRefFromSelection({
+						instanceId: input.instanceId,
+						providerId: input.providerId,
+						model:
+							input.model === undefined
+								? undefined
+								: { providerID: input.model.providerId },
+					}),
+			))
+		);
+	});
+
+export const resolveSessionCreation = (
+	input: Parameters<typeof resolveSessionCreationAccount>[0],
+	options: { readonly startIfStopped?: boolean } = { startIfStopped: true },
+) =>
+	Effect.gen(function* () {
+		const account = yield* resolveSessionCreationAccount(input);
+		const { model, permissionMode } = input;
+		if (
+			permissionMode == null ||
+			!model?.modelId.trim() ||
+			!model.providerId.trim()
+		)
+			return yield* new PickRequired();
+		const catalog = yield* loadModelCatalog(
+			account.driver,
+			account.id,
+			options,
+		);
+		const resolved = resolveTurnSettings(
+			{
+				harness: account.driver,
+				model,
+				effort: model.variant ?? "",
+				contextWindow: model.contextWindow ?? "",
+			},
+			catalog,
+		);
+		if (Either.isLeft(resolved)) return yield* resolved.left;
+		return { account, pick: resolved.right, permissionMode };
+	});
 
 interface DeleteSessionPayload {
 	readonly sessionId: string;
@@ -138,6 +196,7 @@ export const createSessionForClient = <E = never>({
 	permissionMode,
 	initializeWorkspace,
 	sessionId,
+	resolvedCreation,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
@@ -146,6 +205,9 @@ export const createSessionForClient = <E = never>({
 	readonly accountRef?: AccountRef;
 	readonly account?: Account;
 	readonly sessionId?: string;
+	readonly resolvedCreation?: Effect.Effect.Success<
+		ReturnType<typeof resolveSessionCreation>
+	>;
 	readonly permissionMode: SessionPermissionMode;
 	readonly model?: {
 		readonly modelId: string;
@@ -158,42 +220,19 @@ export const createSessionForClient = <E = never>({
 	Effect.gen(function* () {
 		const sessionManagerService = yield* SessionManagerServiceTag;
 		const log = yield* LoggerTag;
-		const accounts = yield* AccountDirectory;
-		const account =
-			resolvedAccount ??
-			(yield* accounts.resolve(
-				accountRef ??
-					accountRefFromSelection({
-						instanceId,
-						providerId,
-						model:
-							model === undefined
-								? undefined
-								: { providerID: model.providerId },
-					}),
-			));
-		if (
-			permissionMode == null ||
-			!model?.modelId.trim() ||
-			!model.providerId.trim()
-		)
-			return yield* new PickRequired();
-		const catalog = yield* loadModelCatalog(account.driver, account.id, {
-			startIfStopped: true,
-		});
-		const resolved = resolveTurnSettings(
-			{
-				harness: account.driver,
+		const { account, pick } =
+			resolvedCreation ??
+			(yield* resolveSessionCreation({
+				instanceId,
+				providerId,
+				accountRef,
+				account: resolvedAccount,
 				model,
-				effort: model.variant ?? "",
-				contextWindow: model.contextWindow ?? "",
-			},
-			catalog,
-		);
-		if (Either.isLeft(resolved)) return yield* resolved.left;
+				permissionMode,
+			}));
 		const create = sessionManagerService.createSession(title, {
 			account,
-			pick: resolved.right,
+			pick,
 			permissionMode,
 			...(sessionId === undefined ? {} : { sessionId }),
 		});
@@ -209,10 +248,10 @@ export const createSessionForClient = <E = never>({
 						yield* switchClientToSession(clientId, session.id, {
 							skipPollerSeed: true,
 						});
-						if (model.variant !== undefined) {
+						if (model?.variant !== undefined) {
 							yield* Effect.gen(function* () {
 								const config = yield* ConfigTag;
-								const { model: pickModel, effort } = resolved.right;
+								const { model: pickModel, effort } = pick;
 								yield* Effect.try({
 									try: () =>
 										saveRelaySettings(

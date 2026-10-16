@@ -248,6 +248,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "extraFolders"
 	| "daemonConfigDir"
 	| "shellEnv"
+	| "prepareShellEnv"
 	| "claudeSettingsOverrides"
 	| "queryFactory"
 	| "subagentSdk"
@@ -325,6 +326,9 @@ export const makeClaudeProviderRuntime = (
 					? { daemonConfigDir: deps.daemonConfigDir }
 					: {}),
 				...(deps.shellEnv ? { shellEnv: deps.shellEnv } : {}),
+				...(deps.prepareShellEnv
+					? { prepareShellEnv: deps.prepareShellEnv }
+					: {}),
 				...(deps.claudeSettingsOverrides
 					? { claudeSettingsOverrides: deps.claudeSettingsOverrides }
 					: {}),

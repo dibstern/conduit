@@ -56,14 +56,23 @@ async function measureFirstSend(
 	runnerMode: "process" | "in-process",
 	batch: number,
 	round: number,
+	draft = false,
 ) {
-	const sessionId = await browser.createSession("First-send benchmark");
 	const markStart = harness.marks.length;
+	const draftId = draft ? randomUUID() : undefined;
+	const initialSessionId = draft
+		? undefined
+		: await browser.createSession("First-send benchmark");
+	const warm = () => {
+		if (draftId) return browser.preWarmDraft(draftId);
+		if (initialSessionId) return browser.preWarmSession(initialSessionId);
+		throw new Error("Missing session or draft to pre-warm");
+	};
 	let preWarmMs: number | undefined;
 	let repeatPreWarmMs: number | undefined;
 	if (prewarm) {
 		const started = performance.now();
-		await browser.preWarmSession(sessionId);
+		await warm();
 		preWarmMs = performance.now() - started;
 		await waitUntil(
 			() =>
@@ -81,13 +90,21 @@ async function measureFirstSend(
 				"Pre-warm sent a prompt or emitted system/init before input",
 			);
 		const repeated = performance.now();
-		await browser.preWarmSession(sessionId);
+		await warm();
 		repeatPreWarmMs = performance.now() - repeated;
 	} else if (
 		harness.marks.slice(markStart).some((mark) => mark.kind === "query")
 	) {
 		throw new Error("Cold first-send session already had a query");
 	}
+	const sessionId =
+		initialSessionId ??
+		(await browser.createSession(
+			"Draft first-send benchmark",
+			undefined,
+			"claude",
+			draftId ? { draftId } : {},
+		));
 	const prompt = `first-send-${randomUUID()}`;
 	const frameStart = browser.frames.length;
 	const clientSendAt = process.hrtime.bigint();
@@ -97,13 +114,36 @@ async function measureFirstSend(
 		response.chunks.join("") !== responseChunks(prompt).join("")
 	)
 		throw new Error(`First-send stream mismatch for ${prompt}`);
-	await waitUntil(
-		() =>
-			harness.marks
-				.slice(markStart)
-				.some((mark) => mark.kind === "enqueue" && mark.prompt === prompt),
-		"SDK enqueue timing proof",
-	);
+	const findFirstProjection = () =>
+		browser.frames
+			.slice(frameStart)
+			.find(
+				({ message }) =>
+					message["type"] === "transcript_message" &&
+					message["role"] === "assistant" &&
+					message["sessionId"] === sessionId &&
+					(message["parts"] as HistoryMessage["parts"])?.some(
+						(part) =>
+							part.type === "text" &&
+							part.text?.includes(responseChunks(prompt)[0] ?? ""),
+					),
+			);
+	await waitUntil(() => {
+		const observed = harness.marks.slice(markStart);
+		return (
+			observed.some((mark) => mark.kind === "query") &&
+			observed.some((mark) => mark.kind === "initialization-ready") &&
+			(runnerMode !== "process" ||
+				observed.some((mark) => mark.kind === "runner-started")) &&
+			observed.some(
+				(mark) => mark.kind === "receipt" && mark.prompt === prompt,
+			) &&
+			observed.some(
+				(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+			) &&
+			findFirstProjection() !== undefined
+		);
+	}, "first-send query/readiness/RPC/browser evidence");
 	const marks = harness.marks.slice(markStart);
 	const query = marks.find((mark) => mark.kind === "query");
 	const ready = marks.find((mark) => mark.kind === "initialization-ready");
@@ -114,19 +154,7 @@ async function measureFirstSend(
 		(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
 	);
 	const runner = marks.find((mark) => mark.kind === "runner-started");
-	const firstProjection = browser.frames
-		.slice(frameStart)
-		.find(
-			({ message }) =>
-				message["type"] === "transcript_message" &&
-				message["role"] === "assistant" &&
-				message["sessionId"] === sessionId &&
-				(message["parts"] as HistoryMessage["parts"])?.some(
-					(part) =>
-						part.type === "text" &&
-						part.text?.includes(responseChunks(prompt)[0] ?? ""),
-				),
-		);
+	const firstProjection = findFirstProjection();
 	if (
 		query?.kind !== "query" ||
 		ready?.kind !== "initialization-ready" ||
@@ -153,12 +181,21 @@ async function measureFirstSend(
 		throw new Error("First send did not use the initialized runner process");
 	if (runnerMode === "in-process" && (runner || query.pid !== serverPid))
 		throw new Error("Baseline build must use its default in-process runner");
+	if (
+		draft &&
+		prewarm &&
+		(runner?.kind !== "runner-started" ||
+			runner.sessionId !== sessionId ||
+			query.runnerSessionId !== sessionId)
+	)
+		throw new Error("Draft creation did not adopt the reserved session runner");
 	const sample = {
 		batch,
 		round,
 		sessionId,
 		prompt,
 		queryId: query.queryId,
+		...(draftId ? { draftId } : {}),
 		pid: query.pid,
 		clientSendAt: clientSendAt.toString(),
 		receiptAt: receipt.at,
@@ -183,14 +220,16 @@ async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	if (args.includes("--help")) {
 		console.log(
-			"Usage: node --import tsx test/bench/claude-prewarm.ts --baseline-dist <pre-.15 dist> [--dist dist] [--output test-results/85kb-14-prewarm.json] [--initialization-ms 250] [--batches 5] [--sessions 8]\nUses each build's default runner path, fresh sessions, rotating mode order, and a synthetic one-time initialization delay. Gate: warm p50, p99 and median batch p99 <= cold in-process baseline, with no latency allowance.",
+			"Usage: node --import tsx test/bench/claude-prewarm.ts [--draft | --baseline-dist <pre-.15 dist>] [--dist dist] [--output <json>] [--initialization-ms 250] [--batches 5] [--sessions 8]\n--draft compares fresh-session first-send-to-first-event latency with and without PreWarmDraft in the current process-runner build and writes test-results/85kb-15-prewarm-draft.json. The default mode compares session pre-warm against a pre-.15 in-process build. Both use a synthetic initialization delay and rotating mode order.",
 		);
 		return;
 	}
+	const draft = args.includes("--draft");
+	const valueArgs = args.filter((arg) => arg !== "--draft");
 	const options: Record<string, string> = {};
-	for (let index = 0; index < args.length; index += 2) {
-		const key = args[index];
-		const value = args[index + 1];
+	for (let index = 0; index < valueArgs.length; index += 2) {
+		const key = valueArgs[index];
+		const value = valueArgs[index + 1];
 		if (
 			!key ||
 			![
@@ -211,11 +250,14 @@ async function main(): Promise<void> {
 		options[key] = value;
 	}
 	const dist = resolve(options["--dist"] ?? "dist");
-	if (!options["--baseline-dist"])
+	if (!draft && !options["--baseline-dist"])
 		throw new Error("--baseline-dist requires a pre-.15 in-process build");
-	const baselineDist = resolve(options["--baseline-dist"]);
+	const baselineDist = resolve(options["--baseline-dist"] ?? dist);
 	const output = resolve(
-		options["--output"] ?? "test-results/85kb-14-prewarm.json",
+		options["--output"] ??
+			(draft
+				? "test-results/85kb-15-prewarm-draft.json"
+				: "test-results/85kb-14-prewarm.json"),
 	);
 	const initializationMs = Number(options["--initialization-ms"] ?? 250);
 	const batches = Number(options["--batches"] ?? 5);
@@ -245,17 +287,23 @@ async function main(): Promise<void> {
 		node: process.version,
 	};
 	const method = {
+		draft,
 		transport: "typed-rpc-read-model",
 		firstTextMetric: "client-send-to-first-transcript-projection",
 		rawDeltaTimingAvailable: false,
 		batches,
 		freshSessionsPerBatchPerMode: sessions,
 		initializationMs,
-		order:
-			"rotate cold-in-process/cold-process/prewarmed-process per fresh-session round",
-		metric: "RPC receipt to fake SDK prompt consumption after initialization",
+		order: draft
+			? "rotate cold-process/prewarmed-process per fresh-session round"
+			: "rotate cold-in-process/cold-process/prewarmed-process per fresh-session round",
+		metric: draft
+			? "client first-send to first assistant transcript projection"
+			: "RPC receipt to fake SDK prompt consumption after initialization",
 		summary: "nearest-rank p50/p99 raw distribution and median per-batch p99",
-		gate: "prewarmed p50, p99 and median batch p99 <= cold in-process; no allowance",
+		gate: draft
+			? "draft prewarmed first-event p50, p99 and median batch p99 <= cold process; no allowance"
+			: "prewarmed p50, p99 and median batch p99 <= cold in-process; no allowance",
 		limitations:
 			"Synthetic initialization cost, fake inference, ephemeral loopback daemon, no real Claude CLI/auth/MCP or remote model latency. This measures the real built-dist runner/RPC paths with test SDK injection, not production boot savings.",
 	};
@@ -274,11 +322,10 @@ async function main(): Promise<void> {
 		[];
 	let failure: unknown;
 	try {
-		for (const name of [
-			"cold-in-process",
-			"cold-process",
-			"prewarmed-process",
-		] as const) {
+		const names = draft
+			? (["cold-process", "prewarmed-process"] as const)
+			: (["cold-in-process", "cold-process", "prewarmed-process"] as const);
+		for (const name of names) {
 			const harness = await ProcessHarness.start({
 				dist: name === "cold-in-process" ? baselineDist : dist,
 				queryInitializationDelayMs: initializationMs,
@@ -305,6 +352,7 @@ async function main(): Promise<void> {
 							mode.name === "cold-in-process" ? "in-process" : "process",
 							batch,
 							round,
+							draft,
 						),
 					);
 				}
@@ -352,7 +400,11 @@ async function main(): Promise<void> {
 						);
 						return samples.length
 							? percentile(
-									samples.map((sample) => sample.sendToEnqueueMs),
+									samples.map((sample) =>
+										draft
+											? sample.clientToFirstProjectionMs
+											: sample.sendToEnqueueMs,
+									),
 									0.99,
 								)
 							: 0;
@@ -370,16 +422,24 @@ async function main(): Promise<void> {
 			: {}),
 		samples: mode.samples,
 	}));
-	const baseline = results.find((result) => result.name === "cold-in-process");
+	const baseline = results.find(
+		(result) => result.name === (draft ? "cold-process" : "cold-in-process"),
+	);
 	const warm = results.find((result) => result.name === "prewarmed-process");
+	const baselineMetric = draft
+		? baseline?.clientToFirstProjection
+		: baseline?.sendToEnqueue;
+	const warmMetric = draft
+		? warm?.clientToFirstProjection
+		: warm?.sendToEnqueue;
 	const passed =
 		!failure &&
-		baseline?.sendToEnqueue !== undefined &&
-		warm?.sendToEnqueue !== undefined &&
-		baseline.medianBatchP99 !== undefined &&
-		warm.medianBatchP99 !== undefined &&
-		warm.sendToEnqueue.p50 <= baseline.sendToEnqueue.p50 &&
-		warm.sendToEnqueue.p99 <= baseline.sendToEnqueue.p99 &&
+		baselineMetric !== undefined &&
+		warmMetric !== undefined &&
+		baseline?.medianBatchP99 !== undefined &&
+		warm?.medianBatchP99 !== undefined &&
+		warmMetric.p50 <= baselineMetric.p50 &&
+		warmMetric.p99 <= baselineMetric.p99 &&
 		warm.medianBatchP99 <= baseline.medianBatchP99;
 	mkdirSync(dirname(output), { recursive: true });
 	writeFileSync(
@@ -411,16 +471,16 @@ async function main(): Promise<void> {
 	for (const result of results) {
 		if (result.sendToEnqueue)
 			console.log(
-				`${result.name}: send->enqueue p50=${result.sendToEnqueue.p50.toFixed(3)}ms p99=${result.sendToEnqueue.p99.toFixed(3)}ms median-batch-p99=${result.medianBatchP99?.toFixed(3)}ms`,
+				`${result.name}: send->enqueue p50=${result.sendToEnqueue.p50.toFixed(3)}ms p99=${result.sendToEnqueue.p99.toFixed(3)}ms; send->first-event p50=${result.clientToFirstProjection?.p50.toFixed(3)}ms p99=${result.clientToFirstProjection?.p99.toFixed(3)}ms; median-batch-p99=${result.medianBatchP99?.toFixed(3)}ms`,
 			);
 	}
 	console.log(
-		`${passed ? "PASS" : "FAIL"} prewarmed first send <= cold in-process; ${output}`,
+		`${passed ? "PASS" : "FAIL"} prewarmed first send <= cold ${draft ? "process" : "in-process"}; ${output}`,
 	);
 	if (failure) throw failure;
 	if (!passed)
 		throw new Error(
-			"Prewarmed first-send latency exceeded the in-process baseline",
+			`Prewarmed first-send latency exceeded the ${draft ? "process" : "in-process"} baseline`,
 		);
 }
 

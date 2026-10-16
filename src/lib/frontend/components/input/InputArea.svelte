@@ -4,6 +4,7 @@
 <script module lang="ts">
 	// A composer remount must not repeat the same turn's diagnostic.
 	const reportedMissingPrompts = new Set<string>();
+	let draftId = crypto.randomUUID();
 </script>
 
 <script lang="ts">
@@ -81,10 +82,10 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, listWorktreesRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, sendMessageRpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
-	import { requestSessionPreWarm } from "../../utils/session-prewarm.js";
+	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
 	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -145,6 +146,7 @@
 	});
 	const isGoalCommand = $derived(discoveryState.currentProviderId === "claude" && inputText.startsWith("/goal"));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let composerFocused = $state(false);
 	let pendingImages = $state<PendingImage[]>([]);
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
@@ -219,6 +221,26 @@
 	$effect(() => {
 		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
+	});
+	function draftSessionPayload(projectSlug: string | null): PreWarmDraftRpcInput | undefined {
+		const displayed = getDraftPick();
+		if (!projectSlug || !displayed) return undefined;
+		return {
+			projectSlug,
+			originId: getBrowserClientId(),
+			draftId,
+			...displayed,
+			...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
+			...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
+		};
+	}
+	$effect(() => {
+		requestDraftPreWarm(
+			composerFocused && draftRoute.page === "chat" && draftRoute.draft &&
+			!sessionState.currentId && !draftNewWorktree && (draftModeChosen || draftSessionMode !== undefined)
+				? draftSessionPayload(getDraftProject()) : undefined,
+		);
+		return () => requestDraftPreWarm();
 	});
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
@@ -809,11 +831,12 @@
 					});
 					return false;
 				}
-				const displayed = getDraftPick();
-				if (!displayed) {
+				const payload = draftSessionPayload(projectSlug);
+				if (!payload) {
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
+				requestDraftPreWarm();
 				// The message leaves the composer now and shows in the pane until
 				// the new session places it; a failed create puts it back.
 				if (textOverride === undefined) {
@@ -823,13 +846,10 @@
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
 				const created = await createSessionRpc({
-					projectSlug,
-					originId: getBrowserClientId(),
-					...displayed,
-					...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
+					...payload,
 					...(draftNewWorktree ? { newWorktree: true } : {}),
-					...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 				});
+				draftId = crypto.randomUUID();
 				sid = created.sessionId;
 				draftSend.sessionId = sid;
 				storeNewSessionDraft("");
@@ -1407,7 +1427,11 @@
 								bind:value={inputText}
 								bind:element={textareaEl}
 								oninput={handleInput}
-								onfocus={() => requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId)}
+								onfocus={() => {
+									composerFocused = true;
+									requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
+								}}
+								onblur={() => { composerFocused = false; }}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
 								onclick={handleClick}

@@ -98,6 +98,7 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				return { projectSlug, sessionId: "draft-session" };
 			},
 			PreWarmSession: () => ({ ok: true }),
+			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {

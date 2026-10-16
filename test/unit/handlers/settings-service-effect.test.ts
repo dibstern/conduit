@@ -43,6 +43,7 @@ describe("settings reads with Effect-native settings service", () => {
 					move: () => Effect.succeed("/workspace"),
 					inherit: () => Effect.die("unused"),
 					resolve: () => Effect.die("unused"),
+					preview: () => Effect.die("unused"),
 					record: () => Effect.die("unused"),
 					claudeWorktreeState: () => Effect.die("unused"),
 					withLaunch: (effect) => effect,

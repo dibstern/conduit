@@ -249,6 +249,7 @@ export class ProcessHarness {
 		managedOpenCodeId = "managed-test",
 		private readonly opencodeBorrowIdleTimeoutMs?: number,
 		private readonly opencodeInitiallyIdle = false,
+		private readonly draftPreWarmTtlMs?: number,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -491,6 +492,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			pauseOpenCodeSupervisor?: boolean;
 			runnerLifecycle?: ProcessHarness["runnerLifecycle"];
 			queryInitializationDelayMs?: number;
+			/** Keep draft reservation expiry observable without a ten-minute wait. */
+			draftPreWarmTtlMs?: number;
 			queryInitializationFailures?: number;
 			blockCapabilitiesProbe?: boolean;
 			capabilityModels?: readonly ModelInfo[];
@@ -556,6 +559,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 			options.managedOpenCodeId,
 			options.opencodeBorrowIdleTimeoutMs,
 			options.opencodeInitiallyIdle,
+			options.draftPreWarmTtlMs,
 		);
 	}
 
@@ -935,6 +939,13 @@ Object.assign(ClaudeDriver, { create: deps => {
 						options.queryInitializationDelayMs ??
 							this.queryInitializationDelayMs,
 					),
+					...(this.draftPreWarmTtlMs === undefined
+						? {}
+						: {
+								CONDUIT_TEST_DRAFT_PREWARM_TTL_MS: String(
+									this.draftPreWarmTtlMs,
+								),
+							}),
 					...(this.buildId ? { CONDUIT_TEST_BUILD_ID: this.buildId } : {}),
 					...(this.upgradeSinkProof
 						? { CONDUIT_TEST_UPGRADE_SINK_PROOF: "1" }
@@ -2269,6 +2280,31 @@ export class ProcessBrowser {
 		);
 	}
 
+	async borrowDraftModels(instanceId: string): Promise<() => Promise<void>> {
+		const cursor = this.frames.length;
+		const fiber = this.runtime.runFork(
+			Stream.runForEach(
+				this.rpc.SubscribeDraftModels({
+					projectSlug: this.projectSlug,
+					instanceId,
+				}),
+				(response) =>
+					Effect.sync(() =>
+						this.record({ type: "draft_models", instanceId, ...response }),
+					),
+			),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "draft_models" &&
+				message["instanceId"] === instanceId,
+			cursor,
+		);
+		return async () => {
+			await this.run(Fiber.interrupt(fiber));
+		};
+	}
+
 	async updateInstance(
 		instanceId: string,
 		updates: { driver?: "opencode" | "claude"; env?: Record<string, string> },
@@ -2294,25 +2330,62 @@ export class ProcessBrowser {
 		title?: string,
 		instanceId?: string,
 		providerId: ProviderDriverKind = "claude",
+		draft: {
+			draftId?: string;
+			modelId?: string;
+			variant?: string;
+			contextWindow?: string;
+			permissionMode?: "ask" | "full";
+			worktreePath?: string;
+		} = {},
 	): Promise<string> {
 		const result = await this.run(
 			this.rpc.CreateSession({
-				permissionMode: "ask",
-				projectSlug: this.projectSlug,
-				providerId,
-				model: {
-					providerId: providerId === "opencode" ? "fake" : "claude",
-					modelId: providerId === "opencode" ? "fake-model" : "sonnet",
-					variant: "",
-					contextWindow: providerId === "opencode" ? "" : "200k",
-				},
-				...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+				...this.draftSessionPayload(providerId, instanceId, draft),
+				...(draft.draftId ? { draftId: draft.draftId } : {}),
 				...(title !== undefined ? { title } : {}),
-				originId: this.originId,
 			}),
 		);
 		await this.view(result.sessionId);
 		return result.sessionId;
+	}
+
+	async preWarmDraft(
+		draftId: string,
+		draft: Parameters<ProcessBrowser["createSession"]>[3] = {},
+		instanceId?: string,
+		providerId: ProviderDriverKind = "claude",
+	): Promise<void> {
+		await this.run(
+			this.rpc.PreWarmDraft({
+				...this.draftSessionPayload(providerId, instanceId, draft),
+				draftId,
+			}),
+		);
+	}
+
+	private draftSessionPayload(
+		providerId: ProviderDriverKind,
+		instanceId: string | undefined,
+		draft: NonNullable<Parameters<ProcessBrowser["createSession"]>[3]>,
+	) {
+		return {
+			permissionMode: draft.permissionMode ?? "ask",
+			projectSlug: this.projectSlug,
+			originId: this.originId,
+			providerId,
+			model: {
+				providerId: providerId === "opencode" ? "fake" : "claude",
+				modelId:
+					draft.modelId ??
+					(providerId === "opencode" ? "fake-model" : "sonnet"),
+				variant: draft.variant ?? "",
+				contextWindow:
+					draft.contextWindow ?? (providerId === "opencode" ? "" : "200k"),
+			},
+			...(instanceId ? { instanceId: AccountIdSchema.make(instanceId) } : {}),
+			...(draft.worktreePath ? { worktreePath: draft.worktreePath } : {}),
+		};
 	}
 
 	async createPty(): Promise<PtyInfo> {

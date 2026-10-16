@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -71,6 +72,18 @@ function sdkProof(harness: ProcessHarness): ProcessMark[] {
 		.map((line) => JSON.parse(line) as ProcessMark);
 }
 
+// Seed the legacy discovery path only while the isolated daemon is stopped.
+function seedSessionWithoutPick(harness: ProcessHarness, sessionId: string) {
+	const db = new Database(harness.projectStorePath());
+	try {
+		db.prepare(
+			"UPDATE sessions SET model_id = NULL, model_provider = NULL, variant = NULL, context_window = NULL WHERE id = ?",
+		).run(sessionId);
+	} finally {
+		db.close();
+	}
+}
+
 describe("Claude session pre-warm through daemon RPC", () => {
 	const harnesses: ProcessHarness[] = [];
 	const evidence: unknown[] = [];
@@ -85,7 +98,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		probeWorkspace?: string;
 		sessionDeletedBeforeRelease?: boolean;
 		sessionCancelledBeforeRelease?: boolean;
-		sendJoinedBeforeLifecycle?: boolean;
+		catalogJoinedBeforeLifecycle?: boolean;
+		catalogProviderIds?: string[];
+		catalogActiveModel?: string;
 		firstQueryModel?: string;
 		persistedModels?: ReturnType<typeof durableCounts>["models"];
 		sharedProbeAttempts?: number;
@@ -154,6 +169,504 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		harnesses.push(harness);
 		return { harness, browser: await harness.connect() };
 	}
+
+	// Draft failure cases: a different reserved ID, duplicate SDK initialization,
+	// a runner bound to the wrong session, changed model adoption, expired or
+	// replaced runners surviving, and directory hints warming the wrong scope.
+	it("draft pre-warm reserves the created session and its first send adopts the initialized runner", async () => {
+		const { harness, browser } = await start({
+			queryInitializationDelayMs: 80,
+			capabilityModels: [
+				{
+					id: "sonnet",
+					name: "Draft Sonnet",
+					providerId: "claude",
+					variants: { high: {} },
+					contextWindowOptions: [
+						{ value: "200k", label: "200K" },
+						{ value: "1m", label: "1M" },
+					],
+				},
+			],
+		});
+		const draftId = randomUUID();
+		const pick = {
+			variant: "high",
+			contextWindow: "1m",
+			permissionMode: "full" as const,
+		};
+		await browser.preWarmDraft(draftId, pick);
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		const query = harness.marks.find((mark) => mark.kind === "query");
+		if (runner?.kind !== "runner-started" || query?.kind !== "query")
+			throw new Error("Missing draft warm runner/query");
+		expect(durableCounts(harness, runner.sessionId).status).toBeUndefined();
+		expect(
+			harness.marks.filter((mark) => mark.kind === "enqueue"),
+		).toHaveLength(0);
+		await browser.preWarmDraft(draftId, pick);
+		const sessionId = await browser.createSession(
+			"Adopt draft warm",
+			undefined,
+			"claude",
+			{ draftId, ...pick },
+		);
+		expect(sessionId).toBe(runner.sessionId);
+		expect(query.runnerSessionId).toBe(sessionId);
+		const turn = await browser.send(sessionId, "draft-prewarmed-first-send");
+		expect(turn.done["status"]).toBe("idle");
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("draft-prewarmed-first-send").join(""),
+		);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
+		);
+		expect(
+			harness.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(1);
+		expect(harness.marks.filter((mark) => mark.kind === "enqueue")).toEqual([
+			expect.objectContaining({ queryId: query.queryId, promptIndex: 1 }),
+		]);
+		const reused = await browser.createSession(
+			"Consumed draft token",
+			undefined,
+			"claude",
+			{ draftId, ...pick },
+		);
+		expect(reused).not.toBe(sessionId);
+	});
+
+	it("draft pre-warm with a different create model discards the old runner and sends on a fresh session", async () => {
+		const { harness, browser } = await start();
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId, { modelId: "sonnet" });
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing reserved runner");
+		const sessionId = await browser.createSession(
+			"Changed draft model",
+			undefined,
+			"claude",
+			{ draftId, modelId: "opus" },
+		);
+		expect(sessionId).not.toBe(runner.sessionId);
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 5000,
+		});
+		expect(existsSync(runner.socketPath)).toBe(false);
+		const turn = await browser.send(sessionId, "draft-changed-model-send");
+		expect(turn.done["status"]).toBe("idle");
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("draft-changed-model-send").join(""),
+		);
+		expect(
+			harness.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(2);
+	});
+
+	it("draft pre-warm adopts the inherited relay agent", async () => {
+		const { harness, browser } = await start();
+		await Effect.runPromise(
+			browser.rpc.SetAgent({ slug: "process-test", agent: "Explore" }),
+		);
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId);
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing inherited-agent draft runner");
+		const sessionId = await browser.createSession(
+			"Inherited relay agent draft",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		expect(sessionId).toBe(runner.sessionId);
+		const turn = await browser.send(sessionId, "draft-inherited-agent-send");
+		expect(turn.done["status"]).toBe("idle");
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("draft-inherited-agent-send").join(""),
+		);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
+		);
+		expect(
+			harness.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(1);
+	});
+
+	it("draft pre-warm expiry stops its runner and an expired token creates a fresh session", async () => {
+		// The TTL clock starts at reservation, so it must outlast a loaded runner startup.
+		const { harness, browser } = await start({ draftPreWarmTtlMs: 5000 });
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId);
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing expiring draft runner");
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 8000,
+		});
+		expect(existsSync(runner.socketPath)).toBe(false);
+		const sessionId = await browser.createSession(
+			"Expired draft warm",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		expect(sessionId).not.toBe(runner.sessionId);
+	});
+
+	it("draft pre-warm refresh extends expiry without starting another query or runner", async () => {
+		const ttl = 6000;
+		const { harness, browser } = await start({ draftPreWarmTtlMs: ttl });
+		const draftId = randomUUID();
+		const sleepUntil = (at: number) =>
+			new Promise<void>((done) =>
+				setTimeout(done, Math.max(0, at - Date.now())),
+			);
+		// The reservation lands between sending the first warm and its reply.
+		const reservedAfter = Date.now();
+		await browser.preWarmDraft(draftId);
+		const reservedBefore = Date.now();
+		expect(
+			reservedBefore - reservedAfter,
+			"warm too slow to refresh inside the TTL",
+		).toBeLessThan(ttl - 1500);
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing refreshable draft runner");
+		// Refresh before the earliest original expiry, then check after the latest one.
+		await sleepUntil(reservedBefore + 1000);
+		await browser.preWarmDraft(draftId);
+		await sleepUntil(reservedBefore + ttl + 500);
+		expect(alive(runner.pid)).toBe(true);
+		expect(
+			harness.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(1);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
+		);
+		const sessionId = await browser.createSession(
+			"Refreshed draft",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		expect(sessionId).toBe(runner.sessionId);
+	});
+
+	it("draft pre-warm evicts the least recently refreshed reservation when a ninth origin warms", async () => {
+		const { harness, browser } = await start();
+		const origins: Array<{ client: typeof browser; draftId: string }> = [];
+		for (let index = 0; index < 8; index++) {
+			const client = await harness.connect();
+			const draftId = randomUUID();
+			await client.preWarmDraft(draftId);
+			origins.push({ client, draftId });
+		}
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(8),
+		);
+		const initial = harness.marks.filter(
+			(mark) => mark.kind === "runner-started",
+		);
+		expect(initial).toHaveLength(8);
+		const first = origins[0];
+		if (!first) throw new Error("Missing first draft origin");
+		await first.client.preWarmDraft(first.draftId);
+		await browser.preWarmDraft(randomUUID());
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(9),
+		);
+		const evicted = initial[1];
+		if (!evicted) throw new Error("Missing least recently refreshed runner");
+		await vi.waitFor(() => expect(alive(evicted.pid)).toBe(false), {
+			timeout: 5000,
+		});
+		expect(
+			harness.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(9);
+		expect(initial.filter((runner) => alive(runner.pid))).toHaveLength(7);
+		expect(initial[0] && alive(initial[0].pid)).toBe(true);
+	}, 60_000);
+
+	it("draft pre-warm for an existing Claude worktree adopts the same launch folders on the first turn", async () => {
+		const harness = ProcessHarness.create({
+			...(process.env["CONDUIT_PREWARM_E2E_DIST"]
+				? { dist: process.env["CONDUIT_PREWARM_E2E_DIST"] }
+				: {}),
+		});
+		harnesses.push(harness);
+		const gitEnv = { ...process.env };
+		for (const name of [
+			"GIT_DIR",
+			"GIT_INDEX_FILE",
+			"GIT_WORK_TREE",
+			"GIT_COMMON_DIR",
+		])
+			delete gitEnv[name];
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-C", harness.projectDir, ...args], {
+				env: gitEnv,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+		git("init", "-b", "main");
+		git(
+			"-c",
+			"user.name=Draft pre-warm test",
+			"-c",
+			"user.email=draft@example.test",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"commit",
+			"--allow-empty",
+			"-m",
+			"Initial commit",
+		);
+		const worktreePath = join(harness.root, "draft-worktree");
+		git("worktree", "add", "-b", "draft-worktree", worktreePath);
+		await harness.restart();
+		const browser = await harness.connect();
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId, { worktreePath });
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		const query = harness.marks.find((mark) => mark.kind === "query");
+		if (runner?.kind !== "runner-started" || query?.kind !== "query")
+			throw new Error("Missing worktree draft warm");
+		expect(JSON.parse(query.optionsJson)).toMatchObject({ cwd: worktreePath });
+		const sessionId = await browser.createSession(
+			"Existing worktree draft",
+			undefined,
+			"claude",
+			{ draftId, worktreePath },
+		);
+		expect(sessionId).toBe(runner.sessionId);
+		const turn = await browser.send(sessionId, "draft-existing-worktree-send");
+		expect(turn.done["status"]).toBe("idle");
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("draft-existing-worktree-send").join(""),
+		);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
+		);
+		expect(
+			harness.marks.filter((mark) => mark.kind === "runner-started"),
+		).toHaveLength(1);
+	});
+
+	it("draft pre-warm for a second token from the same origin stops the previous runner", async () => {
+		const { harness, browser } = await start();
+		const firstDraft = randomUUID();
+		await browser.preWarmDraft(firstDraft);
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const first = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (first?.kind !== "runner-started")
+			throw new Error("Missing first draft runner");
+		const secondDraft = randomUUID();
+		await browser.preWarmDraft(secondDraft);
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(2),
+		);
+		await vi.waitFor(() => expect(alive(first.pid)).toBe(false), {
+			timeout: 5000,
+		});
+		const second = harness.marks.filter(
+			(mark) => mark.kind === "runner-started",
+		)[1];
+		if (second?.kind !== "runner-started")
+			throw new Error("Missing replacement draft runner");
+		expect(second.sessionId).not.toBe(first.sessionId);
+		const sessionId = await browser.createSession(
+			"Latest draft",
+			undefined,
+			"claude",
+			{ draftId: secondDraft },
+		);
+		expect(sessionId).toBe(second.sessionId);
+	});
+
+	it("draft pre-warm tokens cannot consume another origin's reservation", async () => {
+		const { harness, browser } = await start();
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId);
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing origin-owned draft runner");
+		const other = await harness.connect();
+		const otherId = await other.createSession(
+			"Other origin",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		expect(otherId).not.toBe(runner.sessionId);
+		expect(alive(runner.pid)).toBe(true);
+		const ownerId = await browser.createSession(
+			"Owning origin",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		expect(ownerId).toBe(runner.sessionId);
+	});
+
+	it("draft pre-warm orphan runner is terminated when the daemon recovers after a crash", async () => {
+		const { harness, browser } = await start();
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId);
+		await vi.waitFor(() =>
+			expect(
+				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+			).toHaveLength(1),
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing unpersisted draft runner");
+		await harness.kill();
+		expect(alive(runner.pid)).toBe(true);
+		await harness.restart();
+		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+			timeout: 5000,
+		});
+		expect(existsSync(runner.socketPath)).toBe(false);
+		const reconnected = await harness.connect(undefined, browser.originId);
+		const sessionId = await reconnected.createSession(
+			"After draft recovery",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		expect(sessionId).not.toBe(runner.sessionId);
+		const turn = await reconnected.send(
+			sessionId,
+			"draft-after-orphan-recovery",
+		);
+		expect(turn.done["status"]).toBe("idle");
+		expect(turn.chunks.join("")).toBe(
+			responseChunks("draft-after-orphan-recovery").join(""),
+		);
+	});
+
+	it("draft OpenCode pre-warm scopes one path request to an alternate directory and refreshes after process restart", async () => {
+		const { harness, browser } = await start({
+			managedOpenCode: true,
+			opencodeInitiallyIdle: true,
+		});
+		let releaseBorrow = await browser.borrowDraftModels("managed-test");
+		const worktreePath = join(harness.root, "existing-worktree");
+		mkdirSync(worktreePath);
+		const cursor = harness.opencodeRequests().length;
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId, {}, "managed-test", "opencode");
+		expect(
+			harness
+				.opencodeRequests()
+				.slice(cursor)
+				.filter(
+					(request) =>
+						new URL(request.url, "http://stand-in").pathname === "/path",
+				),
+		).toHaveLength(0);
+		await browser.preWarmDraft(
+			draftId,
+			{ worktreePath },
+			"managed-test",
+			"opencode",
+		);
+		await browser.preWarmDraft(
+			draftId,
+			{ worktreePath },
+			"managed-test",
+			"opencode",
+		);
+		const paths = harness
+			.opencodeRequests()
+			.slice(cursor)
+			.filter(
+				(request) =>
+					new URL(request.url, "http://stand-in").pathname === "/path",
+			);
+		expect(paths).toHaveLength(1);
+		const request = paths[0];
+		if (!request) throw new Error("Missing scoped path request");
+		expect(request.method).toBe("GET");
+		expect(
+			new URL(request.url, "http://stand-in").searchParams.get("directory") ??
+				request.directory,
+		).toBe(worktreePath);
+		await releaseBorrow();
+		await browser.stopInstance("managed-test");
+		releaseBorrow = await browser.borrowDraftModels("managed-test");
+		const restartCursor = harness.opencodeRequests().length;
+		await browser.preWarmDraft(
+			draftId,
+			{ worktreePath },
+			"managed-test",
+			"opencode",
+		);
+		const restarted = harness
+			.opencodeRequests()
+			.slice(restartCursor)
+			.filter(
+				(entry) => new URL(entry.url, "http://stand-in").pathname === "/path",
+			);
+		expect(restarted).toHaveLength(1);
+		expect(
+			new URL(restarted[0]?.url ?? "", "http://stand-in").searchParams.get(
+				"directory",
+			) ?? restarted[0]?.directory,
+		).toBe(worktreePath);
+		expect(restarted[0]?.pid).not.toBe(request.pid);
+		await releaseBorrow();
+	});
 
 	it("coalesces concurrent warm requests, waits for readiness, and reuses the query for the first streamed approval turn", async () => {
 		const { harness, browser } = await start({
@@ -493,7 +1006,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		"delete",
 		"cancel",
 	] as const)("does not warm a session receiving %s during provider discovery", async (lifecycleAction) => {
-		const { harness, browser } = await start({
+		const { harness, browser: creatingBrowser } = await start({
 			blockCapabilitiesProbe: true,
 		});
 		const markerPath = join(harness.root, "capabilities-probe-started");
@@ -509,9 +1022,18 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		let warm: Promise<{ error?: unknown }> | undefined;
 		let warmSettled = false;
 		try {
-			const sessionId = await browser.createSession(
+			const sessionId = await creatingBrowser.createSession(
 				`${lifecycleAction} during discovery`,
 			);
+			// Restore a legacy session that predates mandatory model selection.
+			await harness.kill();
+			seedSessionWithoutPick(harness, sessionId);
+			await harness.restart();
+			const browser = await harness.connect(
+				undefined,
+				creatingBrowser.originId,
+			);
+			writeFileSync(join(harness.root, "capabilities-probe-armed"), "armed");
 			warm = browser.preWarmSession(sessionId).then(
 				() => {
 					capture.warmOutcome = "ready";
@@ -579,6 +1101,23 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			).toHaveLength(0);
 			expect(durableCounts(harness, sessionId).commands).toEqual([]);
 			if (lifecycleAction === "cancel") {
+				await Effect.runPromise(
+					browser.rpc.SwitchModel({
+						projectSlug: "process-test",
+						sessionId,
+						originId: browser.originId,
+						providerId: "claude",
+						modelId: "opus",
+					}),
+				);
+				await Effect.runPromise(
+					browser.rpc.SwitchContextWindow({
+						projectSlug: "process-test",
+						sessionId,
+						originId: browser.originId,
+						contextWindow: "200k",
+					}),
+				);
 				expect(
 					(
 						await browser.send(sessionId, "send-after-discovery-cancel")
@@ -608,22 +1147,38 @@ describe("Claude session pre-warm through daemon RPC", () => {
 	it.each([
 		"delete",
 		"cancel",
-	] as const)("preserves the live catalog for a first send when another session's pre-warm receives %s", async (lifecycleAction) => {
-		const { harness, browser } = await start({
+	] as const)("preserves a shared catalog consumer and subsequent first send when another session's pre-warm receives %s", async (lifecycleAction) => {
+		const { harness, browser: creatingBrowser } = await start({
 			blockCapabilitiesProbe: true,
 			capabilityModels: [
 				{
 					id: "claude-opus-4",
 					name: "Review Opus default",
 					providerId: "claude",
+					contextWindowOptions: [{ value: "200k", label: "200K" }],
 				},
-				{ id: "sonnet", name: "Review Sonnet", providerId: "claude" },
+				{
+					id: "sonnet",
+					name: "Review Sonnet",
+					providerId: "claude",
+					contextWindowOptions: [{ value: "200k", label: "200K" }],
+				},
 			],
 		});
-		const warmSessionId = await browser.createSession("Shared probe owner");
-		const sendSessionId = await browser.createSession(
+		const warmSessionId =
+			await creatingBrowser.createSession("Shared probe owner");
+		const sendSessionId = await creatingBrowser.createSession(
 			"Shared probe first send",
+			undefined,
+			"claude",
+			{ modelId: "claude-opus-4" },
 		);
+		// The legacy warm discovers a model; the send retains its validated stored pick.
+		await harness.kill();
+		seedSessionWithoutPick(harness, warmSessionId);
+		await harness.restart();
+		const browser = await harness.connect(undefined, creatingBrowser.originId);
+		writeFileSync(join(harness.root, "capabilities-probe-armed"), "armed");
 		const markerPath = join(harness.root, "capabilities-probe-started");
 		const releasePath = join(harness.root, "capabilities-probe-release");
 		const ownerPath = join(harness.root, "capabilities-consumer-1.json");
@@ -644,7 +1199,16 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				capture.warmOutcome = "cancelled";
 			},
 		);
-		let pending: ReturnType<typeof browser.send> | undefined;
+		const loadCatalog = () =>
+			Effect.runPromise(
+				browser.rpc.GetModels({
+					projectSlug: "process-test",
+					sessionId: sendSessionId,
+					instanceId: "claude",
+				}),
+			);
+		let pending: ReturnType<typeof loadCatalog> | undefined;
+		const catalogCursor = browser.frames.length;
 		try {
 			await vi.waitFor(() => expect(existsSync(ownerPath)).toBe(true));
 			expect(JSON.parse(readFileSync(ownerPath, "utf8"))).toEqual({
@@ -653,13 +1217,14 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			});
 			expect(existsSync(markerPath)).toBe(true);
 			expect(existsSync(joinedPath)).toBe(false);
-			pending = browser.send(sendSessionId, "first-send-sharing-warm-catalog");
+			// Turn dispatch validates the cached catalog; GetModels is the discovery consumer.
+			pending = loadCatalog();
 			await vi.waitFor(() => expect(existsSync(joinedPath)).toBe(true));
 			expect(JSON.parse(readFileSync(joinedPath, "utf8"))).toEqual({
 				workspaceRoot: harness.projectDir,
 				status: "Suspended",
 			});
-			capture.sendJoinedBeforeLifecycle = true;
+			capture.catalogJoinedBeforeLifecycle = true;
 			expect(
 				JSON.parse(
 					readFileSync(
@@ -689,7 +1254,40 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			expect(capture.warmOutcome).toBe("cancelled");
 			writeFileSync(releasePath, "release");
 			capture.released = true;
-			const result = await pending;
+			const discoveredCatalog = await pending;
+			capture.catalogProviderIds = discoveredCatalog.providers.map(
+				(provider) => provider.id,
+			);
+			if (discoveredCatalog.active)
+				capture.catalogActiveModel = discoveredCatalog.active.model;
+			expect(discoveredCatalog.active).toEqual({
+				model: "claude-opus-4",
+				provider: "claude",
+			});
+			// Claude catalogs are published through project settings, not GetModels.providers.
+			const refreshed = await browser.waitFor(
+				(message) =>
+					message["type"] === "project_setting" &&
+					message["_tag"] === "providerModels",
+				catalogCursor,
+			);
+			expect(refreshed["providers"]).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						id: "claude",
+						models: expect.arrayContaining([
+							expect.objectContaining({
+								id: "claude-opus-4",
+								name: "Review Opus default",
+							}),
+						]),
+					}),
+				]),
+			);
+			const result = await browser.send(
+				sendSessionId,
+				"first-send-sharing-warm-catalog",
+			);
 			expect(result.chunks.join("")).toBe(
 				responseChunks("first-send-sharing-warm-catalog").join(""),
 			);
@@ -728,12 +1326,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 					instanceId: "claude",
 				}),
 			);
-			expect(
-				catalog.providers.find((provider) => provider.id === "claude")
-					?.models[0],
-			).toMatchObject({
-				id: "claude-opus-4",
-				name: "Review Opus default",
+			expect(catalog.active).toEqual({
+				model: "claude-opus-4",
+				provider: "claude",
 			});
 		} finally {
 			writeFileSync(releasePath, "release");
@@ -945,7 +1540,23 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		"settings",
 		"inherited settings",
 	] as const)("starts a fresh query when %s changes before the first send", async (changed) => {
-		const { harness, browser } = await start({});
+		const { harness, browser } = await start({
+			capabilityModels: [
+				{
+					id: "sonnet",
+					name: "Sonnet",
+					providerId: "claude",
+					variants: { high: {} },
+					contextWindowOptions: [{ value: "200k", label: "200K" }],
+				},
+				{
+					id: "claude-opus-4",
+					name: "Opus",
+					providerId: "claude",
+					contextWindowOptions: [{ value: "200k", label: "200K" }],
+				},
+			],
+		});
 		const sessionId = await browser.createSession(`Changed ${changed}`);
 		await browser.preWarmSession(sessionId);
 		await vi.waitFor(() =>
