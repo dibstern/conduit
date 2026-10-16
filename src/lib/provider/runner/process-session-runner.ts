@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SqlClient } from "@effect/sql";
 import { Cause, Data, Deferred, Effect, Exit, FiberSet } from "effect";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
 import { isRecord } from "../../utils.js";
@@ -123,7 +124,8 @@ export interface ProcessRunnerDriver {
 				>
 			>
 		>,
-		unknown
+		unknown,
+		PersistenceProjectTag
 	>;
 }
 
@@ -325,6 +327,13 @@ export const makeProcessSessionRunner = (
 				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const project = yield* Effect.serviceOption(PersistenceProjectTag);
+		if (sql && project._tag === "None")
+			return yield* Effect.dieMessage(
+				"A persistent session runner requires project ownership",
+			);
+		const projectId =
+			project._tag === "Some" ? project.value.projectId : undefined;
 		const receipts = sql
 			? yield* makeRunnerReceiptStore(sql).pipe(Effect.orDie)
 			: undefined;
@@ -670,7 +679,7 @@ export const makeProcessSessionRunner = (
 									FROM provider_command_outbox outbox
 									LEFT JOIN turns ON turns.session_id = outbox.session_id
 										AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-									WHERE outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
+									WHERE outbox.project_key = ${projectId} AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
 									Effect.mapError((cause) =>
 										runnerFailure("restore runner history", cause),
 									),
@@ -961,7 +970,7 @@ export const makeProcessSessionRunner = (
 								return false;
 							const running = yield* sql<{
 								command_id: string;
-							}>`SELECT command_id FROM provider_command_outbox WHERE session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
+							}>`SELECT command_id FROM provider_command_outbox WHERE project_key = ${projectId} AND session_id = ${sessionId} AND status = 'running' AND effect_type = 'send_turn' LIMIT 1`.pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("upgrade runner", cause),
 								),
@@ -1057,16 +1066,17 @@ export const makeProcessSessionRunner = (
 						continue;
 					const persisted = sql
 						? (yield* sql<{
-								id: string;
-							}>`SELECT id FROM sessions WHERE id = ${registration.sessionId} LIMIT 1`.pipe(
+								project_id: string;
+							}>`SELECT project_id FROM sessions WHERE id = ${registration.sessionId} LIMIT 1`.pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("recover runner session", cause),
 								),
-							)).length > 0
-						: true;
+							))[0]
+						: undefined;
+					if (persisted && persisted.project_id !== projectId) continue;
 					// Draft warms are not durable; verify their identity before stopping them.
 					let abandoned =
-						!persisted ||
+						(sql !== undefined && !persisted) ||
 						registration.role === "candidate" ||
 						children.has(registration.sessionId);
 					const entry: RunnerChild = {
@@ -1218,6 +1228,14 @@ export const makeProcessSessionRunner = (
 										},
 									)
 									.pipe(
+										Effect.provideServiceEffect(
+											PersistenceProjectTag,
+											project._tag === "Some"
+												? Effect.succeed(project.value)
+												: Effect.dieMessage(
+														"Runner recovery requires project ownership",
+													),
+										),
 										Effect.mapError((cause) =>
 											runnerFailure("recover runner commands", cause),
 										),
@@ -1735,7 +1753,7 @@ export const makeProcessSessionRunner = (
 						const rows = yield* sql<{
 							command_id: string;
 						}>`SELECT command_id FROM provider_command_outbox
-							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+							WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
 								AND status = 'running' AND attempt_count = ${command.input.commandAttempt}
 								AND COALESCE(json_extract(payload_json, '$.inputId'), json_extract(payload_json, '$.userMessageId'), json_extract(payload_json, '$.commandId'), json_extract(payload_json, '$.turnId')) = ${command.input.inputId}
 							ORDER BY request_sequence LIMIT 1`.pipe(

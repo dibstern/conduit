@@ -266,7 +266,7 @@ export const SessionGitLive = Layer.effect(
 											}
 											const rows = yield* sql<
 												Pick<SessionRow, "id" | "workspace">
-											>`SELECT id, workspace FROM sessions`;
+											>`SELECT id, workspace FROM sessions WHERE project_id = ${eventStore.projectId}`;
 											const ids: string[] = [];
 											for (const row of rows) {
 												const workspace =
@@ -292,8 +292,8 @@ export const SessionGitLive = Layer.effect(
 											if (ids.length === 0) return [];
 											const moved = yield* sql<{
 												id: string;
-											}>`UPDATE sessions SET version = ${version} WHERE id IN ${sql.in(ids)} RETURNING id`;
-											yield* sql`UPDATE session_sidebar SET version = ${version}, row = json_set(row, '$.version', ${version}) WHERE session_id IN (SELECT root_id FROM sessions WHERE id IN ${sql.in(moved.map(({ id }) => id))})`;
+											}>`UPDATE sessions SET version = ${version} WHERE project_id = ${eventStore.projectId} AND id IN ${sql.in(ids)} RETURNING id`;
+											yield* sql`UPDATE session_sidebar SET version = ${version}, row = json_set(row, '$.version', ${version}) WHERE project_id = ${eventStore.projectId} AND session_id IN (SELECT root_id FROM sessions WHERE id IN ${sql.in(moved.map(({ id }) => id))})`;
 											return moved.map(({ id }) => id);
 										}),
 									),

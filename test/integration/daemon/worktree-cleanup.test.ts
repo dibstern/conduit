@@ -555,7 +555,8 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					(request_sequence, command_id, project_key, session_id, provider_id,
 					effect_type, payload_json, status, next_attempt_at, requested_at, updated_at)
 					VALUES (-1, 'cleanup-handoff', ?, ?, 'claude', 'send_turn', '{}', ?, ?, ?, ?)`).run(
-				fixture.projectDir,
+				// Admission keys durable commands by project slug.
+				"process-test",
 				session.id,
 				outboxStatus,
 				Date.now() + 86_400_000,
