@@ -263,6 +263,7 @@ export const ProjectInfoSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
 	),
 	missing: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 });
@@ -1022,7 +1023,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literal("unknown-session", "ambiguous-session")),
+	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
 export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {

@@ -124,10 +124,7 @@ async function openDraft(
 				rpc.setProjectSetting({ _tag: "defaultSessionMode", mode });
 				return { mode };
 			},
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
-			GetInstances: () => instances,
 			SaveProject: ({ slug: editedSlug, sessionMode, title, folders }) => {
 				const savedSlug = typeof editedSlug === "string" ? editedSlug : "added";
 				const previous = projects.find((project) => project.slug === savedSlug);

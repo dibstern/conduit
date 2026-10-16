@@ -145,7 +145,7 @@ async function waitForChatReady(page: import("@playwright/test").Page) {
 
 test.describe("Roots-only sidebar", () => {
 	test("hides subagent sessions by default", async ({ page, baseURL }) => {
-		await mockWsRpc(page, { handlers: {} });
+		await mockWsRpc(page);
 		await mockRelayWebSocket(page, {
 			initMessages,
 			responses: new Map(),

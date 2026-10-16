@@ -36,7 +36,11 @@ import { AccountDirectory } from "../domain/daemon/Services/account-directory.js
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
-import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
+import {
+	SessionDirectory,
+	SessionDirectoryReadError,
+} from "../domain/daemon/Services/session-directory.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	ProjectManagementNotSupported,
@@ -551,7 +555,13 @@ export async function createProjectRelay(
 				},
 				idleWindowMs,
 				now,
-			).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
@@ -736,10 +746,6 @@ export async function createRelayStack(
 			);
 			const parentContext = (await relay.effectRuntime.runtime.runtime())
 				.context;
-			const sessionDirectory = Context.getOption(
-				parentContext,
-				SessionDirectory,
-			);
 			const daemonContext = Context.pick(
 				DaemonConfigRefTag,
 				ConfigPersistenceTag,
@@ -750,9 +756,7 @@ export async function createRelayStack(
 			);
 			const newRelay = await createProjectRelay({
 				httpServer,
-				daemonConfigContext: Option.isSome(sessionDirectory)
-					? Context.add(daemonContext, SessionDirectory, sessionDirectory.value)
-					: daemonContext,
+				daemonConfigContext: daemonContext,
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
 				slug,
@@ -856,12 +860,28 @@ export async function createRelayStack(
 				undefined,
 				config.slug,
 			).pipe(
-				Effect.provideServiceEffect(
-					SessionDirectory,
-					Effect.map(relay.effectRuntime.runtime.runtimeEffect, (runtime) =>
-						Context.get(runtime.context, SessionDirectory),
-					),
-				),
+				// Each relay owns its own store and claims only its own sessions,
+				// so ask every mounted relay, including projects added later.
+				Effect.provideService(SessionDirectory, {
+					projectOf: (sessionId) =>
+						Effect.gen(function* () {
+							for (const mounted of [...relays.values()]) {
+								const runtime =
+									yield* mounted.effectRuntime.runtime.runtimeEffect.pipe(
+										Effect.mapError(
+											(cause) =>
+												new SessionDirectoryReadError({ sessionId, cause }),
+										),
+									);
+								const owner = yield* Context.get(
+									runtime.context,
+									SessionDirectory,
+								).projectOf(sessionId);
+								if (Option.isSome(owner)) return owner;
+							}
+							return Option.none<string>();
+						}),
+				}),
 			),
 		),
 	);

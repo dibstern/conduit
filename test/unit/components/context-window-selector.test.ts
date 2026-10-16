@@ -14,14 +14,16 @@ type SwitchContextWindowInput = Parameters<
 >[1];
 
 const switchContextWindowRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: SwitchContextWindowInput) => ({
-		projectSlug: "project-a",
-		contextWindow: input.contextWindow,
-		options: [
-			{ value: "200k", label: "200K", isDefault: true },
-			{ value: "1m", label: "1M (beta)" },
-		],
-	})),
+	vi.fn((input: SwitchContextWindowInput) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			contextWindow: input.contextWindow,
+			options: [
+				{ value: "200k", label: "200K", isDefault: true },
+				{ value: "1m", label: "1M (beta)" },
+			],
+		}),
+	),
 );
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
@@ -36,13 +38,12 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	rpc: (
-		tag: "SwitchContextWindow" | "QuotaForAccounts",
-		input: SwitchContextWindowInput,
-	) =>
+	rpc: (tag: string, input: SwitchContextWindowInput) =>
 		tag === "QuotaForAccounts"
 			? Promise.resolve([])
-			: switchContextWindowRpcSpy(input),
+			: tag === "SwitchContextWindow"
+				? switchContextWindowRpcSpy(input)
+				: Promise.reject(new Error("Catalog not configured in this fixture")),
 }));
 
 describe("InstanceModelPicker context window", () => {

@@ -575,6 +575,7 @@ export interface ProjectInfo {
 	/** Keys are Project Folder paths; absent entries have no Repository Identity. */
 	repositoryIdentities?: Readonly<Record<string, RepositoryIdentity>>;
 	missing?: boolean;
+	unavailableReason?: string;
 	git?: SessionGit;
 	clientCount?: number;
 	instanceId?: string;

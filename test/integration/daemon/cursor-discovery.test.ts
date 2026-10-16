@@ -194,7 +194,7 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 				);
 				const reply = await browser.send(sessionId, "Say hi.", 90_000);
 				expect(reply.done["status"]).toBe("idle");
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					const turn = db
 						.prepare<[string], { state: string }>(

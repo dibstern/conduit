@@ -50,7 +50,7 @@ function git(directory: string, ...args: string[]) {
 }
 
 function events(fixture: ProcessHarness, sessionId?: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		const rows = db
 			.prepare(
@@ -153,7 +153,7 @@ describe("Missing session worktrees through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["events"] = existsSync(fixture.projectStorePath())
+			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? events(fixture)
 				: [];
 			evidence["queries"] = fixture.claudeOptions();
@@ -592,7 +592,7 @@ describe("Missing session worktrees through the built daemon", () => {
 		);
 		// Seed conduit origin on an unowned path to pin fail-closed dispatch,
 		// including recorded state that cannot be recreated by the owned service.
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			db.prepare(
 				"UPDATE sessions SET workspace = json_set(workspace, '$.origin', 'conduit') WHERE id = ?",

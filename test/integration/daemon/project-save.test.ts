@@ -44,7 +44,7 @@ async function projectFolders(harness: ProcessHarness) {
 }
 
 function persistedTurn(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			session: db

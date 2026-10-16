@@ -179,8 +179,8 @@ export const PROVIDER_DRIVERS = {
 		supportsGoalState: false, // Goals need a captured Cursor runtime contract.
 		worktreeMoves: "tool-directive", // Never declare workspace moves through OpenCode.
 		emitsMessageParentIds: false, // No native message-lineage contract is established.
-		// test/fixtures/cursor-sdk-traces/steer.jsonl (xqsg.22) pins text on a live local run only.
-		// Cloud runs, handles reacquired after restart and images get revert_to_followup and requeue (xqsg.20).
+		// steer.jsonl pins native text delivery; cursor-steer.test.ts pins missing
+		// methods, declined/image/pending steers and crash recovery through the inbox.
 		steering: "native",
 		readOnlySubagents: true, // cursor-subagents.test.ts pins rejection of child input.
 		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.

@@ -32,6 +32,7 @@ import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
+import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { discoverRunners } from "../../../provider/runner/runner-registry.js";
@@ -56,6 +57,7 @@ import {
 	requestManagedOpenCodeShutdown,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	normalizeProjectDirectory,
 	type ProjectRegistryState,
@@ -203,7 +205,8 @@ type ForegroundRuntimeRequirements =
 	| InstanceManagerStateTag
 	| ProjectRegistryTag
 	| RelayCacheTag
-	| ShutdownSignalTag;
+	| ShutdownSignalTag
+	| PersistenceStore;
 
 export async function startForegroundDaemon(
 	options: DaemonOptions,
@@ -479,6 +482,7 @@ export async function startForegroundDaemon(
 			runtime,
 			Effect.gen(function* () {
 				const relayCache = yield* RelayCacheTag;
+				const storeContext = yield* persistenceStoreContext;
 				// Persist startup refreshes even when no project is saved this run.
 				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
@@ -502,9 +506,8 @@ export async function startForegroundDaemon(
 							runners.length > 0 ||
 							(yield* hasProviderRecoveryCandidate(
 								project,
-								configDir,
 								openCodeInstanceIds,
-							))
+							).pipe(Effect.provide(storeContext)))
 						) {
 							// Recovery subscribes OpenCode directories passively, including
 							// projects no browser has opened since the restart.

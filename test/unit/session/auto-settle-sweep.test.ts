@@ -88,8 +88,8 @@ describe("relay automatic settlement sweep", () => {
 				const now = Date.now();
 				const sql = yield* SqlClient.SqlClient;
 				for (const [id, directory] of directories)
-					yield* sql`INSERT INTO sessions (id, provider, title, status, workspace, last_message_at, created_at, updated_at)
-						VALUES (${id}, 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now}, ${now})`;
+					yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, workspace, last_message_at, created_at, updated_at)
+						VALUES (${id}, 'test-project', 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now}, ${now})`;
 				const settling = yield* Effect.fork(
 					settleIdleSessions(
 						{

@@ -30,7 +30,7 @@ const RUN_SMOKE =
 const TIMEOUT = 180_000;
 
 function sourceEvents(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare<

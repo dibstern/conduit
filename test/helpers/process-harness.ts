@@ -472,7 +472,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.rememberManagedOpenCode();
 	}
 
-	projectStorePath(slug = "process-test"): string {
+	daemonStorePath(): string {
+		return join(this.configDir, "events.db");
+	}
+
+	/** Offline source for startup-import fixtures, never a daemon runtime store. */
+	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
 	}
 

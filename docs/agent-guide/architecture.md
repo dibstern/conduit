@@ -43,12 +43,14 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 |---|---|
 | Relay composition | Each relay combines provider instances, session services, event pipeline modules, `WebSocketHandler`, pollers, PTY wiring, and permission/question handling. Legacy relay composition still has bridge layers while the Effect migration is in progress. |
 | Source of truth | Durable conversation state lives in conduit's SQLite event store. Provider instances are stateless execution engines that stream events into the store. |
-| Relay-owned state | The event store and its projections (sessions, messages, turns, providers, approvals) are the primary record. Projectors maintain materialized views from the append-only event log. |
-| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and project history at `<configDir>/projects/<slug>/events.db`. |
+| Relay-owned state | Project services, provider activity and client subscriptions borrow the daemon store. Projectors maintain materialized views from the append-only event log. |
+| Daemon-owned state | The config directory holds the protected local RPC socket, daemon config, recent projects, push settings, and all project history in one daemon store at `<configDir>/events.db`. Relays borrow this store for their lifetime. |
 | Frontend delivery | Frontend assets are built separately with Vite and served as static files by the relay server. |
 
-Before relays start, a one-time migration checkpoints and copies legacy `<project>/.conduit/events.db` stores, verifies each copy, and archives the originals as `events.db.migrated`; failed copies keep using the legacy store and retry on the next startup.
-Each storage directory records its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs; removing a project keeps its history.
+Before relays start, offline startup migration imports registered and retained per-project stores from `<configDir>/projects/<slug>/events.db`, including legacy `<project>/.conduit/events.db` sources. The importer normalizes private copies, commits history to the daemon store, and archives the sources as described in [ADR-0006](../adr/0006-daemon-store-import-normalises-copies-and-keeps-the-first-owner.md). A failed import makes only its project unavailable until restart retries it; committed imports with backup-only failures remain usable, as specified in [ADR-0008](../adr/0008-a-failed-import-blocks-its-project-and-removed-history-stays-hidden.md).
+Each project storage directory retains its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs. Removing a project disposes its relay and retains its rows in the daemon store; the history stays hidden until the project is registered again.
+
+`SessionDirectory` exposes only `projectOf(sessionId)`. The daemon queries `sessions.project_id` in the shared store at lookup time and returns an owner only while that project is registered. Session IDs are primary keys, so each stored session has one owner. Standalone relays keep their own store and resolve only rows whose `project_id` matches their slug for WebSocket routing.
 
 Read-model subscribers detect dropped advance publications after a bus overflow.
 Catch-up sources read a shared window through the newest queued advance, including

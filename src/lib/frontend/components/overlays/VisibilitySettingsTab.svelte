@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import type { HarnessDefaultState } from "../../transport/ws-rpc.js";
-	import { catalogFromProviderList, findCatalogModel, type Harness, harnessForModelProvider, offeredOptions } from "../../../provider/turn-settings.js";
+	import { catalogFromProviderList, findCatalogModel, type Harness, offeredOptions } from "../../../provider/turn-settings.js";
 	import Select from "../ui/Select.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
@@ -11,11 +11,10 @@
 	import { isKnownDriverKind } from "../../../contracts/provider-instance.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
-	import { applyGetAgentsResponse, followModelsRead, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
+	import { refreshCatalogs, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState, getHarnessDefaultProviders } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let modelsFetchPending = $state(false);
@@ -71,7 +70,7 @@
 	const defaultRows = $derived(Object.keys(PROVIDER_PRESENTATION).filter(isKnownDriverKind).map((harness) => {
 		const row = { harness, label: PROVIDER_PRESENTATION[harness].label };
 		const state = discoveryState.harnessDefaults[row.harness];
-		const providers = modelProviders.filter((provider) => harnessForModelProvider(provider.id) === row.harness);
+		const providers = getHarnessDefaultProviders(row.harness);
 		const catalog = catalogFromProviderList(providers);
 		const model = state.pick ? findCatalogModel(row.harness, state.pick, catalog) : undefined;
 		return { ...row, state, providers, model, options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
@@ -118,23 +117,11 @@
 		if (!projectSlug) return;
 		untrack(() => {
 			modelsFetchPending = true;
-			// Scoped, so the reply describes the open session's model, not the
-			// project default.
-			const sessionId = sessionState.currentId;
-			const applyModels = followModelsRead(sessionId ?? undefined);
-			void rpc("GetModels", { ...(sessionId ? { sessionId } : { projectSlug }) })
-				.then((response) => {
-					if (sessionState.currentId === sessionId) applyModels(response);
-				})
+			void refreshCatalogs()
 				.catch((err) => log.warn("Visibility models fetch failed:", err))
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-			void rpc("GetAgents", { ...(sessionId ? { sessionId } : { projectSlug }) })
-				.then((response) => {
-					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
-				})
-				.catch((err) => log.warn("Visibility agents fetch failed:", err));
 		});
 	});
 

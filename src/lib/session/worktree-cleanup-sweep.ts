@@ -9,6 +9,7 @@ import type {
 } from "../contracts/worktree.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	BackgroundLivenessTag,
 	ConfigTag,
@@ -36,10 +37,12 @@ const DAY_MS = 86_400_000;
 /** Discovery only: no Git calls and no relay startup for an absent checkout. */
 export const readWorktreeCleanupPaths = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* PersistenceProjectTag;
 	return yield* sql<{ session_id: string; path: string }>`
 		SELECT DISTINCT events.session_id, mapping.value AS path
 		FROM events, json_each(events.data, '$.worktrees') AS mapping
-		WHERE events.type = 'session.workspace_changed'
+		WHERE events.project_id = ${projectId}
+			AND events.type = 'session.workspace_changed'
 			AND json_extract(events.data, '$.cause') = 'launch'
 			AND json_extract(events.data, '$.origin') = 'conduit'`;
 });
@@ -51,6 +54,7 @@ export const cleanUpProjectWorktrees = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const worktrees = yield* WorktreeServiceTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const inbox = yield* SessionInboxTag;
@@ -72,15 +76,17 @@ export const cleanUpProjectWorktrees = (
 		const sessionIds = new Set(paths.map(({ session_id }) => session_id));
 		const stateOf = (sessionId: string) =>
 			Effect.gen(function* () {
-				const facts = (yield* readPersistedAutoSettleFacts(now, sessionId)).get(
+				const facts = (yield* readPersistedAutoSettleFacts(
+					projectId,
+					now,
 					sessionId,
-				);
+				)).get(sessionId);
 				return {
 					facts,
 					hasPendingTurn:
 						(yield* sql<{ found: number }>`SELECT EXISTS (
 							SELECT 1 FROM provider_command_outbox
-							WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+							WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
 							AND status IN ('pending', 'running', 'retryable_failed')
 						) AS found`)[0]?.found === 1,
 					hasViewer: viewers.getClientsForSession(sessionId).length > 0,

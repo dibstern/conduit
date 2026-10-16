@@ -149,12 +149,12 @@ describe("Draft worktree launches through the built daemon", () => {
 			task.result?.errors?.map(({ message }) => message) ?? [];
 		evidence["events"] = [];
 		try {
-			if (existsSync(fixture.projectStorePath())) {
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+			if (existsSync(fixture.daemonStorePath())) {
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					evidence["events"] = db
 						.prepare(
-							"SELECT data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+							"SELECT data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 						)
 						.all()
 						.map((row) => {

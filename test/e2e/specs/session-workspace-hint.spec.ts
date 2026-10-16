@@ -20,7 +20,7 @@ const hintPath = "/workspace/conduit-hint";
 
 async function openHint(page: Page, relayBaseUrl: string) {
 	const projects = [
-		{ slug: projectSlug, title: "Workspace project", folders: [main] },
+		{ slug: projectSlug, title: "Workspace project", folders: [main] as const },
 	];
 	const session = {
 		accountId: null,
@@ -50,8 +50,6 @@ async function openHint(page: Page, relayBaseUrl: string) {
 				projectSlug: "e2e-replay",
 				providers: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});

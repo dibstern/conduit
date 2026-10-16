@@ -56,7 +56,11 @@ test("settings, commands and skill documents follow a workspace change and sessi
 		],
 	};
 	const projects = [
-		{ slug: "e2e-replay", title: "Discovery project", folders: [main] },
+		{
+			slug: "e2e-replay",
+			title: "Discovery project",
+			folders: [main] as const,
+		},
 	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
@@ -112,6 +116,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					content: `Skill instructions from ${directory}`,
 				};
 			},
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetClaudeSettings: () => ({ projectSlug: "e2e-replay", overrides: {} }),
 			ResolveClaudeSettings: (input) => {
 				const sessionId = "sessionId" in input ? input.sessionId : undefined;
@@ -133,10 +138,6 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					},
 				};
 			},
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {

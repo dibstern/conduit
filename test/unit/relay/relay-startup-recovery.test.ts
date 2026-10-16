@@ -150,7 +150,9 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 	try {
 		await Effect.runPromise(
 			Effect.all([seed("claude"), seed("opencode")]).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				Effect.provide(
+					makePersistenceEffectLayer(filename, "orphaned-permissions"),
+				),
 			),
 		);
 

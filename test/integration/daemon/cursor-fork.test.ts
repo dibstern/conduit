@@ -44,7 +44,7 @@ function rows(path: string): TraceRow[] {
 }
 
 function state(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db

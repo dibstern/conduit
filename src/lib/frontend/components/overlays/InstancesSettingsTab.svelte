@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { AccountChangeRejected } from "../../../contracts/account.js";
 	import { isKnownDriverKind, type KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import { onDestroy } from "svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
@@ -20,7 +19,8 @@
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { getProviderPresentation, PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
-	import { addInstanceRpc, detectProxyRpc, removeInstanceRpc, scanNowRpc, setDefaultRpc, startInstanceRpc, stopInstanceRpc, updateInstanceRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
@@ -47,7 +47,7 @@
 
 	$effect(() => {
 		beginProxyDetection();
-		void detectProxyRpc()
+		void rpc("DetectProxy", {})
 			.then(applyDetectProxyResponse)
 			.catch(() => applyDetectProxyResponse({ found: false, port: 8317 }));
 	});
@@ -86,24 +86,24 @@
 		state.expandedInstanceId = state.expandedInstanceId === instanceId ? null : instanceId;
 	}
 	function handleStart(instanceId: string) {
-		void startInstanceRpc({ instanceId })
+		void rpc("StartInstance", { instanceId })
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
-			.catch(() => showToast("Failed to start instance", { variant: "warn" }));
+			.catch(toastFailure("Failed to start instance", "warn"));
 	}
 	function handleStop(instanceId: string) {
-		void stopInstanceRpc({ instanceId })
+		void rpc("StopInstance", { instanceId })
 			.then(applyInstanceListResponse)
 			.then(refreshServerStatus)
-			.catch(() => showToast("Failed to stop instance", { variant: "warn" }));
+			.catch(toastFailure("Failed to stop instance", "warn"));
 	}
 	async function handleMakeDefault(instanceId: string) {
 		if (state.defaultSaving) return;
 		state.defaultSaving = true;
 		try {
-			applyInstanceListResponse(await setDefaultRpc({ instanceId }));
+			applyInstanceListResponse(await rpc("SetDefault", { instanceId }));
 		} catch (error: unknown) {
-			showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to change default account", { variant: "warn" });
+			toastFailure("Failed to change default account", "warn")(error);
 		} finally {
 			state.defaultSaving = false;
 		}
@@ -111,12 +111,10 @@
 	async function handleRemove(instanceId: string, instanceName: string) {
 		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
 		if (confirmed) {
-			void removeInstanceRpc({ instanceId })
+			void rpc("RemoveInstance", { instanceId })
 				.then(applyInstanceListResponse)
 				.then(refreshServerStatus)
-				.catch((error: unknown) =>
-					showToast(error instanceof AccountChangeRejected ? error.reason : "Failed to remove instance", { variant: "warn" }),
-				);
+				.catch(toastFailure("Failed to remove instance", "warn"));
 		}
 	}
 	function closeInstanceForm() {
@@ -200,14 +198,14 @@
 		state.formSaving = true;
 		const request =
 			instanceFormMode === "edit" && editingInstanceId
-				? updateInstanceRpc({
+				? rpc("UpdateInstance", {
 						instanceId: editingInstanceId,
 						name,
 						...(usesConfigDirectory
 							? { configDir: configDir ?? "" }
 							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
 					})
-				: addInstanceRpc({
+				: rpc("AddInstance", {
 						name,
 						driver: state.formDriver,
 						...(usesConfigDirectory
@@ -232,20 +230,17 @@
 			})
 			.catch((error: unknown) => {
 				state.formSaving = false;
-				showToast(
-					error instanceof AccountChangeRejected ? error.reason : `Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`,
-					{ variant: "warn" },
-				);
+				toastFailure(`Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`, "warn")(error);
 			});
 	}
 	function handleScanNow() {
 		beginScan();
-		void scanNowRpc()
+		void rpc("ScanNow", {})
 			.then(applyScanNowResponse)
 			.then(refreshServerStatus)
-			.catch(() => {
+			.catch((error) => {
 				clearScanInFlight();
-				showToast("Port scan failed", { variant: "warn" });
+				toastFailure("Port scan failed", "warn")(error);
 			});
 	}
 	async function handleCopy(text: string, key: string) {

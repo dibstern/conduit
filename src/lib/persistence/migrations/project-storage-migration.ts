@@ -21,6 +21,7 @@ export const migrateProjectStorage = (
 	config: DaemonConfig,
 ) =>
 	Effect.gen(function* () {
+		const failures = new Map<string, string>();
 		for (const project of config.projects) {
 			const storageDir = projectStorageDir(configDir, project.slug);
 			const filename = join(storageDir, "events.db");
@@ -75,12 +76,23 @@ export const migrateProjectStorage = (
 				Effect.catchAllCause((cause) =>
 					Cause.isInterruptedOnly(cause)
 						? Effect.failCause(cause)
-						: Effect.logWarning("Project history migration failed", {
-								projectSlug: project.slug,
-								directory: project.path,
-								cause: Cause.pretty(cause),
-							}),
+						: Effect.sync(() => {
+								const error = Cause.squash(cause);
+								failures.set(
+									project.slug,
+									`Legacy history migration failed: ${error instanceof Error ? error.message : String(error)}`,
+								);
+							}).pipe(
+								Effect.andThen(
+									Effect.logWarning("Project history migration failed", {
+										projectSlug: project.slug,
+										directory: project.path,
+										cause: Cause.pretty(cause),
+									}),
+								),
+							),
 				),
 			);
 		}
+		return failures;
 	});

@@ -34,13 +34,13 @@ async function mockTwoProjects(page: Page) {
 		{
 			slug: "e2e-replay",
 			title: "e2e-replay",
-			folders: ["/tmp/e2e-replay"],
+			folders: ["/tmp/e2e-replay"] as const,
 			git: { branch: "main" },
 		},
 		{
 			slug: "other",
 			title: "other",
-			folders: ["/tmp/other"],
+			folders: ["/tmp/other"] as const,
 			git: { branch: "dev" },
 		},
 	];
@@ -52,8 +52,6 @@ async function mockTwoProjects(page: Page) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});

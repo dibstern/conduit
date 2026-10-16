@@ -2,8 +2,8 @@
 	"ticket": "conduit-test-extp.4",
 	"passed": true,
 	"migration": {
-		"id": "0061_legacy_forks",
-		"applied": [59, 60, 61]
+		"id": "0062_legacy_forks",
+		"applied": [61, 62]
 	},
 	"selection": {
 		"legacyForks": [
@@ -13,12 +13,14 @@
 		],
 		"sideThreads": [
 			"47ed8bbd-5e64-4622-b869-3be86380f010",
+			"678c19f7-5901-46d5-a8f2-4911f3b2e336",
 			"d366f08f-c251-4df7-b6bd-4749cc7811cb"
 		],
 		"sessionIds": [
 			"214e557a-1687-4a62-bbed-89e350c83541",
 			"377eff4d-a0de-4003-b36f-0deaaab509ed",
 			"47ed8bbd-5e64-4622-b869-3be86380f010",
+			"678c19f7-5901-46d5-a8f2-4911f3b2e336",
 			"ccd9ebf4-a25a-47eb-ae5d-86f78b585f4d",
 			"claude-subagent-004e52c7bf329593a9c18374",
 			"claude-subagent-008aa562b482cf260d8f0c16",
@@ -27,6 +29,7 @@
 			"claude-subagent-01fa0da797e7a8c61eefec0d",
 			"claude-subagent-026aa11852ccc63f15b5eb41",
 			"claude-subagent-03492b74028065b88eb742a2",
+			"claude-subagent-043cde52498e8ed226dcc200",
 			"claude-subagent-047ff661ed71ce4b3912f2e1",
 			"claude-subagent-04a34f751089dedcb02b16f3",
 			"claude-subagent-05004b3230974b433019a308",
@@ -41,12 +44,14 @@
 			"claude-subagent-078dc69dd367fc80d0df8d0d",
 			"claude-subagent-07a2908bf56e6401e3d22904",
 			"claude-subagent-08b36925364a62722b460072",
+			"claude-subagent-09a0e791bfa3c15727acecc2",
 			"claude-subagent-0a70fd6f8bbf588af87dbb7f",
 			"claude-subagent-0ac0d185f60b0a86b47f1187",
 			"claude-subagent-0ad8abada363193157b055b1",
 			"claude-subagent-0ad95e68d4ca275fc48a5457",
 			"claude-subagent-0b0d389a51d0c8feb67a506a",
 			"claude-subagent-0c2c7952da2d94fbc3b030b0",
+			"claude-subagent-0c7a79aa2892a377acbb6f5d",
 			"claude-subagent-0cd580ef27d964431cc2d5aa",
 			"claude-subagent-0cf50156e74fe0fc83815334",
 			"claude-subagent-0d1f2d6371cc6afb0d33dec3",
@@ -84,6 +89,7 @@
 			"claude-subagent-16c3435cffbe64aab01759c5",
 			"claude-subagent-1797400f4c3b1b6b8c2d0552",
 			"claude-subagent-193461badb28d47301df457e",
+			"claude-subagent-1a265921be6e6aa1cd7948d0",
 			"claude-subagent-1a87c49030b7f5c9d28f8381",
 			"claude-subagent-1ba03b3c4e35adbdb2a01381",
 			"claude-subagent-1bc33a7ba27c45879ca37894",
@@ -109,6 +115,7 @@
 			"claude-subagent-248083b5aadae4f143426772",
 			"claude-subagent-254a987808198c95c863e04d",
 			"claude-subagent-271f52377aea8fce83486884",
+			"claude-subagent-2720b801487ac0aaa833ab4f",
 			"claude-subagent-27531460215ddae57d7e3cc0",
 			"claude-subagent-27fc927aa007f6a07a95e247",
 			"claude-subagent-284e4d1492d8ef7dbff29f4a",
@@ -206,6 +213,7 @@
 			"claude-subagent-4939f5d7b52a65b1c4cc4656",
 			"claude-subagent-4a32a0ca50bc558aab106ffe",
 			"claude-subagent-4a4fb94956a20f0d4affd958",
+			"claude-subagent-4ab6faf909d468d1a44dccdb",
 			"claude-subagent-4ad970c41397911500362da3",
 			"claude-subagent-4b1fc2d8585c37c99b5dfa57",
 			"claude-subagent-4c73daed0d0ee385cc599167",
@@ -223,6 +231,7 @@
 			"claude-subagent-50c1e5bceee5e3b17af78ce3",
 			"claude-subagent-5291da45bf77bd639a5b4955",
 			"claude-subagent-52c70701203b84ccc3ae7b82",
+			"claude-subagent-52c888471fa1434c015462f0",
 			"claude-subagent-5357bd2cef1cdc20ddfc7e88",
 			"claude-subagent-53768f2fe6c2079292f939ee",
 			"claude-subagent-53d2c91e18757627c262f565",
@@ -339,8 +348,10 @@
 			"claude-subagent-7c09395173d2c20ef0443414",
 			"claude-subagent-7c844b3583566e80282378a8",
 			"claude-subagent-7cda3186aba470cb9f3d403a",
+			"claude-subagent-7cdb5a3931315af606627fe0",
 			"claude-subagent-7cff55188abfd9f5b8795073",
 			"claude-subagent-7d37d07f1dec73f0ce2eb543",
+			"claude-subagent-7d5f777a43bca51bd05ca7fa",
 			"claude-subagent-7e0fb3c630df9478a1f03127",
 			"claude-subagent-7f06d598b513ef5bc01d43ae",
 			"claude-subagent-7f411b6524c3d1f2788cafb5",
@@ -385,6 +396,7 @@
 			"claude-subagent-8c7feff8b3b958b1e9b063e8",
 			"claude-subagent-8cdb68544a959256aac2af76",
 			"claude-subagent-8d5c1ed423558661d3394e3a",
+			"claude-subagent-8de231a9a2a514d064db3ae0",
 			"claude-subagent-8dee7027ac25ac1fb5e9583f",
 			"claude-subagent-8ec395a54a9481c0b11dd5aa",
 			"claude-subagent-8eeb68c3baac3ae73bdaefc4",
@@ -418,6 +430,7 @@
 			"claude-subagent-985164204f0d7774c86ea26a",
 			"claude-subagent-989ab7db84a0195ce938f190",
 			"claude-subagent-989b92671b1633180bb18095",
+			"claude-subagent-989c5125872e27199c82e85a",
 			"claude-subagent-98f5ca7d1c872c32b3a95345",
 			"claude-subagent-99aba54f2709b248a7b02b58",
 			"claude-subagent-99dfa322cb77d95996f892eb",
@@ -437,6 +450,7 @@
 			"claude-subagent-9f12f9a322d9cdc951108e41",
 			"claude-subagent-9f6200604bbd8b3d9780e9b7",
 			"claude-subagent-9f6f233d5626765e37fd7ec3",
+			"claude-subagent-9f71567b7da12da4cfa721cf",
 			"claude-subagent-9fbf17d857c8b67813368b66",
 			"claude-subagent-9fdc83349ac66cf831c0ef7d",
 			"claude-subagent-9ff078a34e5ca7140947e373",
@@ -454,6 +468,7 @@
 			"claude-subagent-a4473a84c5cf45863fcdf818",
 			"claude-subagent-a49e2b4250da14cc01511ea6",
 			"claude-subagent-a4ef8b1272e814d9ced6671a",
+			"claude-subagent-a56ea51a548e7fe028348e05",
 			"claude-subagent-a587b04334df49dc95ad65f0",
 			"claude-subagent-a631150806c7e1aeba05c401",
 			"claude-subagent-a6723955f6a46aef426833cc",
@@ -469,6 +484,7 @@
 			"claude-subagent-abb5394ec726276c7b130640",
 			"claude-subagent-ac32d23d2a3b1282c9e2eee9",
 			"claude-subagent-aceb1d24399cbc1cf16b3814",
+			"claude-subagent-ad4b1c9d461128128071b260",
 			"claude-subagent-ad7ea4adcd4822c1a531ec5c",
 			"claude-subagent-adae0e18814805e3ccd5132f",
 			"claude-subagent-adfbcdaee13558620e34ddcb",
@@ -484,6 +500,7 @@
 			"claude-subagent-b33beda515926544207250e5",
 			"claude-subagent-b33f4c43781bdd219006990d",
 			"claude-subagent-b34515f659e39e01fd7fafe2",
+			"claude-subagent-b4633d4946a5e1c560ec4da9",
 			"claude-subagent-b50cf672f1d306a2b277ab1e",
 			"claude-subagent-b5437abddcd34a1df2aac24f",
 			"claude-subagent-b5f4d34bb78714eb8e6dce9e",
@@ -510,6 +527,7 @@
 			"claude-subagent-bc37fbd5c30040689b7c06d2",
 			"claude-subagent-bc936bd08b43989236fd749a",
 			"claude-subagent-bcc205e873b9258d9ddf8f84",
+			"claude-subagent-bcdf0d5043b08f88f2986c48",
 			"claude-subagent-bd0593acf231264c5be63e04",
 			"claude-subagent-bdb84b87c30f7aa832425c9a",
 			"claude-subagent-be0d3670e0ca9aa1e09bbba4",
@@ -558,6 +576,7 @@
 			"claude-subagent-cf2f1718b287ed93de9dd262",
 			"claude-subagent-cf53e214ba4cb4f85b3e8b02",
 			"claude-subagent-d0156effeb67477f8a0f3ec0",
+			"claude-subagent-d080d3a34ad9f5f01fff806d",
 			"claude-subagent-d081d7bcf6bb3559ab4443bd",
 			"claude-subagent-d0a97f3fb78212a76d77e29a",
 			"claude-subagent-d0f87959dee55752a1aea9bc",
@@ -630,6 +649,7 @@
 			"claude-subagent-ed63115f75bbb60aa596a558",
 			"claude-subagent-ee2145bfee96af5f6fac0a42",
 			"claude-subagent-ee4caf8d818e627770a7e0e5",
+			"claude-subagent-ee7394f8f7f251d76e87fb0f",
 			"claude-subagent-eedbe8f98206347a61cbf0d8",
 			"claude-subagent-ef1d0b76ff4aa2c5d50bfd9e",
 			"claude-subagent-ef3b8e1bcc971edb53b6c8bf",
@@ -685,6 +705,7 @@
 			"claude-subagent-ff940584911d7347197646d1",
 			"claude-subagent-ffcb70ef0e5f326fe963a440",
 			"d366f08f-c251-4df7-b6bd-4749cc7811cb",
+			"ses_32a4a20ed2cb4aa484b33d57d2a362a9",
 			"ses_3a0e722b296846d1951e29d28234e905",
 			"ses_4eab8a79caeb45eca0418219535fedc6",
 			"ses_a191fb2920184b02a8044b6025dfb749"
@@ -693,6 +714,7 @@
 			"214e557a-1687-4a62-bbed-89e350c83541",
 			"377eff4d-a0de-4003-b36f-0deaaab509ed",
 			"ccd9ebf4-a25a-47eb-ae5d-86f78b585f4d",
+			"ses_32a4a20ed2cb4aa484b33d57d2a362a9",
 			"ses_3a0e722b296846d1951e29d28234e905",
 			"ses_4eab8a79caeb45eca0418219535fedc6",
 			"ses_a191fb2920184b02a8044b6025dfb749"
@@ -705,29 +727,39 @@
 	],
 	"sideThreadsWithLineage": [
 		"47ed8bbd-5e64-4622-b869-3be86380f010",
+		"678c19f7-5901-46d5-a8f2-4911f3b2e336",
 		"d366f08f-c251-4df7-b6bd-4749cc7811cb"
 	],
 	"notReplayable": [],
 	"readState": {
-		"carriedOver": 5,
+		"carriedOver": 6,
 		"reason": "seen_version is not event-sourced (ADR-0004)"
 	},
 	"placement": {
-		"compared": 672,
+		"compared": 692,
 		"differences": []
 	},
 	"sidebar": {
-		"compared": 6,
-		"differences": []
+		"compared": 7,
+		"differences": [],
+		"preExisting": {
+			"differences": [
+				{
+					"id": "ses_32a4a20ed2cb4aa484b33d57d2a362a9",
+					"columns": ["last_activity"]
+				}
+			],
+			"reason": "Family and stored row unchanged by the migration; background-work stamps are not event-sourced"
+		}
 	},
 	"replay": {
 		"events": {
-			"count": 110787,
-			"maxSequence": 4066451
+			"count": 133918,
+			"maxSequence": 4171285
 		},
 		"startCursor": 0,
-		"endCursor": 4066451,
-		"totalReplayed": 154167,
+		"endCursor": 4171285,
+		"totalReplayed": 193020,
 		"failures": 0,
 		"persistedFailures": 0,
 		"restartReplayed": 0
@@ -735,34 +767,34 @@
 	"unchanged": {
 		"messages": {
 			"before": {
-				"count": 61847,
-				"sha256": "dd9dcc686ce7d57bf53c30dcb1fe09f76d79fd7aafd9798663e3a428b06414af"
+				"count": 64780,
+				"sha256": "ffabf87401e6eacb437572f0e5c37a2bfdc06ef9b02357f56ccf8894a974b99a"
 			},
 			"after": {
-				"count": 61847,
-				"sha256": "dd9dcc686ce7d57bf53c30dcb1fe09f76d79fd7aafd9798663e3a428b06414af"
+				"count": 64780,
+				"sha256": "ffabf87401e6eacb437572f0e5c37a2bfdc06ef9b02357f56ccf8894a974b99a"
 			},
 			"equal": true
 		},
 		"messageParts": {
 			"before": {
-				"count": 202257,
-				"sha256": "ae179167cea994c8da1dfceaf1cad6d0b85e469cb589b4819dbb310b303cdbfa"
+				"count": 218940,
+				"sha256": "eb591b2c0711df8b5d2c40ef565c050e1b146b040c4d632d748fc4c92dd331c8"
 			},
 			"after": {
-				"count": 202257,
-				"sha256": "ae179167cea994c8da1dfceaf1cad6d0b85e469cb589b4819dbb310b303cdbfa"
+				"count": 218940,
+				"sha256": "eb591b2c0711df8b5d2c40ef565c050e1b146b040c4d632d748fc4c92dd331c8"
 			},
 			"equal": true
 		},
 		"events": {
 			"before": {
-				"count": 3180168,
-				"maxSequence": 4072529
+				"count": 3278924,
+				"maxSequence": 4171285
 			},
 			"after": {
-				"count": 3180168,
-				"maxSequence": 4072529
+				"count": 3278924,
+				"maxSequence": 4171285
 			},
 			"equal": true
 		}
@@ -778,22 +810,22 @@
 		"rows": []
 	},
 	"readModelCounter": {
-		"before": 3498804,
-		"after": 3498805,
-		"rerun": 3498805
+		"before": 3597743,
+		"after": 3597744,
+		"rerun": 3597744
 	},
 	"idempotence": {
-		"applied": [61],
-		"placementCompared": 14185,
-		"sidebarCompared": 187,
+		"applied": [62],
+		"placementCompared": 14225,
+		"sidebarCompared": 200,
 		"placementDifferences": [],
 		"sidebarDifferences": [],
 		"counterUnchanged": true
 	},
 	"disk": {
 		"minimumFreeBytes": 8589934592,
-		"minimumObservedFreeBytes": 21395431424,
-		"checks": 327,
+		"minimumObservedFreeBytes": 22973755392,
+		"checks": 407,
 		"fullCopies": 3
 	},
 	"temporaryDatabasesRemoved": true
