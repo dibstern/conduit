@@ -13,15 +13,11 @@ import {
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
+import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
-interface RewindSessionInput {
-	readonly sessionId: string;
-	readonly messageId: string;
-}
-
-const rewindSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: RewindSessionInput) => ({
+const rpcSpy = vi.hoisted(() =>
+	vi.fn<typeof rpc<"RewindSession">>(async (_tag, input) => ({
 		ok: true as const,
 		sessionId: input.sessionId,
 		messageId: input.messageId,
@@ -38,13 +34,12 @@ vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	rewindSessionRpc: (input: RewindSessionInput) => rewindSessionRpcSpy(input),
-	undoRewindRpc: vi.fn(),
+	rpc: rpcSpy,
 }));
 
 describe("RewindBanner", () => {
 	beforeEach(() => {
-		rewindSessionRpcSpy.mockClear();
+		rpcSpy.mockClear();
 		sessionState.currentId = "session-1";
 		getOrCreateSessionActivity("session-1");
 		uiState.rewindActive = true;
@@ -144,7 +139,7 @@ describe("RewindBanner", () => {
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 
 		await waitFor(() => {
-			expect(rewindSessionRpcSpy).toHaveBeenCalledWith({
+			expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
 				sessionId: "session-1",
 				messageId: "provider-1",
 			});
@@ -167,7 +162,7 @@ describe("RewindBanner", () => {
 		const onRewind = vi.fn();
 		const { getByRole } = render(RewindBanner, { onRewind });
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
-		expect(rewindSessionRpcSpy).toHaveBeenCalledWith({
+		expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
 			sessionId: "session-1",
 			messageId: "provider-assistant-1",
 		});
@@ -184,7 +179,7 @@ describe("RewindBanner", () => {
 		];
 		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
-		expect(rewindSessionRpcSpy).not.toHaveBeenCalled();
+		expect(rpcSpy).not.toHaveBeenCalled();
 		expect(chatState.messages).toHaveLength(1);
 		expect(uiState.rewindActive).toBe(false);
 		expect(uiState.toasts).toEqual([
@@ -196,7 +191,7 @@ describe("RewindBanner", () => {
 	});
 
 	it("keeps the transcript and reports an RPC rejection", async () => {
-		rewindSessionRpcSpy.mockRejectedValueOnce(new Error("Target not found"));
+		rpcSpy.mockRejectedValueOnce(new Error("Target not found"));
 		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		await waitFor(() =>
@@ -217,7 +212,7 @@ describe("RewindBanner", () => {
 			sessionId: string;
 			messageId: string;
 		}) => void;
-		rewindSessionRpcSpy.mockImplementationOnce(
+		rpcSpy.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
 					resolveReply = resolve;
@@ -256,7 +251,7 @@ describe("RewindBanner", () => {
 			sessionId: string;
 			messageId: string;
 		}) => void;
-		rewindSessionRpcSpy.mockImplementationOnce(
+		rpcSpy.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
 					resolveReply = resolve;

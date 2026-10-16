@@ -103,7 +103,7 @@ test.describe("Notification → Session Navigation", () => {
 	}) => {
 		// Set up WS mock and respond to ViewSession RPC.
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
@@ -186,7 +186,7 @@ test.describe("Notification → Session Navigation", () => {
 		// we test the onNavigateToSession callback is wired up by
 		// directly calling it via the session list click path.
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: () => ({ ok: true }),
 			},
 		});
@@ -232,7 +232,7 @@ test.describe("Notification → Session Navigation", () => {
 		// Verify the pipeline handles an alert without sessionId
 		// gracefully (no navigation, no crash).
 		const rpc = await mockWsRpc(page, {
-			handlers: {
+			stubs: {
 				ViewSession: () => ({ ok: true }),
 			},
 		});

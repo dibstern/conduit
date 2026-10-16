@@ -27,9 +27,8 @@
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getProjectGroup } from "../../stores/project-state.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import {
-		deleteSessionRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import {
 		dismissToast,
 		showToast,
@@ -449,19 +448,19 @@
 			// The list is cross-project, so each row deletes in its own project.
 			resetSelectMode();
 			const results = await Promise.allSettled(
-				targets.map((target) => deleteSessionRpc(target)),
+				targets.map((target) => rpc("DeleteSession", target)),
 			);
 			const warnings = results.flatMap((result) => result.status === "fulfilled" ? result.value.worktreeWarnings ?? [] : []);
 			if (warnings.length > 0) showToast(`Sessions deleted. ${warnings.join("; ")}`, { variant: "warn" });
 			void refreshListedSessions();
 			const failed = results.filter((r) => r.status === "rejected").length;
 			if (failed > 0) {
-				showToast(
+				toastFailure(
 					failed === 1
 						? "Couldn't delete 1 session"
 						: `Couldn't delete ${failed} sessions`,
-					{ variant: "warn" },
-				);
+					"warn",
+				)(results.find((result) => result.status === "rejected")?.reason);
 			}
 		}
 		bulkPending = false;

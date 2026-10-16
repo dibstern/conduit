@@ -3,19 +3,20 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { switchToSession } from "../../stores/session.svelte.js";
-	import { listDaemonSessionsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 
-	type SearchRpc = typeof listDaemonSessionsRpc;
+	type SearchRpc = typeof rpc<"ListDaemonSessions">;
 	type SearchResponse = Awaited<ReturnType<SearchRpc>>;
 	type SearchResult = SearchResponse["sessions"][number];
 
 	// The story supplies a transport stub; the app uses the daemon RPC directly.
-	let { search = listDaemonSessionsRpc, initiallyOpen = false }: { search?: SearchRpc; initiallyOpen?: boolean } = $props();
+	let { search = rpc, initiallyOpen = false }: { search?: SearchRpc; initiallyOpen?: boolean } = $props();
 	onMount(() => { if (initiallyOpen) openSearch(); });
 
 	let open = $state(false);
@@ -25,7 +26,7 @@
 	let cursor = $state<SearchResponse["nextCursor"]>(null);
 	let hasMore = $state(false);
 	let loading = $state(false);
-	let failed = $state(false);
+	let failed = $state<string | null>(null);
 	let highlighted = $state(-1);
 	let input: HTMLInputElement | undefined = $state();
 	let opener: HTMLElement | null = null;
@@ -34,7 +35,7 @@
 
 	const announcement = $derived(
 		failed
-			? "Search unavailable"
+			? failed
 			: loading && results.length === 0
 			? ""
 			: results.length === 0
@@ -92,7 +93,7 @@
 		// keystroke does not flash the list empty.
 		cursor = null;
 		hasMore = false;
-		failed = false;
+		failed = null;
 		highlighted = -1;
 		loading = true;
 		const trimmed = query.trim();
@@ -103,15 +104,15 @@
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) {
 			loading = false;
-			failed = true;
+			failed = "Search unavailable";
 			return;
 		}
 		const token = replace ? ++requestToken : requestToken;
 		if (replace) activeQuery = searchQuery;
 		loading = true;
-		failed = false;
+		failed = null;
 		try {
-			const response = await search({
+			const response = await search("ListDaemonSessions", {
 				projectSlug,
 				roots: true,
 				limit: searchQuery ? 20 : 8,
@@ -127,8 +128,8 @@
 			}
 			cursor = searchQuery ? response.nextCursor : null;
 			hasMore = searchQuery ? response.hasMore : false;
-		} catch {
-			if (token === requestToken && open) failed = true;
+		} catch (error) {
+			if (token === requestToken && open) failed = failureLine(error, "Search unavailable");
 		} finally {
 			if (token === requestToken && open) loading = false;
 		}
@@ -223,7 +224,7 @@
 		{#if !loading && !failed && query.trim() && results.length === 0}
 			<p class="py-4 text-center text-sm text-text-secondary">No sessions match “{query.trim()}”</p>
 		{:else if !loading && failed}
-			<p class="py-4 text-center text-sm text-text-secondary">Search unavailable</p>
+			<p class="py-4 text-center text-sm text-text-secondary">{failed}</p>
 		{/if}
 		{#if hasMore}
 			<Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="surface" disabledStyle="undimmed" data-testid="deep-search-more" class="self-center rounded px-3 py-2 text-sm text-text-secondary" disabled={loading} onclick={showMore}>Show more</Button>

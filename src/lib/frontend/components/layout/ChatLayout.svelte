@@ -9,7 +9,8 @@
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
-	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, attachProjectRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
 	import { taskDrawer } from "../session/background-tasks.svelte.js";
@@ -116,14 +117,14 @@
 		// OpenCode draft models arrive through viewDraftModels; agents have no subscription.
 		if (draftNeedsDiscovery) {
 			const applyModels = followModelsRead();
-			void getModelsRpc({ projectSlug, instanceId })
+			void rpc("GetModels", { projectSlug, instanceId })
 				.then((response) => { if (active) applyModels(response); })
 				.catch(() => undefined);
 		}
-		void getAgentsRpc({ projectSlug, instanceId })
+		void rpc("GetAgents", { projectSlug, instanceId })
 			.then((response) => { if (active) applyGetAgentsResponse(response); })
 			.catch(() => undefined);
-		void getCommandsRpc({ projectSlug, instanceId })
+		void rpc("GetCommands", { projectSlug, instanceId })
 			.then((response) => { if (active) applyGetCommandsResponse(response); })
 			.catch(() => undefined);
 		return () => { active = false; };
@@ -169,7 +170,7 @@
 		if (!projectSlug) return;
 		let active = true;
 		const instanceId = sessionId ? undefined : getEffectiveInstanceId();
-		void getCommandsRpc({ ...(sessionId ? { sessionId } : { projectSlug }), ...(instanceId ? { instanceId } : {}) }).then((response) => {
+		void rpc("GetCommands", { ...(sessionId ? { sessionId } : { projectSlug }), ...(instanceId ? { instanceId } : {}) }).then((response) => {
 			if (active && (sessionId || instanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 		}).catch(() => undefined);
 		return () => { active = false; };
@@ -490,7 +491,7 @@
 				routeSessionId == null
 					? getEffectiveInstanceId()
 					: undefined;
-			void getAgentsRpc({
+			void rpc("GetAgents", {
 				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
@@ -503,7 +504,7 @@
 				})
 				.catch(() => undefined);
 			const applyModels = followModelsRead(routeSessionId ?? undefined);
-			void getModelsRpc({
+			void rpc("GetModels", {
 				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
@@ -511,7 +512,7 @@
 					if (generation === attachGeneration && getCurrentSessionId() === routeSessionId && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyModels(response);
 				})
 				.catch(() => undefined);
-			void getCommandsRpc({
+			void rpc("GetCommands", {
 				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
@@ -566,14 +567,14 @@
 			}
 			requestFileTree();
 		});
-		void getFileTreeRpc({ ...(sessionId ? { sessionId } : { projectSlug: slug }) })
+		void rpc("GetFileTree", { ...(sessionId ? { sessionId } : { projectSlug: slug }) })
 			.then((response) => {
 				if (!cancelled) applyGetFileTreeResponse(response);
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
 				if (!cancelled) {
 					fileTreeState.loading = false;
-					showToast("Failed to load file tree", { variant: "error" });
+					toastFailure("Failed to load file tree")(error);
 				}
 			});
 		return () => { cancelled = true; };
@@ -689,10 +690,10 @@
 					if (attachedSlug && (!projectHint || projectHint === attachedSlug)) {
 						const draftInstanceId = getEffectiveInstanceId();
 						const applyModels = followModelsRead();
-						void getModelsRpc({ projectSlug: attachedSlug, ...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}) })
+						void rpc("GetModels", { projectSlug: attachedSlug, ...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}) })
 							.then(applyModels)
 								.catch(() => undefined);
-						void getAgentsRpc({
+						void rpc("GetAgents", {
 							projectSlug: attachedSlug,
 							...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 						})
@@ -712,12 +713,12 @@
 			if (!attachedSlug) return;
 			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
-			void resolveSessionRpc({ sessionId }).then(({ projectSlug }) => {
+			void rpc("ResolveSession", { sessionId }).then(({ projectSlug }) => {
 				placeSession(sessionId, projectSlug);
 			}).catch((error) => {
 				if (cancelled) return;
 				if (error instanceof WsRpcError && error.code === "unknown-session") placeSession(sessionId, null);
-				else showToast("Failed to open session", { variant: "error" });
+				else toastFailure("Failed to open session")(error);
 			});
 		});
 		return () => { cancelled = true; };

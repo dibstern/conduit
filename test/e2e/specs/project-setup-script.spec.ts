@@ -50,21 +50,27 @@ async function openSession(
 		accountId: null,
 		id: sessionId,
 		title: "New worktree",
-		status: "idle",
+		status: "idle" as const,
 		projectSlug: slug,
 		messageCount: setup ? 1 : 0,
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-			GetProjects: () => ({ projects: [project], current: slug }),
+		stubs: {
+			FindFolders: () => ({ home: "/workspace", entries: [] }),
 			ListDaemonSessions: () => ({
 				sessions: [session],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
-			FindFolders: () => ({ home: "/workspace", entries: [] }),
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
+				providers: [],
+			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects: [project], current: slug }),
 			SaveProject: ({ setupScript }) => {
 				const { setupScript: _previous, ...rest } = project;
 				project = {

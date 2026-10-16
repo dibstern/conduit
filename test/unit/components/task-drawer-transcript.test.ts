@@ -9,15 +9,11 @@ import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
-	loadMoreHistoryRpc:
-		vi.fn<
-			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js").loadMoreHistoryRpc
-		>(),
-	forkSessionRpc: vi.fn<
-		typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js").forkSessionRpc
-	>(() => new Promise<never>(() => {})),
-	respondPermissionRpc: vi.fn(async () => ({ ok: true })),
-	answerQuestionRpc: vi.fn(async () => ({ ok: true })),
+	call: vi.fn<(tag: string, payload: unknown) => Promise<unknown>>((tag) =>
+		tag === "ForkSession"
+			? new Promise<never>(() => {})
+			: Promise.resolve({ ok: true }),
+	),
 }));
 
 vi.mock(
@@ -27,6 +23,7 @@ vi.mock(
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
 		...rpc,
+		rpc: rpc.call,
 	}),
 );
 vi.mock(
@@ -212,7 +209,7 @@ describe("Task drawer transcript", () => {
 		if (!child.transcript) throw new Error("Missing seeded child transcript");
 		child.transcript = { ...child.transcript, hasMore: true };
 		child.historyHasMore = true;
-		rpc.loadMoreHistoryRpc.mockResolvedValueOnce({
+		rpc.call.mockResolvedValueOnce({
 			projectSlug: "conduit",
 			sessionId: childId,
 			messages: [textRow("child-earlier", "Earlier child work", 1, "user")],
@@ -230,7 +227,7 @@ describe("Task drawer transcript", () => {
 		);
 
 		expect(await within(pane).findByText("Earlier child work")).toBeTruthy();
-		expect(rpc.loadMoreHistoryRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(rpc.call).toHaveBeenCalledExactlyOnceWith("LoadMoreHistory", {
 			sessionId: childId,
 			before: `${childId}-reply`,
 		});
@@ -276,7 +273,8 @@ describe("Task drawer transcript", () => {
 		expect(within(pane).queryByText(`Choice for ${parentId}?`)).toBeNull();
 		expect(within(pane).queryByText("Choice for drawer-sibling?")).toBeNull();
 		await fireEvent.click(within(pane).getByRole("button", { name: "Allow" }));
-		expect(rpc.respondPermissionRpc).toHaveBeenCalledWith(
+		expect(rpc.call).toHaveBeenCalledWith(
+			"RespondPermission",
 			expect.objectContaining({
 				requestId: "child-permission",
 				decision: "allow",
@@ -284,7 +282,8 @@ describe("Task drawer transcript", () => {
 		);
 		await fireEvent.click(within(pane).getByRole("radio"));
 		await fireEvent.click(within(pane).getByRole("button", { name: "Submit" }));
-		expect(rpc.answerQuestionRpc).toHaveBeenCalledWith(
+		expect(rpc.call).toHaveBeenCalledWith(
+			"AnswerQuestion",
 			expect.objectContaining({
 				toolId: `question-${childId}`,
 				answers: { "0": "SQLite" },
@@ -368,7 +367,8 @@ describe("Task drawer transcript", () => {
 		await fireEvent.click(
 			within(pane).getByRole("button", { name: "Fork from here" }),
 		);
-		expect(rpc.forkSessionRpc).toHaveBeenCalledWith(
+		expect(rpc.call).toHaveBeenCalledWith(
+			"ForkSession",
 			expect.objectContaining({
 				sessionId: childId,
 				messageId: `${childId}-reply`,

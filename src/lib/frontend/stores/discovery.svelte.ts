@@ -34,7 +34,7 @@ import type {
 	SwitchModelResponse,
 	SwitchVariantResponse,
 } from "../transport/ws-rpc.js";
-import { getModelsRpc } from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	AgentInfo,
 	AgentProviderScope,
@@ -502,7 +502,7 @@ export function followSessionPickChange(
 
 function refreshSessionPick(sessionId: string): void {
 	const apply = followModelsRead(sessionId);
-	void getModelsRpc({ sessionId })
+	void rpc("GetModels", { sessionId })
 		.then(apply)
 		.catch(() => undefined);
 }

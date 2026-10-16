@@ -7,6 +7,7 @@ const repoRoot = resolve(import.meta.dirname, "../../../..");
 const readPackageJson = (path: string) =>
 	JSON.parse(readFileSync(path, "utf8")) as {
 		dependencies?: Record<string, string>;
+		optionalDependencies?: Record<string, string>;
 		peerDependencies?: Record<string, string>;
 		version?: string;
 	};
@@ -57,6 +58,17 @@ describe("provider SDK version locks", () => {
 
 		expect(installedVersion).toBe(pinnedVersion);
 		expect(pinnedVersion).toBe("1.19.1");
+	});
+
+	it("locks the installed Cursor SDK to the pinned optional dependency version", () => {
+		const pinnedVersion = readPackageJson(resolve(repoRoot, "package.json"))
+			.optionalDependencies?.["@cursor/sdk"];
+		const installedVersion = readPackageJson(
+			resolve(repoRoot, "node_modules/@cursor/sdk/package.json"),
+		).version;
+
+		expect(installedVersion).toBe(pinnedVersion);
+		expect(pinnedVersion).toBe("1.0.37");
 	});
 
 	// conduit-test-o6r: @anthropic-ai/sdk is a transitive dep (via the Claude

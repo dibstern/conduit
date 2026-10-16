@@ -29,7 +29,7 @@ test("detail feed renders streamed text once and resumes cached content across s
 	harness,
 }) => {
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ResolveSession: () => ({ projectSlug: project }),
 			ViewSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
@@ -144,7 +144,7 @@ test("detail catch-up removes a message after returning to a session", async ({
 	harness,
 }) => {
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ResolveSession: () => ({ projectSlug: project }),
 			ViewSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({

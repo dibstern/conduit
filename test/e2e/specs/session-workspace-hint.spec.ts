@@ -26,27 +26,33 @@ async function openHint(page: Page, relayBaseUrl: string) {
 		accountId: null,
 		id: "hint-session",
 		title: "Workspace hint",
-		status: "idle",
+		status: "idle" as const,
 		projectSlug,
 		provider: "claude",
 		git: { branch: "main" },
 		workspaceHint: hintPath,
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: projectSlug }),
+		stubs: {
+			MoveSessionWorkspace: ({ path }) => ({
+				projectSlug,
+				directory: String(path),
+			}),
+			DismissWorkspaceHint: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [session],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
-			MoveSessionWorkspace: ({ path }) => ({
-				projectSlug,
-				directory: String(path),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
 			}),
-			DismissWorkspaceHint: () => ({ ok: true }),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});
 	rpc.setShellRows([session]);

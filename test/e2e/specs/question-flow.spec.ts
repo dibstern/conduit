@@ -8,6 +8,7 @@
 // Reproduces: "When I answer a question in a session, the agent doesn't respond."
 
 import { expect, test } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { initMessages, type MockMessage } from "../fixtures/mockup-state.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket, type WsMockControl } from "../helpers/ws-mock.js";
@@ -106,11 +107,11 @@ test.describe("Question/Answer Flow", () => {
 	): Promise<QuestionFlowControl> {
 		let relay: WsMockControl | null = null;
 		const rpc = await mockWsRpc(page, {
-			handlers: {
-				"input.submit": async () => {
+			stubs: {
+				"input.submit": async ({ sessionId }) => {
 					await relay?.sendMessages(questionResponseMessages);
 					rpc.sendChunk("SubscribeApprovals", [questionAsked]);
-					return { ok: true };
+					return { ok: true, sessionId };
 				},
 				AnswerQuestion: () => ({ ok: true }),
 				RejectQuestion: () => ({ ok: true }),
@@ -277,4 +278,51 @@ test.describe("Question/Answer Flow", () => {
 		// Card should show "Skipped ✗"
 		await expect(questionCard.locator(".question-resolved-skip")).toBeVisible();
 	});
+
+	for (const action of ["answer", "skip"] as const) {
+		for (const withReason of [true, false]) {
+			test(`${action} refusal ${withReason ? "shows the server reason" : "uses the fallback"} and permits retry`, async ({
+				page,
+				baseURL,
+			}, testInfo) => {
+				const control = await setupQuestionFlow(page, baseURL);
+				const refuse = () => {
+					throw new WsRpcError({
+						message: withReason ? "The question is no longer open." : "",
+					});
+				};
+				control.rpc.setStubs(
+					action === "answer"
+						? { AnswerQuestion: refuse }
+						: { RejectQuestion: refuse },
+				);
+				await page.locator("#input").fill("Ask me about databases");
+				await page.locator("#input").press("Enter");
+				const card = page.locator(".question-card");
+				await expect(card).toBeVisible();
+				if (action === "answer")
+					await card
+						.locator(".question-option-label", { hasText: "PostgreSQL" })
+						.click();
+				const button = card.locator(
+					action === "answer" ? ".question-submit-btn" : ".question-skip-btn",
+				);
+				await button.click();
+				await expect(card).toContainText(
+					withReason
+						? "The question is no longer open."
+						: action === "answer"
+							? "No response from server. You can try again, or send a follow-up message to continue."
+							: "Could not skip this question.",
+				);
+				await expect(button).toBeEnabled();
+				const path = testInfo.outputPath("question-refusal.png");
+				await page.screenshot({ path });
+				await testInfo.attach("question-refusal", {
+					path,
+					contentType: "image/png",
+				});
+			});
+		}
+	}
 });
