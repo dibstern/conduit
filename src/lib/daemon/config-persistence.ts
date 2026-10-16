@@ -7,7 +7,7 @@ import { chmod, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { Data, Effect, Either, Schema } from "effect";
+import { Data, Effect, Either, Record, Schema } from "effect";
 import {
 	type AccountsState,
 	accountsStateFromConfig,
@@ -28,6 +28,7 @@ import {
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
+	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
@@ -182,14 +183,13 @@ const DaemonConfigFields = {
 		{ exact: true },
 	),
 	accountDefaults: Schema.optionalWith(
-		Schema.Struct({
-			claude: Schema.optionalWith(
-				Schema.suspend(() => AccountIdSchema),
-				{
-					exact: true,
-				},
+		Schema.partial(
+			Schema.Struct(
+				Record.map(PROVIDER_DRIVERS, () =>
+					Schema.suspend(() => AccountIdSchema),
+				),
 			),
-		}),
+		),
 		{ exact: true },
 	),
 	deletedAccounts: Schema.optionalWith(

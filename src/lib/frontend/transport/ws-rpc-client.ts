@@ -4,7 +4,10 @@ import { Cause, Effect, Either, HashSet } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import type { DefaultSessionMode } from "../../contracts/project-file.js";
-import { AccountIdSchema } from "../../contracts/provider-instance.js";
+import {
+	AccountIdSchema,
+	type KnownProviderDriverKind,
+} from "../../contracts/provider-instance.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
 import type {
 	WorktreeCleanup,
@@ -359,7 +362,7 @@ export interface SetDefaultModelRpcInput {
 
 export interface SetHarnessDefaultRpcInput {
 	readonly projectSlug: string;
-	readonly harness: "claude" | "opencode";
+	readonly harness: KnownProviderDriverKind;
 	readonly providerId: string;
 	readonly modelId: string;
 	readonly effort?: string;

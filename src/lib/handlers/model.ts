@@ -562,11 +562,13 @@ export interface SwitchModelInput {
  */
 export const applyLiveSessionSettings = (sessionId: string) =>
 	Effect.gen(function* () {
-		const registry = yield* ProviderRegistryTag;
-		const instance = registry.getInstance("claude");
-		if (!instance?.applyLiveSettingsEffect) return;
 		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
-		if (!row?.model_id || row.model_provider !== "claude") return;
+		if (!row?.model_id || !row.model_provider) return;
+		const driver = harnessForModelProvider(row.model_provider);
+		if (PROVIDER_DRIVERS[driver].catalogSource !== "discovery") return;
+		const registry = yield* ProviderRegistryTag;
+		const instance = registry.getInstance(driver);
+		if (!instance?.applyLiveSettingsEffect) return;
 
 		const result = yield* Effect.either(
 			instance.applyLiveSettingsEffect(sessionId, {

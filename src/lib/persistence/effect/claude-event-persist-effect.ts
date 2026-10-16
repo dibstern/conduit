@@ -394,6 +394,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 						const existingChild = existingChildRows[0];
 						if (
 							existingChild &&
+							// driver-dispatch-ok: Claude-only persistence checks a stored row's owner.
 							(existingChild.provider !== "claude" ||
 								existingChild.parent_id !== input.parentSessionId ||
 								existingChild.provider_sid !== input.providerSessionId)

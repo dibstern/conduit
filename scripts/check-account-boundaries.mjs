@@ -11,7 +11,6 @@ const ENV_OWNERS = new Set([
 	DIRECTORY,
 	resolve("src/lib/provider/claude/claude-sdk-env.ts"),
 ]);
-const DRIVER_LITERALS = new Set(["claude", "opencode"]);
 const ACCOUNT_NAME = /^(?:accountId|instanceId)$|(?:AccountId|InstanceId)$/;
 
 function collectSourceFiles(directory) {
@@ -53,6 +52,26 @@ const program = ts.createProgram(
 	{ ...parsed.options, noEmit: true },
 );
 const checker = program.getTypeChecker();
+const driverSource = program.getSourceFile(
+	resolve("src/lib/contracts/provider-instance.ts"),
+);
+const driverDeclaration = driverSource?.statements
+	.filter(ts.isVariableStatement)
+	.flatMap((statement) => statement.declarationList.declarations)
+	.find(
+		(declaration) =>
+			declaration.name.getText(driverSource) === "PROVIDER_DRIVERS",
+	);
+if (!driverDeclaration) {
+	console.error("Account boundaries: cannot load PROVIDER_DRIVERS.");
+	process.exit(1);
+}
+const DRIVER_LITERALS = new Set(
+	checker
+		.getTypeAtLocation(driverDeclaration.name)
+		.getProperties()
+		.map((property) => property.name),
+);
 const accountSource = program.getSourceFile(
 	resolve("src/lib/contracts/account.ts"),
 );
