@@ -63,6 +63,20 @@ import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
 
+export type SessionPlacement =
+	| { parentId?: never; forkedFrom?: never; sideThread?: false }
+	| { parentId: string; forkedFrom?: never; sideThread?: false }
+	| { parentId?: never; forkedFrom: string; sideThread?: false }
+	| { parentId: string; forkedFrom: string; sideThread: true };
+
+export const forkPlacement = (
+	sourceId: string,
+	sideThread: boolean,
+): Extract<SessionPlacement, { forkedFrom: string }> =>
+	sideThread
+		? { parentId: sourceId, forkedFrom: sourceId, sideThread: true }
+		: { forkedFrom: sourceId };
+
 const sideThreadTitle = (question: string) =>
 	normalizeSessionTitle(question)
 		.slice(0, SIDE_THREAD_TITLE_MAX_LENGTH)
@@ -103,7 +117,9 @@ type SessionCommandType =
 export type SessionCommand = {
 	[K in SessionCommandType]: {
 		readonly type: K;
-		readonly data: EventPayloadMap[K];
+		readonly data: K extends "session.created"
+			? Omit<EventPayloadMap[K], keyof SessionPlacement> & SessionPlacement
+			: EventPayloadMap[K];
 	};
 }[SessionCommandType];
 
@@ -553,10 +569,9 @@ export const forkOpenCodeSession = (
 							sessionId: session.id,
 							title,
 							provider: account.id,
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
@@ -853,10 +868,9 @@ const forkSessionInWorkspace = (
 							...(parentThread
 								? { providerSessionId: forked.sdkSessionId }
 								: {}),
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
@@ -864,7 +878,10 @@ const forkSessionInWorkspace = (
 							forkPointEvent,
 							forkPointTimestamp: source.boundary.createdAt,
 							forkPointMessageId: source.boundary.messageId,
-						},
+						} satisfies Extract<
+							SessionCommand,
+							{ type: "session.created" }
+						>["data"],
 						{
 							provider,
 							createdAt: Date.now(),

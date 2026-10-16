@@ -34,7 +34,7 @@ async function setup(page: import("@playwright/test").Page) {
 				draft: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
 			}),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
-			ForkSession: () => ({ projectSlug, sessionId: forked, parentId: seed }),
+			ForkSession: () => ({ projectSlug, sessionId: forked, forkedFrom: seed }),
 			DeleteSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],
