@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
+import { Either, Schema } from "effect";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
@@ -20,6 +21,40 @@ interface TraceRow {
 function object(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+
+const decodeModels = Schema.decodeUnknownEither(
+	Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			displayName: Schema.String,
+			parameters: Schema.optional(
+				Schema.Array(
+					Schema.Struct({
+						id: Schema.String,
+						displayName: Schema.optional(Schema.String),
+						values: Schema.Array(
+							Schema.Struct({
+								value: Schema.String,
+								displayName: Schema.optional(Schema.String),
+							}),
+						),
+					}),
+				),
+			),
+			variants: Schema.optional(
+				Schema.Array(
+					Schema.Struct({
+						params: Schema.Array(
+							Schema.Struct({ id: Schema.String, value: Schema.String }),
+						),
+						displayName: Schema.String,
+						isDefault: Schema.optional(Schema.Boolean),
+					}),
+				),
+			),
+		}),
+	),
+);
 
 export function createTraceCursorSdkPort(
 	path: string,
@@ -358,21 +393,14 @@ export function createTraceCursorSdkPort(
 		async modelsList(): Promise<readonly CursorModel[]> {
 			const data = result("models.list");
 			const models = object(data) ? data["models"] : data;
-			if (
-				!Array.isArray(models) ||
-				!models.every(
-					(model): model is CursorModel =>
-						object(model) &&
-						typeof model["id"] === "string" &&
-						typeof model["displayName"] === "string",
-				)
-			) {
+			const decoded = decodeModels(models);
+			if (Either.isLeft(decoded)) {
 				throw new CursorSdkFailure({
 					operation: "models.list",
 					reason: "Invalid Cursor model list trace",
 				});
 			}
-			return models;
+			return decoded.right;
 		},
 		async openStore() {
 			let disposed: Promise<void> | undefined;
