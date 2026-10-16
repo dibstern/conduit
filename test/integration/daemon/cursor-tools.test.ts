@@ -39,9 +39,9 @@ const kinds = {
 	generateImage: "generateImage",
 	recordScreen: "recordScreen",
 	computerUse: "ComputerUse",
-	task: "cursor.task",
+	task: "Task",
 	unknown: "future-tool",
-	"nested-computerUse": "cursor.task",
+	"nested-computerUse": "Task",
 	"shell-error": "Bash",
 	"computerUse-error": "ComputerUse",
 	"stream-truncated": "Glob",
@@ -169,10 +169,7 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 				kind,
 			).toBe(true);
 			expect(completed, kind).toHaveLength(
-				sourceCompleted.length +
-					(kind === "nested-computerUse" || kind === "stream-truncated"
-						? 1
-						: 0),
+				sourceCompleted.length + (kind === "stream-truncated" ? 1 : 0),
 			);
 			for (const source of sourceCompleted) {
 				const call = source.data?.["toolCall"] as Record<string, unknown>;
@@ -192,6 +189,9 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 					expectedResult = value["message"] || call["result"];
 				else {
 					switch (call["type"]) {
+						case "task":
+							expectedResult = value["resultSuffix"] ?? "";
+							break;
 						case "shell":
 							expectedResult =
 								String(value["stdout"]) + String(value["stderr"]);
@@ -249,11 +249,7 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 				.find(({ id }) => id === completed.at(-1)?.data["partId"]);
 			expect(finalPart?.state?.["metadata"], kind).toMatchObject({
 				progress:
-					kind === "task"
-						? "Inspecting tool results"
-						: kind === "nested-computerUse"
-							? "Inspecting the browser"
-							: "Running 3 tools",
+					kind === "task" ? "Inspecting tool results" : "Running 3 tools",
 			});
 			if (kind === "shell") {
 				expect(completed[0]?.data["result"]).toBe("hi\n");
@@ -381,10 +377,23 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 					]),
 				});
 			if (kind === "nested-computerUse") {
+				expect(started).toHaveLength(1);
+				expect(started[0]?.data["toolName"]).toBe("Task");
+				const childId = metadata["childSessionId"];
+				expect(childId).toEqual(expect.any(String));
+				const childEvents = snapshot(harness, String(childId));
+				const childStarted = childEvents.filter(
+					({ type }) => type === "tool.started",
+				);
+				const childCompleted = childEvents.filter(
+					({ type }) => type === "tool.completed",
+				);
+				expect(childStarted).toHaveLength(1);
+				expect(childCompleted).toHaveLength(1);
 				expect(
-					started.some(({ data }) => data["toolName"] === "ComputerUse"),
+					childStarted.some(({ data }) => data["toolName"] === "ComputerUse"),
 				).toBe(true);
-				const nestedTool = completed.find(
+				const nestedTool = childCompleted.find(
 					({ data }) =>
 						(data["metadata"] as Record<string, unknown>)["cursorToolType"] ===
 						"computerUse",
@@ -400,8 +409,10 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 					],
 				});
 				expect(
-					events.some(
-						({ data }) => data["message"] === "Inspecting the browser",
+					childEvents.some(
+						({ type, data }) =>
+							type === "text.delta" &&
+							data["text"] === "Inspecting the browser",
 					),
 				).toBe(true);
 			}
