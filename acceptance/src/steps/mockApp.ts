@@ -779,7 +779,7 @@ export const mockAppHandlers: StepHandler[] = [
 						ok: true,
 						sessionId: payload["sessionId"],
 					}),
-					SyncInputDraft: async () => undefined,
+					SyncInputDraft: async () => ({ ok: true }),
 					GetSessionSkills: async () => ({
 						loads: mockSessionSkills.get(page) ?? [],
 					}),

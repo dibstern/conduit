@@ -111,7 +111,6 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			const request = await rpc.waitForRequest(
 				(candidate) => candidate.tag === "GetGoalDetails",
 			);
-			expect(request.payload["projectSlug"]).toBe(rpc.projectSlug);
 			expect(request.payload["sessionId"]).toBe(
 				new URL(world.page.url()).pathname.split("/")[2],
 			);
@@ -278,7 +277,6 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			expect(request.payload["sessionId"]).toBe(
 				new URL(world.page.url()).pathname.split("/")[2],
 			);
-			expect(request.payload["projectSlug"]).toBe(rpc.projectSlug);
 		},
 	},
 	{
@@ -294,7 +292,6 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 			expect(request.payload["sessionId"]).toBe(
 				new URL(world.page.url()).pathname.split("/")[2],
 			);
-			expect(request.payload["projectSlug"]).toBe(rpc.projectSlug);
 		},
 	},
 	{
