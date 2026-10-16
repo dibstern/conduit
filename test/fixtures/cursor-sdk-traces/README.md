@@ -94,6 +94,76 @@ scheduling only, without adding or modifying SDK wire fields. The test submits
 its second input after the tee's `close.call` marker and before agent disposal,
 then verifies both turns and the remembered code word reach durable history.
 
+## Tool replay cases (conduit-test-xqsg.7)
+
+The 23 `tool-*.jsonl` files are derived fixtures, not live captures. They use
+`tools-project.jsonl`'s header, create/send/run envelopes, tool delta wrappers,
+tool-requests-listed update, authoritative wait result and disposal markers.
+Unrelated text/thinking, hooks, tool calls and duplicated stream content are
+omitted so each file isolates one kind. Call IDs receive the scenario prefix
+to prevent independent replay turns from sharing a projected tool part.
+
+- `tool-shell`, `tool-read`, `tool-edit`, and `tool-mcp` retain the native first
+  started/completed tool payloads from `tools-project.jsonl` unchanged.
+- `tool-delete` retains the native delete payload unchanged. Its declared
+  success value contains only `fileSize`, never a diff or removed text.
+- `tool-write`, `tool-glob`, `tool-grep`, `tool-ls`, `tool-readLints`,
+  `tool-semSearch`, `tool-updateTodos`, `tool-createPlan`, `tool-generateImage`,
+  `tool-recordScreen`, `tool-computerUse`, and `tool-task` replace the first
+  shell call's type, arguments and success value with the corresponding
+  **public `ToolCall` union** member in installed `@cursor/sdk` 1.0.37.
+  These are declaration-derived examples; there is no claim of live execution.
+  The write path is `created.txt`; the success value supplies `linesCreated`
+  and `fileSize`. No prior read or before-content is added. Glob's declared
+  `clientTruncated` is true. Todos include the declared `inProgress` status.
+  Image data is a one-pixel PNG. Screen media paths are relative to the isolated
+  workspace, where the process test creates deterministic PNG/video bytes.
+- `tool-shell` additionally exercises streamed stdout/stderr with
+  `shell-output-delta.event = {case, value: {content}}`. No live native capture
+  emitted these deltas. The public delta declares an open event record; the
+  installed SDK's public-message serializer emits the case/value envelope and
+  stdout/stderr's JSON `content` field. The final result remains the real
+  captured shell result.
+- `tool-task` adds a declared `SDKTaskMessage` (`type`, `agent_id`, `run_id`,
+  `status`, `text`) to pin stream progress. It renders as the generic
+  `cursor.task` row; the subagent ticket (.10) owns child-session materialization.
+- `tool-nested-computerUse` wraps the declared computer-use started/completed
+  deltas in the declared `tool-call-delta.taskUpdate` wrapper beneath the task,
+  plus a nested text delta. Actions, error/success values and screenshot paths
+  use public declarations only, not internal tool names. A live computer-use
+  capture is still unavailable on this host, as recorded in the spike findings.
+- `tool-unknown` changes only the native shell type to `future-tool`, pinning
+  forward-compatible generic rendering without inventing a known tool schema.
+  SDK 1.0.37's public union declares neither `webSearch` nor `webFetch`; no
+  fixtures claim wire shapes for those names. They use the generic fallback.
+- `tool-shell-error` changes the shell's declared `exitCode` to 2 and `stderr`
+  to a failure line. `tool-computerUse-error` replaces its result with the
+  declared error fields (`message`, `actionCount`, `durationMs`, `screenshotPath`,
+  `log`) to pin failed actions and their screenshot attachment.
+- `tool-stream-truncated` removes glob's result-level truncation flag and adds
+  the declared `SDKToolUseMessage.truncated.result` after completion, proving a
+  late stream marker survives in stored history without creating another row.
+- `tool-early-stream-truncated` moves that same stream marker before its
+  started delta, pinning truncation when the SDK channels arrive in that order.
+
+`cursor-tools.test.ts` supplies the same redacted credential-store and captured
+model-catalog rows as the text-turn process tests. It drives the built daemon
+and detached runner without an API key and writes each stored started/completed
+payload, absence of duplicate file attachments, terminal outcome, process identity and cleanup proof
+to `test-results/conduit-test-xqsg.7.json`.
+It replays an identical captured call ID again and verifies all earlier tools
+remain attached to their original message; stored part IDs include the owning
+message ID while provider references keep the SDK call ID.
+
+Returned screenshot/recording files are read only within the workspace or OS
+temporary directories, after resolving symlinks, with a 10 MiB attachment limit.
+Unavailable/out-of-scope media is marked in metadata; `.cursor` paths are never
+read. Tool media lives only in the tool row's `metadata.media`; no duplicate
+`file.attached` events are emitted. File changes use only declared SDK values:
+edit's `diffString`, `linesAdded` and `linesRemoved`; write's canonical input
+content and `linesCreated`; delete's path and returned `fileSize`. Write and
+delete have no before-content in the SDK result, so no diff or removed-line
+count is reconstructed, cached or read from the filesystem.
 ## Usage, error and interrupt replay cases (conduit-test-xqsg.19)
 
 These derivatives keep `basic.jsonl`'s wire envelopes and change only their
