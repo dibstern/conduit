@@ -40,6 +40,10 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -383,11 +387,25 @@ export function createProjectRelayLayers({
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.
 	const sharedInstances = config.openCodeInstances;
+	const sharedDirectory = config.daemonConfigContext
+		? Context.getOption(config.daemonConfigContext, SessionDirectory)
+		: Option.none();
+	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
+		? Layer.succeedContext(
+				Context.make(SessionDirectory, sharedDirectory.value),
+			)
+		: makeSessionDirectoryLive(config.configDir ?? getConfigDir(), [
+				{
+					slug: config.slug,
+					folders: [config.projectDir, ...(config.extraFolders ?? [])],
+				},
+			]);
 	const persistenceEffectLayer = makePersistenceEffectLayer(
 		config.persistenceDbPath,
 		config.slug,
 		undefined,
 		SessionEventBusLive,
+		sessionDirectoryLayer,
 	).pipe(Layer.provideMerge(SessionWorkspaceHintStateLive));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,

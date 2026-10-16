@@ -31,7 +31,7 @@ describe("WsRpcServerLayer file reads", () => {
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				path: ".",
 				entries: [
 					{ name: "src", type: "directory" },
@@ -63,7 +63,7 @@ describe("WsRpcServerLayer file reads", () => {
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				path: "README.md",
 				content: "hello world",
 				binary: false,

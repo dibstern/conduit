@@ -39,10 +39,7 @@ import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import {
-	listDaemonSessions as listEffectDaemonSessions,
-	resolveDaemonSession,
-} from "../Services/daemon-session-reader.js";
+import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
 import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
@@ -61,6 +58,7 @@ import {
 	openCodeInstanceFor,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
@@ -158,6 +156,7 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -396,6 +395,11 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.merge(
+											Option.isSome(sessionDirectory)
+												? Context.make(SessionDirectory, sessionDirectory.value)
+												: Context.empty(),
+										),
 									),
 									openCodeInstances,
 									...(Option.isSome(worktreeService)
@@ -427,12 +431,11 @@ export const RelayFactoryLive = (
 									listDaemonSessions,
 									resolveSessionProject: (sessionId) =>
 										runCallback(
-											resolveDaemonSession(configDir, sessionId).pipe(
-												Effect.provideService(
-													ProjectRegistryTag,
-													projectRegistry,
-												),
-											),
+											Option.isSome(sessionDirectory)
+												? sessionDirectory.value
+														.projectOf(sessionId)
+														.pipe(Effect.map(Option.getOrNull))
+												: Effect.succeed(null),
 										),
 									broadcastSessionListChanged,
 									requestWorktreeCleanup: () =>

@@ -17,7 +17,7 @@ import {
 	CreateSession,
 	DeleteSession,
 	DetectProxy,
-	ForkSession,
+	ForkSessionForSession,
 	GetAgents,
 	GetClaudeSettings,
 	GetCommands,
@@ -157,7 +157,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({ checks: [], tokensSinceStart: null }),
 				GetModels: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						providers: [
 							{
 								id: "opencode",
@@ -187,14 +188,18 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				GetAgents: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						providerScope: { id: "opencode", name: "OpenCode" },
 						agents: [{ id: "build", name: "Build" }],
-						...(request.sessionId ? { activeAgentId: "build" } : {}),
+						...(("sessionId" in request ? request.sessionId : undefined)
+							? { activeAgentId: "build" }
+							: {}),
 					}),
 				GetCommands: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						commands: [{ name: "init", description: "Initialize" }],
 					}),
 				GetProjects: (request) =>
@@ -389,7 +394,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				DeleteSession: () => Effect.succeed({ ok: true as const }),
 				ForkSession: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						sessionId: "session-forked",
 						parentId: "session-parent",
 					}),
@@ -402,13 +408,13 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				SwitchAgent: () => Effect.succeed({ ok: true as const }),
 				SwitchContextWindow: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						contextWindow: request.contextWindow,
 						options: [{ value: "1m", label: "1M" }],
 					}),
 				SwitchModel: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						model: request.modelId,
 						provider: request.providerId,
 						variant: "fast",
@@ -493,14 +499,15 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 						}),
 					).pipe(
 						Effect.map((resolved) => ({
-							projectSlug: request.projectSlug,
+							projectSlug:
+								"projectSlug" in request ? request.projectSlug : "demo",
 							instanceId: request.instanceId,
 							resolved,
 						})),
 					),
 				ReloadProviderSession: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						sessionId: request.sessionId,
 					}),
 				RenameSession: () => Effect.succeed({ ok: true as const }),
@@ -546,35 +553,38 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 				GetContinuationHandoff: () => Effect.succeed({ handoff: null }),
 				SwitchVariant: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						variant: request.variant,
 						variants: ["low", "medium", "high", "max"],
 					}),
 				SwitchPermissionMode: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						mode: request.mode,
 					}),
 				GetFileTree: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						entries: ["src/", "src/index.ts", "README.md"],
 					}),
 				GetFileList: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						path: request.path ?? ".",
 						entries: [{ name: "src", type: "directory" as const }],
 					}),
 				GetFileContent: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						path: request.path,
 						content: "file contents",
 					}),
 				GetToolDetails: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						tools: request.toolIds.map((toolId) => ({
 							toolId,
 							version: PartVersion.make(1),
@@ -584,7 +594,8 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				GetSkillContent: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug:
+							"projectSlug" in request ? request.projectSlug : "demo",
 						name: request.name,
 						path: "/project/.claude/skills/review/SKILL.md",
 						content: "Review instructions",
@@ -604,7 +615,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					}),
 				LoadMoreHistory: (request) =>
 					Effect.succeed({
-						projectSlug: request.projectSlug,
+						projectSlug: "demo",
 						sessionId: request.sessionId,
 						messages: [
 							{
@@ -673,23 +684,19 @@ describe("browser WebSocket RPC contract", () => {
 	it("registers and decodes the project-scoped triage RPCs", () => {
 		for (const request of [
 			new SetSessionSettled({
-				projectSlug: "demo",
 				sessionId: "s1",
 				settled: true,
 				originId: "browser",
 			}),
 			new SetSessionPinned({
-				projectSlug: "demo",
 				sessionId: "s1",
 				pinned: false,
 			}),
 			new SnoozeSession({
-				projectSlug: "demo",
 				sessionId: "s1",
 				until: null,
 			}),
 			new UnsnoozeSession({
-				projectSlug: "demo",
 				sessionId: "s1",
 			}),
 		]) {
@@ -955,7 +962,6 @@ describe("browser WebSocket RPC contract", () => {
 			Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const result = yield* client.GetModels({
-					projectSlug: "demo",
 					sessionId: "session-1",
 				});
 
@@ -967,7 +973,6 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const agents = yield* client.GetAgents({
-					projectSlug: "demo",
 					sessionId: "session-1",
 				});
 				expect(agents).toEqual({
@@ -1172,14 +1177,12 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.SwitchAgent({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						agentId: "plan",
 					}),
 				).toEqual({ ok: true });
 
 				const contextWindow = yield* client.SwitchContextWindow({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					contextWindow: "1m",
 				});
@@ -1190,7 +1193,6 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const model = yield* client.SwitchModel({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					modelId: "gpt-4",
 					providerId: "opencode",
@@ -1226,7 +1228,6 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const reload = yield* client.ReloadProviderSession({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					commandId: "cmd-reload-session",
 				});
@@ -1237,7 +1238,6 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.RenameSession({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						title: "Renamed",
 					}),
@@ -1245,13 +1245,11 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.MarkSessionUnread({
-						projectSlug: "demo",
 						sessionId: "session-1",
 					}),
 				).toEqual({ ok: true });
 
 				const variant = yield* client.SwitchVariant({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					variant: "high",
 				});
@@ -1262,7 +1260,6 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const permissionMode = yield* client.SwitchPermissionMode({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					mode: "acceptEdits",
 				});
@@ -1298,7 +1295,6 @@ describe("browser WebSocket RPC contract", () => {
 				});
 
 				const toolDetails = yield* client.GetToolDetails({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					toolIds: [ToolCallId.make("tool-1")],
 				});
@@ -1327,7 +1323,6 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.GetSessionSkills({
-						projectSlug: "demo",
 						sessionId: "session-1",
 					}),
 				).toEqual({
@@ -1355,7 +1350,6 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.ViewSession({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						originId: "browser-tab-a",
 					}),
@@ -1363,14 +1357,12 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.DeleteSession({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						originId: "browser-tab-a",
 					}),
 				).toEqual({ ok: true });
 
 				const forked = yield* client.ForkSession({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					messageId: "message-1",
 					originId: "browser-tab-a",
@@ -1411,7 +1403,6 @@ describe("browser WebSocket RPC contract", () => {
 				).toEqual({ ok: true });
 
 				const history = yield* client.LoadMoreHistory({
-					projectSlug: "demo",
 					sessionId: "session-1",
 					before: "message-1",
 				});
@@ -1430,7 +1421,6 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.RewindSession({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						messageId: "message-1",
 					}),
@@ -1442,7 +1432,6 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.input.submit({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						text: "hello",
 						inputId: "cmd-send-contract",
@@ -1452,7 +1441,6 @@ describe("browser WebSocket RPC contract", () => {
 
 				expect(
 					yield* client.SyncInputDraft({
-						projectSlug: "demo",
 						sessionId: "session-1",
 						text: "draft",
 						originId: "browser-tab-a",
@@ -1567,20 +1555,17 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("CreateSession");
 		expect(
 			new ViewSession({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			})._tag,
 		).toBe("ViewSession");
 		expect(
 			new DeleteSession({
-				projectSlug: "demo",
 				sessionId: "session-1",
 			})._tag,
 		).toBe("DeleteSession");
 		expect(
-			new ForkSession({
-				projectSlug: "demo",
+			new ForkSessionForSession({
 				sessionId: "session-1",
 				messageId: "message-1",
 				originId: "browser-tab-a",
@@ -1614,21 +1599,18 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("RejectQuestion");
 		expect(
 			new SwitchAgent({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				agentId: "plan",
 			})._tag,
 		).toBe("SwitchAgent");
 		expect(
 			new SwitchContextWindow({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				contextWindow: "1m",
 			})._tag,
 		).toBe("SwitchContextWindow");
 		expect(
 			new SwitchModel({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				modelId: "gpt-4",
 				providerId: "opencode",
@@ -1664,34 +1646,29 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("ResolveClaudeSettings");
 		expect(
 			new ReloadProviderSession({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				commandId: "cmd-reload-session",
 			})._tag,
 		).toBe("ReloadProviderSession");
 		expect(
 			new RenameSession({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				title: "Renamed",
 			})._tag,
 		).toBe("RenameSession");
 		expect(
 			new MarkSessionUnread({
-				projectSlug: "demo",
 				sessionId: "session-1",
 			})._tag,
 		).toBe("MarkSessionUnread");
 		expect(
 			new SwitchVariant({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				variant: "high",
 			})._tag,
 		).toBe("SwitchVariant");
 		expect(
 			new SwitchPermissionMode({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				mode: "full",
 			})._tag,
@@ -1703,7 +1680,6 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("GetFileContent");
 		expect(
 			new GetToolDetails({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				toolIds: [ToolCallId.make("tool-1")],
 			})._tag,
@@ -1714,27 +1690,23 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("GetSkillContent");
 		expect(
 			new GetSessionSkills({
-				projectSlug: "demo",
 				sessionId: "session-1",
 			})._tag,
 		).toBe("GetSessionSkills");
 		expect(
 			new LoadMoreHistory({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				before: "message-1",
 			})._tag,
 		).toBe("LoadMoreHistory");
 		expect(
 			new RewindSession({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				messageId: "message-1",
 			})._tag,
 		).toBe("RewindSession");
 		expect(
 			new SubmitInput({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				text: "hello",
 				inputId: "cmd-send-contract",
@@ -1743,7 +1715,6 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("input.submit");
 		expect(
 			new SyncInputDraft({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				text: "draft",
 				originId: "browser-tab-a",
@@ -1751,7 +1722,6 @@ describe("browser WebSocket RPC contract", () => {
 		).toBe("SyncInputDraft");
 		expect(
 			new CancelSession({
-				projectSlug: "demo",
 				sessionId: "session-1",
 				commandId: "cmd-stop-contract",
 			})._tag,

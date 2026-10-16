@@ -87,6 +87,7 @@ import {
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
+import type { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -107,6 +108,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const context = yield* Effect.context<
 			| ProjectRegistryTag
+			| SessionDirectory
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
@@ -183,6 +185,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				A,
 				E,
 				| ProjectRegistryTag
+				| SessionDirectory
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
@@ -263,6 +266,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| AccountDirectory
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
+				| SessionDirectory
 				| DaemonConfigRefTag
 			>,
 		) =>
@@ -733,8 +737,17 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ResolveSession: (request) =>
 				run(
-					resolveDaemonSession(configDir, request.sessionId).pipe(
-						Effect.map((projectSlug) => ({ projectSlug })),
+					resolveDaemonSession(request.sessionId).pipe(
+						Effect.flatMap((projectSlug) =>
+							projectSlug === null
+								? Effect.fail(
+										new WsRpcError({
+											code: "unknown-session",
+											message: `Unknown session: ${request.sessionId}`,
+										}),
+									)
+								: Effect.succeed({ projectSlug }),
+						),
 					),
 				),
 			OpenCodeUseWorktree: (request) =>

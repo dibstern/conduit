@@ -24,13 +24,13 @@ export const modelsHandlers = {
 			const config = yield* ConfigTag;
 			const agentService = yield* AgentServiceTag;
 			const result = yield* agentService.listAgents(
-				request.sessionId,
+				"sessionId" in request ? request.sessionId : undefined,
 				request.instanceId === undefined
 					? undefined
 					: { _tag: "Id", id: request.instanceId },
 			);
 			return {
-				projectSlug: request.projectSlug,
+				projectSlug: config.slug,
 				...(result.instanceId === undefined
 					? {}
 					: { instanceId: result.instanceId }),
@@ -51,16 +51,20 @@ export const modelsHandlers = {
 			),
 		),
 	GetCommands: (request) =>
-		getCommandsForSession(request.sessionId).pipe(
-			Effect.map((commands) => ({
-				projectSlug: request.projectSlug,
-				commands,
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `GetCommands failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			getCommandsForSession(
+				"sessionId" in request ? request.sessionId : undefined,
+			).pipe(
+				Effect.map((commands) => ({
+					projectSlug: config.slug,
+					commands,
+				})),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `GetCommands failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
@@ -83,37 +87,41 @@ export const modelsHandlers = {
 			),
 		),
 	SwitchContextWindow: (request) =>
-		switchContextWindowForSession({
-			clientId: request.originId ?? "rpc",
-			sessionId: request.sessionId,
-			contextWindow: request.contextWindow,
-		}).pipe(
-			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: isPickRejection(error)
-							? error.message
-							: `SwitchContextWindow failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			switchContextWindowForSession({
+				clientId: request.originId ?? "rpc",
+				sessionId: request.sessionId,
+				contextWindow: request.contextWindow,
+			}).pipe(
+				Effect.map((result) => ({ projectSlug: config.slug, ...result })),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: isPickRejection(error)
+								? error.message
+								: `SwitchContextWindow failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
 	SwitchModel: (request) =>
-		switchModelForSession({
-			clientId: request.originId ?? "rpc",
-			sessionId: request.sessionId,
-			modelId: request.modelId,
-			providerId: request.providerId,
-		}).pipe(
-			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: isPickRejection(error)
-							? error.message
-							: `SwitchModel failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			switchModelForSession({
+				clientId: request.originId ?? "rpc",
+				sessionId: request.sessionId,
+				modelId: request.modelId,
+				providerId: request.providerId,
+			}).pipe(
+				Effect.map((result) => ({ projectSlug: config.slug, ...result })),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: isPickRejection(error)
+								? error.message
+								: `SwitchModel failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
@@ -152,19 +160,21 @@ export const modelsHandlers = {
 			),
 		),
 	SwitchVariant: (request) =>
-		switchVariantForSession({
-			clientId: request.originId ?? "rpc",
-			sessionId: request.sessionId,
-			variant: request.variant,
-		}).pipe(
-			Effect.map((result) => ({ projectSlug: request.projectSlug, ...result })),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: isPickRejection(error)
-							? error.message
-							: `SwitchVariant failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			switchVariantForSession({
+				clientId: request.originId ?? "rpc",
+				sessionId: request.sessionId,
+				variant: request.variant,
+			}).pipe(
+				Effect.map((result) => ({ projectSlug: config.slug, ...result })),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: isPickRejection(error)
+								? error.message
+								: `SwitchVariant failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
@@ -172,8 +182,8 @@ export const modelsHandlers = {
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const response = yield* getModelsResponse({
-				projectSlug: request.projectSlug,
-				...(request.sessionId != null ? { sessionId: request.sessionId } : {}),
+				projectSlug: config.slug,
+				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
 				...(request.instanceId != null
 					? { instanceId: request.instanceId }
 					: {}),

@@ -2173,7 +2173,6 @@ export class ProcessBrowser {
 				this.watch(
 					this.rpc
 						.SubscribeSessionDetail({
-							projectSlug: this.projectSlug,
 							sessionId,
 						})
 						.pipe(decodeSessionDetail),
@@ -2218,7 +2217,6 @@ export class ProcessBrowser {
 			this.familyFibers.add(
 				this.watch(
 					this.rpc.SubscribeSessionFamily({
-						projectSlug: this.projectSlug,
 						sessionId,
 					}),
 					(envelope) =>
@@ -2458,7 +2456,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.ViewSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -2471,10 +2468,7 @@ export class ProcessBrowser {
 		timeoutMs = TIMEOUT_MS,
 	): Promise<void> {
 		await this.followSession(sessionId);
-		await this.run(
-			this.rpc.PreWarmSession({ projectSlug: this.projectSlug, sessionId }),
-			timeoutMs,
-		);
+		await this.run(this.rpc.PreWarmSession({ sessionId }), timeoutMs);
 	}
 
 	async send(
@@ -2502,7 +2496,6 @@ export class ProcessBrowser {
 		const cursor = this.frames.length;
 		const result = await this.run(
 			this.rpc.input.submit({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 				inputId: randomUUID(),
@@ -2593,11 +2586,7 @@ export class ProcessBrowser {
 
 	async history(sessionId: string) {
 		await this.followSession(sessionId);
-		return (
-			await this.run(
-				this.rpc.LoadMoreHistory({ projectSlug: this.projectSlug, sessionId }),
-			)
-		).messages;
+		return (await this.run(this.rpc.LoadMoreHistory({ sessionId }))).messages;
 	}
 
 	async setAutoSettle(days: number | null): Promise<void> {
@@ -2614,7 +2603,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.DeleteSession({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 			}),
@@ -2625,7 +2613,6 @@ export class ProcessBrowser {
 		await this.followSession(sessionId);
 		await this.run(
 			this.rpc.SwitchAgent({
-				projectSlug: this.projectSlug,
 				sessionId,
 				agentId,
 				originId: this.originId,
@@ -2637,7 +2624,6 @@ export class ProcessBrowser {
 	async sendNow(sessionId: string, inputId: string): Promise<void> {
 		const result = await this.run(
 			this.rpc.input.sendNow({
-				projectSlug: this.projectSlug,
 				sessionId,
 				originId: this.originId,
 				inputId,
@@ -2651,7 +2637,6 @@ export class ProcessBrowser {
 		await this.runtime.runPromise(
 			this.rpc
 				.ReloadProviderSession({
-					projectSlug: this.projectSlug,
 					sessionId,
 					originId: this.originId,
 					commandId: randomUUID(),

@@ -8,6 +8,7 @@
 	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
+	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -164,7 +165,7 @@
 		const projectSlug = attachedProjectState.slug;
 		if (!projectSlug) return;
 		let active = true;
-		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) }).then((response) => {
+		void getCommandsRpc({ ...(sessionId ? { sessionId } : { projectSlug }) }).then((response) => {
 			if (active) applyGetCommandsResponse(response);
 		}).catch(() => undefined);
 		return () => { active = false; };
@@ -486,8 +487,7 @@
 					? getEffectiveInstanceId()
 					: undefined;
 			void getAgentsRpc({
-				projectSlug: slug,
-				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
@@ -500,8 +500,7 @@
 				.catch(() => undefined);
 			const applyModels = followModelsRead(routeSessionId ?? undefined);
 			void getModelsRpc({
-				projectSlug: slug,
-				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
@@ -509,8 +508,7 @@
 				})
 				.catch(() => undefined);
 			void getCommandsRpc({
-				projectSlug: slug,
-				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 			})
 				.then((response) => {
 					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace) applyGetCommandsResponse(response);
@@ -563,7 +561,7 @@
 			}
 			requestFileTree();
 		});
-		void getFileTreeRpc({ projectSlug: slug, ...(sessionId ? { sessionId } : {}) })
+		void getFileTreeRpc({ ...(sessionId ? { sessionId } : { projectSlug: slug }) })
 			.then((response) => {
 				if (!cancelled) applyGetFileTreeResponse(response);
 			})
@@ -643,13 +641,14 @@
 		untrack(() => {
 			const placeSession = (sessionId: string, projectSlug: string | null) => {
 				if (cancelled) return;
-				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
-				placeSavedDraw(sessionId, projectSlug);
 				if (projectSlug === null) {
+					placeSavedDraw(sessionId, null);
 					routerState.sessionNotFound = true;
 					replaceRoute("/");
 					return;
 				}
+				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
+				placeSavedDraw(sessionId, projectSlug);
 				switchToSession(sessionId, projectSlug);
 			};
 			// The server picks the project on a cold load (the session's, the hint,
@@ -658,8 +657,7 @@
 				requestedProject = projectHint ?? null;
 				void attachProjectRpc({
 					originId: getBrowserClientId(),
-					...(projectHint ? { projectSlug: projectHint } : {}),
-					...(route.sessionId ? { sessionId: route.sessionId } : {}),
+					...(route.sessionId ? { sessionId: route.sessionId } : projectHint ? { projectSlug: projectHint } : {}),
 				})
 					.then(({ projectSlug, sessionSlug }) => {
 						if (cancelled) return;
@@ -670,7 +668,13 @@
 						}
 						if (route.sessionId) placeSession(route.sessionId, sessionSlug);
 					})
-					.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
+					.catch((error) => {
+						if (cancelled) return;
+						requestedProject = null;
+						if (error instanceof WsRpcError && error.code === "unknown-session" && route.sessionId)
+							placeSession(route.sessionId, null);
+						else showToast("Failed to switch projects", { variant: "error" });
+					});
 				if (route.sessionId) return;
 			}
 			if (!route.sessionId) {
@@ -703,9 +707,13 @@
 			if (!attachedSlug) return;
 			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
-			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
+			void resolveSessionRpc({ sessionId }).then(({ projectSlug }) => {
 				placeSession(sessionId, projectSlug);
-			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
+			}).catch((error) => {
+				if (cancelled) return;
+				if (error instanceof WsRpcError && error.code === "unknown-session") placeSession(sessionId, null);
+				else showToast("Failed to open session", { variant: "error" });
+			});
 		});
 		return () => { cancelled = true; };
 	});

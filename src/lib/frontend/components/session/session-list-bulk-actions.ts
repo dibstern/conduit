@@ -93,7 +93,6 @@ export async function runBulkSnooze(
 	const results = await Promise.allSettled(
 		input.map((session) =>
 			snoozeSessionRpc({
-				projectSlug: session.projectSlug,
 				sessionId: session.sessionId,
 				originId: session.originId,
 				until,
@@ -132,13 +131,11 @@ export async function runBulkSnooze(
 								changed.map((session) =>
 									session.wasSnoozed
 										? snoozeSessionRpc({
-												projectSlug: session.projectSlug,
 												sessionId: session.sessionId,
 												originId: session.originId,
 												until: session.previousUntil,
 											})
 										: unsnoozeSessionRpc({
-												projectSlug: session.projectSlug,
 												sessionId: session.sessionId,
 												originId: session.originId,
 											}),

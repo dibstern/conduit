@@ -2,8 +2,9 @@
 
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Context, Data, Effect, Exit } from "effect";
+import { Context, Data, Effect, Exit, Option } from "effect";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
+import { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import type { StoredEvent } from "../events.js";
 import { ProjectorCursorEffectTag } from "./projector-cursor-effect.js";
 import {
@@ -110,6 +111,7 @@ export const makeProjectionRunnerEffect = (
 	Effect.gen(function* () {
 		const cursorRepo = yield* ProjectorCursorEffectTag;
 		const sql = yield* SqlClient.SqlClient;
+		const directory = yield* Effect.serviceOption(SessionDirectory);
 		const batchCursorName =
 			BATCH_CURSOR_PREFIX +
 			projectors
@@ -543,6 +545,19 @@ export const makeProjectionRunnerEffect = (
 					durationMs: Date.now() - startTime,
 				};
 			}).pipe(
+				Effect.tap(() =>
+					Effect.gen(function* () {
+						// Recovery can replay creations/deletions before live writers start.
+						if (Option.isNone(directory)) return;
+						const sessions = yield* sql<{
+							readonly id: string;
+						}>`SELECT id FROM sessions`;
+						yield* directory.value.replaceProject(
+							cursorRepo.projectId,
+							sessions.map(({ id }) => id),
+						);
+					}),
+				),
 				Effect.mapError((e) =>
 					e instanceof ProjectionRunnerError
 						? e

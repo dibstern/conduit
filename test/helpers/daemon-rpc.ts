@@ -39,6 +39,7 @@ import {
 	makeRelayCacheLive,
 	type RelayFactory,
 } from "../../src/lib/domain/daemon/Services/relay-cache.js";
+import { makeSessionDirectoryLive } from "../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	makeUsage,
 	Usage,
@@ -76,6 +77,10 @@ export const makeDaemonRpcTestLayer = (
 	} = {},
 ) => {
 	const base = Layer.mergeAll(
+		makeSessionDirectoryLive(
+			options.configDir ?? "/tmp/daemon-rpc-fixture",
+			projects,
+		),
 		makeProjectRegistryLive(projects),
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,

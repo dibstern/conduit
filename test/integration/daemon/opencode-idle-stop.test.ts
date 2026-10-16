@@ -195,7 +195,6 @@ describe("Managed OpenCode stops when idle", () => {
 		const cursor = browser.frames.length;
 		const accepted = await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				text: "hello",
 				inputId: randomUUID(),

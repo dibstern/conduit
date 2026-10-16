@@ -84,7 +84,6 @@ export function loadSessionSkills(sessionId: string): Promise<void> {
 				pending.running = true;
 				try {
 					const { loads } = await getSessionSkillsRpc({
-						projectSlug,
 						sessionId,
 					});
 					if (request === latestRequest) sessionSkillsState.loads = loads;

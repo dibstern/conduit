@@ -1007,6 +1007,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
+	code: Schema.optional(Schema.Literal("unknown-session")),
 }) {}
 
 export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {
@@ -1110,10 +1111,23 @@ export class GetAgents extends Schema.TaggedRequest<GetAgents>()("GetAgents", {
 	success: GetAgentsResponseSchema,
 	payload: {
 		projectSlug: NonEmptyString,
-		sessionId: Schema.optional(Schema.String),
+
 		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
+
+/** Session-scoped form of GetAgents; its owner supplies the project. */
+export class GetAgentsForSession extends Schema.TaggedRequest<GetAgentsForSession>()(
+	GetAgents._tag,
+	{
+		failure: GetAgents.failure,
+		success: GetAgents.success,
+		payload: {
+			sessionId: NonEmptyString,
+			instanceId: Schema.optional(Schema.String),
+		},
+	},
+) {}
 
 export class GetCommands extends Schema.TaggedRequest<GetCommands>()(
 	"GetCommands",
@@ -1122,8 +1136,17 @@ export class GetCommands extends Schema.TaggedRequest<GetCommands>()(
 		success: GetCommandsResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(Schema.String),
 		},
+	},
+) {}
+
+/** Session-scoped form of GetCommands; its owner supplies the project. */
+export class GetCommandsForSession extends Schema.TaggedRequest<GetCommandsForSession>()(
+	GetCommands._tag,
+	{
+		failure: GetCommands.failure,
+		success: GetCommands.success,
+		payload: { sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1390,11 +1413,26 @@ export class CreatePty extends Schema.TaggedRequest<CreatePty>()("CreatePty", {
 	payload: {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
-		sessionId: Schema.optional(NonEmptyString),
+
 		accountId: Schema.optional(NonEmptyString),
 		root: Schema.optional(NonEmptyString),
 	},
 }) {}
+
+/** Session-scoped form of CreatePty; its owner supplies the project. */
+export class CreatePtyForSession extends Schema.TaggedRequest<CreatePtyForSession>()(
+	CreatePty._tag,
+	{
+		failure: CreatePty.failure,
+		success: CreatePty.success,
+		payload: {
+			originId: NonEmptyString,
+			sessionId: NonEmptyString,
+			accountId: Schema.optional(NonEmptyString),
+			root: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
 
 export class ResizePty extends Schema.TaggedRequest<ResizePty>()("ResizePty", {
 	failure: WsRpcError,
@@ -1447,7 +1485,6 @@ export class SwitchAgent extends Schema.TaggedRequest<SwitchAgent>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			agentId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -1461,7 +1498,6 @@ export class SwitchContextWindow extends Schema.TaggedRequest<SwitchContextWindo
 		failure: WsRpcError,
 		success: SwitchContextWindowResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			contextWindow: Schema.String,
 			originId: Schema.optional(NonEmptyString),
@@ -1475,7 +1511,6 @@ export class SwitchModel extends Schema.TaggedRequest<SwitchModel>()(
 		failure: WsRpcError,
 		success: SwitchModelResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			modelId: NonEmptyString,
 			providerId: NonEmptyString,
@@ -1616,7 +1651,6 @@ class ResolveClaudeSettingsWire extends Schema.TaggedRequest<ResolveClaudeSettin
 		payload: {
 			projectSlug: NonEmptyString,
 			instanceId: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
 		},
 	},
 ) {}
@@ -1651,13 +1685,26 @@ export class ResolveClaudeSettings extends ResolveClaudeSettingsWire.transformOr
 	static readonly failure = ResolveClaudeSettingsWire.failure;
 }
 
+/** Session-scoped form of ResolveClaudeSettings; its owner supplies the project. */
+export class ResolveClaudeSettingsForSession extends Schema.TaggedRequest<ResolveClaudeSettingsForSession>()(
+	ResolveClaudeSettings._tag,
+	{
+		failure: ResolveClaudeSettings.failure,
+		success: ResolveClaudeSettings.success,
+		payload: {
+			instanceId: NonEmptyString,
+			sessionId: NonEmptyString,
+			accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)),
+		},
+	},
+) {}
+
 export class ReloadProviderSession extends Schema.TaggedRequest<ReloadProviderSession>()(
 	"ReloadProviderSession",
 	{
 		failure: WsRpcError,
 		success: ReloadProviderSessionResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			commandId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -1687,8 +1734,17 @@ export class ListWorktrees extends Schema.TaggedRequest<ListWorktrees>()(
 		}),
 		payload: {
 			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
 		},
+	},
+) {}
+
+/** Session-scoped form of ListWorktrees; its owner supplies the project. */
+export class ListWorktreesForSession extends Schema.TaggedRequest<ListWorktreesForSession>()(
+	ListWorktrees._tag,
+	{
+		failure: ListWorktrees.failure,
+		success: ListWorktrees.success,
+		payload: { sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1698,7 +1754,6 @@ export class MoveSessionWorkspace extends Schema.TaggedRequest<MoveSessionWorksp
 		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
 		success: Schema.Struct({ directory: Schema.String }),
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
@@ -1713,7 +1768,7 @@ export class InspectSessionWorktrees extends Schema.TaggedRequest<InspectSession
 			worktrees: Schema.Array(SessionWorktreeInspectionSchema),
 			removeWorktrees: Schema.Boolean,
 		}),
-		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+		payload: { sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1723,7 +1778,6 @@ export class RenameSessionBranch extends Schema.TaggedRequest<RenameSessionBranc
 		failure: Schema.Union(WsRpcError, WorktreeBranchRenameError),
 		success: Schema.Struct({ ok: Schema.Literal(true) }),
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			branchName: Schema.String,
 		},
@@ -1735,7 +1789,7 @@ export class RecreateSessionWorktree extends Schema.TaggedRequest<RecreateSessio
 	{
 		failure: Schema.Union(WsRpcError, WorktreeRecoveryError),
 		success: Schema.Struct({ directory: Schema.String }),
-		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+		payload: { sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1744,7 +1798,7 @@ export class ContinueSessionInMainFolder extends Schema.TaggedRequest<ContinueSe
 	{
 		failure: Schema.Union(WsRpcError, WorkspaceMoveError),
 		success: Schema.Struct({ directory: Schema.String }),
-		payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+		payload: { sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -1754,7 +1808,6 @@ export class DismissWorkspaceHint extends Schema.TaggedRequest<DismissWorkspaceH
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			path: NonEmptyString,
 		},
@@ -1781,7 +1834,6 @@ export class RenameSession extends Schema.TaggedRequest<RenameSession>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			title: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -1795,7 +1847,6 @@ export class MarkSessionUnread extends Schema.TaggedRequest<MarkSessionUnread>()
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
@@ -1813,7 +1864,6 @@ export class MarkSessionSeen extends Schema.TaggedRequest<MarkSessionSeen>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			upTo: Schema.NonNegativeInt,
 			originId: Schema.optional(NonEmptyString),
@@ -1827,7 +1877,6 @@ export class MarkSessionRead extends Schema.TaggedRequest<MarkSessionRead>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
@@ -1840,7 +1889,6 @@ export class SetSessionSettled extends Schema.TaggedRequest<SetSessionSettled>()
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			settled: Schema.Boolean,
 			originId: Schema.optional(NonEmptyString),
@@ -1854,7 +1902,6 @@ export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			pinned: Schema.Boolean,
 			originId: Schema.optional(NonEmptyString),
@@ -1868,7 +1915,6 @@ export class SetSessionAutoSettle extends Schema.TaggedRequest<SetSessionAutoSet
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			disabled: Schema.Boolean,
 			originId: Schema.optional(NonEmptyString),
@@ -1882,7 +1928,6 @@ export class SnoozeSession extends Schema.TaggedRequest<SnoozeSession>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			until: Schema.NullOr(Schema.Number),
 			originId: Schema.optional(NonEmptyString),
@@ -1896,7 +1941,6 @@ export class DismissCutOff extends Schema.TaggedRequest<DismissCutOff>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
@@ -1909,7 +1953,6 @@ class ContinueSessionWire extends Schema.TaggedRequest<ContinueSessionWire>()(
 		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			instanceId: NonEmptyString,
 			expectedInstanceId: NonEmptyString,
@@ -1956,7 +1999,6 @@ export class CancelContinuation extends Schema.TaggedRequest<CancelContinuation>
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
@@ -1971,7 +2013,6 @@ class PreviewContinuationWire extends Schema.TaggedRequest<PreviewContinuationWi
 		failure: Schema.Union(WsRpcError, ContinuationErrorSchema),
 		success: HandoffSummarySchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			instanceId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -2045,7 +2086,6 @@ export class GetContinuationHandoff extends Schema.TaggedRequest<GetContinuation
 		failure: WsRpcError,
 		success: ContinuationHandoffResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			instanceId: NonEmptyString,
 			at: Schema.Number,
@@ -2060,7 +2100,6 @@ export class UnsnoozeSession extends Schema.TaggedRequest<UnsnoozeSession>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 		},
@@ -2073,7 +2112,6 @@ export class SwitchVariant extends Schema.TaggedRequest<SwitchVariant>()(
 		failure: WsRpcError,
 		success: SwitchVariantResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			variant: Schema.String,
 			originId: Schema.optional(NonEmptyString),
@@ -2087,7 +2125,6 @@ export class SwitchPermissionMode extends Schema.TaggedRequest<SwitchPermissionM
 		failure: WsRpcError,
 		success: SwitchPermissionModeResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			mode: SessionPermissionModeSchema,
 			originId: Schema.optional(NonEmptyString),
@@ -2102,8 +2139,17 @@ export class GetFileTree extends Schema.TaggedRequest<GetFileTree>()(
 		success: GetFileTreeResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
 		},
+	},
+) {}
+
+/** Session-scoped form of GetFileTree; its owner supplies the project. */
+export class GetFileTreeForSession extends Schema.TaggedRequest<GetFileTreeForSession>()(
+	GetFileTree._tag,
+	{
+		failure: GetFileTree.failure,
+		success: GetFileTree.success,
+		payload: { sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -2114,7 +2160,21 @@ export class GetFileList extends Schema.TaggedRequest<GetFileList>()(
 		success: GetFileListResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
+
+			root: Schema.optional(NonEmptyString),
+			path: Schema.optional(Schema.String),
+		},
+	},
+) {}
+
+/** Session-scoped form of GetFileList; its owner supplies the project. */
+export class GetFileListForSession extends Schema.TaggedRequest<GetFileListForSession>()(
+	GetFileList._tag,
+	{
+		failure: GetFileList.failure,
+		success: GetFileList.success,
+		payload: {
+			sessionId: NonEmptyString,
 			root: Schema.optional(NonEmptyString),
 			path: Schema.optional(Schema.String),
 		},
@@ -2128,7 +2188,21 @@ export class GetFileContent extends Schema.TaggedRequest<GetFileContent>()(
 		success: GetFileContentResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
+
+			root: Schema.optional(NonEmptyString),
+			path: NonEmptyString,
+		},
+	},
+) {}
+
+/** Session-scoped form of GetFileContent; its owner supplies the project. */
+export class GetFileContentForSession extends Schema.TaggedRequest<GetFileContentForSession>()(
+	GetFileContent._tag,
+	{
+		failure: GetFileContent.failure,
+		success: GetFileContent.success,
+		payload: {
+			sessionId: NonEmptyString,
 			root: Schema.optional(NonEmptyString),
 			path: NonEmptyString,
 		},
@@ -2141,7 +2215,6 @@ export class GetToolDetails extends Schema.TaggedRequest<GetToolDetails>()(
 		failure: WsRpcError,
 		success: GetToolDetailsResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			toolIds: Schema.NonEmptyArray(ToolCallId),
 		},
@@ -2156,8 +2229,17 @@ export class GetSkillContent extends Schema.TaggedRequest<GetSkillContent>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			name: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
 		},
+	},
+) {}
+
+/** Session-scoped form of GetSkillContent; its owner supplies the project. */
+export class GetSkillContentForSession extends Schema.TaggedRequest<GetSkillContentForSession>()(
+	GetSkillContent._tag,
+	{
+		failure: GetSkillContent.failure,
+		success: GetSkillContent.success,
+		payload: { name: NonEmptyString, sessionId: NonEmptyString },
 	},
 ) {}
 
@@ -2167,7 +2249,6 @@ export class GetSessionSkills extends Schema.TaggedRequest<GetSessionSkills>()(
 		failure: WsRpcError,
 		success: GetSessionSkillsResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 		},
 	},
@@ -2178,10 +2259,23 @@ export class GetModels extends Schema.TaggedRequest<GetModels>()("GetModels", {
 	success: GetModelsResponseSchema,
 	payload: {
 		projectSlug: NonEmptyString,
-		sessionId: Schema.optional(Schema.String),
+
 		instanceId: Schema.optional(Schema.String),
 	},
 }) {}
+
+/** Session-scoped form of GetModels; its owner supplies the project. */
+export class GetModelsForSession extends Schema.TaggedRequest<GetModelsForSession>()(
+	GetModels._tag,
+	{
+		failure: GetModels.failure,
+		success: GetModels.success,
+		payload: {
+			sessionId: NonEmptyString,
+			instanceId: Schema.optional(Schema.String),
+		},
+	},
+) {}
 
 export class ListDaemonSessions extends Schema.TaggedRequest<ListDaemonSessions>()(
 	"ListDaemonSessions",
@@ -2277,7 +2371,6 @@ export class ViewSession extends Schema.TaggedRequest<ViewSession>()(
 		failure: WsRpcError,
 		success: ViewSessionResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: NonEmptyString,
 		},
@@ -2290,7 +2383,6 @@ export class PreWarmSession extends Schema.TaggedRequest<PreWarmSession>()(
 		failure: WsRpcError,
 		success: Schema.Void,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 		},
 	},
@@ -2312,17 +2404,25 @@ export class AttachProject extends Schema.TaggedRequest<AttachProject>()(
 		// The project this tab is now attached to; null when none is registered.
 		success: Schema.Struct({
 			projectSlug: Schema.NullOr(Schema.String),
-			// Null means the requested session was not found, even if a fallback
-			// project was attached. Omitted requests also have no session location.
+			// Project-only attaches have no session location.
 			sessionSlug: Schema.NullOr(Schema.String),
 		}),
 		payload: {
-			// Hints, in priority order: the session's project, then projectSlug.
-			// The server falls back to its default project when neither resolves.
-			sessionId: Schema.optional(NonEmptyString),
+			// Omission attaches the daemon's default project.
+
 			projectSlug: Schema.optional(NonEmptyString),
 			originId: NonEmptyString,
 		},
+	},
+) {}
+
+/** Session-scoped form of AttachProject; its owner supplies the project. */
+export class AttachProjectForSession extends Schema.TaggedRequest<AttachProjectForSession>()(
+	AttachProject._tag,
+	{
+		failure: AttachProject.failure,
+		success: AttachProject.success,
+		payload: { sessionId: NonEmptyString, originId: NonEmptyString },
 	},
 ) {}
 
@@ -2335,7 +2435,6 @@ export class DeleteSession extends Schema.TaggedRequest<DeleteSession>()(
 			worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
 		}),
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
 			removeWorktrees: Schema.optional(Schema.Boolean),
@@ -2354,7 +2453,21 @@ export class ForkSession extends Schema.TaggedRequest<ForkSession>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			originId: NonEmptyString,
-			sessionId: Schema.optional(NonEmptyString),
+
+			messageId: Schema.optional(NonEmptyString),
+		},
+	},
+) {}
+
+/** Session-scoped form of ForkSession; its owner supplies the project. */
+export class ForkSessionForSession extends Schema.TaggedRequest<ForkSessionForSession>()(
+	ForkSession._tag,
+	{
+		failure: ForkSession.failure,
+		success: ForkSession.success,
+		payload: {
+			originId: NonEmptyString,
+			sessionId: NonEmptyString,
 			messageId: Schema.optional(NonEmptyString),
 		},
 	},
@@ -2372,8 +2485,7 @@ export class StartSideThread extends Schema.TaggedRequest<StartSideThread>()(
 		),
 		success: Schema.Struct({ sessionId: Schema.String }),
 		payload: {
-			projectSlug: NonEmptyString,
-			parentSessionId: NonEmptyString,
+			sessionId: NonEmptyString,
 			title: NonEmptyString,
 			inputId: NonEmptyString,
 			text: NonEmptyString,
@@ -2436,7 +2548,6 @@ export class LoadMoreHistory extends Schema.TaggedRequest<LoadMoreHistory>()(
 		failure: WsRpcError,
 		success: LoadMoreHistoryResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			before: Schema.optional(NonEmptyString),
 		},
@@ -2457,7 +2568,6 @@ export class RewindSession extends Schema.TaggedRequest<RewindSession>()(
 		failure: WsRpcError,
 		success: RewindSessionResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			messageId: NonEmptyString,
 		},
@@ -2476,7 +2586,6 @@ export class UndoRewind extends Schema.TaggedRequest<UndoRewind>()(
 		failure: WsRpcError,
 		success: UndoRewindResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 		},
 	},
@@ -2495,7 +2604,6 @@ export class SubmitInput extends Schema.TaggedRequest<SubmitInput>()(
 		),
 		success: SubmitInputResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			inputId: NonEmptyString,
 			text: Schema.String,
@@ -2513,7 +2621,6 @@ export class CancelInput extends Schema.TaggedRequest<CancelInput>()(
 		failure: WsRpcError,
 		success: InboxCommandResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			inputId: NonEmptyString,
 		},
@@ -2527,7 +2634,6 @@ export class SendInputNow extends Schema.TaggedRequest<SendInputNow>()(
 		failure: WsRpcError,
 		success: InboxCommandResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			inputId: NonEmptyString,
 			originId: Schema.optional(NonEmptyString),
@@ -2541,7 +2647,6 @@ export class SyncInputDraft extends Schema.TaggedRequest<SyncInputDraft>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			text: Schema.String,
 			originId: Schema.optional(NonEmptyString),
@@ -2555,7 +2660,6 @@ export class CancelSession extends Schema.TaggedRequest<CancelSession>()(
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			commandId: NonEmptyString,
 		},
@@ -2568,7 +2672,6 @@ export class StopBackgroundTask extends Schema.TaggedRequest<StopBackgroundTask>
 		failure: WsRpcError,
 		success: OkResponseSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 			taskId: NonEmptyString,
 		},
@@ -2593,7 +2696,6 @@ export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
 		failure: WsRpcError,
 		success: Schema.Struct({ projectSlug: Schema.NullOr(Schema.String) }),
 		payload: {
-			projectSlug: Schema.optional(NonEmptyString),
 			sessionId: NonEmptyString,
 		},
 	},
@@ -2617,7 +2719,6 @@ export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
 		failure: WsRpcError,
 		success: GoalDetailsSchema,
 		payload: {
-			projectSlug: NonEmptyString,
 			sessionId: NonEmptyString,
 		},
 	},
@@ -2634,10 +2735,13 @@ export const WsRpcRequest = Schema.Union(
 	RestartWithConfig,
 	GetInstances,
 	GetInstanceStatus,
+	AttachProjectForSession,
 	AttachProject,
 	ResolveSession,
 	GetGoalDetails,
+	GetAgentsForSession,
 	GetAgents,
+	GetCommandsForSession,
 	GetCommands,
 	GetProjects,
 	FindFolders,
@@ -2654,10 +2758,12 @@ export const WsRpcRequest = Schema.Union(
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,
+	ResolveClaudeSettingsForSession,
 	ResolveClaudeSettings,
 	ReloadProviderSession,
 	RenameSession,
 	ListBranches,
+	ListWorktreesForSession,
 	ListWorktrees,
 	InspectSessionWorktrees,
 	RenameSessionBranch,
@@ -2682,12 +2788,17 @@ export const WsRpcRequest = Schema.Union(
 	GetContinuationHandoff,
 	SwitchVariant,
 	SwitchPermissionMode,
+	GetFileTreeForSession,
 	GetFileTree,
+	GetFileListForSession,
 	GetFileList,
+	GetFileContentForSession,
 	GetFileContent,
 	GetToolDetails,
+	GetSkillContentForSession,
 	GetSkillContent,
 	GetSessionSkills,
+	GetModelsForSession,
 	GetModels,
 	SaveProject,
 	RemoveProject,
@@ -2708,6 +2819,7 @@ export const WsRpcRequest = Schema.Union(
 	ScanNow,
 	DetectProxy,
 	ListPtys,
+	CreatePtyForSession,
 	CreatePty,
 	ResizePty,
 	ClosePty,
@@ -2718,6 +2830,7 @@ export const WsRpcRequest = Schema.Union(
 	PreWarmSession,
 	PreWarmDraft,
 	DeleteSession,
+	ForkSessionForSession,
 	ForkSession,
 	StartSideThread,
 	RespondPermission,
@@ -2750,7 +2863,6 @@ export const SubscribeShell = Rpc.make("SubscribeShell", {
 
 export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	payload: {
-		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
@@ -2773,7 +2885,6 @@ export type SessionTodosEnvelope = typeof SessionTodosEnvelopeSchema.Type;
 
 export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
 	payload: {
-		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	},
@@ -2789,7 +2900,6 @@ export const SubscribeSessionTodos = Rpc.make("SubscribeSessionTodos", {
  */
 export const SubscribeSessionFamily = Rpc.make("SubscribeSessionFamily", {
 	payload: {
-		projectSlug: NonEmptyString,
 		sessionId: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	},
@@ -3052,7 +3162,7 @@ export type InputDraftEnvelope = typeof InputDraftEnvelopeSchema.Type;
  * reconnect never clobbers text typed while offline.
  */
 export const SubscribeInputDraft = Rpc.make("SubscribeInputDraft", {
-	payload: { projectSlug: NonEmptyString, sessionId: NonEmptyString },
+	payload: { sessionId: NonEmptyString },
 	success: InputDraftEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,
@@ -3083,11 +3193,50 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(RestartWithConfig),
 	Rpc.fromTaggedRequest(GetInstances),
 	Rpc.fromTaggedRequest(GetInstanceStatus),
-	Rpc.fromTaggedRequest(AttachProject),
+	Rpc.make(AttachProject._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...AttachProjectForSession.fields,
+				_tag: Schema.optional(Schema.Literal(AttachProjectForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...AttachProject.fields,
+				_tag: Schema.optional(Schema.Literal(AttachProject._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: AttachProject.success,
+		error: AttachProject.failure,
+	}),
 	Rpc.fromTaggedRequest(ResolveSession),
 	Rpc.fromTaggedRequest(GetGoalDetails),
-	Rpc.fromTaggedRequest(GetAgents),
-	Rpc.fromTaggedRequest(GetCommands),
+	Rpc.make(GetAgents._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetAgentsForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetAgentsForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetAgents.fields,
+				_tag: Schema.optional(Schema.Literal(GetAgents._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetAgents.success,
+		error: GetAgents.failure,
+	}),
+	Rpc.make(GetCommands._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetCommandsForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetCommandsForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetCommands.fields,
+				_tag: Schema.optional(Schema.Literal(GetCommands._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetCommands.success,
+		error: GetCommands.failure,
+	}),
 	Rpc.fromTaggedRequest(GetProjects),
 	Rpc.fromTaggedRequest(FindFolders),
 	Rpc.fromTaggedRequest(SwitchAgent),
@@ -3103,11 +3252,75 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(SetHiddenEntries),
 	Rpc.fromTaggedRequest(GetClaudeSettings),
 	Rpc.fromTaggedRequest(SetClaudeSettings),
-	Rpc.fromTaggedRequest(ResolveClaudeSettings),
+	Rpc.make(ResolveClaudeSettings._tag, {
+		payload: Schema.transformOrFail(
+			Schema.Union(
+				Schema.Struct({
+					...ResolveClaudeSettingsForSession.fields,
+					_tag: Schema.optional(
+						Schema.Literal(ResolveClaudeSettingsForSession._tag),
+					),
+				})
+					.omit("accountRef")
+					.annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...ResolveClaudeSettingsWire.fields,
+					_tag: Schema.optional(Schema.Literal(ResolveClaudeSettingsWire._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			Schema.Union(
+				Schema.Struct({
+					...ResolveClaudeSettingsForSession.fields,
+					_tag: Schema.optional(
+						Schema.Literal(ResolveClaudeSettingsForSession._tag),
+					),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.Struct({
+					...ResolveClaudeSettings.fields,
+					_tag: Schema.optional(Schema.Literal(ResolveClaudeSettings._tag)),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			),
+			{
+				decode: (wire) =>
+					Effect.succeed({
+						...wire,
+						accountRef: { _tag: "Id" as const, id: wire.instanceId },
+					}),
+				encode: ({ accountRef, ...wire }, _options, ast) =>
+					accountRef?._tag === "DriverDefault"
+						? Effect.fail(
+								new ParseResult.Type(
+									ast,
+									accountRef,
+									"ResolveClaudeSettings requires an explicit account Id",
+								),
+							)
+						: Effect.succeed({
+								...wire,
+								instanceId: accountRef?.id ?? wire.instanceId,
+							}),
+			},
+		),
+		success: ResolveClaudeSettings.success,
+		error: ResolveClaudeSettings.failure,
+	}),
 	Rpc.fromTaggedRequest(ReloadProviderSession),
 	Rpc.fromTaggedRequest(RenameSession),
 	Rpc.fromTaggedRequest(ListBranches),
-	Rpc.fromTaggedRequest(ListWorktrees),
+	Rpc.make(ListWorktrees._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...ListWorktreesForSession.fields,
+				_tag: Schema.optional(Schema.Literal(ListWorktreesForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...ListWorktrees.fields,
+				_tag: Schema.optional(Schema.Literal(ListWorktrees._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: ListWorktrees.success,
+		error: ListWorktrees.failure,
+	}),
 	Rpc.fromTaggedRequest(InspectSessionWorktrees),
 	Rpc.fromTaggedRequest(RenameSessionBranch),
 	Rpc.fromTaggedRequest(MoveSessionWorkspace),
@@ -3131,13 +3344,78 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(GetContinuationHandoff),
 	Rpc.fromTaggedRequest(SwitchVariant),
 	Rpc.fromTaggedRequest(SwitchPermissionMode),
-	Rpc.fromTaggedRequest(GetFileTree),
-	Rpc.fromTaggedRequest(GetFileList),
-	Rpc.fromTaggedRequest(GetFileContent),
+	Rpc.make(GetFileTree._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetFileTreeForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetFileTreeForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetFileTree.fields,
+				_tag: Schema.optional(Schema.Literal(GetFileTree._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetFileTree.success,
+		error: GetFileTree.failure,
+	}),
+	Rpc.make(GetFileList._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetFileListForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetFileListForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetFileList.fields,
+				_tag: Schema.optional(Schema.Literal(GetFileList._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetFileList.success,
+		error: GetFileList.failure,
+	}),
+	Rpc.make(GetFileContent._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetFileContentForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetFileContentForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetFileContent.fields,
+				_tag: Schema.optional(Schema.Literal(GetFileContent._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetFileContent.success,
+		error: GetFileContent.failure,
+	}),
 	Rpc.fromTaggedRequest(GetToolDetails),
-	Rpc.fromTaggedRequest(GetSkillContent),
+	Rpc.make(GetSkillContent._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetSkillContentForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetSkillContentForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetSkillContent.fields,
+				_tag: Schema.optional(Schema.Literal(GetSkillContent._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetSkillContent.success,
+		error: GetSkillContent.failure,
+	}),
 	Rpc.fromTaggedRequest(GetSessionSkills),
-	Rpc.fromTaggedRequest(GetModels),
+	Rpc.make(GetModels._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...GetModelsForSession.fields,
+				_tag: Schema.optional(Schema.Literal(GetModelsForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...GetModels.fields,
+				_tag: Schema.optional(Schema.Literal(GetModels._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: GetModels.success,
+		error: GetModels.failure,
+	}),
 	Rpc.fromTaggedRequest(SaveProject),
 	Rpc.fromTaggedRequest(RemoveProject),
 	Rpc.fromTaggedRequest(StartInstance),
@@ -3157,7 +3435,20 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(ScanNow),
 	Rpc.fromTaggedRequest(DetectProxy),
 	Rpc.fromTaggedRequest(ListPtys),
-	Rpc.fromTaggedRequest(CreatePty),
+	Rpc.make(CreatePty._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...CreatePtyForSession.fields,
+				_tag: Schema.optional(Schema.Literal(CreatePtyForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...CreatePty.fields,
+				_tag: Schema.optional(Schema.Literal(CreatePty._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: CreatePty.success,
+		error: CreatePty.failure,
+	}),
 	Rpc.fromTaggedRequest(ResizePty),
 	Rpc.fromTaggedRequest(ClosePty),
 	Rpc.fromTaggedRequest(PtyInput),
@@ -3167,7 +3458,20 @@ export const WsRpcGroup = RpcGroup.make(
 	Rpc.fromTaggedRequest(PreWarmSession),
 	Rpc.fromTaggedRequest(PreWarmDraft),
 	Rpc.fromTaggedRequest(DeleteSession),
-	Rpc.fromTaggedRequest(ForkSession),
+	Rpc.make(ForkSession._tag, {
+		payload: Schema.Union(
+			Schema.Struct({
+				...ForkSessionForSession.fields,
+				_tag: Schema.optional(Schema.Literal(ForkSessionForSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+			Schema.Struct({
+				...ForkSession.fields,
+				_tag: Schema.optional(Schema.Literal(ForkSession._tag)),
+			}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+		),
+		success: ForkSession.success,
+		error: ForkSession.failure,
+	}),
 	Rpc.fromTaggedRequest(StartSideThread),
 	Rpc.fromTaggedRequest(RespondPermission),
 	Rpc.fromTaggedRequest(AnswerQuestion),

@@ -1,7 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
-import { GetAgents } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -88,13 +87,10 @@ function agentHandlerLayer({
 /** The GetAgents RPC reply, minus the fields this suite does not cover. */
 const listAgents = (sessionId: string | undefined, instanceId?: string) =>
 	modelsHandlers
-		.GetAgents(
-			new GetAgents({
-				projectSlug: "demo",
-				...(sessionId === undefined ? {} : { sessionId }),
-				...(instanceId === undefined ? {} : { instanceId }),
-			}),
-		)
+		.GetAgents({
+			...(sessionId === undefined ? { projectSlug: "demo" } : { sessionId }),
+			...(instanceId === undefined ? {} : { instanceId }),
+		})
 		.pipe(
 			Effect.map(
 				({ projectSlug: _slug, hiddenAgents: _hidden, ...reply }) => reply,

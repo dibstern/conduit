@@ -3,7 +3,7 @@ import { AccountUnroutable } from "../../contracts/limit-recovery.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
-import { LoggerTag } from "../../domain/relay/Services/services.js";
+import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import {
 	type SessionInbox,
 	type SessionInboxOutcome,
@@ -56,6 +56,7 @@ export const conversationHandlers = {
 		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
+			const config = yield* ConfigTag;
 			const previousMode = yield* getPermissionMode(request.sessionId);
 			const log = yield* LoggerTag;
 			yield* persistSessionPermissionMode(request.sessionId, request.mode);
@@ -92,7 +93,7 @@ export const conversationHandlers = {
 				log.info(
 					`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
 				);
-				return { projectSlug: request.projectSlug, mode: request.mode };
+				return { projectSlug: config.slug, mode: request.mode };
 			}).pipe(
 				Effect.tapError(() =>
 					persistSessionPermissionMode(request.sessionId, previousMode).pipe(

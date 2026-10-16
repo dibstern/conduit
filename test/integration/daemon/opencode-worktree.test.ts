@@ -182,7 +182,6 @@ describe("OpenCode declared worktree moves", () => {
 		await sendRpcRequest(
 			socket,
 			new SubmitInput({
-				projectSlug: "process-test",
 				sessionId,
 				inputId: "worktree-prompt",
 				text: "Reply with pong.",

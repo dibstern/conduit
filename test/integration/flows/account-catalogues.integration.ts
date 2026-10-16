@@ -196,13 +196,11 @@ describe("Integration: account catalogues", () => {
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
 			throw new Error("CreateSession returned no id");
-		const agents = await client.rpcCall((rpc) =>
-			rpc.GetAgents({ projectSlug: "integration-test", sessionId }),
-		);
+		const agents = await client.rpcCall((rpc) => rpc.GetAgents({ sessionId }));
 		expect(agents.providerScope.id).toBe("claude");
 		expect(agents.instanceId).toBe("personal-account");
 		const commands = await client.rpcCall((rpc) =>
-			rpc.GetCommands({ projectSlug: "integration-test", sessionId }),
+			rpc.GetCommands({ sessionId }),
 		);
 		expect(commands.commands.map((command) => command.name)).toContain(
 			"account-command",

@@ -419,7 +419,6 @@ test("tools open as previews and expand to full detail", async ({
 	const send = (sessionId: string, text: string) =>
 		Effect.runPromise(
 			driver.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: driver.originId,
 				inputId: randomUUID(),
@@ -718,7 +717,6 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	const requestsBeforeLive = rpc.detailRequests.length;
 	await Effect.runPromise(
 		driver.rpc.input.submit({
-			projectSlug: "process-test",
 			sessionId: liveSession,
 			originId: driver.originId,
 			inputId: randomUUID(),

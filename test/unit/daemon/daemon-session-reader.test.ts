@@ -1074,51 +1074,50 @@ describe("listDaemonSessions", () => {
 });
 
 describe("ResolveSession", () => {
-	it.scoped(
-		"finds sessions in cold project stores and returns null for unknown IDs",
-		() => {
-			const root = makeTemporaryRoot();
-			const projects = ["project-a", "project-b"].map((slug) => ({
-				slug,
-				title: slug,
-				folders: [join(root, slug)] as const,
-			}));
-			for (const project of projects) {
-				makeProjectStore(project.folders[0], [
-					{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
-				]);
-			}
-			return Effect.gen(function* () {
-				const handlers = yield* DaemonWsRpcHandlersTag;
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(
-							() => Effect.die("Must not resolve a relay"),
-							handlers,
-						),
-					),
-				);
-				for (const project of projects) {
-					expect(
-						yield* client.ResolveSession({
-							sessionId: `${project.slug}-session`,
-						}),
-					).toEqual({ projectSlug: project.slug });
-				}
-				expect(
-					yield* client.ResolveSession({
-						projectSlug: "nonexistent",
-						sessionId: "project-b-session",
-					}),
-				).toEqual({ projectSlug: "project-b" });
-				expect(yield* client.ResolveSession({ sessionId: "unknown" })).toEqual({
-					projectSlug: null,
-				});
-			}).pipe(
+	it.scoped("finds indexed sessions and rejects unknown IDs", () => {
+		const root = makeTemporaryRoot();
+		const projects = ["project-a", "project-b"].map((slug) => ({
+			slug,
+			title: slug,
+			folders: [join(root, slug)] as const,
+		}));
+		for (const project of projects) {
+			makeProjectStore(project.folders[0], [
+				{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
+			]);
+		}
+		return Effect.gen(function* () {
+			const handlers = yield* DaemonWsRpcHandlersTag;
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 				Effect.provide(
-					makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+					makeRoutedWsRpcServerLayer(
+						() => Effect.die("Must not resolve a relay"),
+						handlers,
+					),
 				),
 			);
-		},
-	);
+			for (const project of projects) {
+				expect(
+					yield* client.ResolveSession({
+						sessionId: `${project.slug}-session`,
+					}),
+				).toEqual({ projectSlug: project.slug });
+			}
+			expect(
+				yield* client.ResolveSession({
+					sessionId: "project-b-session",
+				}),
+			).toEqual({ projectSlug: "project-b" });
+			expect(
+				yield* Effect.either(client.ResolveSession({ sessionId: "unknown" })),
+			).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },
+			});
+		}).pipe(
+			Effect.provide(
+				makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+			),
+		);
+	});
 });

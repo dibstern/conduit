@@ -137,11 +137,10 @@ afterEach(async () => {
 it("shares one control transport across unary helpers and projects", async () => {
 	await Promise.all([
 		setLogLevelRpc({ projectSlug: "alpha", level: "debug" }),
-		syncInputDraftRpc({ projectSlug: "alpha", sessionId: "s1", text: "draft" }),
+		syncInputDraftRpc({ sessionId: "s1", text: "draft" }),
 	]);
 	await setLogLevelRpc({ projectSlug: "alpha", level: "info" });
 	await syncInputDraftRpc({
-		projectSlug: "beta",
 		sessionId: "s2",
 		text: "other",
 	});

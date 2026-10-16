@@ -219,8 +219,8 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
-		return () => requestSessionPreWarm(null, null);
+		requestSessionPreWarm(sessionState.currentId);
+		return () => requestSessionPreWarm(null);
 	});
 	function draftSessionPayload(projectSlug: string | null): PreWarmDraftRpcInput | undefined {
 		const displayed = getDraftPick();
@@ -597,10 +597,8 @@
 
 	function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return Promise.resolve();
+		if (!sessionId) return Promise.resolve();
 		return syncInputDraftRpc({
-			projectSlug,
 			sessionId,
 			text,
 			originId: getBrowserClientId(),
@@ -686,7 +684,7 @@
 		const images = pendingImages;
 		switchingAccount = true;
 		try {
-			if (!(await switchSessionAccount({ projectSlug, sessionId, instanceId, expectedInstanceId }))) return false;
+			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
 			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || inputText !== draft || pendingImages !== images) return false;
@@ -711,7 +709,7 @@
 		if (startingSideThread) return false;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
-		if (!parentSessionId || !projectSlug) {
+		if (!parentSessionId) {
 			showToast("Open a session to start a Side Thread", { variant: "error" });
 			return false;
 		}
@@ -730,8 +728,7 @@
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
 			const { sessionId } = await startSideThreadRpc({
-				projectSlug,
-				parentSessionId,
+				sessionId: parentSessionId,
 				title: question,
 				inputId,
 				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
@@ -741,7 +738,7 @@
 			sideThreadAttempt = undefined;
 			if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
 				clearComposer();
-				switchToSession(sessionId, projectSlug);
+				switchToSession(sessionId, projectSlug ?? undefined);
 			}
 			return true;
 		} catch (error) {
@@ -800,11 +797,11 @@
 		// A draft is created in the project its chip names, which can differ
 		// from the attached one until the attach round trip lands.
 		const projectSlug = sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!projectSlug) {
-			showToast("No active project", { variant: "error" });
-			return false;
-		}
 		if (!sid) {
+			if (!projectSlug) {
+				showToast("No active project", { variant: "error" });
+				return false;
+			}
 			// First send with no active session: create one bound to the selected
 			// harness instance (the picker's pre-creation draft), then send into it.
 			// A second Enter before the create lands would make a second session.
@@ -896,7 +893,6 @@
 		steerRefusal = null;
 		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
 			sendMessageRpc({
-				projectSlug,
 				sessionId: sentToSessionId,
 				text: messageText,
 				commandId,
@@ -910,7 +906,7 @@
 					return resolve(false);
 				}
 				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
-					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
+					switchToSession(response.sessionId, projectSlug ?? undefined, undefined, { replace: true });
 				resolve(true);
 			}).catch(() => {
 				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
@@ -956,13 +952,13 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
-	let taskStopToast: { id: string; sessionId: string; projectSlug: string } | null = $state(null);
+	let taskStopToast: { id: string; sessionId: string } | null = $state(null);
 	let composerDestroyed = false;
 	$effect(() => {
 		const offer = taskStopToast;
 		if (!offer) return;
 		const count = currentSession?.backgroundTasks?.length ?? 0;
-		const active = sessionState.currentId === offer.sessionId && currentSession?.projectSlug === offer.projectSlug;
+		const active = sessionState.currentId === offer.sessionId;
 		const toast = uiState.toasts.find((toast) => toast.id === offer.id);
 		untrack(() => {
 			if (!active || count === 0 || !toast) {
@@ -978,30 +974,28 @@
 
 	function handleStop() {
 		const sessionId = sessionState.currentId;
-		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return;
+		if (!sessionId) return;
 		const accountId = currentSession?.accountId;
 		const driver = getInstanceById(accountId ?? "")?.driver;
 		const hadTasks = driver === "claude" && (currentSession?.backgroundTasks?.length ?? 0) > 0;
 		void cancelSessionRpc({
-			projectSlug,
 			sessionId,
 			commandId: crypto.randomUUID(),
 		}).then(() => {
 			// An interrupt can end a turn the row never reported busy for, so
 			// nothing else would end it. A still-busy row ends it on idle.
 			if (!isSessionBusy(sessionId)) followSessionBusy(sessionId, false);
-			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId || currentSession?.projectSlug !== projectSlug) return;
+			if (composerDestroyed || !hadTasks || sessionState.currentId !== sessionId) return;
 			const count = findSession(sessionId)?.backgroundTasks?.length ?? 0;
 			if (count === 0) return;
 			if (taskStopToast) dismissToast(taskStopToast.id);
 			const id = showToast(`Turn stopped. ${count} ${count === 1 ? "task" : "tasks"} still running`, {
 				duration: 6000,
 				action: { label: "Stop them", run: () => {
-					if (sessionState.currentId === sessionId && currentSession?.projectSlug === projectSlug) void stopBackgroundTasks(sessionId, projectSlug);
+					if (sessionState.currentId === sessionId) void stopBackgroundTasks(sessionId);
 				} },
 			});
-			taskStopToast = { id, sessionId, projectSlug };
+			taskStopToast = { id, sessionId };
 		}).catch(() => {
 			showToast("Failed to stop session", { variant: "error" });
 		});
@@ -1429,7 +1423,7 @@
 								oninput={handleInput}
 								onfocus={() => {
 									composerFocused = true;
-									requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
+									requestSessionPreWarm(sessionState.currentId);
 								}}
 								onblur={() => { composerFocused = false; }}
 								onkeydown={handleKeydown}
@@ -1495,11 +1489,11 @@
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
 												loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+												onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
+												onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
+												oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
+												ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
+												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
 											>
 												{#snippet children(attention, checkout, warning)}
 													{@render phoneMore(rows, attention, checkout, warning)}
@@ -1530,11 +1524,11 @@
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
 								loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+								onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
+								onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
+								oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
+								ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
+								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
 							/>
 						{/key}
 					{/if}
@@ -1673,11 +1667,11 @@
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
 									loadWorktrees={supportsWorktree !== false ? () => listWorktreesRpc(composerProjectSlug, session.id) : undefined}
-									onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+									onmove={(path) => moveSessionWorkspaceRpc({ sessionId: session.id, path })}
+									onrecreate={() => recreateSessionWorktreeRpc({ sessionId: session.id })}
+									oncontinue={() => continueSessionInMainFolderRpc({ sessionId: session.id })}
+									ondismiss={(path) => dismissWorkspaceHintRpc({ sessionId: session.id, path })}
+									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}

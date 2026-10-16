@@ -212,7 +212,7 @@
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
 		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ projectSlug, sessionId })
+		void getModelsRpc({ sessionId })
 			.then((response) => {
 				if (sessionState.currentId === sessionId) {
 					applyModels(response);
@@ -273,7 +273,7 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void switchAgentRpc({ projectSlug, sessionId, agentId: agent.id }).catch(undoAgent);
+			void switchAgentRpc({ sessionId, agentId: agent.id }).catch(undoAgent);
 		}
 	}
 

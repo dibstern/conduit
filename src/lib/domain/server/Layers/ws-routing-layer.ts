@@ -30,7 +30,7 @@ import { ConfigPersistenceTag } from "../../daemon/Services/config-persistence-s
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
 import { DaemonEventBusTag } from "../../daemon/Services/daemon-pubsub.js";
 import { resolveDaemonSession } from "../../daemon/Services/daemon-session-reader.js";
-import { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
+import type { DaemonStateTag } from "../../daemon/Services/daemon-state.js";
 import {
 	allProjects,
 	getProject,
@@ -40,6 +40,7 @@ import {
 	touchLastUsed as touchProjectLastUsed,
 } from "../../daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../daemon/Services/relay-cache.js";
+import { SessionDirectory } from "../../daemon/Services/session-directory.js";
 import { type AuthManagerService, AuthManagerTag } from "./auth-middleware.js";
 
 const RELAY_WAIT_TIMEOUT_MS = 10_000;
@@ -268,15 +269,16 @@ export const WebSocketRoutingLive: Layer.Layer<
 	| ProjectRegistryTag
 	| DaemonStateTag
 	| ShutdownSignalTag
+	| SessionDirectory
 > = Layer.scopedDiscard(
 	Effect.gen(function* () {
-		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const configRef = yield* DaemonConfigRefTag;
 		const httpServerRef = yield* HttpServerRefTag;
 		const auth = yield* AuthManagerTag;
 		const relayRouter = yield* WebSocketRelayRouterTag;
 		const daemonHandlers = yield* DaemonWsRpcHandlersTag;
 		const projectRegistry = yield* ProjectRegistryTag;
+		const directory = yield* SessionDirectory;
 		const shutdownSignal = yield* ShutdownSignalTag;
 		const runtime = yield* Effect.runtime<never>();
 		const server = yield* Ref.get(httpServerRef);
@@ -320,8 +322,15 @@ export const WebSocketRoutingLive: Layer.Layer<
 			Effect.gen(function* () {
 				const projects = yield* allProjects;
 				const sessionSlug = hints.sessionId
-					? yield* resolveDaemonSession(configDir, hints.sessionId)
+					? yield* resolveDaemonSession(hints.sessionId).pipe(
+							Effect.provideService(SessionDirectory, directory),
+						)
 					: null;
+				if (hints.sessionId && sessionSlug === null)
+					return yield* new WsRpcError({
+						code: "unknown-session",
+						message: `Unknown session: ${hints.sessionId}`,
+					});
 				const slug =
 					sessionSlug ??
 					projects.find((project) => project.slug === hints.projectSlug)
@@ -333,11 +342,12 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 		const attachProject: AttachDaemonProject = (payload) =>
 			resolveAttachSlug(payload).pipe(
-				Effect.mapError(
-					(cause) =>
-						new WsRpcError({
-							message: `AttachProject failed: ${formatCause(cause)}`,
-						}),
+				Effect.mapError((cause) =>
+					cause instanceof WsRpcError
+						? cause
+						: new WsRpcError({
+								message: `AttachProject failed: ${formatCause(cause)}`,
+							}),
 				),
 				Effect.tap(({ slug }) =>
 					slug === null ? Effect.void : resolveRpcRelay(slug),

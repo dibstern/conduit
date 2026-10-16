@@ -164,7 +164,7 @@
 
 		let cancelled = false;
 		beginClaudeSettingsResolution(projectSlug);
-		void resolveClaudeSettingsRpc({ projectSlug, instanceId, ...(sessionId ? { sessionId } : {}) })
+		void resolveClaudeSettingsRpc({ ...(sessionId ? { sessionId } : { projectSlug }), instanceId })
 			.then((response) => {
 				if (!cancelled && workspace === requestedWorkspace) applyResolvedClaudeSettingsResponse(response);
 			})
