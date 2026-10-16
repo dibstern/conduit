@@ -9,7 +9,7 @@
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { listBranchesRpc, listWorktreesRpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
+	import { listBranchesRpc, rpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
@@ -21,7 +21,7 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, loadWorktrees = listWorktreesRpc, loadBranches = listBranchesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, loadWorktrees = (projectSlug: string) => rpc("ListWorktrees", { projectSlug }), loadBranches = listBranchesRpc }: {
 		worktree?: WorktreeInfo | null;
 		newWorktree?: boolean;
 		worktreeBase?: string | null;

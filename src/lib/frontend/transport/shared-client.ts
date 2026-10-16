@@ -58,13 +58,13 @@ export type TrafficClass = "control" | "stream";
 
 // The client description, reused by every transport below: an Effect is a
 // description, so providing it twice yields two independent clients.
-const wsRpcClient = RpcClient.make(WsRpcGroup);
+const wsRpcClient = RpcClient.make(WsRpcGroup, { flatten: true });
 
 export type WsRpcClient = Effect.Effect.Success<typeof wsRpcClient>;
 
 // Subscriptions are handed out already resuming, and already on the right
 // socket, because both are transport decisions a consumer should not be able to
-// get wrong. A consumer that reached for `sockets.stream.SubscribeSessionDetail`
+// get wrong. A consumer that reached for `sockets.stream("SubscribeSessionDetail", ...)`
 // would get a stream that dies on the first drop; there is no reason to leave
 // that door open, so ni8.9/10/11/14 add a member here rather than a call site.
 const makeSubscriptions = (
@@ -80,7 +80,7 @@ const makeSubscriptions = (
 	) =>
 		resumeStream(
 			(resumeFromSequence, resumeBase) =>
-				sockets.control.SubscribeShell({
+				sockets.control("SubscribeShell", {
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					...(resumeBase === undefined ? {} : { resumeBase }),
@@ -99,7 +99,7 @@ const makeSubscriptions = (
 	approvals: (options: { readonly onTransportDrop?: () => void } = {}) =>
 		resumeStream(
 			(resumeFromSequence) =>
-				sockets.control.SubscribeApprovals({
+				sockets.control("SubscribeApprovals", {
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 				}),
@@ -121,7 +121,8 @@ const makeSubscriptions = (
 			(resumeFromSequence, resumeBase, resumePoint) =>
 				Stream.unwrapScoped(
 					Effect.map(
-						sockets.stream.SubscribeSessionDetail(
+						sockets.stream(
+							"SubscribeSessionDetail",
 							{
 								projectSlug,
 								sessionId: options.sessionId,
@@ -148,7 +149,7 @@ const makeSubscriptions = (
 	/** One session's todo list. Low-rate, so it rides the control socket. */
 	todos: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>
-			sockets.control.SubscribeSessionTodos({
+			sockets.control("SubscribeSessionTodos", {
 				projectSlug,
 				sessionId: options.sessionId,
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
@@ -158,7 +159,7 @@ const makeSubscriptions = (
 	 *  at shell rate, not a hot stream, so it rides the control socket. */
 	family: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>
-			sockets.control.SubscribeSessionFamily({
+			sockets.control("SubscribeSessionFamily", {
 				projectSlug,
 				sessionId: options.sessionId,
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
@@ -168,26 +169,27 @@ const makeSubscriptions = (
 	 * The project's terminals. Hot, so it rides the stream socket. PTYs carry no
 	 * sequence, so every re-issue is a cold snapshot with each scrollback ring.
 	 */
-	ptys: () => resumeStream(() => sockets.stream.SubscribePtys({ projectSlug })),
+	ptys: () =>
+		resumeStream(() => sockets.stream("SubscribePtys", { projectSlug })),
 	/** Default model, visibility, default approval mode, Claude overrides.
 	 *  Not in the read model, so a re-issue re-snapshots instead of resuming. */
 	projectSettings: () =>
 		resumeStream(() =>
-			sockets.control.SubscribeProjectSettings({ projectSlug }),
+			sockets.control("SubscribeProjectSettings", { projectSlug }),
 		),
 	/** This draft's OpenCode inventory also retains its borrowed instance. */
 	draftModels: (instanceId: string) =>
 		resumeStream(() =>
-			sockets.control.SubscribeDraftModels({ projectSlug, instanceId }),
+			sockets.control("SubscribeDraftModels", { projectSlug, instanceId }),
 		),
 	/** Done/error alerts for sessions no tab is viewing. Live-only: a re-issue
 	 *  never replays one, so a reconnect cannot re-fire a ding. */
 	alerts: () =>
-		resumeStream(() => sockets.control.SubscribeAlerts({ projectSlug })),
+		resumeStream(() => sockets.control("SubscribeAlerts", { projectSlug })),
 	/** One session's composer draft as other tabs type it. Live-only. */
 	inputDraft: (options: { readonly sessionId: string }) =>
 		resumeStream(() =>
-			sockets.control.SubscribeInputDraft({
+			sockets.control("SubscribeInputDraft", {
 				projectSlug,
 				sessionId: options.sessionId,
 			}),
@@ -196,13 +198,14 @@ const makeSubscriptions = (
 	 * The daemon's instance and project lists. Daemon-global, so neither takes
 	 * the project; low-rate, so both ride the control socket.
 	 */
-	instances: () => resumeStream(() => sockets.control.SubscribeInstances({})),
-	usage: () => resumeStream(() => sockets.control.SubscribeUsage({})),
-	projects: () => resumeStream(() => sockets.control.SubscribeProjects({})),
+	instances: () =>
+		resumeStream(() => sockets.control("SubscribeInstances", {})),
+	usage: () => resumeStream(() => sockets.control("SubscribeUsage", {})),
+	projects: () => resumeStream(() => sockets.control("SubscribeProjects", {})),
 	/** The daemon's protocol, build and restart state, plus a revision that
 	 *  moves when the cross-project session lists go stale. */
 	serverStatus: (options: { readonly onTransportDrop?: () => void } = {}) =>
-		resumeStream(() => sockets.control.SubscribeServerStatus({}), options),
+		resumeStream(() => sockets.control("SubscribeServerStatus", {}), options),
 });
 
 /** Every stream subscription the frontend has, resume already applied. */
