@@ -24,6 +24,14 @@ type Resolution = {
 	warning?: string;
 };
 const controls = new WeakMap<Page, RpcMockControl>();
+const modelProviders = ["claude", "anthropic"].map((id) => ({
+	id,
+	name: id === "claude" ? "Claude" : "Anthropic",
+	configured: true,
+	models: [
+		{ id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: id },
+	],
+}));
 
 async function openDraft(
 	page: Page,
@@ -56,6 +64,7 @@ async function openDraft(
 			id,
 			name: id === "claude" ? "Claude" : "OpenCode",
 			driver: id,
+			isDefault: true,
 			port: 0,
 			managed: false,
 			status: "healthy",
@@ -72,7 +81,12 @@ async function openDraft(
 		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
 			GetInstances: () => instances,
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
+			GetModels: ({ projectSlug, instanceId }) => ({
+				projectSlug,
+				providers: modelProviders.filter(
+					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
 			GetAgents: ({ projectSlug, instanceId }) => ({
 				projectSlug,
 				instanceId,
@@ -140,6 +154,41 @@ async function openDraft(
 		responses: new Map(),
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
+	for (const account of instances.instances.filter(
+		({ driver }) => driver === "claude",
+	))
+		rpc.setProjectSetting({
+			_tag: "providerModels",
+			accountId: account.id,
+			providers: modelProviders.filter(({ id }) => id === "claude"),
+		});
+	rpc.setProjectSetting({
+		_tag: "harnessDefaults",
+		claude: {
+			status: "ok",
+			pick: {
+				providerId: "claude",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+		opencode: {
+			status: "ok",
+			pick: {
+				providerId: "anthropic",
+				modelId: "claude-sonnet-4-5",
+				effort: "",
+				contextWindow: "",
+			},
+		},
+	});
+	rpc.setProjectSetting({
+		_tag: "defaultModel",
+		model: "claude-sonnet-4-5",
+		provider: "claude",
+		variant: "",
+	});
 	rpc.setProjectSetting({ _tag: "defaultSessionMode", mode: globalMode });
 	controls.set(page, rpc);
 	await page.goto(`${baseUrl}/new?project=${slug}`);
@@ -443,7 +492,7 @@ for (const viewport of [
 				await expect(choice).toContainText(
 					limitation === "git"
 						? "Requires a Git folder"
-						: "Not supported by OpenCode",
+						: "Not supported by Claude",
 				);
 			});
 		}
@@ -538,7 +587,7 @@ for (const viewport of [
 			);
 			const back = page.getByTestId("picker-back");
 			if (await back.isVisible()) await press(back);
-			await press(page.getByTestId("picker-harness-claude"));
+			await press(page.getByTestId("picker-harness-opencode"));
 			await page.keyboard.press("Escape");
 			await expect
 				.poll(

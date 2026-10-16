@@ -21,14 +21,19 @@
 // report rows that still exist.
 
 import { SqlClient } from "@effect/sql";
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import { withCachedSessionGit } from "../../../git/session-git.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { resolveSessionAccountIds } from "../../daemon/Services/session-accounts.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
-import { BackgroundLivenessTag, ConfigTag } from "./services.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+	SessionCompactionsTag,
+	SessionRetriesTag,
+} from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { withSessionWorktreeStatus } from "./session-workspace.js";
 import type { ShellSubscriptionError } from "./shell-subscription.js";
@@ -54,6 +59,14 @@ export const subscribeSessionFamily = (options: {
 			const config = yield* ConfigTag;
 			const sql = yield* SqlClient.SqlClient;
 			const accounts = yield* AccountDirectory;
+			// A child's family row is its only status feed, so it carries the
+			// transient compaction and retry the shell gives roots.
+			const compactingOf = Option.getOrUndefined(
+				yield* Effect.serviceOption(SessionCompactionsTag),
+			);
+			const retryingOf = Option.getOrUndefined(
+				yield* Effect.serviceOption(SessionRetriesTag),
+			);
 			const anchor =
 				(yield* readQuery.getSessionFamilyRoot(options.sessionId)) ??
 				options.sessionId;
@@ -83,22 +96,29 @@ export const subscribeSessionFamily = (options: {
 										);
 										return yield* Effect.forEach(list.rows, (row) =>
 											Effect.gen(function* () {
+												const compacting = compactingOf?.(row.item.id);
+												const retrying = retryingOf?.(row.item.id);
 												return {
 													...row,
-													item: yield* withSessionWorktreeStatus(
-														withCachedSessionGit(
-															{
-																...row.item,
-																projectSlug: config.slug,
-																accountId: accountIds.get(row.item.id) ?? null,
-															},
-															[
-																config.projectDir,
-																...(config.extraFolders ?? []),
-															],
-														),
-														config,
-													),
+													item: {
+														...(yield* withSessionWorktreeStatus(
+															withCachedSessionGit(
+																{
+																	...row.item,
+																	projectSlug: config.slug,
+																	accountId:
+																		accountIds.get(row.item.id) ?? null,
+																},
+																[
+																	config.projectDir,
+																	...(config.extraFolders ?? []),
+																],
+															),
+															config,
+														)),
+														...(compacting === undefined ? {} : { compacting }),
+														...(retrying === undefined ? {} : { retrying }),
+													},
 												};
 											}),
 										).pipe(Effect.map((rows) => ({ ...list, rows })));
