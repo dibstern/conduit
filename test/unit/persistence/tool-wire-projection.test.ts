@@ -29,8 +29,8 @@ import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type {
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 	ToolStartedPayload,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -178,10 +178,7 @@ describe("toolDetail", () => {
 // detail read, against what the projectors stored.
 describe("transcript query and detail read", () => {
 	const SESSION = "s-wire";
-	const event = <T extends CanonicalEventType>(
-		type: T,
-		data: EventPayloadMap[T],
-	) =>
+	const event = <T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 		canonicalEvent(type, SESSION, data, { provider: "claude", createdAt: 1 });
 	const toolEvents = (
 		messageId: string,
@@ -355,7 +352,7 @@ describe("transcript query and detail read", () => {
 
 	it("serves the tool of the session asking, by part id when it has no call id (9)", async () => {
 		const FORK = "s-fork";
-		const inFork = <T extends CanonicalEventType>(
+		const inFork = <T extends LiveEventType>(
 			type: T,
 			data: EventPayloadMap[T],
 		) => canonicalEvent(type, FORK, data, { provider: "claude", createdAt: 1 });

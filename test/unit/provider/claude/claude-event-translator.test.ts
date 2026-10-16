@@ -1494,9 +1494,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events.filter((e) => e.type === "tool.running")).toHaveLength(
 			0,
 		);
-		expect(
-			sink.events.filter((e) => e.type === "tool.input_updated"),
-		).toHaveLength(0);
+		expect(sink.events.map((e) => e.type)).not.toContain("tool.input_updated");
 
 		// Stop the block — should emit tool.started with buffered input
 		await runTranslate(
@@ -2995,7 +2993,9 @@ describe("ClaudeEventTranslator", () => {
 		const liveness = makeSessionBackgroundLiveness();
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
-			onBackgroundTask: liveness.record,
+			onBackgroundTask: (input) => {
+				liveness.record(input);
+			},
 		});
 		const nestedCtx = makeCtx({
 			subagentTasks: new Map([
@@ -3068,7 +3068,9 @@ describe("ClaudeEventTranslator", () => {
 			const liveness = makeSessionBackgroundLiveness();
 			const instance = new ClaudeEventTranslator({
 				getSink: () => sink,
-				onBackgroundTask: liveness.record,
+				onBackgroundTask: (input) => {
+					liveness.record(input);
+				},
 			});
 			const context = makeCtx({
 				subagentTasks: new Map(),
@@ -3320,7 +3322,9 @@ describe("ClaudeEventTranslator", () => {
 		const liveness = makeSessionBackgroundLiveness(undefined, () => 200);
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
-			onBackgroundTask: liveness.record,
+			onBackgroundTask: (input) => {
+				liveness.record(input);
+			},
 		});
 		const snapshot = (
 			tasks: ReadonlyArray<Record<string, unknown>>,

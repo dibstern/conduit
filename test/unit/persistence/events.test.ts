@@ -9,61 +9,28 @@ import type {
 	StoredEvent,
 } from "../../../src/lib/persistence/events.js";
 import {
-	CANONICAL_EVENT_TYPES,
 	CanonicalEventSchema,
 	canonicalEvent,
 	createCommandId,
 	createEventId,
-	validateEventPayload,
 } from "../../../src/lib/persistence/events.js";
+import { makeStored } from "../../helpers/persistence-factories.js";
+
+describe("Stored event factory", () => {
+	it("rejects a missing required tool input through append's schema", () => {
+		expect(() =>
+			// @ts-expect-error Deliberately omit input to exercise factory validation.
+			makeStored("tool.started", "s1", {
+				messageId: "m1",
+				partId: "p1",
+				toolName: "Bash",
+				callId: "call1",
+			}),
+		).toThrow();
+	});
+});
 
 describe("Canonical Event Types", () => {
-	it("exports all 63 canonical event types", () => {
-		expect(CANONICAL_EVENT_TYPES).toHaveLength(63);
-		expect(CANONICAL_EVENT_TYPES).toContain("message.created");
-		expect(CANONICAL_EVENT_TYPES).toContain("message.snapshot");
-		expect(CANONICAL_EVENT_TYPES).toContain("text.delta");
-		expect(CANONICAL_EVENT_TYPES).toContain("thinking.start");
-		expect(CANONICAL_EVENT_TYPES).toContain("thinking.delta");
-		expect(CANONICAL_EVENT_TYPES).toContain("thinking.end");
-		expect(CANONICAL_EVENT_TYPES).toContain("tool.started");
-		expect(CANONICAL_EVENT_TYPES).toContain("tool.running");
-		expect(CANONICAL_EVENT_TYPES).toContain("tool.completed");
-		expect(CANONICAL_EVENT_TYPES).toContain("file.attached");
-		expect(CANONICAL_EVENT_TYPES).toContain("tool.input_updated");
-		expect(CANONICAL_EVENT_TYPES).toContain("turn.completed");
-		expect(CANONICAL_EVENT_TYPES).toContain("turn.error");
-		expect(CANONICAL_EVENT_TYPES).toContain("turn.interrupted");
-		expect(CANONICAL_EVENT_TYPES).toContain("turn.model_resolved");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.created");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.renamed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.workspace_hint_changed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.read");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.unread");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.settled");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.unsettled");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.pinned");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.unpinned");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.snoozed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.unsnoozed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.deleted");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.forked");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.rewound");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.rewind_undone");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.rewind_committed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.status");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.compaction");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_changed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.provider_cleanup_failed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.permission_mode_changed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.goal_changed");
-		expect(CANONICAL_EVENT_TYPES).toContain("session.handoff_delivered");
-		expect(CANONICAL_EVENT_TYPES).toContain("permission.asked");
-		expect(CANONICAL_EVENT_TYPES).toContain("permission.resolved");
-		expect(CANONICAL_EVENT_TYPES).toContain("question.asked");
-		expect(CANONICAL_EVENT_TYPES).toContain("question.resolved");
-	});
-
 	it.each([
 		"/repo/worktree",
 		null,
@@ -71,14 +38,9 @@ describe("Canonical Event Types", () => {
 		const event = canonicalEvent("session.workspace_hint_changed", "s1", {
 			path,
 		});
-		expect(() => validateEventPayload(event)).not.toThrow();
 		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
 		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
 			event,
-		);
-		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-		expect(() => validateEventPayload({ ...event, data: {} })).toThrow(
-			"missing required fields: path",
 		);
 	});
 
@@ -88,17 +50,11 @@ describe("Canonical Event Types", () => {
 		"session.pinned",
 		"session.unpinned",
 		"session.unsnoozed",
-	] as const)("validates and round-trips %s", (type) => {
+	] as const)("round-trips %s", (type) => {
 		const event = canonicalEvent(type, "s1", { sessionId: "s1" });
-		expect(() => validateEventPayload(event)).not.toThrow();
 		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
 		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
 			event,
-		);
-		const missingSession = { ...event, data: {} };
-		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-		expect(() => validateEventPayload(missingSession)).toThrow(
-			"missing required fields: sessionId",
 		);
 	});
 
@@ -107,7 +63,6 @@ describe("Canonical Event Types", () => {
 			sessionId: "s1",
 			until,
 		});
-		expect(() => validateEventPayload(event)).not.toThrow();
 		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
 		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
 			event,
@@ -177,40 +132,5 @@ describe("Canonical Event Types", () => {
 	it("EventMetadata can be empty", () => {
 		const meta: EventMetadata = {};
 		expect(meta).toEqual({});
-	});
-
-	it("validates permission mode change required fields", () => {
-		const event = canonicalEvent("session.permission_mode_changed", "s1", {
-			sessionId: "s1",
-			mode: "auto",
-		});
-		expect(() => validateEventPayload(event)).not.toThrow();
-
-		const missingMode = {
-			...event,
-			data: { sessionId: "s1" },
-		};
-		// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-		expect(() => validateEventPayload(missingMode)).toThrow(
-			"missing required fields: mode",
-		);
-	});
-
-	it("validates provider cleanup failure required fields while instanceId stays optional", () => {
-		const event = canonicalEvent("session.provider_cleanup_failed", "s1", {
-			sessionId: "s1",
-			provider: "opencode",
-			reason: "provider_delete: unavailable",
-		});
-		expect(() => validateEventPayload(event)).not.toThrow();
-
-		for (const field of ["sessionId", "provider", "reason"] as const) {
-			const { [field]: _removed, ...data } = event.data;
-			const malformed = { ...event, data };
-			// @ts-expect-error Deliberately malformed payload verifies runtime validation.
-			expect(() => validateEventPayload(malformed)).toThrow(
-				`missing required fields: ${field}`,
-			);
-		}
 	});
 });

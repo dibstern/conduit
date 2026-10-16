@@ -124,8 +124,8 @@ const seedBusySession = (sessionId: string, updatedAt: number) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
-			INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'opencode', ${sessionId}, 'busy', 1000, ${updatedAt})`;
+			INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+			VALUES (${sessionId}, 'opencode', ${sessionId}, 'busy', 1000, ${updatedAt}, 'test-project')`;
 		expect(yield* versionOf(sessionId)).toBe(0);
 	});
 

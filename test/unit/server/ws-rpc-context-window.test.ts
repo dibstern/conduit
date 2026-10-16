@@ -46,14 +46,13 @@ describe("WsRpcServerLayer SwitchContextWindow", () => {
 
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.SwitchContextWindow({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				contextWindow: "1m",
 				originId: "browser-1",
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				contextWindow: "1m",
 				options: contextWindowOptions,
 			});

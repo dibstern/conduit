@@ -23,6 +23,7 @@ async function openHint(page: Page, relayBaseUrl: string) {
 		{ slug: projectSlug, title: "Workspace project", folders: [main] },
 	];
 	const session = {
+		accountId: null,
 		id: "hint-session",
 		title: "Workspace hint",
 		status: "idle",
@@ -33,6 +34,7 @@ async function openHint(page: Page, relayBaseUrl: string) {
 	};
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: projectSlug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],

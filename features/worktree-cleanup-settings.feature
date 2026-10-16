@@ -45,3 +45,18 @@ Scenario: Clean up now shows progress, then a failure that can be retried
   When the server fails the cleanup
   Then the worktree cleanup report alerts "Couldn't run cleanup. Try again."
   And the worktree cleanup button reads "Run" and is enabled
+
+Scenario Outline: Deleting a session asks about its worktree unless the rule removes it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And worktree cleanup <current_rule> worktrees of deleted sessions
+  When I open settings to the General section
+  And I expand Worktree cleanup
+  Then deleting a session is set to "<current_label>"
+  When I set deleting a session to "<next_label>"
+  Then the worktree cleanup delete rule is saved as <saved>
+
+Examples:
+  | current_rule | current_label | next_label | saved |
+  | asks about   | Ask           | Remove     | true  |
+  | removes      | Remove        | Ask        | false |

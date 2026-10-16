@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
@@ -24,6 +25,19 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 				removed: [entry("row-opencode", "/worktrees/opencode", match[1] ?? "")],
 				kept: [entry("row-kept", match[2] ?? "", match[3] ?? "")],
 				failed: [entry("row-failed", match[4] ?? "", match[5] ?? "")],
+			});
+		},
+	},
+	{
+		name: "seed the delete rule",
+		match:
+			/^worktree cleanup (asks about|removes) worktrees of deleted sessions$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setResponse("GetWorktreeCleanupSetting", {
+				worktreeCleanup: {
+					...DEFAULT_WORKTREE_CLEANUP,
+					onDelete: match[1] === "removes",
+				},
 			});
 		},
 	},
@@ -80,6 +94,38 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 					tag === "SetWorktreeCleanupSetting" &&
 					(payload["worktreeCleanup"] as { keepWhen?: unknown } | undefined)
 						?.keepWhen === match[1],
+			);
+		},
+	},
+	{
+		name: "assert the delete rule",
+		match: /^deleting a session is set to "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			const select = cleanupGroup(world.page).getByRole("combobox", {
+				name: "When a session is deleted",
+			});
+			await expect(select.locator("option:checked")).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "choose the delete rule",
+		match: /^I set deleting a session to "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await cleanupGroup(world.page)
+				.getByRole("combobox", { name: "When a session is deleted" })
+				.selectOption({ label: match[1] ?? "" });
+		},
+	},
+	{
+		name: "assert the saved delete rule",
+		match: /^the worktree cleanup delete rule is saved as (true|false)$/,
+		run: async ({ world, match }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				({ tag, payload }) =>
+					tag === "SetWorktreeCleanupSetting" &&
+					(payload["worktreeCleanup"] as { onDelete?: unknown } | undefined)
+						?.onDelete ===
+						(match[1] === "true"),
 			);
 		},
 	},

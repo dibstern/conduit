@@ -10,7 +10,7 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	type OpenCodeAccount,
 } from "../contracts/account.js";
-import { PROVIDER_SESSION_CAPABILITIES } from "../contracts/provider-instance.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { OpenCodeApiError } from "../errors.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type {
@@ -161,11 +161,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		account?: Account,
 	): Effect.Effect<OpenCodeAPI, Error, Scope.Scope> {
 		if (account) {
-			if (account.driver !== "opencode")
+			if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer)
 				return Effect.fail(
 					new Error("OpenCode turn requires an OpenCode account"),
 				);
-			if (this.clientForAccount) return this.clientForAccount(account);
+			if (this.clientForAccount && account.driver === "opencode")
+				return this.clientForAccount(account);
 			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID)
 				return Effect.succeed(this.client);
 			return Effect.fail(
@@ -679,6 +680,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 export const OpenCodeDriver: ProviderDriver<OpenCodeProviderInstanceOptions> = {
 	providerId: "opencode",
-	capabilities: PROVIDER_SESSION_CAPABILITIES.opencode,
+	capabilities: PROVIDER_DRIVERS.opencode.sessionCapabilities,
 	create: (options) => Effect.sync(() => new OpenCodeProviderInstance(options)),
 };

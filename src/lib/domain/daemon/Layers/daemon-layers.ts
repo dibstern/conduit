@@ -86,6 +86,7 @@ import {
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
 import {
+	allProjects,
 	broadcastProjectList,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
@@ -100,6 +101,11 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
+import { SessionActivityDaemonLive } from "../Services/session-activity.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import {
@@ -509,6 +515,7 @@ export const DaemonRpcServerLive = Layer.scopedDiscard(
 	Effect.gen(function* () {
 		const ctx = yield* DaemonLifecycleContextTag;
 		const handlers = yield* DaemonWsRpcHandlersTag;
+		const directory = yield* SessionDirectory;
 		const relayRouter = yield* WebSocketRelayRouterTag;
 		const shutdownSignal = yield* ShutdownSignalTag;
 		const server = makeDaemonRpcSocketLayer(
@@ -516,7 +523,7 @@ export const DaemonRpcServerLive = Layer.scopedDiscard(
 			makeRoutedWsRpcServerLayer(
 				(slug) => resolveProjectRpcContext(relayRouter, slug),
 				handlers,
-			),
+			).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory))),
 			{
 				onSuccessfulShutdownResponse: (tag) =>
 					Deferred.succeed(
@@ -670,7 +677,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 						),
 					),
 				),
-		DaemonEventBusLive,
+		SessionActivityDaemonLive.pipe(Layer.provideMerge(DaemonEventBusLive)),
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),
@@ -805,6 +812,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
 		Layer.provideMerge(withManagedOpenCodeServers),
 	);
+	const withSessionDirectory = Layer.unwrapEffect(
+		Effect.map(allProjects, (projects) =>
+			makeSessionDirectoryLive(configDir, projects),
+		),
+	).pipe(Layer.provideMerge(withOpenCodeInstances));
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(
 			Layer.merge(
@@ -812,7 +824,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
 				}),
 				UsageLive(),
-			).pipe(Layer.provideMerge(withOpenCodeInstances)),
+			).pipe(Layer.provideMerge(withSessionDirectory)),
 		),
 	);
 

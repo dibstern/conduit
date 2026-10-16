@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	mockInstances,
 	openModelPicker,
 	openSessionRoute,
 	requireRpcControl,
@@ -41,6 +42,53 @@ async function openPickerAgentView(page: Page): Promise<void> {
 }
 
 export const harnessHandlers: StepHandler[] = [
+	{
+		name: "register a Cursor account without a runtime",
+		match: /^a Cursor account is registered without a runtime$/,
+		run: ({ world }) => {
+			const instances = [
+				...(mockInstances.get(world.page) ?? []),
+				{
+					id: "cursor-work",
+					name: "Cursor work",
+					driver: "cursor",
+					isDefault: true,
+					usageEligible: false,
+					available: false,
+					unavailableReason: "Cursor runtime not installed",
+					configDir: "/tmp/cursor-work",
+					port: 0,
+					managed: false,
+					status: "stopped",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			];
+			mockInstances.set(world.page, instances);
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances,
+			});
+		},
+	},
+	{
+		name: "assert unavailable Cursor provider rail",
+		match: /^the Cursor provider rail choice is unavailable with reason (.+)$/,
+		run: async ({ world, match }) => {
+			const choice = world.page.getByTestId("picker-harness-cursor");
+			await expect(choice).toBeVisible();
+			await expect(choice).toHaveAccessibleName("Cursor");
+			await expect(choice).toBeDisabled();
+			await expect(choice).toHaveAccessibleDescription(match[1] ?? "");
+			await expect(
+				choice.locator(
+					'[data-testid="harness-logo"][data-driver="cursor"] svg path',
+				),
+			).toHaveAttribute("fill", "currentColor");
+			await expect(
+				world.page.getByTestId("picker-harness-cursor-unavailable"),
+			).toHaveText(`Cursor unavailable · ${match[1] ?? ""}`);
+		},
+	},
 	{
 		name: "start a new session",
 		match: /^I start a new session$/,

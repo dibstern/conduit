@@ -97,7 +97,9 @@ describe("RelayEventSink Effect persistence integration", () => {
 					),
 				);
 
-				const sessions = yield* readQuery.listSessions();
+				const sessions = yield* readQuery.listSessions({
+					projectIds: ["test-project"],
+				});
 				const events = yield* eventStore.readAllBySession("s-claude");
 				expect(sessions).toEqual([]);
 				expect(events).toEqual([]);

@@ -357,8 +357,8 @@ test("defaults follow RPC writes across relays", async ({
 	);
 	await other.waitFor(
 		() =>
-			latestDefaults(other)?.claude.pick?.modelId === "opus" &&
-			latestDefaults(other)?.claude.status === "ok",
+			latestDefaults(other)?.claude?.pick?.modelId === "opus" &&
+			latestDefaults(other)?.claude?.status === "ok",
 	);
 	await page.waitForFunction(
 		() =>
@@ -401,7 +401,7 @@ test.describe("foreign stored pick", () => {
 		const browser = await harness.connect();
 		await openSettings(page, harness);
 		await browser.waitFor(
-			() => latestDefaults(browser)?.claude.status === "invalid",
+			() => latestDefaults(browser)?.claude?.status === "invalid",
 		);
 		const evidence = await artifact(
 			testInfo,
@@ -416,7 +416,7 @@ test.describe("foreign stored pick", () => {
 			selectedDisabled: true,
 			status: "invalid",
 		});
-		expect(latestDefaults(browser)?.claude.problem).toMatch(
+		expect(latestDefaults(browser)?.claude?.problem).toMatch(
 			/^ModelNotInCatalog:/,
 		);
 	});

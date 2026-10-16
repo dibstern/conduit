@@ -9,6 +9,7 @@ import {
 	EventId,
 	type EventMetadata,
 	type EventPayloadMap,
+	type LiveEventType,
 } from "../contracts/stored-event.js";
 
 export * from "../contracts/stored-event.js";
@@ -21,7 +22,7 @@ export function createCommandId(): CommandId {
 	return Schema.decodeSync(CommandId)(`cmd_${randomUUID()}`);
 }
 
-export function canonicalEvent<K extends CanonicalEventType>(
+export function canonicalEvent<K extends LiveEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],
@@ -41,95 +42,4 @@ export function canonicalEvent<K extends CanonicalEventType>(
 		provider: opts?.provider ?? "opencode",
 		createdAt: opts?.createdAt ?? Date.now(),
 	} as CanonicalEvent & { readonly type: K; readonly data: EventPayloadMap[K] };
-}
-
-import { PersistenceError } from "./errors.js";
-
-const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
-	// sideThread and permissionMode are optional so historical creations still decode.
-	"session.created": ["sessionId", "title", "provider"],
-	"session.renamed": ["sessionId", "title"],
-	"session.rewound": ["messageId"],
-	"session.rewind_undone": [],
-	"session.rewind_committed": ["messageId"],
-	"session.workspace_changed": ["sessionId", "cause", "worktrees", "origin"],
-	"session.workspace_hint_changed": ["path"],
-	"session.workspace_started": ["sessionId", "path"],
-	"session.setup_started": ["sessionId", "source"],
-	"session.setup_output": ["sessionId", "output"],
-	"session.setup_finished": ["sessionId", "status"],
-	"session.read": ["sessionId"],
-	"session.unread": ["sessionId"],
-	"session.settled": ["sessionId"],
-	"session.unsettled": ["sessionId"],
-	"session.pinned": ["sessionId"],
-	"session.unpinned": ["sessionId"],
-	"session.snoozed": ["sessionId", "until"],
-	"session.auto_settle_set": ["sessionId", "disabled"],
-	"session.unsnoozed": ["sessionId"],
-	"session.deleted": ["sessionId"],
-	"session.forked": ["sessionId", "parentId"],
-	"session.status": ["sessionId", "status"],
-	"session.compaction": ["sessionId", "state", "detail"],
-	"session.provider_changed": ["sessionId", "oldProvider", "newProvider"],
-	"session.provider_cleanup_failed": ["sessionId", "provider", "reason"],
-	"session.permission_mode_changed": ["sessionId", "mode"],
-	"session.model_changed": ["sessionId", "modelId", "providerId"],
-	"session.variant_changed": ["sessionId", "variant"],
-	"session.context_window_changed": ["sessionId", "contextWindow"],
-	"session.goal_changed": ["sessionId", "goal"],
-	"session.handoff_delivered": ["included", "omitted", "tokens"],
-	"session.usage_limited": ["instanceId", "rateLimitType", "cutOffMessageId"],
-	"session.cut_off_dismissed": ["cutOffMessageId"],
-	"session.resumed": ["reason", "instanceId"],
-	"session.resume_scheduled": ["instanceId", "at"],
-	"session.resume_cancelled": [],
-	"message.created": ["messageId", "role", "sessionId"],
-	"message.removed": ["messageId"],
-	"message.part.removed": ["messageId", "partId"],
-	"message.snapshot": ["messageId", "digest", "message"],
-	"text.delta": ["messageId", "partId", "text"],
-	"thinking.start": ["messageId", "partId"],
-	"thinking.delta": ["messageId", "partId", "text"],
-	"thinking.end": ["messageId", "partId"],
-	"tool.started": ["messageId", "partId", "toolName", "callId"],
-	"tool.running": ["messageId", "partId"],
-	"tool.completed": ["messageId", "partId", "result", "duration"],
-	"file.attached": ["messageId", "partId", "mime", "url"],
-	"tool.input_updated": ["messageId", "partId"], // Historical compat
-	"turn.completed": ["messageId"],
-	"turn.error": ["messageId", "error"],
-	"turn.interrupted": ["messageId"],
-	"turn.model_resolved": ["actualModel"],
-	"input.admitted": ["sessionId", "inputId", "delivery", "request"],
-	"input.sent": ["sessionId", "inputId"],
-	"input.requeued": ["sessionId", "inputId", "sentSequence", "reason"],
-	"input.cancelled": ["sessionId", "inputId"],
-	"input.interrupt_requested": ["sessionId", "inputId"],
-	"permission.asked": ["id", "sessionId", "toolName"],
-	"permission.resolved": ["id", "decision"],
-	"question.asked": ["id", "sessionId", "questions"],
-	"question.resolved": ["id", "answers"],
-};
-
-export function validateEventPayload(event: CanonicalEvent): void {
-	const required = PAYLOAD_REQUIRED_FIELDS[event.type];
-	if (!required) return;
-	const fields = Object.entries(event.data);
-	const missing = required.filter(
-		(field) =>
-			!fields.some(([key, value]) => key === field && value !== undefined),
-	);
-	if (missing.length > 0) {
-		throw new PersistenceError({
-			code: "SCHEMA_VALIDATION_FAILED",
-			message: `Event ${event.type} missing required fields: ${missing.join(", ")}`,
-			context: {
-				eventId: event.eventId,
-				sessionId: event.sessionId,
-				type: event.type,
-				missing,
-			},
-		});
-	}
 }

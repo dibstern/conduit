@@ -225,7 +225,7 @@ describe("MessageProjector", () => {
 		).toEqual({ text: "keep", version: 1, rest_payload: null });
 	});
 
-	it("a recreated message supersedes its tombstone", async () => {
+	it("a recreated message preserves its tombstone at the removal version", async () => {
 		await project(makeStored("message.removed", "s1", { messageId: "m1" }));
 		await project(
 			makeStored(
@@ -236,18 +236,25 @@ describe("MessageProjector", () => {
 			),
 		);
 		expect(
-			await harness.query("SELECT id FROM messages WHERE id = 'm1'"),
-		).toEqual([{ id: "m1" }]);
+			await harness.query("SELECT id, version FROM messages WHERE id = 'm1'"),
+		).toEqual([{ id: "m1", version: 2 }]);
 		expect(
 			await harness.query(
-				"SELECT message_id FROM message_tombstones WHERE message_id = 'm1'",
+				"SELECT id, version FROM message_parts WHERE message_id = 'm1'",
 			),
-		).toEqual([]);
+		).toEqual([{ id: "p1", version: 2 }]);
+		expect(
+			await harness.query(
+				"SELECT message_id, version FROM message_tombstones WHERE message_id = 'm1'",
+			),
+		).toEqual([{ message_id: "m1", version: 1 }]);
 	});
 
-	it("a recreated part supersedes its tombstone, through a delta or a snapshot", async () => {
+	it("a recreated part preserves its tombstone at the removal version, through a delta or a snapshot", async () => {
 		const tombstones = () =>
-			harness.query("SELECT part_id FROM message_part_tombstones");
+			harness.query(
+				"SELECT part_id, version FROM message_part_tombstones ORDER BY part_id",
+			);
 		const snapshot = (parts: readonly string[], sequence: number) =>
 			project({
 				...makeStored(
@@ -282,7 +289,7 @@ describe("MessageProjector", () => {
 				2,
 			),
 		);
-		expect(await tombstones()).toEqual([{ part_id: "p1" }]);
+		expect(await tombstones()).toEqual([{ part_id: "p1", version: 2 }]);
 		await project(
 			makeStored(
 				"text.delta",
@@ -291,13 +298,28 @@ describe("MessageProjector", () => {
 				3,
 			),
 		);
-		expect(await tombstones()).toEqual([]);
+		expect(await tombstones()).toEqual([{ part_id: "p1", version: 2 }]);
+		expect(
+			await harness.query("SELECT id, version FROM message_parts"),
+		).toEqual([{ id: "p1", version: 3 }]);
 
 		await snapshot(["p1", "p2"], 4);
 		await snapshot(["p1"], 5);
-		expect(await tombstones()).toEqual([{ part_id: "p2" }]);
+		expect(await tombstones()).toEqual([
+			{ part_id: "p1", version: 2 },
+			{ part_id: "p2", version: 5 },
+		]);
 		await snapshot(["p1", "p2"], 6);
-		expect(await tombstones()).toEqual([]);
+		expect(await tombstones()).toEqual([
+			{ part_id: "p1", version: 2 },
+			{ part_id: "p2", version: 5 },
+		]);
+		expect(
+			await harness.query("SELECT id, version FROM message_parts ORDER BY id"),
+		).toEqual([
+			{ id: "p1", version: 6 },
+			{ id: "p2", version: 6 },
+		]);
 	});
 
 	it.each([

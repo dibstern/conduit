@@ -122,9 +122,8 @@ export function toggleTerminal(): void {
 		const accountId = terminalAccountId();
 		if (slug && beginCreateTab()) {
 			void createPtyRpc({
-				projectSlug: slug,
+				...(sessionId ? { sessionId } : { projectSlug: slug }),
 				originId: getBrowserClientId(),
-				...(sessionId ? { sessionId } : {}),
 				...(accountId === undefined ? {} : { accountId }),
 			}).catch(() => {
 				failCreateTab("Failed to create terminal");

@@ -15,10 +15,14 @@ export const requeueFailedSteers = (
 			session_id: string;
 			input_id: string;
 			sent_sequence: number;
+			error_code: string | null;
 		}>`
 			SELECT pending.session_id, pending.input_id,
 				(SELECT MAX(sequence) FROM events WHERE session_id = pending.session_id
-					AND type = 'input.sent' AND json_extract(data, '$.inputId') = pending.input_id) AS sent_sequence
+					AND type = 'input.sent' AND json_extract(data, '$.inputId') = pending.input_id) AS sent_sequence,
+				(SELECT error_code FROM provider_command_outbox
+					WHERE command_id = pending.input_id AND session_id = pending.session_id
+					AND effect_type = 'send_turn' ORDER BY request_sequence DESC LIMIT 1) AS error_code
 			FROM pending_inputs pending
 			WHERE pending.state = 'steering'
 				AND (${sessionId ?? null} IS NULL OR pending.session_id = ${sessionId ?? null})
@@ -35,7 +39,7 @@ export const requeueFailedSteers = (
 					sessionId: row.session_id,
 					inputId: row.input_id,
 					sentSequence: row.sent_sequence,
-					reason: "failed",
+					reason: row.error_code === "steer-declined" ? "declined" : "failed",
 				}),
 			),
 		);

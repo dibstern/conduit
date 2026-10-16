@@ -14,7 +14,10 @@ import {
 	ManagedRuntime,
 	Ref,
 } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+} from "../../../contracts/provider-instance.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -29,9 +32,9 @@ import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
-import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
 import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
+import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
+import { discoverRunners } from "../../../provider/runner/runner-registry.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -452,7 +455,7 @@ export async function startForegroundDaemon(
 						yield* Effect.validateAll(
 							registered,
 							({ project }) =>
-								stopRegisteredClaudeRunners(project.folders[0], configDir),
+								stopRegisteredRunners(project.folders[0], configDir),
 							{ concurrency: 4 },
 						).pipe(
 							Effect.orDie,
@@ -480,7 +483,11 @@ export async function startForegroundDaemon(
 				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
 				const openCodeInstanceIds = (yield* currentHandle.getInstances())
-					.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+					.filter(
+						(instance) =>
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer,
+					)
 					.map((instance) => instance.id);
 				// Persisted default bindings route to the project's selected instance,
 				// even when only named instances are registered.
@@ -489,7 +496,7 @@ export async function startForegroundDaemon(
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>
-							discoverClaudeRunners(project.folders[0], configDir),
+							discoverRunners(project.folders[0], configDir),
 						);
 						if (
 							runners.length > 0 ||

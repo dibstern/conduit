@@ -113,7 +113,7 @@ describe("InputArea build reload recovery", () => {
 		sessionStorage.clear();
 	});
 
-	it("syncs a loaded foreign session draft through its owning project", async () => {
+	it("syncs a loaded foreign session draft by session id", async () => {
 		seedDaemonSessions([
 			{ id: sessionId, title: "Foreign session", projectSlug: "dotfiles" },
 		]);
@@ -125,14 +125,13 @@ describe("InputArea build reload recovery", () => {
 		await vi.advanceTimersByTimeAsync(300);
 		expect(syncInputDraftRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "dotfiles",
 				sessionId,
 				text: "draft for dotfiles",
 			}),
 		);
 	});
 
-	it("stops a loaded foreign session through its owning project", async () => {
+	it("stops a loaded foreign session by session id", async () => {
 		seedDaemonSessions([
 			{
 				id: sessionId,
@@ -146,7 +145,6 @@ describe("InputArea build reload recovery", () => {
 		await fireEvent.click(getByRole("button", { name: "Stop generating" }));
 		expect(cancelSessionRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "dotfiles",
 				sessionId,
 			}),
 		);

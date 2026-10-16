@@ -1,116 +1,200 @@
-// src/lib/provider/claude/event-type-guard.ts
-/**
- * Compile-time exhaustiveness guard for canonical event types.
- *
- * When a new CanonicalEventType is added to CANONICAL_EVENT_TYPES, this
- * file will cause a type error unless the new type is explicitly listed
- * in one of the sets below. This prevents silent event-handling gaps
- * between the OpenCode SSE path and the Claude SDK path.
- */
-import type { CanonicalEventType } from "../../persistence/events.js";
+import type { LiveEventType } from "../../contracts/stored-event.js";
 
-/**
- * Canonical event types that the Claude event translator PRODUCES.
- * If the translator should emit a new event type, add it here AND
- * add the actual emission code in claude-event-translator.ts.
- */
-const CLAUDE_PRODUCED_TYPES = [
-	"message.created",
-	"text.delta",
-	"thinking.start",
-	"thinking.delta",
-	"thinking.end",
-	"tool.started",
-	"tool.running",
-	"tool.completed",
-	"turn.completed",
-	"turn.error",
-	"turn.interrupted",
-	"turn.model_resolved",
-	"session.status",
-	"session.compaction",
-	"session.permission_mode_changed",
-	"session.goal_changed", // Goal tracker translates SDK facts and transcript settlement through the event sink
-	"session.workspace_started", // The workspace.changed startup report maps to a durable observation.
-] as const satisfies readonly CanonicalEventType[];
-
-/**
- * Canonical event types that the Claude path explicitly does NOT produce
- * via the ClaudeEventTranslator because they are OpenCode-specific or
- * handled elsewhere in the Claude SDK pipeline. Each entry MUST have a
- * comment explaining why it's excluded.
- */
-const CLAUDE_NOT_APPLICABLE_TYPES = [
-	"message.snapshot", // OpenCode REST reconciliation only
-	"message.removed", // OpenCode SSE or relay-owned rewind commits; not SDK translation
-	"message.part.removed", // OpenCode SSE part removal only
-	"file.attached", // OpenCode REST/SSE file part transport; Claude attachments use a different provider path
-	"tool.input_updated", // Historical event — no longer emitted after tool input buffering changed (buffered tool.started replaces it)
-	"session.created", // Emitted directly in prompt.ts via eventStore.append(), not via translator
-	"session.renamed", // Title changes handled by auto-rename in prompt.ts
-	"session.deleted", // Relay-owned lifecycle event appended directly by SessionManager
-	"session.forked", // Fork lineage is recorded by the relay, not the Claude event translator
-	"session.rewound", // Relay-owned pending transcript cut, with no Claude SDK mutation
-	"session.rewind_undone", // Relay-owned restoration of a pending cut
-	"session.rewind_committed", // Relay-owned send admission commits the cut
-	"session.provider_changed", // Provider switching is a relay-level concept
-	"session.provider_cleanup_failed", // Relay-owned cleanup diagnostic
-	"session.handoff_delivered", // Server-owned handoff completion receipt; adapters do not emit it
-	"session.usage_limited", // Runtime interception emits the signal; continuation owns canonical intake.
-	"session.cut_off_dismissed", // Continuation owns Dismiss; the adapter does not produce it.
-	"session.resumed", // Continuation owns resume decisions; the adapter only runs the turn.
-	"session.resume_scheduled",
-	"session.resume_cancelled",
-	"session.model_changed", // Relay-owned model settings, appended by the relay's session settings module
-	"session.workspace_changed", // Conduit-originated, recorded by Session Workspace through the session-command seam
-	"session.setup_started", // Daemon setup lifecycle, recorded through the session-command seam.
-	"session.setup_output", // Same; merged setup output never comes from a provider.
-	"session.setup_finished", // Same; includes failures, timeout and interrupted-setup recovery.
-	"session.workspace_hint_changed", // Relay-owned write-path inference; never emitted by the provider translator.
-	"session.variant_changed", // Same
-	"session.context_window_changed", // Same
-	"session.settled", // Relay-owned triage state
-	"session.unsettled", // Relay-owned triage state
-	"session.pinned", // Relay-owned triage state
-	"session.unpinned", // Relay-owned triage state
-	"session.snoozed", // Relay-owned triage state
-	"session.auto_settle_set", // Relay-owned triage state
-	"session.unsnoozed", // Relay-owned triage state
-	"session.read", // Retired read state (hk9m.7); kept so historical stores decode
-	"session.unread", // Same
-	"permission.asked", // Recorded by the sink's requestPermission(), not push()
-	"permission.resolved", // Same
-	"question.asked", // Recorded by the sink's requestQuestion(), not push()
-	"question.resolved", // Same, or by the turn that answers a recovered question
-	"input.admitted", // Relay-owned: the Session Inbox commits it when a send is admitted
-	"input.sent", // Relay-owned: committed with the send_turn outbox row at handoff
-	"input.requeued", // Inbox recovery after a declined or failed steer
-	"input.cancelled", // Relay-owned: the Session Inbox commits it when a queued input is removed
-	"input.interrupt_requested", // Relay-owned: the Session Inbox commits it before interrupting a turn
-] as const satisfies readonly CanonicalEventType[];
-
-// All canonical event types MUST appear in exactly one of the two arrays.
-// If this type errors, a new CanonicalEventType was added without updating
-// this file. Fix: add the new type to either CLAUDE_PRODUCED_TYPES or
-// CLAUDE_NOT_APPLICABLE_TYPES with a comment explaining the decision.
-
-type ProducedType = (typeof CLAUDE_PRODUCED_TYPES)[number];
-type NotApplicableType = (typeof CLAUDE_NOT_APPLICABLE_TYPES)[number];
-type CoveredType = ProducedType | NotApplicableType;
-
-// This will error if CanonicalEventType has a member not in CoveredType:
-type _AssertExhaustive = CanonicalEventType extends CoveredType
-	? true
-	: {
-			ERROR: "New CanonicalEventType not listed in event-type-guard.ts";
-			missing: Exclude<CanonicalEventType, CoveredType>;
-		};
-
-// Force the compiler to evaluate the type (dead code elimination removes this)
-const _exhaustiveCheck: _AssertExhaustive = true;
-
-// Re-export for runtime access if needed
-export const CLAUDE_PRODUCED = new Set<string>(CLAUDE_PRODUCED_TYPES);
-export const CLAUDE_NOT_APPLICABLE = new Set<string>(
-	CLAUDE_NOT_APPLICABLE_TYPES,
-);
+/** Claude SDK translation coverage; other event owners are recorded as reasons. */
+export const CLAUDE_EVENT_CLASSIFICATION = {
+	"message.created": { produced: true },
+	"text.delta": { produced: true },
+	"thinking.start": { produced: true },
+	"thinking.delta": { produced: true },
+	"thinking.end": { produced: true },
+	"tool.started": { produced: true },
+	"tool.running": { produced: true },
+	"tool.completed": { produced: true },
+	"turn.completed": { produced: true },
+	"turn.error": { produced: true },
+	"turn.interrupted": { produced: true },
+	"turn.model_resolved": { produced: true },
+	"session.status": { produced: true },
+	"session.compaction": { produced: true },
+	"session.permission_mode_changed": { produced: true },
+	"session.goal_changed": { produced: true },
+	"session.workspace_started": { produced: true },
+	"message.snapshot": {
+		produced: false,
+		reason: "OpenCode REST reconciliation only",
+	},
+	"message.removed": {
+		produced: false,
+		reason: "OpenCode SSE or relay-owned rewind commits; not SDK translation",
+	},
+	"message.part.removed": {
+		produced: false,
+		reason: "OpenCode SSE part removal only",
+	},
+	"file.attached": {
+		produced: false,
+		reason:
+			"OpenCode REST/SSE file part transport; Claude attachments use a different provider path",
+	},
+	"session.created": {
+		produced: false,
+		reason:
+			"Root sessions are created by SessionManager; subagent sessions are seeded by Claude event persistence, outside SDK translation",
+	},
+	"session.renamed": {
+		produced: false,
+		reason:
+			"Title changes are recorded by Session Title and SessionManager triage through session commands",
+	},
+	"session.deleted": {
+		produced: false,
+		reason:
+			"Relay-owned lifecycle event recorded by SessionManager through session commands",
+	},
+	"session.forked": {
+		produced: false,
+		reason:
+			"Fork lineage is recorded by the relay, not the Claude event translator",
+	},
+	"session.rewound": {
+		produced: false,
+		reason: "Relay-owned pending transcript cut, with no Claude SDK mutation",
+	},
+	"session.rewind_undone": {
+		produced: false,
+		reason: "Relay-owned restoration of a pending cut",
+	},
+	"session.rewind_committed": {
+		produced: false,
+		reason: "Relay-owned send admission commits the cut",
+	},
+	"session.provider_changed": {
+		produced: false,
+		reason: "Provider switching is a relay-level concept",
+	},
+	"session.provider_cleanup_failed": {
+		produced: false,
+		reason: "Relay-owned cleanup diagnostic",
+	},
+	"session.handoff_delivered": {
+		produced: false,
+		reason: "Server-owned handoff completion receipt; adapters do not emit it",
+	},
+	"session.usage_limited": {
+		produced: false,
+		reason:
+			"Runtime interception emits the signal; continuation owns canonical intake.",
+	},
+	"session.cut_off_dismissed": {
+		produced: false,
+		reason: "Continuation owns Dismiss; the adapter does not produce it.",
+	},
+	"session.resumed": {
+		produced: false,
+		reason:
+			"Continuation owns resume decisions; the adapter only runs the turn.",
+	},
+	"session.resume_scheduled": {
+		produced: false,
+		reason:
+			"Continuation records scheduled resumes and re-arms after a usage probe",
+	},
+	"session.resume_cancelled": {
+		produced: false,
+		reason: "Continuation records cancellation of scheduled resumes",
+	},
+	"session.model_changed": {
+		produced: false,
+		reason:
+			"Relay-owned model settings, appended by the relay's session settings module",
+	},
+	"session.workspace_changed": {
+		produced: false,
+		reason:
+			"Conduit-originated, recorded by Session Workspace through the session-command seam",
+	},
+	"session.setup_started": {
+		produced: false,
+		reason:
+			"Daemon setup lifecycle, recorded through the session-command seam.",
+	},
+	"session.setup_output": {
+		produced: false,
+		reason:
+			"Daemon setup lifecycle; merged setup output never comes from a provider.",
+	},
+	"session.setup_finished": {
+		produced: false,
+		reason:
+			"Daemon setup lifecycle, including failures, timeout and interrupted-setup recovery.",
+	},
+	"session.workspace_hint_changed": {
+		produced: false,
+		reason:
+			"Relay-owned write-path inference; never emitted by the provider translator.",
+	},
+	"session.variant_changed": {
+		produced: false,
+		reason:
+			"Relay-owned effort settings, appended by the session settings module",
+	},
+	"session.context_window_changed": {
+		produced: false,
+		reason:
+			"Relay-owned context window settings, appended by the session settings module",
+	},
+	"session.settled": { produced: false, reason: "Relay-owned triage state" },
+	"session.unsettled": { produced: false, reason: "Relay-owned triage state" },
+	"session.pinned": { produced: false, reason: "Relay-owned triage state" },
+	"session.unpinned": { produced: false, reason: "Relay-owned triage state" },
+	"session.snoozed": { produced: false, reason: "Relay-owned triage state" },
+	"session.auto_settle_set": {
+		produced: false,
+		reason: "Relay-owned triage state",
+	},
+	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
+	"permission.asked": {
+		produced: false,
+		reason: "Recorded by the sink's requestPermission(), not push()",
+	},
+	"permission.resolved": {
+		produced: false,
+		reason: "Recorded by the sink's requestPermission(), not push()",
+	},
+	"question.asked": {
+		produced: false,
+		reason: "Recorded by the sink's requestQuestion(), not push()",
+	},
+	"question.resolved": {
+		produced: false,
+		reason:
+			"Recorded by the sink's requestQuestion(), or by the turn that answers a recovered question",
+	},
+	"input.admitted": {
+		produced: false,
+		reason: "Relay-owned: the Session Inbox commits it when a send is admitted",
+	},
+	"input.sent": {
+		produced: false,
+		reason:
+			"Relay-owned: the Session Inbox records turn handoff or steering delivery",
+	},
+	"input.requeued": {
+		produced: false,
+		reason: "Inbox recovery after a declined or failed steer",
+	},
+	"input.cancelled": {
+		produced: false,
+		reason:
+			"Relay-owned: the Session Inbox commits it when a queued input is removed",
+	},
+	"input.interrupt_requested": {
+		produced: false,
+		reason:
+			"Relay-owned: the Session Inbox commits it before interrupting a turn",
+	},
+} as const satisfies Record<
+	LiveEventType,
+	| { readonly produced: true }
+	| { readonly produced: false; readonly reason: string }
+>;

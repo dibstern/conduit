@@ -25,12 +25,13 @@ describe("merged Effect projection", () => {
 				VALUES ('session', 'claude', 1, 1)`;
 				const projector = makeSessionProjector();
 				const read: StoredEvent = {
-					...canonicalEvent(
-						"session.read",
-						"session",
-						{ sessionId: "session" },
-						{ provider: "claude", createdAt: 100 },
-					),
+					eventId: "retired-read",
+					sessionId: "session",
+					type: "session.read",
+					data: { sessionId: "session" },
+					metadata: {},
+					provider: "claude",
+					createdAt: 100,
 					sequence: 1,
 					projectId: "test-project",
 					streamVersion: 1,
@@ -40,12 +41,13 @@ describe("merged Effect projection", () => {
 					yield* sql`SELECT version FROM sessions WHERE id = 'session'`,
 				).toEqual([{ version: 0 }]);
 				const unread: StoredEvent = {
-					...canonicalEvent(
-						"session.unread",
-						"session",
-						{ sessionId: "session" },
-						{ provider: "claude", createdAt: 101 },
-					),
+					eventId: "retired-unread",
+					sessionId: "session",
+					type: "session.unread",
+					data: { sessionId: "session" },
+					metadata: {},
+					provider: "claude",
+					createdAt: 101,
 					sequence: 2,
 					projectId: "test-project",
 					streamVersion: 2,

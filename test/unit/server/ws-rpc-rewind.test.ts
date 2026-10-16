@@ -21,7 +21,6 @@ describe("WsRpcServerLayer RewindSession", () => {
 			const client = yield* rpcClient;
 			const result = yield* Effect.either(
 				client.RewindSession({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 					messageId: "client-only-uuid",
 				}),
@@ -65,7 +64,6 @@ describe("WsRpcServerLayer RewindSession", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.RewindSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				messageId: "message-1",
 			});

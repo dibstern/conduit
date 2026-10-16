@@ -39,12 +39,14 @@ import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	wireMonitoring,
 	wireMonitoringEffect,
 } from "../../../src/lib/relay/monitoring-wiring.js";
 import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
+import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
 import type { PushNotificationSender } from "../../../src/lib/server/push.js";
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
@@ -430,22 +432,20 @@ describe("wireMonitoring shutdown", () => {
 					harness.emitStatus({ root: { type: "idle" } });
 					await flushPromises();
 					if (!harness.runtime) throw new Error("Missing test runtime");
+					const primary = turnEndedAlert(
+						canonicalEvent("turn.completed", "root", {
+							messageId: "message-1",
+						}),
+					);
+					if (!primary) throw new Error("Missing turn-ended alert");
 					await harness.runtime.runPromise(
-						sendPushForEventEffect(
-							pushManager,
-							{
-								type: "done",
-								sessionId: "root",
-								code: 0,
-								alertId: '["root","message-1","done"]',
-							},
-							createSilentLogger(),
-							{ sessionId: "root" },
-						),
+						sendPushForEventEffect(pushManager, primary, createSilentLogger(), {
+							sessionId: "root",
+						}),
 					);
 					expect(sendToAll).toHaveBeenCalledOnce();
 					expect(harness.alerts()).toContainEqual(
-						expect.objectContaining({ alertId: '["root","message-1","done"]' }),
+						expect.objectContaining({ alertId: primary.alertId }),
 					);
 				} finally {
 					harness.result.stopMonitoring();
@@ -636,8 +636,8 @@ describe("wireMonitoring shutdown", () => {
 			await harness.runtime?.runPromise(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
-					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at)
-						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1)`;
+					yield* sql`INSERT INTO sessions (id, title, provider, created_at, updated_at, project_id)
+						VALUES ('claude-1', 'c', 'claude-sdk', 1, 1, 'test-project')`;
 				}),
 			);
 			// OpenCode answers 404 for sessions it does not own (live: NotFoundError).
@@ -879,12 +879,16 @@ async function createEffectHarness(
 				Effect.gen(function* () {
 					const readQuery = yield* ReadQueryEffectTag;
 					getSessionProviders.mockImplementation(() =>
-						readQuery.getAllSessionStatusesWithProviders().pipe(
-							Effect.map(
-								(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+						readQuery
+							.getAllSessionStatusesWithProviders({
+								projectIds: ["test-project"],
+							})
+							.pipe(
+								Effect.map(
+									(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+								),
+								Effect.orDie,
 							),
-							Effect.orDie,
-						),
 					);
 					if (seedTurn) {
 						const sql = yield* SqlClient.SqlClient;

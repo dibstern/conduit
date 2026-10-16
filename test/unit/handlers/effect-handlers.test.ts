@@ -3,6 +3,10 @@ import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceTag,
@@ -51,7 +55,6 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -822,6 +825,7 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2350,6 +2354,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2454,6 +2459,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2752,6 +2758,7 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
+			listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2913,7 +2920,7 @@ describe("sendMessageToSession", () => {
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, ws),
-						Layer.succeed(BackgroundLivenessTag, () => undefined),
+Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
 						Layer.succeed(
@@ -3339,6 +3346,7 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3602,6 +3610,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),

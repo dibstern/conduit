@@ -53,30 +53,17 @@ describe("queued input across a restart", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			foregroundCli: true,
 			restartProof: true,
-			capabilityModels: [
-				{
-					id: "sonnet",
-					name: "Sonnet",
-					providerId: "claude",
-					contextWindowOptions: [
-						{ value: "200k", label: "200K", isDefault: true },
-					],
-				},
-				{
-					id: "claude-sonnet-4",
-					name: "Sonnet 4",
-					providerId: "claude",
-					contextWindowOptions: [
-						{ value: "200k", label: "200K", isDefault: true },
-					],
-				},
-			],
+			capabilityModels: ["sonnet", "claude-sonnet-4"].map((id) => ({
+				id,
+				name: id,
+				providerId: "claude",
+				contextWindowOptions: [{ value: "200k", label: "200K" }],
+			})),
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Queue across restart");
 		await Effect.runPromise(
 			browser.rpc.SwitchModel({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				providerId: "claude",
@@ -97,7 +84,6 @@ describe("queued input across a restart", () => {
 		const queuedId = randomUUID();
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId: queuedId,

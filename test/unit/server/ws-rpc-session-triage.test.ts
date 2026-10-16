@@ -1,8 +1,12 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
@@ -10,8 +14,13 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
+const sessionDirectory = makeSessionDirectoryLive("/unused", []).pipe(
+	Layer.tap((context) =>
+		Context.get(context, SessionDirectory).record("project-b", ["s1", "s"]),
+	),
+);
 describe("session triage RPCs", () => {
-	it.scoped("routes the triage setters by projectSlug", () =>
+	it.scoped("routes the triage setters by session ownership", () =>
 		Effect.gen(function* () {
 			const service = makeMockSessionManagerService({
 				setSessionSettled: vi.fn(() => Effect.succeed(true)),
@@ -24,12 +33,15 @@ describe("session triage RPCs", () => {
 			);
 			const resolve = vi.fn((_slug: string) => Effect.succeed(context));
 			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-				Effect.provide(makeRoutedWsRpcServerLayer(resolve)),
+				Effect.provide(
+					makeRoutedWsRpcServerLayer(resolve).pipe(
+						Layer.provide(sessionDirectory),
+					),
+				),
 			);
 			for (const value of [true, false]) {
 				expect(
 					yield* client.SetSessionSettled({
-						projectSlug: "project-b",
 						sessionId: "s1",
 						settled: value,
 						originId: "browser",
@@ -37,7 +49,6 @@ describe("session triage RPCs", () => {
 				).toEqual({ ok: true });
 				expect(
 					yield* client.SetSessionPinned({
-						projectSlug: "project-b",
 						sessionId: "s1",
 						pinned: value,
 					}),
@@ -49,14 +60,12 @@ describe("session triage RPCs", () => {
 			}
 			expect(
 				yield* client.SnoozeSession({
-					projectSlug: "project-b",
 					sessionId: "s1",
 					until: null,
 				}),
 			).toEqual({ ok: true });
 			expect(
 				yield* client.UnsnoozeSession({
-					projectSlug: "project-b",
 					sessionId: "s1",
 				}),
 			).toEqual({ ok: true });
@@ -86,12 +95,13 @@ describe("session triage RPCs", () => {
 			);
 			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 				Effect.provide(
-					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)),
+					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
+						Layer.provide(sessionDirectory),
+					),
 				),
 			);
 			const result = yield* Effect.either(
 				client.SetSessionSettled({
-					projectSlug: "project-a",
 					sessionId: "s1",
 					settled: true,
 				}),
@@ -113,33 +123,32 @@ describe("session triage RPCs", () => {
 			);
 			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 				Effect.provide(
-					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)),
+					makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
+						Layer.provide(sessionDirectory),
+					),
 				),
 			);
 			expect(
 				yield* client.SetSessionSettled({
-					projectSlug: "a",
 					sessionId: "s",
 					settled: true,
 				}),
 			).toEqual({ ok: true });
 			expect(
 				yield* client.SetSessionPinned({
-					projectSlug: "a",
 					sessionId: "s",
 					pinned: false,
 				}),
 			).toEqual({ ok: true });
 			expect(
 				yield* client.SnoozeSession({
-					projectSlug: "a",
 					sessionId: "s",
 					until: null,
 				}),
 			).toEqual({ ok: true });
-			expect(
-				yield* client.UnsnoozeSession({ projectSlug: "a", sessionId: "s" }),
-			).toEqual({ ok: true });
+			expect(yield* client.UnsnoozeSession({ sessionId: "s" })).toEqual({
+				ok: true,
+			});
 		}),
 	);
 
@@ -166,12 +175,13 @@ describe("session triage RPCs", () => {
 				);
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)),
+						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
+							Layer.provide(sessionDirectory),
+						),
 					),
 				);
 				const result = yield* Effect.either(
 					client.SnoozeSession({
-						projectSlug: "project-a",
 						sessionId: "s1",
 						until: null,
 					}),

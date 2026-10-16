@@ -31,8 +31,7 @@ async function forkSessionViaRpc(
 	relayUrl: string,
 	sessionId: string,
 ): Promise<string> {
-	// The replay harness hosts one project; the daemon /rpc routes by slug.
-	const projectSlug = "e2e-replay";
+	// Session ownership determines the relay on the daemon /rpc endpoint.
 	const url = new URL(relayUrl);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	url.pathname = "/rpc";
@@ -47,7 +46,6 @@ async function forkSessionViaRpc(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
 					const result = yield* client.ForkSession({
-						projectSlug,
 						sessionId,
 						originId: crypto.randomUUID(),
 					});

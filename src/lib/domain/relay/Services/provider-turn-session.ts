@@ -1,8 +1,13 @@
 import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
+import {
+	PROVIDER_DRIVERS,
+	type ProviderDriverTraits,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
@@ -10,10 +15,7 @@ import {
 	type PendingQuestion,
 } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
-import {
-	CLAUDE_PROVIDER_ID,
-	isProviderTurnInterruptProvider,
-} from "./provider-turn-dispatch.js";
+import { CLAUDE_PROVIDER_ID } from "./provider-turn-dispatch.js";
 import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
@@ -153,7 +155,8 @@ const materializeOpenCodeSession = (
 			_tag: "Id",
 			id: row.provider,
 		});
-		if (source.driver === "opencode") return input.sessionId;
+		if (PROVIDER_DRIVERS[source.driver].runsOpenCodeServer)
+			return input.sessionId;
 		const session = yield* sessionManagerService.createSession(row.title, {
 			account,
 			sourceSessionId: row.id,
@@ -179,16 +182,27 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		if (account.driver === "claude") {
-			if (input.delivery !== "steer")
-				yield* resolvePendingClaudeQuestions(input);
+		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
+		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		if (
+			traits.unavailableReason &&
+			(registry._tag === "None" || !registry.value.hasInstance(account.driver))
+		)
 			return input.sessionId;
-		}
-		return yield* materializeOpenCodeSession(
-			input,
-			account,
-			providerId ?? account.id,
-		).pipe(Effect.provideService(OrchestrationEngineTag, orchestrationEngine));
+		if (
+			traits.interactionSink === "permission-asking" &&
+			input.delivery !== "steer"
+		)
+			yield* resolvePendingClaudeQuestions(input);
+		if (traits.runsOpenCodeServer)
+			return yield* materializeOpenCodeSession(
+				input,
+				account,
+				providerId ?? account.id,
+			).pipe(
+				Effect.provideService(OrchestrationEngineTag, orchestrationEngine),
+			);
+		return input.sessionId;
 	});
 
 const interruptLegacyTurn = (input: ProviderTurnServiceInterruptInput) =>
@@ -224,10 +238,11 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		if (!isProviderTurnInterruptProvider(account.driver)) {
+		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 			yield* interruptLegacyTurn(input);
 			return;
 		}
+		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
 
 		const interruptResult = yield* Effect.either(
 			engine.dispatchEffect({

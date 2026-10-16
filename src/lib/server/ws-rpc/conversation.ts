@@ -1,9 +1,10 @@
 import { Effect } from "effect";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
-import { LoggerTag } from "../../domain/relay/Services/services.js";
+import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import {
 	type SessionInbox,
 	type SessionInboxOutcome,
@@ -56,6 +57,7 @@ export const conversationHandlers = {
 		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
+			const config = yield* ConfigTag;
 			const previousMode = yield* getPermissionMode(request.sessionId);
 			const log = yield* LoggerTag;
 			yield* persistSessionPermissionMode(request.sessionId, request.mode);
@@ -75,10 +77,12 @@ export const conversationHandlers = {
 				);
 				if (
 					session?.side_thread === 1 &&
-					(yield* (yield* AccountDirectory).resolve({
-						_tag: "Id",
-						id: session.provider,
-					})).driver === "opencode"
+					PROVIDER_DRIVERS[
+						(yield* (yield* AccountDirectory).resolve({
+							_tag: "Id",
+							id: session.provider,
+						})).driver
+					].runsOpenCodeServer
 				) {
 					const opencode = registry.getInstance("opencode");
 					if (opencode?.setPermissionModeEffect) {
@@ -92,7 +96,7 @@ export const conversationHandlers = {
 				log.info(
 					`client=${request.originId ?? "rpc"} session=${request.sessionId} Switched permission mode to: ${request.mode}`,
 				);
-				return { projectSlug: request.projectSlug, mode: request.mode };
+				return { projectSlug: config.slug, mode: request.mode };
 			}).pipe(
 				Effect.tapError(() =>
 					persistSessionPermissionMode(request.sessionId, previousMode).pipe(
