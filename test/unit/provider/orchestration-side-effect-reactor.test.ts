@@ -117,6 +117,7 @@ describe("ProviderSideEffectReactor", () => {
 				);
 				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: () => Effect.succeed(0) },
@@ -159,6 +160,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([
 					{
@@ -228,6 +230,7 @@ describe("ProviderSideEffectReactor", () => {
 				);
 				yield* seedSendTurnOutbox(sql, { providerId: "work-claude" });
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -260,9 +263,9 @@ describe("ProviderSideEffectReactor", () => {
 				const events = yield* EventStoreEffectTag;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				yield* sql`
-					INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES ('session-1', 'work-claude', 'Work', 'idle', 1, 1),
-						('session-2', 'personal', 'Other', 'idle', 1, 1)`;
+					INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'test-project', 'work-claude', 'Work', 'idle', 1, 1),
+						('session-2', 'test-project', 'personal', 'Other', 'idle', 1, 1)`;
 				yield* events.appendBatch([
 					canonicalEvent("session.created", "session-2", {
 						sessionId: "session-2",
@@ -297,6 +300,7 @@ describe("ProviderSideEffectReactor", () => {
 					Effect.succeed(completedTurn),
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion,
@@ -375,6 +379,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest },
@@ -438,6 +443,7 @@ describe("ProviderSideEffectReactor", () => {
 			const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest },
@@ -476,6 +482,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql);
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -567,6 +574,7 @@ describe("ProviderSideEffectReactor", () => {
 					["cmd-1"],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -576,7 +584,7 @@ describe("ProviderSideEffectReactor", () => {
 				const row = {
 					request_sequence: 10,
 					command_id: "cmd-1",
-					project_key: "project-1",
+					project_key: "test-project",
 					session_id: "session-1",
 					provider_id: "claude",
 					effect_type: "send_turn",
@@ -617,6 +625,7 @@ describe("ProviderSideEffectReactor", () => {
 					[10],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -656,6 +665,7 @@ describe("ProviderSideEffectReactor", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -715,6 +725,7 @@ describe("ProviderSideEffectReactor", () => {
 					[10],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -758,6 +769,7 @@ describe("ProviderSideEffectReactor", () => {
 					[10],
 				);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -798,6 +810,7 @@ describe("ProviderSideEffectReactor", () => {
 				yield* seedSendTurnOutbox(sql);
 				const registry = new ProviderRegistry([makeProvider(sendTurn)]);
 				const winnerReactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry,
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -805,6 +818,7 @@ describe("ProviderSideEffectReactor", () => {
 					outcomePollTimeout: "500 millis",
 				});
 				const loserReactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry,
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -837,6 +851,7 @@ describe("ProviderSideEffectReactor", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry(),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -872,6 +887,7 @@ describe("ProviderSideEffectReactor", () => {
 			);
 			yield* seedSendTurnOutbox(sql, { payloadJson: "{not json" });
 			const reactor = new ProviderSideEffectReactor({
+				projectId: "test-project",
 				sql,
 				registry: new ProviderRegistry([makeProvider(sendTurn)]),
 				ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -907,6 +923,7 @@ describe("ProviderSideEffectReactor", () => {
 					payloadJson: JSON.stringify({ sessionId: "session-1" }),
 				});
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -959,6 +976,7 @@ describe("ProviderSideEffectReactor", () => {
 				);
 				yield* seedSendTurnOutbox(sql);
 				const reactor = new ProviderSideEffectReactor({
+					projectId: "test-project",
 					sql,
 					registry: new ProviderRegistry([makeProvider(sendTurn)]),
 					ingestion: { ingest: vi.fn(() => Effect.succeed(1)) },
@@ -1005,7 +1023,7 @@ function seedSendTurnOutbox(
 				"side_effect_requested",
 				1000,
 				"send_turn",
-				"project-1",
+				"test-project",
 				"sha256:abc",
 				1,
 				requestSequence,
@@ -1020,7 +1038,7 @@ function seedSendTurnOutbox(
 			[
 				requestSequence,
 				commandId,
-				"project-1",
+				"test-project",
 				"session-1",
 				options.providerId ?? "claude",
 				"send_turn",

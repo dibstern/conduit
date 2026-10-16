@@ -314,7 +314,7 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 		}
 	});
 
-	it("isolates every list, checksum and tombstone while session history and replay stay global", async () => {
+	it("isolates every list, checksum and tombstone while history stays global and relay replay stays scoped", async () => {
 		const sharedFile = filename();
 		const alpha = ManagedRuntime.make(
 			makePersistenceEffectLayer(sharedFile, "alpha"),
@@ -568,11 +568,7 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 					(await replay.runPromise(replayRead.listSessions(scope))).map(
 						(row) => row.id,
 					),
-					name === "A"
-						? ["Alpha", "Alpha child"]
-						: name === "B"
-							? ["Beta", "Beta child"]
-							: ["Alpha", "Alpha child", "Beta", "Beta child"],
+					name === "B" ? [] : ["Alpha", "Alpha child"],
 				);
 			const beforeDelete = (
 				await alpha.runPromise(read.readSessionList(scopes.A))

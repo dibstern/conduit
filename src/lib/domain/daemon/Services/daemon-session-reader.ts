@@ -165,11 +165,11 @@ export const hasProviderRecoveryCandidate = (
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
 				SELECT 1 FROM provider_command_outbox
-				WHERE provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
+				WHERE project_key = ${project.slug} AND provider_id = 'claude' AND effect_type = 'send_turn' AND status = 'running'
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id
-				WHERE binding.status = 'active'
+				WHERE session.project_id = ${project.slug} AND binding.status = 'active'
 				AND binding.provider IN ${sql.in(openCodeInstanceIds)}
 				AND (session.status IN ('busy', 'retry') OR EXISTS (
 					SELECT 1 FROM pending_approvals AS approval
@@ -205,10 +205,10 @@ export const countRunningProjectSessions = (
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM (
-				SELECT id FROM sessions WHERE status IN ('busy', 'retry')
+				SELECT id FROM sessions WHERE project_id = ${project.slug} AND status IN ('busy', 'retry')
 				UNION
 				SELECT session_id FROM provider_command_outbox
-				WHERE effect_type = 'send_turn' AND status IN ('pending', 'running')
+				WHERE project_key = ${project.slug} AND effect_type = 'send_turn' AND status IN ('pending', 'running')
 			)`;
 			return rows[0]?.count ?? 0;
 		}).pipe(Effect.provide(sqliteLayer));
@@ -241,6 +241,7 @@ export const hasColdAutoSettleCandidate = (
 			disableWAL: true,
 		}).pipe(Layer.provide(Reactivity.layer));
 		const facts = yield* readPersistedAutoSettleFacts(
+			project.slug,
 			now,
 			undefined,
 			project.folders[0],

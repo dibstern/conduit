@@ -530,7 +530,7 @@ export const makeProjectionRunnerEffect = (
 						if (Option.isNone(directory)) return;
 						const sessions = yield* sql<{
 							readonly id: string;
-						}>`SELECT id FROM sessions`;
+						}>`SELECT id FROM sessions WHERE project_id = ${cursorRepo.projectId}`;
 						yield* directory.value.replaceProject(
 							cursorRepo.projectId,
 							sessions.map(({ id }) => id),

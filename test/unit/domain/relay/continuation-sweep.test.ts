@@ -45,6 +45,7 @@ import {
 	makeAccountDirectory,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
+import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
@@ -70,8 +71,12 @@ import {
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -214,6 +219,83 @@ const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 		}),
 	);
 };
+
+it("sweeps due continuations only for its own project in a shared store", async () => {
+	const dispatched: string[] = [];
+	let probes = 0;
+	await Effect.runPromise(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const { continuation, read } = yield* seed();
+				const foreignStore = yield* makeEventStoreEffect.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: "foreign",
+					}),
+				);
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.projectBatch(
+					yield* foreignStore.appendBatch([
+						canonicalEvent("session.created", "foreign", {
+							sessionId: "foreign",
+							title: "Foreign due continuation",
+							provider: "claude",
+						}),
+						canonicalEvent("message.created", "foreign", {
+							sessionId: "foreign",
+							messageId: "foreign-user",
+							role: "user",
+						}),
+						canonicalEvent("session.usage_limited", "foreign", {
+							instanceId: "claude",
+							rateLimitType: "seven_day",
+							cutOffMessageId: "foreign-user",
+							resetsAt: 5,
+						}),
+						canonicalEvent("session.resume_scheduled", "foreign", {
+							instanceId: "claude",
+							at: 10,
+						}),
+					]),
+				);
+				const before = yield* read.getSession("foreign");
+				const beforeEvents = yield* foreignStore.readAllBySession("foreign");
+				yield* continuation.sweepDueContinuations(10);
+				expect(dispatched).toEqual(["s1"]);
+				expect(probes).toBe(1);
+				expect(yield* read.getSession("foreign")).toEqual(before);
+				expect(yield* foreignStore.readAllBySession("foreign")).toEqual(
+					beforeEvents,
+				);
+			}).pipe(
+				Effect.provideService(ConfigTag, config),
+				Effect.provideService(Usage, {
+					readings: Stream.empty,
+					latest: () => Effect.succeed(undefined),
+					turnEnded: () => Effect.void,
+					refresh: () =>
+						Effect.sync(() => {
+							probes++;
+							return [usageReading("claude", { status: "available" })];
+						}),
+					pickFailover: () => Effect.succeed(undefined),
+				}),
+				Effect.provideService(ProviderTurnServiceTag, {
+					holdUserTurnsForAccountSwitch: () => Effect.void,
+					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+					sendTurn: (input) =>
+						Effect.sync(() => {
+							dispatched.push(input.sessionId);
+						}),
+					interruptTurn: () => Effect.void,
+				}),
+				withSwitchServices,
+				withContinuationAdmission,
+				Effect.provide(makeOverridesStateLive()),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		),
+	);
+});
 
 for (const delivery of ["queue", "steer"] as const) {
 	it(`the usage hold admits ${delivery} inputs and blocks Drain but not SendNow`, () => {

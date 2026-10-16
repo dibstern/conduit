@@ -144,8 +144,8 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`
-				INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${sessionId}, 'claude', 'Restart session', 'idle', 1000, 1000)`;
+				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES (${sessionId}, 'test-project', 'claude', 'Restart session', 'idle', 1000, 1000)`;
 
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			yield* client.SwitchPermissionMode({
@@ -207,10 +207,10 @@ describe("WsRpcServerLayer SwitchPermissionMode", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
 					INSERT INTO sessions (
-						id, provider, title, status, permission_mode, created_at, updated_at
+						id, project_id, provider, title, status, permission_mode, created_at, updated_at
 					)
 					VALUES (
-						${sessionId}, 'claude', 'Rejected switch', 'idle', 'ask', 1000, 1000
+						${sessionId}, 'test-project', 'claude', 'Rejected switch', 'idle', 'ask', 1000, 1000
 					)`;
 
 				const client = yield* RpcTest.makeClient(WsRpcGroup);

@@ -29,6 +29,29 @@ export class DurableCommandCommitRepository {
 	): Effect.Effect<readonly StoredEvent[], SqlError | EventStoreError | Error> {
 		return this.sql.withTransaction(
 			Effect.gen(this, function* () {
+				// Acquire the writer slot before the command-ownership preflight.
+				// No session rows change; this prevents a stale snapshot upgrade.
+				yield* this.sql`UPDATE sessions SET project_id = project_id WHERE 0`;
+				const commandIds = [
+					...new Set([
+						input.receipt.commandId,
+						...input.outboxRequests.map((request) => request.commandId),
+					]),
+				];
+				const [foreign] = yield* this.sql<{
+					readonly command_id: string;
+					readonly project_key: string;
+				}>`SELECT command_id, project_key FROM command_receipts
+					WHERE command_id IN ${this.sql.in(commandIds)} AND project_key IS NOT ${this.projectId}
+					UNION ALL SELECT command_id, project_key FROM provider_command_outbox
+					WHERE command_id IN ${this.sql.in(commandIds)} AND project_key IS NOT ${this.projectId}
+					LIMIT 1`;
+				if (foreign)
+					return yield* Effect.fail(
+						new Error(
+							`Command ${foreign.command_id} belongs to project ${foreign.project_key}; project ${this.projectId} cannot commit it`,
+						),
+					);
 				const eventStore = yield* makeEventStoreEffect.pipe(
 					Effect.provideService(SqlClient.SqlClient, this.sql),
 					Effect.provideService(PersistenceProjectTag, {
@@ -75,13 +98,15 @@ export class DurableCommandCommitRepository {
 				status = excluded.status,
 				result_sequence = excluded.result_sequence,
 				command_type = excluded.command_type,
-				project_key = excluded.project_key,
 				fingerprint_hash = excluded.fingerprint_hash,
 				fingerprint_version = excluded.fingerprint_version,
 				accepted_sequence = excluded.accepted_sequence,
 				side_effect_sequence = excluded.side_effect_sequence,
 				error_code = excluded.error_code,
-				updated_at = excluded.updated_at`.pipe(Effect.asVoid);
+				updated_at = excluded.updated_at
+			WHERE command_receipts.project_key = ${this.projectId}`.pipe(
+			Effect.asVoid,
+		);
 	}
 
 	private recordOutboxRequest(
@@ -99,7 +124,8 @@ export class DurableCommandCommitRepository {
 		return Effect.gen(this, function* () {
 			const [running] = yield* this.sql<{ readonly n: number }>`
 				SELECT COUNT(*) AS n FROM provider_command_outbox
-				WHERE command_id = ${request.commandId} AND status = 'running'`;
+				WHERE command_id = ${request.commandId} AND project_key = ${this.projectId}
+					AND status = 'running'`;
 			if ((running?.n ?? 0) > 0) {
 				return yield* Effect.fail(
 					new Error(
@@ -110,6 +136,7 @@ export class DurableCommandCommitRepository {
 			yield* this.sql`
 				DELETE FROM provider_command_outbox
 				WHERE command_id = ${request.commandId}
+				  AND project_key = ${this.projectId}
 				  AND status IN ('pending', 'retryable_failed')`;
 			yield* this.sql`
 				INSERT INTO provider_command_outbox (
