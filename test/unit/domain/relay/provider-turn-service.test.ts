@@ -1470,7 +1470,6 @@ describe("ProviderTurnService", () => {
 				const interruptTurnEffect = vi.fn(() => Effect.void);
 				const instance: ProviderInstance = {
 					providerId: "claude",
-					steering: false,
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],

@@ -40,10 +40,8 @@ test("@drift-layout drift indicator never covers the composer controls on mobile
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [{ id: "planner", name: "Planner" }],
 			}),
-		},
-		handlers: {
 			GetProjects: async () => ({
-				projects: [{ slug: "myapp", name: "myapp", path: "/tmp/myapp" }],
+				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 			}),
 		},
 	});

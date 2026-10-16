@@ -13,13 +13,24 @@ const LINEAGE_CALL =
 const CHILD_METADATA_WRITE =
 	/\b\w*[Mm]etadata\s*[:=]\s*\{[^;]*?\bchildSessionId\b|\b\w*[Mm]etadata\s*(?:\.childSessionId|\[\s*["']childSessionId["']\s*\])\s*=|\bReflect\.set\(\s*\w*[Mm]etadata\s*,\s*["']childSessionId["']/g;
 
-// Pin each permitted call and its count so these files cannot acquire a
-// second caller. Declarations and transport wiring do not invoke operations.
+// Pin each permitted call and metadata write by site and count. Declarations
+// and transport wiring do not invoke operations.
 const IMPLEMENTATION_CALLS = [
 	{
 		file: "src/lib/provider/claude/claude-provider-runtime.ts",
 		calls: ['emit({ type: "ensure-subagent-session"'],
 		// Runner transport emits only the ownership module's lineage command.
+	},
+	{
+		file: "src/lib/provider/cursor/cursor-runner-payload.ts",
+		calls: ['emit({ type: "ensure-subagent-session"'],
+		// Cursor uses the same runner materialization command as Claude.
+	},
+	{
+		file: "src/lib/provider/cursor/cursor-turn-events.ts",
+		calls: [],
+		childMetadataWrites: ["metadata: { childSessionId"],
+		// The Task translator owns Cursor child identity and its tool link.
 	},
 ];
 
@@ -34,8 +45,10 @@ function sourceFiles(dir: string): string[] {
 	});
 }
 
-describe("Claude Child Session ownership boundary", () => {
-	it("confines lineage operations and child tool metadata to the ownership module", () => {
+describe("Provider Child Session ownership boundary", () => {
+	it("confines lineage operations and child tool metadata to their provider owner", () => {
+		for (const { file } of IMPLEMENTATION_CALLS)
+			expect(statSync(join(ROOT, file)).isFile(), file).toBe(true);
 		const outside = sourceFiles(join(ROOT, "src")).flatMap((file) => {
 			const path = relative(ROOT, file);
 			if (path === CORE || path === RUNTIME) return [];
@@ -51,8 +64,14 @@ describe("Claude Child Session ownership boundary", () => {
 			) {
 				violations.push({ path, source: calls.join(", ") });
 			}
-			for (const match of source.matchAll(CHILD_METADATA_WRITE)) {
-				violations.push({ path, source: match[0] });
+			const metadataWrites = [...source.matchAll(CHILD_METADATA_WRITE)].map(
+				(match) => match[0].replace(/\s+/g, " "),
+			);
+			if (
+				JSON.stringify(metadataWrites.sort()) !==
+				JSON.stringify([...(allowed?.childMetadataWrites ?? [])].sort())
+			) {
+				violations.push({ path, source: metadataWrites.join(", ") });
 			}
 			return violations;
 		});

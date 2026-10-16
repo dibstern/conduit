@@ -142,6 +142,8 @@ export type SessionOutput =
 						readonly parentSessionId: string;
 						readonly providerSessionId: string;
 						readonly title: string;
+						readonly instanceId?: string;
+						readonly modelId?: string;
 					};
 			  }
 	  ));

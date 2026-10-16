@@ -63,7 +63,6 @@ function makeProvider(
 ): ProviderInstance {
 	return {
 		providerId: "claude",
-		steering: false,
 		discoverEffect: () => Effect.succeed(emptyCapabilities),
 		sendTurnEffect,
 		interruptTurnEffect: () => Effect.void,

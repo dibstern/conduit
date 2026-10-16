@@ -26,7 +26,11 @@ test("a draft offers and highlights its own account's skills", async ({
 		],
 	};
 	const projects = [
-		{ slug: "e2e-replay", title: "Draft project", folders: ["/workspace"] },
+		{
+			slug: "e2e-replay",
+			title: "Draft project",
+			folders: ["/workspace"] as const,
+		},
 	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
@@ -51,9 +55,9 @@ test("a draft offers and highlights its own account's skills", async ({
 					},
 				],
 			}),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
 		},
 	});

@@ -320,8 +320,10 @@ export const SessionInfoSchema = Schema.Struct({
 	),
 	variant: Schema.optional(Schema.String),
 	contextWindow: Schema.optional(Schema.String),
-	/** Parent session ID — set when this session was forked from another. */
+	/** Containing session, for subagents and Side Threads only. */
 	parentID: Schema.optional(Schema.String),
+	/** Source session whose context started this Fork or Side Thread. */
+	forkedFrom: Schema.optional(Schema.String),
 	sideThread: Schema.optional(Schema.Boolean),
 	/** The message ID at the fork point — messages up to this ID are inherited context. */
 	forkMessageId: Schema.optional(Schema.String),
@@ -822,6 +824,7 @@ export interface OpenCodeInstance {
 	usageEligible?: boolean;
 	available?: boolean;
 	unavailableReason?: string;
+	unavailableCode?: "auth_required";
 	id: string;
 	name: string;
 	port: number;

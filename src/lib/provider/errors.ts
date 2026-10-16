@@ -42,6 +42,8 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	readonly providerId: string;
 	readonly operation: string;
 	readonly cause: unknown;
+	/** Logging in again is the remedy. */
+	readonly code?: "auth_required";
 }> {
 	get message(): string {
 		const inner =

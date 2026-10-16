@@ -10,7 +10,7 @@ import type {
 	ProjectMutationResponse,
 	WsRpcError,
 } from "../transport/ws-rpc.js";
-import { removeProjectRpc } from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type { ProjectInfo } from "../types.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
 import { projectState } from "./project-state.svelte.js";
@@ -80,7 +80,7 @@ export async function confirmRemoveProjects(
 	void (async () => {
 		for (const slug of slugs) {
 			applyProjectList(
-				await removeProjectRpc({ projectSlug: router ?? slug, slug }),
+				await rpc("RemoveProject", { projectSlug: router ?? slug, slug }),
 			);
 		}
 	})().catch(() => undefined);

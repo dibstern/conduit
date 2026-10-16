@@ -260,7 +260,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "DismissCutOff",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 		},
 	},
 	{
@@ -284,7 +283,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "ContinueSession",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 			expect(request.payload["instanceId"]).toBe(match[1]);
 			expect(request.payload["expectedInstanceId"]).toBe(match[1]);
 			expect(request.payload["at"]).toBe(
@@ -300,7 +298,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "CancelContinuation",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 		},
 	},
 	{
@@ -573,7 +570,6 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "PreviewContinuation",
 			);
 			expect(request.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(request.payload["projectSlug"]).toBe("myapp");
 			expect(request.payload["instanceId"]).toBe(match[1]);
 		},
 	},

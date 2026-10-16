@@ -61,6 +61,7 @@ interface RunnerChild {
 	draftPreWarm?: boolean;
 	candidate?: boolean;
 	commandsInFlight: number;
+	pendingSendCommands?: Map<string, number> | undefined;
 	readonly upgrade: RunnerUpgrade;
 }
 
@@ -79,6 +80,8 @@ interface ProcessRunnerDeps {
 
 export interface ProcessRunnerDriver {
 	readonly driverKind: string;
+	/** The payload resumes durable state on demand and needs no warm SDK query. */
+	readonly coldUpgrade?: true;
 	readonly connect: typeof connectRunner;
 	readonly settingsDeferredCode: string;
 	readonly warmCommand: (
@@ -354,6 +357,54 @@ export const makeProcessSessionRunner = (
 			}
 		>();
 		let closing = false;
+		const acknowledgeSends = (
+			sessionId: string,
+			entry: RunnerChild,
+			connection: RunnerSocket,
+		) =>
+			Effect.gen(function* () {
+				if (!sql || !entry.pendingSendCommands?.size) return;
+				const rows = yield* sql<{
+					command_id: string;
+					attempt: number;
+				}>`SELECT command_id, MAX(attempt_count) AS attempt FROM provider_command_outbox
+				WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
+					AND status IN ('completed', 'failed') AND command_id IN ${sql.in([...entry.pendingSendCommands.keys()])}
+				GROUP BY command_id`;
+				if (closing || entry.connection !== connection || connection.closed)
+					return;
+				if (rows.length)
+					connection.write({
+						type: "settled-commands",
+						commands: rows.map((row) => ({
+							commandId: row.command_id,
+							attempt: row.attempt,
+						})),
+					});
+			}).pipe(
+				Effect.catchAll((cause) =>
+					Effect.logWarning("Runner send acknowledgement failed", cause),
+				),
+			);
+		if (sql)
+			yield* Effect.forkScoped(
+				Effect.forever(
+					Effect.sleep("1 second").pipe(
+						Effect.zipRight(
+							Effect.suspend(() =>
+								Effect.forEach(
+									[...children],
+									([sessionId, entry]) =>
+										entry.connection
+											? acknowledgeSends(sessionId, entry, entry.connection)
+											: Effect.void,
+									{ discard: true },
+								),
+							),
+						),
+					),
+				),
+			);
 		const upgradeMark = (
 			sessionId: string,
 			old: RunnerChild,
@@ -594,6 +645,15 @@ export const makeProcessSessionRunner = (
 								);
 							});
 						yield* ensureAttached();
+						entry.pendingSendCommands = hello.sendCommands
+							? new Map(
+									hello.sendCommands.map(({ commandId, attempt }) => [
+										commandId,
+										attempt,
+									]),
+								)
+							: undefined;
+						yield* acknowledgeSends(sessionId, entry, connection);
 						entry.buildId = hello.buildId;
 						entry.stopsTasks = hello.stopsTasks === true;
 						entry.upgrade.state = hello.upgradeState;
@@ -689,6 +749,13 @@ export const makeProcessSessionRunner = (
 							runFork(Deferred.succeed(binding.admission, undefined));
 					}
 				},
+				onCommandsSettled: (commands) => {
+					for (const { commandId, attempt } of commands) {
+						const pending = entry.pendingSendCommands?.get(commandId);
+						if (pending !== undefined && pending <= attempt)
+							entry.pendingSendCommands?.delete(commandId);
+					}
+				},
 				onUpgradeState: (state) => {
 					const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
 					// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
@@ -722,16 +789,19 @@ export const makeProcessSessionRunner = (
 							throw runnerFailure("spawn runner", "Runners are shutting down");
 						prepareRunnerDirectory(deps.workspaceRoot, configDir);
 						const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+						// Launch the real absolute file: Cursor finds native helpers in
+						// ancestor node_modules directories of this entry, not its SDK import.
+						const runnerEntry = fileURLToPath(
+							new URL(
+								`../../../bin/claude-session-runner.${extension}`,
+								import.meta.url,
+							),
+						);
 						const child = spawn(
 							process.execPath,
 							[
 								...process.execArgv,
-								fileURLToPath(
-									new URL(
-										`../../../bin/claude-session-runner.${extension}`,
-										import.meta.url,
-									),
-								),
+								runnerEntry,
 								entry.socketPath,
 								sessionId,
 								entry.runnerId,
@@ -852,7 +922,8 @@ export const makeProcessSessionRunner = (
 			entry.buildId !== undefined &&
 			entry.buildId !== runnerBuildId() &&
 			entry.upgrade.state?.quiescent === true &&
-			entry.upgrade.state.snapshot !== undefined;
+			(entry.upgrade.state.snapshot !== undefined ||
+				driver.coldUpgrade === true);
 		const upgrade = makeRunnerUpgrade<RunnerChild>({
 			eligible,
 			runFork,
@@ -870,7 +941,7 @@ export const makeProcessSessionRunner = (
 				Effect.gen(function* () {
 					const state = old.upgrade.state;
 					const snapshot = state?.snapshot;
-					if (!snapshot)
+					if (!snapshot && !driver.coldUpgrade)
 						return yield* Effect.fail(
 							runnerFailure(
 								"upgrade runner",
@@ -880,10 +951,11 @@ export const makeProcessSessionRunner = (
 					const connection = yield* start(sessionId, replacement);
 					yield* Deferred.succeed(replacement.ready, connection);
 					upgradeMark(sessionId, old, "warming", replacement);
-					yield* connection.commandEffect(
-						randomUUID(),
-						driver.warmCommand(sessionId, state, snapshot),
-					);
+					if (state && snapshot)
+						yield* connection.commandEffect(
+							randomUUID(),
+							driver.warmCommand(sessionId, state, snapshot),
+						);
 				}),
 			commit: (sessionId, old, replacement, activity) =>
 				Effect.gen(function* () {
@@ -1140,6 +1212,7 @@ export const makeProcessSessionRunner = (
 										() => closing,
 										runner.getNativeSessionEffect(registration.sessionId),
 										(commandId, inputId, attempt, nativeResumeFallback) => {
+											entry.pendingSendCommands?.set(commandId, attempt);
 											const sinkId = runnerSinkId(
 												inputId,
 												attempt,
@@ -1738,6 +1811,11 @@ export const makeProcessSessionRunner = (
 						yield* Effect.never;
 					}
 					sentToRunner = true;
+					if (command.type === "send-turn")
+						entry.pendingSendCommands?.set(
+							commandId,
+							command.input.commandAttempt ?? 0,
+						);
 					return yield* connection
 						.commandEffect(
 							commandId,

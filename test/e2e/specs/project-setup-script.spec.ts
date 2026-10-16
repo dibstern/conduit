@@ -68,8 +68,6 @@ async function openSession(
 				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
 				providers: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects: [project], current: slug }),
 			SaveProject: ({ setupScript }) => {
 				const { setupScript: _previous, ...rest } = project;

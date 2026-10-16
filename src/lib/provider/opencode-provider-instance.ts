@@ -99,7 +99,6 @@ export interface OpenCodeProviderInstanceOptions {
 
 export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
-	readonly steering = false;
 
 	private readonly client: OpenCodeAPI;
 	private readonly workspaceRoot: string | undefined;

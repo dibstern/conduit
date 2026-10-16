@@ -192,7 +192,9 @@ Parameters are `CREATE_LATENCY_DEVICES` (4), `CREATE_LATENCY_CREATES` (50),
 `CREATE_LATENCY_P90_BUDGET_MS` (50), and
 `CREATE_LATENCY_ARRIVAL_TIMEOUT_MS` (5000). The test always uses three existing
 100 ms fake Claude streams, `CONDUIT_SLOW_RPC_MS=1`, and
-`CONDUIT_TRACE_SQL_MIN_MS=5` in its isolated daemon.
+`CONDUIT_TRACE_MIN_MS=5` in its isolated daemon. Before the measured phase, it
+creates a stream session and restarts with `CONDUIT_TRACE_SESSION` set to that
+session's ID, retaining its short successful spans while filtering other sessions.
 
 The 50 ms budget is the worst p90 of three runs (30.7 ms on an M-series Mac)
 multiplied by 1.5 and rounded up to a multiple of 25 ms. Recalibrate the same
@@ -204,7 +206,9 @@ shell read and replacement counts, and CreateSession/SubscribeShell slow logs.
 An arrival or p90 failure means creates failed to reach all sidebars promptly.
 A write-rate failure means the intended background load was not sustained;
 replacement reads indicate a shell subscription regression. Missing slow logs
-or short SQL trace spans indicate broken request logging or file sampling.
+or short successful spans outside the debugged session indicate broken request
+logging or file sampling. Missing short spans for the debugged session indicate
+broken session tracing.
 
 `opencode-real-lifecycle.test.ts` runs the real `opencode` (PATH or `CONDUIT_TEST_REAL_OPENCODE`; skipped unless it
 matches `@opencode-ai/sdk`) behind a logging proxy, never prompting: lazy spawn, one process and `/global/event` stream
