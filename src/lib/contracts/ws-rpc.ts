@@ -1,5 +1,5 @@
 import { Rpc, RpcGroup } from "@effect/rpc";
-import { Effect, ParseResult, Schema } from "effect";
+import { Effect, Option, ParseResult, Schema } from "effect";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { FolderIssue } from "../project-folders.js";
 import {
@@ -1698,7 +1698,6 @@ export class ResolveClaudeSettingsForSession extends Schema.TaggedRequest<Resolv
 		payload: {
 			instanceId: NonEmptyString,
 			sessionId: NonEmptyString,
-			accountRef: Schema.optional(Schema.suspend(() => AccountRefSchema)),
 		},
 	},
 ) {}
@@ -2728,6 +2727,14 @@ export class GetGoalDetails extends Schema.TaggedRequest<GetGoalDetails>()(
 	},
 ) {}
 
+// Paired forms let callers omit the tag, but the wire always carries it so
+// every encoded request still decodes as WsRpcRequest.
+const wireTag = <Tag extends string>(tag: Tag) =>
+	Schema.requiredToOptional(Schema.Literal(tag), Schema.Literal(tag), {
+		decode: Option.some,
+		encode: Option.getOrElse(() => tag),
+	});
+
 // One registration per RPC tag, shared by CLI/IPC decoding and browser RPC.
 // Paired forms share one wire tag while keeping their Request constructors.
 const wsRpcRequests = [
@@ -2747,11 +2754,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...AttachProjectForSession.fields,
-					_tag: Schema.optional(Schema.Literal(AttachProjectForSession._tag)),
+					_tag: wireTag(AttachProjectForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...AttachProject.fields,
-					_tag: Schema.optional(Schema.Literal(AttachProject._tag)),
+					_tag: wireTag(AttachProject._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: AttachProject.success,
@@ -2766,11 +2773,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetAgentsForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetAgentsForSession._tag)),
+					_tag: wireTag(GetAgentsForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetAgents.fields,
-					_tag: Schema.optional(Schema.Literal(GetAgents._tag)),
+					_tag: wireTag(GetAgents._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetAgents.success,
@@ -2783,11 +2790,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetCommandsForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetCommandsForSession._tag)),
+					_tag: wireTag(GetCommandsForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetCommands.fields,
-					_tag: Schema.optional(Schema.Literal(GetCommands._tag)),
+					_tag: wireTag(GetCommands._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetCommands.success,
@@ -2812,55 +2819,44 @@ const wsRpcRequests = [
 	{
 		requests: [ResolveClaudeSettingsForSession, ResolveClaudeSettings],
 		rpc: Rpc.make(ResolveClaudeSettings._tag, {
-			payload: Schema.transformOrFail(
-				Schema.Union(
-					Schema.Struct({
-						...ResolveClaudeSettingsForSession.fields,
-						_tag: Schema.optional(
-							Schema.Literal(ResolveClaudeSettingsForSession._tag),
-						),
-					})
-						.omit("accountRef")
-						.annotations({ parseOptions: { onExcessProperty: "error" } }),
+			payload: Schema.Union(
+				Schema.Struct({
+					...ResolveClaudeSettingsForSession.fields,
+					_tag: wireTag(ResolveClaudeSettingsForSession._tag),
+				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+				Schema.transformOrFail(
 					Schema.Struct({
 						...ResolveClaudeSettingsWire.fields,
-						_tag: Schema.optional(
-							Schema.Literal(ResolveClaudeSettingsWire._tag),
-						),
-					}).annotations({ parseOptions: { onExcessProperty: "error" } }),
-				),
-				Schema.Union(
-					Schema.Struct({
-						...ResolveClaudeSettingsForSession.fields,
-						_tag: Schema.optional(
-							Schema.Literal(ResolveClaudeSettingsForSession._tag),
-						),
+						_tag: wireTag(ResolveClaudeSettingsWire._tag),
 					}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 					Schema.Struct({
 						...ResolveClaudeSettings.fields,
-						_tag: Schema.optional(Schema.Literal(ResolveClaudeSettings._tag)),
+						_tag: Schema.optionalWith(
+							Schema.Literal(ResolveClaudeSettings._tag),
+							{ exact: true },
+						),
 					}).annotations({ parseOptions: { onExcessProperty: "error" } }),
+					{
+						decode: (wire) =>
+							Effect.succeed({
+								...wire,
+								accountRef: { _tag: "Id" as const, id: wire.instanceId },
+							}),
+						encode: ({ accountRef, ...wire }, _options, ast) =>
+							accountRef?._tag === "DriverDefault"
+								? Effect.fail(
+										new ParseResult.Type(
+											ast,
+											accountRef,
+											"ResolveClaudeSettings requires an explicit account Id",
+										),
+									)
+								: Effect.succeed({
+										...wire,
+										instanceId: accountRef?.id ?? wire.instanceId,
+									}),
+					},
 				),
-				{
-					decode: (wire) =>
-						Effect.succeed({
-							...wire,
-							accountRef: { _tag: "Id" as const, id: wire.instanceId },
-						}),
-					encode: ({ accountRef, ...wire }, _options, ast) =>
-						accountRef?._tag === "DriverDefault"
-							? Effect.fail(
-									new ParseResult.Type(
-										ast,
-										accountRef,
-										"ResolveClaudeSettings requires an explicit account Id",
-									),
-								)
-							: Effect.succeed({
-									...wire,
-									instanceId: accountRef?.id ?? wire.instanceId,
-								}),
-				},
 			),
 			success: ResolveClaudeSettings.success,
 			error: ResolveClaudeSettings.failure,
@@ -2875,11 +2871,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...ListWorktreesForSession.fields,
-					_tag: Schema.optional(Schema.Literal(ListWorktreesForSession._tag)),
+					_tag: wireTag(ListWorktreesForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...ListWorktrees.fields,
-					_tag: Schema.optional(Schema.Literal(ListWorktrees._tag)),
+					_tag: wireTag(ListWorktrees._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: ListWorktrees.success,
@@ -2915,11 +2911,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetFileTreeForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetFileTreeForSession._tag)),
+					_tag: wireTag(GetFileTreeForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetFileTree.fields,
-					_tag: Schema.optional(Schema.Literal(GetFileTree._tag)),
+					_tag: wireTag(GetFileTree._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetFileTree.success,
@@ -2932,11 +2928,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetFileListForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetFileListForSession._tag)),
+					_tag: wireTag(GetFileListForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetFileList.fields,
-					_tag: Schema.optional(Schema.Literal(GetFileList._tag)),
+					_tag: wireTag(GetFileList._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetFileList.success,
@@ -2949,11 +2945,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetFileContentForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetFileContentForSession._tag)),
+					_tag: wireTag(GetFileContentForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetFileContent.fields,
-					_tag: Schema.optional(Schema.Literal(GetFileContent._tag)),
+					_tag: wireTag(GetFileContent._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetFileContent.success,
@@ -2967,11 +2963,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetSkillContentForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetSkillContentForSession._tag)),
+					_tag: wireTag(GetSkillContentForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetSkillContent.fields,
-					_tag: Schema.optional(Schema.Literal(GetSkillContent._tag)),
+					_tag: wireTag(GetSkillContent._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetSkillContent.success,
@@ -2985,11 +2981,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...GetModelsForSession.fields,
-					_tag: Schema.optional(Schema.Literal(GetModelsForSession._tag)),
+					_tag: wireTag(GetModelsForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...GetModels.fields,
-					_tag: Schema.optional(Schema.Literal(GetModels._tag)),
+					_tag: wireTag(GetModels._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: GetModels.success,
@@ -3021,11 +3017,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...CreatePtyForSession.fields,
-					_tag: Schema.optional(Schema.Literal(CreatePtyForSession._tag)),
+					_tag: wireTag(CreatePtyForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...CreatePty.fields,
-					_tag: Schema.optional(Schema.Literal(CreatePty._tag)),
+					_tag: wireTag(CreatePty._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: CreatePty.success,
@@ -3047,11 +3043,11 @@ const wsRpcRequests = [
 			payload: Schema.Union(
 				Schema.Struct({
 					...ForkSessionForSession.fields,
-					_tag: Schema.optional(Schema.Literal(ForkSessionForSession._tag)),
+					_tag: wireTag(ForkSessionForSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 				Schema.Struct({
 					...ForkSession.fields,
-					_tag: Schema.optional(Schema.Literal(ForkSession._tag)),
+					_tag: wireTag(ForkSession._tag),
 				}).annotations({ parseOptions: { onExcessProperty: "error" } }),
 			),
 			success: ForkSession.success,
