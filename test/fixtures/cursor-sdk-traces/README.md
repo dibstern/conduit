@@ -93,3 +93,14 @@ conversation. With `NODE_ENV=test`, `CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS` and
 scheduling only, without adding or modifying SDK wire fields. The test submits
 its second input after the tee's `close.call` marker and before agent disposal,
 then verifies both turns and the remembered code word reach durable history.
+
+## Skill command process replay (conduit-test-xqsg.13)
+
+`cursor-skills.test.ts` derives a temporary replay from `basic.jsonl` by adding
+only the redacted `credential.store` result described above. Its tee records the
+actual `/nested release` prompt received by the runner. The filesystem skills
+are created under the harness's isolated workspace and home; the JSON evidence
+is `test-results/conduit-test-xqsg.13.json`. This proves command discovery and
+prompt delivery through Conduit, not SDK skill activation. None of the original
+captures contains a skill scenario. The opt-in `cursor-skills-real-sdk.test.ts`
+checks real activation separately and records a new trace when explicitly run.
