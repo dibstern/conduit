@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	type AutoSettleFacts,
-	shouldSettleIdleSession,
+	getAutoSettleOutlook,
 } from "../../../src/lib/session/auto-settle-policy.js";
 
 const DAY = 86_400_000;
@@ -30,7 +30,7 @@ describe("automatic idle settlement policy", () => {
 	// and consume each merged head once, including after a fetch or daemon restart.
 	it("settles recent work when its own branch has a new merged head", () => {
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...eligible(),
 					lastMessageAt: NOW - 1_000,
@@ -45,7 +45,7 @@ describe("automatic idle settlement policy", () => {
 				},
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(true);
 	});
 
@@ -61,7 +61,7 @@ describe("automatic idle settlement policy", () => {
 		["disabled", { autoSettleDisabledAt: NOW - 2_000 }],
 	])("does not let a merge bypass %s", (_label, override) => {
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...eligible(),
 					lastMessageAt: NOW - 100,
@@ -77,7 +77,7 @@ describe("automatic idle settlement policy", () => {
 				},
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(false);
 	});
 
@@ -96,18 +96,17 @@ describe("automatic idle settlement policy", () => {
 			mergedHead: "merged-head",
 			settledMergedHead: "merged-head",
 		};
-		expect(shouldSettleIdleSession(resumed, NOW, idle)).toBe(false);
+		expect(getAutoSettleOutlook(resumed, NOW, idle).kind === "due").toBe(false);
 		expect(
-			shouldSettleIdleSession(
-				{ ...resumed, mergedHead: "next-head" },
-				NOW,
-				idle,
-			),
+			getAutoSettleOutlook({ ...resumed, mergedHead: "next-head" }, NOW, idle)
+				.kind === "due",
 		).toBe(true);
 	});
 
 	it("settles an eligible session", () => {
-		expect(shouldSettleIdleSession(eligible(), NOW, idle)).toBe(true);
+		expect(getAutoSettleOutlook(eligible(), NOW, idle).kind === "due").toBe(
+			true,
+		);
 	});
 
 	it.each([
@@ -124,7 +123,8 @@ describe("automatic idle settlement policy", () => {
 		["snoozed", { isSnoozed: true }],
 	] as const)("leaves %s alone", (_reason, patch) => {
 		expect(
-			shouldSettleIdleSession({ ...eligible(), ...patch }, NOW, idle),
+			getAutoSettleOutlook({ ...eligible(), ...patch }, NOW, idle).kind ===
+				"due",
 		).toBe(false);
 	});
 
@@ -133,7 +133,7 @@ describe("automatic idle settlement policy", () => {
 		"running",
 	] as const)("leaves a %s latest turn alone", (state) => {
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...eligible(),
 					latestTurn: {
@@ -145,23 +145,20 @@ describe("automatic idle settlement policy", () => {
 				},
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(false);
 	});
 
 	it("blocks an un-settle after the last activity", () => {
 		expect(
-			shouldSettleIdleSession(
-				{ ...eligible(), unsettledAt: NOW - DAY },
-				NOW,
-				idle,
-			),
+			getAutoSettleOutlook({ ...eligible(), unsettledAt: NOW - DAY }, NOW, idle)
+				.kind === "due",
 		).toBe(false);
 	});
 
 	it("allows new activity after un-settle once it becomes idle", () => {
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...eligible(),
 					lastMessageAt: NOW - idle - 1,
@@ -169,61 +166,63 @@ describe("automatic idle settlement policy", () => {
 				},
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(true);
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{ ...eligible(), unsettledAt: NOW - idle - 1 },
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(true);
 	});
 
 	it("uses a strict idle-window boundary", () => {
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{ ...eligible(), lastMessageAt: NOW - idle },
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(false);
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{ ...eligible(), lastMessageAt: NOW - idle - 1 },
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(true);
 	});
 
 	it("never settles when the setting is null", () => {
-		expect(shouldSettleIdleSession(eligible(), NOW, null)).toBe(false);
+		expect(getAutoSettleOutlook(eligible(), NOW, null).kind === "due").toBe(
+			false,
+		);
 	});
 
 	it("respects the queued user message grace boundary", () => {
 		const queued = { ...eligible(), latestUserMessageAt: NOW - 119_999 };
-		expect(shouldSettleIdleSession(queued, NOW, idle)).toBe(false);
+		expect(getAutoSettleOutlook(queued, NOW, idle).kind === "due").toBe(false);
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{ ...queued, latestUserMessageAt: NOW - 120_000 },
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(false);
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{ ...queued, latestUserMessageAt: NOW - 120_001 },
 				NOW,
 				idle,
-			),
+			).kind === "due",
 		).toBe(true);
 	});
 
 	it("does not block a user message already picked up by a turn", () => {
 		const facts = eligible();
 		expect(
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...facts,
 					latestUserMessageAt: NOW - 1000,
@@ -236,19 +235,21 @@ describe("automatic idle settlement policy", () => {
 				},
 				NOW,
 				1000,
-			),
+			).kind === "due",
 		).toBe(false); // Recent turn activity still controls idleness.
 	});
 
 	it("allows a woken snooze", () => {
 		expect(
-			shouldSettleIdleSession({ ...eligible(), isSnoozed: false }, NOW, idle),
+			getAutoSettleOutlook({ ...eligible(), isSnoozed: false }, NOW, idle)
+				.kind === "due",
 		).toBe(true);
 	});
 
 	it("does not treat rename or pin timestamps as activity", () => {
 		expect(
-			shouldSettleIdleSession({ ...eligible(), pinnedAt: null }, NOW, idle),
+			getAutoSettleOutlook({ ...eligible(), pinnedAt: null }, NOW, idle)
+				.kind === "due",
 		).toBe(true);
 	});
 });

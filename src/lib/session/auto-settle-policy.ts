@@ -26,28 +26,40 @@ export interface AutoSettleFacts {
 	readonly settledMergedHead?: string | undefined;
 }
 
-export function shouldSettleIdleSession(
+export type AutoSettleOutlook =
+	| { kind: "off" }
+	| { kind: "never" }
+	| { kind: "settled" }
+	| {
+			kind: "paused";
+			reason: "pinned" | "snoozed" | "unread" | "working" | "awaiting-activity";
+	  }
+	| { kind: "due" }
+	| { kind: "scheduled"; at: number };
+
+export function getAutoSettleOutlook(
 	facts: AutoSettleFacts,
 	now: number,
 	idleWindowMs: number | null,
-): boolean {
+): AutoSettleOutlook {
+	if (!facts.exists || facts.autoSettleDisabledAt !== null)
+		return { kind: "off" };
+	if (idleWindowMs === null) return { kind: "never" };
+	if (facts.settledAt !== null) return { kind: "settled" };
+	if (facts.pinnedAt !== null) return { kind: "paused", reason: "pinned" };
+	if (facts.isSnoozed) return { kind: "paused", reason: "snoozed" };
+	if (facts.unread) return { kind: "paused", reason: "unread" };
+
 	if (
-		idleWindowMs === null ||
-		!facts.exists ||
-		facts.settledAt !== null ||
-		facts.autoSettleDisabledAt !== null ||
 		facts.hasPendingApproval ||
 		facts.status === "busy" ||
 		facts.status === "retry" ||
 		facts.latestTurn?.state === "pending" ||
 		facts.latestTurn?.state === "running" ||
 		facts.hasLiveBackgroundWork ||
-		facts.isSnoozed ||
-		facts.pinnedAt !== null ||
-		facts.hasViewer ||
-		facts.unread
+		facts.hasViewer
 	)
-		return false;
+		return { kind: "paused", reason: "working" };
 
 	const turn = facts.latestTurn;
 	const latestUserMessageAt = facts.latestUserMessageAt;
@@ -59,7 +71,13 @@ export function shouldSettleIdleSession(
 				(time) => time === null || time < latestUserMessageAt,
 			))
 	)
-		return false;
+		return { kind: "paused", reason: "working" };
+
+	if (
+		facts.mergedHead !== undefined &&
+		facts.mergedHead !== facts.settledMergedHead
+	)
+		return { kind: "due" };
 
 	const lastActivityAt = Math.max(
 		facts.lastMessageAt ?? Number.NEGATIVE_INFINITY,
@@ -67,13 +85,15 @@ export function shouldSettleIdleSession(
 		turn?.startedAt ?? Number.NEGATIVE_INFINITY,
 		turn?.completedAt ?? Number.NEGATIVE_INFINITY,
 	);
-	return (
-		(facts.mergedHead !== undefined &&
-			facts.mergedHead !== facts.settledMergedHead) ||
-		(Number.isFinite(lastActivityAt) &&
-			(facts.unsettledAt === null || facts.unsettledAt <= lastActivityAt) &&
-			lastActivityAt < now - idleWindowMs)
-	);
+	if (
+		!Number.isFinite(lastActivityAt) ||
+		!(facts.unsettledAt === null || facts.unsettledAt <= lastActivityAt)
+	)
+		return { kind: "paused", reason: "awaiting-activity" };
+
+	return lastActivityAt < now - idleWindowMs
+		? { kind: "due" }
+		: { kind: "scheduled", at: lastActivityAt + idleWindowMs };
 }
 
 export function sessionRowToAutoSettleFacts(

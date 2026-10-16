@@ -3,7 +3,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Effect } from "effect";
 import {
 	type AutoSettleFacts,
-	shouldSettleIdleSession,
+	getAutoSettleOutlook,
 } from "./auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 
@@ -24,7 +24,7 @@ export const settleIdleSessions = <SettleError>(
 ): Effect.Effect<number, SqlError | SettleError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const decide = (sessionId: string, facts: AutoSettleFacts) =>
-			shouldSettleIdleSession(
+			getAutoSettleOutlook(
 				{
 					...facts,
 					hasViewer: ports.hasViewer(sessionId),
@@ -32,7 +32,7 @@ export const settleIdleSessions = <SettleError>(
 				},
 				now,
 				idleWindowMs,
-			);
+			).kind === "due";
 		const candidates = [
 			...(yield* readPersistedAutoSettleFacts(
 				now,

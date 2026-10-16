@@ -15,7 +15,7 @@ import {
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
-import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
+import { getAutoSettleOutlook } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
 import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
@@ -245,8 +245,8 @@ export const hasColdAutoSettleCandidate = (
 			undefined,
 			project.folders[0],
 		).pipe(Effect.provide(sqliteLayer));
-		return [...facts.values()].some((item) =>
-			shouldSettleIdleSession(item, now, idleWindowMs),
+		return [...facts.values()].some(
+			(item) => getAutoSettleOutlook(item, now, idleWindowMs).kind === "due",
 		);
 	});
 
