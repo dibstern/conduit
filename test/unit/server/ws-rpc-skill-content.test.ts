@@ -11,13 +11,10 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import {
-	makeSessionDirectoryLive,
-	SessionDirectory,
-} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
@@ -196,10 +193,12 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 			writeSkill(project, "review", "Project A instructions");
 			const homePath = writeSkill(home, "review", "Home instructions");
 			const otherProject = join(temp, "project-b");
-			const directory = yield* SessionDirectory.pipe(
-				Effect.provide(makeSessionDirectoryLive(temp, [])),
-			);
-			const directoryLayer = Layer.succeed(SessionDirectory, directory);
+			const directoryLayer = Layer.succeed(SessionDirectory, {
+				projectOf: (sessionId) =>
+					Effect.succeed(
+						sessionId === "owned-b" ? Option.some("project-b") : Option.none(),
+					),
+			});
 			const projectA = yield* Layer.build(
 				makeTestHandlerLayer({
 					config: makeMockConfig({ slug: "project-a", projectDir: project }),
@@ -211,13 +210,7 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 						slug: "project-b",
 						projectDir: otherProject,
 					}),
-					persistenceLayer: makePersistenceEffectLayer(
-						":memory:",
-						"project-b",
-						undefined,
-						undefined,
-						directoryLayer,
-					),
+					persistenceLayer: makePersistenceEffectLayer(":memory:", "project-b"),
 					seedEvents: [
 						canonicalEvent("session.created", "owned-b", {
 							sessionId: "owned-b",

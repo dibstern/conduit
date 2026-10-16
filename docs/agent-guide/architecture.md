@@ -50,6 +50,8 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 Before relays start, offline startup migration imports registered and retained per-project stores from `<configDir>/projects/<slug>/events.db`, including legacy `<project>/.conduit/events.db` sources. The importer normalizes private copies, commits history to the daemon store, and archives the sources as described in [ADR-0006](../adr/0006-daemon-store-import-normalises-copies-and-keeps-the-first-owner.md). A failed import makes only its project unavailable until restart retries it; committed imports with backup-only failures remain usable, as specified in [ADR-0008](../adr/0008-a-failed-import-blocks-its-project-and-removed-history-stays-hidden.md).
 Each project storage directory retains its main folder in `project.json`, so re-adding that folder reuses its inactive slug and history, while other folders reserve occupied or unowned storage slugs. Removing a project disposes its relay and retains its rows in the daemon store; the history stays hidden until the project is registered again.
 
+`SessionDirectory` exposes only `projectOf(sessionId)`. The daemon queries `sessions.project_id` in the shared store at lookup time and returns an owner only while that project is registered. Session IDs are primary keys, so each stored session has one owner. Standalone relays keep their own store and resolve only rows whose `project_id` matches their slug for WebSocket routing.
+
 Read-model subscribers detect dropped advance publications after a bus overflow.
 Catch-up sources read a shared window through the newest queued advance, including
 unrouted advances, and send row deltas plus durable tombstones. They replace the

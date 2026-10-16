@@ -80,7 +80,7 @@ export const makeDaemonRpcTestLayer = (
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
-		/** Explicit standalone adapter fixtures may supply the in-memory directory. */
+		/** Routing fixtures may supply a lookup double. */
 		sessionDirectory?: Layer.Layer<SessionDirectory>;
 		instances?: ReadonlyArray<DaemonInstanceConfig>;
 		launchLogin?: ClaudeConfigDir;

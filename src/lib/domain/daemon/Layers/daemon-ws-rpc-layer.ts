@@ -782,9 +782,6 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.mapError(
 							(error) =>
 								new WsRpcError({
-									...(error._tag === "AmbiguousSession"
-										? { code: "ambiguous-session" as const }
-										: {}),
 									message: error.message,
 								}),
 						),

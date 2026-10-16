@@ -60,7 +60,6 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
-	indexProjectSessions,
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
@@ -768,17 +767,6 @@ describe("daemon shared-store startup", () => {
 						yield* Ref.set(registry, beforeRemoval);
 						expect(yield* directory.projectOf("child")).toEqual(
 							Option.some("beta"),
-						);
-						yield* indexProjectSessions(root, projects[1]);
-						yield* directory.record("alpha", ["child", "invented"]);
-						yield* directory.replaceProject("alpha", ["invented"]);
-						yield* directory.remove("alpha", ["parent"]);
-						yield* directory.removeProject("alpha");
-						expect(yield* directory.projectOf("parent")).toEqual(
-							Option.some("alpha"),
-						);
-						expect(yield* directory.projectOf("invented")).toEqual(
-							Option.none(),
 						);
 					}),
 				);

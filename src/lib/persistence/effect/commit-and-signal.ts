@@ -2,9 +2,7 @@ import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect, Option } from "effect";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
-import { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
-import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import { contentionMetrics } from "../contention-metrics.js";
 import type { CanonicalEvent, StoredEvent } from "../events.js";
@@ -139,8 +137,6 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 	const eventStore = yield* EventStoreEffectTag;
 	const projectionRunner = yield* ProjectionRunnerEffectTag;
 	const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
-	const directory = yield* Effect.serviceOption(SessionDirectory);
-	const project = yield* Effect.serviceOption(PersistenceProjectTag);
 
 	const write = <A, E, R>(
 		body: (
@@ -263,12 +259,6 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 								collections: advance.collections,
 							})),
 						);
-						// Ownership follows the committed rows, including direct seeds and
-						// cascaded children, before any caller can observe success.
-						if (Option.isSome(directory) && Option.isSome(project)) {
-							yield* directory.value.record(project.value.projectId, stamped);
-							yield* directory.value.remove(project.value.projectId, removed);
-						}
 						if (Option.isSome(sessionEventBus) && options.publish !== false) {
 							// Post-commit, so a subscriber that re-queries on the advance
 							// cannot read behind the rows it was told about. Keep the permit
