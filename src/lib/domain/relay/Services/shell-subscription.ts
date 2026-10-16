@@ -20,27 +20,20 @@
 // before the tombstones began, or past the current version, gets a snapshot.
 
 import { channel } from "node:diagnostics_channel";
-import { SqlClient } from "@effect/sql";
+import type { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Duration, Effect, Option, Stream } from "effect";
+import { Duration, Effect, Stream } from "effect";
 import type { ResumeBase } from "../../../contracts/ws-rpc.js";
-import { withCachedSessionGit } from "../../../git/session-git.js";
-import {
-	type ReadQueryEffectError,
+import type {
+	ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
-import { AccountDirectory } from "../../daemon/Services/account-directory.js";
-import { resolveSessionAccountIds } from "../../daemon/Services/session-accounts.js";
+import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { makeSessionRows } from "../../daemon/Services/session-rows.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
-import {
-	BackgroundLivenessTag,
-	ConfigTag,
-	SessionCompactionsTag,
-	SessionRetriesTag,
-} from "./services.js";
+import { type BackgroundLivenessTag, ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
-import { withSessionWorktreeStatus } from "./session-workspace.js";
 
 export type ShellSubscriptionError = ReadQueryEffectError | SqlError;
 
@@ -79,19 +72,12 @@ export const subscribeShell = (
 > =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const backgroundOf = yield* BackgroundLivenessTag;
 			const config = yield* ConfigTag;
-			const sql = yield* SqlClient.SqlClient;
-			const accounts = yield* AccountDirectory;
-			// Optional so read-only hosts need not wire it; the relay always does.
-			const compactingOf = Option.getOrUndefined(
-				yield* Effect.serviceOption(SessionCompactionsTag),
-			);
-			const retryingOf = Option.getOrUndefined(
-				yield* Effect.serviceOption(SessionRetriesTag),
-			);
+			const rows = yield* makeSessionRows({
+				slug: config.slug,
+				folders: [config.projectDir, ...(config.extraFolders ?? [])],
+			});
 			return stream<SessionInfo, ShellSubscriptionError>({
 				bus,
 				source: {
@@ -100,10 +86,9 @@ export const subscribeShell = (
 					shareReads: true,
 					// The sidebar is never paged, so a resume base is the whole list.
 					read: (range, base) =>
-						readQuery
-							.readSessionList({
+						rows
+							.read({
 								...range,
-								backgroundOf,
 								...(base === undefined ? {} : { listing: true }),
 							})
 							.pipe(
@@ -116,44 +101,6 @@ export const subscribeShell = (
 										} satisfies SidebarRead);
 									return list;
 								}),
-								Effect.flatMap((list) =>
-									Effect.gen(function* () {
-										const accountIds = yield* resolveSessionAccountIds(
-											list.rows.map((row) => row.item.id),
-										).pipe(
-											Effect.provideService(SqlClient.SqlClient, sql),
-											Effect.provideService(AccountDirectory, accounts),
-										);
-										return yield* Effect.forEach(list.rows, (row) =>
-											Effect.gen(function* () {
-												const compacting = compactingOf?.(row.item.id);
-												const retrying = retryingOf?.(row.item.id);
-												return {
-													...row,
-													item: {
-														...(yield* withSessionWorktreeStatus(
-															withCachedSessionGit(
-																{
-																	...row.item,
-																	projectSlug: config.slug,
-																	accountId:
-																		accountIds.get(row.item.id) ?? null,
-																},
-																[
-																	config.projectDir,
-																	...(config.extraFolders ?? []),
-																],
-															),
-															config,
-														)),
-														...(compacting === undefined ? {} : { compacting }),
-														...(retrying === undefined ? {} : { retrying }),
-													},
-												};
-											}),
-										).pipe(Effect.map((rows) => ({ ...list, rows })));
-									}),
-								),
 							),
 					resume: "catchUp",
 				},

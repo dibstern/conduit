@@ -58,6 +58,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
@@ -797,6 +798,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// The relay constructs the session manager before its status-poller layer.
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		const backgroundOf = yield* BackgroundLivenessTag;
+		const activity = Option.getOrUndefined(
+			yield* Effect.serviceOption(SessionActivityTag),
+		);
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const accounts = yield* AccountDirectory;
@@ -819,6 +823,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				accounts,
 				statusPollerOption,
 				backgroundOf,
+				...(activity === undefined ? {} : { activity }),
 				snapshot,
 				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
 				projectSlug: config.slug,

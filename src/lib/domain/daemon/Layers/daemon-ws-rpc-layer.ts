@@ -87,6 +87,7 @@ import {
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
+import { SessionActivityTag } from "../Services/session-activity.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -105,7 +106,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
-		const context = yield* Effect.context<
+		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
@@ -122,6 +123,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| KeepAwakeTag
 			| TailscaleCliTag
 		>();
+		const activity = yield* Effect.serviceOption(SessionActivityTag);
+		const context = Option.isSome(activity)
+			? Context.add(baseContext, SessionActivityTag, activity.value)
+			: baseContext;
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;

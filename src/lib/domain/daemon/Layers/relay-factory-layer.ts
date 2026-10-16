@@ -61,6 +61,10 @@ import {
 	openCodeInstanceFor,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../Services/session-activity.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
@@ -168,6 +172,10 @@ export const RelayFactoryLive = (
 			const pollerFibers = yield* PollerFibersTag;
 			const healthCheck = yield* InstanceHealthCheckTag;
 			const eventBus = yield* DaemonEventBusTag;
+			const activity =
+				Option.getOrUndefined(
+					yield* Effect.serviceOption(SessionActivityTag),
+				) ?? (yield* makeSessionActivity);
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -205,6 +213,7 @@ export const RelayFactoryLive = (
 					listEffectDaemonSessions(configDir, options).pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 						Effect.provideService(AccountDirectory, accounts),
+						Effect.provideService(SessionActivityTag, activity),
 					),
 				);
 			const broadcastSessionListChanged = () =>
@@ -396,6 +405,7 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.add(SessionActivityTag, activity),
 									),
 									openCodeInstances,
 									...(Option.isSome(worktreeService)

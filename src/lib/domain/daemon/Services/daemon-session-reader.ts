@@ -6,7 +6,6 @@ import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
-	withCachedSessionGit,
 } from "../../../git/session-git.js";
 import {
 	makeReadQueryEffect,
@@ -17,10 +16,6 @@ import { computeProjectGroups } from "../../../project-grouping.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { shouldSettleIdleSession } from "../../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../../session/auto-settle-reader.js";
-import {
-	effectiveSessionFolders,
-	effectiveWorkingDirectory,
-} from "../../../session/session-workspace.js";
 import { getScopeGroupKey } from "../../../session-scope.js";
 import type {
 	DaemonSessionCursor,
@@ -29,13 +24,12 @@ import type {
 	SessionInfo,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
-import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
 import type { AccountDirectory } from "./account-directory.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
 } from "./project-registry-service.js";
-import { resolveSessionAccountIds } from "./session-accounts.js";
+import { makeSessionRows } from "./session-rows.js";
 
 class DaemonSessionReadError extends Data.TaggedError(
 	"DaemonSessionReadError",
@@ -110,63 +104,25 @@ const readProjectSessions = (
 		).pipe(Layer.provide(sqliteLayer));
 
 		const sessions = yield* Effect.gen(function* () {
-			const readQuery = yield* ReadQueryEffectTag;
-			return yield* readQuery.listSessionInfos({
+			const rows = yield* makeSessionRows({
+				slug: projectSlug,
+				folders: project.folders,
+				gitCache,
+				refreshGit: true,
+			});
+			return yield* rows.list({
 				...(options.roots !== undefined ? { roots: options.roots } : {}),
 				...(options.limit !== undefined ? { limit: options.limit } : {}),
 				...(options.search !== undefined ? { titleQuery: options.search } : {}),
 				...(options.cursor !== undefined ? { before: options.cursor } : {}),
 			});
-		}).pipe(Effect.provide(readQueryLayer));
-		const accountIds = yield* resolveSessionAccountIds(
-			sessions.map((session) => session.id),
-		).pipe(Effect.provide(sqliteLayer));
-		const directories = new Set(
-			sessions.flatMap((session) => [
-				effectiveWorkingDirectory(project.folders[0], session.workspace),
-				...effectiveSessionFolders(project.folders, session.workspace).map(
-					({ directory }) => directory,
-				),
-			]),
+		}).pipe(Effect.provide(readQueryLayer), Effect.provide(sqliteLayer));
+		return sessions.map(
+			(session): ProjectSessionCandidate => ({
+				sortKey: { updatedAt: session.updatedAt, id: session.id },
+				session,
+			}),
 		);
-		// Cold projects have no git-change signal to update browsers after this read.
-		yield* Effect.forEach(
-			[...directories].filter((directory) => gitCache.isStale(directory)),
-			(directory) =>
-				Effect.tryPromise({
-					try: () => gitCache.refresh(directory),
-					catch: (cause) => new DaemonSessionReadError({ projectSlug, cause }),
-				}),
-			{ concurrency: 4, discard: true },
-		);
-		return yield* Effect.forEach(sessions, (session) =>
-			withSessionWorktreeStatus(
-				withCachedSessionGit(
-					{
-						...session,
-						projectSlug,
-						accountId: accountIds.get(session.id) ?? null,
-					},
-					project.folders,
-					gitCache,
-				),
-				{
-					projectDir: projectDirectory,
-					slug: projectSlug,
-					extraFolders: project.folders.slice(1),
-				},
-			).pipe(
-				Effect.map(
-					(enriched): ProjectSessionCandidate => ({
-						sortKey: { updatedAt: session.updatedAt, id: session.id },
-						session: {
-							...enriched,
-							projectSlug,
-						},
-					}),
-				),
-			),
-		).pipe(Effect.provide(sqliteLayer));
 	});
 
 /** Check recovery work without acquiring the project's relay or starting providers. */

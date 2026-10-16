@@ -6,7 +6,7 @@ export type SessionBackground = {
 };
 
 /**
- * Relay-owned state for Claude background tasks that outlive their foreground
+ * Daemon-owned state for Claude background tasks that outlive their foreground
  * turn. Driven by the SDK's level signal (`background_tasks_changed`, the full
  * live set) rather than start/finish pairs, so a missed finish can't leave a
  * session stuck on "working".
