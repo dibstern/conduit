@@ -147,7 +147,6 @@ for (const scenario of [
 		const registry = new ProviderRegistry([
 			{
 				providerId: "claude",
-				steering: true,
 				discoverEffect: () =>
 					Effect.die("Continuation must not discover providers"),
 				sendTurnEffect: () =>

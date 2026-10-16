@@ -322,7 +322,6 @@ export const composerWordsHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === tag,
 			);
 			expect(request.payload).toMatchObject({
-				projectSlug: "myapp",
 				sessionId: new URL(world.page.url()).pathname.split("/")[2],
 				path: match[2],
 			});

@@ -87,6 +87,7 @@
 		return (inp?.["command"] as string | undefined) ?? null;
 	}
 	const bashCommand = $derived(commandOf(message));
+	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.metadata['fileChange'] || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
 
 	// Description preview (prefer input subtitle, then first line of result, then status)
 	const descText = $derived.by(() => {
@@ -125,6 +126,7 @@
 	>
 		{descText}
 	</span>
+	{#if typeof message.metadata?.['cursorToolType'] === "string" && message.metadata['truncated'] === true}<span class="text-xs text-text-muted">Truncated</span>{/if}
 
 	{#if toolSummary.tags}
 		{#each toolSummary.tags as tag}
@@ -142,7 +144,7 @@
 	</div>
 	{/if}
 
-	{#if expanded && (message.result || bashCommand)}
+	{#if expanded && (message.result || bashCommand || cursorDetail)}
 		<ToolFullDetail {message} {...loadDetails && { load: loadDetails }} class="mx-2.5 mt-1 mb-1">
 			{#snippet children(tool)}
 				{@const command = commandOf(tool)}

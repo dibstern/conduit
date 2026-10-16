@@ -14,7 +14,7 @@ import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import {
-	getProviderDriver,
+	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import {
@@ -45,6 +45,7 @@ import {
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
+import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
 	PickRequired,
@@ -62,6 +63,20 @@ import { loadServerSessionPick, sessionPickEvents } from "./session-pick.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
+
+export type SessionPlacement =
+	| { parentId?: never; forkedFrom?: never; sideThread?: false }
+	| { parentId: string; forkedFrom?: never; sideThread?: false }
+	| { parentId?: never; forkedFrom: string; sideThread?: false }
+	| { parentId: string; forkedFrom: string; sideThread: true };
+
+export const forkPlacement = (
+	sourceId: string,
+	sideThread: boolean,
+): Extract<SessionPlacement, { forkedFrom: string }> =>
+	sideThread
+		? { parentId: sourceId, forkedFrom: sourceId, sideThread: true }
+		: { forkedFrom: sourceId };
 
 const sideThreadTitle = (question: string) =>
 	normalizeSessionTitle(question)
@@ -103,20 +118,22 @@ type SessionCommandType =
 export type SessionCommand = {
 	[K in SessionCommandType]: {
 		readonly type: K;
-		readonly data: EventPayloadMap[K];
+		readonly data: K extends "session.created"
+			? Omit<EventPayloadMap[K], keyof SessionPlacement> & SessionPlacement
+			: EventPayloadMap[K];
 	};
 }[SessionCommandType];
 
 /**
  * Upstream sync varies for a real reason: OpenCode keeps its own session
- * registry that has to be told about mutations, and the Claude Agent SDK has no
- * such registry. Two adapters, so the seam is real rather than hypothetical.
+ * registry that has to be told about mutations, Cursor stores local agents,
+ * and the Claude Agent SDK has no such registry.
  *
  * Sync is best-effort by contract — the local write is authoritative, so a
  * failure here is logged, never propagated.
  */
 export interface SessionUpstreamAdapter {
-	readonly provider: "opencode" | "claude";
+	readonly provider: KnownProviderDriverKind;
 	readonly sync: (
 		command: SessionCommand,
 	) => Effect.Effect<void, Cause.UnknownException>;
@@ -185,6 +202,30 @@ export const claudeUpstreamAdapter: SessionUpstreamAdapter = {
 	// The Claude Agent SDK has no server-side session registry to keep in step.
 	sync: () => Effect.void,
 };
+
+export const sessionUpstreamAdapter = (
+	provider: KnownProviderDriverKind,
+	api: OpenCodeAPI,
+): Effect.Effect<SessionUpstreamAdapter> =>
+	Effect.gen(function* () {
+		switch (provider) {
+			case "opencode":
+				return openCodeUpstreamAdapter(api);
+			case "claude":
+				return claudeUpstreamAdapter;
+			case "cursor": {
+				const config = yield* Effect.serviceOption(ConfigTag);
+				return cursorUpstreamAdapter(
+					config._tag === "Some" && config.value.configDir !== undefined
+						? {
+								workspaceRoot: config.value.projectDir,
+								configDir: config.value.configDir,
+							}
+						: undefined,
+				);
+			}
+		}
+	});
 
 /**
  * Apply a session mutation: append, project, sync.
@@ -303,10 +344,7 @@ export const applySessionCommand = (
 					? options.upstreamAdapter
 					: command.type === "session.renamed" ||
 							command.type === "session.deleted"
-						? getProviderDriver(account?.driver ?? "opencode")
-								?.runsOpenCodeServer
-							? openCodeUpstreamAdapter(api)
-							: claudeUpstreamAdapter
+						? yield* sessionUpstreamAdapter(account?.driver ?? "opencode", api)
 						: null;
 
 			if (adapter !== null) {
@@ -553,10 +591,9 @@ export const forkOpenCodeSession = (
 							sessionId: session.id,
 							title,
 							provider: account.id,
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
@@ -853,10 +890,9 @@ const forkSessionInWorkspace = (
 							...(parentThread
 								? { providerSessionId: forked.sdkSessionId }
 								: {}),
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
@@ -864,7 +900,10 @@ const forkSessionInWorkspace = (
 							forkPointEvent,
 							forkPointTimestamp: source.boundary.createdAt,
 							forkPointMessageId: source.boundary.messageId,
-						},
+						} satisfies Extract<
+							SessionCommand,
+							{ type: "session.created" }
+						>["data"],
 						{
 							provider,
 							createdAt: Date.now(),

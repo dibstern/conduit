@@ -7,7 +7,6 @@ import {
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
@@ -183,12 +182,15 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			id: providerId,
 		});
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
-		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 		if (
-			traits.unavailableReason &&
-			(registry._tag === "None" || !registry.value.hasInstance(account.driver))
+			traits.readOnlySubagents &&
+			session?.parent_id &&
+			session.side_thread !== 1 &&
+			!session.fork_point_event &&
+			session.fork_point_message_id == null &&
+			session.fork_point_timestamp == null
 		)
-			return input.sessionId;
+			return yield* Effect.fail(new Error("Subagent sessions are read-only."));
 		if (
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"

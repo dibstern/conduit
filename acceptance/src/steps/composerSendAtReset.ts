@@ -123,7 +123,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 						inputId,
 						text,
 					});
-					return { ok: true, sessionId };
+					return { ok: true, sessionId, handedOff: false };
 				},
 				"input.cancel": ({ sessionId, inputId }) => {
 					relay.sendMessage({
@@ -435,7 +435,6 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			expect(switched.payload["instanceId"]).toBe(match[2]);
 			expect(switched.payload["expectedInstanceId"]).toBe("claude");
 			expect(switched.payload["sessionId"]).toBe(currentSessionId(world.page));
-			expect(switched.payload["projectSlug"]).toBe("myapp");
 			expect(switched.payload["originId"]).toBeTruthy();
 			expect(submitted.payload["originId"]).toBe(switched.payload["originId"]);
 			expect(submitted.payload["sessionId"]).toBe(

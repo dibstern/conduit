@@ -113,8 +113,6 @@ for (const scenario of [
 					providerScope: { id: "claude", name: "Claude" },
 					instanceId: "claude",
 				}),
-			},
-			handlers: {
 				GetProjects: () => ({ projects: [project], current: slug }),
 			},
 		});

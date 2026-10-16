@@ -85,9 +85,11 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
-			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
-		},
-		handlers: {
+			"input.submit": ({ sessionId }) => ({
+				ok: true,
+				sessionId,
+				handedOff: true,
+			}),
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects: [] }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
@@ -302,7 +304,11 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		5,
 		{ defaultClaudeId: "claude", usageOrder },
 	);
-	const project = { slug: "myapp", title: "myapp", folders: ["/myapp"] };
+	const project = {
+		slug: "myapp",
+		title: "myapp",
+		folders: ["/myapp"] as const,
+	};
 	const refreshAccounts = (change?: AccountChange) => {
 		if (change)
 			state = Either.getOrThrowWith(
@@ -346,6 +352,14 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ResolveSession: () => ({ projectSlug: "myapp" }),
+			GetUsageLimitsSetting: () => ({
+				usageLimits: {
+					autoResume: false,
+					autoSwitch: false,
+					warnAt: 80,
+					order: usageOrder,
+				},
+			}),
 			CreateSession: (payload) => {
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");
@@ -406,18 +420,8 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				providerScope: { id: "claude", name: "Claude" },
 				agents: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects: [project], current: "myapp" }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
-			GetUsageLimitsSetting: () => ({
-				usageLimits: {
-					autoResume: false,
-					autoSwitch: false,
-					warnAt: 80,
-					order: usageOrder,
-				},
-			}),
 			RemoveInstance: (payload) => {
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");

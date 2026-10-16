@@ -212,6 +212,7 @@ exports[`preserves every read model from the recorded Claude event log 1`] = `
       "fork_point_event": null,
       "fork_point_message_id": null,
       "fork_point_timestamp": null,
+      "forked_from": null,
       "goal_state": null,
       "history_complete": 0,
       "id": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",

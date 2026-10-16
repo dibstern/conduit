@@ -95,7 +95,7 @@ for (const [viewportName, viewport] of [
 				stale: false,
 			}));
 			const rpc = await mockWsRpc(page, {
-				handlers: {
+				stubs: {
 					GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 					GetClaudeSettings: () => ({
 						projectSlug: "e2e-replay",
