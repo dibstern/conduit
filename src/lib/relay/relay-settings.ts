@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import type { ClaudeSettingsOverrides } from "../contracts/claude-settings.js";
 import {
+	type DefaultSessionMode,
+	DefaultSessionModeSchema,
 	type SessionMode,
 	SessionModeSchema,
 } from "../contracts/project-file.js";
@@ -25,7 +27,9 @@ export interface RelaySettings {
 		opencode?: { providerId: string; modelId: string; contextWindow: string };
 	};
 	defaultPermissionMode?: SessionPermissionMode;
-	defaultSessionMode?: SessionMode;
+	defaultSessionMode?: DefaultSessionMode;
+	/** The mode the last composer-created session started in, read when the default is "last". */
+	lastSessionMode?: SessionMode;
 	defaultGroupingMode?: GroupingMode;
 	defaultVariants?: Record<string, string>;
 	/** Model keys ("<providerId>/<modelId>") hidden from the model dropdown. */
@@ -48,6 +52,7 @@ function stripComments(text: string): string {
 }
 
 const isSessionPermissionMode = Schema.is(SessionPermissionModeSchema);
+const isDefaultSessionMode = Schema.is(DefaultSessionModeSchema);
 const isSessionMode = Schema.is(SessionModeSchema);
 const isGroupingMode = Schema.is(GroupingModeSchema);
 
@@ -64,6 +69,7 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 		const {
 			defaultPermissionMode,
 			defaultSessionMode,
+			lastSessionMode,
 			defaultGroupingMode,
 			...rest
 		} = settings;
@@ -74,7 +80,9 @@ export function loadRelaySettings(configDir?: string): RelaySettings {
 					defaultPermissionMode,
 				}),
 			...(defaultSessionMode !== undefined &&
-				isSessionMode(defaultSessionMode) && { defaultSessionMode }),
+				isDefaultSessionMode(defaultSessionMode) && { defaultSessionMode }),
+			...(lastSessionMode !== undefined &&
+				isSessionMode(lastSessionMode) && { lastSessionMode }),
 			...(defaultGroupingMode !== undefined &&
 				isGroupingMode(defaultGroupingMode) && { defaultGroupingMode }),
 		};
@@ -113,6 +121,9 @@ export function saveRelaySettings(
 	}
 	if (settings.defaultSessionMode !== undefined) {
 		merged.defaultSessionMode = settings.defaultSessionMode;
+	}
+	if (settings.lastSessionMode !== undefined) {
+		merged.lastSessionMode = settings.lastSessionMode;
 	}
 	if (settings.defaultGroupingMode !== undefined) {
 		merged.defaultGroupingMode = settings.defaultGroupingMode;

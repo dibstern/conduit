@@ -42,7 +42,11 @@ import {
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
-import { type SessionMode, SessionModeSchema } from "./project-file.js";
+import {
+	DefaultSessionModeSchema,
+	type SessionMode,
+	SessionModeSchema,
+} from "./project-file.js";
 import {
 	AccountIdSchema,
 	BrowserDriverTraitsSchema,
@@ -525,7 +529,7 @@ export const SetDefaultPermissionModeResponseSchema = Schema.Struct({
 });
 
 export const SetDefaultSessionModeResponseSchema = Schema.Struct({
-	mode: SessionModeSchema,
+	mode: DefaultSessionModeSchema,
 });
 export type SetDefaultSessionModeResponse =
 	typeof SetDefaultSessionModeResponseSchema.Type;
@@ -1582,7 +1586,7 @@ export class SetDefaultSessionMode extends Schema.TaggedRequest<SetDefaultSessio
 		success: SetDefaultSessionModeResponseSchema,
 		payload: {
 			projectSlug: NonEmptyString,
-			mode: SessionModeSchema,
+			mode: DefaultSessionModeSchema,
 		},
 	},
 ) {}
@@ -3308,7 +3312,7 @@ export const ProjectSettingSchema = Schema.Union(
 		mode: SessionPermissionModeSchema,
 	}),
 	Schema.TaggedStruct("defaultSessionMode", {
-		mode: SessionModeSchema,
+		mode: DefaultSessionModeSchema,
 	}),
 	Schema.TaggedStruct("defaultGroupingMode", {
 		mode: GroupingModeSchema,
