@@ -59,6 +59,11 @@ export const makePersistenceServiceLive: Layer.Layer<
 					yield* sql`UPDATE events SET project_id = ${projectId}
 						WHERE project_id IS NULL OR project_id = ''`;
 				for (const table of ["sessions", "session_sidebar"]) {
+					// An UPDATE takes the write lock even when nothing matches.
+					const unstamped = yield* sql.unsafe(
+						`SELECT 1 FROM ${table} WHERE project_id IS NULL OR project_id = '' LIMIT 1`,
+					);
+					if (unstamped.length === 0) continue;
 					yield* sql.unsafe(
 						`UPDATE ${table} SET project_id = ? WHERE project_id IS NULL OR project_id = ''`,
 						[projectId],
