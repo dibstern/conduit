@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
-import { expect, vi } from "vitest";
+import { expect, type Mock, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
@@ -69,8 +69,8 @@ const makeLayer = (
 	options?: {
 		auth?: AuthManager;
 		relay?: WebSocketRelay;
-		ensureRelayStarted?: ReturnType<typeof vi.fn>;
-		touchLastUsed?: ReturnType<typeof vi.fn>;
+		ensureRelayStarted?: Mock<(slug: string) => void>;
+		touchLastUsed?: Mock<(slug: string) => void>;
 		waitForRelay?: (
 			slug: string,
 			timeoutMs: number,
