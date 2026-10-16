@@ -53,6 +53,14 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 					hasMore: false,
 				},
 			});
+			// Ends the sent turn like the relay does; createdAt keeps the row time pinned.
+			requireRelayControl(world.page).sendMessage({
+				type: "done",
+				sessionId,
+				messageId: "cursor-usage-assistant",
+				createdAt: 3_000,
+				code: 0,
+			});
 			setSessionRowStatus(world.page, sessionId, "idle");
 		},
 	},
@@ -109,6 +117,18 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 				history: {
 					messages: [
 						{
+							id: "cursor-error-user",
+							role: "user",
+							time: { created: 1_000 },
+							parts: [
+								{
+									id: "cursor-error-prompt",
+									type: "text",
+									text: "Try this turn",
+								},
+							],
+						},
+						{
 							id: "cursor-error-assistant",
 							role: "assistant",
 							time: { created: 2_000, completed: 3_000 },
@@ -123,6 +143,14 @@ export const cursorUsageErrorsHandlers: StepHandler[] = [
 					],
 					hasMore: false,
 				},
+			});
+			// Ends the sent turn like the relay does; createdAt keeps the row time pinned.
+			requireRelayControl(world.page).sendMessage({
+				type: "done",
+				sessionId,
+				messageId: "cursor-error-assistant",
+				createdAt: 3_000,
+				code: 0,
 			});
 			setSessionRowStatus(world.page, sessionId, "idle");
 		},
