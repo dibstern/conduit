@@ -24,7 +24,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude fork trace capture (real SDK)", () => {
 		const projectDir = realpathSync(
 			mkdtempSync(join(tmpdir(), "conduit-fork-capture-")),
 		);
-		const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
+		const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
 		const configDir = configuredDir ?? join(homedir(), ".claude");
 		const launchConfigDir =
 			configuredDir === undefined

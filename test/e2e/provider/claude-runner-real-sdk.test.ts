@@ -24,7 +24,9 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				ticket: "conduit-test-85kb.15",
 				at: new Date().toISOString(),
 				dist: resolve("dist"),
-				model: "claude-haiku-4-5",
+				// An id the live catalog lists. Bare "claude-haiku-4-5" never was:
+				// the CLI advertises the alias and, since 2.1.301, the dated id.
+				model: "haiku",
 				prompt: "Reply with exactly: hello world",
 				turnCompleted: false,
 				serverPid: null as number | null,
@@ -104,7 +106,9 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 				evidence.timings.completionObservedMs =
 					Number(turnEnd.at - sendAt) / 1e6;
 				evidence.text = response.chunks.join("");
-				expect(evidence.text.trim()).toBe("hello world");
+				// The reviewer's own Claude plugins load too and may decorate the
+				// reply (message-timestamps prefixes "[hh:mm:ss] "), so anchor the end.
+				expect(evidence.text.trim()).toMatch(/hello world$/);
 				expect(response.done["status"]).toBe("idle");
 				const runner = harness.marks.find(
 					(mark) =>

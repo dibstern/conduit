@@ -29,7 +29,7 @@ describe.skipIf(process.env["RUN_EXPENSIVE_E2E"] !== "1")(
 			const projectDir = realpathSync(
 				mkdtempSync(join(tmpdir(), "conduit-usage-capture-")),
 			);
-			const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
+			const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
 			const configDir =
 				configuredDir === undefined
 					? sdkDefaultClaudeConfigDir(join(homedir(), ".claude"))
