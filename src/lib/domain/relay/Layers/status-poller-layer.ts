@@ -192,9 +192,7 @@ export const StatusPollerLive: Layer.Layer<
 		const refreshGit = (
 			Option.isSome(sessionGit)
 				? sessionGit.value.refresh({ staleOnly: true })
-				: config.refreshSessionGit
-					? Effect.tryPromise(config.refreshSessionGit)
-					: Effect.void
+				: Effect.void
 		).pipe(
 			Effect.catchAllCause((cause) =>
 				reportFailure("Git state refresh failed", cause),

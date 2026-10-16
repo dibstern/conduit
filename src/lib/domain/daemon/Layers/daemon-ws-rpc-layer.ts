@@ -478,11 +478,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 								message: `Relay "${request.slug}" does not support default agent updates`,
 							});
 						}
-						yield* Effect.tryPromise({
-							try: () => setDefaultAgent(request.agent),
-							catch: (cause) =>
-								new WsRpcError({ message: formatErrorDetail(cause) }),
-						});
+						yield* setDefaultAgent(request.agent);
 						return { ok: true as const };
 					}),
 				),

@@ -2,7 +2,7 @@ import { channel } from "node:diagnostics_channel";
 import { lstat } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { SqlClient } from "@effect/sql";
-import { type Context, Effect, Layer, Option, Schema } from "effect";
+import { type Context, Effect, Layer, Option, PubSub, Schema } from "effect";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
@@ -15,6 +15,14 @@ import {
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
 import { type SessionGit, SessionGitSchema } from "../../../shared-types.js";
+import {
+	DaemonEvent,
+	DaemonEventBusTag,
+} from "../../daemon/Services/daemon-pubsub.js";
+import {
+	broadcastProjectList,
+	ProjectRegistryTag,
+} from "../../daemon/Services/project-registry-service.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { inspectSessionWorktree } from "../Services/session-workspace.js";
@@ -31,6 +39,8 @@ export const SessionGitLive = Layer.effect(
 	SessionGitServiceTag,
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+		const daemonEvents = yield* Effect.serviceOption(DaemonEventBusTag);
 		const read = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
 		const sql = yield* SqlClient.SqlClient;
@@ -288,10 +298,20 @@ export const SessionGitLive = Layer.effect(
 										}),
 									),
 								);
-								yield* Effect.tryPromise(async () => {
-									await config.refreshSessionGit?.();
-									await config.broadcastSessionListChanged?.();
-								});
+								if (Option.isSome(daemonEvents)) {
+									if (Option.isSome(registry))
+										yield* broadcastProjectList.pipe(
+											Effect.provideService(ProjectRegistryTag, registry.value),
+											Effect.provideService(
+												DaemonEventBusTag,
+												daemonEvents.value,
+											),
+										);
+									yield* PubSub.publish(
+										daemonEvents.value,
+										DaemonEvent.DaemonSessionsChanged(),
+									);
+								}
 								published = next;
 								yield* forget(forgotten);
 							}

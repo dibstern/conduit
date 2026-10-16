@@ -35,7 +35,10 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import {
+	ProjectManagementServiceLive,
+	ProjectManagementServiceTag,
+} from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ProjectSettingsLive,
 	publishProjectSetting,
@@ -374,18 +377,22 @@ describe("GetAgents", () => {
 });
 
 describe("GetProjects", () => {
-	it.effect("uses config.getProjects when available", () => {
+	it.effect("uses the provided project service", () => {
 		const ws = mockWsHandler();
 		const projects = [
 			{ slug: "proj-1", title: "Project 1", folders: ["/path"] as const },
 		];
-		const config = mockConfig({
-			getProjects: () => projects,
-		});
+		const config = mockConfig();
 		const client = makeHandlerOpenCodeAPI();
 
 		const layer = Layer.mergeAll(
 			projectManagementLayer(client, config),
+			Layer.succeed(ProjectManagementServiceTag, {
+				currentSlug: () => Effect.succeed(config.slug),
+				list: () => Effect.succeed(projects),
+				save: () => Effect.die("Unexpected save"),
+				remove: () => Effect.die("Unexpected remove"),
+			}),
 			Layer.succeed(WebSocketHandlerTag, ws),
 		);
 
@@ -394,7 +401,7 @@ describe("GetProjects", () => {
 			Effect.tap((reply) => {
 				expect(reply).toEqual({
 					projectSlug: "test-project",
-					projects: [{ ...projects[0], folders: ["/path"], missing: true }],
+					projects,
 					current: "test-project",
 				});
 			}),

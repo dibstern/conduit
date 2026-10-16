@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option, Ref } from "effect";
+import { Context, Effect, Fiber, Layer, Option, Ref } from "effect";
 import { expect, vi } from "vitest";
 import { makeRelayCacheLayer } from "../../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
@@ -28,16 +28,18 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { DaemonSessionQueryServiceTag } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
+import { InstanceManagementServiceTag } from "../../../src/lib/domain/relay/Services/instance-management-service.js";
+import { ProjectManagementServiceTag } from "../../../src/lib/domain/relay/Services/project-management-service.js";
+import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-service.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import type {
-	DaemonSessionQueryResult,
-	OpenCodeInstance,
-	ProjectInfo,
-} from "../../../src/lib/shared-types.js";
+import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
-const createProjectRelayMock = vi.hoisted(() => vi.fn());
+const createProjectRelayMock = vi.hoisted(() =>
+	vi.fn<(config: ProjectRelayConfig) => Promise<unknown>>(),
+);
 
 vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 	createProjectRelay: createProjectRelayMock,
@@ -135,7 +137,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 	);
 
 	it.effect(
-		"threads Effect-owned project and instance read models into relay config",
+		"provides daemon read services to the relay through its Effect context",
 		() => {
 			const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-config-"));
 			const projectDir = join(dir, "project");
@@ -199,36 +201,30 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 
 				expect(createProjectRelayMock).toHaveBeenCalledOnce();
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
-				expect(config?.getProjects).toBeTypeOf("function");
-				expect(config?.listDaemonSessions).toBeTypeOf("function");
-				expect(config?.getInstances).toBeTypeOf("function");
-
-				const projects = yield* Effect.tryPromise({
-					try: () => Promise.resolve(config?.getProjects?.() ?? []),
-					catch: (cause) => cause,
-				});
-				const instances = yield* Effect.tryPromise<
-					ReadonlyArray<Readonly<OpenCodeInstance>>,
-					unknown
-				>({
-					try: () => Promise.resolve(config?.getInstances?.() ?? []),
-					catch: (cause) => cause,
-				});
-				const daemonSessions = yield* Effect.tryPromise<
-					DaemonSessionQueryResult,
-					unknown
-				>({
-					try: () =>
-						Promise.resolve(
-							config?.listDaemonSessions?.({ limit: 5 }) ?? {
-								sessions: [],
-								availability: [],
-								hasMore: false,
-								nextCursor: null,
-							},
-						),
-					catch: (cause) => cause,
-				});
+				const context = config?.daemonConfigContext;
+				if (!context) throw new Error("Missing daemon Effect context");
+				for (const callback of [
+					"getProjects",
+					"listDaemonSessions",
+					"getInstances",
+					"broadcastSessionListChanged",
+					"publishProjectList",
+					"resolveSessionProject",
+				]) {
+					expect(config).not.toHaveProperty(callback);
+				}
+				const projectService = Option.getOrThrow(
+					Context.getOption(context, ProjectManagementServiceTag),
+				);
+				const instanceService = Option.getOrThrow(
+					Context.getOption(context, InstanceManagementServiceTag),
+				);
+				const sessionService = Option.getOrThrow(
+					Context.getOption(context, DaemonSessionQueryServiceTag),
+				);
+				const projects = yield* projectService.list();
+				const instances = yield* instanceService.list();
+				const daemonSessions = yield* sessionService.list({ limit: 5 });
 				expect(config?.openCodeInstanceId).toBe(
 					instances.find((instance) => instance.driver !== "claude")?.id,
 				);
@@ -275,125 +271,128 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		},
 	);
 
-	it.effect("threads Effect-owned instance mutators into relay config", () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-instance-"));
-		const projectDir = join(dir, "project");
-		mkdirSync(projectDir);
-		const server = createServer();
-		createProjectRelayMock.mockResolvedValue({
-			syncGlobalSetting: () => Effect.void,
-			refreshGlobalDefaults: () => Effect.void,
-			stop: vi.fn(async () => undefined),
-		});
-
-		const layer = RelayFactoryLive(join(dir, "config")).pipe(
-			Layer.provide(
-				Layer.mergeAll(
-					InstanceHealthCheckLive,
-					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
-					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
-					ConfigPersistenceNoopLive,
-					DaemonEventBusLive,
-					Layer.effect(SessionActivityTag, makeSessionActivity),
-					makeProjectRegistryLive([
-						{
-							slug: "effect-project",
-							title: "Effect Project",
-							folders: [projectDir],
-						},
-					]),
-					makeInstanceManagerStateLive(undefined, [], {
-						launchLogin: sdkDefaultClaudeConfigDir(
-							"/isolated-test-home/.claude",
-						),
-					}),
-					NoopAuxiliaryDaemonServices,
-				),
-			),
-		);
-
-		return Effect.gen(function* () {
-			const httpServerRef = yield* HttpServerRefTag;
-			yield* Ref.set(httpServerRef, server);
-
-			const factory = yield* RelayFactoryTag;
-			yield* factory
-				.create({
-					slug: "effect-project",
-					title: "Effect Project",
-					folders: [projectDir],
-				})
-				.pipe(Effect.scoped);
-
-			const config = createProjectRelayMock.mock.calls[0]?.[0];
-			expect(config?.addInstance).toBeTypeOf("function");
-			expect(config?.removeInstance).toBeTypeOf("function");
-			expect(config?.updateInstance).toBeTypeOf("function");
-			expect(config?.persistConfig).toBeTypeOf("function");
-
-			const added = yield* Effect.tryPromise({
-				try: () =>
-					Promise.resolve(
-						config?.addInstance?.({
-							name: "Remote",
-							port: 4321,
-							managed: false,
-							url: "http://remote.example.test",
-						}),
-					),
-				catch: (cause) => cause,
+	it.effect(
+		"provides Effect-owned instance mutations with the original typed failure",
+		() => {
+			const dir = mkdtempSync(
+				join(tmpdir(), "conduit-relay-factory-instance-"),
+			);
+			const projectDir = join(dir, "project");
+			mkdirSync(projectDir);
+			const server = createServer();
+			createProjectRelayMock.mockResolvedValue({
+				syncGlobalSetting: () => Effect.void,
+				refreshGlobalDefaults: () => Effect.void,
+				stop: vi.fn(async () => undefined),
 			});
-			expect(added).toEqual(
-				expect.objectContaining({
-					id: "remote",
+
+			const layer = RelayFactoryLive(join(dir, "config")).pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						InstanceHealthCheckLive,
+						Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
+						ConfigPersistenceNoopLive,
+						DaemonEventBusLive,
+						Layer.effect(SessionActivityTag, makeSessionActivity),
+						makeProjectRegistryLive([
+							{
+								slug: "effect-project",
+								title: "Effect Project",
+								folders: [projectDir],
+							},
+						]),
+						makeInstanceManagerStateLive(undefined, [], {
+							launchLogin: sdkDefaultClaudeConfigDir(
+								"/isolated-test-home/.claude",
+							),
+						}),
+						NoopAuxiliaryDaemonServices,
+					),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const httpServerRef = yield* HttpServerRefTag;
+				yield* Ref.set(httpServerRef, server);
+
+				const factory = yield* RelayFactoryTag;
+				yield* factory
+					.create({
+						slug: "effect-project",
+						title: "Effect Project",
+						folders: [projectDir],
+					})
+					.pipe(Effect.scoped);
+
+				const config = createProjectRelayMock.mock.calls[0]?.[0];
+				const context = config?.daemonConfigContext;
+				if (!context) throw new Error("Missing daemon Effect context");
+				for (const callback of [
+					"addInstance",
+					"removeInstance",
+					"updateInstance",
+					"startInstance",
+					"stopInstance",
+					"persistConfig",
+				]) {
+					expect(config).not.toHaveProperty(callback);
+				}
+				const service = Option.getOrThrow(
+					Context.getOption(context, InstanceManagementServiceTag),
+				);
+				const added = yield* service.add({
 					name: "Remote",
 					port: 4321,
 					managed: false,
-				}),
-			);
-
-			const updated = yield* Effect.tryPromise({
-				try: () =>
-					Promise.resolve(
-						config?.updateInstance?.("remote", {
-							name: "Renamed",
-							port: 4322,
-						}),
-					),
-				catch: (cause) => cause,
-			});
-			expect(updated).toEqual(
-				expect.objectContaining({
-					id: "remote",
+					url: "http://remote.example.test",
+				});
+				expect(added).toContainEqual(
+					expect.objectContaining({
+						id: "remote",
+						name: "Remote",
+						port: 4321,
+						managed: false,
+					}),
+				);
+				const updated = yield* service.update("remote", {
 					name: "Renamed",
 					port: 4322,
-				}),
-			);
-
-			yield* Effect.tryPromise({
-				try: () => Promise.resolve(config?.removeInstance?.("remote")),
-				catch: (cause) => cause,
-			});
-			const instances = yield* Effect.tryPromise({
-				try: () => Promise.resolve(config?.getInstances?.() ?? []),
-				catch: (cause) => cause,
-			});
-			expect(
-				instances.some(
-					(instance: Readonly<OpenCodeInstance>) => instance.id === "remote",
+				});
+				expect(updated).toContainEqual(
+					expect.objectContaining({
+						id: "remote",
+						name: "Renamed",
+						port: 4322,
+					}),
+				);
+				const missing = yield* Effect.either(
+					service.update("missing", { name: "Missing" }),
+				);
+				expect(missing).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "InstanceManagementServiceError",
+						operation: "update",
+						cause: { _tag: "AccountChangeRejected", id: "missing" },
+					},
+				});
+				const instances = yield* service.remove("remote");
+				expect(instances.some((instance) => instance.id === "remote")).toBe(
+					false,
+				);
+			}).pipe(
+				Effect.provide(Layer.fresh(layer)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						server.close();
+						rmSync(dir, { recursive: true, force: true });
+						createProjectRelayMock.mockReset();
+					}),
 				),
-			).toBe(false);
-		}).pipe(
-			Effect.provide(Layer.fresh(layer)),
-			Effect.ensuring(
-				Effect.sync(() => {
-					server.close();
-					rmSync(dir, { recursive: true, force: true });
-					createProjectRelayMock.mockReset();
-				}),
-			),
-		);
-	});
+			);
+		},
+	);
 
 	it.effect("threads auxiliary daemon services into relay config", () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-factory-aux-"));
@@ -474,17 +473,14 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				.pipe(Effect.scoped);
 
 			const config = createProjectRelayMock.mock.calls[0]?.[0];
-			expect(config?.triggerScan).toBeTypeOf("function");
+			expect(config).not.toHaveProperty("triggerScan");
 			expect(config?.pushManager).toBe(pushManager);
-			const triggerScan = config?.triggerScan;
-			if (triggerScan == null) {
-				expect.fail("expected relay auxiliary callbacks");
-			}
-
-			const scan = yield* Effect.tryPromise({
-				try: () => triggerScan(),
-				catch: (cause) => cause,
-			});
+			const context = config?.daemonConfigContext;
+			if (!context) throw new Error("Missing daemon Effect context");
+			const service = Option.getOrThrow(
+				Context.getOption(context, ScanServiceTag),
+			);
+			const scan = yield* service.scanNow();
 			expect(scan).toEqual(scanResult);
 		}).pipe(
 			Effect.provide(Layer.fresh(layer)),
@@ -647,30 +643,15 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				yield* cache.get("effect-project");
 
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
-				expect(config?.saveProject).toBeTypeOf("function");
-				expect(config?.removeProject).toBeTypeOf("function");
-				const saveProject = config?.saveProject;
-				const removeProject = config?.removeProject;
-				const getProjects = config?.getProjects;
-				if (
-					saveProject == null ||
-					removeProject == null ||
-					getProjects == null
-				) {
-					expect.fail("expected project mutation callbacks");
-				}
-
-				const { project: added } = yield* Effect.tryPromise<
-					{ project: ProjectInfo },
-					unknown
-				>({
-					try: () =>
-						saveProject({
-							folders: [
-								{ path: join(dir, "added"), create: { gitInit: false } },
-							],
-						}),
-					catch: (cause) => cause,
+				const context = config?.daemonConfigContext;
+				if (!context) throw new Error("Missing daemon Effect context");
+				expect(config).not.toHaveProperty("saveProject");
+				expect(config).not.toHaveProperty("removeProject");
+				const service = Option.getOrThrow(
+					Context.getOption(context, ProjectManagementServiceTag),
+				);
+				const { project: added } = yield* service.save({
+					folders: [{ path: join(dir, "added"), create: { gitInit: false } }],
 				});
 				expect(added).toEqual(
 					expect.objectContaining({
@@ -678,41 +659,23 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						folders: [realpathSync(join(dir, "added"))],
 					}),
 				);
-
-				yield* Effect.tryPromise({
-					try: () =>
-						saveProject({
-							slug: added.slug,
-							folders: added.folders,
-							title: "Added Project",
-						}),
-					catch: (cause) => cause,
+				yield* service.save({
+					slug: added.slug,
+					folders: added.folders,
+					title: "Added Project",
 				});
-				let projects = yield* Effect.tryPromise<
-					ReadonlyArray<ProjectInfo>,
-					unknown
-				>({
-					try: () => Promise.resolve(getProjects()),
-					catch: (cause) => cause,
-				});
+				let projects = yield* service.list();
 				expect(projects).toContainEqual(
-					expect.objectContaining({
-						slug: added.slug,
-						title: "Added Project",
-					}),
+					expect.objectContaining({ slug: added.slug, title: "Added Project" }),
 				);
-
-				yield* Effect.tryPromise({
-					try: () => Promise.resolve(removeProject(added.slug)),
-					catch: (cause) => cause,
+				const invalid = yield* Effect.either(
+					service.save({ folders: [join(dir, "missing")] }),
+				);
+				expect(invalid).toMatchObject({
+					_tag: "Left",
+					left: { _tag: "ProjectSaveRejected" },
 				});
-				projects = yield* Effect.tryPromise<
-					ReadonlyArray<ProjectInfo>,
-					unknown
-				>({
-					try: () => Promise.resolve(getProjects()),
-					catch: (cause) => cause,
-				});
+				projects = yield* service.remove(added.slug);
 				expect(projects.some((project) => project.slug === added.slug)).toBe(
 					false,
 				);
