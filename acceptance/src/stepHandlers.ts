@@ -13,6 +13,7 @@ import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
+import { cursorTurnHandlers } from "./steps/cursorTurn.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
@@ -57,6 +58,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...usageSettingsHandlers,
 	...usageWarningStripHandlers,
 	...composerSendAtResetHandlers,
+	...cursorTurnHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".

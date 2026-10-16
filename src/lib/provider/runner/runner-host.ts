@@ -35,6 +35,11 @@ export interface RunnerLaunchCallbacks {
 }
 
 export interface RunnerLaunch {
+	/** Retire a poisoned payload after delivering its command result. */
+	readonly shouldExitAfterCommand?: (
+		command: SessionCommand,
+		result: TurnResult | undefined,
+	) => boolean;
 	readonly wire?: RunnerWireCodec;
 	readonly capabilities?: Pick<RunnerHello, "stopsTasks" | "taggedConfigDir">;
 	readonly makeRunner: (
@@ -474,6 +479,8 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												...(result ? { result } : {}),
 											});
+											if (launch.shouldExitAfterCommand?.(command, result))
+												beginExit();
 											if (command.type === "shutdown")
 												runFork(
 													Deferred.succeed(stopped, undefined).pipe(

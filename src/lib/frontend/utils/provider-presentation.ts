@@ -11,6 +11,7 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "claude",
 		namePlaceholder: "Work Claude",
 		configDirPlaceholder: "~/.config/claude/work",
+		composerNotice: undefined,
 	},
 	opencode: {
 		logo: "opencode",
@@ -18,6 +19,7 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "server",
 		namePlaceholder: "Staging OC",
 		configDirPlaceholder: undefined,
+		composerNotice: undefined,
 	},
 	cursor: {
 		logo: "cursor",
@@ -25,6 +27,7 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "server",
 		namePlaceholder: "Work Cursor",
 		configDirPlaceholder: "~/.config/cursor/work",
+		composerNotice: "Cursor runs without per-call approval.",
 	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
@@ -34,6 +37,7 @@ export const PROVIDER_PRESENTATION = {
 		readonly settingsTab: SettingsSection;
 		readonly namePlaceholder: string;
 		readonly configDirPlaceholder: string | undefined;
+		readonly composerNotice: string | undefined;
 	}
 >;
 

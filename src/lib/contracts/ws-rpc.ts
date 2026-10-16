@@ -642,7 +642,11 @@ const SteerRefusedSchema = Schema.Struct({
 
 /** Ok, or a refused steer: nothing was admitted, so the browser keeps the text. */
 export const SubmitInputResponseSchema = Schema.Union(
-	Schema.Struct({ ok: Schema.Literal(true), sessionId: Schema.String }),
+	Schema.Struct({
+		ok: Schema.Literal(true),
+		sessionId: Schema.String,
+		handedOff: Schema.Boolean,
+	}),
 	SteerRefusedSchema,
 );
 

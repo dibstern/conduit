@@ -27,7 +27,6 @@ function makeStubInstance(providerId: string): ProviderInstance & {
 } {
 	return {
 		providerId,
-		steering: false,
 		discoverEffect: vi.fn(() =>
 			Effect.succeed({
 				models: [],

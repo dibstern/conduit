@@ -1,15 +1,27 @@
 import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { CursorSdkFailure } from "./sdk-error.js";
-import type { CursorSdkPort } from "./sdk-port.js";
+import type {
+	CursorAgent,
+	CursorAgentOptions,
+	CursorSdkPort,
+	CursorSendOptions,
+	CursorStore,
+} from "./sdk-port.js";
 
 const SECRET_FIELD =
 	/^(?:api[_-]?key|authorization|(?:access|refresh|session)[_-]?token|token|password|secret|(?:blob)?encryption[_-]?key|email)$/i;
 const PRIVATE_HOME = /\/Users\/[^/\s"\\]+|\/home\/(?!test\b)[^/\s"\\]+/g;
 
-// This writer also accepts delta, stream, wait.result and create/resume/send.options
-// rows. Turn operations will use it when they are added to the SDK port.
-export function createCursorSdkTrace(path: string | undefined) {
+interface CursorTraceMetadata {
+	readonly scenario: string;
+	readonly model: CursorSendOptions["model"];
+}
+
+export function createCursorSdkTrace(
+	path: string | undefined,
+	metadata?: CursorTraceMetadata,
+) {
 	const secrets = new Set<string>();
 	const collectSecrets = (value: unknown): void => {
 		if (!value || typeof value !== "object") return;
@@ -54,7 +66,7 @@ export function createCursorSdkTrace(path: string | undefined) {
 					empty = true;
 				}
 				const header = empty
-					? `${JSON.stringify({ scenario: "cursor-sdk-port", model: "discovery", sdkVersion: "1.0.37", recordedAt: new Date().toISOString() })}\n`
+					? `${JSON.stringify({ scenario: metadata?.scenario ?? "cursor-sdk-port", model: metadata?.model ?? "discovery", sdkVersion: "1.0.37", recordedAt: new Date().toISOString() })}\n`
 					: "";
 				appendFileSync(
 					path,
@@ -71,8 +83,9 @@ export function createCursorSdkTrace(path: string | undefined) {
 export function teeCursorSdkPort(
 	port: CursorSdkPort,
 	path: string | undefined,
+	metadata?: CursorTraceMetadata,
 ): CursorSdkPort {
-	const trace = createCursorSdkTrace(path);
+	const trace = createCursorSdkTrace(path, metadata);
 	if (!port.replay) {
 		const apiKey = process.env["CURSOR_API_KEY"]?.trim();
 		if (apiKey) trace.protect(apiKey);
@@ -95,12 +108,82 @@ export function teeCursorSdkPort(
 			}
 			trace.record(kind, result ?? null);
 			return result;
-		} catch {
+		} catch (cause) {
 			// SDK errors may echo credentials. Keep both trace and caller safe.
-			const message = `Cursor ${kind} failed`;
+			const message =
+				cause instanceof CursorSdkFailure
+					? cause.reason
+					: `Cursor ${kind} failed`;
 			trace.record(`${kind}.error`, { message });
 			throw new CursorSdkFailure({ operation: kind, reason: message });
 		}
+	};
+	const stores = new WeakMap<CursorStore, CursorStore>();
+	const unwrapStore = (store: CursorStore) => stores.get(store) ?? store;
+	const recordedOptions = (options: CursorAgentOptions) => ({
+		tools: options.tools,
+		disallowedTools: options.disallowedTools,
+		credentialFingerprint: options.credentialFingerprint,
+		local: {
+			cwd: options.cwd,
+			dirs: options.dirs,
+			store: { stateRoot: options.storePath, workspaceRef: options.cwd },
+			settingSources: options.settingSources,
+			sandboxOptions: options.sandboxOptions,
+			autoReview: options.autoReview,
+			customTools: options.customToolNames,
+			subagentInherit: options.subagentInherit,
+		},
+	});
+	const wrapAgent = (agent: CursorAgent): CursorAgent => {
+		let closed: Promise<void> | undefined;
+		return {
+			id: agent.id,
+			async send(prompt, options, onDelta) {
+				trace.record("send.options", { prompt, options });
+				try {
+					const run = await agent.send(prompt, options, (update) => {
+						trace.record("delta", update);
+						onDelta(update);
+					});
+					trace.record("run.handle", { id: run.id, agentId: agent.id });
+					return {
+						id: run.id,
+						stream: (async function* () {
+							try {
+								for await (const message of run.stream) {
+									trace.record("stream", message);
+									yield message;
+								}
+								trace.record("stream.end", {});
+							} catch {
+								trace.record("stream.error", {
+									message: "Cursor stream failed",
+								});
+								throw new CursorSdkFailure({
+									operation: "run.stream",
+									reason: "Cursor stream failed",
+								});
+							}
+						})(),
+						wait: () => call("wait.result", {}, () => run.wait()),
+						cancel: () => call("cancel", { runId: run.id }, () => run.cancel()),
+					};
+				} catch {
+					trace.record("send.error", { message: "Cursor send failed" });
+					throw new CursorSdkFailure({
+						operation: "agent.send",
+						reason: "Cursor send failed",
+					});
+				}
+			},
+			close() {
+				return (closed ??= (async () => {
+					await call("close", { agentId: agent.id }, () => agent.close());
+					trace.record("agent.disposed", { agentId: agent.id });
+				})());
+			},
+		};
 	};
 	return {
 		...(port.replay ? { replay: true } : {}),
@@ -113,6 +196,89 @@ export function teeCursorSdkPort(
 			return call("models.list", { credential }, () =>
 				port.modelsList(credential),
 			);
+		},
+		async openStore(path, cwd) {
+			const store = await port.openStore(path, cwd);
+			trace.record("store.open", { stateRoot: path, workspaceRef: cwd });
+			let disposed: Promise<void> | undefined;
+			const wrapped: CursorStore = {
+				dispose() {
+					return (disposed ??= (async () => {
+						await store.dispose();
+						trace.record("store.disposed", { stateRoot: path });
+						if (port.replay)
+							trace.record("store.disposed.handles", { handles: [] });
+					})());
+				},
+			};
+			stores.set(wrapped, store);
+			return wrapped;
+		},
+		async primeSandbox(options, credential, store) {
+			trace.protect(credential.apiKey);
+			trace.record(
+				"sandbox.prime.options",
+				recordedOptions({
+					...options,
+					sandboxOptions: { enabled: true },
+					customToolNames: [],
+				}),
+			);
+			try {
+				await port.primeSandbox(options, credential, unwrapStore(store));
+				trace.record("sandbox.prime", {});
+			} catch {
+				const reason =
+					"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.";
+				trace.record("sandbox.prime.error", { message: reason });
+				throw new CursorSdkFailure({ operation: "sandbox.prime", reason });
+			}
+		},
+		async createAgent(options, credential, store, customTools) {
+			trace.protect(credential.apiKey);
+			trace.record("create.options", recordedOptions(options));
+			try {
+				const agent = await port.createAgent(
+					options,
+					credential,
+					unwrapStore(store),
+					customTools,
+				);
+				trace.record("created", { agentId: agent.id });
+				return wrapAgent(agent);
+			} catch {
+				trace.record("create.error", {
+					message: "Cursor agent creation failed",
+				});
+				throw new CursorSdkFailure({
+					operation: "agent.create",
+					reason: "Cursor agent creation failed",
+				});
+			}
+		},
+		async resumeAgent(id, options, credential, store, customTools) {
+			trace.protect(credential.apiKey);
+			trace.record("resume.options", {
+				agentId: id,
+				...recordedOptions(options),
+			});
+			try {
+				const agent = await port.resumeAgent(
+					id,
+					options,
+					credential,
+					unwrapStore(store),
+					customTools,
+				);
+				trace.record("resumed", { agentId: agent.id });
+				return wrapAgent(agent);
+			} catch {
+				trace.record("resume.error", { message: "Cursor agent resume failed" });
+				throw new CursorSdkFailure({
+					operation: "agent.resume",
+					reason: "Cursor agent resume failed",
+				});
+			}
 		},
 	};
 }
