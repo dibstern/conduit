@@ -740,7 +740,7 @@ export class ProviderSideEffectReactor {
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return this.writeFailure(
 			row,
-			turn.error?.retryable === true,
+			turn.error?.retryable === true && turn.error.retryHandled !== true,
 			turn.error?.code ?? turn.status,
 			updatedAt,
 		);
