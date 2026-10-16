@@ -16,9 +16,9 @@
 	} = $props();
 </script>
 
-{#snippet commandDetails(item: SessionCommand)}
+{#snippet commandDetails(item: SessionCommandEntry)}
 	{#if presentation !== "sheet"}
-		{#if item.icon}<Icon name={item.icon} size={13} />{:else if item.checked !== undefined}<span class="w-[13px] shrink-0" aria-hidden="true"></span>{/if}
+		{#if item.checked !== undefined}<span class="w-[13px] shrink-0" aria-hidden="true"></span>{:else if !item.danger}<Icon name={item.icon} size={13} />{/if}
 	{/if}
 	<span>{item.label}</span>
 	{#if item.keys}<span class="shortcut-hint ml-auto text-xs text-text-muted" aria-hidden="true">{sessionCommandKeysHint(item.keys)}</span>{/if}
@@ -26,13 +26,13 @@
 {/snippet}
 
 {#each commands as item, index (index)}
-	{#if "divider" in item}
+	{#if index > 0 && item.section !== commands[index - 1]?.section}
 		<MenuSeparator />
-	{:else if item.checked !== undefined}
+	{/if}
+	{#if item.checked !== undefined}
 		<MenuCheckboxItem
 			data-testid={item.testId}
 			class={presentation === "menu" ? "min-h-[44px] md:min-h-0" : undefined}
-			icon={presentation === "sheet" ? item.icon : undefined}
 			checked={item.checked}
 			disabled={item.disabledReason != null}
 			onselect={() => onselect(item.run)}

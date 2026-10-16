@@ -33,7 +33,7 @@
 		now?: number;
 		onclose: () => void;
 		/** Non-session actions appended after a divider, drawn as command rows. */
-		extras?: readonly SessionCommand[];
+		extras?: readonly Omit<SessionCommand, "section">[];
 	} = $props();
 	// Captured once: dialogs opened from a command call focusTarget after this menu
 	// unmounts, when its props may already be gone.
@@ -53,7 +53,7 @@
 	});
 	const commands = $derived([
 		...getSessionCommands(session, now, host, presentation === "sheet" ? "sheet" : "center"),
-		...(extras.length > 0 ? [{ divider: true } as const, ...extras] : []),
+		...extras.map((item) => ({ ...item, section: "extras" as const })),
 	]);
 	function focusTarget(): HTMLElement | null {
 		const row = [...opener.ownerDocument.querySelectorAll<HTMLElement>("#session-list .session-item[data-session-id]")].find((item) => item.dataset["sessionId"] === targetId);

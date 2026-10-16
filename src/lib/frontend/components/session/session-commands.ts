@@ -21,8 +21,12 @@ export type SessionCommandHost = {
 
 export type SessionCommand = {
 	testId: string;
+	section: "triage" | "manage" | "danger";
 	label: string;
-	icon?:
+	shortLabel?: string;
+	detail?: string | null;
+	emphasis?: "primary" | undefined;
+	icon:
 		| "undo"
 		| "check"
 		| "moon"
@@ -34,6 +38,8 @@ export type SessionCommand = {
 		| "pencil"
 		| "git-fork"
 		| "copy"
+		| "zap"
+		| "trash-2"
 		| "share"
 		| "settings"
 		| "bug";
@@ -43,7 +49,9 @@ export type SessionCommand = {
 	danger?: boolean;
 	run(returnFocus?: () => HTMLElement | null): void;
 };
-export type SessionCommandEntry = SessionCommand | { divider: true };
+export type SessionCommandEntry = Omit<SessionCommand, "section"> & {
+	section: SessionCommand["section"] | "extras";
+};
 
 /**
  * Each command's keys, defined once. `key` acts on the focused list row, or on the
@@ -76,7 +84,7 @@ type ShortcutEvent = Pick<
 
 /** The command among `entries` that `event` triggers, if any. */
 export function findSessionCommandForKey(
-	entries: readonly SessionCommandEntry[],
+	entries: readonly SessionCommand[],
 	event: ShortcutEvent,
 ): SessionCommand | undefined {
 	if (event.repeat || event.altKey) return undefined;
@@ -85,9 +93,7 @@ export function findSessionCommandForKey(
 	if (!global && (command || event.shiftKey)) return undefined;
 	const key = event.key.toLowerCase();
 	return entries.find(
-		(entry): entry is SessionCommand =>
-			"keys" in entry &&
-			(global ? entry.keys?.global : entry.keys?.key) === key,
+		(entry) => (global ? entry.keys?.global : entry.keys?.key) === key,
 	);
 }
 
@@ -97,7 +103,7 @@ export function findSessionCommandForKey(
  */
 export function runSessionCommandShortcut(
 	event: ShortcutEvent & Pick<KeyboardEvent, "preventDefault" | "target">,
-	entries: readonly SessionCommandEntry[],
+	entries: readonly SessionCommand[],
 ): void {
 	const command = findSessionCommandForKey(entries, event);
 	if (!command) return;
@@ -324,9 +330,12 @@ export function getSettleCommand(
 		testId:
 			session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle",
 		label: session.settledAt != null ? "Un-settle" : "Settle",
+		section: "triage",
 		icon: session.settledAt != null ? "undo" : "check",
 		keys: sessionCommandKeys.settle,
 		disabledReason: actions.settleDisabledReason,
+		detail: actions.settleDisabledReason,
+		emphasis: !actions.pinned && !actions.settled ? "primary" : undefined,
 		run: () => {
 			void settle(session, !actions.settled);
 		},
@@ -338,8 +347,11 @@ export function getPinCommand(session: SessionInfo): SessionCommand {
 	return {
 		testId: pinned ? "session-ctx-unpin" : "session-ctx-pin",
 		label: pinned ? "Unpin" : "Pin to top",
+		shortLabel: pinned ? "Unpin" : "Pin",
+		section: "triage",
 		icon: pinned ? "star-off" : "star",
 		keys: sessionCommandKeys.pin,
+		emphasis: pinned ? "primary" : undefined,
 		run: () => {
 			void pin(session, !pinned);
 		},
@@ -364,12 +376,15 @@ export function getSessionCommands(
 	now: number,
 	host: SessionCommandHost,
 	snoozePlacement: "center" | "sheet",
-): SessionCommandEntry[] {
+): SessionCommand[] {
 	const actions = getSessionActionState(session, now);
-	const items: SessionCommandEntry[] = [];
+	const items: SessionCommand[] = [];
 	items.push(getSettleCommand(session, now), {
 		testId: "session-ctx-auto-settle",
 		label: "Auto-settle when idle",
+		shortLabel: "Auto-settle",
+		section: "triage",
+		icon: "zap",
 		checked: session.autoSettleDisabled !== true,
 		run: () => {
 			void autoSettle(session, session.autoSettleDisabled !== true);
@@ -379,9 +394,18 @@ export function getSessionCommands(
 		items.push({
 			testId: "session-ctx-snooze",
 			label: actions.snoozed ? "Change snooze…" : "Snooze…",
+			shortLabel: "Snooze",
+			section: "triage",
 			icon: "moon",
 			...(actions.snoozed ? {} : { keys: sessionCommandKeys.snooze }),
 			disabledReason: actions.snoozeDisabledReason,
+			detail:
+				actions.snoozeDisabledReason ??
+				(actions.snoozed
+					? session.snoozedUntil == null
+						? "No timer"
+						: `until ${formatSnoozeTime(session.snoozedUntil, now)}`
+					: null),
 			run: (returnFocus) =>
 				openSnoozePicker(session, snoozePlacement, returnFocus),
 		});
@@ -389,6 +413,7 @@ export function getSessionCommands(
 			items.push({
 				testId: "session-ctx-unsnooze",
 				label: "Unsnooze",
+				section: "triage",
 				icon: "undo",
 				keys: sessionCommandKeys.snooze,
 				run: () => {
@@ -403,6 +428,8 @@ export function getSessionCommands(
 				? "session-ctx-mark-read"
 				: "session-ctx-mark-unread",
 			label: session.unread ? "Mark read" : "Mark unread",
+			shortLabel: session.unread ? "Read" : "Unread",
+			section: "triage",
 			icon: session.unread ? "circle" : "circle-dot",
 			keys: sessionCommandKeys.read,
 			run: () => {
@@ -410,12 +437,12 @@ export function getSessionCommands(
 			},
 		});
 	items.push(
-		{ divider: true },
 		...(host.select
 			? [
 					{
 						testId: "session-ctx-select",
 						label: "Select",
+						section: "manage" as const,
 						icon: "circle-check" as const,
 						run: host.select,
 					},
@@ -424,6 +451,7 @@ export function getSessionCommands(
 		{
 			testId: "session-ctx-rename",
 			label: "Rename",
+			section: "manage",
 			icon: "pencil",
 			keys: sessionCommandKeys.rename,
 			run: host.rename,
@@ -431,21 +459,26 @@ export function getSessionCommands(
 		{
 			testId: "session-ctx-fork",
 			label: "Fork",
+			section: "manage",
 			icon: "git-fork",
 			run: () => fork(session),
 		},
 		{
 			testId: "session-ctx-copy-resume",
 			label: "Copy resume command",
+			shortLabel: "Copy resume",
+			section: "manage",
 			icon: "copy",
 			run: () => {
 				void copyResume(session);
 			},
 		},
-		{ divider: true },
 		{
 			testId: "session-ctx-delete",
 			label: "Delete",
+			shortLabel: "Delete…",
+			section: "danger",
+			icon: "trash-2",
 			danger: true,
 			run: (returnFocus) => {
 				void remove(session, returnFocus);
