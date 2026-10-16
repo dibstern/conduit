@@ -31,7 +31,7 @@
 		onPhotos: () => void;
 		onSetGoal: () => void;
 	} = $props();
-	const canSetGoal = $derived(discoveryState.currentProviderId === "claude");
+	const canSetGoal = $derived(discoveryState.currentTraits?.supportsGoalState);
 </script>
 
 <!-- `side="top"`: the composer sits at the bottom of the viewport, so the menu

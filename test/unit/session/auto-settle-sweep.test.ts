@@ -8,10 +8,13 @@ import { afterEach, expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -135,7 +138,7 @@ describe("relay automatic settlement sweep", () => {
 					loggerLayer,
 					configLayer,
 					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-					Layer.succeed(BackgroundLivenessTag, () => undefined),
+					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
 					Layer.succeed(
@@ -173,12 +176,6 @@ describe("relay automatic settlement sweep", () => {
 								id,
 								{ sessionId: id, messageId: `${id}-m1`, role: "assistant" },
 								{ createdAt: old },
-							),
-							canonicalEvent(
-								"session.read",
-								id,
-								{ sessionId: id },
-								{ createdAt: old + 1 },
 							),
 						])
 							yield* runner.projectEvent(yield* store.append(event));
@@ -224,12 +221,7 @@ describe("relay automatic settlement sweep", () => {
 					(yield* store.readAllBySession("woken"))
 						.filter((event) => event.type.startsWith("session."))
 						.map((event) => event.type),
-				).toEqual([
-					"session.created",
-					"session.read",
-					"session.snoozed",
-					"session.settled",
-				]);
+				).toEqual(["session.created", "session.snoozed", "session.settled"]);
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(0);
 				yield* service.setSessionSettled("eligible", { settled: false });
 				expect(

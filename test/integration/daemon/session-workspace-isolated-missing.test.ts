@@ -213,16 +213,13 @@ const gate = ${JSON.stringify(gate)};
 			return { id: sessionId, path: path ?? fixture.projectDir, session };
 		};
 		const recreate = (sessionId: string) =>
-			sendRpcRequest(
-				socket,
-				new RecreateSessionWorktree({ projectSlug: "process-test", sessionId }),
-				{ requestTimeoutMs: 30_000 },
-			);
+			sendRpcRequest(socket, new RecreateSessionWorktree({ sessionId }), {
+				requestTimeoutMs: 30_000,
+			});
 		const continueInMain = (sessionId: string) =>
 			sendRpcRequest(
 				socket,
 				new ContinueSessionInMainFolder({
-					projectSlug: "process-test",
 					sessionId,
 				}),
 			);
@@ -563,7 +560,6 @@ const gate = ${JSON.stringify(gate)};
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: local.id,
 				path,
 			}),
@@ -613,7 +609,6 @@ const gate = ${JSON.stringify(gate)};
 			await sendRpcRequest(
 				socket,
 				new RenameSessionBranch({
-					projectSlug: "process-test",
 					sessionId: isolated.id,
 					branchName: "renamed-recovery",
 				}),
@@ -770,7 +765,6 @@ const gate = ${JSON.stringify(gate)};
 			await sendRpcRequest(
 				socket,
 				new SubmitInput({
-					projectSlug: "process-test",
 					sessionId: isolated.id,
 					inputId,
 					delivery: "queue",
@@ -863,7 +857,6 @@ const gate = ${JSON.stringify(gate)};
 			await sendRpcRequest(
 				socket,
 				new SubmitInput({
-					projectSlug: "process-test",
 					sessionId: isolated.id,
 					inputId,
 					delivery: "queue",

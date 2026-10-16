@@ -50,9 +50,13 @@ it("recovers historical sessions before startup can create a live session", asyn
 					),
 				);
 				const query = yield* ReadQueryEffectTag;
-				expect(yield* query.listSessions()).toEqual([]);
+				expect(
+					yield* query.listSessions({ projectIds: ["startup-recovery"] }),
+				).toEqual([]);
 			}).pipe(
-				Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+				Effect.provide(
+					makePersistenceEffectLayer(filename, "startup-recovery"),
+				),
 			),
 		);
 

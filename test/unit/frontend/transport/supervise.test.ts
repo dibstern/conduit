@@ -4,7 +4,7 @@
 // only what a consumer sees: the envelopes, the statuses, and when the
 // subscription is asked for again.
 
-import { RpcClient, type RpcMessage } from "@effect/rpc";
+import type { Rpc } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
 	Chunk,
@@ -20,84 +20,46 @@ import {
 } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
+	type SubscribeShell,
+	WsRpcError,
+} from "../../../../src/lib/contracts/ws-rpc.js";
+import {
 	makeWsRpcClientsLayer,
 	WsRpcClients,
-	type WsRpcConnect,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
 import {
 	type FeedStatus,
 	retryFeedsNow,
 	supervise,
 } from "../../../../src/lib/frontend/transport/supervise.js";
-import { WsRpcGroup } from "../../../../src/lib/frontend/transport/ws-rpc.js";
-
-/** One subscription request, and the server's side of answering it. */
-interface Served {
-	readonly emit: (
-		...envelopes: readonly [object, ...object[]]
-	) => Effect.Effect<void>;
-	readonly fail: (message: string) => Effect.Effect<void>;
-	readonly end: Effect.Effect<void>;
-	readonly die: (message: string) => Effect.Effect<void>;
-}
+import { makeRpcStream, makeRpcWire } from "../../../helpers/rpc-wire.js";
 
 const inMemoryTransport = Effect.gen(function* () {
-	const requests = yield* Queue.unbounded<Served>();
-	const connect: WsRpcConnect = () =>
-		Effect.gen(function* () {
-			let write:
-				| ((frame: RpcMessage.FromServerEncoded) => Effect.Effect<void>)
-				| undefined;
-			const answer = (frame: RpcMessage.FromServerEncoded) =>
-				Effect.suspend(() =>
-					write === undefined ? Effect.dieMessage("not running") : write(frame),
-				);
-			const exit = (
-				requestId: string,
-				exit: RpcMessage.ResponseExitEncoded["exit"],
-			) => answer({ _tag: "Exit", requestId, exit });
-			const protocol = RpcClient.Protocol.make((w) =>
-				Effect.sync(() => {
-					write = w;
-					return {
-						send: (request: RpcMessage.FromClientEncoded) =>
-							request._tag === "Request"
-								? Queue.offer(requests, {
-										emit: (...values) =>
-											answer({ _tag: "Chunk", requestId: request.id, values }),
-										fail: (message) =>
-											exit(request.id, {
-												_tag: "Failure",
-												cause: {
-													_tag: "Fail",
-													error: { _tag: "WsRpcError", message },
-												},
-											}),
-										end: exit(request.id, {
-											_tag: "Success",
-											value: undefined,
-										}),
-										die: (message) =>
-											exit(request.id, {
-												_tag: "Failure",
-												cause: { _tag: "Die", defect: message },
-											}),
-									})
-								: Effect.void,
-						supportsAck: false,
-						supportsTransferables: false,
-					};
+	const requests = yield* Queue.unbounded<{
+		readonly emit: (
+			...values: readonly Rpc.SuccessChunk<typeof SubscribeShell>[]
+		) => Effect.Effect<void>;
+		readonly fail: (message: string) => Effect.Effect<void>;
+		readonly end: Effect.Effect<void>;
+		readonly die: (message: string) => Effect.Effect<void>;
+	}>();
+	const wire = makeRpcWire({
+		SubscribeShell: () =>
+			Stream.unwrap(
+				Effect.gen(function* () {
+					const served = yield* makeRpcStream<
+						Rpc.SuccessChunk<typeof SubscribeShell>,
+						WsRpcError
+					>();
+					yield* Queue.offer(requests, {
+						...served,
+						fail: (message: string) => served.fail(new WsRpcError({ message })),
+					});
+					return served.stream;
 				}),
-			);
-			return yield* Layer.build(
-				Layer.effect(RpcClient.Protocol, protocol),
-			).pipe(
-				Effect.flatMap((ctx) =>
-					Effect.provide(RpcClient.make(WsRpcGroup), ctx),
-				),
-			);
-		});
-	return { requests, connect };
+			),
+	});
+	return { requests, connect: wire.connect };
 });
 
 /**
@@ -155,8 +117,8 @@ const restartsAfter = (
 		return yield* feed.request;
 	});
 
-const snapshot = { _tag: "snapshot", rows: [], sequence: 1 };
-const synchronized = { _tag: "synchronized" };
+const snapshot = { _tag: "snapshot", rows: [], sequence: 1 } as const;
+const synchronized = { _tag: "synchronized" } as const;
 
 beforeEach(() => {
 	vi.stubGlobal("location", { protocol: "http:", host: "localhost:2633" });

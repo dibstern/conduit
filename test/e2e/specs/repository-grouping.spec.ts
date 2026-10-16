@@ -92,6 +92,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 	let projects = fixtureProjects();
 	let defaultMode: GroupingMode = "repository";
 	const sessions = projects.map((project, index) => ({
+		accountId: null,
 		id: `grouping-${project.slug}`,
 		title: `Review ${project.title}`,
 		status: "idle",

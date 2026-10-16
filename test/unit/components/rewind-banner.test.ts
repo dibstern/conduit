@@ -16,7 +16,6 @@ import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
 interface RewindSessionInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly messageId: string;
 }
@@ -146,7 +145,6 @@ describe("RewindBanner", () => {
 
 		await waitFor(() => {
 			expect(rewindSessionRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				messageId: "provider-1",
 			});
@@ -170,7 +168,6 @@ describe("RewindBanner", () => {
 		const { getByRole } = render(RewindBanner, { onRewind });
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		expect(rewindSessionRpcSpy).toHaveBeenCalledWith({
-			projectSlug: "project-a",
 			sessionId: "session-1",
 			messageId: "provider-assistant-1",
 		});

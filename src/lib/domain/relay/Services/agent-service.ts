@@ -4,6 +4,7 @@ import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import {
 	type AccountId,
 	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import type { Agent } from "../../../instance/sdk-types.js";
 import { harnessForModelProvider } from "../../../provider/turn-settings.js";
@@ -226,7 +227,7 @@ export const AgentServiceLive: Layer.Layer<
 								),
 							);
 						});
-					if (account.driver === "claude")
+					if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
 						return yield* listClaudeAgents(account);
 
 					const running = yield* instances.ifRunning(

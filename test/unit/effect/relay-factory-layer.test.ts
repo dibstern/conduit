@@ -33,6 +33,14 @@ import {
 	makeProjectRegistryLive,
 	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -95,6 +103,7 @@ describe("RelayFactoryTag", () => {
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 		ConfigPersistenceNoopLive,
 		DaemonEventBusLive,
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeProjectRegistryLive(),
 		makeInstanceManagerStateLive(undefined, [], {
 			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
@@ -199,6 +208,71 @@ describe("RelayFactoryTag", () => {
 					}),
 				),
 				Effect.provide(Layer.fresh(factoryLayer)),
+			);
+		},
+	);
+
+	it.effect(
+		"session resolution rejects ambiguous ownership and keeps the surviving owner",
+		() => {
+			const root = mkdtempSync(join(tmpdir(), "conduit-relay-ownership-"));
+			const server = createServer();
+			createProjectRelayMock.mockResolvedValue(
+				partialFake<ProjectRelay>({ stop: async () => undefined }),
+			);
+			return Effect.gen(function* () {
+				const directory = yield* SessionDirectory;
+				yield* directory.record("a", ["shared"]);
+				yield* directory.record("b", ["shared"]);
+				const serverRef = yield* HttpServerRefTag;
+				yield* Ref.set(serverRef, server);
+				const factory = yield* RelayFactoryTag;
+				yield* factory.create({ slug: "a", title: "A", folders: [root] });
+				const resolve =
+					createProjectRelayMock.mock.calls.at(-1)?.[0].resolveSessionProject;
+				if (!resolve) throw new Error("Missing session resolution callback");
+				expect(
+					yield* Effect.either(
+						Effect.tryPromise({
+							try: () => resolve("shared"),
+							catch: (error) => error,
+						}),
+					),
+				).toMatchObject({
+					_tag: "Left",
+					left: {
+						_tag: "AmbiguousSession",
+						sessionId: "shared",
+						projectSlugs: ["a", "b"],
+						message:
+							"OpenCode session belongs to more than one Conduit project",
+					},
+				});
+				yield* directory.removeProject("b");
+				expect(yield* Effect.tryPromise(() => resolve("shared"))).toBe("a");
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					RelayFactoryLive(root).pipe(
+						Layer.provideMerge(
+							Layer.mergeAll(
+								configLayer,
+								makeSessionDirectoryLive(root, []),
+								Layer.succeed(
+									OpenCodeInstancesTag,
+									makeOpenCodeInstancesStub(),
+								),
+							),
+						),
+					),
+				),
+				Effect.ensuring(
+					Effect.sync(() => {
+						server.close();
+						rmSync(root, { recursive: true, force: true });
+						createProjectRelayMock.mockReset();
+					}),
+				),
 			);
 		},
 	);

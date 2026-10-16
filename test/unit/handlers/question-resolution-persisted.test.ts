@@ -205,6 +205,7 @@ it("answering an OpenCode question resolves the row and announces the advance", 
 			}>`SELECT version FROM sessions WHERE id = ${SESSION}`;
 			expect(advances.at(-1)).toEqual({
 				version: rows[0]?.version,
+				projectIds: ["test-project"],
 				sessionIds: [SESSION],
 				removedSessionIds: [],
 				collections: ["sessions", "approvals", "sidebar"],
@@ -230,6 +231,7 @@ it("skipping an OpenCode question resolves the row and announces the advance", a
 			}>`SELECT version FROM sessions WHERE id = ${SESSION}`;
 			expect(advances.at(-1)).toEqual({
 				version: rows[0]?.version,
+				projectIds: ["test-project"],
 				sessionIds: [SESSION],
 				removedSessionIds: [],
 				collections: ["sessions", "approvals", "sidebar"],

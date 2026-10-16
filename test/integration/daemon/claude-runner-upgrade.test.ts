@@ -1132,7 +1132,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await Effect.runPromise(
 			initial.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1221,7 +1220,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const originalQuery = queryFor(harness, old.pid);
 		await Effect.runPromise(
 			initial.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1325,7 +1323,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const original = queryFor(harness, old.pid);
 		await Effect.runPromise(
 			initial.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1350,7 +1347,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		const rejected = "invalidated-resume-rejected-send";
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -1536,7 +1532,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1638,7 +1633,6 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),

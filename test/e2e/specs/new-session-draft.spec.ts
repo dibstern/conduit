@@ -29,6 +29,41 @@ async function openDraft(page: Page, relayUrl: string) {
 	return { app, sidebar, countBefore };
 }
 
+async function mockTwoProjects(page: Page) {
+	const projects = [
+		{
+			slug: "e2e-replay",
+			title: "e2e-replay",
+			folders: ["/tmp/e2e-replay"],
+			git: { branch: "main" },
+		},
+		{
+			slug: "other",
+			title: "other",
+			folders: ["/tmp/other"],
+			git: { branch: "dev" },
+		},
+	];
+	await mockWsRpc(page, {
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+		},
+	});
+	await mockRelayWebSocket(page, {
+		initMessages: [
+			{ type: "project_list", projects, current: "e2e-replay" },
+			{ type: "shell_snapshot", roots: true, sessions: [] },
+		],
+		responses: new Map(),
+	});
+}
+
 test.describe("New session draft", () => {
 	test("+ opens an empty draft and creates nothing", async ({
 		page,
@@ -95,6 +130,29 @@ test.describe("New session draft", () => {
 		await expect(app.input).toHaveValue("Keep me");
 	});
 
+	// Picking used to hand focus back to the chip, so the prompt typed next
+	// went to it: a space reopened the menu, "e2e" picked e2e-replay by
+	// typeahead, and the next space chose it. The session started in the old
+	// project and the prompt was lost.
+	test("typing right after a project pick goes to the prompt", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		await mockTwoProjects(page);
+		const app = new AppPage(page);
+		await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
+		const chip = page.getByTestId("draft-project-chip");
+		await chip.click();
+		await page.getByRole("menuitemradio", { name: /other/ }).click();
+
+		await page.keyboard.type("update e2e tests ");
+
+		await expect(app.input).toHaveValue("update e2e tests ");
+		await expect(page).toHaveURL(/project=other/);
+		await expect(chip).toContainText("other");
+		await capture(page, testInfo, "desktop-pick-then-type");
+	});
+
 	test("a reload keeps the half-typed prompt", async ({ page, relayUrl }) => {
 		const { app } = await openDraft(page, relayUrl);
 		await app.input.fill("Survive a reload");
@@ -135,38 +193,7 @@ test.describe("New session draft", () => {
 			page,
 			harness,
 		}, testInfo) => {
-			const projects = [
-				{
-					slug: "e2e-replay",
-					title: "e2e-replay",
-					folders: ["/tmp/e2e-replay"],
-					git: { branch: "main" },
-				},
-				{
-					slug: "other",
-					title: "other",
-					folders: ["/tmp/other"],
-					git: { branch: "dev" },
-				},
-			];
-			await mockWsRpc(page, {
-				handlers: {
-					GetProjects: () => ({ projects, current: "e2e-replay" }),
-					ListDaemonSessions: () => ({
-						sessions: [],
-						availability: [],
-						hasMore: false,
-						nextCursor: null,
-					}),
-				},
-			});
-			await mockRelayWebSocket(page, {
-				initMessages: [
-					{ type: "project_list", projects, current: "e2e-replay" },
-					{ type: "shell_snapshot", roots: true, sessions: [] },
-				],
-				responses: new Map(),
-			});
+			await mockTwoProjects(page);
 			await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
 			const chip = page.getByTestId("draft-project-chip");
 			await expect(chip).toContainText("e2e-replay");

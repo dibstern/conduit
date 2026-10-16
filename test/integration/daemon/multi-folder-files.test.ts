@@ -4,8 +4,10 @@ import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetFileContent,
-	GetFileList,
+	GetFileContentForSession,
+	GetFileListForSession,
 	GetFileTree,
+	GetFileTreeForSession,
 	MoveSessionWorkspace,
 	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -79,9 +81,9 @@ describe("Multi-folder files through the built daemon", () => {
 		const sessionId = await (await fixture.connect()).createSession(
 			"Two folders",
 		);
-		const scope = { projectSlug: "process-test", sessionId };
-		await sendRpcRequest(socket, new GetFileList(scope));
-		const tree = await sendRpcRequest(socket, new GetFileTree(scope));
+		const scope = { sessionId };
+		await sendRpcRequest(socket, new GetFileListForSession(scope));
+		const tree = await sendRpcRequest(socket, new GetFileTreeForSession(scope));
 		evidence["roots"] = tree.roots;
 		expect(tree.roots).toEqual([
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
@@ -91,7 +93,7 @@ describe("Multi-folder files through the built daemon", () => {
 		expect(tree.entries).not.toContain("nested/child.txt");
 		const list = await sendRpcRequest(
 			socket,
-			new GetFileList({ ...scope, root: secondary, path: "nested" }),
+			new GetFileListForSession({ ...scope, root: secondary, path: "nested" }),
 		);
 		expect(list).toMatchObject({
 			root: secondary,
@@ -99,7 +101,7 @@ describe("Multi-folder files through the built daemon", () => {
 		});
 		const opened = await sendRpcRequest(
 			socket,
-			new GetFileContent({
+			new GetFileContentForSession({
 				...scope,
 				root: secondary,
 				path: "nested/child.txt",
@@ -114,7 +116,7 @@ describe("Multi-folder files through the built daemon", () => {
 		for (const root of [fixture.projectDir, secondary]) {
 			const response = await sendRpcRequest(
 				socket,
-				new GetFileContent({ ...scope, root, path: "shared.txt" }),
+				new GetFileContentForSession({ ...scope, root, path: "shared.txt" }),
 			);
 			expect(response.content).toBe(
 				root === secondary ? "secondary content\n" : "primary content\n",
@@ -128,7 +130,7 @@ describe("Multi-folder files through the built daemon", () => {
 			await expect(
 				sendRpcRequest(
 					socket,
-					new GetFileContent({ ...scope, root: secondary, path }),
+					new GetFileContentForSession({ ...scope, root: secondary, path }),
 				),
 			).rejects.toThrow(/outside.*folder/i);
 		}
@@ -136,14 +138,14 @@ describe("Multi-folder files through the built daemon", () => {
 			await expect(
 				sendRpcRequest(
 					socket,
-					new GetFileList({ ...scope, root: secondary, path }),
+					new GetFileListForSession({ ...scope, root: secondary, path }),
 				),
 			).rejects.toThrow(/outside.*folder/i);
 		}
 		await expect(
 			sendRpcRequest(
 				socket,
-				new GetFileContent({
+				new GetFileContentForSession({
 					...scope,
 					root: fixture.root,
 					path: "project/shared.txt",
@@ -151,13 +153,16 @@ describe("Multi-folder files through the built daemon", () => {
 			),
 		).rejects.toThrow(/Unknown file root/);
 		await expect(
-			sendRpcRequest(socket, new GetFileList({ ...scope, root: fixture.root })),
+			sendRpcRequest(
+				socket,
+				new GetFileListForSession({ ...scope, root: fixture.root }),
+			),
 		).rejects.toThrow(/Unknown file root/);
 		evidence["containment"] =
 			"traversal, absolute escape, symlink escape and unknown roots refused";
 		const rootless = await sendRpcRequest(
 			socket,
-			new GetFileContent({ ...scope, path: "shared.txt" }),
+			new GetFileContentForSession({ ...scope, path: "shared.txt" }),
 		);
 		evidence["rootless"] = rootless;
 		expect(rootless).toEqual({
@@ -166,9 +171,9 @@ describe("Multi-folder files through the built daemon", () => {
 			content: "primary content\n",
 		});
 		expect(
-			(await sendRpcRequest(socket, new GetFileList(scope))).entries.map(
-				({ name }) => name,
-			),
+			(
+				await sendRpcRequest(socket, new GetFileListForSession(scope))
+			).entries.map(({ name }) => name),
 		).toContain("shared.txt");
 		expect(
 			(
@@ -233,7 +238,7 @@ describe("Multi-folder files through the built daemon", () => {
 		const sessionId = await (await fixture.connect()).createSession(
 			"Mapped folders",
 		);
-		const scope = { projectSlug: "process-test", sessionId };
+		const scope = { sessionId };
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({ ...scope, path: secondaryWorktree }),
@@ -242,10 +247,17 @@ describe("Multi-folder files through the built daemon", () => {
 			{ root: fixture.projectDir, label: basename(fixture.projectDir) },
 			{ root: secondary, label: "library" },
 		];
-		const secondaryTree = await sendRpcRequest(socket, new GetFileTree(scope));
+		const secondaryTree = await sendRpcRequest(
+			socket,
+			new GetFileTreeForSession(scope),
+		);
 		const secondaryOpened = await sendRpcRequest(
 			socket,
-			new GetFileContent({ ...scope, root: secondary, path: "shared.txt" }),
+			new GetFileContentForSession({
+				...scope,
+				root: secondary,
+				path: "shared.txt",
+			}),
 		);
 		expect(secondaryTree.roots).toEqual(roots);
 		expect(secondaryOpened.content).toBe("secondary worktree\n");
@@ -257,7 +269,7 @@ describe("Multi-folder files through the built daemon", () => {
 			(
 				await sendRpcRequest(
 					socket,
-					new GetFileContent({ ...scope, path: "shared.txt" }),
+					new GetFileContentForSession({ ...scope, path: "shared.txt" }),
 				)
 			).content,
 		).toBe("secondary worktree\n");
@@ -265,7 +277,7 @@ describe("Multi-folder files through the built daemon", () => {
 			(
 				await sendRpcRequest(
 					socket,
-					new GetFileContent({
+					new GetFileContentForSession({
 						...scope,
 						root: fixture.projectDir,
 						path: "shared.txt",
@@ -282,10 +294,13 @@ describe("Multi-folder files through the built daemon", () => {
 				await fixture.kill();
 				await fixture.restart();
 			}
-			const tree = await sendRpcRequest(socket, new GetFileTree(scope));
+			const tree = await sendRpcRequest(
+				socket,
+				new GetFileTreeForSession(scope),
+			);
 			const opened = await sendRpcRequest(
 				socket,
-				new GetFileContent({
+				new GetFileContentForSession({
 					...scope,
 					root: fixture.projectDir,
 					path: "shared.txt",
@@ -297,7 +312,7 @@ describe("Multi-folder files through the built daemon", () => {
 				(
 					await sendRpcRequest(
 						socket,
-						new GetFileContent({
+						new GetFileContentForSession({
 							...scope,
 							root: secondary,
 							path: "shared.txt",
@@ -309,7 +324,7 @@ describe("Multi-folder files through the built daemon", () => {
 				(
 					await sendRpcRequest(
 						socket,
-						new GetFileContent({ ...scope, path: "shared.txt" }),
+						new GetFileContentForSession({ ...scope, path: "shared.txt" }),
 					)
 				).content,
 			).toBe("primary worktree\n");
@@ -346,17 +361,17 @@ describe("Multi-folder files through the built daemon", () => {
 		writeFileSync(join(fixture.projectDir, "only.txt"), "single folder\n");
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Single folder");
-		const scope = { projectSlug: "process-test", sessionId };
+		const scope = { sessionId };
 		// Start the lazy file provider before requesting the background tree.
-		await sendRpcRequest(socket, new GetFileList(scope));
-		const tree = await sendRpcRequest(socket, new GetFileTree(scope));
+		await sendRpcRequest(socket, new GetFileListForSession(scope));
+		const tree = await sendRpcRequest(socket, new GetFileTreeForSession(scope));
 		expect(tree).toEqual({
 			projectSlug: "process-test",
 			entries: ["only.txt"],
 		});
 		const opened = await sendRpcRequest(
 			socket,
-			new GetFileContent({ ...scope, path: "only.txt" }),
+			new GetFileContentForSession({ ...scope, path: "only.txt" }),
 		);
 		expect(opened).toEqual({
 			projectSlug: "process-test",

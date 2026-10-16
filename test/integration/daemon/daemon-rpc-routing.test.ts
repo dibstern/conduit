@@ -199,7 +199,6 @@ describe("daemon shared RPC routing", () => {
 				).toEqual({ projectSlug: "project-a" });
 				if (operation === "ViewSession") {
 					yield* rpcClient.SyncInputDraft({
-						projectSlug: "project-b",
 						sessionId: "session-b",
 						text: "saved draft",
 					});
@@ -207,12 +206,10 @@ describe("daemon shared RPC routing", () => {
 				expect(
 					yield* operation === "ViewSession"
 						? rpcClient.ViewSession({
-								projectSlug: "project-b",
 								sessionId: "session-b",
 								originId: "daemon-client",
 							})
 						: rpcClient.AttachProject({
-								projectSlug: "project-a",
 								sessionId: "session-b",
 								originId: "daemon-client",
 							}),

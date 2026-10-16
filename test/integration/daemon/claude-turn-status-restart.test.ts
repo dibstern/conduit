@@ -116,7 +116,6 @@ describe("running Claude turn status across restart", () => {
 		const sessionId = await browser.createSession("Running across restart");
 		await Effect.runPromise(
 			browser.rpc.SwitchModel({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				providerId: "claude",
@@ -240,7 +239,6 @@ describe("Claude turn status before the model streams", () => {
 		const sessionId = await browser.createSession("Local work");
 		await Effect.runPromise(
 			browser.rpc.SwitchModel({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				providerId: "claude",

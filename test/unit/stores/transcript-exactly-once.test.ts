@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { RpcClient, type RpcMessage } from "@effect/rpc";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
+import type {
+	SessionDetailEnvelope,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	getOrCreateSessionSlot,
 	sessionActivity,
@@ -13,13 +15,11 @@ import {
 	transcriptStatus,
 	viewTranscript,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
-import {
-	makeWsRpcClientsLayer,
-	type WsRpcConnect,
-} from "../../../src/lib/frontend/transport/shared-client.js";
-import { WsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
+import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 import { detailRowsOf, detailUpserts } from "../../helpers/detail-rows.js";
+import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
+import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
 const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
@@ -57,47 +57,20 @@ const assistant = (text: string): HistoryMessage => ({
 });
 
 function adapter() {
-	let requestId: string | undefined;
-	let deliver:
-		| ((frame: RpcMessage.FromServerEncoded) => Effect.Effect<void>)
-		| undefined;
-	const connect: WsRpcConnect = ({ trafficClass }) =>
-		Effect.gen(function* () {
-			const protocol = RpcClient.Protocol.make((write) =>
-				Effect.sync(() => {
-					if (trafficClass === "stream") deliver = write;
-					return {
-						send: (frame: RpcMessage.FromClientEncoded) =>
-							Effect.sync(() => {
-								if (
-									frame._tag === "Request" &&
-									frame.tag === "SubscribeSessionDetail"
-								)
-									requestId = frame.id;
-							}),
-						supportsAck: false,
-						supportsTransferables: false,
-					};
-				}),
-			);
-			return yield* Layer.build(
-				Layer.effect(RpcClient.Protocol, protocol),
-			).pipe(
-				Effect.flatMap((context) =>
-					Effect.provide(RpcClient.make(WsRpcGroup), context),
-				),
-			);
-		});
+	const feed = Effect.runSync(
+		makeRpcStream<SessionDetailEnvelope, WsRpcError>(),
+	);
+	const table: StubTable = { SubscribeSessionDetail: () => feed.stream };
+	const wire = makeRpcWire(table);
 	return {
-		connect,
+		...wire,
 		get ready() {
-			return requestId !== undefined && deliver !== undefined;
+			return wire.requests.some(
+				(request) => request.tag === "SubscribeSessionDetail",
+			);
 		},
 		async emit(envelope: SessionDetailEnvelope) {
-			if (!requestId || !deliver) throw new Error("subscription not ready");
-			await Effect.runPromise(
-				deliver({ _tag: "Chunk", requestId, values: [envelope] }),
-			);
+			await Effect.runPromise(feed.emit(envelope));
 		},
 	};
 }

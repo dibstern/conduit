@@ -9,14 +9,13 @@ import {
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 
 interface SwitchVariantInput {
-	readonly projectSlug: string;
 	readonly sessionId: string;
 	readonly variant: string;
 }
 
 const switchVariantRpcSpy = vi.hoisted(() =>
 	vi.fn(async (input: SwitchVariantInput) => ({
-		projectSlug: input.projectSlug,
+		projectSlug: "project-a",
 		variant: input.variant,
 		variants: ["low", "medium", "high", "max"],
 	})),
@@ -64,7 +63,6 @@ describe("ModelVariant", () => {
 
 		await waitFor(() => {
 			expect(switchVariantRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				variant: "high",
 			});

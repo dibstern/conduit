@@ -19,8 +19,8 @@ import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 	ToolStartedPayload,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -65,7 +65,7 @@ const seed = (filename: string) =>
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
 			const at = Date.UTC(2026, 9, 1);
-			const event = <T extends CanonicalEventType>(
+			const event = <T extends LiveEventType>(
 				type: T,
 				data: EventPayloadMap[T],
 			) =>
@@ -164,7 +164,7 @@ const seed = (filename: string) =>
 			// Three turns, each a block of two finished tools with cut results.
 			// Every reply but the last is taller than a screen, so a block shows
 			// alone and the newest is the one on screen at the bottom.
-			const prefetchEvent = <T extends CanonicalEventType>(
+			const prefetchEvent = <T extends LiveEventType>(
 				type: T,
 				data: EventPayloadMap[T],
 			) =>
@@ -230,7 +230,7 @@ const seed = (filename: string) =>
 				{ publish: false },
 			);
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -419,7 +419,6 @@ test("tools open as previews and expand to full detail", async ({
 	const send = (sessionId: string, text: string) =>
 		Effect.runPromise(
 			driver.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: driver.originId,
 				inputId: randomUUID(),
@@ -718,7 +717,6 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	const requestsBeforeLive = rpc.detailRequests.length;
 	await Effect.runPromise(
 		driver.rpc.input.submit({
-			projectSlug: "process-test",
 			sessionId: liveSession,
 			originId: driver.originId,
 			inputId: randomUUID(),

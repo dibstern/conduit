@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { AccountId } from "../../../contracts/provider-instance.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type Harness,
@@ -105,7 +106,7 @@ export const loadModelCatalog = (
 				: { _tag: "Id", id: instanceId },
 		);
 		if (account.driver !== harness) return [] as ModelInfo[];
-		if (harness === "claude") {
+		if (PROVIDER_DRIVERS[harness].catalogSource === "discovery") {
 			const engine = yield* OrchestrationEngineTag;
 
 			const capsResult = yield* Effect.either(

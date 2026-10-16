@@ -306,7 +306,6 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		if (!sessionId) throw new Error("No Claude session was created");
 		await client.rpcCall((rpc) =>
 			rpc.SwitchContextWindow({
-				projectSlug: "integration-test",
 				sessionId,
 				contextWindow: "200k",
 			}),
