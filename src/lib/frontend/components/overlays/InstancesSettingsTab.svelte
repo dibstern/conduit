@@ -303,7 +303,7 @@
 		<div class="flex flex-wrap items-center gap-[10px] text-[12.5px]">
 			<h4 class="font-semibold text-text">{instanceFormMode === "edit" ? `Edit ${instances.find((inst) => inst.id === editingInstanceId)?.name ?? "instance"}` : "New instance"}</h4>
 			{#if instanceFormMode === "add"}
-				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="whitespace-nowrap" />
+				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="max-w-full" />
 			{/if}
 		</div>
 		{#if formTraits?.runsOpenCodeServer}
