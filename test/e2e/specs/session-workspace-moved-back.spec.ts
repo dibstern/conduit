@@ -29,6 +29,7 @@ for (const viewport of [
 			{ slug: projectSlug, title: "Workspace project", folders: [main] },
 		];
 		const session = {
+			accountId: null,
 			id: "moved-back-session",
 			title: "Removed worktree",
 			status: "idle",
@@ -39,6 +40,7 @@ for (const viewport of [
 		};
 		const rpc = await mockWsRpc(page, {
 			handlers: {
+				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 				GetProjects: () => ({ projects, current: projectSlug }),
 				ListDaemonSessions: () => ({
 					sessions: [session],
