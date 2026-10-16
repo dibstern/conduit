@@ -60,7 +60,7 @@ import {
 	isPermissionDenied,
 } from "../../../project-folders.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
@@ -562,7 +562,7 @@ export const remove = (slug: string) =>
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
 					const state = yield* Ref.get(yield* DaemonStateTag);
-					yield* stopRegisteredClaudeRunners(
+					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
 						state.configDir,
 					);
@@ -1193,10 +1193,7 @@ export const saveProject = (input: SaveProjectInput) =>
 				) {
 					yield* replaceRelay(slug);
 					if (mainChanged) {
-						yield* stopRegisteredClaudeRunners(
-							existing.folders[0],
-							configDir,
-						).pipe(
+						yield* stopRegisteredRunners(existing.folders[0], configDir).pipe(
 							Effect.catchAllCause((cause) =>
 								Effect.logWarning(
 									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,

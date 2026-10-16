@@ -30,18 +30,18 @@ import { isSessionDeleted } from "../../../persistence/effect/session-seeder-eff
 import { type CanonicalEvent, EventId } from "../../../persistence/events.js";
 import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import {
-	commitClaudeRunnerOutput,
-	createClaudeRunnerPermissionReplies,
-	currentClaudeRunnerOutput,
-	currentClaudeRunnerPermissionReply,
-	ownsClaudeRunnerAttachment,
-} from "../../../provider/claude/claude-runner-receipts.js";
-import {
 	emptyProviderRuntimeDomainMapperState,
 	partKey,
 	restoreRuntimeToolStart,
 	translateProviderRuntimeEventToDomain,
 } from "../../../provider/provider-runtime-event-to-domain.js";
+import {
+	commitRunnerOutput,
+	createRunnerPermissionReplies,
+	currentRunnerOutput,
+	currentRunnerPermissionReply,
+	ownsRunnerAttachment,
+} from "../../../provider/runner/runner-receipts.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
@@ -189,9 +189,9 @@ export const makeProviderRuntimeIngestionLive = (
 					);
 					return yield* ingestSemaphore.withPermits(1)(
 						Effect.gen(function* () {
-							const context = yield* FiberRef.get(currentClaudeRunnerOutput);
+							const context = yield* FiberRef.get(currentRunnerOutput);
 							const permissionReply = yield* FiberRef.get(
-								currentClaudeRunnerPermissionReply,
+								currentRunnerPermissionReply,
 							);
 							const receipt =
 								context && !context.consumed ? context : undefined;
@@ -260,7 +260,7 @@ export const makeProviderRuntimeIngestionLive = (
 							const beforeCommit = Effect.gen(function* () {
 								yield* ingestOptions.beforeCommit ?? Effect.void;
 								if (permissionReply) {
-									yield* createClaudeRunnerPermissionReplies(sql);
+									yield* createRunnerPermissionReplies(sql);
 									yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
 								}
 								if (options.usage)
@@ -317,8 +317,8 @@ export const makeProviderRuntimeIngestionLive = (
 											// projections are written. Replayed and fenced frames are no-ops.
 											if (context && (receipt || context.attachmentId))
 												appended = receipt
-													? yield* commitClaudeRunnerOutput(sql, receipt)
-													: yield* ownsClaudeRunnerAttachment(sql, context);
+													? yield* commitRunnerOutput(sql, receipt)
+													: yield* ownsRunnerAttachment(sql, context);
 											if (!appended) return;
 											// Check under the same write permit and transaction as local
 											// deletion. Neither seeding nor publication may revive a deletion.

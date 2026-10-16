@@ -478,6 +478,8 @@ const handleDispatchResult = (
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
+		// The steer-requeue ticket defines how declined inputs are rescheduled.
+		if (result.status === "steer-declined") return;
 		// The interrupter already sent done; finalizing again can end a newer turn.
 		if (result.status === "interrupted" && !result.error) return;
 		// One provider result finalises once: the input that owns it does that,
