@@ -395,6 +395,33 @@ describe("session read-model contract", () => {
 		}),
 	);
 
+	// OpenCode ingress seeds a session it has not seen yet, with OpenCode's
+	// native parentID, after checking the store. A Fork stored in that gap
+	// must stay a Family Root.
+	it.effect(
+		"keeps a Fork a Family Root when a native parent arrives later",
+		() =>
+			Effect.gen(function* () {
+				expect(
+					yield* readModelAfter([
+						source,
+						forkOf("fork", "source"),
+						canonicalEvent("session.created", "fork", {
+							sessionId: "fork",
+							title: "Untitled",
+							provider: "opencode",
+							parentId: "source",
+						}),
+					]),
+				).toStrictEqual({
+					roots: ["fork", "source"],
+					families: { fork: ["fork"], source: ["source"] },
+					rollups: { fork: idle, source: idle },
+					lineage: { fork: forkLineage("source"), source: noLineage },
+				});
+			}),
+	);
+
 	it.effect("deleting a Source keeps its Forks as Family Roots", () =>
 		Effect.gen(function* () {
 			const before = [source, unrelated, forkOf("fork", "source"), sideThread];

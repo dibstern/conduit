@@ -285,7 +285,8 @@ export const sessionHandlers: {
 		// Use INSERT ... ON CONFLICT DO UPDATE instead of INSERT OR REPLACE
 		// to preserve user/auto-renamed titles plus nullable columns
 		// (provider_sid, parent_id, forked_from, fork_point_event) that may have been set by
-		// other code paths.
+		// other code paths. A Fork never takes a parent, whichever creation lands
+		// last: OpenCode ingress can seed the native parentID after the Fork.
 		return [
 			{
 				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, forked_from, fork_point_event, side_thread, permission_mode, created_at, updated_at)
@@ -314,8 +315,9 @@ export const sessionHandlers: {
 				       ELSE sessions.title
 				     END,
 				     parent_id = CASE
-				       WHEN excluded.forked_from IS NOT NULL AND sessions.side_thread = 0
-				       THEN excluded.parent_id
+				       WHEN COALESCE(excluded.forked_from, sessions.forked_from) IS NOT NULL
+				         AND MAX(sessions.side_thread, excluded.side_thread) = 0
+				       THEN NULL
 				       ELSE COALESCE(excluded.parent_id, sessions.parent_id)
 				     END,
 				     forked_from = COALESCE(excluded.forked_from, sessions.forked_from),
