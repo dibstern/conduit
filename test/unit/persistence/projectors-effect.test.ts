@@ -3094,7 +3094,6 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(result.recovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 4,
@@ -3222,7 +3221,6 @@ describe("ProjectionRunnerEffect", () => {
 		}
 		expect(result.failuresAfterFirst).toEqual([{ count: 1 }]);
 		expect(result.secondRecovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: result.poisonEvent.sequence,
 			totalReplayed: 0,
@@ -3313,7 +3311,6 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.messageCursorAfterFailure).toEqual([{ last_applied_seq: 0 }]);
 		expect(result.recoveredAfterFailure).toBe(false);
 		expect(result.retryRecovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 1,
 			totalReplayed: 3,
@@ -3380,7 +3377,6 @@ describe("ProjectionRunnerEffect", () => {
 		);
 
 		expect(cold.recovery).toMatchObject({
-			projectId: "test-project",
 			startCursor: 0,
 			endCursor: 3,
 			totalReplayed: 7,
@@ -3537,7 +3533,6 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(recovery).toMatchObject({
-					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 4,
 					totalReplayed: 3,
@@ -3652,7 +3647,6 @@ describe("ProjectionRunnerEffect", () => {
 				}>`SELECT projector_name, last_applied_seq FROM projector_cursors ORDER BY projector_name`;
 
 				expect(first).toMatchObject({
-					projectId: "test-project",
 					startCursor: 0,
 					endCursor: 501,
 					totalReplayed: 1002,
@@ -3672,7 +3666,6 @@ describe("ProjectionRunnerEffect", () => {
 					status: string;
 				}>`SELECT status FROM sessions WHERE id = 's-paged'`;
 				expect(second).toMatchObject({
-					projectId: "test-project",
 					startCursor: 501,
 					endCursor: 502,
 					totalReplayed: 2,

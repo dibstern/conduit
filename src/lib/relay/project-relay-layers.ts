@@ -141,7 +141,9 @@ import type { EventStoreEffectTag } from "../persistence/effect/event-store-effe
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
+	makePersistenceProjectLayer,
 	type PersistenceEffectError,
+	PersistenceStore,
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
@@ -475,12 +477,22 @@ export function createProjectRelayLayers({
 					folders: [config.projectDir, ...(config.extraFolders ?? [])],
 				},
 			]);
-	const persistenceEffectLayer = makePersistenceEffectLayer(
-		config.persistenceDbPath,
-		config.slug,
-		undefined,
-		SessionEventBusLive,
-		sessionDirectoryLayer,
+	const sharedStore = config.daemonConfigContext
+		? Context.getOption(config.daemonConfigContext, PersistenceStore)
+		: Option.none();
+	const persistenceEffectLayer = (
+		Option.isSome(sharedStore)
+			? makePersistenceProjectLayer(config.slug, {
+					sessionEventBusLayer: SessionEventBusLive,
+					sessionDirectoryLayer,
+				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
+			: makePersistenceEffectLayer(
+					config.persistenceDbPath,
+					config.slug,
+					undefined,
+					SessionEventBusLive,
+					sessionDirectoryLayer,
+				)
 	).pipe(Layer.provideMerge(activityReaders));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
