@@ -53,6 +53,12 @@ describe("queued input across a restart", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			foregroundCli: true,
 			restartProof: true,
+			capabilityModels: ["sonnet", "claude-sonnet-4"].map((id) => ({
+				id,
+				name: id,
+				providerId: "claude",
+				contextWindowOptions: [{ value: "200k", label: "200K" }],
+			})),
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Queue across restart");

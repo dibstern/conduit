@@ -16,10 +16,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Layer, Option, Stream } from "effect";
+import { Effect, Either, Layer, Option, Record, Stream } from "effect";
 import { afterAll, vi } from "vitest";
 import type { Account } from "../../src/lib/contracts/account.js";
-import { AccountIdSchema } from "../../src/lib/contracts/provider-instance.js";
+import {
+	AccountIdSchema,
+	PROVIDER_DRIVERS,
+	type ProviderDriverKind,
+} from "../../src/lib/contracts/provider-instance.js";
 import {
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
@@ -59,10 +63,18 @@ import { AlertsLive } from "../../src/lib/domain/relay/Services/alerts.js";
 import { DaemonSessionQueryServiceLive } from "../../src/lib/domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../../src/lib/domain/relay/Services/directory-listing-service.js";
 import { InputDraftsLive } from "../../src/lib/domain/relay/Services/input-drafts.js";
-import { InstanceManagementServiceLive } from "../../src/lib/domain/relay/Services/instance-management-service.js";
+import {
+	type InstanceManagementService,
+	InstanceManagementServiceError,
+	InstanceManagementServiceTag,
+} from "../../src/lib/domain/relay/Services/instance-management-service.js";
 import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { ProjectManagementServiceLive } from "../../src/lib/domain/relay/Services/project-management-service.js";
+import {
+	type ProjectManagementService,
+	ProjectManagementServiceLive,
+	ProjectManagementServiceTag,
+} from "../../src/lib/domain/relay/Services/project-management-service.js";
 import { ProjectSettingsLive } from "../../src/lib/domain/relay/Services/project-settings.js";
 import {
 	makeProviderRuntimeIngestionLive,
@@ -838,15 +850,115 @@ export function makeMockAccountDirectory(
 			accounts,
 			launchLogin: configuredClaudeConfigDir("/isolated-test-login"),
 			maxAccounts: 5,
-			defaults: {
-				claude: Option.fromNullable(
-					accounts.find((account) => account.driver === "claude")?.id,
+			defaults: Record.map(PROVIDER_DRIVERS, (_, driver) =>
+				Option.fromNullable(
+					accounts.find((account) => account.driver === driver)?.id,
 				),
-			},
+			),
 			deleted: [],
 		}),
 	);
 }
+
+const toError =
+	(operation: InstanceManagementServiceError["operation"]) =>
+	(cause: unknown) =>
+		new InstanceManagementServiceError({ operation, cause });
+
+const makeTestInstanceManagementService = (
+	instanceMgmt: InstanceManagementDeps,
+): InstanceManagementService => {
+	const list = () =>
+		Effect.tryPromise({
+			try: () => Promise.resolve(instanceMgmt.getInstances()),
+			catch: toError("list"),
+		});
+
+	const persist = (operation: InstanceManagementServiceError["operation"]) =>
+		Effect.tryPromise({
+			try: () => Promise.resolve(instanceMgmt.persistConfig()),
+			catch: toError(operation),
+		});
+
+	const withPersistedList = (
+		operation: InstanceManagementServiceError["operation"],
+	) =>
+		Effect.gen(function* () {
+			yield* persist(operation);
+			return yield* list();
+		});
+
+	return {
+		list,
+		add: (input) =>
+			Effect.gen(function* () {
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(instanceMgmt.addInstance(input)),
+					catch: toError("add"),
+				});
+				return yield* withPersistedList("add");
+			}),
+		remove: (instanceId) =>
+			Effect.gen(function* () {
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(instanceMgmt.removeInstance(instanceId)),
+					catch: toError("remove"),
+				});
+				return yield* withPersistedList("remove");
+			}),
+		start: (instanceId) =>
+			Effect.gen(function* () {
+				yield* Effect.tryPromise({
+					try: () => instanceMgmt.startInstance(instanceId),
+					catch: toError("start"),
+				});
+				return yield* list();
+			}),
+		stop: (instanceId) =>
+			Effect.gen(function* () {
+				yield* Effect.tryPromise({
+					try: () => Promise.resolve(instanceMgmt.stopInstance(instanceId)),
+					catch: toError("stop"),
+				});
+				return yield* list();
+			}),
+		update: (instanceId, input) =>
+			Effect.gen(function* () {
+				const updates: {
+					name?: string;
+					env?: Record<string, string>;
+					port?: number;
+					driver?: ProviderDriverKind;
+					configDir?: string;
+				} = {};
+				if (typeof input.name === "string") updates.name = input.name;
+				if (typeof input.port === "number") updates.port = input.port;
+				if (input.env !== undefined) updates.env = input.env;
+				if (input.driver !== undefined) updates.driver = input.driver;
+				if (input.configDir !== undefined) updates.configDir = input.configDir;
+
+				yield* Effect.tryPromise({
+					try: () =>
+						Promise.resolve(instanceMgmt.updateInstance(instanceId, updates)),
+					catch: toError("update"),
+				});
+				return yield* withPersistedList("update");
+			}),
+		rename: (instanceId, name) =>
+			Effect.gen(function* () {
+				yield* Effect.tryPromise({
+					try: () =>
+						Promise.resolve(
+							instanceMgmt.updateInstance(instanceId, {
+								name,
+							}),
+						),
+					catch: toError("rename"),
+				});
+				return yield* withPersistedList("rename");
+			}),
+	};
+};
 
 /**
  * Options for building the handler-level test Layer.
@@ -868,6 +980,7 @@ export interface TestHandlerLayerOptions {
 	localPty?: LocalPtyService;
 	sessionTitleService?: SessionTitleService;
 	instanceMgmt?: InstanceManagementDeps;
+	projectManagementService?: ProjectManagementService;
 	orchestrationEngine?: OrchestrationEngine;
 	providerRegistry?: ProviderRegistry;
 	persistenceLayer?: ReturnType<typeof makePersistenceEffectLayer>;
@@ -1045,9 +1158,13 @@ export function makeTestHandlerLayer(
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
-	const projectManagementServiceLayer = ProjectManagementServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(configLayer, openCodeSettingsServiceLayer)),
-	);
+	const projectManagementServiceLayer = opts?.projectManagementService
+		? Layer.succeed(ProjectManagementServiceTag, opts.projectManagementService)
+		: ProjectManagementServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(configLayer, openCodeSettingsServiceLayer),
+				),
+			);
 	const daemonSessionQueryServiceLayer = DaemonSessionQueryServiceLive.pipe(
 		Layer.provide(Layer.mergeAll(configLayer, accountDirectoryLayer)),
 	);
@@ -1103,8 +1220,9 @@ export function makeTestHandlerLayer(
 	const instanceManagementServiceLayer =
 		instanceMgmt == null
 			? Layer.empty
-			: InstanceManagementServiceLive.pipe(
-					Layer.provide(Layer.succeed(InstanceMgmtTag, instanceMgmt)),
+			: Layer.succeed(
+					InstanceManagementServiceTag,
+					makeTestInstanceManagementService(instanceMgmt),
 				);
 	const providerTurnServiceLayer = ProviderTurnServiceLive.pipe(
 		Layer.provide(

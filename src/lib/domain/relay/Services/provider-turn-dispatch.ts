@@ -14,9 +14,9 @@ import {
 } from "effect";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import {
-	getProviderDriver,
 	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
+	type ProviderDriverTraits,
 } from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
 import {
@@ -37,6 +37,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
@@ -305,16 +306,6 @@ export class ProviderTurnTimeoutRuntimeTag extends Context.Tag(
 	}
 >() {}
 
-export function isProviderTurnInterruptProvider(
-	driver: ProviderDriverKind,
-): boolean {
-	return getProviderDriver(driver)?.interruptViaEngine === true;
-}
-
-export function isClaudeDriver(driver: ProviderDriverKind): boolean {
-	return driver === CLAUDE_PROVIDER_ID;
-}
-
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -541,13 +532,27 @@ const prepareEngineTurnInput = (
 	Effect.gen(function* () {
 		const driver = account.driver;
 		const providerId = account.id;
+		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
+		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		if (
+			traits.unavailableReason &&
+			(registry._tag === "None" || !registry.value.hasInstance(driver))
+		) {
+			yield* failUnfinishedSend(
+				resolvedInput,
+				driver,
+				false,
+				traits.unavailableReason,
+				"PROVIDER_UNAVAILABLE",
+			);
+			return undefined;
+		}
 		const readQuery = yield* ReadQueryEffectTag;
 		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
 		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
 			yield* clearProcessingTimeout(resolvedInput.sessionId);
 			return undefined;
 		}
-		const traits = PROVIDER_DRIVERS[driver];
 		const harness = driver;
 		const pick = storedSessionPick(sessionRow, harness);
 		if (!pick) {

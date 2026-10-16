@@ -193,6 +193,7 @@ async function openDraft(
 				sessions = [
 					{
 						id: "draft-session",
+						accountId: provider,
 						title: "New workspace",
 						status: "idle",
 						projectSlug,

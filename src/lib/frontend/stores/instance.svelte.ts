@@ -131,6 +131,12 @@ export function applyInstanceListResponse(
 		...(instance.usageEligible !== undefined
 			? { usageEligible: instance.usageEligible }
 			: {}),
+		...(instance.available !== undefined
+			? { available: instance.available }
+			: {}),
+		...(instance.unavailableReason !== undefined
+			? { unavailableReason: instance.unavailableReason }
+			: {}),
 		...(instance.capabilities != null
 			? { capabilities: instance.capabilities }
 			: {}),

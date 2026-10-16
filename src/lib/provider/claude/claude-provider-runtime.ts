@@ -18,7 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	type Settings,
 	query as sdkQuery,
@@ -298,6 +298,15 @@ export const makeClaudeProviderRuntime = (
 		const capabilitiesService =
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
+				...(deps.daemonConfigDir !== undefined
+					? {
+							cacheDir: join(
+								deps.daemonConfigDir,
+								"cache",
+								"claude-capabilities",
+							),
+						}
+					: {}),
 				launchConfig: () =>
 					resolveClaudeLaunchConfig(
 						Either.getOrElse(
@@ -389,6 +398,15 @@ export const makeClaudeSessionRunner = (
 		const capabilitiesService =
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
+				...(deps.daemonConfigDir !== undefined
+					? {
+							cacheDir: join(
+								deps.daemonConfigDir,
+								"cache",
+								"claude-capabilities",
+							),
+						}
+					: {}),
 				launchConfig: () =>
 					resolveClaudeLaunchConfig(
 						Either.getOrElse(

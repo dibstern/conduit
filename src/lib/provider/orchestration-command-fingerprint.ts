@@ -100,7 +100,12 @@ export function effectiveDispatchFingerprint(
 		materialDefaults: input.account
 			? input.account.driver === "claude"
 				? { configDir: input.account.folder, env: input.account.env ?? null }
-				: { url: input.account.url ?? null }
+				: input.account.driver === "opencode"
+					? { url: input.account.url ?? null }
+					: {
+							configDir: input.account.configuredFolder ?? null,
+							env: input.account.env ?? null,
+						}
 			: null,
 	};
 	return { version: DURABLE_COMMAND_FINGERPRINT_VERSION, fields };

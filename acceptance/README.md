@@ -51,6 +51,10 @@ pnpm acceptance:visual:capture      # (re)capture baselines for the current plat
 pnpm acceptance:mutation:visual     # mutate example values to measure test strength
 ```
 
+Set `ACCEPTANCE_FEATURE=cursor-unavailable` to run or capture only that feature.
+`VISUAL_ACCEPTANCE_CAPTURE_BASELINES=cursor-unavailable-rail` further limits
+capture to the named baseline; other baselines remain assertions.
+
 `acceptance:visual` builds the frontend, starts a hot `vite preview` on
 `:4173` (set `ACCEPTANCE_PORT` to run beside another worktree), mocks the relay WebSocket (`test/e2e/helpers/ws-mock.ts`), and drives
 the live page with Playwright — no OpenCode/relay backend required.

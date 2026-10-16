@@ -301,7 +301,7 @@ describe("routed RPC server", () => {
 			Effect.gen(function* () {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
-						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
+						config: makeMockConfig({ slug: "initial" }),
 					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
@@ -351,7 +351,7 @@ describe("routed RPC server", () => {
 			Effect.gen(function* () {
 				const context = yield* Layer.build(
 					makeTestHandlerLayer({
-						config: makeMockConfig({ slug: "initial", getProjects: () => [] }),
+						config: makeMockConfig({ slug: "initial" }),
 					}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
 				);
 				const resolve = vi.fn(() => Effect.succeed(context));
@@ -405,12 +405,16 @@ describe("routed RPC server", () => {
 						slug,
 						yield* Layer.build(
 							makeTestHandlerLayer({
-								config: makeMockConfig({
-									slug,
-									getProjects: () => [
-										{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
-									],
-								}),
+								config: makeMockConfig({ slug }),
+								projectManagementService: {
+									currentSlug: () => Effect.succeed(slug),
+									list: () =>
+										Effect.succeed([
+											{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
+										]),
+									save: () => Effect.die("Unexpected save"),
+									remove: () => Effect.die("Unexpected remove"),
+								},
 							}),
 						),
 					);

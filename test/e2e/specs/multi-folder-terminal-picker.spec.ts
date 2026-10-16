@@ -55,6 +55,7 @@ for (const scenario of [
 				},
 			];
 			const session = {
+				accountId: null,
 				id: "terminal-folders-session",
 				title: "Terminal folders session",
 				status: "idle",
@@ -72,6 +73,7 @@ for (const scenario of [
 			let rpc: RpcMockControl;
 			rpc = await mockWsRpc(page, {
 				handlers: {
+					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 					GetProjects: () => ({ projects, current: projectSlug }),
 					GetAgents: () => ({
 						projectSlug,
