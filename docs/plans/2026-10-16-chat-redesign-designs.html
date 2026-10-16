@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chat redesign: type, colour and transcript format</title>
-<!-- PROTOTYPE. Directions for the chat surface, switchable with ?variant=today|A|B|C|D|AC|jev-A|jev-C|jev-AC|avatar|final|app|menu|jev
+<!-- PROTOTYPE. Directions for the chat surface, switchable with ?variant=today|A|B|C|D|AC|jev-A|jev-C|jev-AC|avatar|final|app|menu|jev|new
      (or the arrow keys). Each renders the same session in dark and light. Throwaway. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -843,7 +843,9 @@ code, pre { font-variant-ligatures: none; }
 .vf .pop-i.goal > .i { color: var(--goal); }
 .vf .pop-i.warn > .i { color: var(--ask); } .vf .pop-i.danger > .i { color: var(--del); }
 .vf .pop-sep { height: 1px; margin: 4px 8px; background: var(--line2); opacity: .7; }
-.vf .pop-search { display: flex; align-items: center; gap: 8px; height: 34px; margin: 2px 2px 4px; padding: 0 10px; border-radius: 10px; background: var(--chip); color: var(--text3); }
+.vf .pop .set-seg.full { display: flex; margin: 0 4px 6px; }
+.vf .pop .set-seg.full > span { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 30px; font-size: 13px; }
+.vf .pop .set-seg .off, .vf .pop .set-seg .off ~ .i { color: var(--text3); }
 .vf .pop-acc { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 2px 4px 6px; }
 .vf .pop-acc > span { display: flex; flex-direction: column; gap: 6px; padding: 8px 9px; border-radius: 10px; background: var(--chip); font-size: 12.5px; font-weight: 500; }
 .vf .pop-acc > span > span { display: flex; align-items: center; gap: 6px; }
@@ -950,6 +952,17 @@ code, pre { font-variant-ligatures: none; }
 .vf.light { --set-bg: #f4f4f6; --set-card: #ffffff; --set-rail: #ffffff; --set-sep: rgba(0,0,0,.06); }
 .vf .set-pair { width: 1120px; margin: 0 auto 34px; display: grid; grid-template-columns: 720px 351px; justify-content: space-between; align-items: start; }
 .vf .set-pair > figure { margin: 0; }
+.vf .nf-row { width: 1120px; margin: 0 auto; padding: 28px 0; display: grid; grid-template-columns: 320px 740px; justify-content: space-between; align-items: start; border-top: 1px solid var(--line2); }
+.vf .nf-txt h4 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+.vf .nf-n { display: inline-block; min-width: 30px; color: var(--text3); font-variant-numeric: tabular-nums; }
+.vf .nf-txt p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--text2); }
+.vf .nf-txt p b { display: block; color: var(--text); font-size: 12px; font-weight: 600; }
+.vf .nf-t { font: 12px var(--mono); color: var(--text3); }
+.vf .nf-art > .cp-stage, .vf .nf-art > figure { width: 540px; margin: 0; }
+.vf .nf-art figcaption { padding: 0 4px 10px; font-size: 12.5px; color: var(--text3); }
+.vf .nf-art figcaption b { margin-right: 4px; color: var(--text); font-weight: 600; }
+.vf .nf-art > figure > .sb { width: 280px; height: 640px; border: 0; border-radius: 12px; box-shadow: 0 0 0 1px var(--line2); }
+.vf .nf-phones { display: flex; gap: 30px; align-items: start; }
 .vf .set-pair > figure > figcaption { padding: 0 4px 12px; font-size: 13.5px; font-weight: 600; }
 .vf .set-dlg { height: 600px; display: grid; grid-template-columns: 172px 1fr; grid-template-rows: 52px minmax(0, 1fr); overflow: hidden; border-radius: 16px; background: var(--set-bg); box-shadow: 0 0 0 1px var(--line2), 0 24px 60px rgba(0,0,0,.3); }
 .vf.light .set-dlg { box-shadow: 0 0 0 1px var(--line2), 0 24px 60px rgba(0,0,0,.1); }
@@ -1933,7 +1946,7 @@ const SHELVES = sbShelf("settled", "Settled", 14) + sbShelf("snoozed", "Snoozed"
 const fSide = ({ rows = SESSIONS, list = sbGroups(rows) + SHELVES, foot = `<div class="um">${UM_ROWS}</div>`, chip = "", phone } = {}) => {
 	const count = (s) => rows.filter((r) => r.s === s).length;
 	return `<aside class="sb">
-		<div class="sb-top">Sessions<small>24</small><span class="grow"></span><span class="sb-ib">${ic("checkc")}</span><span class="sb-ib">${ic("pen")}</span>${phone ? "" : `<span class="sb-ib">${ic("panel")}</span>`}</div>
+		<div class="sb-top">Sessions<small>24</small><span class="grow"></span><span class="sb-ib">${ic("checkc")}</span><span class="sb-ib">${ic("pen")}</span><span class="sb-ib">${ic(phone ? "more" : "panel")}</span></div>
 		<div class="sb-find"><span class="sb-scope">All projects${ic("chevd")}</span><span class="sb-search">${ic("search", "s")}Search<kbd>⌘K</kbd></span></div>
 		<div class="sb-chips">${[["Needs you", "need"], ["Running", "working"], ["Unread", "unread"]].map(([label, s]) => `<span class="sb-chip${label === chip ? " on" : ""}">${label}<em>${count(s)}</em></span>`).join("")}<span class="sb-ib">${ic("sort")}</span></div>
 		<div class="sb-list">${list}</div>
@@ -2222,7 +2235,8 @@ const ST = (() => {
 	return { lab, card, row, pick, sw, col, btn, NAV, dlg, pageNav, tile };
 })();
 
-function renderApp() {
+/* The app tab's drawings, shared with the New features tab so the two can't drift. */
+function appParts() {
 	/* 1. Session header */
 	const act = (icon, text) => `<span>${ic(icon)}${text}</span>`;
 	const BANNERS = `<div class="ban" style="--t:var(--ask)">${ic("refresh")}<b>This tab runs an older build.</b> Reload to get the latest.<span class="f-btn">Reload</span></div>
@@ -2293,14 +2307,16 @@ function renderApp() {
 			input: cpIn(`Here are the two failing screenshots<span class="caret"></span>`, true) }],
 	];
 	const v = (text) => `<span class="v">${text}${ic("chev")}</span>`;
-	const model = (name, ctx, on) => `<div class="pop-i${on ? " on" : ""}">${MARK}<div>${name}</div><em>${ctx}</em>${on ? ic("check", "ck") : ""}</div>`;
 	const accCard = (name, meter, cls = "") => `<span class="${cls}"><span>${adot(name)}${name}</span>${meter}</span>`;
+	const seg = (opts, on, cls = "") => `<span class="set-seg ${cls}">${opts.map((o, i) => `<span${i === on ? ' class="on"' : ""}>${o}</span>`).join("")}</span>`;
 	const composerPops = [
-		["Model picker", "Account, favourites, effort and harness in one place.", `<div class="pop wide"><div class="pop-h">Account</div>
-			<div class="pop-acc">${accCard("personal", mt(42), "on")}${accCard("work", mt(91, "warn"))}${accCard("lab", mt(100, "lim", "3:40"), "lim")}</div>
-			<div class="pop-search">${ic("search", "s")}Search models</div><div class="pop-h">Favorites</div>
-			${model("Opus 5.5", "200K")}${model("Sonnet 5", "1M", true)}${model("Opus 5", "200K")}${SEP}
-			${item("sliders", "Effort", v("High"))}${item("box", "Harness", v("Claude"))}</div>`],
+		["Model picker", "Today's controls, restyled: harness, account, model, context, effort and agent.", `<div class="pop wide"><div class="pop-h"><b>Harness &amp; model</b><span class="grow"></span>this session</div>
+			<div class="pop-h">Harness<span class="grow"></span>${ic("lock", "s")}Fixed for this session</div>
+			${seg([`${MARK}Claude`, `<span class="off">OpenCode</span>${ic("lock", "s")}`], 0, "full")}
+			<div class="pop-h">Account<span class="grow"></span>5-hour use</div>
+			<div class="pop-acc">${accCard("personal", mt(42), "on")}${accCard("work", mt(91, "warn"))}${accCard("lab", mt(100, "lim", "3:40"), "lim")}</div>${SEP}
+			${item("zap", "Model", v("Sonnet 5"))}${item("gauge", "Context", seg(["200K", "1M"], 1))}
+			${item("sliders", "Effort", seg(["low", "med", "high", "xhigh", "max"], 2))}${item("user", "Agent", v("Planner"))}</div>`],
 		["Mode", "The shield: neutral for Ask, orange for less-safe, red for Full access.", `<div class="pop">
 			${item("book", "Plan<small>Reads and plans, changes nothing</small>")}
 			${item("shield", "Ask before edits<small>The default</small>", ic("check", "ck"), "on")}
@@ -2385,21 +2401,84 @@ function renderApp() {
 			${lab("Advanced")}${card(col("Set when conduit starts", "Port · host · HTTPS · more"), col("Logs"))}`,
 			{ name: "Phone · Server", note: "Buttons drop to their own line.", nav: pageNav("Server"), screen: `<div class="j-set">${lab("Status")}${card(`<div class="set-row">${RUNNING}</div>${SERVER_BTNS}`)}${SERVER_REST}</div>` }],
 	];
+	return { strips, headPops, headPhones, stages, composerPops, composerPhones, sideCols, meterStates, sidePhones, settings };
+}
 
+/* One drawing each, as Final · app shows it; the New features tab reuses them. */
+const stageFig = ([name, note, opts]) => `<div class="cp-stage"><p><b>${name}</b> ${note}</p>${fComposer(opts)}</div>`;
+const popFig = ([name, note, pop]) => `<figure><figcaption><b>${name}</b> · ${note}</figcaption>${pop}</figure>`;
+const sideFig = ([name, note, side]) => `<figure><figcaption><b>${name}</b>${note}</figcaption>${side}</figure>`;
+
+function renderApp() {
+	const { strips, headPops, headPhones, stages, composerPops, composerPhones, sideCols, meterStates, sidePhones, settings } = appParts();
+	const { dlg } = ST;
 	return `<div class="f-sec">Session header<small>Title with its menu, the state chip, the goal line, and one pill: skills, side threads, then the next action.</small></div>
 		<div class="hd-list">${strips.map(([name, note, html]) => `<div class="hd-cap"><b>${name}</b>${note}</div><div class="hd-strip">${html}</div>`).join("")}</div>
 		<div class="hd-pops">${headPops.map(([head, pop]) => `<div class="hd-popc">${fHead({ ...head, conn: false, pill: "" })}${pop}</div>`).join("")}</div>
 		<div class="j-grid" style="margin-top:40px">${headPhones.map(jPhone).join("")}</div>
 		<div class="f-sec f-gap">Composer<small>One rounded box. Strips stack above it for goals, context, usage and limits; the tray holds queued messages.</small></div>
-		<div class="cp-grid">${stages.map(([name, note, opts]) => `<div class="cp-stage"><p><b>${name}</b> ${note}</p>${fComposer(opts)}</div>`).join("")}</div>
-		<div class="pops">${composerPops.map(([name, note, pop]) => `<figure><figcaption><b>${name}</b> · ${note}</figcaption>${pop}</figure>`).join("")}</div>
+		<div class="cp-grid">${stages.map(stageFig).join("")}</div>
+		<div class="pops">${composerPops.map(popFig).join("")}</div>
 		<div class="j-grid" style="margin-top:40px">${composerPhones.map(jPhone).join("")}</div>
 		<div class="f-sec f-gap">Sidebar and usage<small>One status glyph everywhere. Chips filter, groups sort, shelves hold settled and snoozed. Usage sits in the footer.</small></div>
-		<div class="sb-cols">${sideCols.map(([name, note, side]) => `<figure><figcaption><b>${name}</b>${note}</figcaption>${side}</figure>`).join("")}
+		<div class="sb-cols">${sideCols.map(sideFig).join("")}
 			<figure><figcaption><b>Meter states</b>Two windows per account, in a fixed grid.</figcaption>${meterStates}</figure></div>
 		<div class="j-grid" style="margin-top:40px">${sidePhones.map(jPhone).join("")}</div>
 		<div class="f-sec f-gap">Settings<small>The real sections as grouped cards. On a phone, each section is a pushed page.</small></div>
 		${settings.map(([name, main, phone]) => `<div class="set-pair"><figure><figcaption>${name}</figcaption>${dlg(name, main)}</figure>${jPhone({ dock: "", ...phone })}</div>`).join("")}`;
+}
+
+/* Only what the redesign adds or changes in behaviour, outside the session menu, header and turn activity. */
+function renderNew() {
+	const { stages, composerPops, composerPhones, sideCols, sidePhones, settings } = appParts();
+	const get = (list, name) => list.find((e) => (e.name ?? e[0]) === name);
+	const setPhone = (name) => jPhone({ dock: "", ...get(settings, name)[2] });
+	const feature = (n, title, today, next, ticket, art) => `<div class="nf-row"><div class="nf-txt">
+		<h4><span class="nf-n">${n}</span>${title}</h4><p><b>Today</b> ${today}</p><p><b>New</b> ${next}</p><div class="nf-t">${ticket}</div></div>
+		<div class="nf-art">${art}</div></div>`;
+	return `<div class="f-sec">Composer<small>The input box, its queue and its menus.</small></div>
+		${feature(1, "Run now for any queued message",
+			"Run now shows only on queued commands. A queued message waits for the turn to end, or you Steer it in.",
+			"Every queued row has Steer and Run now. Run now stops the running turn and sends that message next; the rest of the queue keeps its order.",
+			"conduit-test-aoqb.13", stageFig(get(stages, "Working")))}
+		${feature(2, "Add Files",
+			"Only images attach: Take Photo and Add Photos.",
+			"Add Files attaches any file both Claude and OpenCode accept, as a chip with the other attachments. Anything else gets a clear error.",
+			"conduit-test-aoqb.14", popFig(get(composerPops, "Attach")))}
+		${feature(3, "Limit and queue in one card",
+			"A usage-limit strip, and separately a queue tray with Edit and Remove as text and no send time.",
+			"One card says whose limit you're waiting on, with Switch account, and holds the queued rows. Each shows when it sends, with Send now.",
+			"conduit-test-aoqb.6", stageFig(get(stages, "Waiting to auto-resume")))}
+		${feature(4, "One model chip at every width",
+			"Wide windows split it into “Claude · personal” and “Sonnet 5 · 200K”. The checkout is plain text.",
+			"One “Sonnet 5 1M” chip at every width, the mode as a shield icon, and the checkout as a pill with a dot when it has uncommitted changes.",
+			"conduit-test-aoqb.6", stageFig(get(stages, "Idle · icons")))}
+		${feature(5, "Phone: the model pill opens every control",
+			"A ⋯ button opens the Composer sheet. The mode shield shows only in riskier modes, and harness and account share a row.",
+			"No ⋯. The model pill opens the sheet: Harness, Account, Model, Effort, Mode and Checkout. The shield always shows. Context and Agent stay one tap away, through the Model row.",
+			"conduit-test-aoqb.6", `<div class="nf-phones">${jPhone(get(composerPhones, "Composer options"))}</div>`)}
+		${feature(6, "Slash menu: /goal first, /compact shows context",
+			"Commands sort alphabetically, and /compact doesn't say how full the context is.",
+			"Two-line rows with icons. /goal is pinned first in teal, and /compact shows how full the context is.",
+			"conduit-test-aoqb.6", popFig(get(composerPops, "Slash commands")))}
+		<div class="f-sec f-gap">Sidebar<small>The session list on desktop and phone.</small></div>
+		${feature(7, "Settled shelf: true count, above Snoozed",
+			"Snoozed comes first with a count. Settled follows with no count, because paged rows undercount.",
+			"Settled comes first with its true count from the event store, then “12 more” to page. Snoozed follows.",
+			"conduit-test-aoqb.15 · aoqb.7", sideFig(get(sideCols, "Scrolled to the end")))}
+		${feature(8, "Hover actions: Settle, Snooze, Pin, ⋯",
+			"Hovering a row shows Mark read/unread, Settle, Snooze, Pin and More.",
+			"Mark read/unread leaves the hover row and stays in ⋯.",
+			"conduit-test-aoqb.7", sideFig(get(sideCols, "Default")))}
+		${feature(9, "Phone list header: Select and New session move up",
+			"Title, the sort menu, and a ⋯ holding Select, Resume by ID, Settings and Debug. New session is a floating button.",
+			"A large “Sessions 24” with Select and New session as icons. The ⋯ keeps Resume by ID, Settings and Debug. Sort moves to the end of the filter chips.",
+			"conduit-test-aoqb.7", `<div class="nf-phones">${jPhone(get(sidePhones, "Session list"))}</div>`)}
+		<div class="f-sec f-gap">Settings<small>On a phone.</small></div>
+		${feature(10, "Phone settings: full-screen pages",
+			"Settings open as a centred card, 80% of the screen tall.",
+			"Full screen. The root lists the sections, and each one pushes its own page with a back bar.",
+			"conduit-test-aoqb.8", `<div class="nf-phones">${setPhone("General")}${setPhone("Usage")}</div>`)}`;
 }
 
 const AVATAR_DESIGN = `<div class="a-doc">
@@ -3472,6 +3551,9 @@ const VARIANTS = [
 			<dt>Open</dt><dd>R (reading without jumping), S (where the reader lives) and J (turning Jev off) have no decision yet. S proposes <b>A · Auto by width</b>.</dd>
 			<dt>Colour</dt><dd>Blue is new, primary and chosen. Orange is the Ask, red Blocked, magenta Risk, green Milestone. The rest are neutral, since gold already means pinned.</dd>
 		</dl>`, render: () => renderJevSpec() + renderJevStrip() },
+	{ key: "new", label: "New features", cls: "vac vf", jev: true, brief: `
+		<h2>New features <small>what the redesign adds or changes in behaviour, outside the session menu, header and turn activity</small></h2>
+		<p class="pitch">Each one: what the app does today, what changes, and its ticket. The drawings are the same ones Final · app uses.</p>`, render: renderNew },
 ];
 
 const SHOTS = "../../test/visual/components.spec.ts-snapshots/chat-messagelist--full-conversation";
