@@ -472,7 +472,9 @@ describe("applySessionCommand", () => {
 					context_window: "",
 				});
 				expect(
-					(yield* reads.listSessionInfos()).find(({ id }) => id === forked.id),
+					(yield* reads.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find(({ id }) => id === forked.id),
 				).toMatchObject({ forkMessageId: "msg-7" });
 				expect(forked).not.toHaveProperty("forkPointTimestamp");
 

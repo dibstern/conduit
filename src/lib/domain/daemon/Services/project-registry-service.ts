@@ -233,8 +233,12 @@ export const resolveSessionMode = (slug: string) =>
 				source: "file",
 				...warning,
 			} satisfies ResolveSessionModeResponse;
+		const settings = loadRelaySettings(configDir);
 		return {
-			mode: loadRelaySettings(configDir).defaultSessionMode ?? "local",
+			mode:
+				settings.defaultSessionMode === "last"
+					? (settings.lastSessionMode ?? "local")
+					: (settings.defaultSessionMode ?? "local"),
 			source: "global",
 			...warning,
 		} satisfies ResolveSessionModeResponse;

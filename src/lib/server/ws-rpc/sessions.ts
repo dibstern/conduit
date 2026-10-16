@@ -80,6 +80,7 @@ import {
 import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
+import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const sideThreadStarts = Effect.unsafeMakeSemaphore(1);
@@ -624,6 +625,29 @@ export const sessionsHandlers = {
 				sessionId: session.id,
 			};
 		}).pipe(
+			Effect.tap(() =>
+				Effect.gen(function* () {
+					if (
+						request.draftId === undefined ||
+						request.worktreePath !== undefined
+					)
+						return;
+					const config = yield* ConfigTag;
+					yield* Effect.try(() =>
+						saveRelaySettings(
+							{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
+							config.configDir,
+						),
+					).pipe(
+						Effect.catchAll((cause) =>
+							Effect.gen(function* () {
+								const log = yield* LoggerTag;
+								log.warn("Failed to persist last session mode", { cause });
+							}),
+						),
+					);
+				}),
+			),
 			Effect.catchAll(
 				(
 					error,

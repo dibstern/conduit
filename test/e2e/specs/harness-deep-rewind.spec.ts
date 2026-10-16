@@ -69,7 +69,7 @@ const seed = (filename: string) =>
 				{ publish: false },
 			);
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 

@@ -38,6 +38,7 @@ import {
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_PICK_BACKFILL_MIGRATION,
+	SESSION_PROJECT_SCOPE_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
@@ -485,6 +486,7 @@ const appendedSessionColumns = [
 	"workspace_hint",
 	"workspace_hint_sequence",
 	"pending_rewind_message_id",
+	"project_id",
 	"forked_from",
 ] as const;
 
@@ -1010,7 +1012,7 @@ export const effectMigrationEntries = {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (!columns.some((column) => column.name === "forked_from")) return;
-		// Ledger repair can replay this after 0059. Its index distinguishes the
+		// Ledger repair can replay this after 0060. Its index distinguishes the
 		// new lineage column from the retired, unindexed local-build column.
 		const indexes = yield* sql<{ name: string }>`PRAGMA index_list(sessions)`;
 		if (indexes.some((index) => index.name === "idx_sessions_forked_from"))
@@ -1092,6 +1094,10 @@ export const effectMigrationEntries = {
 		yield* executeSqlStatements(
 			readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
 		);
+		// A repaired ledger can replay this migration over newer session rows.
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "project_id"))
+			yield* sql`ALTER TABLE session_sidebar ADD COLUMN project_id TEXT`;
 		const roots = yield* sql<{ id: string }>`
 			SELECT id FROM sessions WHERE parent_id IS NULL
 			UNION SELECT session_id FROM session_sidebar`;
@@ -1181,12 +1187,24 @@ export const effectMigrationEntries = {
 	"0058_compact_redundant_events": executeSqlStatements(
 		readMigrationSql(COMPACT_REDUNDANT_EVENTS_MIGRATION),
 	),
-	"0059_sessions_lineage": runAddColumnMigrationIfMissing(
+	"0059_session_project_scope": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(SESSION_PROJECT_SCOPE_MIGRATION),
+		);
+		for (const [index, table] of ["sessions", "session_sidebar"].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(table, "project_id", statement);
+		}
+		for (const statement of statements.slice(2))
+			yield* executeSqlStatements(statement);
+	}),
+	"0060_sessions_lineage": runAddColumnMigrationIfMissing(
 		"sessions",
 		"forked_from",
 		readMigrationSql(SESSIONS_LINEAGE_MIGRATION),
 	),
-	"0060_legacy_forks": Effect.gen(function* () {
+	"0061_legacy_forks": Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const changed = yield* sql.unsafe<{ id: string; side_thread: number }>(
 			readMigrationSql(LEGACY_FORKS_MIGRATION),

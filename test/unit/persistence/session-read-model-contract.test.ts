@@ -15,6 +15,8 @@ import {
 	makeSessionStatusEvent,
 } from "../../helpers/persistence-factories.js";
 
+const scope = { projectIds: ["test-project"] } as const;
+
 const readModelAfter = (events: readonly CanonicalEvent[]) =>
 	Effect.gen(function* () {
 		const store = yield* EventStoreEffectTag;
@@ -25,7 +27,7 @@ const readModelAfter = (events: readonly CanonicalEvent[]) =>
 			yield* runner.projectEvent(yield* store.append(event));
 		}
 
-		const shell = yield* readQuery.readSessionList();
+		const shell = yield* readQuery.readSessionList(scope);
 		// Resolve the anchor as SubscribeSessionFamily does, including deleted
 		// anchors so a missing shell row cannot hide surviving family members.
 		const anchors = new Set(
@@ -39,7 +41,7 @@ const readModelAfter = (events: readonly CanonicalEvent[]) =>
 		);
 		const families = yield* Effect.forEach(anchors, (id) =>
 			readQuery
-				.readSessionList({ familyOf: id })
+				.readSessionList(scope, { familyOf: id })
 				.pipe(Effect.map((family) => ({ id, rows: family.rows }))),
 		);
 		return {
@@ -458,7 +460,7 @@ describe("session read-model contract", () => {
 			yield* runner.recover();
 			for (const event of [source, forkOf("fork", "source")])
 				yield* runner.projectEvent(yield* store.append(event));
-			const before = yield* readQuery.readSessionList();
+			const before = yield* readQuery.readSessionList(scope);
 			yield* runner.projectEvent(
 				yield* store.append(
 					canonicalEvent("session.deleted", "source", { sessionId: "source" }),
@@ -474,13 +476,15 @@ describe("session read-model contract", () => {
 				item && { forkedFrom: item.forkedFrom };
 			expect(
 				lineage(
-					forkIn(yield* readQuery.readSessionList({ after: before.version })),
+					forkIn(
+						yield* readQuery.readSessionList(scope, { after: before.version }),
+					),
 				),
 			).toStrictEqual({ forkedFrom: undefined });
 			expect(
 				lineage(
 					forkIn(
-						yield* readQuery.readSessionList({
+						yield* readQuery.readSessionList(scope, {
 							after: before.version,
 							familyOf: "fork",
 						}),
@@ -549,7 +553,7 @@ describe("session read-model contract", () => {
 					yield* runner.projectEvent(
 						yield* store.append(makeSessionStatusEvent("side-thread", "busy")),
 					);
-					const before = yield* readQuery.readSessionList();
+					const before = yield* readQuery.readSessionList(scope);
 					expect(before.rows.map(({ item }) => item.id).sort()).toStrictEqual([
 						"side-thread",
 						"source",
@@ -559,7 +563,9 @@ describe("session read-model contract", () => {
 					);
 					expect(
 						shellChange(
-							yield* readQuery.readSessionList({ after: before.version }),
+							yield* readQuery.readSessionList(scope, {
+								after: before.version,
+							}),
 						),
 					).toStrictEqual({
 						// A Side Thread's activity stays off its owner's row.
@@ -589,7 +595,7 @@ describe("session read-model contract", () => {
 					}),
 				])
 					yield* runner.projectEvent(yield* store.append(event));
-				const before = yield* readQuery.readSessionList();
+				const before = yield* readQuery.readSessionList(scope);
 				expect(before.rows.map(({ item }) => item.id)).toStrictEqual([
 					"source",
 				]);
@@ -603,7 +609,7 @@ describe("session read-model contract", () => {
 				);
 				expect(
 					shellChange(
-						yield* readQuery.readSessionList({ after: before.version }),
+						yield* readQuery.readSessionList(scope, { after: before.version }),
 					),
 				).toStrictEqual({
 					upserts: ["fork", "source"],

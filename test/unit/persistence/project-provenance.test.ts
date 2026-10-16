@@ -109,8 +109,9 @@ describe("Bound project provenance", () => {
 			"0056_drop_activities",
 			"0057_session_pick_backfill",
 			"0058_compact_redundant_events",
-			"0059_sessions_lineage",
-			"0060_legacy_forks",
+			"0059_session_project_scope",
+			"0060_sessions_lineage",
+			"0061_legacy_forks",
 		]);
 	});
 

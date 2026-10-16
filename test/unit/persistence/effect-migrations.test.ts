@@ -92,6 +92,7 @@ const expectedNames = [
 	"drop_activities",
 	"session_pick_backfill",
 	"compact_redundant_events",
+	"session_project_scope",
 	"sessions_lineage",
 	"legacy_forks",
 ];
@@ -115,13 +116,13 @@ it.effect(
 	"adds lineage after the legacy fork-column cleanup and preserves it on reopen",
 	() =>
 		Effect.gen(function* () {
-			yield* makeEffectSqlMigrator(prefix(58));
+			yield* makeEffectSqlMigrator(prefix(59));
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at)
 			VALUES ('source', 'claude', 1, 1), ('fork', 'claude', 2, 2)`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
-				[59, "sessions_lineage"],
-				[60, "legacy_forks"],
+				[60, "sessions_lineage"],
+				[61, "legacy_forks"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -238,6 +239,7 @@ describe("Effect migration lineage", () => {
 					58,
 					59,
 					60,
+					61,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -402,8 +404,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 60", () => {
-		expect(migrationEntries).toHaveLength(60);
+	it("registers the contiguous production chain from 1 through 61", () => {
+		expect(migrationEntries).toHaveLength(61);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -578,8 +580,9 @@ describe("Effect migration lineage", () => {
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
-					[59, "sessions_lineage"],
-					[60, "legacy_forks"],
+					[59, "session_project_scope"],
+					[60, "sessions_lineage"],
+					[61, "legacy_forks"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -659,8 +662,9 @@ describe("Effect migration lineage", () => {
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
-					[59, "sessions_lineage"],
-					[60, "legacy_forks"],
+					[59, "session_project_scope"],
+					[60, "sessions_lineage"],
+					[61, "legacy_forks"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -719,8 +723,9 @@ describe("Effect migration lineage", () => {
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
-					[59, "sessions_lineage"],
-					[60, "legacy_forks"],
+					[59, "session_project_scope"],
+					[60, "sessions_lineage"],
+					[61, "legacy_forks"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1313,8 +1318,9 @@ describe("Effect migration lineage", () => {
 				[56, "drop_activities"],
 				[57, "session_pick_backfill"],
 				[58, "compact_redundant_events"],
-				[59, "sessions_lineage"],
-				[60, "legacy_forks"],
+				[59, "session_project_scope"],
+				[60, "sessions_lineage"],
+				[61, "legacy_forks"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1410,8 +1416,9 @@ describe("Effect migration lineage", () => {
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
-					[59, "sessions_lineage"],
-					[60, "legacy_forks"],
+					[59, "session_project_scope"],
+					[60, "sessions_lineage"],
+					[61, "legacy_forks"],
 				]);
 				const rows = yield* sql<{
 					id: string;

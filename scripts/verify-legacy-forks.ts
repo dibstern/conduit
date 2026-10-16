@@ -1,5 +1,5 @@
 /**
- * Compare migration 0060 with event replay, using disposable copies only.
+ * Compare migration 0061 with event replay, using disposable copies only.
  * Run: node --import tsx scripts/verify-legacy-forks.ts --source /tmp/extp/live-clone.db --output docs/performance/extp4-legacy-fork-migration.json
  * Reports contain identifiers, counts, hashes and booleans, never store content.
  */
@@ -159,7 +159,7 @@ function placements(db: Database.Database): Placement[] {
 			.all()
 			.map(({ name }) => name),
 	);
-	// Older snapshots can precede migration 0059, which adds forked_from.
+	// Older snapshots can precede migration 0060, which adds forked_from.
 	const selection = placementColumns.map((column) => {
 		if (column === "forked_from" && !columns.has(column))
 			return "NULL AS forked_from";
@@ -612,7 +612,7 @@ async function verify() {
 			ticket: "conduit-test-extp.4",
 			passed,
 			migration: {
-				id: "0060_legacy_forks",
+				id: "0061_legacy_forks",
 				applied: applied.map(([id]) => id),
 			},
 			selection: {

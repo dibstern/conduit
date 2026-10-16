@@ -17,9 +17,9 @@ import {
 	type CommitAndSignalProject,
 	makeCommitAndSignal,
 } from "../../../persistence/effect/commit-and-signal.js";
-import type {
+import {
 	EventStoreEffectTag,
-	EventStoreError,
+	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
@@ -142,6 +142,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const commitAndSignal = yield* makeCommitAndSignal;
 			const appendEvents = yield* makeAppendEventsWithClaudeTurnCosts;
 			const sql = yield* SqlClient.SqlClient;
+			const eventStore = yield* EventStoreEffectTag;
 			const continuation = yield* ContinuationTag;
 			const services = yield* Effect.context<
 				EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
@@ -455,8 +456,8 @@ export const makeProviderRuntimeIngestionLive = (
 												const seeded = yield* sql<{
 													readonly id: string;
 												}>`INSERT OR IGNORE INTO sessions
-											(id, provider, title, status, created_at, updated_at)
-											VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt}) RETURNING id`;
+											(id, project_id, provider, title, status, created_at, updated_at)
+											VALUES (${sessionId}, ${eventStore.projectId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt}) RETURNING id`;
 												seededSessionIds.push(...seeded.map(({ id }) => id));
 											}
 											// A first provider event need not project a session touch.

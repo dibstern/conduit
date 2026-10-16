@@ -803,6 +803,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					const relayContext = yield* relay.rpcWsHandler.context;
 					return yield* Effect.gen(function* () {
 						const sessionId = yield* findOpenCodeSession(
+							{ projectIds: [target.projectSlug] },
 							request.instanceId,
 							request.providerSessionId,
 						);

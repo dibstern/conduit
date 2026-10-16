@@ -243,7 +243,9 @@ for (const scenario of [
 				expect(binding).toBe("deleted-claude");
 				expect(sends).toEqual([]);
 				expect(
-					(yield* read.listSessionInfos())[0]?.limitRecovery,
+					(yield* read.listSessionInfos({
+						projectIds: ["effective-continuation"],
+					}))[0]?.limitRecovery,
 				).toMatchObject({
 					instanceId: "deleted-claude",
 					scheduledAt: scenario.at,

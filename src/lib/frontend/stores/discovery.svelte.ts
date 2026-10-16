@@ -4,7 +4,7 @@ import { Effect, Either, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
-import type { SessionMode } from "../../contracts/project-file.js";
+import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import {
 	type BrowserDriverTraits,
 	isKnownDriverKind,
@@ -193,7 +193,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
-	defaultSessionMode: "local" as SessionMode,
+	defaultSessionMode: "local" as DefaultSessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -646,7 +646,7 @@ export const discoveryState = {
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
 	},
-	get defaultSessionMode(): SessionMode {
+	get defaultSessionMode(): DefaultSessionMode {
 		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
@@ -1606,7 +1606,7 @@ export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	if (!draft.model && !draftPermissionChosen) draft.permissionMode = mode;
 }
 
-export function applyDefaultSessionMode(mode: SessionMode): void {
+export function applyDefaultSessionMode(mode: DefaultSessionMode): void {
 	serverDiscovery.defaultSessionMode = mode;
 }
 

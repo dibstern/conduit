@@ -8,6 +8,7 @@ import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
 import {
 	effectiveSessionFolders,
@@ -33,6 +34,7 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 		const sql = yield* SqlClient.SqlClient;
 		const accounts = yield* AccountDirectory;
 		const activity = yield* SessionActivityTag;
+		const sessionScope: SessionScope = { projectIds: [scope.slug] };
 		const overlay = {
 			backgroundOf: activity.background.backgroundOf,
 			hintDismissals: activity.hintDismissals,
@@ -105,20 +107,20 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 		return {
 			list: (
 				options?: Omit<
-					NonNullable<Parameters<ReadQueryEffect["listSessionInfos"]>[0]>,
+					NonNullable<Parameters<ReadQueryEffect["listSessionInfos"]>[1]>,
 					"backgroundOf" | "hintDismissals"
 				>,
 			) =>
 				readQuery
-					.listSessionInfos({ ...options, ...overlay })
+					.listSessionInfos(sessionScope, { ...options, ...overlay })
 					.pipe(Effect.flatMap(decorate)),
 			read: (
 				range?: Omit<
-					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[0]>,
+					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[1]>,
 					"backgroundOf" | "hintDismissals"
 				>,
 			) =>
-				readQuery.readSessionList({ ...range, ...overlay }).pipe(
+				readQuery.readSessionList(sessionScope, { ...range, ...overlay }).pipe(
 					Effect.flatMap((list) =>
 						decorate(list.rows.map(({ item }) => item)).pipe(
 							Effect.map((items) => ({

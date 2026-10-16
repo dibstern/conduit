@@ -18,7 +18,7 @@ import { SidebarRowSchema } from "../../../src/lib/persistence/sidebar-row.js";
 
 const throughLineage = Object.fromEntries(
 	Object.entries(effectMigrationEntries).filter(
-		([key]) => key <= "0059_sessions_lineage",
+		([key]) => key <= "0060_sessions_lineage",
 	),
 );
 const T0 = 1_000;

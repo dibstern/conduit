@@ -99,6 +99,9 @@ const streamHandlers = {
 			...(request.resumeBase === undefined
 				? {}
 				: { resumeBase: request.resumeBase }),
+			...(request.resumePoint === undefined
+				? {}
+				: { resumePoint: request.resumePoint }),
 		}),
 	SubscribeApprovals: (request) =>
 		subscribeApprovals(

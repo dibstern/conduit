@@ -96,9 +96,15 @@ export const refreshSidebar = (
 			}
 			const { changed } = changeSidebarRow(storedRows.get(rootId), row);
 			if (!changed) continue;
+			// Migration 0039 also uses this upkeep before project_id exists.
+			const projectId = top.find((root) => root.id === rootId)?.project_id;
+			const projectColumn =
+				projectId === undefined ? sql.literal("") : sql`, project_id`;
+			const projectValue =
+				projectId === undefined ? sql.literal("") : sql`, ${projectId}`;
 			yield* sql`
-				INSERT INTO session_sidebar (session_id, version, last_activity, row)
-				VALUES (${rootId}, ${row.version}, ${row.lastActivity}, ${encodeRow(row)})
+				INSERT INTO session_sidebar (session_id, version, last_activity, row ${projectColumn})
+				VALUES (${rootId}, ${row.version}, ${row.lastActivity}, ${encodeRow(row)} ${projectValue})
 				ON CONFLICT (session_id) DO UPDATE SET
 					version = excluded.version,
 					last_activity = excluded.last_activity,

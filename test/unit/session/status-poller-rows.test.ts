@@ -44,10 +44,10 @@ const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
 
 const insertParentAndBusyChild = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
-	yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-		VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1)`;
-	yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at)
-		VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2)`;
+	yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+		VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1, 'test-project')`;
+	yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at, project_id)
+		VALUES ('child', 'opencode', 'Child', 'busy', 'parent', 2, 2, 'test-project')`;
 });
 
 it("returns readiness while initial git is blocked and completes it in the relay scope", async () => {
@@ -147,9 +147,9 @@ it("keeps Claude status observation and exposes ownership separately", async () 
 		Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-					VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
-						('claude-1', 'claude', 'Claude', 'busy', 2, 2)`;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+					VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1, 'test-project'),
+						('claude-1', 'claude', 'Claude', 'busy', 2, 2, 'test-project')`;
 				const poller = yield* StatusPollerTag;
 				yield* poller.start();
 				expect(yield* poller.getCurrentStatuses()).toEqual({

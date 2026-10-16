@@ -50,7 +50,7 @@ function makePersistenceEffectLayer(filename: string, lineage = false) {
 					? effectMigrationEntries
 					: Object.fromEntries(
 							Object.entries(effectMigrationEntries).filter(
-								([key]) => key < "0059_sessions_lineage",
+								([key]) => key < "0060_sessions_lineage",
 							),
 						),
 			),

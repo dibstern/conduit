@@ -5,6 +5,7 @@ import type { HistoryMessage } from "../shared-types.js";
 
 export interface SessionRow {
 	id: string;
+	project_id?: string | null;
 	version: number;
 	provider: string;
 	provider_sid: string | null;
