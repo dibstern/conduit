@@ -14,6 +14,7 @@ import type {
 } from "../runner/session-runner.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
+import { CursorModelParameters } from "./cursor-runner-driver.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
 import { CursorTurnEvents } from "./cursor-turn-events.js";
@@ -59,6 +60,7 @@ const decodeTerminal = Schema.decodeUnknownEither(
 		status: Schema.Literal("finished", "cancelled", "error"),
 		requestId: Schema.optional(Schema.String),
 		durationMs: Schema.optional(Schema.Number),
+		model: Schema.optional(Schema.Struct({ id: Schema.String })),
 		usage: Schema.optional(Schema.Unknown),
 		error: Schema.optional(
 			Schema.Struct({
@@ -245,6 +247,19 @@ export class CursorRunnerPayload implements RunnerPayload {
 							"sandbox_unavailable",
 							"Cursor sandbox initialization failed; restart the runner before retrying",
 						);
+					const modelParams =
+						input.providerState["cursor.modelParams"] === undefined
+							? undefined
+							: yield* Schema.decodeUnknown(CursorModelParameters)(
+									input.providerState["cursor.modelParams"],
+								).pipe(
+									Effect.mapError(
+										(): SessionFailure => ({
+											operation: "model parameters",
+											message: "Invalid Cursor model parameters",
+										}),
+									),
+								);
 					const recovery = yield* sdkCall("read interrupted run", async () => {
 						let text: string;
 						try {
@@ -312,6 +327,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						extraFolders: input.extraFolders,
 						permissionMode: input.permissionMode,
 						modelId: input.model.modelId,
+						modelParams,
 						credential,
 					});
 					if (
@@ -549,6 +565,16 @@ export class CursorRunnerPayload implements RunnerPayload {
 							);
 						if (terminal.right.requestId)
 							events.refs.providerRequestId = terminal.right.requestId;
+						if (terminal.right.model?.id)
+							yield* events.push("turn.model_resolved", {
+								messageId: events.messageId,
+								requestedModel: input.model.modelId,
+								expectedModel:
+									input.model.modelId === "default"
+										? terminal.right.model.id
+										: input.model.modelId,
+								actualModel: terminal.right.model.id,
+							});
 						events.reconcileUsage(terminal.right.usage);
 						const afterUsage = yield* readUsage;
 						if (beforeUsage?.cost && afterUsage?.cost) {

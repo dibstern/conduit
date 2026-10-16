@@ -209,11 +209,23 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 				} finally {
 					db.close();
 				}
-				// A fresh failed response must evict the old catalog and change the
-				// rail's availability; restoring the trace must recover both.
+				// Rotating the credential must miss the catalog cache. A failed list
+				// clears the rail; restoring the original credential recovers it.
+				const rotatedRows = rows.map((row) =>
+					"kind" in row && row.kind === "credential.store"
+						? {
+								...row,
+								data: {
+									apiKey: "[REDACTED:rotated]",
+									backendUrl: "https://api2.cursor.sh",
+									createdAtMs: 0,
+								},
+							}
+						: row,
+				);
 				writeFileSync(
 					tracePath,
-					`${[...rows.slice(0, -1), { kind: "models.list.error", data: { message: "catalog refresh failed" } }].map((row) => JSON.stringify(row)).join("\n")}\n`,
+					`${[...rotatedRows.slice(0, -1), { kind: "models.list.error", data: { message: "catalog refresh failed" } }].map((row) => JSON.stringify(row)).join("\n")}\n`,
 				);
 				const refreshCursor = browser.frames.length;
 				await browser.getModels(accountId);
@@ -243,7 +255,11 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 						({ id }) => id === accountId,
 					),
 				).toMatchObject({ available: true });
-				evidence["refresh"] = { failedCatalogCount: 0, recovered: true };
+				evidence["refresh"] = {
+					credentialRotationMiss: true,
+					failedCatalogCount: 0,
+					recovered: true,
+				};
 			} else {
 				await expect(
 					browser.createSession("Unavailable Cursor", accountId, "cursor", {
