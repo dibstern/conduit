@@ -24,6 +24,7 @@ import {
 } from "../../../provider/opencode/opencode-runtime-event-translator.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import type { SSEEvent } from "../../../relay/opencode-events.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import {
 	canSeedSession,
 	type ProviderRuntimeIngestion,
@@ -85,6 +86,7 @@ export class OpenCodeSessionCreationGateTag extends Context.Tag(
 )<OpenCodeSessionCreationGateTag, Effect.Semaphore>() {}
 
 export interface EffectOpenCodeRuntimeIngressOptions {
+	readonly projectId: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly projectionRunner: ProjectionRunnerEffect;
 	readonly ingestion: ProviderRuntimeIngestion;
@@ -147,6 +149,7 @@ export class EffectOpenCodeRuntimeIngress
 	implements EffectOpenCodeRuntimeIngressPort
 {
 	private readonly sql: SqlClient.SqlClient;
+	private readonly projectId: string;
 	private readonly projectionRunner: ProjectionRunnerEffect;
 	private readonly ingestion: ProviderRuntimeIngestion;
 	private readonly retryingOf:
@@ -206,6 +209,7 @@ export class EffectOpenCodeRuntimeIngress
 
 	constructor(opts: EffectOpenCodeRuntimeIngressOptions) {
 		this.sql = opts.sql;
+		this.projectId = opts.projectId;
 		this.projectionRunner = opts.projectionRunner;
 		this.ingestion = opts.ingestion;
 		this.retryingOf = opts.retryingOf;
@@ -882,7 +886,8 @@ export class EffectOpenCodeRuntimeIngress
 					provider: string;
 					status: string;
 				}>`
-					SELECT id, provider, status FROM sessions WHERE provider IN ${sql.in(instanceIds)}`;
+					SELECT id, provider, status FROM sessions
+					WHERE project_id = ${this.projectId} AND provider IN ${sql.in(instanceIds)}`;
 				for (const {
 					id: sessionId,
 					provider: boundInstanceId,
@@ -1129,18 +1134,23 @@ export const makeEffectOpenCodeRuntimeIngress = (
 ): Effect.Effect<
 	EffectOpenCodeRuntimeIngress,
 	ProjectionRunnerError | SqlError,
-	SqlClient.SqlClient | ProjectionRunnerEffectTag | ProviderRuntimeIngestionTag
+	| SqlClient.SqlClient
+	| ProjectionRunnerEffectTag
+	| ProviderRuntimeIngestionTag
+	| PersistenceProjectTag
 > =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
+		const { projectId } = yield* PersistenceProjectTag;
 		const creationGate = yield* Effect.serviceOption(
 			OpenCodeSessionCreationGateTag,
 		);
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
 		const config = yield* Effect.serviceOption(ConfigTag);
 		const ingress = new EffectOpenCodeRuntimeIngress({
+			projectId,
 			sql,
 			projectionRunner,
 			ingestion,
@@ -1158,6 +1168,6 @@ export const makeEffectOpenCodeRuntimeIngress = (
 		});
 		yield* ingress.recoverEffect();
 		// Reconciliation proof is valid only for the process that fetched REST.
-		yield* sql`UPDATE sessions SET history_complete = 0`;
+		yield* sql`UPDATE sessions SET history_complete = 0 WHERE project_id = ${projectId}`;
 		return ingress;
 	});

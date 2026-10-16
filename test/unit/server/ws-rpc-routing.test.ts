@@ -95,12 +95,7 @@ describe("routed RPC server", () => {
 					Layer.mergeAll(
 						RpcSubscriptionScopeLive,
 						bus,
-						makePersistenceEffectLayer(
-							":memory:",
-							"test-project",
-							undefined,
-							bus,
-						),
+						makePersistenceEffectLayer(":memory:", slug, undefined, bus),
 						Layer.effect(SessionActivityTag, makeSessionActivity),
 						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
 						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),

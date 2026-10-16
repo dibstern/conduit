@@ -244,6 +244,7 @@ export const makeProjectionRunnerEffect = (
 					yield* refreshSidebar(touched.sidebar ?? [], version);
 					return {
 						version,
+						projectIds: [event.projectId],
 						sessionIds: touched.stamped,
 						removedSessionIds: touched.removed,
 						collections: touched.collections,
@@ -261,6 +262,7 @@ export const makeProjectionRunnerEffect = (
 			if (events.length === 0)
 				return Effect.succeed({
 					version: 0,
+					projectIds: [],
 					sessionIds: [],
 					removedSessionIds: [],
 					collections: [],
@@ -319,6 +321,7 @@ export const makeProjectionRunnerEffect = (
 
 				return {
 					version,
+					projectIds: [...new Set(events.map((event) => event.projectId))],
 					sessionIds: touched.stamped,
 					removedSessionIds: touched.removed,
 					collections: touched.collections,

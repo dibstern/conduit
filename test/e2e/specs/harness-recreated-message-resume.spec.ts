@@ -53,7 +53,7 @@ const seed = (filename: string, events: readonly CanonicalEvent[]) =>
 			const commit = yield* makeCommitAndSignal;
 			yield* commit([...events], { publish: false });
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 

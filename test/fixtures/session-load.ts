@@ -223,11 +223,16 @@ export const HEAVY_FINAL_TEXT = "Heavy session complete: all steps verified.";
 /**
  * Seed the fixture into `filename`, creating and migrating the store if it
  * does not exist. `families` scales the store; the heavy session is always
- * added and is the newest root.
+ * added and is the newest root. `projectId` must match the project whose
+ * relay reads the store, or its scoped lists hide every seeded session.
  */
 export const seedSessionLoadFixture = async (
 	filename: string,
-	options: { readonly families?: number; readonly heavyTurns?: number } = {},
+	options: {
+		readonly families?: number;
+		readonly heavyTurns?: number;
+		readonly projectId?: string;
+	} = {},
 ): Promise<SessionLoadFixture> => {
 	const families = options.families ?? 2500;
 	const started = performance.now();
@@ -258,7 +263,12 @@ export const seedSessionLoadFixture = async (
 				yield* write(batch);
 			return count;
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(
+				makePersistenceEffectLayer(
+					filename,
+					options.projectId ?? "test-project",
+				),
+			),
 		),
 	);
 	return {
