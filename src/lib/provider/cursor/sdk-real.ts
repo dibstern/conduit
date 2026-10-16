@@ -214,9 +214,15 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		},
 		async modelsList(credential) {
 			try {
-				return await (await load()).Cursor.models.list({
+				const models = await (await load()).Cursor.models.list({
 					apiKey: credential.apiKey,
 				});
+				return models.map(({ id, displayName, parameters, variants }) => ({
+					id,
+					displayName,
+					...(parameters ? { parameters } : {}),
+					...(variants ? { variants } : {}),
+				}));
 			} catch (cause) {
 				throw cursorSdkFailure("models.list", cause);
 			}

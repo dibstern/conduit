@@ -1112,10 +1112,11 @@
 			inputText = command;
 			newCursorPos = command.length;
 		}
-		// Move cursor to end of inserted command and focus the textarea
+		// Move cursor to end of inserted command and focus the textarea. tick, not a
+		// frame: keys typed before the next frame would land before the moved caret.
 		if (textareaEl) {
 			textareaEl.focus();
-			requestAnimationFrame(() => {
+			void tick().then(() => {
 				if (textareaEl) {
 					textareaEl.selectionStart = newCursorPos;
 					textareaEl.selectionEnd = newCursorPos;

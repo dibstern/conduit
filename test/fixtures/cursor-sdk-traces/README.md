@@ -94,6 +94,30 @@ scheduling only, without adding or modifying SDK wire fields. The test submits
 its second input after the tee's `close.call` marker and before agent disposal,
 then verifies both turns and the remembered code word reach durable history.
 
+## Model parameter and reroute replay (conduit-test-xqsg.18)
+
+These are derived protocol fixtures, not live proof of plan entitlement or
+server rerouting. Both retain `basic.jsonl`'s transcript, IDs, timestamps,
+catalog and envelopes. Their scenario and model headers describe the replay:
+
+- `turn-model-parameters.jsonl`: changes the existing `send.options` model and
+  `wait.result.model` to `grok-4.7` with the catalog's existing `context=256k`,
+  `reasoning_effort=low`, `fast=false` combination. The process test reuses the
+  turn while changing the requested next-send combination; the tee verifies
+  the native ids and values actually passed to send, independently of replay.
+- `turn-model-reroute.jsonl`: changes only the requested `send.options` model
+  id to retired `composer-2`. The unchanged captured `wait.result.model.id`
+  remains `composer-2.5`, providing the actual-model projection oracle.
+
+`cursor-model-parameters.test.ts` adds the same redacted credential-store row
+as discovery/turn tests in temporary harness traces. Its cache cases replace
+only the catalog response with an empty array or a `models.list.error` wrapper,
+or rotate the inert redaction marker to `[REDACTED:rotated]`. A test-only positive
+`CONDUIT_TEST_CURSOR_CATALOG_TTL_MS` override shortens catalog expiry without
+changing SDK fields. The run writes `test-results/conduit-test-xqsg.18.json`.
+Auto resolution reuses `basic.jsonl` unchanged while requesting `default`; its
+captured `wait.result.model.id` proves that choosing an actual model is not drift.
+
 ## Tool replay cases (conduit-test-xqsg.7)
 
 The 23 `tool-*.jsonl` files are derived fixtures, not live captures. They use
