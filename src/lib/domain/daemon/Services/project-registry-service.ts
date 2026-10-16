@@ -1031,6 +1031,15 @@ export const saveProject = (input: SaveProjectInput) =>
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
+					// Startup finds legacy history through the main folder, so moving it
+					// would orphan history that has not been imported yet.
+					const unavailableReason = (yield* DaemonStoreAvailability).get(
+						existing.slug,
+					);
+					if (unavailableReason !== undefined)
+						return yield* new WsRpcError({
+							message: `Fix this project's history before changing its main folder: ${unavailableReason}`,
+						});
 					// A send admitted between this check and the relay swap is not blocked.
 					const count = yield* countRunningProjectSessions(existing).pipe(
 						Effect.mapError(

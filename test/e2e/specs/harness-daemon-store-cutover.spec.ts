@@ -2,6 +2,7 @@
 // the first daemon start; imports run through the real startup graph.
 import {
 	existsSync,
+	mkdirSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
@@ -399,6 +400,7 @@ test("a failed import blocks its project until restart and retained history reap
 			sessionListReportsReason: false,
 			relayRefused: false,
 			sessionCreationRefused: false,
+			mainFolderChangeRefused: false,
 			projectBRows: null as number | null,
 			aTranscriptRendered: false,
 		},
@@ -559,6 +561,21 @@ test("a failed import blocks its project until restart and retained history reap
 			),
 		).rejects.toThrow();
 		evidence.unavailable.sessionCreationRefused = true;
+		// Startup finds legacy history through the main folder; moving it would orphan B.
+		const movedB = join(harness.root, "project-b-moved");
+		mkdirSync(movedB, { recursive: true });
+		await expect(
+			Effect.runPromise(
+				reader.rpc.SaveProject({ slug: slugB, folders: [movedB] }),
+			),
+		).rejects.toThrow(/before changing its main folder/);
+		const afterMove = await Effect.runPromise(reader.rpc.GetProjects({}));
+		expect(
+			JSON.stringify(
+				afterMove.projects.find((project) => project.slug === slugB)?.folders,
+			),
+		).not.toContain("project-b-moved");
+		evidence.unavailable.mainFolderChangeRefused = true;
 		readStore(destination, (db) => {
 			const tables = db
 				.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")

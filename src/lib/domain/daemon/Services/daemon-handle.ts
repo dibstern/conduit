@@ -18,6 +18,7 @@ import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import { DaemonLifecycleContextTag } from "./daemon-lifecycle-context.js";
 import { DaemonEventBusTag } from "./daemon-pubsub.js";
 import { DaemonStateTag } from "./daemon-state.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import {
 	getInstances as getEffectInstances,
 	InstanceManagerStateTag,
@@ -104,6 +105,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const daemonState = yield* DaemonStateTag;
 		const keepAwake = yield* KeepAwakeTag;
 		const store = yield* PersistenceStore;
+		const unavailable = yield* DaemonStoreAvailability;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
 		const onboardingPort = Effect.sync(() =>
@@ -117,6 +119,7 @@ export const DaemonHandleLive: Layer.Layer<
 			Effect.gen(function* () {
 				const result = yield* saveProjectToRegistry(input).pipe(
 					Effect.provideService(PersistenceStore, store),
+					Effect.provideService(DaemonStoreAvailability, unavailable),
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),

@@ -329,7 +329,8 @@ it.skipIf(!process.env["CONDUIT_LEGACY_DIST"]).each([
 		await running.kill();
 		await first;
 		if (phase === "replay") {
-			const store = new Database(running.daemonStorePath());
+			// The pre-cutover build still writes the per-project store.
+			const store = new Database(running.legacyProjectStorePath());
 			try {
 				const row = store
 					.prepare<[string], { payload_json: string }>(
