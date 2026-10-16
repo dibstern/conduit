@@ -15,7 +15,10 @@ import {
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { isPlaceholderTitle } from "../../../contracts/session-title.js";
-import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
+import {
+	type SessionWorkspace,
+	SessionWorkspaceSchema,
+} from "../../../contracts/session-workspace.js";
 import {
 	MissingWorktreeError,
 	WorktreeRecoveryError,
@@ -36,6 +39,7 @@ import {
 	harnessForModelProvider,
 	ModelNotInCatalog,
 	resolveTurnSettings,
+	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type {
 	ModelInfo,
@@ -83,6 +87,72 @@ import { makeFailTurn } from "./turn-failure.js";
 
 export const CLAUDE_PROVIDER_ID = "claude";
 export const OPENCODE_PROVIDER_ID = "opencode";
+
+/** The launch fields shared by a draft warm and its eventual first send. */
+export const buildSessionLaunchInput = (
+	account: Account,
+	pick: TurnSettings,
+	permissionMode: NonNullable<SendTurnInput["permissionMode"]>,
+	folders: {
+		readonly workspaceRoot: string;
+		readonly extraFolders: readonly string[];
+	},
+	agent?: string,
+) => ({
+	account,
+	instanceId: account.id,
+	model: pick.model,
+	...folders,
+	...(account.driver === "claude"
+		? { configDir: account.folder, folderSource: "account" as const }
+		: {}),
+	permissionMode,
+	...(agent ? { agent } : {}),
+	variant: pick.effort,
+	contextWindow: pick.contextWindow,
+});
+
+/** Apply the same folder mapping and missing-extra-folder policy before any launch. */
+export const resolveLaunchFolders = (
+	state: SessionWorkspace | null,
+	sessionId?: string,
+	workingDirectory?: string,
+) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const workspaceRoot =
+			workingDirectory ?? effectiveWorkingDirectory(config.projectDir, state);
+		const effectiveFolders = effectiveSessionFolders(
+			[config.projectDir, ...(config.extraFolders ?? [])],
+			state,
+		);
+		const extraFolders: string[] = [];
+		const launchFolders = state
+			? effectiveFolders
+					.map(({ directory }) => directory)
+					.filter((folder) => folder !== workspaceRoot)
+			: (config.extraFolders ?? []);
+		for (const folder of launchFolders) {
+			if (existsSync(folder)) extraFolders.push(folder);
+			else {
+				const message = `Extra folder "${folder}" does not exist and was skipped.`;
+				const log = yield* LoggerTag;
+				if (sessionId === undefined) {
+					log.debug(message);
+					continue;
+				}
+				log.warn(`session=${sessionId} ${message}`);
+				yield* publishAlert({
+					_tag: "alert",
+					kind: "warning",
+					alertId: randomUUID(),
+					sessionId,
+					message,
+				});
+			}
+		}
+		return { workspaceRoot, extraFolders, effectiveFolders };
+	});
 
 /** Shared folder mapping for launches and browser requests; recheck session folders at launch. */
 export const resolveSessionFolders = (
@@ -189,34 +259,7 @@ export const resolveSessionFolders = (
 			);
 			state = null;
 		}
-		const effectiveFolders = effectiveSessionFolders(
-			[config.projectDir, ...(config.extraFolders ?? [])],
-			state,
-		);
-		const extraFolders: string[] = [];
-		const launchFolders = state
-			? effectiveFolders
-					.map(({ directory }) => directory)
-					.filter((folder) => folder !== workspaceRoot)
-			: (config.extraFolders ?? []);
-		for (const folder of launchFolders) {
-			if (existsSync(folder)) extraFolders.push(folder);
-			else {
-				// Not the turn's failure: the launch goes on without the folder, so
-				// the user is warned rather than shown a failed turn.
-				const message = `Extra folder "${folder}" does not exist and was skipped.`;
-				const log = yield* LoggerTag;
-				log.warn(`session=${session.id} ${message}`);
-				yield* publishAlert({
-					_tag: "alert",
-					kind: "warning",
-					alertId: randomUUID(),
-					sessionId: session.id,
-					message,
-				});
-			}
-		}
-		return { workspaceRoot, extraFolders, effectiveFolders };
+		return yield* resolveLaunchFolders(state, session.id, workspaceRoot);
 	});
 
 /** Browser requests identify a session; project-level requests keep the primary folder. */
@@ -661,13 +704,13 @@ const prepareEngineTurnInput = (
 				: {}),
 			history: [],
 			providerState,
-			account: turnAccount,
-			instanceId: account.id,
-			model: settings.model,
-			...folders,
-			...(turnAccount.driver === "claude"
-				? { configDir: turnAccount.folder, folderSource: "account" as const }
-				: {}),
+			...buildSessionLaunchInput(
+				turnAccount,
+				settings,
+				yield* getPermissionMode(resolvedInput.sessionId),
+				folders,
+				resolvedInput.agent,
+			),
 			...(isClaudeDriver(driver) && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),
@@ -678,12 +721,8 @@ const prepareEngineTurnInput = (
 				: {}),
 			eventSink,
 			abortSignal: new AbortController().signal,
-			permissionMode: yield* getPermissionMode(resolvedInput.sessionId),
 			...(sessionRow?.side_thread === 1 ? { sideThread: true } : {}),
 			...(imageList ? { images: imageList } : {}),
-			...(resolvedInput.agent ? { agent: resolvedInput.agent } : {}),
-			variant: settings.effort,
-			contextWindow: settings.contextWindow,
 		};
 
 		return { sendTurnInput, workspaceMoveSequence };

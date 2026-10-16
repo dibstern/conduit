@@ -181,6 +181,7 @@ export interface ClosePtyRpcInput {
 export interface CreateSessionRpcInput {
 	readonly projectSlug: string;
 	readonly originId: string;
+	readonly draftId?: string;
 	readonly title?: string;
 	/** Harness instance to bind the session to (preferred over providerId). */
 	readonly instanceId?: string;
@@ -208,6 +209,11 @@ export interface PreWarmSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
 }
+
+export type PreWarmDraftRpcInput = Omit<
+	CreateSessionRpcInput,
+	"title" | "newWorktree" | "draftId"
+> & { readonly draftId: string };
 
 export interface AttachProjectRpcInput {
 	readonly projectSlug?: string;
@@ -810,6 +816,7 @@ const callCreateSession = (input: CreateSessionRpcInput) =>
 		client.CreateSession({
 			projectSlug: input.projectSlug,
 			originId: input.originId,
+			...(input.draftId != null ? { draftId: input.draftId } : {}),
 			...(input.title != null ? { title: input.title } : {}),
 			...(input.instanceId != null
 				? { instanceId: AccountIdSchema.make(input.instanceId) }
@@ -832,6 +839,27 @@ const callViewSession = (input: ViewSessionRpcInput) =>
 
 const callPreWarmSession = (input: PreWarmSessionRpcInput) =>
 	callControl(input.projectSlug, (client) => client.PreWarmSession(input));
+
+const callPreWarmDraft = (input: PreWarmDraftRpcInput) =>
+	callControl(input.projectSlug, (client) =>
+		client.PreWarmDraft({
+			projectSlug: input.projectSlug,
+			originId: input.originId,
+			draftId: input.draftId,
+			...(input.instanceId != null
+				? { instanceId: AccountIdSchema.make(input.instanceId) }
+				: {}),
+			...(input.providerId != null ? { providerId: input.providerId } : {}),
+			...(input.model != null ? { model: input.model } : {}),
+			permissionMode: input.permissionMode,
+			...(input.worktreePath != null
+				? { worktreePath: input.worktreePath }
+				: {}),
+			...(input.worktreeBase != null
+				? { worktreeBase: input.worktreeBase }
+				: {}),
+		}),
+	);
 
 const callAttachProject = (input: AttachProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client.AttachProject(input));
@@ -1299,6 +1327,12 @@ export async function preWarmSessionRpc(
 	input: PreWarmSessionRpcInput,
 ): Promise<void> {
 	await runTransportEffect(callPreWarmSession(input));
+}
+
+export async function preWarmDraftRpc(
+	input: PreWarmDraftRpcInput,
+): Promise<void> {
+	await runTransportEffect(callPreWarmDraft(input));
 }
 
 export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
