@@ -35,7 +35,7 @@ export const usageWarningStripHandlers: StepHandler[] = [
 			});
 			const rpc = requireRpcControl(world.page);
 			rpc.setUsageReadings(readings);
-			rpc.setResponse("QuotaForAccounts", readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
 		},
 	},
 	{
@@ -54,7 +54,7 @@ export const usageWarningStripHandlers: StepHandler[] = [
 			);
 			const rpc = requireRpcControl(world.page);
 			rpc.setUsageReadings(readings);
-			rpc.setResponse("QuotaForAccounts", readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
 		},
 	},
 	{

@@ -59,15 +59,17 @@ test("settings, commands and skill documents follow a workspace change and sessi
 		{ slug: "e2e-replay", title: "Discovery project", folders: [main] },
 	];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions,
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
+			}),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
 			}),
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",
@@ -75,7 +77,8 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				providerScope: { id: "claude", name: "Claude" },
 				instanceId: "claude",
 			}),
-			GetCommands: async ({ sessionId }) => {
+			GetCommands: async (input) => {
+				const sessionId = "sessionId" in input ? input.sessionId : undefined;
 				const directory = recordDirectory("GetCommands", sessionId);
 				if (holdMainCommands && directory === main)
 					await new Promise<void>((resolve) => pendingCommands.push(resolve));
@@ -86,6 +89,33 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					],
 				};
 			},
+			GetSessionSkills: () => ({
+				loads: [
+					{
+						name: "release-notes",
+						invokedBy: "agent",
+						turnOrdinal: 1,
+						at: 1,
+						anchor: { messageId: "skill-message" },
+						running: false,
+					},
+				],
+			}),
+			GetSkillContent: (input) => {
+				const { name } = input;
+				const sessionId = "sessionId" in input ? input.sessionId : undefined;
+				const directory = recordDirectory("GetSkillContent", sessionId);
+				return {
+					projectSlug: "e2e-replay",
+					name,
+					path: `${directory}/.claude/skills/${String(name)}/SKILL.md`,
+					content: `Skill instructions from ${directory}`,
+				};
+			},
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 			GetClaudeSettings: () => ({ projectSlug: "e2e-replay", overrides: {} }),
 			ResolveClaudeSettings: ({ sessionId }) => {
 				const directory = recordDirectory("ResolveClaudeSettings", sessionId);
@@ -104,27 +134,6 @@ test("settings, commands and skill documents follow a workspace change and sessi
 							path: `${directory}/.claude/settings.json`,
 						},
 					},
-				};
-			},
-			GetSessionSkills: () => ({
-				loads: [
-					{
-						name: "release-notes",
-						invokedBy: "agent",
-						turnOrdinal: 1,
-						at: 1,
-						anchor: { messageId: "skill-message" },
-						running: false,
-					},
-				],
-			}),
-			GetSkillContent: ({ sessionId, name }) => {
-				const directory = recordDirectory("GetSkillContent", sessionId);
-				return {
-					projectSlug: "e2e-replay",
-					name,
-					path: `${directory}/.claude/skills/${String(name)}/SKILL.md`,
-					content: `Skill instructions from ${directory}`,
 				};
 			},
 		},

@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { GetSessionSkillsResponseSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -19,19 +20,26 @@ const activityPanel = (page: Page, turn: string) =>
 
 // e.g. "release-notes by you in turn 1; changelog-style by agent in turn 2, loading"
 const parseLoads = (text: string) =>
-	text.split(";").map((entry, index) => {
-		const parts = LOAD.exec(entry);
-		if (!parts) throw new Error(`unreadable skill load "${entry}"`);
-		return {
-			name: parts[1],
-			invokedBy: parts[2] === "you" ? "user" : "agent",
-			turnOrdinal: Number(parts[3]),
-			// The browser's Date.now is pinned, so ages are read against that.
-			at: PINNED_CLOCK_MS - FIVE_MINUTES,
-			anchor: { messageId: `msg-skill-${index}` },
-			running: parts[4] !== undefined,
-		};
-	});
+	text
+		.split(";")
+		.map(
+			(
+				entry,
+				index,
+			): (typeof GetSessionSkillsResponseSchema.Type)["loads"][number] => {
+				const parts = LOAD.exec(entry);
+				if (!parts) throw new Error(`unreadable skill load "${entry}"`);
+				return {
+					name: parts[1] ?? "",
+					invokedBy: parts[2] === "you" ? "user" : "agent",
+					turnOrdinal: Number(parts[3]),
+					// The browser's Date.now is pinned, so ages are read against that.
+					at: PINNED_CLOCK_MS - FIVE_MINUTES,
+					anchor: { messageId: `msg-skill-${index}` },
+					running: parts[4] !== undefined,
+				};
+			},
+		);
 
 /** The open session, as the chip last asked the server about it. */
 const openSessionId = async (page: Page) => {
@@ -457,9 +465,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		match: /^the agent finishes loading the skill$/,
 		run: async ({ world }) => {
 			const sessionId = await openSessionId(world.page);
-			const loads = (mockSessionSkills.get(world.page) ?? []) as readonly {
-				running: boolean;
-			}[];
+			const loads = mockSessionSkills.get(world.page) ?? [];
 			mockSessionSkills.set(
 				world.page,
 				loads.map((load) => ({ ...load, running: false })),

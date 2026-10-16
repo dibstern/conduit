@@ -8,6 +8,7 @@
 	import type { ToolMessage } from "../../types.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { type SessionRef, shownCut, toolDetails } from "../../stores/tool-details.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 
 	const loadFromServer = async (tool: ToolMessage, session: SessionRef | undefined) =>
@@ -30,6 +31,7 @@
 
 	let full = $state<ToolMessage>();
 	let failed = $state(false);
+	let failure = $state<unknown>();
 	let attempt = $state(0);
 
 	const cut = $derived(shownCut(message));
@@ -53,11 +55,15 @@
 		const key = loadKey;
 		full = undefined;
 		failed = false;
+		failure = undefined;
 		if (key === undefined) return;
 		const [tool, ref] = untrack(() => [message, session] as const);
 		let current = true;
-		const fail = () => {
-			if (current) failed = true;
+		const fail = (error?: unknown) => {
+			if (current) {
+				failed = true;
+				failure = error;
+			}
 		};
 		load(tool, ref).then((detail) => {
 			if (!current) return;
@@ -79,7 +85,7 @@
 {#if cut && !full}
 	<div class="tool-full-detail flex items-center gap-2 text-xs text-text-dimmer {className}">
 		{#if failed}
-			<span>Couldn't load the full {cut}.</span>
+			<span>{failureLine(failure, `Couldn't load the full ${cut}.`)}</span>
 			<Button
 				variant="accent-soft"
 				size="content"

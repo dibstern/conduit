@@ -21,15 +21,7 @@ import type {
 	ForkSessionResponse,
 	ListDaemonSessionsResponse,
 } from "../transport/ws-rpc.js";
-import {
-	getAgentsRpc,
-	getCommandsRpc,
-	getModelsRpc,
-	listDaemonSessionsRpc,
-	reloadProviderSessionRpc,
-	type ViewSessionRpcInput,
-	viewSessionRpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	AttentionGroups,
 	DateGroups,
@@ -650,7 +642,7 @@ export async function loadDaemonSessions(): Promise<void> {
 	const token = daemonBrowseToken;
 	const scope = getSessionScope();
 	try {
-		const response = await listDaemonSessionsRpc({
+		const response = await rpc("ListDaemonSessions", {
 			projectSlug,
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			// The sidebar shows other projects' roots only; this project's roots
@@ -698,7 +690,7 @@ export async function loadMoreDaemonSessions(): Promise<void> {
 	clientSession.daemonLoading = true;
 	try {
 		const scope = getSessionScope();
-		const response = await listDaemonSessionsRpc({
+		const response = await rpc("ListDaemonSessions", {
 			projectSlug,
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			cursor,
@@ -789,7 +781,7 @@ async function runSearchPage(token: number, replace: boolean): Promise<void> {
 	const cursor = replace ? null : sessionState.searchCursor;
 	clientSession.searchLoading = true;
 	try {
-		const response = await listDaemonSessionsRpc({
+		const response = await rpc("ListDaemonSessions", {
 			projectSlug,
 			roots: search.roots,
 			search: search.query,
@@ -1026,7 +1018,7 @@ export function setCurrentSession(id: string | null): void {
 export function switchToSession(
 	sessionId: string,
 	projectSlug?: string,
-	view?: typeof viewSessionRpc,
+	view?: typeof rpc<"ViewSession">,
 	options?: { replace?: boolean },
 ): void {
 	const generation = ++selectionGeneration;
@@ -1052,11 +1044,11 @@ export function switchToSession(
 		else navigate(`/s/${sessionId}`);
 	}
 	if (slug) {
-		const input: ViewSessionRpcInput = {
+		const input = {
 			sessionId,
 			originId: getBrowserClientId(),
 		};
-		void (view ?? viewSessionRpc)(input)
+		void (view ?? rpc)("ViewSession", input)
 			.then(({ draft }) => {
 				// Viewing another project's session attaches this tab to it.
 				if (generation === selectionGeneration && getCurrentSlug() !== slug)
@@ -1073,7 +1065,7 @@ export function switchToSession(
 	}
 	if (slug) {
 		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-		void getAgentsRpc({ sessionId })
+		void rpc("GetAgents", { sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1083,7 +1075,7 @@ export function switchToSession(
 					applyGetAgentsResponse(response, sessionId);
 			})
 			.catch(() => undefined);
-		void getCommandsRpc({ sessionId })
+		void rpc("GetCommands", { sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1098,7 +1090,7 @@ export function switchToSession(
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
 		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ sessionId })
+		void rpc("GetModels", { sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1119,15 +1111,15 @@ export async function reloadProviderSession(
 	projectSlug: string,
 	sessionId: string,
 ): Promise<void> {
-	await reloadProviderSessionRpc({
+	await rpc("ReloadProviderSession", {
 		sessionId,
 		commandId: crypto.randomUUID(),
 	});
 	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
 	const applyModels = followModelsRead(sessionId);
 	const [commands, models] = await Promise.all([
-		getCommandsRpc({ sessionId }),
-		getModelsRpc({ sessionId }),
+		rpc("GetCommands", { sessionId }),
+		rpc("GetModels", { sessionId }),
 	]);
 	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
 		return;

@@ -9,7 +9,12 @@ export const sessionModeDefaultHandlers: StepHandler[] = [
 			/^the next draft resolves to (local|worktree) from the project file$/,
 		run: ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("ResolveSessionMode", { mode: match[1], source: "file" });
+			rpc.setStubs({
+				ResolveSessionMode: () => ({
+					mode: match[1] as "local" | "worktree",
+					source: "file",
+				}),
+			});
 			const projects = [
 				{
 					slug: "myapp",

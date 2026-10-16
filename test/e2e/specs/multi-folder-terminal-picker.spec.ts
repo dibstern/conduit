@@ -58,11 +58,11 @@ for (const scenario of [
 				accountId: null,
 				id: "terminal-folders-session",
 				title: "Terminal folders session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 				workspace: {
-					cause: "user",
-					origin: "existing",
+					cause: "user" as const,
+					origin: "existing" as const,
 					worktrees: {
 						[primary]: "/workspace/web-worktree",
 						...(secondary ? { [secondary]: "/workspace/api-worktree" } : {}),
@@ -72,14 +72,11 @@ for (const scenario of [
 			let terminalCount = 0;
 			let rpc: RpcMockControl;
 			rpc = await mockWsRpc(page, {
-				handlers: {
-					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-					GetProjects: () => ({ projects, current: projectSlug }),
-					GetAgents: () => ({
+				stubs: {
+					GetFileTree: () => ({
 						projectSlug,
-						agents: [],
-						providerScope: { id: "claude", name: "Claude" },
-						instanceId: "claude",
+						entries: [],
+						...(secondary ? { roots: scenario.roots } : {}),
 					}),
 					ListDaemonSessions: () => ({
 						sessions: [session],
@@ -87,11 +84,21 @@ for (const scenario of [
 						hasMore: false,
 						nextCursor: null,
 					}),
-					GetFileTree: () => ({
-						projectSlug,
-						entries: [],
-						...(secondary ? { roots: scenario.roots } : {}),
+					GetModels: (input) => ({
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug:
+							"projectSlug" in input ? input.projectSlug : projectSlug,
+						providers: [],
 					}),
+					GetAgents: () => ({
+						projectSlug,
+						agents: [],
+						providerScope: { id: "claude", name: "Claude" },
+						instanceId: "claude",
+					}),
+				},
+				handlers: {
+					GetProjects: () => ({ projects, current: projectSlug }),
 					CreatePty: ({ root }) => {
 						const id = `pty-${++terminalCount}`;
 						rpc.sendChunk("SubscribePtys", [

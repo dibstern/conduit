@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
+import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -122,30 +123,10 @@ async function openDraft(
 			}),
 		),
 	};
-	let sessions: readonly Record<string, unknown>[] = [];
+	let sessions: readonly SessionInfo[] = [];
 	let workspaceCreated = false;
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
-			GetModels: ({ projectSlug, instanceId }) => ({
-				projectSlug,
-				providers: modelProviders.filter(
-					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
-				),
-			}),
-			GetAgents: ({ instanceId }) => ({
-				projectSlug: "e2e-replay",
-				instanceId: instanceId ?? provider,
-				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
-				agents: [],
-			}),
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+		stubs: {
 			GetFileTree: () => ({
 				projectSlug: "e2e-replay",
 				entries: [],
@@ -182,6 +163,12 @@ async function openDraft(
 					},
 				],
 			}),
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 			CreateSession: ({ projectSlug, newWorktree }) => {
 				if (options.fail)
 					throw new WorktreeCreationError({
@@ -195,7 +182,7 @@ async function openDraft(
 						id: "draft-session",
 						accountId: provider,
 						title: "New workspace",
-						status: "idle",
+						status: "idle" as const,
 						projectSlug,
 						workspace: newWorktree
 							? {
@@ -229,8 +216,26 @@ async function openDraft(
 				rpc.setShellRows(sessions);
 				return { projectSlug, sessionId: "draft-session" };
 			},
-			PreWarmSession: () => ({ ok: true }),
+			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : "e2e-replay",
+				providers: modelProviders.filter(
+					({ id }) =>
+						id === (input.instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
+			GetAgents: ({ instanceId }) => ({
+				projectSlug: "e2e-replay",
+				instanceId: instanceId ?? provider,
+				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
+				agents: [],
+			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {
