@@ -152,6 +152,7 @@ export class CursorTurnEvents {
 	>();
 	private readonly lastShell = new Map<string, string>();
 	private readonly results: CursorToolResults;
+	private readonly questionSources = new Map<string, string>();
 	private nextMessage = false;
 	private readonly content: Array<
 		ContentPart | { kind: "tool"; callId: string }
@@ -185,6 +186,38 @@ export class CursorTurnEvents {
 		},
 	) {
 		this.results = new CursorToolResults(cwd);
+	}
+
+	questionSource(callId: string): string | undefined {
+		return this.questionSources.get(callId);
+	}
+
+	private trackQuestionSource(value: unknown, parent?: string): void {
+		if (!Schema.is(RecordSchema)(value)) return;
+		const callId = value["callId"];
+		if (typeof callId !== "string") return;
+		if (value["type"] === "tool-call-delta") {
+			this.trackQuestionSource(
+				value["taskUpdate"],
+				this.questionSources.get(callId) ?? parent,
+			);
+			return;
+		}
+		const tool = value["toolCall"];
+		if (Schema.is(RecordSchema)(tool) && tool["type"] === "task") {
+			const args = tool["args"];
+			if (!Schema.is(RecordSchema)(args)) return;
+			const subagent = args["subagentType"];
+			const name = Schema.is(RecordSchema)(subagent)
+				? subagent["name"]
+				: undefined;
+			const label = name ?? args["description"] ?? args["agentId"];
+			if (typeof label === "string") this.questionSources.set(callId, label);
+		} else if (parent) {
+			// 1.0.37 reports the parent in callback context.sessionId. Task's
+			// nested call ID, rather than that context, identifies the asker.
+			this.questionSources.set(callId, parent);
+		}
 	}
 
 	push<K extends Exclude<ProviderRuntimeEventType, "workspace.changed">>(
@@ -329,6 +362,7 @@ export class CursorTurnEvents {
 		parentCallId?: string,
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
+			this.trackQuestionSource(value);
 			const decoded = decodeDelta(value);
 			if (Either.isLeft(decoded)) {
 				log.warn("Skipped malformed Cursor delta update", { payload: value });

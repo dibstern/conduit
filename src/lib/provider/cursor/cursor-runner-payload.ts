@@ -14,6 +14,7 @@ import type {
 } from "../runner/session-runner.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
+import { cursorAskUserTool } from "./cursor-questions.js";
 import { CursorModelParameters } from "./cursor-runner-driver.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
@@ -58,6 +59,7 @@ interface CursorSession {
 	run?: CursorRun | undefined;
 	busy: boolean;
 	cancelRequested: boolean;
+	questionAbort?: AbortController | undefined;
 	onCancel?: (() => void) | undefined;
 }
 
@@ -103,6 +105,7 @@ type Update =
 	| { readonly channel: "interrupt-timeout" }
 	| { readonly channel: "delta"; readonly value: unknown }
 	| { readonly channel: "stream"; readonly value: unknown }
+	| { readonly channel: "question"; readonly answer: Effect.Effect<void> }
 	| {
 			readonly channel: "wait";
 			readonly result: Either.Either<unknown, SessionFailure>;
@@ -184,6 +187,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 			if (session.busy) return this.result(session, "steer-declined", 0);
 			session.busy = true;
 			session.cancelRequested = false;
+			const questionAbort = new AbortController();
+			session.questionAbort = questionAbort;
 			const started = Date.now();
 			let abandoned = false;
 			let acceptingUpdates = true;
@@ -235,6 +240,17 @@ export class CursorRunnerPayload implements RunnerPayload {
 
 			return yield* Effect.scoped(
 				Effect.gen(this, function* () {
+					const queue = yield* Queue.unbounded<Update>();
+					const customTools = {
+						ask_user: cursorAskUserTool(
+							sink,
+							events,
+							questionAbort.signal,
+							(answer) => {
+								Queue.unsafeOffer(queue, { channel: "question", answer });
+							},
+						),
+					};
 					// The daemon places only sends that reach an idle session, so a send
 					// that starts here just after a turn ends places its own message
 					// (placement is idempotent). A continuation places nothing: it
@@ -344,7 +360,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 							);
 							this.primed = true;
 						}
-						const customTools = {};
 						const agent = yield* Effect.acquireRelease(
 							sdkCall("agent open", () =>
 								session.agentId
@@ -437,7 +452,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 						}),
 					});
 					session.controllerPid = process.pid;
-					const queue = yield* Queue.unbounded<Update>();
 					const agent = open.agent;
 					const readUsage = sdkCall("usage", () => agent.getUsage()).pipe(
 						Effect.timeout("2 seconds"),
@@ -558,6 +572,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 						}
 						if (update.channel === "stream") {
 							yield* events.stream(update.value);
+							continue;
+						}
+						if (update.channel === "question") {
+							yield* Effect.forkScoped(update.answer);
 							continue;
 						}
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
@@ -689,6 +707,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							"retryable" in failure && failure.retryable === true,
 						),
 					),
+					Effect.ensuring(Effect.sync(() => questionAbort.abort())),
 				),
 			).pipe(
 				Effect.ensuring(
@@ -696,6 +715,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						acceptingUpdates = false;
 						session.busy = false;
 						session.run = undefined;
+						session.questionAbort = undefined;
 						session.onCancel = undefined;
 					}),
 				),
@@ -768,7 +788,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 	interrupt(sessionId: string) {
 		return Effect.suspend(() => {
 			const session = this.sessions.get(sessionId);
-			if (session) session.cancelRequested = true;
+			if (session) {
+				session.cancelRequested = true;
+				session.questionAbort?.abort();
+			}
 			session?.onCancel?.();
 			return Effect.void;
 		});

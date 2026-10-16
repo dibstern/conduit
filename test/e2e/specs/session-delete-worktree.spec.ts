@@ -113,9 +113,6 @@ async function setup(
 				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetWorktreeCleanupSetting: () => {
 				if (options.failCleanupSetting)
 					throw new WsRpcError({ message: "Could not read cleanup setting" });
@@ -126,6 +123,9 @@ async function setup(
 					},
 				};
 			},
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 	});
 	await mockRelayWebSocket(page, {

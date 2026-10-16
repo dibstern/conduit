@@ -245,10 +245,10 @@ describe("build ID dispatch", () => {
 		const run = restartAction();
 		mocks.showBanner.mockClear();
 		await run();
-		expect(mocks.showToast).toHaveBeenCalledWith(
-			expect.stringContaining("restart rejected"),
-			{ variant: "error" },
-		);
+		expect(mocks.showToast).toHaveBeenCalledWith({
+			title: "Failed to restart conduit",
+			variant: "error",
+		});
 		await restartAction()();
 		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(2);
 		expect(mocks.showToast).toHaveBeenCalledWith("Restarting conduit…");

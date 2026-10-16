@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { tick } from "svelte";
 	import { refreshServerStatus, serverStatus } from "../../stores/server-status.svelte.js";
-	import { SetPinRejected, setPinRpc } from "../../transport/ws-rpc-client.js";
+	import { SetPinRejected } from "../../transport/ws-rpc.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
@@ -43,19 +44,15 @@
 		saving = true;
 		let wrongPin = false;
 		try {
-			await setPinRpc({ pin: form === "pin-remove" ? null : newPin, ...(form === "pin-set" ? {} : { currentPin }) });
+			await rpc("SetPin", { pin: form === "pin-remove" ? null : newPin, ...(form === "pin-set" ? {} : { currentPin }) });
 			if (openForm === form) onToggleForm(form);
 			await refreshServerStatus();
 		} catch (cause: unknown) {
 			if (openForm !== form) return;
-			if (cause instanceof SetPinRejected) {
-				error = failureLine(cause, "Could not save PIN. Try again.");
-				if (cause.reason === "wrong_pin") {
-					wrongPin = true;
-					currentPin = "";
-				}
-			} else {
-				error = "Could not save PIN. Try again.";
+			error = failureLine(cause, "Could not save PIN. Try again.");
+			if (cause instanceof SetPinRejected && cause.reason === "wrong_pin") {
+				wrongPin = true;
+				currentPin = "";
 			}
 		} finally {
 			saving = false;

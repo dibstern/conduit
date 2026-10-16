@@ -112,12 +112,9 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					content: `Skill instructions from ${directory}`,
 				};
 			},
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
 			GetClaudeSettings: () => ({ projectSlug: "e2e-replay", overrides: {} }),
-			ResolveClaudeSettings: ({ sessionId }) => {
+			ResolveClaudeSettings: (input) => {
+				const sessionId = "sessionId" in input ? input.sessionId : undefined;
 				const directory = recordDirectory("ResolveClaudeSettings", sessionId);
 				return {
 					projectSlug: "e2e-replay",
@@ -136,6 +133,10 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					},
 				};
 			},
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 	});
 	await mockRelayWebSocket(page, {
