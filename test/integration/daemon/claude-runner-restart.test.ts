@@ -765,7 +765,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			throw new Error("Missing verified runner");
 		const admitted = persisted(harness, sessionId);
 		expect(admitted).toMatchObject({
-			turns: [{ state: "pending", assistant_message_id: null }],
+			turns: [{ state: "running", assistant_message_id: null }],
 			commands: [{ status: "running" }],
 		});
 		expect(
@@ -1081,7 +1081,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const active = persisted(harness, sessionId);
 		expect(active.turns).toEqual([
 			{
-				state: "pending",
+				state: "running",
 				user_message_id: expect.any(String),
 				assistant_message_id: null,
 			},

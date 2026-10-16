@@ -6,6 +6,7 @@ exports[`Exhaustiveness guards > EventPayloadMap key snapshot > snapshot of all 
   "input.admitted",
   "input.cancelled",
   "input.interrupt_requested",
+  "input.requeued",
   "input.sent",
   "message.created",
   "message.part.removed",

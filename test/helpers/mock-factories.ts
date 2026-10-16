@@ -1263,6 +1263,7 @@ export const PassThroughSessionInbox = Layer.effect(
 			// Nothing ever queues here, so nothing can be removed or sent now.
 			cancel: () => Effect.succeed("already_started" as const),
 			sendNow: () => Effect.succeed("already_started" as const),
+			steerDeclined: () => Effect.void,
 			start: Effect.void,
 		};
 	}),

@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { SqlClient } from "@effect/sql";
+import { Effect, Option } from "effect";
 import { isRecord } from "../../utils.js";
 import { claudeTurnErrorEvent } from "./claude-event-translator.js";
 import { claudeRuntimeEvent } from "./claude-runtime-event.js";
@@ -64,24 +65,35 @@ export function failClaudeRunnerTurn(
 			recoverQuestions: false,
 		});
 		if (!turn.terminal) {
-			// A held send the SDK never started has no message yet, and an error
-			// naming it would end no turn. Placing is a no-op once it is placed.
-			if (turn.placement)
+			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+			const inputId = turn.userMessageId ?? turn.placement?.inputId;
+			const pendingSteer =
+				inputId && Option.isSome(sql)
+					? (yield* sql.value`SELECT 1 FROM pending_inputs
+					WHERE session_id = ${turn.sessionId} AND input_id = ${inputId}
+					AND state IN ('steering', 'queued')
+					AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = ${inputId})`)
+							.length > 0
+					: false;
+			// An unstarted steer belongs to the inbox. Failure settlement will
+			// return it to the queue; a synthetic message would consume it.
+			if (turn.placement && !pendingSteer)
 				yield* emit({
 					type: "place-user-message",
 					sinkId,
 					input: { sessionId: turn.sessionId, ...turn.placement },
 				});
-			yield* emit({
-				type: "event",
-				sinkId,
-				event: claudeTurnErrorEvent(
-					turn.sessionId,
-					turn.messageId,
-					new Error(failure.message),
-					turn.userMessageId,
-				),
-			});
+			if (!pendingSteer)
+				yield* emit({
+					type: "event",
+					sinkId,
+					event: claudeTurnErrorEvent(
+						turn.sessionId,
+						turn.messageId,
+						new Error(failure.message),
+						turn.userMessageId,
+					),
+				});
 		}
 		// A terminal event may have arrived just before the socket closed,
 		// without its following idle event. Always release the busy lease.

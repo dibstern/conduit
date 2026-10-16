@@ -103,6 +103,7 @@ const PAYLOAD_REQUIRED_FIELDS: Record<CanonicalEventType, readonly string[]> = {
 	"turn.model_resolved": ["actualModel"],
 	"input.admitted": ["sessionId", "inputId", "delivery", "request"],
 	"input.sent": ["sessionId", "inputId"],
+	"input.requeued": ["sessionId", "inputId", "sentSequence", "reason"],
 	"input.cancelled": ["sessionId", "inputId"],
 	"input.interrupt_requested": ["sessionId", "inputId"],
 	"permission.asked": ["id", "sessionId", "toolName"],

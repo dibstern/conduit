@@ -125,6 +125,7 @@ export function translateDomainEventToRelay(
 
 		case "input.admitted":
 		case "input.sent":
+		case "input.requeued":
 		case "input.cancelled":
 		case "input.interrupt_requested":
 			return silent(

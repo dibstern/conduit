@@ -1089,15 +1089,23 @@ export const makeProcessClaudeSessionRunner = (
 									(sinkId, failure) => {
 										const binding = sinks.get(sinkId);
 										if (!binding?.pending) return Effect.void;
-										return entry.outputs.withPermits(1)(
-											failClaudeRunnerTurn(
-												(output) => emit(output, registration.sessionId),
-												sinkId,
-												binding,
-												failure,
-											).pipe(
-												Effect.ensuring(
-													Effect.sync(() => sinks.delete(sinkId)),
+										return (
+											entry.failure
+												? Deferred.await(entry.stopped)
+												: Effect.void
+										).pipe(
+											Effect.zipRight(
+												entry.outputs.withPermits(1)(
+													failClaudeRunnerTurn(
+														(output) => emit(output, registration.sessionId),
+														sinkId,
+														binding,
+														failure,
+													).pipe(
+														Effect.ensuring(
+															Effect.sync(() => sinks.delete(sinkId)),
+														),
+													),
 												),
 											),
 										);
@@ -1747,7 +1755,13 @@ export const makeProcessClaudeSessionRunner = (
 						).pipe(
 							Effect.ensuring(Effect.sync(() => sinks.delete(command.sinkId))),
 						);
-						return child ? child.outputs.withPermits(1)(cleanup) : cleanup;
+						return (
+							child?.failure ? Deferred.await(child.stopped) : Effect.void
+						).pipe(
+							Effect.zipRight(
+								child ? child.outputs.withPermits(1)(cleanup) : cleanup,
+							),
+						);
 					}),
 					Effect.ensuring(
 						Effect.suspend(() =>

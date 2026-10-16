@@ -206,6 +206,7 @@ const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	const permit = Effect.unsafeMakeSemaphore(1);
 	return effect.pipe(
 		Effect.provideService(SessionInboxTag, {
+			steerDeclined: () => Effect.void,
 			withSession: (_sessionId, admission) => permit.withPermits(1)(admission),
 			start: Effect.void,
 			submit: () => Effect.die("This fixture only dispatches continuations"),

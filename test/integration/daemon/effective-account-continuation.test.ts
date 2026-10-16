@@ -306,6 +306,7 @@ for (const scenario of [
 					}),
 			}),
 			Effect.provideService(SessionInboxTag, {
+				steerDeclined: () => Effect.void,
 				withSession: (sessionId, effect) =>
 					admission.withPermits(1)(
 						Effect.sync(() => admittedSessions.push(sessionId)).pipe(

@@ -102,6 +102,24 @@ describe("running Claude turn status across restart", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			foregroundCli: true,
 			restartProof: true,
+			capabilityModels: [
+				{
+					id: "sonnet",
+					name: "Sonnet",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+					],
+				},
+				{
+					id: "claude-sonnet-4",
+					name: "Sonnet 4",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+					],
+				},
+			],
 			...(opencodeAvailable && { opencodeRecording: "chat-simple" }),
 		});
 		const browser = await harness.connect();
@@ -226,6 +244,24 @@ describe("Claude turn status before the model streams", () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
+			capabilityModels: [
+				{
+					id: "sonnet",
+					name: "Sonnet",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+					],
+				},
+				{
+					id: "claude-sonnet-4",
+					name: "Sonnet 4",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+					],
+				},
+			],
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Local work");
@@ -295,6 +331,24 @@ describe("Claude turn status before the model streams", () => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
+			capabilityModels: [
+				{
+					id: "sonnet",
+					name: "Sonnet",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+					],
+				},
+				{
+					id: "claude-sonnet-4",
+					name: "Sonnet 4",
+					providerId: "claude",
+					contextWindowOptions: [
+						{ value: "200k", label: "200K", isDefault: true },
+					],
+				},
+			],
 		});
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Mode change");

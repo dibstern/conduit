@@ -136,6 +136,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			// Relay-owned Session Inbox facts; no provider produces them.
 			"input.admitted",
 			"input.sent",
+			"input.requeued",
 			"input.cancelled",
 			"input.interrupt_requested",
 		];

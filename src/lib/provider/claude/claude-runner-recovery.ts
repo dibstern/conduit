@@ -7,6 +7,8 @@ import {
 	resolveClaudeLaunchConfig,
 } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
+import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
 import {
 	makeProviderStateEffect,
 	ProviderStateEffectTag,
@@ -124,6 +126,13 @@ export const recoverClaudeRunnerCommands = (
 									}),
 								);
 								const read = yield* makeReadQueryEffect;
+								const prepareShellEnv = deps.prepareShellEnv;
+								if (prepareShellEnv)
+									yield* Effect.tryPromise({
+										try: () => prepareShellEnv(input.workspaceRoot),
+										catch: (cause) =>
+											claudeRunnerFailure("prepare shell environment", cause),
+									});
 								return yield* sendPreparedClaudeTurn({
 									sessionId,
 									instanceId,
@@ -351,4 +360,20 @@ const settleClaudeRunnerCommand = (
 				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE command_id = ${commandId}`;
 			}),
 		)
-		.pipe(Effect.asVoid);
+		.pipe(
+			Effect.asVoid,
+			Effect.tap(() =>
+				Effect.gen(function* () {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					if (persist._tag === "Some")
+						yield* requeueFailedSteers(
+							sql,
+							persist.value,
+							sessionId,
+							commandId,
+						);
+				}),
+			),
+		);

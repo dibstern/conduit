@@ -66,6 +66,7 @@ export const CANONICAL_EVENT_TYPES = [
 	"turn.model_resolved",
 	"input.admitted",
 	"input.sent",
+	"input.requeued",
 	"input.cancelled",
 	"input.interrupt_requested",
 	"session.created",
@@ -325,6 +326,13 @@ export interface InputSentPayload {
 export interface InputCancelledPayload {
 	readonly sessionId: string;
 	readonly inputId: string;
+}
+
+export interface InputRequeuedPayload {
+	readonly sessionId: string;
+	readonly inputId: string;
+	readonly sentSequence: number;
+	readonly reason: "declined" | "failed";
 }
 
 export interface InputInterruptRequestedPayload {
@@ -626,6 +634,7 @@ export interface EventPayloadMap {
 	"turn.model_resolved": TurnModelResolvedPayload;
 	"input.admitted": InputAdmittedPayload;
 	"input.sent": InputSentPayload;
+	"input.requeued": InputRequeuedPayload;
 	"input.cancelled": InputCancelledPayload;
 	"input.interrupt_requested": InputInterruptRequestedPayload;
 	"session.created": SessionCreatedPayload;
@@ -1022,6 +1031,13 @@ const InputCancelledPayloadSchema = Schema.Struct({
 	inputId: Schema.String,
 });
 
+const InputRequeuedPayloadSchema = Schema.Struct({
+	sessionId: Schema.String,
+	inputId: Schema.String,
+	sentSequence: Schema.Number,
+	reason: Schema.Literal("declined", "failed"),
+});
+
 const InputInterruptRequestedPayloadSchema = Schema.Struct({
 	sessionId: Schema.String,
 	inputId: Schema.String,
@@ -1353,6 +1369,10 @@ const InputCancelledEventSchema = eventEnvelope(
 	"input.cancelled",
 	InputCancelledPayloadSchema,
 );
+const InputRequeuedEventSchema = eventEnvelope(
+	"input.requeued",
+	InputRequeuedPayloadSchema,
+);
 const InputInterruptRequestedEventSchema = eventEnvelope(
 	"input.interrupt_requested",
 	InputInterruptRequestedPayloadSchema,
@@ -1532,6 +1552,7 @@ export const CanonicalEventSchema = Schema.Union(
 	TurnModelResolvedEventSchema,
 	InputAdmittedEventSchema,
 	InputSentEventSchema,
+	InputRequeuedEventSchema,
 	InputCancelledEventSchema,
 	InputInterruptRequestedEventSchema,
 	SessionCreatedEventSchema,
