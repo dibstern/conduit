@@ -86,11 +86,10 @@ export const harnessHandlers: StepHandler[] = [
 					},
 				],
 			});
-			// Wrap the mockup's typed stubs: a handler override would answer every
-			// other account with nothing, failing its requests.
-			const { GetModels: getModels, GetAgents: getAgents } = rpc.stubs;
-			if (!getModels || !getAgents)
-				throw new Error("Cursor discovery wraps the mockup's catalogue stubs");
+			// Other instances keep the default catalogue: an undefined reply fails
+			// the contract decode and the mock's Defect fails every pending RPC.
+			const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			const getAgents = rpc.stubs.GetAgents ?? rpc.catalogStubs().GetAgents;
 			rpc.setStubs({
 				GetModels: (payload) =>
 					payload.instanceId === "cursor-work"
