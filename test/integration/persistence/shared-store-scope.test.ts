@@ -91,7 +91,6 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
-import { settleUnclaimedClaudeRunnerCommands } from "../../../src/lib/provider/claude/claude-runner-recovery.js";
 import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
@@ -100,7 +99,10 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
-import { runningRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
+import {
+	runningRunnerCommands,
+	settleUnclaimedRunnerCommands,
+} from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as relayStartup from "../../../src/lib/relay/project-relay-startup.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import {
@@ -516,14 +518,15 @@ describe("shared-store relay project scope", () => {
 		const failures: string[] = [];
 		await store.runtime.runPromise(
 			Effect.gen(function* () {
-				yield* settleUnclaimedClaudeRunnerCommands(
+				yield* settleUnclaimedRunnerCommands(
 					yield* SqlClient.SqlClient,
 					new Set(),
+					"claude",
+					() => "claude",
 					(_sink, turn) =>
 						Effect.sync(() => {
 							failures.push(turn.sessionId);
 						}),
-					store.root,
 				);
 			}),
 		);
