@@ -843,9 +843,13 @@
 <div id="layout" class={layoutClass}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
-		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
+		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 4).
 		Both phone top bars are static, so this strip stands in for them. Same colour
 		as the bars, so it is invisible; compact-only, styled in style.css.
+		It must paint over #app: WebKit skips boxes with no fixed or sticky element
+		in or around them, so #app is harmless until it holds one (the sticky
+		scroll-to-bottom button), and then it hides the strip. Guarded by
+		test/e2e/specs/phone-top-edge.spec.ts and test/e2e/ios/top-scroll-pocket.test.ts.
 	-->
 	<div id="compact-top-edge" aria-hidden="true"></div>
 
