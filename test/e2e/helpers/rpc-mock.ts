@@ -704,9 +704,7 @@ function defaultHandler(
 						? () => ({ ok: true })
 						: tag === "InspectSessionWorktrees"
 							? () => ({ worktrees: [], removeWorktrees: false })
-							: tag === "input.submit"
-								? ({ sessionId }) => ({ ok: true, sessionId })
-								: undefined)
+							: undefined)
 	);
 }
 
@@ -878,7 +876,10 @@ export async function mockWsRpc(
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.initialHandlers = options.handlers ?? {};
-	control.stubs = { ...options.stubs };
+	control.stubs = {
+		"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+		...options.stubs,
+	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {
@@ -959,6 +960,13 @@ export async function ensureMockTranscriptRpc(
 	const control = controls.get(page);
 	if (control) return control;
 	return mockWsRpc(page, {
+		stubs: {
+			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
+				projectSlug,
+				sessionId,
+				...mockDetailPage(page, sessionId, before),
+			}),
+		},
 		handlers: {
 			ViewSession: () => ({ ok: true }),
 			ResolveSession: ({ projectSlug }) => ({
@@ -969,15 +977,6 @@ export async function ensureMockTranscriptRpc(
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
-			}),
-			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
-				sessionId: String(sessionId ?? ""),
-				...mockDetailPage(
-					page,
-					String(sessionId ?? ""),
-					typeof before === "string" ? before : undefined,
-				),
 			}),
 		},
 	});

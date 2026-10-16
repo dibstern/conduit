@@ -9,7 +9,7 @@ import { makeResumeLedger, type ResumeLedger } from "../transport/resume.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { type FeedStatus, supervise } from "../transport/supervise.js";
-import { loadMoreHistoryRpc } from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type {
 	ChatMessage,
 	HistoryMessage,
@@ -377,7 +377,7 @@ export function applyTranscriptEnvelope(
 	entry: TranscriptEntry,
 	envelope:
 		| SessionDetailEnvelope
-		| Awaited<ReturnType<typeof loadMoreHistoryRpc>>,
+		| Awaited<ReturnType<typeof rpc<"LoadMoreHistory">>>,
 ): TranscriptEntry {
 	if ("messages" in envelope) {
 		// Older pages still bring whole messages. Preserve their existing
@@ -1031,7 +1031,7 @@ export function loadOlderTranscript(sessionId: string): Promise<void> {
 	if (!entry || !entry.hasMore || !entry.rows[0]) return Promise.resolve();
 	slot.messages.historyLoading = true;
 	if (sessionState.currentId === sessionId) historyState.loading = true;
-	const request = loadMoreHistoryRpc({
+	const request = rpc("LoadMoreHistory", {
 		projectSlug: entry.project,
 		sessionId,
 		before: entry.rows[0].id,

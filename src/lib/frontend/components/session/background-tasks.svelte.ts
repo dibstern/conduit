@@ -8,8 +8,8 @@ import {
 	switchToSession,
 } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
-import { showToast } from "../../stores/ui.svelte.js";
-import { stopBackgroundTaskRpc } from "../../transport/ws-rpc-client.js";
+import { toastFailure } from "../../transport/rpc-errors.js";
+import { rpc } from "../../transport/ws-rpc-client.js";
 
 /** Whether the header's background-task pull-down is open. One per page, like goalDetails. */
 export const tasksPanel = $state({ open: false });
@@ -152,20 +152,21 @@ export async function stopBackgroundTasks(
 		taskId,
 	);
 	let failed = false;
+	let failure: unknown;
 	for (const id of ids) {
 		try {
-			await stopBackgroundTaskRpc({ projectSlug, sessionId, taskId: id });
-		} catch {
+			await rpc("StopBackgroundTask", { projectSlug, sessionId, taskId: id });
+		} catch (error) {
 			failed = true;
+			failure = error;
 		}
 	}
 	if (failed)
-		showToast(
+		toastFailure(
 			taskId
 				? "Failed to stop background task"
 				: "Failed to stop background tasks",
-			{ variant: "error" },
-		);
+		)(failure);
 }
 
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */

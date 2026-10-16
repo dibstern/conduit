@@ -84,6 +84,9 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 		},
 	];
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+		},
 		handlers: {
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects: [] }),
@@ -417,10 +420,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				});
 				return { projectSlug: "myapp", sessionId: "sess-restored" };
 			},
-			"input.submit": (payload) => ({
-				ok: true,
-				sessionId: payload["sessionId"],
-			}),
 		},
 	});
 	const publishCatalogue = (id: string) => {

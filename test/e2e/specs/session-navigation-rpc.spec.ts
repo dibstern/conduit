@@ -22,6 +22,9 @@ const rows = [
 
 async function setup(page: import("@playwright/test").Page) {
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			"input.submit": () => ({ ok: true, sessionId: materialized }),
+		},
 		handlers: {
 			AttachProject: ({ sessionId }) => ({
 				projectSlug,
@@ -34,7 +37,6 @@ async function setup(page: import("@playwright/test").Page) {
 			}),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
 			ForkSession: () => ({ projectSlug, sessionId: forked, parentId: seed }),
-			"input.submit": () => ({ ok: true, sessionId: materialized }),
 			DeleteSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],

@@ -5,7 +5,6 @@ import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import type { SessionMode } from "../../contracts/project-file.js";
 import { AccountIdSchema } from "../../contracts/provider-instance.js";
-import type { ToolCallId } from "../../contracts/tool-wire.js";
 import type { WorktreeCleanup } from "../../contracts/worktree.js";
 import {
 	type GetSessionSkillsResponse,
@@ -39,20 +38,13 @@ import type {
 	GetCommandsResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
-	GetToolDetailsResponse,
-	InboxCommandResponse,
 	InstanceListResponse,
 	ListDaemonSessionsResponse,
-	LoadMoreHistoryResponse,
-	PermissionDecision,
-	PermissionPersistScope,
-	PermissionUpdateDestination,
 	PreviewContinuationResponse,
 	ProjectMutationResponse,
 	QuotaForAccountsResponse,
 	ReloadProviderSessionResponse,
 	ResolveClaudeSettingsResponse,
-	RewindSessionResponse,
 	RpcLogLevel,
 	SaveProjectResponse,
 	ScanNowResponse,
@@ -64,7 +56,6 @@ import type {
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
 	SwitchVariantResponse,
-	UndoRewindResponse,
 	ViewSessionResponse,
 } from "./ws-rpc.js";
 
@@ -115,18 +106,6 @@ export async function rpc<T extends UnaryTag>(
 	);
 	if (Either.isLeft(result)) throw result.left;
 	return result.right;
-}
-
-export interface CancelSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly commandId: string;
-}
-
-export interface StopBackgroundTaskRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly taskId: string;
 }
 
 export interface GetModelsRpcInput {
@@ -287,38 +266,6 @@ export interface StartSideThreadRpcInput {
 	readonly text: string;
 	readonly images?: readonly string[];
 	readonly originId?: string;
-}
-
-export interface RespondPermissionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly commandId: string;
-	readonly requestId: string;
-	readonly decision: PermissionDecision;
-	readonly persistScope?: PermissionPersistScope;
-	readonly persistPattern?: string;
-	readonly permissionDestination?: PermissionUpdateDestination;
-}
-
-export interface AnswerQuestionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly commandId: string;
-	readonly toolId: string;
-	readonly answers: Readonly<Record<string, string>>;
-}
-
-export interface RejectQuestionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly commandId: string;
-	readonly toolId: string;
-}
-
-export interface GetToolDetailsRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly toolIds: readonly [ToolCallId, ...ToolCallId[]];
 }
 
 export interface GetSkillContentRpcInput {
@@ -523,30 +470,6 @@ export interface ListDaemonSessionsRpcInput {
 	readonly exclude?: string;
 }
 
-export interface LoadMoreHistoryRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly before?: string;
-}
-
-export interface RewindSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly messageId: string;
-}
-
-export interface UndoRewindRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}
-
-export interface SyncInputDraftRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly text: string;
-	readonly originId?: string;
-}
-
 export const LOG_LEVELS = RpcLogLevelSchema.literals;
 
 export interface SetLogLevelRpcInput {
@@ -625,21 +548,6 @@ export async function setDefaultSessionModeRpc(input: {
 	return runTransportEffect(
 		callControl(input.projectSlug, (client) =>
 			client("SetDefaultSessionMode", input),
-		),
-	);
-}
-
-const callCancelSession = (input: CancelSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("CancelSession", input).pipe(Effect.asVoid),
-	);
-
-export async function stopBackgroundTaskRpc(
-	input: StopBackgroundTaskRpcInput,
-): Promise<void> {
-	await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("StopBackgroundTask", input).pipe(Effect.asVoid),
 		),
 	);
 }
@@ -791,50 +699,6 @@ const callForkSession = (input: ForkSessionRpcInput) =>
 
 const callStartSideThread = (input: StartSideThreadRpcInput) =>
 	callControl(input.projectSlug, (client) => client("StartSideThread", input));
-
-const callRespondPermission = (input: RespondPermissionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("RespondPermission", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			commandId: input.commandId,
-			requestId: input.requestId,
-			decision: input.decision,
-			...(input.persistScope != null
-				? { persistScope: input.persistScope }
-				: {}),
-			...(input.persistPattern != null
-				? { persistPattern: input.persistPattern }
-				: {}),
-			...(input.permissionDestination != null
-				? { permissionDestination: input.permissionDestination }
-				: {}),
-		}).pipe(Effect.asVoid),
-	);
-
-const callAnswerQuestion = (input: AnswerQuestionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("AnswerQuestion", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			commandId: input.commandId,
-			toolId: input.toolId,
-			answers: { ...input.answers },
-		}).pipe(Effect.asVoid),
-	);
-
-const callRejectQuestion = (input: RejectQuestionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("RejectQuestion", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			commandId: input.commandId,
-			toolId: input.toolId,
-		}).pipe(Effect.asVoid),
-	);
-
-const callGetToolDetails = (input: GetToolDetailsRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetToolDetails", input));
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetSkillContent", input));
@@ -1013,25 +877,6 @@ const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
 		client("ListDaemonSessions", input),
 	);
 
-const callLoadMoreHistory = (input: LoadMoreHistoryRpcInput) =>
-	callControl(input.projectSlug, (client) => client("LoadMoreHistory", input));
-
-const callRewindSession = (input: RewindSessionRpcInput) =>
-	callControl(input.projectSlug, (client) => client("RewindSession", input));
-
-const callUndoRewind = (input: UndoRewindRpcInput) =>
-	callControl(input.projectSlug, (client) => client("UndoRewind", input));
-
-const callSyncInputDraft = (input: SyncInputDraftRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SyncInputDraft", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			text: input.text,
-			...(input.originId ? { originId: input.originId } : {}),
-		}).pipe(Effect.asVoid),
-	);
-
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
 	callDaemon((client) => client("SetLogLevel", input).pipe(Effect.asVoid));
 
@@ -1039,12 +884,6 @@ const callSetTailscaleServe = (input: SetTailscaleServeRpcInput) =>
 	callDaemon((client) =>
 		client("SetTailscaleServe", input).pipe(Effect.asVoid),
 	);
-
-export async function cancelSessionRpc(
-	input: CancelSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callCancelSession(input));
-}
 
 export async function getModelsRpc(
 	input: GetModelsRpcInput,
@@ -1234,30 +1073,6 @@ export async function startSideThreadRpc(
 	);
 	if (Either.isLeft(result)) throw result.left;
 	return result.right;
-}
-
-export async function respondPermissionRpc(
-	input: RespondPermissionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callRespondPermission(input));
-}
-
-export async function answerQuestionRpc(
-	input: AnswerQuestionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callAnswerQuestion(input));
-}
-
-export async function rejectQuestionRpc(
-	input: RejectQuestionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callRejectQuestion(input));
-}
-
-export async function getToolDetailsRpc(
-	input: GetToolDetailsRpcInput,
-): Promise<GetToolDetailsResponse> {
-	return await runTransportEffect(callGetToolDetails(input));
 }
 
 export async function getSkillContentRpc(
@@ -1577,55 +1392,6 @@ export async function listDaemonSessionsRpc(
 	input: ListDaemonSessionsRpcInput,
 ): Promise<ListDaemonSessionsResponse> {
 	return await runTransportEffect(callListDaemonSessions(input));
-}
-
-export async function loadMoreHistoryRpc(
-	input: LoadMoreHistoryRpcInput,
-): Promise<LoadMoreHistoryResponse> {
-	return await runTransportEffect(callLoadMoreHistory(input));
-}
-
-export async function rewindSessionRpc(
-	input: RewindSessionRpcInput,
-): Promise<RewindSessionResponse> {
-	return await runTransportEffect(callRewindSession(input));
-}
-
-export async function undoRewindRpc(
-	input: UndoRewindRpcInput,
-): Promise<UndoRewindResponse> {
-	return await runTransportEffect(callUndoRewind(input));
-}
-
-export interface InboxCommandRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly inputId: string;
-}
-
-/** Remove a queued input; rejected once it has started. */
-export async function cancelInputRpc(
-	input: InboxCommandRpcInput,
-): Promise<InboxCommandResponse> {
-	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("input.cancel", input)),
-	);
-}
-
-/** Send a queued input now: a steer on a busy session (refused, it stays
- *  queued); on an idle session this resumes the queue. */
-export async function sendInputNowRpc(
-	input: InboxCommandRpcInput,
-): Promise<InboxCommandResponse> {
-	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("input.sendNow", input)),
-	);
-}
-
-export async function syncInputDraftRpc(
-	input: SyncInputDraftRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSyncInputDraft(input));
 }
 
 export async function setLogLevelRpc(

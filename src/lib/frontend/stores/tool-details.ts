@@ -13,7 +13,7 @@ import {
 	type ToolDetail,
 	Utf8Bytes,
 } from "../../contracts/tool-wire.js";
-import { getToolDetailsRpc } from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type { ToolMessage } from "../types.js";
 import { TOOL_CONTENT_LOAD_TIMEOUT_MS } from "../ui-constants.js";
 import { toolCommand } from "../utils/turns.js";
@@ -233,6 +233,6 @@ export function makeToolDetails(
 
 export const toolDetails = makeToolDetails(
 	async (session, toolIds) =>
-		(await getToolDetailsRpc({ ...session, toolIds })).tools,
+		(await rpc("GetToolDetails", { ...session, toolIds })).tools,
 	({ projectSlug, sessionId }) => sessionViewLoaded(projectSlug, sessionId),
 );

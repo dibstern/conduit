@@ -15,10 +15,8 @@
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import {
-		rewindSessionRpc,
-		undoRewindRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Surface from "../ui/Surface.svelte";
 
 	let {
@@ -68,7 +66,7 @@
 			return;
 		}
 
-		void rewindSessionRpc({
+		void rpc("RewindSession", {
 			projectSlug,
 			sessionId,
 			messageId: message.messageId,
@@ -83,9 +81,9 @@
 				}
 				onRewind?.(uuid, mode);
 			})
-			.catch(() => {
+			.catch((error) => {
 				if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
-					showToast("Could not rewind the conversation.", { variant: "warn" });
+					toastFailure("Could not rewind the conversation.", "warn")(error);
 			});
 
 		exitRewindMode();
@@ -97,10 +95,10 @@
 		if (!pendingMessageId || !sessionId || !projectSlug || undoing) return;
 		undoing = true;
 		try {
-			await undoRewindRpc({ projectSlug, sessionId });
-		} catch {
+			await rpc("UndoRewind", { projectSlug, sessionId });
+		} catch (error) {
 			if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
-				showToast("Could not undo the rewind.", { variant: "warn" });
+				toastFailure("Could not undo the rewind.", "warn")(error);
 		} finally {
 			undoing = false;
 		}

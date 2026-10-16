@@ -12,10 +12,7 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import {
-	cancelSessionRpc,
-	syncInputDraftRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { seedDaemonSessions } from "../stores/session-fixtures.js";
 
 vi.mock(
@@ -24,8 +21,7 @@ vi.mock(
 		...(await original<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		syncInputDraftRpc: vi.fn(async () => {}),
-		cancelSessionRpc: vi.fn(async () => {}),
+		rpc: vi.fn(async () => ({ ok: true })),
 	}),
 );
 
@@ -83,8 +79,7 @@ describe("InputArea build reload recovery", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
-		vi.mocked(syncInputDraftRpc).mockReset().mockResolvedValue(undefined);
-		vi.mocked(cancelSessionRpc).mockReset().mockResolvedValue(undefined);
+		vi.mocked(rpc).mockReset().mockResolvedValue({ ok: true });
 		sessionStorage.clear();
 		sessionState.currentId = sessionId;
 		attachedProjectState.slug = "test";
@@ -123,7 +118,8 @@ describe("InputArea build reload recovery", () => {
 		}) as HTMLTextAreaElement;
 		await enterText(textarea, "draft for dotfiles");
 		await vi.advanceTimersByTimeAsync(300);
-		expect(syncInputDraftRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"SyncInputDraft",
 			expect.objectContaining({
 				projectSlug: "dotfiles",
 				sessionId,
@@ -144,7 +140,8 @@ describe("InputArea build reload recovery", () => {
 		followSessionBusy(sessionId, true);
 		const { getByRole } = render(InputArea);
 		await fireEvent.click(getByRole("button", { name: "Stop generating" }));
-		expect(cancelSessionRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"CancelSession",
 			expect.objectContaining({
 				projectSlug: "dotfiles",
 				sessionId,
@@ -175,10 +172,10 @@ describe("InputArea build reload recovery", () => {
 
 	it("defers if an image is attached while the draft RPC is pending", async () => {
 		let finishSave: (() => void) | undefined;
-		vi.mocked(syncInputDraftRpc).mockImplementationOnce(
+		vi.mocked(rpc).mockImplementationOnce(
 			() =>
-				new Promise<void>((resolve) => {
-					finishSave = resolve;
+				new Promise<{ ok: true }>((resolve) => {
+					finishSave = () => resolve({ ok: true });
 				}),
 		);
 		render(InputArea);

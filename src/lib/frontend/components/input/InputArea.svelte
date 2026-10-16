@@ -83,7 +83,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, createSessionRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
+	import { createSessionRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -599,11 +599,11 @@
 		);
 	}
 
-	function syncInputDraft(text: string): Promise<void> {
+	async function syncInputDraft(text: string): Promise<void> {
 		const sessionId = sessionState.currentId;
 		const projectSlug = currentSession ? currentSession.projectSlug : getCurrentSlug();
-		if (!sessionId || !projectSlug) return Promise.resolve();
-		return syncInputDraftRpc({
+		if (!sessionId || !projectSlug) return;
+		await rpc("SyncInputDraft", {
 			projectSlug,
 			sessionId,
 			text,
@@ -909,10 +909,10 @@
 				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 				resolve(true);
-			}).catch(() => {
+			}).catch((error) => {
 				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
 				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
-				showToast("Failed to send message", { variant: "error" });
+				toastFailure("Failed to send message")(error);
 				resolve(false);
 			});
 		}));
@@ -981,7 +981,7 @@
 		const driver = getInstanceById(accountId ?? "")?.driver;
 		const supportsTaskStop = getDriverTraits(driver)?.sessionCapabilities.supportsTaskStop;
 		const hadTasks = supportsTaskStop && (currentSession?.backgroundTasks?.length ?? 0) > 0;
-		void cancelSessionRpc({
+		void rpc("CancelSession", {
 			projectSlug,
 			sessionId,
 			commandId: crypto.randomUUID(),
@@ -1000,9 +1000,7 @@
 				} },
 			});
 			taskStopToast = { id, sessionId, projectSlug };
-		}).catch(() => {
-			showToast("Failed to stop session", { variant: "error" });
-		});
+		}).catch(toastFailure("Failed to stop session"));
 	}
 
 	function handleSendClick(e: MouseEvent) {

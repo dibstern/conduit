@@ -108,16 +108,13 @@ async function setup(
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
+			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
 		},
 		handlers: {
 			SwitchPermissionMode: (params) => {
 				serverModes.set(String(params["sessionId"]), String(params["mode"]));
 				return { projectSlug: "myapp", mode: params["mode"] };
 			},
-			"input.submit": (params) => ({
-				ok: true,
-				sessionId: params["sessionId"],
-			}),
 			ViewSession: () => ({ ok: true }),
 			GetAgents: () => ({
 				projectSlug: "myapp",

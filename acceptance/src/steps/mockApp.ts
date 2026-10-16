@@ -619,6 +619,15 @@ export const mockAppHandlers: StepHandler[] = [
 				);
 			};
 			const rpcControl = await mockWsRpc(world.page, {
+				stubs: {
+					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
+						projectSlug,
+						sessionId,
+						...mockDetailPage(page, sessionId, before),
+					}),
+					"input.submit": async ({ sessionId }) => ({ ok: true, sessionId }),
+					SyncInputDraft: async () => ({ ok: true }),
+				},
 				streams: {
 					SubscribePtys: () => [
 						{ _tag: "snapshot", rows: [] },
@@ -640,15 +649,6 @@ export const mockAppHandlers: StepHandler[] = [
 						current: "myapp",
 					}),
 					ViewSession: async () => ({ ok: true }),
-					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-						projectSlug: String(projectSlug ?? "myapp"),
-						sessionId: String(sessionId ?? ""),
-						...mockDetailPage(
-							page,
-							String(sessionId ?? ""),
-							typeof before === "string" ? before : undefined,
-						),
-					}),
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
@@ -775,11 +775,6 @@ export const mockAppHandlers: StepHandler[] = [
 						mockInstances.set(page, next);
 						return { projectSlug: "myapp", instances: next };
 					},
-					"input.submit": async (payload) => ({
-						ok: true,
-						sessionId: payload["sessionId"],
-					}),
-					SyncInputDraft: async () => ({ ok: true }),
 					GetSessionSkills: async () => ({
 						loads: mockSessionSkills.get(page) ?? [],
 					}),

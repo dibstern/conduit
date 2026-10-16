@@ -87,6 +87,9 @@ function defaultAccountDaemon() {
 			instances.find((instance) => instance.isDefault)?.id ?? "claude";
 		let sessionAccount: string | undefined;
 		const rpc = await mockWsRpc(page, {
+			stubs: {
+				"input.submit": () => ({ ok: true, sessionId: "sess-first-send" }),
+			},
 			handlers: {
 				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
 				DetectProxy: () => ({ found: false, port: 8317 }),
@@ -126,7 +129,6 @@ function defaultAccountDaemon() {
 					sessionAccount = String(payload["instanceId"]);
 					return { projectSlug: "myapp", sessionId: "sess-first-send" };
 				},
-				"input.submit": () => ({ ok: true, sessionId: "sess-first-send" }),
 			},
 		});
 		clients.push(rpc);

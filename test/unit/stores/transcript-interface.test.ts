@@ -14,7 +14,7 @@ const runtimeMock = vi.hoisted(() => ({
 	getRuntime: vi.fn(),
 	runTransportEffect: vi.fn(),
 }));
-const pageMock = vi.hoisted(() => ({ loadMoreHistoryRpc: vi.fn() }));
+const pageMock = vi.hoisted(() => ({ rpc: vi.fn() }));
 const savedMock = vi.hoisted(() => ({
 	openSavedTranscript: vi.fn<() => Promise<SavedTranscript | undefined>>(),
 	saveTranscript: vi.fn(() => Promise.resolve()),
@@ -158,7 +158,7 @@ afterEach(async () => {
 	await runtime.dispose();
 	runtimeMock.getRuntime.mockReset();
 	runtimeMock.runTransportEffect.mockReset();
-	pageMock.loadMoreHistoryRpc.mockReset();
+	pageMock.rpc.mockReset();
 	savedMock.openSavedTranscript.mockReset();
 	sessionActivity.clear();
 	sessionMessages.clear();
@@ -359,7 +359,7 @@ describe("transcript feed interface", () => {
 		let finish:
 			| ((value: { messages: HistoryMessage[]; hasMore: boolean }) => void)
 			| undefined;
-		pageMock.loadMoreHistoryRpc.mockImplementation(
+		pageMock.rpc.mockImplementation(
 			() =>
 				new Promise((resolve) => {
 					finish = resolve;
@@ -368,7 +368,7 @@ describe("transcript feed interface", () => {
 		const one = loadOlderTranscript("A");
 		const two = loadOlderTranscript("A");
 		expect(two).toBe(one);
-		expect(pageMock.loadMoreHistoryRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(pageMock.rpc).toHaveBeenCalledExactlyOnceWith("LoadMoreHistory", {
 			projectSlug: "project",
 			sessionId: "A",
 			before: "u2",
