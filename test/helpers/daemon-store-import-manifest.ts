@@ -1,0 +1,440 @@
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import Database from "better-sqlite3";
+
+type Row = Record<string, unknown>;
+type NumberDomain = "event" | "outbox" | "version";
+
+// These rows belong to the store rather than a project. Their reconciliation is
+// asserted separately, since importing a second project necessarily changes them.
+const storeTables = new Set([
+	"effect_sql_migrations",
+	"_migrations",
+	"sqlite_sequence",
+	"sqlite_stat1",
+	"sqlite_stat4",
+	"projector_cursors",
+	"read_model_counter",
+	"store_identity",
+	"session_sidebar_horizon",
+	"session_pick_backfill_state",
+	"daemon_store_imports",
+]);
+const versionTables = new Set([
+	"sessions",
+	"messages",
+	"message_parts",
+	"pending_approvals",
+	"pending_inputs",
+	"message_tombstones",
+	"message_part_tombstones",
+	"session_sidebar",
+]);
+const eventColumns: Readonly<Record<string, readonly string[]>> = {
+	events: ["sequence"],
+	sessions: ["workspace_hint_sequence"],
+	messages: ["last_applied_seq"],
+	projection_failures: ["event_sequence"],
+	provider_command_meta: ["last_applied_sequence"],
+	provider_command_tombstones: ["event_sequence"],
+};
+const outboxColumns: Readonly<Record<string, readonly string[]>> = {
+	provider_command_outbox: ["request_sequence"],
+	command_receipts: ["accepted_sequence", "side_effect_sequence"],
+};
+
+export interface ProjectManifest {
+	readonly tables: Readonly<Record<string, readonly Row[]>>;
+	readonly rowCounts: Readonly<Record<string, number>>;
+	readonly hash: string;
+	/** Selection keys for runtime tables which have no project/session column. */
+	readonly unownedKeys: Readonly<Record<string, readonly string[]>>;
+}
+
+function parsed(value: unknown): unknown {
+	if (typeof value !== "string" || !/^[\s]*[[{]/.test(value)) return value;
+	try {
+		return JSON.parse(value) as unknown;
+	} catch {
+		return value;
+	}
+}
+
+function sorted(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sorted);
+	if (value !== null && typeof value === "object")
+		return Object.fromEntries(
+			Object.entries(value)
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([key, item]) => [key, sorted(item)]),
+		);
+	return value;
+}
+
+// Keep path equality in the logical comparison without exposing absolute paths.
+function logicalPaths(value: unknown): unknown {
+	if (typeof value === "string" && value.startsWith("/"))
+		return `path:${createHash("sha256").update(value).digest("hex")}`;
+	if (Array.isArray(value)) return value.map(logicalPaths);
+	if (value !== null && typeof value === "object")
+		return Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [
+				String(logicalPaths(key)),
+				logicalPaths(item),
+			]),
+		);
+	return value;
+}
+
+// The full manifest preserves identity and time for the equality assertion.
+// Artifact hashes additionally remove run-specific ids and wall-clock values.
+function artifactHash(
+	tables: Readonly<Record<string, readonly Row[]>>,
+): string {
+	const identities = new Map<string, string>();
+	const identity = (value: string) => {
+		let alias = identities.get(value);
+		if (alias === undefined) {
+			alias = `identity-${identities.size + 1}`;
+			identities.set(value, alias);
+		}
+		return alias;
+	};
+	const normalize = (value: unknown, key = ""): unknown => {
+		if (Array.isArray(value)) return value.map((item) => normalize(item));
+		if (value !== null && typeof value === "object")
+			return Object.fromEntries(
+				Object.entries(value).map(([field, item], index) => [
+					field.startsWith("path:") ? `path-key-${index}` : field,
+					normalize(item, field),
+				]),
+			);
+		if (
+			typeof value === "number" &&
+			/(?:_at|At|Timestamp|last_activity|lastActivity|sent_at)$/.test(key)
+		)
+			return "time";
+		if (typeof value === "string") {
+			if (value.startsWith("/") || value.startsWith("path:")) return "path";
+			if (key === "fingerprint_hash" || key === "fingerprintHash")
+				return "command-fingerprint";
+			if (
+				!/^(provider|project|model|agent|origin|instance)(?:_?id|Id|ID)$/i.test(
+					key,
+				) &&
+				/(?:^id$|_id$|Id$|ID$|fork_point_event$|anchor$|claim_id$)/.test(key)
+			)
+				return identity(value);
+		}
+		return value;
+	};
+	// Sequence rank is stable even when event ids were randomly generated.
+	for (const row of [...(tables["events"] ?? [])].sort(
+		(a, b) => Number(a["sequence"]) - Number(b["sequence"]),
+	))
+		normalize(row);
+	const stable = Object.fromEntries(
+		Object.entries(tables).map(([table, rows]) => [
+			table,
+			rows
+				.map((row) =>
+					normalize(
+						table === "provider_state" &&
+							typeof row["key"] === "string" &&
+							/(?:id|uuid)$/i.test(row["key"]) &&
+							typeof row["value"] === "string"
+							? { ...row, value: identity(row["value"]) }
+							: row,
+					),
+				)
+				.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+		]),
+	);
+	return createHash("sha256")
+		.update(JSON.stringify(sorted(stable)))
+		.digest("hex");
+}
+
+/**
+ * Independent logical comparison: no offsets or importer implementation are
+ * consulted. Every application table is discovered, scoped and compared. Event,
+ * outbox and version clocks become their relative ranks within this project.
+ */
+export function projectManifest(
+	filename: string,
+	projectId: string,
+	source?: ProjectManifest,
+): ProjectManifest {
+	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	try {
+		const names = db
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+			)
+			.all() as { name: string }[];
+		const sessions = new Set(
+			(
+				db
+					.prepare(`SELECT id FROM sessions WHERE project_id = ? OR project_id IS NULL
+			UNION SELECT session_id FROM events WHERE project_id = ? OR project_id IS NULL
+			UNION SELECT session_id FROM session_sidebar WHERE project_id = ? OR project_id IS NULL`)
+					.all(projectId, projectId, projectId) as { id: string }[]
+			).map((row) => row.id),
+		);
+		const events = new Set(
+			(
+				db
+					.prepare(
+						"SELECT sequence FROM events WHERE project_id = ? OR project_id IS NULL",
+					)
+					.all(projectId) as { sequence: number }[]
+			).map((row) => row.sequence),
+		);
+		const messages = new Set(
+			(
+				db.prepare("SELECT id, session_id FROM messages").all() as {
+					id: string;
+					session_id: string;
+				}[]
+			)
+				.filter((row) => sessions.has(row.session_id))
+				.map((row) => row.id),
+		);
+		const raw: Record<string, Row[]> = {};
+		const unownedKeys: Record<string, string[]> = {
+			claude_runner_cursors: [],
+			session_git_published: [],
+		};
+		raw["claude_runner_cursors"] = [];
+		raw["claude_runner_permission_replies"] = [];
+		for (const { name } of names) {
+			if (storeTables.has(name)) continue;
+			if (!/^[a-z_][a-z_0-9]*$/.test(name))
+				throw new Error(`Unexpected table ${name}`);
+			let rows = db
+				.prepare(`SELECT rowid AS __rowid, * FROM "${name}" ORDER BY rowid`)
+				.all() as Row[];
+			if (name === "projection_failures")
+				rows = rows.filter(
+					(row) =>
+						events.has(Number(row["event_sequence"])) ||
+						sessions.has(String(row["session_id"])),
+				);
+			else if (name === "message_parts")
+				rows = rows.filter((row) => messages.has(String(row["message_id"])));
+			else if (name === "sessions")
+				rows = rows.filter((row) => sessions.has(String(row["id"])));
+			else if (rows.some((row) => "project_id" in row))
+				rows = rows.filter(
+					(row) =>
+						row["project_id"] === projectId || row["project_id"] === null,
+				);
+			else if (rows.some((row) => "project_key" in row))
+				rows = rows.filter(
+					(row) =>
+						row["project_key"] === projectId || row["project_key"] === null,
+				);
+			else if (rows.some((row) => "session_id" in row))
+				rows = rows.filter((row) => sessions.has(String(row["session_id"])));
+			else if (
+				name === "claude_runner_cursors" ||
+				name === "session_git_published"
+			) {
+				const key =
+					name === "claude_runner_cursors" ? "runner_id" : "directory";
+				const selectionKey = (row: Row) => String(logicalPaths(row[key]));
+				const expected = source?.unownedKeys[name];
+				if (expected)
+					rows = rows.filter((row) => expected.includes(selectionKey(row)));
+				unownedKeys[name] = rows.map(selectionKey);
+			} else if (rows.length > 0)
+				throw new Error(`Manifest has no ownership rule for ${name}`);
+			raw[name] = rows;
+		}
+		const domains: Record<NumberDomain, Set<number>> = {
+			event: new Set(),
+			outbox: new Set(),
+			version: new Set(),
+		};
+		const visit = (
+			value: unknown,
+			domain: NumberDomain,
+			transform: (n: number, d: NumberDomain) => unknown,
+		): unknown =>
+			typeof value === "number" && (domain === "version" || value > 0)
+				? transform(value, domain)
+				: value;
+		const json = (
+			value: unknown,
+			transform: (n: number, d: NumberDomain) => unknown,
+			versions = false,
+		): unknown => {
+			const item = parsed(value);
+			if (Array.isArray(item))
+				return item.map((entry) => json(entry, transform));
+			if (item !== null && typeof item === "object")
+				return Object.fromEntries(
+					Object.entries(item).map(([key, entry]) => [
+						key,
+						[
+							"firstSequence",
+							"deliveredThrough",
+							"workspaceMoveSequence",
+						].includes(key) ||
+						(key === "sequence" && "acknowledged" in item)
+							? visit(entry, "event", transform)
+							: versions && key === "version"
+								? visit(entry, "version", transform)
+								: json(entry, transform),
+					]),
+				);
+			return item;
+		};
+		const walk = (
+			table: string,
+			row: Row,
+			transform: (n: number, d: NumberDomain) => unknown,
+		): Row =>
+			Object.fromEntries(
+				Object.entries(row)
+					.filter(([key]) => key !== "__rowid")
+					.map(([key, value]) => {
+						if ((eventColumns[table] ?? []).includes(key))
+							return [key, visit(value, "event", transform)];
+						if ((outboxColumns[table] ?? []).includes(key))
+							return [key, visit(value, "outbox", transform)];
+						if (key === "version" && versionTables.has(table))
+							return [key, visit(value, "version", transform)];
+						if (
+							(key === "project_id" || key === "project_key") &&
+							value === null
+						)
+							return [key, projectId];
+						if (table === "sessions" && key === "claude_worktree_state") {
+							const state = parsed(value);
+							if (
+								state !== null &&
+								typeof state === "object" &&
+								!Array.isArray(state)
+							) {
+								const pending = (state as Row)["pending"];
+								if (
+									pending !== null &&
+									typeof pending === "object" &&
+									!Array.isArray(pending)
+								)
+									return [
+										key,
+										{
+											...state,
+											pending: {
+												...pending,
+												sequence: visit(
+													(pending as Row)["sequence"],
+													"event",
+													transform,
+												),
+											},
+										},
+									];
+							}
+						}
+						return [
+							key,
+							json(
+								value,
+								transform,
+								table === "session_sidebar" && key === "row",
+							),
+						];
+					}),
+			);
+		for (const [table, rows] of Object.entries(raw))
+			for (const row of rows)
+				walk(table, row, (number, domain) => {
+					domains[domain].add(number);
+					return number;
+				});
+		const ranks = Object.fromEntries(
+			Object.entries(domains).map(([domain, values]) => [
+				domain,
+				new Map(
+					[...values]
+						.sort((a, b) => a - b)
+						.map((value, index) => [value, index + 1]),
+				),
+			]),
+		) as Record<NumberDomain, Map<number, number>>;
+		const counter = Number(
+			(
+				db
+					.prepare("SELECT value FROM read_model_counter WHERE id = 1")
+					.get() as Row
+			)["value"],
+		);
+		if ([...domains.version].some((value) => value < 0 || value > counter))
+			throw new Error("Read-model version outside counter range");
+		const tables: Record<string, Row[]> = {};
+		for (const [table, rows] of Object.entries(raw)) {
+			tables[table] = rows
+				.map((row, index) => {
+					const result = walk(table, row, (number, domain) =>
+						ranks[domain].get(number),
+					);
+					if (table === "turns" || table === "pending_inputs")
+						result["__order"] = index + 1;
+					if (table === "projection_failures") result["id"] = index + 1;
+					return sorted(logicalPaths(result)) as Row;
+				})
+				.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+		}
+		const rowCounts = Object.fromEntries(
+			Object.entries(tables).map(([table, rows]) => [table, rows.length]),
+		);
+		return { tables, rowCounts, hash: artifactHash(tables), unownedKeys };
+	} finally {
+		db.close();
+	}
+}
+
+export function sourceChecksums(filename: string): {
+	main: string;
+	wal: string | null;
+} {
+	const hash = (file: string) =>
+		createHash("sha256").update(readFileSync(file)).digest("hex");
+	return {
+		main: hash(filename),
+		wal: existsSync(`${filename}-wal`) ? hash(`${filename}-wal`) : null,
+	};
+}
+
+export function storeTableCounts(filename: string): Record<string, number> {
+	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	try {
+		return Object.fromEntries(
+			(
+				db
+					.prepare(
+						"SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+					)
+					.all() as { name: string }[]
+			).map(({ name }) => [
+				name,
+				Number(
+					(db.prepare(`SELECT count(*) AS count FROM "${name}"`).get() as Row)[
+						"count"
+					],
+				),
+			]),
+		);
+	} finally {
+		db.close();
+	}
+}
+
+export function writeImportArtifact(filename: string, evidence: unknown): void {
+	mkdirSync(dirname(filename), { recursive: true });
+	writeFileSync(filename, `${JSON.stringify(sorted(evidence), null, 2)}\n`);
+}

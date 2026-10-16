@@ -31,6 +31,7 @@ describe("Schema Migration", () => {
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
+					[60, "daemon_store_imports"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -57,6 +58,7 @@ describe("Schema Migration", () => {
 					ORDER BY name`).map((r) => r.name);
 			expect(tables).toEqual([
 				"command_receipts",
+				"daemon_store_imports",
 				"events",
 				"message_part_tombstones",
 				"message_parts",
@@ -88,6 +90,36 @@ describe("Schema Migration", () => {
 				"turns",
 			]);
 		}).pipe(Effect.provide(migratedStore)),
+	);
+
+	it.effect(
+		"records a project import and its number-domain offsets atomically",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const columns = yield* sql<{
+					name: string;
+					notnull: number;
+					pk: number;
+				}>`PRAGMA table_info(daemon_store_imports)`;
+				expect(columns.map(({ name }) => name)).toEqual([
+					"project_id",
+					"method",
+					"source_path",
+					"source_fingerprint",
+					"event_offset",
+					"outbox_offset",
+					"version_offset",
+					"rowid_offsets",
+					"completed_at",
+				]);
+				expect(columns.find(({ name }) => name === "project_id")?.pk).toBe(1);
+				expect(columns.every(({ notnull }) => notnull === 1)).toBe(true);
+				yield* sql`INSERT INTO daemon_store_imports VALUES ('alpha', 'seeded', 'source.db', '{}', 0, 0, 0, '{}', 1000)`;
+				expect(
+					(yield* sql`SELECT method FROM daemon_store_imports WHERE project_id = 'alpha'`)[0],
+				).toEqual({ method: "seeded" });
+			}).pipe(Effect.provide(migratedStore)),
 	);
 
 	it.effect("creates the full production index inventory", () =>

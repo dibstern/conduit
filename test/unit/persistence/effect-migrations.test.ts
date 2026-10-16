@@ -93,6 +93,7 @@ const expectedNames = [
 	"session_pick_backfill",
 	"compact_redundant_events",
 	"session_project_scope",
+	"daemon_store_imports",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -203,6 +204,7 @@ describe("Effect migration lineage", () => {
 					57,
 					58,
 					59,
+					60,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -367,8 +369,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 59", () => {
-		expect(migrationEntries).toHaveLength(59);
+	it("registers the contiguous production chain from 1 through 60", () => {
+		expect(migrationEntries).toHaveLength(60);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -544,6 +546,7 @@ describe("Effect migration lineage", () => {
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
+					[60, "daemon_store_imports"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -624,6 +627,7 @@ describe("Effect migration lineage", () => {
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
+					[60, "daemon_store_imports"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -683,6 +687,7 @@ describe("Effect migration lineage", () => {
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
+					[60, "daemon_store_imports"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1272,6 +1277,7 @@ describe("Effect migration lineage", () => {
 				[57, "session_pick_backfill"],
 				[58, "compact_redundant_events"],
 				[59, "session_project_scope"],
+				[60, "daemon_store_imports"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1368,6 +1374,7 @@ describe("Effect migration lineage", () => {
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
+					[60, "daemon_store_imports"],
 				]);
 				const rows = yield* sql<{
 					id: string;

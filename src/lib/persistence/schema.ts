@@ -88,6 +88,7 @@ export const SESSION_PICK_BACKFILL_MIGRATION = "0056_session_pick_backfill.sql";
 export const COMPACT_REDUNDANT_EVENTS_MIGRATION =
 	"0057_compact_redundant_events.sql";
 export const SESSION_PROJECT_SCOPE_MIGRATION = "0058_session_project_scope.sql";
+export const DAEMON_STORE_IMPORTS_MIGRATION = "0059_daemon_store_imports.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",
