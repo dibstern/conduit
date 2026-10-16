@@ -17,6 +17,7 @@ export const makeClaudeRunnerDriver = (
 	const discoverEffect = (
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> => {
 		return Effect.gen(function* () {
 			const configDir =
@@ -31,6 +32,7 @@ export const makeClaudeRunnerDriver = (
 				workspaceRoot ?? deps.workspaceRoot,
 				deps.capabilitiesService,
 				configDir,
+				options,
 			);
 		}).pipe(
 			Effect.mapError(
