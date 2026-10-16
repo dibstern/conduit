@@ -263,6 +263,7 @@ export const ProjectInfoSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
 	),
 	missing: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 });

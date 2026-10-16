@@ -656,7 +656,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 					).pipe(
 						// Legacy .conduit/events.db files become import sources in shared mode.
 						Effect.andThen(
-							migrateProjectStorage(configDir, options.persistedConfig),
+							sharedStore
+								? Effect.void
+								: migrateProjectStorage(configDir, options.persistedConfig),
 						),
 						Effect.andThen(
 							sharedStore

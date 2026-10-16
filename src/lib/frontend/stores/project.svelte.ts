@@ -111,6 +111,9 @@ const toProjectInfoList = (
 			? { repositoryIdentities: project.repositoryIdentities }
 			: {}),
 		...(project.git != null ? { git: project.git } : {}),
+		...(project.unavailableReason !== undefined
+			? { unavailableReason: project.unavailableReason }
+			: {}),
 		...(project.clientCount != null
 			? { clientCount: project.clientCount }
 			: {}),

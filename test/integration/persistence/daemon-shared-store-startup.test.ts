@@ -6,8 +6,10 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { SqlClient } from "@effect/sql";
@@ -25,7 +27,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
+import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
+import {
+	HttpServerRefTag,
+	RelayFactoryLive,
+	RelayFactoryTag,
+} from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	countRunningProjectSessions,
 	hasColdAutoSettleCandidate,
@@ -33,6 +47,10 @@ import {
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import { DaemonStoreAvailability } from "../../../src/lib/domain/daemon/Services/daemon-store-availability.js";
+import { InstanceHealthCheckLive } from "../../../src/lib/domain/daemon/Services/instance-health-service.js";
+import { makeOpenCodeRuntimeStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	makeProjectRegistryLive,
 	ProjectRegistryTag,
@@ -49,6 +67,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import * as persistence from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import * as persistenceLayers from "../../../src/lib/persistence/effect/live.js";
 import {
@@ -64,7 +83,10 @@ import * as importer from "../../../src/lib/persistence/migrations/daemon-store-
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { daemonStoreManifest } from "../../helpers/daemon-store-import-manifest.js";
-import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -165,12 +187,37 @@ function startup(root: string, projects: readonly StoredProject[]) {
 		Layer.provide(Layer.merge(store, registry)),
 	);
 	return ManagedRuntime.make(
-		Layer.mergeAll(
-			store,
-			registry,
-			directory,
-			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
-			Layer.effect(SessionActivityTag, makeSessionActivity),
+		RelayFactoryLive(root).pipe(
+			Layer.provideMerge(
+				Layer.mergeAll(
+					store,
+					registry,
+					directory,
+					Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
+					Layer.effect(SessionActivityTag, makeSessionActivity),
+					DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
+					makeOpenCodeRuntimeStateLive(),
+					DaemonEventBusLive,
+					ConfigPersistenceNoopLive,
+					InstanceHealthCheckLive,
+					Layer.succeed(PortScannerTag, {
+						getKnownPorts: () => Effect.succeed(new Set<number>()),
+						scanNow: () =>
+							Effect.succeed({ discovered: [], lost: [], active: [] }),
+					}),
+					Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
+					Layer.succeed(PushManagerTag, {
+						subscribe: () => Effect.void,
+						unsubscribe: () => Effect.void,
+						broadcast: () => Effect.void,
+						getPublicKey: Effect.succeed(undefined),
+						addSubscription: () => Effect.void,
+						removeSubscription: () => Effect.void,
+						sendToAll: () => Effect.void,
+						getLegacyManager: Effect.succeed(Option.none()),
+					}),
+				),
+			),
 		),
 	);
 }
@@ -201,6 +248,363 @@ function watchReaderPreparation() {
 }
 
 describe("daemon shared-store startup", () => {
+	it("blocks a corrupt project's readers and relay while another project remains available", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-shared-unavailable-"));
+		const alpha = project(root, "alpha");
+		const beta = project(root, "beta");
+		try {
+			await writeHistory(root, "alpha", "healthy-session");
+			mkdirSync(dirname(sourcePath(root, "beta")), { recursive: true });
+			writeFileSync(sourcePath(root, "beta"), "not a SQLite database");
+			mkdirSync(dirname(sourcePath(root, "retained-corrupt")), {
+				recursive: true,
+			});
+			writeFileSync(sourcePath(root, "retained-corrupt"), "also not SQLite");
+			const runtime = startup(root, [alpha, beta]);
+			try {
+				const unavailable = await runtime.runPromise(DaemonStoreAvailability);
+				const reason = unavailable.get("beta");
+				expect(reason).toBe("History import failed (corrupt)");
+				expect(unavailable.get("retained-corrupt")).toBe(
+					"History import failed (corrupt)",
+				);
+				expect(unavailable.has("alpha")).toBe(false);
+				const sessions = await runtime.runPromise(listDaemonSessions(root));
+				expect(sessions.sessions.map(({ id }) => id)).toEqual([
+					"healthy-session",
+				]);
+				expect(sessions.availability).toEqual([
+					{ projectSlug: "alpha", available: true },
+					{ projectSlug: "beta", available: false, error: reason },
+				]);
+				await runtime.runPromise(
+					Effect.gen(function* () {
+						// The factory checks availability before opening a store or writing its owner.
+						yield* Ref.set(yield* HttpServerRefTag, createServer());
+						const factory = yield* RelayFactoryTag;
+						for (let retry = 0; retry < 2; retry++) {
+							expect(yield* Effect.either(factory.create(beta))).toMatchObject({
+								_tag: "Left",
+								left: { _tag: "RelayFactoryError", reason },
+							});
+						}
+						const sql = yield* SqlClient.SqlClient;
+						expect(
+							yield* sql`SELECT id FROM sessions WHERE project_id = 'beta'`,
+						).toEqual([]);
+						expect(
+							yield* sql`SELECT event_id FROM events WHERE project_id = 'beta'`,
+						).toEqual([]);
+						// An unavailable list must not issue even a read against the store.
+						yield* sql`ALTER TABLE sessions RENAME TO unavailable_sessions`;
+						expect(
+							yield* listDaemonSessions(root, { scope: "beta" }),
+						).toMatchObject({
+							sessions: [],
+							availability: [
+								{ projectSlug: "beta", available: false, error: reason },
+							],
+						});
+					}),
+				);
+				expect(existsSync(join(root, "projects", "beta", "project.json"))).toBe(
+					false,
+				);
+				expect(readFileSync(sourcePath(root, "beta"), "utf8")).toBe(
+					"not a SQLite database",
+				);
+			} finally {
+				await runtime.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("reports a failed legacy rewrite as unavailable rather than an absent source", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-shared-legacy-failed-"));
+		const alpha = project(root, "alpha");
+		const beta = project(root, "beta");
+		const legacy = join(beta.folders[0], ".conduit", "events.db");
+		try {
+			await writeHistory(root, "alpha", "healthy-session");
+			mkdirSync(dirname(legacy));
+			writeFileSync(legacy, "corrupt legacy database");
+			const imports = vi.spyOn(importer, "importRegisteredProjectStores");
+			const runtime = startup(root, [alpha, beta]);
+			try {
+				const unavailable = await runtime.runPromise(DaemonStoreAvailability);
+				expect(unavailable.get("beta")).toMatch(
+					/^Legacy history migration failed: Store rewrite failed:/,
+				);
+				expect(imports).toHaveBeenCalledTimes(1);
+				expect(
+					imports.mock.calls[0]?.[1].map(({ projectId }) => projectId),
+				).toEqual(["alpha"]);
+				expect(
+					await runtime.runPromise(listDaemonSessions(root)),
+				).toMatchObject({
+					sessions: [{ id: "healthy-session" }],
+					availability: [
+						{ projectSlug: "alpha", available: true },
+						{
+							projectSlug: "beta",
+							available: false,
+							error: unavailable.get("beta"),
+						},
+					],
+				});
+				expect(existsSync(sourcePath(root, "beta"))).toBe(false);
+				expect(readFileSync(legacy, "utf8")).toBe("corrupt legacy database");
+			} finally {
+				await runtime.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("defers lineage writes and preserves their source when an existing shared owner becomes unavailable", async () => {
+		const root = mkdtempSync(
+			join(tmpdir(), "conduit-shared-lineage-unavailable-"),
+		);
+		const alpha = project(root, "alpha");
+		const beta = project(root, "beta");
+		try {
+			await writeHistory(root, "alpha", "parent");
+			await writeHistory(root, "beta", "child");
+			const first = startup(root, [alpha, beta]);
+			try {
+				await first.runPromise(PersistenceStore);
+			} finally {
+				await first.dispose();
+			}
+			const before = daemonStoreManifest(daemonStorePath(root));
+			const legacy = join(beta.folders[0], ".conduit", "events.db");
+			mkdirSync(dirname(legacy));
+			writeFileSync(legacy, "corrupt restored legacy database");
+			const lineage = JSON.stringify({
+				child: { parentID: "parent", forkMessageId: "parent-message" },
+			});
+			const lineagePath = join(root, "fork-metadata.json");
+			writeFileSync(lineagePath, lineage);
+			const second = startup(root, [alpha, beta]);
+			try {
+				expect(
+					(await second.runPromise(DaemonStoreAvailability)).get("beta"),
+				).toMatch(/^Legacy history migration failed:/);
+				expect(daemonStoreManifest(daemonStorePath(root))).toEqual(before);
+				expect(readFileSync(lineagePath, "utf8")).toBe(lineage);
+				expect(existsSync(join(root, "fork-metadata-unresolved.json"))).toBe(
+					false,
+				);
+			} finally {
+				await second.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps committed history available after a backup-only failure and a changed source on restart", async () => {
+		const root = mkdtempSync(
+			join(tmpdir(), "conduit-shared-backup-available-"),
+		);
+		const alpha = project(root, "alpha");
+		const completedAt = 1_792_108_800_000;
+		try {
+			await writeHistory(root, "alpha", "original-session");
+			writeFileSync(
+				`${sourcePath(root, "alpha")}.imported-${completedAt}`,
+				"existing backup",
+			);
+			const results: importer.ProjectStoreImportResult[][] = [];
+			const importStores = importer.importRegisteredProjectStores;
+			vi.spyOn(importer, "importRegisteredProjectStores").mockImplementation(
+				(configDir, sources) =>
+					importStores(configDir, sources, { now: () => completedAt }).pipe(
+						Effect.tap((imported) =>
+							Effect.sync(() => results.push([...imported])),
+						),
+					),
+			);
+			const first = startup(root, [alpha]);
+			try {
+				expect(await first.runPromise(DaemonStoreAvailability)).toEqual(
+					new Map(),
+				);
+				expect(results[0]).toMatchObject([
+					{ outcome: "seeded", backupError: { kind: "io" } },
+				]);
+				expect(
+					(await first.runPromise(listDaemonSessions(root))).availability,
+				).toEqual([{ projectSlug: "alpha", available: true }]);
+			} finally {
+				await first.dispose();
+			}
+			const database = new Database(sourcePath(root, "alpha"));
+			try {
+				database.pragma("user_version = 99");
+			} finally {
+				database.close();
+			}
+			const changed = readFileSync(sourcePath(root, "alpha"));
+			const second = startup(root, [alpha]);
+			try {
+				expect(await second.runPromise(DaemonStoreAvailability)).toEqual(
+					new Map(),
+				);
+				expect(results[1]).toMatchObject([{ outcome: "source-changed" }]);
+				expect(await second.runPromise(listDaemonSessions(root))).toMatchObject(
+					{
+						sessions: [{ id: "original-session" }],
+						availability: [{ projectSlug: "alpha", available: true }],
+					},
+				);
+				expect(readFileSync(sourcePath(root, "alpha"))).toEqual(changed);
+			} finally {
+				await second.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		false,
+		true,
+	])("imports retained stores after registered owners and hides them with existing destination=%s", async (existing) => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-shared-retained-"));
+		const alpha = project(root, "alpha");
+		try {
+			if (existing) {
+				const previous = startup(root, [alpha]);
+				try {
+					await previous.runPromise(PersistenceStore);
+				} finally {
+					await previous.dispose();
+				}
+			}
+			await writeHistory(root, "alpha", "shared-session");
+			await writeHistory(root, "z-retained", "shared-session");
+			await writeHistory(root, "z-retained", "retained-shared");
+			await writeHistory(root, "a-retained", "shared-session");
+			await writeHistory(root, "a-retained", "retained-shared");
+			for (let index = 0; index < 8; index++)
+				await writeHistory(root, "a-retained", `retained-only-${index}`);
+			expect(statSync(sourcePath(root, "a-retained")).size).toBeGreaterThan(
+				statSync(sourcePath(root, "alpha")).size,
+			);
+			const imports = vi.spyOn(importer, "importRegisteredProjectStores");
+			const runtime = startup(root, [alpha]);
+			try {
+				expect(await runtime.runPromise(DaemonStoreAvailability)).toEqual(
+					new Map(),
+				);
+				expect(
+					imports.mock.calls[0]?.[1].map(({ projectId, retained }) => [
+						projectId,
+						retained,
+					]),
+				).toEqual([
+					["alpha", undefined],
+					["a-retained", true],
+					["z-retained", true],
+				]);
+				await runtime.runPromise(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						expect(
+							yield* sql`SELECT project_id FROM sessions WHERE id = 'shared-session'`,
+						).toEqual([{ project_id: "alpha" }]);
+						expect(
+							yield* sql`SELECT project_id FROM sessions WHERE id = 'retained-shared'`,
+						).toEqual([{ project_id: "a-retained" }]);
+						expect(
+							yield* sql`SELECT project_id FROM sessions WHERE id = 'retained-only-0'`,
+						).toEqual([{ project_id: "a-retained" }]);
+						for (const options of [
+							{},
+							{ search: "retained" },
+							{ scope: "a-retained" },
+						]) {
+							const list = yield* listDaemonSessions(root, options);
+							expect(list.sessions.map(({ id }) => id)).toEqual(
+								"search" in options || "scope" in options
+									? []
+									: ["shared-session"],
+							);
+							expect(
+								list.availability.map(({ projectSlug }) => projectSlug),
+							).not.toContain("a-retained");
+						}
+						const directory = yield* SessionDirectory;
+						expect(yield* directory.projectOf("shared-session")).toEqual(
+							Option.some("alpha"),
+						);
+						expect(yield* directory.projectOf("retained-shared")).toEqual(
+							Option.none(),
+						);
+						expect(yield* directory.projectOf("retained-only-0")).toEqual(
+							Option.none(),
+						);
+						expect(
+							yield* resolveDaemonOpenCodeSession(
+								root,
+								"opencode",
+								"retained-shared-native",
+							),
+						).toBeUndefined();
+					}),
+				);
+				expect(sourceFiles(root)).toEqual([]);
+			} finally {
+				await runtime.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("imports retained-only history without promoting an unregistered seed", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-shared-retained-only-"));
+		try {
+			await writeHistory(root, "retained", "retained-session");
+			const runtime = startup(root, []);
+			try {
+				expect(await runtime.runPromise(DaemonStoreAvailability)).toEqual(
+					new Map(),
+				);
+				expect(
+					await runtime.runPromise(
+						Effect.flatMap(
+							SqlClient.SqlClient,
+							(sql) => sql`SELECT id, project_id FROM sessions`,
+						),
+					),
+				).toEqual([{ id: "retained-session", project_id: "retained" }]);
+				expect(
+					await runtime.runPromise(listDaemonSessions(root)),
+				).toMatchObject({ sessions: [], availability: [] });
+				expect(
+					await runtime.runPromise(
+						Effect.flatMap(SessionDirectory, (directory) =>
+							directory.projectOf("retained-session"),
+						),
+					),
+				).toEqual(Option.none());
+				expect(
+					readFileSync(join(root, "daemon-store-import-report.txt"), "utf8"),
+				).toMatch(/retained: imported/);
+				expect(sourceFiles(root)).toEqual([]);
+			} finally {
+				await runtime.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("imports histories before lineage and readers, then borrows one store without recreating project files", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-shared-startup-"));
 		const projects = [project(root, "alpha"), project(root, "beta")] as const;
@@ -674,6 +1078,9 @@ describe("daemon shared-store startup", () => {
 		try {
 			await writeHistory(root, "alpha", "parent");
 			await writeHistory(root, "beta", "child");
+			await writeHistory(root, "retained", "hidden-session");
+			const retainedBytes = readFileSync(sourcePath(root, "retained"));
+			const imports = vi.spyOn(importer, "importRegisteredProjectStores");
 			const runtime = ManagedRuntime.make(
 				Layer.mergeAll(
 					makeProjectRegistryLive(projects),
@@ -683,6 +1090,9 @@ describe("daemon shared-store startup", () => {
 				),
 			);
 			try {
+				expect(await runtime.runPromise(DaemonStoreAvailability)).toEqual(
+					new Map(),
+				);
 				const sessions = await runtime.runPromise(listDaemonSessions(root));
 				expect(
 					sessions.sessions
@@ -702,7 +1112,12 @@ describe("daemon shared-store startup", () => {
 				expect(sourceFiles(root)).toEqual([
 					"projects/alpha/events.db",
 					"projects/beta/events.db",
+					"projects/retained/events.db",
 				]);
+				expect(readFileSync(sourcePath(root, "retained"))).toEqual(
+					retainedBytes,
+				);
+				expect(imports).not.toHaveBeenCalled();
 				expect(existsSync(daemonStorePath(root))).toBe(false);
 			} finally {
 				await runtime.dispose();

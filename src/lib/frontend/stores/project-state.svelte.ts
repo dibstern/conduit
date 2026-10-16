@@ -46,7 +46,9 @@ export function getDraftProject(): string | null {
 	const params = getCurrentSearchParams();
 	const picked = params.get(DRAFT_PROJECT_PARAM);
 	if (picked) return picked;
-	const available = projectState.projects.filter((p) => !p.missing);
+	const available = projectState.projects.filter(
+		(p) => !p.missing && !p.unavailableReason,
+	);
 	const scope = params.get(SCOPE_PARAM);
 	const scopedProject =
 		getScopeGroupKey(scope) === null
