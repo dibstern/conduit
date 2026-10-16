@@ -6,7 +6,14 @@ import type {
 } from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger } from "../../logger.js";
 import { createEventId } from "../../persistence/events.js";
+import type { EventSinkError } from "../event-sink-errors.js";
+import { toRecord } from "../normalize-tool-input-helpers.js";
 import type { EventSink } from "../types.js";
+import {
+	type CursorToolCall,
+	CursorToolResults,
+	cursorToolInput,
+} from "./cursor-tool-events.js";
 
 const log = createLogger("cursor-turn-events");
 const RecordSchema = Schema.Record({
@@ -44,12 +51,15 @@ const decodeDelta = Schema.decodeUnknownEither(
 			taskUpdate: RecordSchema,
 		}),
 		Schema.Struct({
+			type: Schema.Literal("tool-requests-listed"),
+			callCount: Schema.Number,
+		}),
+		Schema.Struct({
 			type: Schema.Literal(
 				"token-delta",
 				"step-started",
 				"step-completed",
 				"turn-ended",
-				"tool-requests-listed",
 				"user-message-appended",
 				"summary-started",
 				"summary-completed",
@@ -65,11 +75,25 @@ const decodeStream = Schema.decodeUnknownEither(
 			request_id: Schema.String,
 		}),
 		Schema.Struct({
+			type: Schema.Literal("task"),
+			text: Schema.optional(Schema.String),
+			status: Schema.optional(Schema.String),
+		}),
+		Schema.Struct({
+			type: Schema.Literal("tool_call"),
+			call_id: Schema.String,
+			truncated: Schema.optional(
+				Schema.Struct({
+					args: Schema.optional(Schema.Boolean),
+					result: Schema.optional(Schema.Boolean),
+				}),
+			),
+		}),
+		Schema.Struct({
 			type: Schema.Literal(
 				"status",
 				"assistant",
 				"thinking",
-				"tool_call",
 				"usage",
 				"system",
 				"user",
@@ -80,13 +104,28 @@ const decodeStream = Schema.decodeUnknownEither(
 	),
 );
 
-/** Deltas own content; the message stream supplies correlation only. */
+/** Deltas own content; stream messages add correlation, truncation and progress. */
 export class CursorTurnEvents {
 	private part = 0;
 	private textPart: string | undefined;
 	private thinkingPart: string | undefined;
-	private readonly tools = new Map<string, number>();
-	private lastTool: string | undefined;
+	private progressText: string | undefined;
+	private readonly truncatedTools = new Set<string>();
+	private readonly tools = new Map<
+		string,
+		{
+			startedAt: number;
+			toolName: string;
+			call: CursorToolCall;
+			providerToolUseId: string;
+			completed?: ProviderRuntimeEventPayloadMap["tool.completed"];
+			truncated?: true;
+			stdout: string;
+			stderr: string;
+		}
+	>();
+	private readonly lastShell = new Map<string, string>();
+	private readonly results: CursorToolResults;
 	readonly refs: {
 		providerSessionId?: string | undefined;
 		providerTurnId?: string | undefined;
@@ -97,7 +136,10 @@ export class CursorTurnEvents {
 		private readonly sessionId: string,
 		readonly messageId: string,
 		private readonly sink: EventSink,
-	) {}
+		cwd: string,
+	) {
+		this.results = new CursorToolResults(cwd);
+	}
 
 	push<K extends Exclude<ProviderRuntimeEventType, "workspace.changed">>(
 		type: K,
@@ -121,7 +163,7 @@ export class CursorTurnEvents {
 	}
 
 	stream(value: unknown) {
-		return Effect.sync(() => {
+		return Effect.gen(this, function* () {
 			const decoded = decodeStream(value);
 			if (Either.isLeft(decoded)) {
 				log.warn("Skipped malformed Cursor stream update", { payload: value });
@@ -129,6 +171,42 @@ export class CursorTurnEvents {
 			}
 			if (decoded.right.type === "request")
 				this.refs.providerRequestId = decoded.right.request_id;
+			if (decoded.right.type === "task") {
+				const text = decoded.right.text ?? decoded.right.status;
+				if (text) yield* this.progress(text);
+			}
+			if (
+				decoded.right.type === "tool_call" &&
+				(decoded.right.truncated?.args || decoded.right.truncated?.result)
+			) {
+				const callId = decoded.right.call_id;
+				this.truncatedTools.add(callId);
+				const entry = [...this.tools.entries()].find(
+					([, tool]) => tool.providerToolUseId === callId,
+				);
+				const tool = entry?.[1];
+				if (tool) {
+					tool.truncated = true;
+					if (tool.completed) {
+						tool.completed = {
+							...tool.completed,
+							metadata: { ...tool.completed.metadata, truncated: true },
+						};
+						yield* this.push("tool.completed", tool.completed, {
+							providerToolUseId: tool.providerToolUseId,
+						});
+					} else
+						yield* this.push(
+							"tool.running",
+							{
+								messageId: this.messageId,
+								partId: `${this.messageId}:tool:${entry?.[0] ?? callId}`,
+								metadata: { cursorToolType: tool.call.type, truncated: true },
+							},
+							{ providerToolUseId: tool.providerToolUseId },
+						);
+				}
+			}
 		});
 	}
 
@@ -143,7 +221,10 @@ export class CursorTurnEvents {
 		});
 	}
 
-	delta(value: unknown) {
+	delta(
+		value: unknown,
+		parentCallId?: string,
+	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const decoded = decodeDelta(value);
 			if (Either.isLeft(decoded)) {
@@ -151,6 +232,13 @@ export class CursorTurnEvents {
 				return;
 			}
 			const update = decoded.right;
+			if (
+				parentCallId &&
+				(update.type === "text-delta" || update.type === "thinking-delta")
+			) {
+				yield* this.progress(update.text, parentCallId);
+				return;
+			}
 			switch (update.type) {
 				case "text-delta":
 					yield* this.endThinking();
@@ -184,65 +272,106 @@ export class CursorTurnEvents {
 				case "partial-tool-call": {
 					yield* this.endThinking();
 					this.textPart = undefined;
-					const { callId, toolCall } = update;
-					const input = {
-						tool: "Unknown" as const,
-						name: toolCall.type,
-						raw: toolCall.args,
-					};
+					const { toolCall } = update;
+					const callId = parentCallId
+						? `${parentCallId}:${update.callId}`
+						: update.callId;
+					const { toolName, input } = cursorToolInput(toolCall);
 					if (!this.tools.has(callId)) {
-						this.tools.set(callId, Date.now());
-						this.lastTool = callId;
+						this.tools.set(callId, {
+							startedAt: Date.now(),
+							toolName,
+							call: toolCall,
+							providerToolUseId: update.callId,
+							...(this.truncatedTools.has(update.callId)
+								? { truncated: true as const }
+								: {}),
+							stdout: "",
+							stderr: "",
+						});
+						if (toolCall.type === "shell")
+							this.lastShell.set(parentCallId ?? "", callId);
 						yield* this.push(
 							"tool.started",
 							{
 								messageId: this.messageId,
-								partId: callId,
-								callId,
-								toolName: toolCall.type,
+								partId: `${this.messageId}:tool:${callId}`,
+								callId: update.callId,
+								toolName,
 								input,
 							},
-							{ providerToolUseId: callId },
+							{ providerToolUseId: update.callId },
 						);
+						if (this.progressText)
+							yield* this.push(
+								"tool.running",
+								{
+									messageId: this.messageId,
+									partId: `${this.messageId}:tool:${callId}`,
+									metadata: {
+										cursorToolType: toolCall.type,
+										progress: this.progressText,
+									},
+								},
+								{ providerToolUseId: update.callId },
+							);
 					}
 					if (update.type === "tool-call-completed") {
-						yield* this.push(
-							"tool.completed",
-							{
-								messageId: this.messageId,
-								partId: callId,
-								result: toolCall.result ?? null,
-								input,
-								duration: Date.now() - (this.tools.get(callId) ?? Date.now()),
-							},
-							{ providerToolUseId: callId },
+						const tool = this.tools.get(callId);
+						const completed = yield* this.results.complete(
+							toolCall,
+							tool?.truncated,
 						);
-						this.tools.delete(callId);
+						const data = {
+							messageId: this.messageId,
+							partId: `${this.messageId}:tool:${callId}`,
+							result: completed.result,
+							input,
+							metadata: {
+								...completed.metadata,
+								...(tool?.truncated ? { truncated: true } : {}),
+								...(parentCallId ? { parentToolCallId: parentCallId } : {}),
+							},
+							duration: Date.now() - (tool?.startedAt ?? Date.now()),
+						};
+						if (tool) tool.completed = data;
+						yield* this.push("tool.completed", data, {
+							providerToolUseId: update.callId,
+						});
 					} else if (update.type === "partial-tool-call") {
 						yield* this.push(
 							"tool.running",
 							{
 								messageId: this.messageId,
-								partId: callId,
+								partId: `${this.messageId}:tool:${callId}`,
 								input,
-								callId,
-								toolName: toolCall.type,
+								callId: update.callId,
+								toolName,
+								metadata: { cursorToolType: toolCall.type },
 							},
-							{ providerToolUseId: callId },
+							{ providerToolUseId: update.callId },
 						);
 					}
 					break;
 				}
+				case "tool-requests-listed":
+					yield* this.progress(
+						`Running ${update.callCount} tool${update.callCount === 1 ? "" : "s"}`,
+						parentCallId,
+					);
+					break;
 				case "shell-output-delta":
-					if (this.lastTool)
-						yield* this.shellOutput(this.lastTool, update.event);
+					{
+						const callId = this.lastShell.get(parentCallId ?? "");
+						if (callId) yield* this.shellOutput(callId, update.event);
+					}
 					break;
 				case "tool-call-delta":
-					// Nested task rendering belongs to the subagent ticket. Shell output
-					// stays on its owning generic tool row without duplicating content.
-					if (update.taskUpdate["type"] === "shell-output-delta") {
-						yield* this.shellOutput(update.callId, update.taskUpdate);
-					}
+					// Keep task calls generic; .10 owns their eventual child sessions.
+					yield* this.delta(
+						update.taskUpdate,
+						parentCallId ? `${parentCallId}:${update.callId}` : update.callId,
+					);
 					break;
 			}
 		});
@@ -252,14 +381,62 @@ export class CursorTurnEvents {
 		callId: string,
 		output: Readonly<Record<string, unknown>>,
 	) {
+		const tool = this.tools.get(callId);
+		if (!tool || tool.completed) return Effect.void;
+		const value = toRecord(output["value"]);
+		const content = value["content"];
+		if (typeof content === "string") {
+			if (output["case"] === "stdout") tool.stdout += content;
+			if (output["case"] === "stderr") tool.stderr += content;
+		}
 		return this.push(
 			"tool.running",
 			{
 				messageId: this.messageId,
-				partId: callId,
-				metadata: { shellOutput: output },
+				partId: `${this.messageId}:tool:${callId}`,
+				metadata: {
+					cursorToolType: tool.call.type,
+					output: tool.stdout + tool.stderr,
+				},
 			},
-			{ providerToolUseId: callId },
+			{ providerToolUseId: tool.providerToolUseId },
 		);
+	}
+
+	private progress(message: string, callId?: string) {
+		return Effect.gen(this, function* () {
+			this.progressText = message;
+			const running = [...this.tools.entries()].filter(
+				([, tool]) => !tool.completed,
+			);
+			const tail = running.at(-1)?.[0];
+			const owner =
+				callId ??
+				running
+					.reverse()
+					.find(([, tool]) => tool.toolName === "cursor.task")?.[0] ??
+				tail;
+			yield* this.push("session.status", {
+				sessionId: this.sessionId,
+				status: "busy",
+				message,
+			});
+			if (owner && this.tools.has(owner))
+				yield* this.push(
+					"tool.running",
+					{
+						messageId: this.messageId,
+						partId: `${this.messageId}:tool:${owner}`,
+						metadata: {
+							cursorToolType: this.tools.get(owner)?.call.type,
+							progress: message,
+						},
+					},
+					{
+						providerToolUseId:
+							this.tools.get(owner)?.providerToolUseId ?? owner,
+					},
+				);
+		});
 	}
 }

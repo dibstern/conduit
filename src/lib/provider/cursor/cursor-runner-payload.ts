@@ -129,6 +129,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 				input.sessionId,
 				createEventId(),
 				sink,
+				session.cwd,
 			);
 			const finish = (
 				status: "completed" | "interrupted" | "error",

@@ -189,6 +189,9 @@ const VERBS: Record<string, [past: string, present: string]> = {
 	Task: ["Delegated", "Delegating"],
 	Skill: ["Loaded", "Loading"],
 	AskUserQuestion: ["Asked", "Asking"],
+	ComputerUse: ["Used computer", "Using computer"],
+	CreatePlan: ["Created plan", "Planning"],
+	Delete: ["Deleted", "Deleting"],
 };
 
 export function toolVerb(
@@ -202,6 +205,15 @@ export function toolVerb(
 
 /** The tool's own one-line summary (file path, command, pattern…). */
 export function toolSubject(tool: ToolMessage): string {
+	const progress = tool.metadata?.["progress"];
+	if (
+		tool.result === undefined &&
+		tool.status !== "error" &&
+		typeof tool.metadata?.["cursorToolType"] === "string" &&
+		typeof progress === "string" &&
+		progress
+	)
+		return progress;
 	return (
 		lookupSummarizer(tool.name).summarize(
 			ensureCanonical(tool.name, tool.input),

@@ -889,6 +889,11 @@ export const makeMessageProjector = defineProjector(() => ({
 
 			if (isEventType(event, "tool.completed")) {
 				const resultJson = encodeJson(event.data.result);
+				const toolStatus =
+					typeof event.data.metadata?.["cursorToolType"] === "string" &&
+					event.data.metadata["isError"] === true
+						? "error"
+						: "completed";
 				const rows = yield* sql<{ metadata: string | null }>`
 					SELECT metadata FROM message_parts WHERE id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
@@ -899,7 +904,7 @@ export const makeMessageProjector = defineProjector(() => ({
 				);
 				yield* sql`
 					UPDATE message_parts
-					SET result = ${resultJson}, duration = ${event.data.duration}, status = 'completed', metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+					SET result = ${resultJson}, duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}`;
 				return ids(

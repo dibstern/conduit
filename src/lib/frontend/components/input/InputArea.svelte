@@ -214,6 +214,8 @@
 			// Projected rows report every ordinary tool as completed, so the
 			// missing result is what marks the tool still in flight.
 			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
+				const progress = part.metadata?.["progress"];
+				if (typeof part.metadata?.["cursorToolType"] === "string" && typeof progress === "string" && progress) return progress;
 				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
 				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
 			}
