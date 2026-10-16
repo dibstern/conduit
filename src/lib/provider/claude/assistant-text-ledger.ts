@@ -148,6 +148,13 @@ export class AssistantTextLedger {
 		return type === "thinking" ? this.startThinking(block) : [];
 	}
 
+	openThinkingPartId(index: number): string | undefined {
+		const block = this.chains.get(MAIN_CHAIN)?.byIndex.get(index);
+		return block?.type === "thinking" && !block.thinkingEnded
+			? block.partId
+			: undefined;
+	}
+
 	blockDelta(index: number, chunk: string): Emission[] {
 		const block = this.chain(MAIN_CHAIN).byIndex.get(index);
 		if (!block || chunk.length === 0) return [];
