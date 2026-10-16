@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
 import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
@@ -61,7 +61,20 @@ interface CursorSession {
 	cancelRequested: boolean;
 	questionAbort?: AbortController | undefined;
 	onCancel?: (() => void) | undefined;
+	steer?:
+		| ((
+				input: SessionTurn,
+				sink: EventSink,
+		  ) => Effect.Effect<TurnResult, SessionFailure>)
+		| undefined;
 }
+
+const decodeSteeredMessage = Schema.decodeUnknownEither(
+	Schema.Struct({
+		type: Schema.Literal("user-message-appended"),
+		userMessage: Schema.Struct({ text: Schema.String }),
+	}),
+);
 
 const decodeTerminal = Schema.decodeUnknownEither(
 	Schema.Struct({
@@ -106,6 +119,11 @@ type Update =
 	| { readonly channel: "delta"; readonly value: unknown }
 	| { readonly channel: "stream"; readonly value: unknown }
 	| { readonly channel: "question"; readonly answer: Effect.Effect<void> }
+	| {
+			readonly channel: "steer-result";
+			readonly inputId: string;
+			readonly delivered: boolean;
+	  }
 	| {
 			readonly channel: "wait";
 			readonly result: Either.Either<unknown, SessionFailure>;
@@ -186,7 +204,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 				this.sessions.set(input.sessionId, state);
 			}
 			const session = state;
-			if (session.busy) return this.result(session, "steer-declined", 0);
+			if (session.busy)
+				return session.steer
+					? yield* session.steer(input, sink)
+					: this.result(session, "steer-declined", 0);
 			session.busy = true;
 			session.cancelRequested = false;
 			const questionAbort = new AbortController();
@@ -197,6 +218,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 			let settled = false;
 			let waitForRun: (() => Promise<unknown>) | undefined;
 			let cost: number | undefined;
+			let currentInputId = input.inputId;
 			const events = new CursorTurnEvents(
 				input.sessionId,
 				createEventId(),
@@ -221,6 +243,86 @@ export class CursorRunnerPayload implements RunnerPayload {
 					},
 				},
 			);
+			const steers = new Map<
+				string,
+				{
+					input: SessionTurn;
+					sinkId: string;
+					shellCalls: readonly string[];
+					finished: Deferred.Deferred<TurnResult, SessionFailure>;
+					landed: boolean;
+					outcome?: boolean;
+				}
+			>();
+			let acceptingSteers = true;
+			// All receipts, turn end and cancellation use this one settle point.
+			// Retain settled receipts until turn end so an ack plus its user delta
+			// cannot consume a second steer with identical text.
+			const settleSteer = (inputId: string, delivered: boolean) =>
+				Effect.suspend(() => {
+					const pending = steers.get(inputId);
+					if (!pending || pending.outcome !== undefined) return Effect.void;
+					pending.outcome = delivered;
+					return Effect.gen(this, function* () {
+						if (delivered) {
+							yield* events.steerDelivered(pending.shellCalls);
+							yield* this.emit({
+								type: "place-user-message",
+								sinkId: pending.sinkId,
+								input: {
+									sessionId: input.sessionId,
+									inputId,
+									text: pending.input.text ?? pending.input.prompt,
+								},
+							});
+							currentInputId = inputId;
+						}
+						return this.result(
+							session,
+							delivered ? "joined" : "steer-declined",
+							0,
+						);
+					}).pipe(
+						Effect.mapError(
+							(): SessionFailure => ({
+								operation: "persist Cursor steer",
+								message: "Could not persist Cursor steer outcome",
+							}),
+						),
+						Effect.exit,
+						Effect.flatMap((exit) => Deferred.done(pending.finished, exit)),
+						Effect.asVoid,
+					);
+				});
+			const declinePending = () =>
+				Effect.gen(function* () {
+					acceptingSteers = false;
+					for (const inputId of steers.keys())
+						yield* settleSteer(inputId, false);
+				});
+			const applyUpdate = (update: Update) =>
+				Effect.gen(function* () {
+					if (update.channel === "steer-result") {
+						yield* settleSteer(update.inputId, update.delivered);
+					} else if (update.channel === "delta") {
+						const message = decodeSteeredMessage(update.value);
+						if (Either.isRight(message)) {
+							const pending = [...steers.values()].find(
+								(steer) =>
+									!steer.landed &&
+									steer.outcome !== false &&
+									steer.input.prompt === message.right.userMessage.text,
+							);
+							if (pending) {
+								pending.landed = true;
+								yield* settleSteer(pending.input.inputId, true);
+							}
+						}
+						yield* events.delta(update.value);
+					} else if (update.channel === "stream") {
+						yield* events.stream(update.value);
+					}
+				});
 			const finish = (
 				status: "completed" | "interrupted" | "error",
 				code?: TurnErrorCode,
@@ -479,6 +581,48 @@ export class CursorRunnerPayload implements RunnerPayload {
 						),
 					);
 					session.run = run;
+					const steer = run.steer?.bind(run);
+					session.steer = (steeredInput, steerSink) =>
+						Effect.scoped(
+							Effect.gen(this, function* () {
+								const sinkId = this.sinks.sinkId(steerSink);
+								const finished = yield* Deferred.make<
+									TurnResult,
+									SessionFailure
+								>();
+								if (
+									!acceptingSteers ||
+									session.cancelRequested ||
+									!steer ||
+									steeredInput.images?.length ||
+									!sinkId
+								)
+									return this.result(session, "steer-declined", 0);
+								steers.set(steeredInput.inputId, {
+									input: steeredInput,
+									sinkId,
+									shellCalls: events.activeShellCalls(),
+									finished,
+									landed: false,
+								});
+								yield* Effect.forkScoped(
+									sdkCall("steer", () => steer(steeredInput.prompt)).pipe(
+										Effect.match({
+											onFailure: () => false,
+											onSuccess: (outcome) => outcome === "complete_delivered",
+										}),
+										Effect.flatMap((delivered) =>
+											Queue.offer(queue, {
+												channel: "steer-result",
+												inputId: steeredInput.inputId,
+												delivered,
+											}),
+										),
+									),
+								);
+								return yield* Deferred.await(finished);
+							}),
+						);
 					session.onCancel = () => {
 						if (acceptingUpdates)
 							Queue.unsafeOffer(queue, { channel: "cancel" });
@@ -541,6 +685,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					while (true) {
 						const update = yield* Queue.take(queue);
 						if (update.channel === "cancel") {
+							yield* declinePending();
 							if (!cancelling) {
 								cancelling = true;
 								// Start the deadline when cancel is invoked, even if cancel itself hangs.
@@ -569,12 +714,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 							this.deps.onAbandonedRun?.(input.inputId);
 							return yield* finish("interrupted");
 						}
-						if (update.channel === "delta") {
-							yield* events.delta(update.value);
-							continue;
-						}
-						if (update.channel === "stream") {
-							yield* events.stream(update.value);
+						if (
+							update.channel === "delta" ||
+							update.channel === "stream" ||
+							update.channel === "steer-result"
+						) {
+							yield* applyUpdate(update);
 							continue;
 						}
 						if (update.channel === "question") {
@@ -584,11 +729,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
 						yield* Fiber.interrupt(stream);
 						for (const pending of yield* Queue.takeAll(queue)) {
-							if (pending.channel === "delta")
-								yield* events.delta(pending.value);
-							else if (pending.channel === "stream")
-								yield* events.stream(pending.value);
+							yield* applyUpdate(pending);
 						}
+						yield* declinePending();
 						acceptingUpdates = false;
 						if (Either.isLeft(update.result))
 							return yield* finish(
@@ -716,13 +859,18 @@ export class CursorRunnerPayload implements RunnerPayload {
 				),
 			).pipe(
 				Effect.ensuring(
-					Effect.sync(() => {
-						acceptingUpdates = false;
-						session.busy = false;
-						session.run = undefined;
-						session.questionAbort = undefined;
-						session.onCancel = undefined;
-					}),
+					declinePending().pipe(
+						Effect.andThen(
+							Effect.sync(() => {
+								acceptingUpdates = false;
+								session.busy = false;
+								session.run = undefined;
+								session.questionAbort = undefined;
+								session.onCancel = undefined;
+								session.steer = undefined;
+							}),
+						),
+					),
 				),
 				Effect.flatMap((result) =>
 					Effect.gen(function* () {
@@ -759,7 +907,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						else
 							yield* events.push("turn.error", {
 								messageId: events.messageId,
-								userMessageId: input.inputId,
+								userMessageId: currentInputId,
 								error: result.error?.message ?? "Cursor turn failed",
 								code: result.error?.code ?? "provider_error",
 								retryable: result.error?.retryable ?? false,

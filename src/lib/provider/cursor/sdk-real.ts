@@ -101,6 +101,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 				});
 				let waiting: Promise<unknown> | undefined;
 				let streamFailure: CursorSdkFailure | undefined;
+				const steer = run.steer?.bind(run);
 				return {
 					id: run.id,
 					stream: (async function* () {
@@ -137,6 +138,11 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 						]);
 					},
 					cancel: () => call("run.cancel", () => run.cancel()),
+					...(steer
+						? {
+								steer: (text: string) => call("run.steer", () => steer(text)),
+							}
+						: {}),
 				};
 			},
 			getUsage: () => call("agent.getUsage", () => agent.getUsage()),

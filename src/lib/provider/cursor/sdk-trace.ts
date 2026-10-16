@@ -178,7 +178,12 @@ export function teeCursorSdkPort(
 						trace.record("delta", update);
 						onDelta(update);
 					});
-					trace.record("run.handle", { id: run.id, agentId: agent.id });
+					trace.record("run.handle", {
+						id: run.id,
+						agentId: agent.id,
+						...(run.steer ? { steer: "function" } : {}),
+					});
+					const steer = run.steer?.bind(run);
 					return {
 						id: run.id,
 						stream: (async function* () {
@@ -214,6 +219,20 @@ export function teeCursorSdkPort(
 							return result;
 						},
 						cancel: () => call("cancel", { runId: run.id }, () => run.cancel()),
+						...(steer
+							? {
+									async steer(text: string) {
+										trace.record("steer.call", { text });
+										try {
+											const outcome = await steer(text);
+											trace.record("steer.ack", { outcome });
+											return outcome;
+										} catch (cause) {
+											throw failure("steer", cause);
+										}
+									},
+								}
+							: {}),
 					};
 				} catch (cause) {
 					throw failure("send", cause);

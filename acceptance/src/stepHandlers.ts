@@ -17,6 +17,7 @@ import { cursorAuthHandlers } from "./steps/cursorAuth.js";
 import { cursorModelParametersHandlers } from "./steps/cursorModelParameters.js";
 import { cursorQuestionHandlers } from "./steps/cursorQuestion.js";
 import { cursorSkillsHandlers } from "./steps/cursorSkills.js";
+import { cursorSteerHandlers } from "./steps/cursorSteer.js";
 import { cursorSubagentsHandlers } from "./steps/cursorSubagents.js";
 import { cursorToolsHandlers } from "./steps/cursorTools.js";
 import { cursorTurnHandlers } from "./steps/cursorTurn.js";
@@ -68,6 +69,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...cursorModelParametersHandlers,
 	...cursorQuestionHandlers,
 	...cursorSkillsHandlers,
+	...cursorSteerHandlers,
 	...cursorTurnHandlers,
 	...cursorAuthHandlers,
 	...cursorToolsHandlers,
