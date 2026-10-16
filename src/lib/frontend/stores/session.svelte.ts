@@ -41,11 +41,9 @@ import {
 } from "./chat.svelte.js";
 import { getBrowserClientId } from "./client-identity.js";
 import {
-	applyGetAgentsResponse,
-	applyGetCommandsResponse,
 	clearDraftSelection,
-	followModelsRead,
 	followSessionModelSettings,
+	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import { getProjectGroup } from "./project-state.svelte.js";
@@ -1063,69 +1061,18 @@ export function switchToSession(
 			})
 			.catch(() => undefined);
 	}
-	if (slug) {
-		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-		void rpc("GetAgents", { sessionId })
-			.then((response) => {
-				if (
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
-				)
-					applyGetAgentsResponse(response, sessionId);
-			})
-			.catch(() => undefined);
-		void rpc("GetCommands", { sessionId })
-			.then((response) => {
-				if (
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug &&
-					JSON.stringify(findSession(sessionId)?.workspace ?? null) ===
-						workspace
-				)
-					applyGetCommandsResponse(response);
-			})
-			.catch(() => undefined);
-		// Re-syncs per-session overrides (variant, context window, permission
-		// mode) that connect-time hydration cannot see for later switches.
-		const applyModels = followModelsRead(sessionId);
-		void rpc("GetModels", { sessionId })
-			.then((response) => {
-				if (
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
-				)
-					applyModels(response);
-			})
-			.catch(() => undefined);
-	}
 }
 
 /**
  * Reload the provider session so it picks up skills/commands added on disk,
  * then refetch the command and model catalogs it changes.
  */
-export async function reloadProviderSession(
-	projectSlug: string,
-	sessionId: string,
-): Promise<void> {
+export async function reloadProviderSession(sessionId: string): Promise<void> {
 	await rpc("ReloadProviderSession", {
 		sessionId,
 		commandId: crypto.randomUUID(),
 	});
-	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-	const applyModels = followModelsRead(sessionId);
-	const [commands, models] = await Promise.all([
-		rpc("GetCommands", { sessionId }),
-		rpc("GetModels", { sessionId }),
-	]);
-	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
-		return;
-	if (JSON.stringify(findSession(sessionId)?.workspace ?? null) === workspace)
-		applyGetCommandsResponse(commands);
-	applyModels(models);
+	await refreshCatalogs();
 }
 
 /** Clear all session state (for project switch). */

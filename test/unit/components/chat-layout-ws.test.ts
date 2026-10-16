@@ -11,7 +11,6 @@ const emptyComponent = vi.hoisted(
 const wsLifecycleHarness = vi.hoisted(() => ({
 	onAttachCallbacks: [] as Array<(slug: string) => void>,
 	attachedSlugs: [] as string[],
-	onSynchronizedCallbacks: [] as Array<(slug: string) => void>,
 }));
 
 // Layout components
@@ -180,10 +179,7 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 	attachSessionList: vi.fn(),
 	detachSessionList: vi.fn(),
-	onShellSynchronized: vi.fn((callback: (slug: string) => void) => {
-		wsLifecycleHarness.onSynchronizedCallbacks.push(callback);
-		return () => {};
-	}),
+	onShellSynchronized: vi.fn(() => () => {}),
 	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
 	currentSearchQuery: vi.fn(() => null),
 	refreshSessionList: vi.fn(async () => {}),
@@ -206,13 +202,7 @@ vi.mock("../../../src/lib/frontend/stores/terminal.svelte.js", () => ({
 
 vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 	clearDiscoveryState: vi.fn(),
-	applyGetAgentsResponse: vi.fn(),
-	applyGetCommandsResponse: vi.fn(),
-	followModelsRead: vi.fn(() => vi.fn()),
-	getEffectiveInstanceId: () => "opencode",
-	getAvailableInstances: () => [],
-	viewDraftModels: vi.fn(),
-	discoveryState: { hasInstanceChoice: false, defaultsLoaded: false },
+	watchCatalogs: vi.fn(() => () => {}),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/todo.svelte.js", () => ({
@@ -299,9 +289,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 				hasMore: false,
 				nextCursor: null,
 			});
-		if (["GetAgents", "GetModels", "GetCommands"].includes(tag)) {
-			return Promise.reject(new Error("discovery temporarily unavailable"));
-		}
 		return Promise.resolve({ projectSlug: "test-project", files: [] });
 	}),
 }));
@@ -326,8 +313,6 @@ import {
 	detachSessionList,
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
-import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { onProjectAttached } from "../../../src/lib/frontend/stores/ws-listeners.js";
 import { runTransportEffect } from "../../../src/lib/frontend/transport/runtime.js";
 import { attachProjectRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
@@ -349,7 +334,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		);
 		wsLifecycleHarness.onAttachCallbacks = [];
 		wsLifecycleHarness.attachedSlugs = [];
-		wsLifecycleHarness.onSynchronizedCallbacks = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.
 		vi.stubGlobal("localStorage", {
@@ -399,26 +383,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		sessionViewState.compact = false;
 		flushSync();
 		expect(taskDrawer.task).toBeNull();
-	});
-
-	it("does not toast when optional discovery RPCs fail after shell synchronization", async () => {
-		render(ChatLayout);
-
-		expect(onProjectAttached).toHaveBeenCalledTimes(1);
-		attach("test-project");
-		wsLifecycleHarness.onSynchronizedCallbacks[0]?.("test-project");
-		await Promise.resolve();
-		await Promise.resolve();
-
-		expect(showToast).not.toHaveBeenCalledWith("Failed to load agents", {
-			variant: "error",
-		});
-		expect(showToast).not.toHaveBeenCalledWith("Failed to load models", {
-			variant: "error",
-		});
-		expect(showToast).not.toHaveBeenCalledWith("Failed to load commands", {
-			variant: "error",
-		});
 	});
 
 	it("attaches the shell feed on project attach", async () => {

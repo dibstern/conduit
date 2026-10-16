@@ -296,12 +296,11 @@
 
 	async function reloadSession(): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
-		if (!sessionId || !projectSlug || reloadInFlight) return;
+		if (!sessionId || reloadInFlight) return;
 
 		reloadInFlight = true;
 		try {
-			await reloadProviderSession(projectSlug, sessionId);
+			await reloadProviderSession(sessionId);
 			showToast("Session reloaded");
 		} catch (error) {
 			toastFailure("Failed to reload the session", "warn")(error);

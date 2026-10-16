@@ -21,8 +21,7 @@
 	} from "../../stores/composer-settings.svelte.js";
 	import {
 		applyDefaultModelSet,
-		followModelsRead,
-		applyGetAgentsResponse,
+		refreshCatalogs,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
@@ -219,14 +218,7 @@
 		const sessionId = sessionState.currentId;
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
-		const applyModels = followModelsRead(sessionId);
-		void rpc("GetModels", { sessionId })
-			.then((response) => {
-				if (sessionState.currentId === sessionId) {
-					applyModels(response);
-				}
-			})
-			.catch(() => undefined);
+		untrack(() => { void refreshCatalogs(); });
 	});
 
 	/** Display name for the trigger button, with date suffix stripped.
@@ -386,17 +378,6 @@
 		view = "root";
 		if (instance.id === selectedId && discoveryState.hasInstanceChoice) return;
 		selectInstance(instance.id);
-		const projectSlug = getDraftProject();
-		const applyModels = followModelsRead();
-		if (projectSlug) void rpc("GetModels", { projectSlug, instanceId: instance.id })
-			.then(applyModels)
-			.catch(() => undefined);
-		if (projectSlug) void rpc("GetAgents", { projectSlug, instanceId: instance.id })
-			.then((response) => {
-				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
-					applyGetAgentsResponse(response);
-			})
-			.catch(() => undefined);
 		searchQuery = "";
 	}
 
@@ -451,10 +432,9 @@
 
 	function handleReload(e: MouseEvent) {
 		e.stopPropagation();
-		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (projectSlug && sessionId) {
-			void reloadProviderSession(projectSlug, sessionId).catch(() => undefined);
+		if (sessionId) {
+			void reloadProviderSession(sessionId).catch(() => undefined);
 		}
 		showToast("Reloading skills…", { duration: 1500 });
 		closePicker();

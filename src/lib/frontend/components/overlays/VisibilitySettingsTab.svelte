@@ -11,11 +11,10 @@
 	import { isKnownDriverKind } from "../../../contracts/provider-instance.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
-	import { applyGetAgentsResponse, followModelsRead, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
+	import { refreshCatalogs, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
 	import { rpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let modelsFetchPending = $state(false);
@@ -118,23 +117,11 @@
 		if (!projectSlug) return;
 		untrack(() => {
 			modelsFetchPending = true;
-			// Scoped, so the reply describes the open session's model, not the
-			// project default.
-			const sessionId = sessionState.currentId;
-			const applyModels = followModelsRead(sessionId ?? undefined);
-			void rpc("GetModels", { ...(sessionId ? { sessionId } : { projectSlug }) })
-				.then((response) => {
-					if (sessionState.currentId === sessionId) applyModels(response);
-				})
+			void refreshCatalogs()
 				.catch((err) => log.warn("Visibility models fetch failed:", err))
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-			void rpc("GetAgents", { ...(sessionId ? { sessionId } : { projectSlug }) })
-				.then((response) => {
-					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
-				})
-				.catch((err) => log.warn("Visibility agents fetch failed:", err));
 		});
 	});
 

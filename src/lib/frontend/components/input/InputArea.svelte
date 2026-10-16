@@ -258,8 +258,9 @@
 	// only Storybook stays in.
 	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
 	const routeSessionId = $derived(getCurrentSessionId());
+	// Sessions have their own loading state; keep an open draft picker mounted.
 	const settingsPending = $derived(
-		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+		offline || (!sessionState.currentId && !discoveryState.modelsLoaded && composerPickerState.request === null) || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
