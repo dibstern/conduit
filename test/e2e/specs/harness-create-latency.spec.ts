@@ -1,0 +1,544 @@
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import type { BrowserContext, Page } from "@playwright/test";
+import { Effect } from "effect";
+import {
+	HEAVY_SESSION_ID,
+	seedSessionLoadFixture,
+} from "../../fixtures/session-load.js";
+import { expect, test } from "../helpers/process-harness-fixture.js";
+import { AppPage } from "../page-objects/app.page.js";
+
+const parameter = (name: string, fallback: number): number => {
+	const value = Number(process.env[name] ?? fallback);
+	if (!Number.isSafeInteger(value) || value <= 0)
+		throw new Error(`${name} must be a positive integer`);
+	return value;
+};
+
+const parameters = {
+	devices: parameter("CREATE_LATENCY_DEVICES", 4),
+	creates: parameter("CREATE_LATENCY_CREATES", 50),
+	arrivalTimeoutMs: parameter("CREATE_LATENCY_ARRIVAL_TIMEOUT_MS", 5_000),
+	gapMs: 200,
+	streams: 3,
+	streamIntervalMs: 100,
+	slowRpcMs: 1,
+	traceSqlMinMs: 5,
+};
+// Calibrated 2026-10-16: worst p90 of three runs (30.7 ms) x 1.5, rounded up to 25 ms.
+const budgetMs = parameter("CREATE_LATENCY_P90_BUDGET_MS", 50);
+const now = () => performance.timeOrigin + performance.now();
+
+interface ArrivalObserver {
+	readonly seen: Map<string, number>;
+	readonly observer: MutationObserver;
+	sessionId?: string;
+	finish?: (at: number) => void;
+}
+
+declare global {
+	interface Window {
+		__createLatencyObservers?: Map<number, ArrivalObserver>;
+	}
+}
+
+// The ID is returned by CreateSession, so collect new rows before submitting
+// and select that ID afterwards. A fast arrival cannot race the RPC reply.
+const armArrival = (page: Page, index: number) =>
+	page.evaluate((index) => {
+		const sidebar = document.querySelector("#sidebar-panel-sessions");
+		if (!sidebar) throw new Error("Session sidebar is missing");
+		const initial = new Set(
+			Array.from(sidebar.querySelectorAll("[data-session-id]"), (row) =>
+				row.getAttribute("data-session-id"),
+			),
+		);
+		const seen = new Map<string, number>();
+		const state: ArrivalObserver = {
+			seen,
+			observer: new MutationObserver(() => {
+				for (const row of sidebar.querySelectorAll("[data-session-id]")) {
+					const id = row.getAttribute("data-session-id");
+					if (
+						id &&
+						!initial.has(id) &&
+						!seen.has(id) &&
+						row.getClientRects().length > 0
+					) {
+						const at = performance.timeOrigin + performance.now();
+						seen.set(id, at);
+						if (state.sessionId === id) state.finish?.(at);
+					}
+				}
+			}),
+		};
+		(window.__createLatencyObservers ??= new Map()).set(index, state);
+		state.observer.observe(sidebar, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ["data-session-id", "class", "style"],
+		});
+	}, index);
+
+const arrival = (
+	page: Page,
+	index: number,
+	sessionId: string,
+	submittedAt: number,
+) =>
+	page.evaluate(
+		({ index, sessionId, deadline }) =>
+			new Promise<number | null>((resolve) => {
+				const states = window.__createLatencyObservers;
+				const state = states?.get(index);
+				if (!state) throw new Error("Arrival observer was not armed");
+				const finish = (at: number | null) => {
+					clearTimeout(timer);
+					state.observer.disconnect();
+					states?.delete(index);
+					resolve(at);
+				};
+				const timer = setTimeout(
+					() => finish(null),
+					Math.max(0, deadline - (performance.timeOrigin + performance.now())),
+				);
+				state.sessionId = sessionId;
+				state.finish = (at) => finish(at <= deadline ? at : null);
+				const at = state.seen.get(sessionId);
+				if (at !== undefined) state.finish(at);
+			}),
+		{ index, sessionId, deadline: submittedAt + parameters.arrivalTimeoutMs },
+	);
+
+const distribution = (values: readonly number[]) => {
+	const sorted = [...values].sort((a, b) => a - b);
+	return {
+		p50: sorted[Math.ceil(sorted.length * 0.5) - 1] ?? null,
+		p90: sorted[Math.ceil(sorted.length * 0.9) - 1] ?? null,
+		max: sorted.at(-1) ?? null,
+	};
+};
+
+const records = (file: string): Record<string, unknown>[] =>
+	existsSync(file)
+		? readFileSync(file, "utf8")
+				.split("\n")
+				.slice(0, -1)
+				.filter((line) => line.startsWith("{"))
+				.map((line) => JSON.parse(line) as Record<string, unknown>)
+		: [];
+
+interface Sample {
+	readonly index: number;
+	readonly submittedAt: number;
+	sessionId: string | null;
+	rpcMs: number | null;
+	arrivals: { device: number; at: number | null; ms: number | null }[];
+	slowestMs: number | null;
+	arrivalError?: string;
+}
+
+interface Metrics {
+	readonly flushedAt: number;
+	readonly readModelReads: readonly {
+		readonly at: number;
+		readonly source: string;
+		readonly kind: string;
+	}[];
+}
+
+test.describe.configure({ retries: 0 });
+test.use({ harnessOptions: { logLevel: "warn" } });
+
+test("creates reach every sidebar under streaming write load", async ({
+	browser,
+	harness,
+}, testInfo) => {
+	test.setTimeout(180_000 + parameters.creates * 2_000);
+	const contexts: BrowserContext[] = [];
+	const samples: Sample[] = [];
+	const metricsFile = join(harness.root, "create-latency-metrics.json");
+	const logFile = join(harness.root, "create-latency-daemon.log");
+	const traceFile = join(harness.root, "create-latency.trace.ndjson");
+	const expectedWriteRate =
+		(parameters.streams * 1_000) / parameters.streamIntervalMs;
+	let phaseStart: number | null = null;
+	let phaseEnd: number | null = null;
+	let backgroundTicks = 0;
+	let achievedWriteRate = 0;
+	let backgroundMeasured = false;
+	const diagnosticErrors: string[] = [];
+	const shellReads: Record<string, number> = {};
+	let fixture: Awaited<ReturnType<typeof seedSessionLoadFixture>> | null = null;
+	let stopped = false;
+	try {
+		await harness.terminate();
+		fixture = await seedSessionLoadFixture(harness.projectStorePath());
+		await harness.restart({
+			keepPort: true,
+			skipBrowserProbe: true,
+			metricsFile,
+			logFile,
+			serviceEnvironment: {
+				CONDUIT_SLOW_RPC_MS: String(parameters.slowRpcMs),
+				CONDUIT_TRACE_ENABLED: "1",
+				CONDUIT_TRACE_FILE: traceFile,
+				CONDUIT_TRACE_MAX_BYTES: String(1_073_741_824),
+				CONDUIT_TRACE_SQL_MIN_MS: String(parameters.traceSqlMinMs),
+			},
+		});
+		const driver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+		await expect
+			.poll(() => harness.generations.at(-1)?.fakeSdkActive)
+			.toBe(true);
+		const streams: string[] = [];
+		for (let index = 0; index < parameters.streams; index++) {
+			const sessionId = await driver.createSession(`Latency stream ${index}`);
+			await Effect.runPromise(
+				driver.rpc.input.submit({
+					projectSlug: "process-test",
+					sessionId,
+					originId: driver.originId,
+					inputId: randomUUID(),
+					text: `load-stream-${index}`,
+					delivery: "queue",
+				}),
+			);
+			streams.push(sessionId);
+		}
+		const pages: Page[] = [];
+		for (let device = 0; device < parameters.devices; device++) {
+			const context = await browser.newContext({
+				viewport: { width: 1440, height: 900 },
+				isMobile: false,
+			});
+			contexts.push(context);
+			const page = await context.newPage();
+			pages.push(page);
+			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
+			await expect(
+				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
+			).toBeVisible({ timeout: 30_000 });
+		}
+		const database = new DatabaseSync(harness.projectStorePath(), {
+			readOnly: true,
+		});
+		try {
+			// Count tick tokens, so coalescing several SDK deltas into one event
+			// cannot inflate or undercount the achieved background write rate.
+			const tickQuery = database.prepare(`
+				SELECT coalesce(sum((length(json_extract(data, '$.text')) -
+					length(replace(json_extract(data, '$.text'), 'tick(', ''))) / 5), 0) AS n
+				FROM events WHERE type = 'text.delta'
+				AND session_id IN (${streams.map(() => "?").join(",")})
+			`);
+			const ticks = () => Number(tickQuery.get(...streams)?.["n"] ?? 0);
+			await expect.poll(ticks).toBeGreaterThan(parameters.streams * 10);
+			// Let connection snapshots settle before measuring replacement reads.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			const beforeTicks = ticks();
+			phaseStart = now();
+			try {
+				const pending: Promise<void>[] = [];
+				for (let index = 0; index < parameters.creates; index++) {
+					await Promise.all(pages.map((page) => armArrival(page, index)));
+					const sample: Sample = {
+						index,
+						submittedAt: now(),
+						sessionId: null,
+						rpcMs: null,
+						arrivals: pages.map((_, device) => ({
+							device,
+							at: null,
+							ms: null,
+						})),
+						slowestMs: null,
+					};
+					samples.push(sample);
+					const reply = await Effect.runPromise(
+						driver.rpc
+							.CreateSession({
+								projectSlug: "process-test",
+								providerId: "claude",
+								permissionMode: "ask",
+								originId: driver.originId,
+								title: `Create latency ${index}`,
+								model: {
+									providerId: "claude",
+									modelId: "sonnet",
+									variant: "",
+									contextWindow: "200k",
+								},
+							})
+							.pipe(Effect.timeout("15 seconds")),
+					);
+					sample.rpcMs = now() - sample.submittedAt;
+					sample.sessionId = reply.sessionId;
+					pending.push(
+						Promise.all(
+							pages.map((page) =>
+								arrival(page, index, reply.sessionId, sample.submittedAt),
+							),
+						).then(
+							(arrivals) => {
+								sample.arrivals = arrivals.map((at, device) => ({
+									device,
+									at,
+									ms: at === null ? null : at - sample.submittedAt,
+								}));
+								sample.slowestMs = arrivals.includes(null)
+									? null
+									: Math.max(
+											...arrivals.map((at) => (at ?? 0) - sample.submittedAt),
+										);
+							},
+							(error: unknown) => {
+								sample.arrivalError = String(error);
+							},
+						),
+					);
+					if (index + 1 < parameters.creates)
+						await new Promise((resolve) =>
+							setTimeout(resolve, parameters.gapMs),
+						);
+				}
+				await Promise.all(pending);
+			} finally {
+				phaseEnd = now();
+				try {
+					backgroundTicks = ticks() - beforeTicks;
+					achievedWriteRate =
+						(backgroundTicks * 1_000) / (phaseEnd - phaseStart);
+					backgroundMeasured = true;
+				} catch (error) {
+					diagnosticErrors.push(
+						`Background write measurement: ${String(error)}`,
+					);
+				}
+			}
+		} finally {
+			database.close();
+		}
+		await expect
+			.poll(
+				() =>
+					(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics).flushedAt,
+			)
+			.toBeGreaterThan(phaseEnd ?? 0);
+		// Graceful shutdown flushes the NDJSON exporter before inspecting it.
+		await harness.terminate();
+		stopped = true;
+		const slowRecords = records(logFile).filter(
+			(record) => record["msg"] === "slow rpc",
+		);
+		const traceRecords = records(traceFile).filter(
+			(record) => record["type"] === "effect-span",
+		);
+		const sqlSpans = traceRecords.filter(
+			(record) => record["name"] === "sql.execute",
+		);
+		expect.soft(fixture.sessions).toBeGreaterThanOrEqual(10_000);
+		expect.soft(samples).toHaveLength(parameters.creates);
+		expect
+			.soft(
+				samples.flatMap((sample) =>
+					sample.arrivals.filter(({ at }) => at === null),
+				),
+				"Every device must render every created session before its arrival deadline",
+			)
+			.toEqual([]);
+		expect
+			.soft(
+				distribution(
+					samples.flatMap(({ slowestMs }) =>
+						slowestMs === null ? [] : [slowestMs],
+					),
+				).p90,
+				"Create-to-slowest-device p90 must stay within its calibrated budget",
+			)
+			.toBeLessThanOrEqual(budgetMs);
+		expect
+			.soft(
+				achievedWriteRate,
+				"Background streams must sustain at least 80% of their configured write rate",
+			)
+			.toBeGreaterThanOrEqual(expectedWriteRate * 0.8);
+		expect
+			.soft(
+				slowRecords.length,
+				"CONDUIT_SLOW_RPC_MS=1 must emit slow rpc records",
+			)
+			.toBeGreaterThan(0);
+		expect
+			.soft(traceRecords.length, "Local trace must contain completed spans")
+			.toBeGreaterThan(0);
+		expect
+			.soft(
+				slowRecords.reduce(
+					(total, record) =>
+						(record["method"] === "CreateSession" ||
+							record["method"] === "SubscribeShell") &&
+						typeof record["sqlCount"] === "number" &&
+						record["sqlCount"] > 0
+							? total + record["sqlCount"]
+							: total,
+					0,
+				),
+				"CreateSession and SubscribeShell slow records must prove SQL activity",
+			)
+			.toBeGreaterThan(0);
+		expect
+			.soft(
+				sqlSpans.filter(
+					(record) =>
+						typeof record["durationMs"] !== "number" ||
+						record["durationMs"] < parameters.traceSqlMinMs,
+				).length,
+				"Local trace must omit sql.execute spans shorter than CONDUIT_TRACE_SQL_MIN_MS",
+			)
+			.toBe(0);
+	} finally {
+		const cleanupErrors: string[] = [];
+		if (!stopped) {
+			if (phaseEnd !== null) {
+				try {
+					await expect
+						.poll(
+							() =>
+								(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+									.flushedAt,
+							{ timeout: 2_000 },
+						)
+						.toBeGreaterThan(phaseEnd);
+				} catch (error) {
+					diagnosticErrors.push(`Metrics flush: ${String(error)}`);
+				}
+			}
+			try {
+				await harness.terminate();
+			} catch (error) {
+				cleanupErrors.push(String(error));
+			}
+		}
+		let metricsFlushedAt: number | null = null;
+		if (phaseStart !== null && phaseEnd !== null) {
+			try {
+				const metrics = JSON.parse(
+					readFileSync(metricsFile, "utf8"),
+				) as Metrics;
+				metricsFlushedAt = metrics.flushedAt;
+				for (const read of metrics.readModelReads) {
+					if (
+						read.source === "shell" &&
+						read.at >= phaseStart &&
+						read.at <= phaseEnd
+					)
+						shellReads[read.kind] = (shellReads[read.kind] ?? 0) + 1;
+				}
+			} catch (error) {
+				diagnosticErrors.push(`Shell read measurement: ${String(error)}`);
+			}
+		}
+		const closed = await Promise.allSettled(
+			contexts.map((context) => context.close()),
+		);
+		for (const result of closed) {
+			if (result.status === "rejected")
+				cleanupErrors.push(String(result.reason));
+		}
+		const slowRecords = records(logFile).filter(
+			(record) =>
+				record["msg"] === "slow rpc" &&
+				(record["method"] === "CreateSession" ||
+					record["method"] === "SubscribeShell"),
+		);
+		const traceRecords = records(traceFile);
+		const sqlSpans = traceRecords.filter(
+			(record) => record["name"] === "sql.execute",
+		);
+		const report = {
+			parameters,
+			budgetMs,
+			fixture,
+			phaseStart,
+			phaseEnd,
+			cleanupErrors,
+			diagnosticErrors,
+			samples,
+			slowestMs: distribution(
+				samples.flatMap(({ slowestMs }) =>
+					slowestMs === null ? [] : [slowestMs],
+				),
+			),
+			rpcMs: distribution(
+				samples.flatMap(({ rpcMs }) => (rpcMs === null ? [] : [rpcMs])),
+			),
+			background: {
+				measured: backgroundMeasured,
+				expectedWriteRate,
+				achievedWriteRate,
+				persistedTicks: backgroundTicks,
+			},
+			shell: {
+				metricsFlushedAt,
+				coversPhase:
+					phaseEnd === null
+						? null
+						: metricsFlushedAt !== null && metricsFlushedAt >= phaseEnd,
+				reads: shellReads,
+				totalReads: Object.values(shellReads).reduce(
+					(sum, count) => sum + count,
+					0,
+				),
+				replacements: shellReads["replacement"] ?? 0,
+			},
+			slowRpc: slowRecords,
+			trace: {
+				spans: traceRecords.length,
+				sqlSpans: sqlSpans.length,
+				shortSqlSpans: sqlSpans.filter(
+					(record) => Number(record["durationMs"]) < parameters.traceSqlMinMs,
+				).length,
+				minimumSqlMs:
+					sqlSpans.length === 0
+						? null
+						: sqlSpans.reduce(
+								(minimum, record) =>
+									Math.min(minimum, Number(record["durationMs"])),
+								Number.POSITIVE_INFINITY,
+							),
+			},
+		};
+		mkdirSync("test-results", { recursive: true });
+		const output = join(
+			"test-results",
+			`create-latency.${testInfo.project.name}.json`,
+		);
+		writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
+		await testInfo.attach("create-latency", {
+			path: output,
+			contentType: "application/json",
+		});
+		expect
+			.soft(
+				shellReads["replacement"] ?? 0,
+				"Create phase must not replace the shell snapshot",
+			)
+			.toBe(0);
+		expect
+			.soft(diagnosticErrors, "Create phase diagnostics must be available")
+			.toEqual([]);
+		expect
+			.soft(cleanupErrors, "Isolated harness cleanup must succeed")
+			.toEqual([]);
+	}
+});

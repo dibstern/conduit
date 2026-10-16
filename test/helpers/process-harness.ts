@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+	appendFileSync,
 	chmodSync,
 	copyFileSync,
 	existsSync,
@@ -597,6 +598,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
 					| "CONDUIT_SERVER_BUILD_ID"
+					| "CONDUIT_SLOW_RPC_MS"
+					| "CONDUIT_TRACE_ENABLED"
+					| "CONDUIT_TRACE_FILE"
+					| "CONDUIT_TRACE_MAX_BYTES"
+					| "CONDUIT_TRACE_SQL_MIN_MS"
 					| "XPC_SERVICE_NAME"
 				>
 			>;
@@ -611,6 +617,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 			 * file, flushed every 250ms.
 			 */
 			metricsFile?: string;
+			/** Retain complete daemon output instead of only its 8 KB log tail. */
+			logFile?: string;
 			/**
 			 * With `metricsFile`, also append SQLite statements of 1ms or more to
 			 * `<metricsFile>.statements.jsonl`, and record a CPU profile between the
@@ -979,9 +987,11 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.child = child;
 		child.stdout?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
+			if (options.logFile) appendFileSync(options.logFile, data);
 		});
 		child.stderr?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
+			if (options.logFile) appendFileSync(options.logFile, data);
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;
