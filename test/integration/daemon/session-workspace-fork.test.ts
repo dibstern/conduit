@@ -231,8 +231,10 @@ describe("Forked session workspaces through the built daemon", () => {
 		);
 		forkId = fork.sessionId;
 		const child = (await list()).sessions.find(({ id }) => id === forkId);
+		// A Side Thread is contained by its Source; a Fork is a Family Root.
+		expect(child?.parentID).toBe(sideThread ? parentId : undefined);
 		expect(child).toMatchObject({
-			parentID: parentId,
+			forkedFrom: parentId,
 			workspace: {
 				cause: "launch",
 				worktrees: parent?.workspace?.worktrees,

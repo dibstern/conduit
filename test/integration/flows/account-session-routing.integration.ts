@@ -541,8 +541,13 @@ describe("Integration: account session routing", () => {
 			childId,
 			(row) => row.id === childId,
 		);
-		expect(rows.find((row) => row.id === childId)?.parentID).toBe(sessionId);
-		expect(rows.find((row) => row.id === sessionId)?.title).toBe(
+		expect(rows.find((row) => row.id === childId)?.forkedFrom).toBe(sessionId);
+		// A Fork is its own Family Root, so its Source is read from its own family.
+		const sourceRows = await client.waitForFamilyRows(
+			sessionId,
+			(row) => row.id === sessionId,
+		);
+		expect(sourceRows.find((row) => row.id === sessionId)?.title).toBe(
 			"Fresh account",
 		);
 		const childCompleted = client.waitForTurnEnd(childId, 10_000);
