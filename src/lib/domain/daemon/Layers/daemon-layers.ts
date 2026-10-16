@@ -100,6 +100,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
+import { SessionActivityDaemonLive } from "../Services/session-activity.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import {
@@ -670,7 +671,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 						),
 					),
 				),
-		DaemonEventBusLive,
+		SessionActivityDaemonLive.pipe(Layer.provideMerge(DaemonEventBusLive)),
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),

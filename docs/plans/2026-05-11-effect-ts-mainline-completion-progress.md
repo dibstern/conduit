@@ -4,7 +4,7 @@
 > Current live status lives in `docs/plans/2026-05-14-effect-ts-mainline-live-progress.md`.
 > Consult this file only for baseline evidence, detailed command output, and older phase notes.
 
-Phase 0 baseline captured from `/Users/dstern/.config/codex/worktrees/bb7e/conduit` on branch
+Phase 0 baseline captured from `~/.config/codex/worktrees/bb7e/conduit` on branch
 `ds/effect-mainline-completion`.
 
 ## Guardrail Checklist
@@ -41,7 +41,7 @@ Dependency setup note:
 
 ```text
 $ pnpm check
-> conduit-code@0.1.3 check /Users/dstern/.config/codex/worktrees/bb7e/conduit
+> conduit-code@0.1.3 check ~/.config/codex/worktrees/bb7e/conduit
 > tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json
 
 sh: tsgo: command not found
@@ -268,7 +268,7 @@ Pattern counts from the same baseline:
 $ pnpm check
 Exit: 0
 Output:
-> conduit-code@0.1.3 check /Users/dstern/.config/codex/worktrees/bb7e/conduit
+> conduit-code@0.1.3 check ~/.config/codex/worktrees/bb7e/conduit
 > tsgo --noEmit && tsgo --noEmit --project src/lib/frontend/tsconfig.json
 ```
 
@@ -276,7 +276,7 @@ Output:
 $ pnpm lint
 Exit: 0
 Output:
-> conduit-code@0.1.3 lint /Users/dstern/.config/codex/worktrees/bb7e/conduit
+> conduit-code@0.1.3 lint ~/.config/codex/worktrees/bb7e/conduit
 > biome check .
 
 Checked 940 files in 229ms. No fixes applied.
@@ -1220,7 +1220,7 @@ Changes:
   `localhost:4096` is listening.
 
 Existing SQLite schema inventory from a copied production DB
-(`/Users/dstern/src/personal/conduit/.conduit/events.db`, copied with `VACUUM INTO`):
+(`~/src/personal/conduit/.conduit/events.db`, copied with `VACUUM INTO`):
 
 | table | columns |
 |---|---|
@@ -1277,7 +1277,7 @@ Constraint inventory covered by the SQL baseline and schema tests:
 Dry-run on copied production DB:
 
 ```text
-Source: /Users/dstern/src/personal/conduit/.conduit/events.db
+Source: ~/src/personal/conduit/.conduit/events.db
 Copy method: SQLite VACUUM INTO a temp-file copy
 Applied migrations: []
 Before migration rows: [{ id: 1, name: "create_event_store_tables" }]

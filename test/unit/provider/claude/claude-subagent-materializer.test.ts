@@ -675,6 +675,104 @@ describe("Claude subagent transcripts and session establishment", () => {
 		}
 	});
 
+	it.each([
+		false,
+		true,
+	])("leaves a retried child's title, version and sidebar unchanged, renamed=%s", async (renamed) => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-subagent-seed-retry-"));
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					yield* establishCanonicalSession("parent-session", "claude");
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const store = yield* EventStoreEffectTag;
+					const sql = yield* SqlClient.SqlClient;
+					const input = {
+						childSessionId: "child-session",
+						parentSessionId: "parent-session",
+						providerSessionId: "agent-abc",
+						title: "Explore Agent",
+					};
+					yield* persist.ensureClaudeSubagentSession(input);
+					if (renamed) {
+						yield* persist.persistEvent(
+							canonicalEvent("session.renamed", input.childSessionId, {
+								sessionId: input.childSessionId,
+								title: "Renamed child",
+							}),
+						);
+					}
+					const before =
+						yield* sql`SELECT title, version, updated_at FROM sessions WHERE id = 'child-session'`;
+					const sidebarBefore =
+						yield* sql`SELECT session_id, version, last_activity, row FROM session_sidebar ORDER BY session_id`;
+					expect(before).toMatchObject([
+						{ title: renamed ? "Renamed child" : "Explore Agent" },
+					]);
+					expect(sidebarBefore).toHaveLength(1);
+
+					yield* persist.ensureClaudeSubagentSession(input);
+
+					expect(
+						yield* sql`SELECT title, version, updated_at FROM sessions WHERE id = 'child-session'`,
+					).toEqual(before);
+					expect(
+						yield* sql`SELECT session_id, version, last_activity, row FROM session_sidebar ORDER BY session_id`,
+					).toEqual(sidebarBefore);
+					const creations = (yield* store.readBySession(
+						input.childSessionId,
+					)).filter((event) => event.type === "session.created");
+					expect(creations).toHaveLength(1);
+					expect(creations[0]?.eventId).toBe(
+						"evt_claude_subagent_session_created_child-session",
+					);
+				}).pipe(Effect.provide(makePersistenceLayer(join(dir, "events.db")))),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects an invalid subagent seed through append's schema check and rolls back establishment", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-subagent-invalid-seed-"));
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					yield* establishCanonicalSession("parent-session", "claude");
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const result = yield* Effect.either(
+						persist.ensureClaudeSubagentSession({
+							childSessionId: "invalid-child",
+							parentSessionId: "parent-session",
+							providerSessionId: "agent-invalid",
+							// @ts-expect-error Exercise malformed input arriving at runtime.
+							title: 123,
+						}),
+					);
+					expect(result).toMatchObject({
+						_tag: "Left",
+						left: {
+							_tag: "ClaudeEventPersistEffectError",
+							operation: "ensureClaudeSubagentSession",
+							cause: {
+								_tag: "EventStoreError",
+								operation: "validateCanonicalEvent",
+							},
+						},
+					});
+					const store = yield* EventStoreEffectTag;
+					expect(yield* store.readBySession("invalid-child")).toEqual([]);
+					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT id FROM sessions WHERE id = 'invalid-child'`,
+					).toEqual([]);
+				}).pipe(Effect.provide(makePersistenceLayer(join(dir, "events.db")))),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("rejects subagent establishment when the parent session is missing or has no pick", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-claude-subagent-parent-"));
 		const filename = join(dir, "events.db");

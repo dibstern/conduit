@@ -184,6 +184,16 @@ describe("Integration: account catalogues", () => {
 		await client.waitFor("shell", {
 			predicate: (message) => message["_tag"] === "synchronized",
 		});
+		// A draft has no session yet; its picked account still owns the catalogue.
+		const draft = await client.rpcCall((rpc) =>
+			rpc.GetCommands({
+				projectSlug: "integration-test",
+				instanceId: "personal-account",
+			}),
+		);
+		expect(draft.commands.map((command) => command.name)).toContain(
+			"account-skill",
+		);
 		const created = await client.createSession("Personal commands", {
 			instanceId: "personal-account",
 			model: {

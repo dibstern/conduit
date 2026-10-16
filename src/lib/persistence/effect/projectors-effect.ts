@@ -1075,19 +1075,7 @@ export const makeMessageProjector = defineProjector(() => ({
 								collections: [...touch.collections, "messages"] as const,
 							})),
 						)
-					: Effect.gen(function* () {
-							const sql = yield* SqlClient.SqlClient;
-							for (const messageId of new Set(written)) {
-								yield* sql`DELETE FROM message_tombstones WHERE message_id = ${messageId}`;
-								// Likewise a part written now, a snapshot's kept parts included.
-								// A bulk batch (a fork's copied history) stamps every part with
-								// one version, so SQLite's pick of the version index scans them all.
-								yield* sql`DELETE FROM message_part_tombstones WHERE part_id IN (
-									SELECT id FROM message_parts INDEXED BY idx_message_parts_message
-									WHERE message_id = ${messageId} AND version = ${ctx.version})`;
-							}
-							return yield* stampMessage(written, ctx.version);
-						}),
+					: stampMessage(written, ctx.version),
 			),
 		),
 }));

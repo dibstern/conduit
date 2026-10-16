@@ -36,7 +36,7 @@ Drop-up popup above the input in the ProjectSwitcher add-project form.
 
 **Trigger:** On input change, debounced ~150ms, send `list_directories` with current value.
 
-**Display:** Show immediate child directories of the resolved parent path. If input is `/Users/`, show `dstern/`, `dave/`, etc.
+**Display:** Show immediate child directories of the resolved parent path. If input is `/Users/`, show `<user>/`, `dave/`, etc.
 
 **Keyboard interaction:**
 

@@ -8,7 +8,7 @@
 	import type { BannerConfig } from "../../types.js";
 	import { uiState } from "../../stores/ui.svelte.js";
 	import { getEffectiveInstanceId, getSessionDriver } from "../../stores/discovery.svelte.js";
-	import { getCachedInstances, instanceState } from "../../stores/instance.svelte.js";
+	import { getCachedInstances, getDriverTraits, getInstanceTraits, instanceState } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
@@ -31,10 +31,10 @@
 	// running but aren't responding to health checks. "stopped" (intentionally
 	// off) and "starting" (booting up) are normal states.
 	function instanceWarningShown(): boolean {
-		const instances = instanceState.instances.filter((instance) => instance.driver === "opencode");
+		const instances = instanceState.instances.filter((instance) => getInstanceTraits(instance.id)?.runsOpenCodeServer);
 		if (instances.length === 0) return false;
 		if (!instances.every((i) => i.status === "unhealthy")) return false;
-		if (sessionState.currentId) return getSessionDriver(sessionState.currentId) === "opencode";
+		if (sessionState.currentId) return getDriverTraits(getSessionDriver(sessionState.currentId))?.runsOpenCodeServer ?? false;
 
 		const accountId = sessionState.currentId
 			? findSession(sessionState.currentId)?.accountId
@@ -52,9 +52,9 @@
 		const instance = instances.find((candidate) => candidate.id === accountId);
 		// Older relays publish their first OpenCode runtime under the managed
 		// transport alias. Prefer the account's own status whenever it is present.
-		const aliasedInstance = instances.find((candidate) => candidate.driver === "opencode");
+		const aliasedInstance = instances.find((candidate) => getInstanceTraits(candidate.id)?.runsOpenCodeServer);
 		const status =
-			sessionId && instance?.driver === "opencode" && accountId
+			sessionId && getInstanceTraits(instance?.id)?.runsOpenCodeServer && accountId
 				? uiState.opencodeConnections[accountId] ??
 					(accountId === aliasedInstance?.id ? uiState.opencodeConnections[MANAGED_OPENCODE_ACCOUNT_ID] : undefined)
 				: undefined;

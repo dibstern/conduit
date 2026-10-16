@@ -1,4 +1,5 @@
 import { Either, Option, Schema } from "effect";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	type CanonicalEvent,
@@ -115,10 +116,10 @@ export function translateProviderRuntimeEventToDomain(
 		case "message.created": {
 			const messageId = messageIdFromData(event, data);
 			const role = messageRole(data["role"]);
-			const parentID =
-				event.providerId === "opencode"
-					? stringField(data["parentID"])
-					: undefined;
+			const parentID = getProviderDriver(event.providerId)
+				?.emitsMessageParentIds
+				? stringField(data["parentID"])
+				: undefined;
 			const inputId = stringField(data["inputId"]);
 			const nextState =
 				role === "assistant"

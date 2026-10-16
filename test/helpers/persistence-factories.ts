@@ -8,6 +8,7 @@ import {
 	makePersistenceServiceLive,
 	PersistenceProjectTag,
 } from "../../src/lib/domain/persistence/Services/persistence-service.js";
+import { validateCanonicalEvent } from "../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../src/lib/persistence/effect/migrations.js";
 import { ReadQueryEffectTag } from "../../src/lib/persistence/effect/read-query-effect.js";
@@ -19,7 +20,6 @@ import {
 	type EventMetadata,
 	type EventPayloadMap,
 	type StoredEvent,
-	validateEventPayload,
 } from "../../src/lib/persistence/events.js";
 import type { MessageWithParts } from "../../src/lib/persistence/read-model-types.js";
 
@@ -159,7 +159,7 @@ export function makeStored<T extends CanonicalEvent["type"]>(
 		createdAt: opts?.createdAt ?? FIXED_TEST_TIMESTAMP,
 	});
 
-	validateEventPayload(event);
+	Effect.runSync(validateCanonicalEvent(event));
 
 	return {
 		...event,

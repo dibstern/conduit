@@ -84,7 +84,7 @@ function switchSetting(
 function approvalOptions(
 	order: readonly SessionPermissionMode[],
 ): readonly ApprovalOption[] {
-	const claude = discoveryState.currentProviderId === "claude";
+	const traits = discoveryState.currentTraits;
 	// OpenCode enforces Plan only on Side Threads, through session rules.
 	const sideThread =
 		findSession(sessionState.currentId ?? "")?.sideThread === true;
@@ -92,8 +92,8 @@ function approvalOptions(
 		PERMISSION_MODES.filter(
 			(option) =>
 				option.mode === mode &&
-				(claude ||
-					(!option.claudeOnly && !option.sessionOnly) ||
+				((traits?.permissionModes.includes(option.mode) ??
+					(!option.claudeOnly && !option.sessionOnly)) ||
 					(sideThread && option.mode === "plan")),
 		),
 	);

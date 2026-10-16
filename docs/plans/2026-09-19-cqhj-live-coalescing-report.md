@@ -37,7 +37,7 @@ Red command:
 `./node_modules/.bin/vitest run test/unit/relay/read-model-coalescing.test.ts`
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ❯ |unit| test/unit/relay/read-model-coalescing.test.ts (1 test | 1 failed) 30ms
    × coalesces 200 part writes while the previous delivery is in flight 29ms
@@ -68,7 +68,7 @@ Green command:
 `./node_modules/.bin/vitest run test/unit/relay/read-model-coalescing.test.ts test/unit/relay/read-model-subscription.test.ts`
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ✓ |unit| test/unit/relay/read-model-coalescing.test.ts (1 test) 32ms
  ✓ |unit| test/unit/relay/read-model-subscription.test.ts (16 tests) 90ms
@@ -85,7 +85,7 @@ Red command:
 `./node_modules/.bin/vitest run test/unit/relay/read-model-coalescing.test.ts`
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ❯ |unit| test/unit/relay/read-model-coalescing.test.ts (2 tests | 1 failed) 47ms
    ✓ coalesces 200 part writes while the previous delivery is in flight 31ms
@@ -145,7 +145,7 @@ Green command:
 `./node_modules/.bin/vitest run test/unit/relay/read-model-coalescing.test.ts test/unit/relay/read-model-subscription.test.ts`
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ✓ |unit| test/unit/relay/read-model-coalescing.test.ts (2 tests) 36ms
  ✓ |unit| test/unit/relay/read-model-subscription.test.ts (16 tests) 104ms
@@ -162,7 +162,7 @@ Red command:
 `./node_modules/.bin/vitest run test/unit/relay/read-model-coalescing.test.ts`
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ❯ |unit| test/unit/relay/read-model-coalescing.test.ts (4 tests | 1 failed) 57ms
    ✓ coalesces 200 part writes while the previous delivery is in flight 30ms
@@ -214,7 +214,7 @@ Green command:
 `./node_modules/.bin/vitest run test/unit/relay/read-model-coalescing.test.ts test/unit/relay/read-model-subscription.test.ts test/unit/contracts/ws-rpc-stream.test.ts`
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ✓ |unit| test/unit/relay/read-model-coalescing.test.ts (4 tests) 51ms
  ✓ |unit| test/unit/contracts/ws-rpc-stream.test.ts (8 tests) 157ms
@@ -237,7 +237,7 @@ Final focused command:
 ```
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ✓ |unit| test/unit/effect/runtime-boundary-grep.test.ts (105 tests) 205ms
  ✓ |unit| test/unit/relay/read-model-coalescing.test.ts (4 tests) 60ms
@@ -283,7 +283,7 @@ Baseline comparison and residual risks
 **The real persisted-write test also passes on the original orchestrator.** I temporarily restored only the original orchestrator from HEAD, ran that test, and restored the implementation in a finally block. This is a characterization/integration safeguard, not evidence of a new 200-to-three production improvement:
 
 ```text
-RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-coalesce
+RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-coalesce
 
  ✓ |unit| test/unit/relay/session-detail-subscription.test.ts (16 tests | 15 skipped) 148ms
 

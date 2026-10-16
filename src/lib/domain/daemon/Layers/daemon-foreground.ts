@@ -14,7 +14,10 @@ import {
 	ManagedRuntime,
 	Ref,
 } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+} from "../../../contracts/provider-instance.js";
 import {
 	type DaemonConfig,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -480,7 +483,11 @@ export async function startForegroundDaemon(
 				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
 				const openCodeInstanceIds = (yield* currentHandle.getInstances())
-					.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+					.filter(
+						(instance) =>
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer,
+					)
 					.map((instance) => instance.id);
 				// Persisted default bindings route to the project's selected instance,
 				// even when only named instances are registered.

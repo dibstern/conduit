@@ -5,6 +5,7 @@ import {
 	type ClaudeSettingsOverrides,
 	ClaudeSettingsTrustBoundaryError,
 } from "../contracts/claude-settings.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
@@ -79,7 +80,10 @@ export const resolveClaudeSettingsForInstance = (
 		const account = yield* (yield* AccountDirectory).resolve(
 			input.accountRef ?? { _tag: "Id", id: input.instanceId },
 		);
-		if (account.driver !== "claude") {
+		if (
+			PROVIDER_DRIVERS[account.driver].accountKind !== "config-directory" ||
+			!("folder" in account)
+		) {
 			return yield* new ClaudeSettingsInstanceError({
 				instanceId: input.instanceId,
 				message: `Provider instance "${input.instanceId}" is not a Claude instance`,
