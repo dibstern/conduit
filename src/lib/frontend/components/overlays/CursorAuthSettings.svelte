@@ -41,7 +41,7 @@
 		{/if}
 		<div role="status" aria-live="polite" data-testid="cursor-auth-status" class="text-text-secondary">
 			{#if fromEnvironment}{copy.environment}
-			{:else if auth?.status === "logged-in"}{copy.loggedIn}{#if auth.email} as {auth.email}{/if}
+			{:else if auth?.status === "logged-in"}{copy.loggedIn}{auth.email ? ` as ${auth.email}` : ""}
 			{:else if auth?.status === "error"}{auth.error ?? "Could not check login status."}
 			{:else if auth}{copy.loggedOut}
 			{:else}Checking login status…{/if}
