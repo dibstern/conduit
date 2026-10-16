@@ -23,6 +23,7 @@ import type {
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
 import type { AccountDirectory } from "./account-directory.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { projectReadDatabase } from "./project-read-database.js";
 import {
 	allProjects,
@@ -184,6 +185,7 @@ export const listDaemonSessions = (
 > =>
 	Effect.gen(function* () {
 		const registered = yield* allProjects;
+		const unavailable = yield* DaemonStoreAvailability;
 		const groupKey = getScopeGroupKey(options.scope);
 		const defaultMode =
 			loadRelaySettings(configDir).defaultGroupingMode ?? "repository";
@@ -221,6 +223,17 @@ export const listDaemonSessions = (
 			projects,
 			(project) =>
 				Effect.gen(function* () {
+					const reason = unavailable.get(project.slug);
+					if (reason !== undefined) {
+						return {
+							sessions: [],
+							availability: {
+								projectSlug: project.slug,
+								available: false as const,
+								error: reason,
+							},
+						};
+					}
 					const exit = yield* Effect.exit(
 						readProjectSessions(project, configDir, projectOptions, gitCache),
 					);

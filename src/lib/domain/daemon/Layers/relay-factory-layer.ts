@@ -57,6 +57,7 @@ import { ConfigPersistenceTag } from "../Services/config-persistence-service.js"
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
@@ -193,6 +194,7 @@ export const RelayFactoryLive = (
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const storeContext = yield* optionalPersistenceStoreContext;
 			const sharedStore = Context.getOption(storeContext, PersistenceStore);
+			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -422,6 +424,12 @@ export const RelayFactoryLive = (
 						if (!existsSync(project.folders[0])) {
 							return yield* new RelayFactoryError({
 								reason: `Project directory does not exist: ${project.folders[0]}`,
+							});
+						}
+						const unavailableReason = unavailable.get(project.slug);
+						if (unavailableReason !== undefined) {
+							return yield* new RelayFactoryError({
+								reason: unavailableReason,
 							});
 						}
 						const dbPath = Option.isSome(sharedStore)

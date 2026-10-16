@@ -39,3 +39,20 @@ The declared cases covered import/lineage/readers/lifetime/restart, existing-sto
 preparation and archived-lineage retry, typed directory failures, and the default
 per-file path. A fifth case exercises every cold reader with foreign-project
 negatives and checks that reads neither prepare nor mutate the store.
+
+## conduit-test-82tn.6.4.2: unavailable and retained projects
+
+| Failure | Coverage |
+| --- | --- |
+| A corrupt import permits relay acquisition or writes before a restart repairs it. | Startup integration and process E2E reject acquisition, preserve zero project rows, and keep the healthy project usable. |
+| A legacy migration failure looks like an absent, healthy store. | Startup integration exercises a failed legacy rewrite and checks its availability reason. |
+| Lineage import updates already stored unavailable history through a healthy ancestor. | Startup integration checks lineage defers without changing the sidecar when unavailable owners already have shared rows. |
+| A committed import is blocked by a backup-only failure or source-changed result. | Startup integration checks both remain available. |
+| A source that changes before its import commits stays writable and is never imported. | Startup integration checks an uncommitted source-changed result blocks the project. |
+| A retained store is omitted, loses its slug, or becomes visible without registration. | Startup integration and process E2E check imported ownership, lists, search and directory visibility. |
+| A larger retained source takes a registered project's shared session. | Startup integration makes the retained store larger and checks registered seed and first-owner priority. |
+| A retained-only startup cannot create a destination without a seed. | Startup integration imports retained history without registered sources. |
+| Opt-in-off startup imports retained stores or publishes import blocks. | Startup integration checks the empty availability map and untouched retained source. |
+| Repairing and restarting duplicates or loses original user messages. | Process E2E restores the original bytes, checks the count and renders the cold transcript. |
+| Re-adding a removed folder chooses a new slug or hides its imported history. | Process E2E checks the original slug, session list and cold transcript. |
+| Unavailable evidence varies by path, slug, id or timestamp. | Process E2E writes a separate normalized 82tn6-shared-store-unavailable.json artifact. |

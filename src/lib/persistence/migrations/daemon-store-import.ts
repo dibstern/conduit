@@ -20,7 +20,11 @@ import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { Data, Effect } from "effect";
-import { makePersistenceEffectLayer } from "../effect/live.js";
+import {
+	makePersistenceEffectLayer,
+	makePersistenceStoreLayer,
+	type PersistenceEffectError,
+} from "../effect/live.js";
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
@@ -29,6 +33,8 @@ import { daemonStorePath } from "../project-storage.js";
 export interface ProjectStoreSource {
 	readonly projectId: string;
 	readonly sourcePath: string;
+	/** Retained history follows every registered source and cannot seed. */
+	readonly retained?: boolean;
 }
 
 export type DaemonStoreImportCheckpoint =
@@ -1464,12 +1470,12 @@ function writeReport(
 	}
 }
 
-/** Only the supplied registered sources participate; failed projects stay isolated. */
+/** Registered sources seed first; retained sources follow without taking ownership. */
 export const importRegisteredProjectStores = (
 	configDir: string,
 	projects: readonly ProjectStoreSource[],
 	options: DaemonStoreImportOptions = {},
-): Effect.Effect<readonly ProjectStoreImportResult[]> =>
+): Effect.Effect<readonly ProjectStoreImportResult[], PersistenceEffectError> =>
 	Effect.gen(function* () {
 		yield* Effect.sync(() => clearImportScratch(configDir, projects));
 		const results = new Map<string, ProjectStoreImportResult>();
@@ -1483,6 +1489,7 @@ export const importRegisteredProjectStores = (
 		});
 		if (!existsSync(daemonStorePath(configDir))) {
 			const sized = projects
+				.filter((project) => !project.retained)
 				.map((project) => {
 					try {
 						return { project, size: statSync(project.sourcePath).size };
@@ -1512,6 +1519,15 @@ export const importRegisteredProjectStores = (
 					if (result.right.outcome === "seeded") break;
 				} else results.set(project.projectId, failed(project, result.left));
 			}
+		}
+		// Retained sources cannot seed, even if there are no registered histories.
+		if (
+			!existsSync(daemonStorePath(configDir)) &&
+			projects.some((project) => project.retained)
+		) {
+			yield* Effect.void.pipe(
+				Effect.provide(makePersistenceStoreLayer(daemonStorePath(configDir))),
+			);
 		}
 		for (const project of projects) {
 			if (results.has(project.projectId)) continue;

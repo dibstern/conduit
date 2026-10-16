@@ -15,17 +15,19 @@ import {
 	PersistenceProjectTag,
 	PersistenceServiceTag,
 } from "../../persistence/Services/persistence-service.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 
 /** Preserve the optional borrowed store across explicitly restricted contexts. */
-export const optionalPersistenceStoreContext = Effect.suspend(() =>
-	Effect.serviceOption(PersistenceStore),
-).pipe(
-	Effect.map((store) =>
+export const optionalPersistenceStoreContext = Effect.gen(function* () {
+	const store = yield* Effect.serviceOption(PersistenceStore);
+	return Context.add(
 		Option.isSome(store)
 			? Context.make(PersistenceStore, store.value)
 			: Context.empty(),
-	),
-);
+		DaemonStoreAvailability,
+		yield* DaemonStoreAvailability,
+	);
+});
 
 type ProjectReadOptions = {
 	readonly mapPathError?: (cause: unknown) => unknown;
