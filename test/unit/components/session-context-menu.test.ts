@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SessionContextMenu from "../../../src/lib/frontend/components/session/SessionContextMenu.svelte";
+import type { SessionCommand } from "../../../src/lib/frontend/components/session/session-commands.js";
 import { openSnoozePicker } from "../../../src/lib/frontend/stores/snooze-picker.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
@@ -45,6 +46,8 @@ function openMenu(
 		projectLabel?: string;
 		branch?: string;
 		onrename?: () => void;
+		presentation?: "menu" | "sheet";
+		extras?: readonly Omit<SessionCommand, "section">[];
 	},
 ) {
 	render(SessionContextMenu, {
@@ -54,12 +57,71 @@ function openMenu(
 			projectLabel: options?.projectLabel,
 			branch: options?.branch,
 			host: { rename: options?.onrename ?? vi.fn() },
+			presentation: options?.presentation ?? "menu",
+			extras: options?.extras ?? [],
 			onclose: vi.fn(),
 		},
 	});
 }
 
 describe("session triage menu", () => {
+	it.each([
+		"menu",
+		"sheet",
+	] as const)("preserves %s rows, separators and icons with an extras section", async (presentation) => {
+		openMenu(
+			{ id: "a", title: "Alpha" },
+			{
+				presentation,
+				extras: [
+					{
+						testId: "extra-share",
+						label: "Share",
+						icon: "share",
+						run: vi.fn(),
+					},
+				],
+			},
+		);
+		await screen.findByTestId("extra-share");
+		const menu = screen.getByRole("menu");
+		expect(
+			[
+				...menu.querySelectorAll(
+					'[role="menuitem"], [role="menuitemcheckbox"], [role="separator"]',
+				),
+			].map((item) => item.getAttribute("data-testid") ?? "divider"),
+		).toEqual([
+			"session-ctx-settle",
+			"session-ctx-auto-settle",
+			"session-ctx-snooze",
+			"session-ctx-pin",
+			"session-ctx-mark-unread",
+			"divider",
+			"session-ctx-rename",
+			"session-ctx-fork",
+			"session-ctx-copy-resume",
+			"divider",
+			"session-ctx-delete",
+			"divider",
+			"extra-share",
+		]);
+		expect(
+			screen.getByTestId("session-ctx-delete").querySelectorAll("svg"),
+		).toHaveLength(1);
+		expect(
+			screen.getByTestId("session-ctx-auto-settle").querySelectorAll("svg"),
+		).toHaveLength(1);
+		expect(
+			screen
+				.getByTestId("session-ctx-auto-settle")
+				.querySelector(".lucide-zap"),
+		).toBeNull();
+		expect(
+			screen.getByTestId("session-ctx-pin").querySelector(".lucide-star"),
+		).toBeTruthy();
+	});
+
 	it("shows a two-line title and separate project and branch in its header", async () => {
 		openMenu(
 			{
