@@ -174,9 +174,13 @@ export const conversationHandlers = {
 				delivery: request.delivery,
 				...(request.images ? { images: request.images } : {}),
 			});
-			return sent.refused
+			return "refused" in sent
 				? { ok: false as const, reason: sent.refused }
-				: { ok: true as const, sessionId: sent.sessionId ?? request.sessionId };
+				: {
+						ok: true as const,
+						sessionId: sent.sessionId ?? request.sessionId,
+						handedOff: sent.handedOff,
+					};
 		}).pipe(
 			Effect.catchAll((error) =>
 				Effect.fail(

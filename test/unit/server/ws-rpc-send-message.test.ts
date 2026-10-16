@@ -7,6 +7,7 @@ import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { RateLimiterLive } from "../../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
+import { sendMessageToSession } from "../../../src/lib/handlers/prompt.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
@@ -23,6 +24,30 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer input.submit", () => {
+	for (const input of [
+		{ sessionId: "session-1", text: "" },
+		{ sessionId: undefined, text: "hello" },
+	]) {
+		it.effect(
+			`reports no handoff for ${input.sessionId ? "empty text" : "no active session"}`,
+			() =>
+				sendMessageToSession({
+					...input,
+					clientId: "browser-tab-a",
+					commandId: "cmd-no-handoff",
+				}).pipe(
+					Effect.tap((result) =>
+						expect(result).toEqual({
+							sessionId: input.sessionId,
+							handedOff: false,
+						}),
+					),
+					Effect.scoped,
+					Effect.provide(makeTestHandlerLayer()),
+				),
+		);
+	}
+
 	it.effect("passes the input id through to provider orchestration", () => {
 		const dispatch = vi.fn(() =>
 			Effect.succeed({
@@ -112,7 +137,11 @@ describe("WsRpcServerLayer input.submit", () => {
 				delivery: "queue",
 			});
 
-			expect(result).toEqual({ ok: true, sessionId: "session-1" });
+			expect(result).toEqual({
+				ok: true,
+				sessionId: "session-1",
+				handedOff: true,
+			});
 			expect(recordMessageActivity).toHaveBeenCalledWith("session-1");
 			expect(dispatchEffect).toHaveBeenCalledWith(
 				expect.objectContaining({

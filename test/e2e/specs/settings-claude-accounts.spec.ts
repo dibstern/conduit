@@ -85,7 +85,11 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
-			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+			"input.submit": ({ sessionId }) => ({
+				ok: true,
+				sessionId,
+				handedOff: true,
+			}),
 		},
 		handlers: {
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
