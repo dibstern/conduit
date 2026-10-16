@@ -125,6 +125,7 @@ export const SessionWorkspaceHintReactorLive = Layer.scopedDiscard(
 					collectWorkspaceHintPaths(tools, directory),
 					workspace.resolve,
 				);
+				if (path === undefined) return;
 				const main = yield* realWorkspacePath(config.projectDir).pipe(
 					Effect.orElseSucceed(() => config.projectDir),
 				);

@@ -221,7 +221,7 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		);
 		await browser.send(sessionId, toolTurn(threePaths(first)));
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
-		await browser.send(sessionId, toolTurn([], { reads: threePaths(first) }));
+		await browser.send(sessionId, toolTurn(threePaths(main)));
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await vi.waitFor(() =>
 			expect(

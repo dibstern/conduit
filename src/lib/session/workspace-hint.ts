@@ -109,18 +109,18 @@ const nearestExistingDirectory = (path: string) =>
 		}
 	});
 
-/** Filesystem inference stays outside projection and uses the workspace resolver. */
+/** Returns a path to show, null to clear, or undefined to keep the stored hint. */
 export const resolveWorkspaceHint = (
 	sessionId: string,
 	paths: readonly WorkspaceHintCandidate[],
 	resolveTarget: SessionWorkspace["resolve"],
-): Effect.Effect<string | null> =>
+): Effect.Effect<string | null | undefined> =>
 	Effect.gen(function* () {
-		if (paths.length < 3) return null;
 		const recorded = new Map<string, { directory: string; root: string }>();
 		const resolved = new Map<string, string | undefined>();
-		let hint: string | undefined;
-		let writes = 0;
+		let runPath: string | undefined;
+		let runCount = 0;
+		let lastHome = false;
 		for (const { path, recordedWorkspace } of paths) {
 			let base = recorded.get(recordedWorkspace);
 			if (base === undefined) {
@@ -150,10 +150,10 @@ export const resolveWorkspaceHint = (
 					target?._tag === "Some" ? target.value.path : undefined,
 				);
 			}
-			const worktree = resolved.get(directory);
+			let worktree = resolved.get(directory);
 			if (worktree === undefined) {
-				// Unrelated repositories count only if they are inside this write's
-				// recorded folder. A nested linked worktree has its own identity.
+				// An unrelated repository inside this write's recorded folder counts as
+				// home; one outside is ignored. A nested linked worktree has its own identity.
 				const fromRecorded = relative(base.directory, directory);
 				if (
 					fromRecorded === "" ||
@@ -161,13 +161,13 @@ export const resolveWorkspaceHint = (
 						!fromRecorded.startsWith(`..${sep}`) &&
 						!isAbsolute(fromRecorded))
 				)
-					return null;
-				continue;
+					worktree = base.root;
+				else continue;
 			}
-			if (worktree === base.root || (hint !== undefined && hint !== worktree))
-				return null;
-			hint = worktree;
-			writes++;
+			lastHome = worktree === base.root;
+			runCount = runPath === worktree ? runCount + 1 : 1;
+			runPath = worktree;
 		}
-		return writes >= 3 ? (hint ?? null) : null;
+		if (lastHome) return null;
+		return runCount >= 3 ? runPath : undefined;
 	});

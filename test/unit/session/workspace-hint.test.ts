@@ -1,6 +1,6 @@
 // Failure modes: reads counted as writes; lifecycle events counted repeatedly;
 // stale inputs or the wrong turn folder used; ambiguous cd targets guessed;
-// split or too few writes; writes in the recorded folder ignored; unrelated
+// short trailing runs replacing hints; trailing home writes ignored; unrelated
 // repositories counted; aliases split one worktree; deleted paths lost;
 // committed dismissals undone by interruption; failed commits lose dismissals.
 import { execFileSync } from "node:child_process";
@@ -333,10 +333,10 @@ describe("workspace hint resolution against real worktrees", () => {
 	let observe: (
 		paths: readonly string[],
 		recorded?: string,
-	) => Promise<string | null>;
+	) => Promise<string | null | undefined>;
 	let observeCandidates: (
 		candidates: readonly { path: string; recordedWorkspace: string }[],
-	) => Promise<string | null>;
+	) => Promise<string | null | undefined>;
 	let runWorkspaceTest: <A, E>(
 		test: Effect.Effect<
 			A,
@@ -462,22 +462,34 @@ describe("workspace hint resolution against real worktrees", () => {
 		if (folders) rmSync(folders.root, { recursive: true, force: true });
 	});
 
-	it("split writes must never produce a hint", async () => {
+	it("a short trailing run gives no opinion", async () => {
 		expect(
 			await observe([...writes(folders.b), ...writes(folders.c, 1)]),
-		).toBeNull();
+		).toBeUndefined();
+	});
+
+	it("three trailing writes produce a hint after writes in another worktree", async () => {
+		expect(await observe([...writes(folders.c, 1), ...writes(folders.b)])).toBe(
+			folders.b,
+		);
 	});
 
 	it.each([
-		1, 2,
+		0, 1, 2,
 	])("fewer than three writes must not produce a hint: %s", async (count) => {
-		expect(await observe(writes(folders.b, count))).toBeNull();
+		expect(await observe(writes(folders.b, count))).toBeUndefined();
 	});
 
-	it("a write in the recorded workspace must cancel a hint", async () => {
+	it("a trailing home write clears a hint", async () => {
 		expect(
 			await observe([...writes(folders.b), ...writes(folders.main, 1)]),
 		).toBeNull();
+	});
+
+	it("three trailing writes produce a hint after creating a worktree from home", async () => {
+		expect(
+			await observe([...writes(folders.main, 1), ...writes(folders.b)]),
+		).toBe(folders.b);
 	});
 
 	it("a write in an unrelated nested repository inside the recorded workspace must cancel a hint", async () => {
@@ -547,7 +559,7 @@ describe("workspace hint resolution against real worktrees", () => {
 		expect(await observeCandidates(collected)).toBeNull();
 	});
 
-	it("a write in its own recorded workspace must cancel a hint across an agent declaration", async () => {
+	it("home and away writes at the same path form one run across an agent declaration", async () => {
 		const before = join(folders.main, "before.ts");
 		const events = [
 			...tools([{ tool: "Write", filePath: before, content: "b" }]),
@@ -576,7 +588,7 @@ describe("workspace hint resolution against real worktrees", () => {
 			...hintCandidates([before], folders.main),
 			...hintCandidates(writes(folders.main), folders.b),
 		]);
-		expect(await observeCandidates(collected)).toBeNull();
+		expect(await observeCandidates(collected)).toBe(folders.main);
 	});
 
 	it("paths outside the project's repository must neither count nor cancel a hint", async () => {
@@ -589,7 +601,7 @@ describe("workspace hint resolution against real worktrees", () => {
 		).toBe(folders.b);
 		expect(
 			await observe([...writes(folders.b, 2), ...writes(folders.otherRepo)]),
-		).toBeNull();
+		).toBeUndefined();
 	});
 
 	it("relative paths must use the recorded workspace instead of the process cwd", async () => {
@@ -657,7 +669,7 @@ describe("workspace hint resolution against real worktrees", () => {
 			],
 			folders.main,
 		);
-		expect(await observeCandidates(paths)).toBeNull();
+		expect(await observeCandidates(paths)).toBeUndefined();
 	});
 
 	it("three writes back to the main checkout must produce the reverse hint", async () => {
