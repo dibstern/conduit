@@ -2,8 +2,8 @@
 	"ticket": "conduit-test-extp.4",
 	"passed": true,
 	"migration": {
-		"id": "0060_legacy_forks",
-		"applied": [59, 60]
+		"id": "0061_legacy_forks",
+		"applied": [59, 60, 61]
 	},
 	"selection": {
 		"legacyForks": [
@@ -783,7 +783,7 @@
 		"rerun": 3498805
 	},
 	"idempotence": {
-		"applied": [60],
+		"applied": [61],
 		"placementCompared": 14185,
 		"sidebarCompared": 187,
 		"placementDifferences": [],
@@ -792,7 +792,7 @@
 	},
 	"disk": {
 		"minimumFreeBytes": 8589934592,
-		"minimumObservedFreeBytes": 61716135936,
+		"minimumObservedFreeBytes": 21395431424,
 		"checks": 327,
 		"fullCopies": 3
 	},

@@ -26,7 +26,10 @@ import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
 import { PersistenceProjectTag } from "../src/lib/domain/persistence/Services/persistence-service.js";
-import { makeEffectSqlMigrator } from "../src/lib/persistence/effect/migrations.js";
+import {
+	effectMigrationEntries,
+	makeEffectSqlMigrator,
+} from "../src/lib/persistence/effect/migrations.js";
 import { makeProjectionRunnerEffect } from "../src/lib/persistence/effect/projection-runner-effect.js";
 import {
 	makeProjectorCursorEffect,
@@ -45,6 +48,14 @@ const { values } = parseArgs({
 		},
 	},
 });
+
+// Found by name: after a renumber, a hard-coded id would rerun a neighbour,
+// which passes as a no-op instead of proving legacy_forks is idempotent.
+const legacyForksKey = Object.keys(effectMigrationEntries).find((key) =>
+	key.endsWith("_legacy_forks"),
+);
+assert(legacyForksKey, "No legacy_forks migration");
+const legacyForksId = Number(legacyForksKey.slice(0, 4));
 
 function safePath(filename: string): string {
 	const absolute = resolve(filename);
@@ -144,11 +155,13 @@ function copyStore(source: string, target: string): void {
 		),
 	);
 	for (const suffix of files) {
-		copyFileSync(
-			safePath(`${source}${suffix}`),
-			`${target}${suffix}`,
-			constants.COPYFILE_EXCL,
-		);
+		const from = safePath(`${source}${suffix}`);
+		const to = `${target}${suffix}`;
+		assert(!existsSync(to), `Refusing to overwrite ${to}`);
+		// Clones cost disk only for the pages a copy rewrites. Node cannot clone
+		// on macOS (FICLONE silently copies), so APFS goes through cp -c.
+		if (process.platform === "darwin") execFileSync("cp", ["-c", from, to]);
+		else copyFileSync(from, to, constants.COPYFILE_FICLONE);
 	}
 }
 
@@ -229,7 +242,7 @@ async function migrate(filename: string, repairLedger = false) {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql.unsafe("PRAGMA foreign_keys = OFF");
 			if (repairLedger) {
-				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 60`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = ${legacyForksId}`;
 			}
 			return yield* makeEffectSqlMigrator();
 		}).pipe(Effect.provide(sqliteLayer(filename)), Effect.scoped),
@@ -589,7 +602,8 @@ async function verify() {
 		const messagesUnchanged = isDeepStrictEqual(sourceMessages, afterMessages);
 		const partsUnchanged = isDeepStrictEqual(sourceParts, afterParts);
 		const eventsUnchanged = isDeepStrictEqual(sourceEvents, afterEvents);
-		const rerunApplied = reapplied.length === 1 && reapplied[0]?.[0] === 60;
+		const rerunApplied =
+			reapplied.length === 1 && reapplied[0]?.[0] === legacyForksId;
 		const passed =
 			placementDifferences.length === 0 &&
 			sidebarDifferences.length === 0 &&
@@ -612,7 +626,7 @@ async function verify() {
 			ticket: "conduit-test-extp.4",
 			passed,
 			migration: {
-				id: "0061_legacy_forks",
+				id: legacyForksKey,
 				applied: applied.map(([id]) => id),
 			},
 			selection: {
