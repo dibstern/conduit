@@ -549,6 +549,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("Created", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -671,6 +672,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("OpenCode Session", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -772,6 +774,7 @@ describe("SessionManagerService", () => {
 					service.createSession("No persistence", {
 						account: {
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
@@ -1131,6 +1134,7 @@ describe("SessionManagerService", () => {
 					{
 						account: {
 							driver: "opencode",
+							usageEligible: false,
 							id: openCodeInstanceId,
 							name: "OpenCode",
 						},
@@ -1247,6 +1251,7 @@ describe("SessionManagerService", () => {
 				const session = yield* service.createSession("Named", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("work-oc"),
 						name: "Work OpenCode",
 					},
@@ -1335,6 +1340,7 @@ describe("SessionManagerService", () => {
 					service.createSession("OpenCode Session", {
 						account: {
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},
@@ -2371,6 +2377,7 @@ describe("SessionManagerService", () => {
 				yield* service.createSession("Session 3", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},

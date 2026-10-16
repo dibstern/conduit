@@ -244,6 +244,7 @@ export type DaemonRpcName =
 	| "GetDefaultGroupingMode"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
+	| "SetCursorUsageKeychain"
 	| "ScanNow"
 	| "DetectProxy"
 	| "FindFolders"

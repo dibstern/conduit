@@ -840,6 +840,7 @@ export function makeMockAccountDirectory(
 		},
 		{
 			driver: "opencode",
+			usageEligible: false,
 			id: AccountIdSchema.make("opencode"),
 			name: "OpenCode",
 		},

@@ -28,6 +28,7 @@ import {
 	makeConfigWriterLive,
 } from "../domain/daemon/Layers/config-persistence-layer.js";
 import { makeStandaloneOpenCodeInstancesLive } from "../domain/daemon/Layers/opencode-instances-layer.js";
+import { makeConfiguredCursorUsage } from "../domain/daemon/Layers/usage-layer.js";
 import { makeWorktreeLive } from "../domain/daemon/Layers/worktree-layer.js";
 import {
 	AccountDirectory,
@@ -155,6 +156,7 @@ import {
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
+import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -336,8 +338,9 @@ export function createProjectRelayLayers({
 									Effect.succeed(defaultDaemonConfig()),
 								),
 							);
+							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
 							return {
-								...persisted,
+								...unchanged,
 								autoSettleAfterDays:
 									current.autoSettleAfterDays === undefined
 										? DEFAULT_AUTO_SETTLE_AFTER_DAYS
@@ -348,6 +351,9 @@ export function createProjectRelayLayers({
 								...(current.usageLimits !== undefined && {
 									usageLimits: current.usageLimits,
 								}),
+								...(current.cursorUsageBinding
+									? { cursorUsageBinding: current.cursorUsageBinding }
+									: {}),
 							};
 						}),
 					};
@@ -432,23 +438,24 @@ export function createProjectRelayLayers({
 		? Layer.sync(Usage, () => sharedUsage)
 		: Layer.scoped(
 				Usage,
-				Effect.flatMap(AccountDirectory, (directory) =>
-					makeUsage({
-						accounts: Effect.map(directory.list, (accounts) =>
-							accounts.flatMap((account) =>
-								account.driver === "claude" && account.usageEligible
-									? [
-											{
-												id: account.id,
-												harness: PROVIDER_DRIVERS[account.driver].usageHarness,
-												folder: account.folder,
-												...(account.env ? { env: account.env } : {}),
-											},
-										]
-									: [],
-							),
-						),
+				Effect.gen(function* () {
+					const directory = yield* AccountDirectory;
+					const configRef = yield* DaemonConfigRefTag;
+					const accountList = directory.list.pipe(
+						Effect.provideService(DaemonConfigRefTag, configRef),
+					);
+					const cursor = yield* makeConfiguredCursorUsage;
+					const usage = yield* makeUsage({
+						accounts: Effect.map(accountList, usageAccounts),
+						accountHarness: (id) =>
+							Effect.map(accountList, (accounts) => {
+								const account = accounts.find((account) => account.id === id);
+								return account
+									? PROVIDER_DRIVERS[account.driver].usageHarness
+									: undefined;
+							}),
 						readers: {
+							cursor: cursor.reader,
 							claude: makeClaudeUsageReader({
 								queryFactory: claudeSdk.query,
 								cwd: config.projectDir,
@@ -457,8 +464,9 @@ export function createProjectRelayLayers({
 									: {}),
 							}),
 						},
-					}),
-				),
+					});
+					return { ...usage, setCursorKeychain: cursor.setKeychain };
+				}),
 			).pipe(Layer.provide(daemonConfigLayer));
 	const loggerLayer = ProjectRelayLoggerLive.pipe(Layer.provide(configLayer));
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,

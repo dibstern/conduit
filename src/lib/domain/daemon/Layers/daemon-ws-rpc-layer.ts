@@ -748,6 +748,12 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
+			SetCursorUsageKeychain: (request) =>
+				run(
+					wsRpcHandlers
+						.SetCursorUsageKeychain(request)
+						.pipe(Effect.provideService(Usage, usage)),
+				),
 			ScanNow: (request) =>
 				run(
 					Effect.gen(function* () {

@@ -215,6 +215,7 @@ describe("applySessionCommand", () => {
 						]);
 						const forked = yield* forkOpenCodeSession("ses-parent", {
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						});
@@ -245,6 +246,7 @@ describe("applySessionCommand", () => {
 
 					const forked = yield* forkOpenCodeSession("ses-parent", {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					});
@@ -270,6 +272,7 @@ describe("applySessionCommand", () => {
 
 					const forked = yield* forkOpenCodeSession("ses-parent", {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					});
@@ -459,6 +462,7 @@ describe("applySessionCommand", () => {
 					"ses-parent",
 					{
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
@@ -542,6 +546,7 @@ describe("applySessionCommand", () => {
 							"ses-parent",
 							{
 								driver: "opencode",
+								usageEligible: false,
 								id: AccountIdSchema.make("opencode"),
 								name: "OpenCode",
 							},
@@ -572,6 +577,7 @@ describe("applySessionCommand", () => {
 							"ses-parent",
 							{
 								driver: "opencode",
+								usageEligible: false,
 								id: AccountIdSchema.make("opencode"),
 								name: "OpenCode",
 							},

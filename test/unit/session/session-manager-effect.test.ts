@@ -511,6 +511,7 @@ describe("SessionManager Effect", () => {
 				const session = yield* service.createSession("New", {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},

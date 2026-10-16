@@ -135,6 +135,7 @@ const READ_MODEL_PARITY_CASES: Record<ReadModelMutation, ParityCase> = {
 				yield* service.createSession(created.title, {
 					account: {
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("opencode"),
 						name: "OpenCode",
 					},
