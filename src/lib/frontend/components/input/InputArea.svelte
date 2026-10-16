@@ -8,9 +8,6 @@
 </script>
 
 <script lang="ts">
-	import { Schema } from "effect";
-	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
-	import { WorktreeCreationError } from "../../../contracts/worktree.js";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -43,7 +40,8 @@
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
-	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, followSessionBusy, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { send, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
@@ -66,7 +64,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, resizeImageIfNeeded } from "./input-utils.js";
-	import { findSession, isSessionBusy, isSessionSnoozed, sessionAttention, sessionState, switchToSession } from "../../stores/session.svelte.js";
+	import { findSession, isSessionBusy, isSessionSnoozed, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { placedSessionId } from "../../stores/transcript.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -77,7 +75,6 @@
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dismissToast, showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
-	import { rateLimitChatSend } from "../../stores/ws-send.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
 	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
@@ -179,7 +176,8 @@
 	// A queued prompt waits in the tray, so the transcript's last turn is the started one.
 	const turn = $derived(segmentTurns(currentChat().messages, isProcessing()).at(-1));
 	const paused = $derived(turn !== undefined && isPaused(turn));
-	const working = $derived(isProcessing() || paused || Boolean(currentSession && sessionAttention(currentSession) === "working"));
+	const turnControl = $derived(readTurn(sessionState.currentId));
+	const working = $derived(turnControl.working);
 	const elapsed = $derived.by(() => {
 		if (!turn) return undefined;
 		if (paused) return workingTime(turn, Date.now());
@@ -566,6 +564,11 @@
 	const steerPending = $derived(currentChat().transcript?.pending.some((input) => input.state === "steering") ?? false);
 	/** The last steer the server refused, shown beside the input box until the draft changes. */
 	let steerRefusal = $state<{ sessionId: string; reason: SteerBlocker } | null>(null);
+	let dismissedRefusal = $state.raw<typeof turnControl.refusal>(null);
+	const visibleRefusal = $derived(
+		steerRefusal?.sessionId === sessionState.currentId ? steerRefusal
+			: turnControl.refusal !== dismissedRefusal ? turnControl.refusal : null,
+	);
 	const STEER_REFUSALS: Record<SteerBlocker, string> = {
 		no_steering: "This provider can't steer.",
 		prompt_open: "Answer the open prompt first.",
@@ -623,6 +626,7 @@
 		}
 		lastLocalEditAt = Date.now();
 		steerRefusal = null;
+		dismissedRefusal = turnControl.refusal;
 
 		// Debounced outgoing input sync to other tabs
 		if (inputSyncTimer) clearTimeout(inputSyncTimer);
@@ -739,23 +743,21 @@
 		startingSideThread = true;
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
-			const { sessionId } = await rpc("StartSideThread", {
-				sessionId: parentSessionId,
-				title: question,
+			const outcome = await send({
+				sideThread: { sessionId: parentSessionId, title: question },
+				delivery: "queue",
 				inputId,
 				text: await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug),
 				...(images.length > 0 ? { images } : {}),
-				originId: getBrowserClientId(),
+				onCreated: (sessionId) => {
+					sideThreadAttempt = undefined;
+					if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
+						clearComposer();
+						switchToSession(sessionId, projectSlug ?? undefined);
+					}
+				},
 			});
-			sideThreadAttempt = undefined;
-			if (sessionState.currentId === parentSessionId && inputText === draftText && pendingImages === draftImages) {
-				clearComposer();
-				switchToSession(sessionId, projectSlug ?? undefined);
-			}
-			return true;
-		} catch (error) {
-			toastFailure("Failed to start Side Thread")(error);
-			return false;
+			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
 		}
@@ -803,26 +805,17 @@
 			? pendingImages.map((img) => img.dataUrl)
 			: undefined;
 
-		// Always send immediately: conduit queues a busy send in the session's
-		// tray, and the transcript shows the message once the adapter places it.
-		let sid = sessionState.currentId;
-		// A draft is created in the project its chip names, which can differ
-		// from the attached one until the attach round trip lands.
-		const projectSlug = sid ? findSession(sid)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!sid) {
-			if (!projectSlug) {
-				showToast("No active project", { variant: "error" });
-				return false;
-			}
-			// First send with no active session: create one bound to the selected
-			// harness instance (the picker's pre-creation draft), then send into it.
-			// A second Enter before the create lands would make a second session.
-			if (creatingSession) return false;
-			creatingSession = true;
-			let unsent: { text: string; images: typeof pendingImages } | undefined;
-			try {
-				// Sending before the default arrives must use the same workspace as
-				// the chip. An explicit choice already supplies that workspace.
+		const sentFromSessionId = sessionState.currentId;
+		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
+		if (!sentFromSessionId && creatingSession) return false;
+		if (!sentFromSessionId) creatingSession = true;
+		try {
+			let draft: Parameters<typeof rpc<"CreateSession">>[1] | undefined;
+			if (!sentFromSessionId) {
+				if (!projectSlug) {
+					showToast("No active project", { variant: "error" });
+					return false;
+				}
 				const context = sessionModeContext;
 				const resolution = pendingDraftSessionMode;
 				if (!draftModeChosen) {
@@ -846,91 +839,50 @@
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
+				draft = { ...payload, ...(draftNewWorktree ? { newWorktree: true } : {}) };
 				requestDraftPreWarm();
-				// The message leaves the composer now and shows in the pane until
-				// the new session places it; a failed create puts it back.
-				if (textOverride === undefined) {
-					unsent = { text: inputText, images: pendingImages };
-					clearComposer();
-				}
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
-				const created = await rpc("CreateSession", {
-					...payload,
-					...(draftNewWorktree ? { newWorktree: true } : {}),
-				});
-				draftId = crypto.randomUUID();
-				sid = created.sessionId;
-				draftSend.sessionId = sid;
-				storeNewSessionDraft("");
-				// Don't yank someone who opened another session while this one was created.
-				if (!sessionState.currentId) switchToSession(sid, projectSlug);
-			} catch (error) {
-				if (Schema.is(WorktreeCreationError)(error) || Schema.is(WorkspaceMoveError)(error)) {
-					toastFailure("Could not start session")(error);
-				} else {
-					toastFailure("Failed to create session")(error);
-				}
-				draftSend.message = null;
-				if (unsent && !sessionState.currentId && !inputText) {
+			}
+			const unsent = { text: inputText, images: pendingImages };
+			if (!isProcessing()) requestScrollOnNextContent();
+			steerRefusal = null;
+			dismissedRefusal = null;
+			if (textOverride === undefined && delivery !== "steer") clearComposer();
+			const outcome = await send({
+				text: messageText,
+				delivery,
+				...(imageUrls ? { images: imageUrls } : {}),
+				...(draft ? {
+					draft,
+					onCreated: (sessionId: string) => {
+						draftId = crypto.randomUUID();
+						storeNewSessionDraft("");
+						// Don't yank someone who opened another session during creation.
+						if (!sessionState.currentId) switchToSession(sessionId, projectSlug ?? undefined);
+					},
+				} : { sessionId: sentFromSessionId! }),
+			});
+			const sentToSessionId = sentFromSessionId ?? draftSend.sessionId;
+			if (outcome.kind === "failed" || outcome.kind === "refused") {
+				const sameScope = sentToSessionId ? sessionState.currentId === sentToSessionId
+					: !sessionState.currentId && getDraftProject() === projectSlug;
+				if (textOverride === undefined && sameScope && !inputText && pendingImages.length === 0) {
 					inputText = unsent.text;
 					cursorPos = unsent.text.length;
 					pendingImages = unsent.images;
 				}
 				return false;
-			} finally {
-				creatingSession = false;
 			}
-		}
-		const commandId = crypto.randomUUID();
-		if (!isProcessing()) requestScrollOnNextContent();
-		const sentToSessionId = sid;
-		// An input the inbox hands straight off starts the sender's turn now; the
-		// row reports busy once the provider picks it up and ends the turn when it
-		// goes idle (ni8.35). A queued, paused or reset-held input starts nothing.
-		const { activity, messages } = getOrCreateSessionSlot(sid);
-		const startsTurn = activity.phase === "idle" && !isSessionBusy(sid) && sendsAt === undefined
-			&& !messages.transcript?.paused && !messages.transcript?.pending.length;
-		if (startsTurn) {
-			phaseToProcessing(activity);
-			activity.awaitingInputId = commandId;
-		}
-		steerRefusal = null;
-		const sent = new Promise<boolean>((resolve) => rateLimitChatSend(() => {
-			rpc("input.submit", {
-				sessionId: sentToSessionId,
-				text: messageText,
-				inputId: commandId,
-				delivery,
-				...(imageUrls ? { images: imageUrls } : {}),
-				originId: getBrowserClientId(),
-			}).then((response) => {
-				if (!response.ok) {
-					if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
-					steerRefusal = { sessionId: sentToSessionId, reason: response.reason };
-					return resolve(false);
-				}
-				if (response.sessionId !== sentToSessionId && sessionState.currentId === sentToSessionId)
-					switchToSession(response.sessionId, projectSlug ?? undefined, undefined, { replace: true });
-				resolve(true);
-			}).catch((error) => {
-				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
-				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
-				toastFailure("Failed to send message")(error);
-				resolve(false);
-			});
-		}));
-		if (delivery === "steer") {
-			// A refused steer admits nothing, so its draft stays until the server takes it.
-			if (!(await sent)) return false;
-			if (sessionState.currentId !== sentToSessionId) {
-				inputDrafts.delete(sentToSessionId);
-				return true;
+			if (delivery === "steer") {
+				if (sessionState.currentId !== sentToSessionId) {
+					if (sentToSessionId) inputDrafts.delete(sentToSessionId);
+				} else if (textOverride === undefined) clearComposer();
 			}
+			return true;
+		} finally {
+			if (!sentFromSessionId) creatingSession = false;
 		}
-		if (textOverride !== undefined) return true;
-		clearComposer();
-		return true;
 	}
 
 	function clearComposer() {
@@ -1344,11 +1296,11 @@
 			onSteerRefused={(reason) => { if (sessionState.currentId) steerRefusal = { sessionId: sessionState.currentId, reason }; }}
 		/>
 
-		{#if steerRefusal && steerRefusal.sessionId === sessionState.currentId}
+		{#if visibleRefusal}
 			<div data-testid="composer-steer-refused" role="status" class="flex items-center gap-[7px] mb-2 rounded-2xl border border-border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary">
 				<Icon name="info" size={14} class="shrink-0 text-status-amber" />
-				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[steerRefusal.reason]}</span>
-				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; }} />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-amber">Not steered.</b> {STEER_REFUSALS[visibleRefusal.reason]}</span>
+				<Button variant="ghost" size="content" tone="muted" hoverFill="none" iconOnly icon="x" iconSize={12} ariaLabel="Dismiss" class="size-5 shrink-0" onclick={() => { steerRefusal = null; dismissedRefusal = turnControl.refusal; }} />
 			</div>
 		{/if}
 
@@ -1547,7 +1499,7 @@
 					     something to steer with; otherwise stop stands alone. -->
 					<!-- No tone supplies text-white without a hover step; inherit leaves that colour local.
 					     transition-colors replaces the arbitrary transition; 150ms is its default. -->
-					{#if !isProcessing() || canSend}
+					{#if !working || canSend}
 					{#if hasSendMenu}
 					<div data-testid="composer-send-control" class="inline-flex shrink-0 items-center rounded-full border font-mono text-[10.5px] whitespace-nowrap {sendMode === 'switch' ? 'border-border text-text' : 'border-status-red/50 text-status-red'} {sessionViewState.compact ? 'h-[32px]' : 'h-[26px]'}">
 						<Button
@@ -1629,7 +1581,7 @@
 					/>
 					{/if}
 					{/if}
-					{#if isProcessing()}
+					{#if working}
 						<Button
 							variant="ghost"
 							size="content"

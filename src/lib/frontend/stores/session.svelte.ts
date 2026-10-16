@@ -59,6 +59,7 @@ import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
+import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
 import { showToast, updateContextPercent } from "./ui.svelte.js";
 import { projectAttachedListeners } from "./ws-listeners.js";
 
@@ -571,6 +572,7 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	const next = reduce(familyApplied, change, (row) => row.id);
 	if (next === familyApplied) return;
 	const previousRows = familyApplied.rows;
+	const reconnect = familyApplied.floor !== undefined;
 	// A child is not a shell row, so its settings follow the family feed.
 	const currentId = clientSession.currentId;
 	const viewed = currentId === null ? undefined : next.rows.get(currentId);
@@ -578,10 +580,14 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (viewed?.parentID && viewed !== previous)
 		followSessionModelSettings(viewed, previous);
 	familyApplied = next;
+	if (change._tag === "upsert") applyTurnRow(change.item);
+	if (change._tag === "remove" && change.deleted === true)
+		deleteTurn(change.id);
 	// The shell feed carries roots only, so a child's family row is the only
 	// status it has. Key on parentID, not shell membership: a root that gains a
 	// parent leaves the shell, and its family row is the one kept current.
 	if (change._tag === "snapshot") {
+		if (reconnect) rebaseTurns([...previousRows.keys(), ...next.rows.keys()]);
 		// A bounded rebase can omit a child that finished while disconnected.
 		for (const row of previousRows.values()) {
 			if (row.parentID === undefined || next.rows.has(row.id)) continue;
@@ -590,8 +596,9 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
+			applyTurnRow(row);
 			if (row.parentID === undefined) continue;
-			followSessionBusy(row.id, isBusy(row));
+			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
 		}
@@ -603,7 +610,7 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 			busy !== isBusy(previousRow) ||
 			(!busy && turnEnded(previousRow, change.item))
 		)
-			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
+			followSessionBusy(change.item.id, busy, change.item.lastTurnEndVersion);
 		if (change.item.compacting !== previousRow?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
 		if (change.item.retrying !== previousRow?.retrying)
