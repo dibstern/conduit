@@ -889,7 +889,6 @@ describe("shared-store relay project scope", () => {
 		const registry = new ProviderRegistry([
 			{
 				providerId: "claude",
-				steering: false,
 				discoverEffect: () => Effect.die("Unexpected discovery"),
 				sendTurnEffect: () =>
 					Effect.die("Continuation uses ProviderTurnService"),
