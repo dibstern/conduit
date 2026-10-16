@@ -8,7 +8,6 @@ import {
 	SessionSetupOutputPayloadSchema,
 	SessionSetupStartedPayloadSchema,
 } from "./project-setup.js";
-import type { ProviderWorkspaceChangedData } from "./providers/provider-runtime-event.js";
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
@@ -602,7 +601,6 @@ export interface QuestionResolvedPayload {
  * Map from event type to its payload shape.
  */
 export interface EventPayloadMap {
-	"workspace.changed": ProviderWorkspaceChangedData;
 	"message.created": MessageCreatedPayload;
 	"message.removed": MessageRemovedPayload;
 	"message.part.removed": MessagePartRemovedPayload;

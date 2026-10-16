@@ -75,6 +75,7 @@ const recordingConnect = () => {
 				| ((requestId: RpcMessage.RequestId) => Effect.Effect<void>)
 				| undefined;
 			const built = yield* RpcClient.makeNoSerialization(WsRpcGroup, {
+				flatten: true,
 				onFromClient: ({ message }) =>
 					message._tag === "Request"
 						? Effect.suspend(() => {
@@ -134,13 +135,13 @@ describe("shared two-socket RPC client in memory", () => {
 				Effect.gen(function* () {
 					const sockets = yield* clients.forProject("alpha");
 					yield* Effect.exit(
-						sockets.stream.SetLogLevel({
+						sockets.stream("SetLogLevel", {
 							projectSlug: "alpha",
 							level: "debug",
 						}),
 					);
 					yield* Effect.exit(
-						sockets.control.ViewSession({
+						sockets.control("ViewSession", {
 							projectSlug: "alpha",
 							sessionId: "s1",
 							originId: "o1",
@@ -353,7 +354,7 @@ describe("shared two-socket RPC client over WebSockets", () => {
 
 			yield* Effect.forkScoped(
 				Effect.exit(
-					control.SetLogLevel({ projectSlug: "alpha", level: "debug" }),
+					control("SetLogLevel", { projectSlug: "alpha", level: "debug" }),
 				),
 			);
 			yield* Deferred.await(frame).pipe(
@@ -422,8 +423,11 @@ describe("shared two-socket RPC client over WebSockets", () => {
 					yield* Effect.forkScoped(
 						Effect.all(
 							[
-								control.SetLogLevel({ projectSlug: "alpha", level: "debug" }),
-								stream.SetLogLevel({ projectSlug: "alpha", level: "debug" }),
+								control("SetLogLevel", {
+									projectSlug: "alpha",
+									level: "debug",
+								}),
+								stream("SetLogLevel", { projectSlug: "alpha", level: "debug" }),
 							],
 							{ concurrency: 2 },
 						).pipe(Effect.ignore),
@@ -515,13 +519,14 @@ describe("shared two-socket RPC client over WebSockets", () => {
 					if (placed || connectionState.status !== "connected") return placed;
 					placed = true;
 					Effect.runFork(
-						control
-							.SetLogLevel({ projectSlug: "alpha", level: "debug" })
-							.pipe(
-								Effect.catchAll((error) =>
-									Deferred.succeed(outcome, String(error)),
-								),
+						control("SetLogLevel", {
+							projectSlug: "alpha",
+							level: "debug",
+						}).pipe(
+							Effect.catchAll((error) =>
+								Deferred.succeed(outcome, String(error)),
 							),
+						),
 					);
 					return placed;
 				};

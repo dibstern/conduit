@@ -4,12 +4,12 @@
 
 import { readFileSync } from "node:fs";
 import * as net from "node:net";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import {
 	deserializeRecent,
 	filterExistingProjects,
 } from "../daemon/recent-projects.js";
+import { DEFAULT_CONFIG_DIR } from "../env.js";
 import type { PromptOptions, TextPromptOptions } from "./prompts.js";
 import {
 	promptMultiSelect,
@@ -54,7 +54,7 @@ async function defaultIsPortFree(port: number): Promise<boolean> {
 	});
 }
 
-/** Default recent projects loader: reads ~/.conduit/recent.json. */
+/** Default recent projects loader: reads recent.json in the config dir (DEFAULT_CONFIG_DIR). */
 function defaultGetRecentProjects(): Array<{
 	path: string;
 	slug: string;
@@ -62,7 +62,7 @@ function defaultGetRecentProjects(): Array<{
 	lastUsed: number;
 }> {
 	try {
-		const recentPath = join(homedir(), ".conduit", "recent.json");
+		const recentPath = join(DEFAULT_CONFIG_DIR, "recent.json");
 		const data = readFileSync(recentPath, "utf-8");
 		const projects = filterExistingProjects(deserializeRecent(data));
 		return projects.map((p) => ({
