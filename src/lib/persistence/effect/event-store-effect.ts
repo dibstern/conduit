@@ -204,8 +204,13 @@ export const makeEventStoreEffect = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const results: StoredEvent[] = [];
 				for (const event of events) {
+					// Re-projecting a child seed would reset a renamed title. OpenCode
+					// seeds still return their stored row for projection recovery.
 					if (
 						event.type === "message.snapshot" ||
+						(event.type === "session.created" &&
+							event.provider === "claude" &&
+							event.data.parentId !== undefined) ||
 						(event.type === "session.compaction" &&
 							event.provider === "opencode" &&
 							event.data.state === "completed")
