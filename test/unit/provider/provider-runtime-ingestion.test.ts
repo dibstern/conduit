@@ -56,6 +56,7 @@ function runtimeEvent(event: Record<string, unknown>): ProviderRuntimeEvent {
 }
 
 function makeHarness(options?: {
+	readonly existingSession?: boolean;
 	readonly appendEffect?: (
 		event: CanonicalEvent,
 		stored: StoredEvent,
@@ -148,7 +149,14 @@ function makeHarness(options?: {
 		nextVersion: Effect.succeed(0),
 	} satisfies ProjectionRunnerEffect;
 
-	const executeSql = vi.fn(() => Effect.succeed([]));
+	const executeSql = vi.fn((strings: TemplateStringsArray) =>
+		Effect.succeed(
+			options?.existingSession &&
+				strings.join("").includes("SELECT id FROM sessions")
+				? [{ id: "session-123" }]
+				: [],
+		),
+	);
 	const sql = executeSql as unknown as SqlClient.SqlClient & {
 		withTransaction: <A, E, R>(
 			effect: Effect.Effect<A, E, R>,
@@ -178,8 +186,8 @@ function makeHarness(options?: {
 }
 
 describe("ProviderRuntimeIngestion", () => {
-	it("publishes ingested provider output to relay clients through the ingestion owner", async () => {
-		const harness = makeHarness();
+	it("publishes only turn-ended alerts through the ingestion owner", async () => {
+		const harness = makeHarness({ existingSession: true });
 		const published: unknown[] = [];
 		const layer = makeProviderRuntimeIngestionLive({
 			relayPublisher: {
@@ -205,17 +213,24 @@ describe("ProviderRuntimeIngestion", () => {
 						},
 					}),
 				);
+				yield* ingestion.ingest(
+					runtimeEvent({
+						eventId: "runtime-turn-completed",
+						type: "turn.completed",
+						turnId: "turn-1",
+						data: { messageId: "message-1" },
+					}),
+				);
 				yield* ingestion.drain();
 			}).pipe(Effect.provide(layer)),
 		);
 
 		expect(published).toEqual([
 			{
-				type: "delta",
+				type: "done",
 				sessionId: "session-123",
-				text: "hello",
-				messageId: "message-1",
-				partId: "text-1",
+				code: 0,
+				alertId: '["session-123","message-1","done"]',
 			},
 		]);
 	});
@@ -272,7 +287,7 @@ describe("ProviderRuntimeIngestion", () => {
 			expectedRelayCalls: 1,
 		},
 	])("$name", async ({ options, expectedBusCalls, expectedRelayCalls }) => {
-		const harness = makeHarness();
+		const harness = makeHarness({ existingSession: true });
 		const busPublish = vi.fn(() => Effect.void);
 		const relayPublish = vi.fn(() => Effect.void);
 		const busLayer = Layer.succeed(SessionEventBusTag, {
@@ -291,13 +306,11 @@ describe("ProviderRuntimeIngestion", () => {
 				yield* ingestion.ingestBatch(
 					[
 						runtimeEvent({
-							eventId: "publication-matrix-delta",
-							type: "text.delta",
+							eventId: "publication-matrix-completed",
+							type: "turn.completed",
 							turnId: "turn-1",
 							data: {
 								messageId: "message-1",
-								partId: "text-1",
-								text: "hello",
 							},
 						}),
 					],

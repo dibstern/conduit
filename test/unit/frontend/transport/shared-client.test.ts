@@ -1,16 +1,14 @@
 // Tests for the shared two-socket RPC client, at two depths.
 //
 // `describe("… in memory")` is ni8.5 seam 1: it supplies its own `WsRpcConnect`
-// built on `RpcClient.makeNoSerialization`, so it observes exactly what this
+// served by the real JSON RPC engine, so it observes exactly what this
 // module owns — how many transports exist, which traffic class a caller's
-// request left on, and when they are closed. Encoding is out of scope there by
-// construction (that is seam 2, S-13).
+// request left on, and when they are closed. Replies are encoded by the contract schemas.
 //
 // `describe("… over WebSockets")` drives the real `WsRpcClientsLayer` against a
 // stubbed `globalThis.WebSocket`, because the in-memory seam cannot see whether
 // the protocol's socket outlives the call that built the client.
 
-import { RpcClient, type RpcMessage } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Schedule, TestClock } from "effect";
 import { afterAll, beforeAll, beforeEach, expect, vi } from "vitest";
@@ -27,7 +25,7 @@ import {
 	WsRpcClientsLayer,
 	type WsRpcConnect,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
-import { WsRpcGroup } from "../../../../src/lib/frontend/transport/ws-rpc.js";
+import { makeRpcWire } from "../../../helpers/rpc-wire.js";
 
 /** Marks the stub response so a completed call is distinguishable from a hang. */
 const STUB = "shared-client-test-stub";
@@ -71,27 +69,18 @@ const recordingConnect = () => {
 				}),
 			);
 
-			let respond:
-				| ((requestId: RpcMessage.RequestId) => Effect.Effect<void>)
-				| undefined;
-			const built = yield* RpcClient.makeNoSerialization(WsRpcGroup, {
-				flatten: true,
-				onFromClient: ({ message }) =>
-					message._tag === "Request"
-						? Effect.suspend(() => {
-								transport.tags.push(message.tag);
-								return respond?.(message.id) ?? Effect.void;
-							})
-						: Effect.void,
-			});
-			respond = (requestId) =>
-				built.write({
-					_tag: "Exit",
-					clientId: 0,
-					requestId,
-					exit: Exit.die(STUB),
-				});
-			return built.client;
+			const fail = () => {
+				throw STUB;
+			};
+			return yield* makeRpcWire(
+				{ SetLogLevel: fail, ViewSession: fail },
+				{
+					beforeSend: (frame) =>
+						Effect.sync(() => {
+							if (frame._tag === "Request") transport.tags.push(frame.tag);
+						}),
+				},
+			).connect({ url, trafficClass });
 		});
 
 	return { transports, connect };
