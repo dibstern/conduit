@@ -16,7 +16,7 @@
 **No issues found in:** Insufficient Test Coverage (AP-17's 5 test cases cover the right paths, assuming finding #2 is resolved to make them functional).
 
 **Key source files examined:**
-- `/Users/dstern/src/personal/conduit/src/lib/cli/tls.ts` -- `ensureCerts` returns `Promise<TlsCerts | null>` (line 223); `TlsCerts` has `key`, `cert`, `caRoot`, `caCertPem`, `caCertDer` (lines 17-25)
-- `/Users/dstern/src/personal/conduit/src/lib/effect/daemon-config.ts` -- `DaemonEnvConfig` with `hostExplicit: boolean` (line 20)
-- `/Users/dstern/src/personal/conduit/src/lib/effect/daemon-main.ts:1055-1082` -- imperative TLS block being replaced
-- `/Users/dstern/src/personal/conduit/docs/plans/2026-05-07-daemon-effect-phase8-plan.md` -- Task 5 (lines 596-675), amendments (lines 1296-1322), Task 1 `DaemonRuntimeConfig` (lines 156-196, 1205-1218)
+- `~/src/personal/conduit/src/lib/cli/tls.ts` -- `ensureCerts` returns `Promise<TlsCerts | null>` (line 223); `TlsCerts` has `key`, `cert`, `caRoot`, `caCertPem`, `caCertDer` (lines 17-25)
+- `~/src/personal/conduit/src/lib/effect/daemon-config.ts` -- `DaemonEnvConfig` with `hostExplicit: boolean` (line 20)
+- `~/src/personal/conduit/src/lib/effect/daemon-main.ts:1055-1082` -- imperative TLS block being replaced
+- `~/src/personal/conduit/docs/plans/2026-05-07-daemon-effect-phase8-plan.md` -- Task 5 (lines 596-675), amendments (lines 1296-1322), Task 1 `DaemonRuntimeConfig` (lines 156-196, 1205-1218)
