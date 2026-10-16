@@ -253,7 +253,7 @@ test("creates reach every sidebar under streaming write load", async ({
 		);
 		debuggedSessionId = await setupDriver.createSession("Latency stream 0");
 		await harness.terminate();
-		fixture = await seedSessionLoadFixture(harness.projectStorePath(), {
+		fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
 			projectId: "process-test",
 		});
 		await harness.restart({
@@ -312,7 +312,7 @@ test("creates reach every sidebar under streaming write load", async ({
 				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
 			).toBeVisible({ timeout: 30_000 });
 		}
-		const database = new DatabaseSync(harness.projectStorePath(), {
+		const database = new DatabaseSync(harness.daemonStorePath(), {
 			readOnly: true,
 		});
 		try {
@@ -640,14 +640,14 @@ test("overflow catches up every sidebar through create and delete bursts", async
 	let backgroundTicks = 0;
 	try {
 		await harness.terminate();
-		await seedSessionLoadFixture(harness.projectStorePath(), {
+		await seedSessionLoadFixture(harness.daemonStorePath(), {
 			projectId: "process-test",
 		});
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
 			metricsFile,
-			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
+			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "2" },
 		});
 		const driver = await harness.connect(
 			undefined,
@@ -686,7 +686,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
 			).toBeVisible({ timeout: 30_000 });
 		}
-		const database = new DatabaseSync(harness.projectStorePath(), {
+		const database = new DatabaseSync(harness.daemonStorePath(), {
 			readOnly: true,
 		});
 		try {
@@ -845,7 +845,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 						devices: 4,
 						creates: 20,
 						deletes: 5,
-						advanceBusCapacity: 1,
+						advanceBusCapacity: 2,
 					},
 					phaseStart,
 					phaseEnd,

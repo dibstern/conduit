@@ -1,14 +1,13 @@
-// This must run outside the socket-restricted sandbox. The real daemon writes
-// both histories; only after shutdown does the test process run the import.
+// Legacy fixtures enter through daemon startup; offline copies exercise import failures.
 import {
 	copyFileSync,
 	existsSync,
-	mkdirSync,
 	readFileSync,
 	realpathSync,
 	writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Effect } from "effect";
 import {
 	importRegisteredProjectStores,
@@ -16,6 +15,7 @@ import {
 } from "../../../src/lib/persistence/migrations/daemon-store-import.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import {
+	createLegacyDaemonFixture,
 	daemonStoreAssertions,
 	daemonStoreManifest,
 	type ProjectManifest,
@@ -38,14 +38,14 @@ const initial = {
 	passed: false,
 };
 
-test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
+test.use({ startHarness: false });
 
 test.beforeEach(() => {
 	writeImportArtifact(artifact, initial);
 	writeImportArtifact(failureArtifact, { runs: [], passed: false });
 });
 
-test("imports both daemon-written project histories after shutdown", async ({
+test("imports both legacy project histories before the first daemon start", async ({
 	harness,
 }, testInfo) => {
 	const evidence: {
@@ -68,36 +68,28 @@ test("imports both daemon-written project histories after shutdown", async ({
 		passed: boolean;
 	} = { runs: [], passed: false };
 	try {
-		const driverA = await harness.connect();
-		const sessionA = await driverA.createSession("Import project A");
-		const folderB = join(harness.root, "project-b");
-		mkdirSync(folderB);
-		const { savedSlug } = await Effect.runPromise(
-			driverA.rpc.SaveProject({ title: "Project B", folders: [folderB] }),
-		);
-		if (!savedSlug) throw new Error("Project B has no slug");
-		const driverB = await harness.connect(undefined, undefined, savedSlug);
-		// B runs on OpenCode so a byte copy of its store has no store-wide
-		// Claude runner cursor to collide with the imported original (C2).
-		await driverB.startInstance("opencode");
-		const sessionB = await driverB.createSession(
-			"Import project B",
-			"opencode",
-			"opencode",
-			{ modelProviderId: "opencode", modelId: "nemotron-3-super-free" },
-		);
-		const a = await driverA.send(sessionA, "import-history-a");
-		const b = await driverB.send(
-			sessionB,
-			"Hello, reply with just the word pong",
-		);
-		expect(a.done["status"]).toBe("idle");
-		expect(b.done["status"]).toBe("idle");
-		await harness.terminate();
+		const savedSlug = "project-b";
+		const sessionB = "ses_import_history_b";
+		await createLegacyDaemonFixture(harness.configDir, [
+			{
+				projectId: "process-test",
+				folder: harness.projectDir,
+				sessionId: "ses_import_history_a",
+				prompt: "import-history-a",
+				reply: "done(import-history-a)",
+			},
+			{
+				projectId: savedSlug,
+				folder: join(harness.root, "project-b"),
+				sessionId: sessionB,
+				prompt: "Hello, reply with just the word pong",
+				reply: "pong",
+			},
+		]);
 
 		const projects = ["process-test", savedSlug].map((projectId) => ({
 			projectId,
-			sourcePath: realpathSync(harness.projectStorePath(projectId)),
+			sourcePath: realpathSync(harness.legacyProjectStorePath(projectId)),
 		}));
 		const before = projects.map((project) =>
 			projectManifest(project.sourcePath, project.projectId),
@@ -110,16 +102,34 @@ test("imports both daemon-written project histories after shutdown", async ({
 		const positions = projects.map((project) =>
 			storeImportPosition(project.sourcePath),
 		);
-		const results = await Effect.runPromise(
-			importRegisteredProjectStores(harness.configDir, projects, {
-				now: () => completedAt,
-			}),
-		);
+		const destination = daemonStorePath(harness.configDir);
+		expect(existsSync(destination)).toBe(false);
+		await harness.restart({ skipBrowserProbe: true });
+		await harness.terminate();
+		const markerDb = new DatabaseSync(destination, { readOnly: true });
+		const results = (() => {
+			try {
+				return projects.map(({ projectId, sourcePath }) => {
+					const marker = markerDb
+						.prepare(
+							"SELECT method, completed_at FROM daemon_store_imports WHERE project_id = ?",
+						)
+						.get(projectId);
+					expect(marker?.["method"]).toMatch(/^(seeded|imported)$/);
+					return {
+						projectId,
+						outcome: String(marker?.["method"]),
+						backup: `${sourcePath}.imported-${marker?.["completed_at"]}`,
+					};
+				});
+			} finally {
+				markerDb.close();
+			}
+		})();
 		expect(results.map((result) => result.outcome).sort()).toEqual([
 			"imported",
 			"seeded",
 		]);
-		const destination = daemonStorePath(harness.configDir);
 		const seedIndex = projects.findIndex((project) =>
 			results.some(
 				(result) =>
@@ -155,7 +165,7 @@ test("imports both daemon-written project histories after shutdown", async ({
 				(result) => result.projectId === project.projectId,
 			)?.backup;
 			expect(existsSync(project.sourcePath)).toBe(false);
-			expect(backup).toBe(`${project.sourcePath}.imported-${completedAt}`);
+			expect(backup?.startsWith(`${project.sourcePath}.imported-`)).toBe(true);
 			return (
 				backup !== undefined &&
 				JSON.stringify(sourceChecksums(backup)) ===
@@ -176,10 +186,17 @@ test("imports both daemon-written project histories after shutdown", async ({
 				projectManifest(destination, project.projectId, before[index]).tables,
 			).toEqual(before[index]?.tables);
 		evidence.idempotency = true;
+		const beforeRestart = daemonStoreManifest(destination);
+		await harness.restart({ skipBrowserProbe: true });
+		await harness.terminate();
+		expect(daemonStoreManifest(destination)).toEqual(beforeRestart);
+		for (const { sourcePath } of projects)
+			for (const suffix of ["", "-wal", "-shm"])
+				expect(existsSync(`${sourcePath}${suffix}`)).toBe(false);
 		evidence.passed = true;
 
-		// Keep the copied source byte-for-byte identical to a daemon-written
-		// project. OpenCode has no store-wide Claude runner cursor to collide.
+		// Keep the independent copied source byte-for-byte identical to B.
+		// Transcript fixtures have no store-wide runner cursor to collide.
 		const originalBackup = results.find(
 			(result) => result.projectId === savedSlug,
 		)?.backup;

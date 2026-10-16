@@ -131,11 +131,12 @@ test("every declared error class reaches the browser", async ({
 	await testInfo.attach("all-declared-errors", { path: artifact });
 });
 
-test("typed and legacy entries coexist with control overrides", async ({
+test("typed stubs accept runtime updates and record submitted input", async ({
 	page,
 }) => {
 	const control = await mockWsRpc(page, {
 		stubs: {
+			GetStatus: () => MOCK_SERVER_STATUS,
 			SetLogLevel: () => ({ ok: true }),
 			"input.submit": ({ sessionId }) => ({
 				ok: true,
@@ -143,7 +144,6 @@ test("typed and legacy entries coexist with control overrides", async ({
 				handedOff: true,
 			}),
 		},
-		handlers: { GetStatus: () => MOCK_SERVER_STATUS },
 	});
 	let submitted: Record<string, unknown> | undefined;
 	control.onSendMessage = (payload) => {
@@ -174,21 +174,12 @@ test("typed and legacy entries coexist with control overrides", async ({
 	expect(await page.evaluate(() => window.callRpc("GetStatus", {}))).toEqual({
 		value: MOCK_SERVER_STATUS,
 	});
-	control.setResponse("GetStatus", { ...MOCK_SERVER_STATUS, clientCount: 9 });
+	control.setStubs({
+		GetStatus: () => ({ ...MOCK_SERVER_STATUS, clientCount: 9 }),
+	});
 	expect(await page.evaluate(() => window.callRpc("GetStatus", {}))).toEqual({
 		value: { ...MOCK_SERVER_STATUS, clientCount: 9 },
 	});
-});
-
-test("a legacy invalid reply warns and becomes a defect", async ({ page }) => {
-	await mockWsRpc(page, {
-		handlers: {
-			GetStatus: () => ({ ...MOCK_SERVER_STATUS, clientCount: "invalid" }),
-		},
-	});
-	await openClient(page);
-	const result = await page.evaluate(() => window.callRpc("GetStatus", {}));
-	expect(result).toHaveProperty("defect");
 });
 
 test("an invalid typed reply fails its owning spec", async ({ page }) => {

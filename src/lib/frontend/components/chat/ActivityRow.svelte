@@ -90,7 +90,8 @@
 {#if part.type === "tool"}
 	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending"}
 	{@const failed = part.status === "error" || part.isError}
-	{@const verb = toolVerb(part, running ? "present" : "past")}
+	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
+	{@const verb = movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}

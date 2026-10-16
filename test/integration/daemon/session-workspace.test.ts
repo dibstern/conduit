@@ -60,11 +60,11 @@ function initRepo(directory: string) {
 }
 
 function workspaceEvents(harness: ProcessHarness) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
-				"SELECT session_id, data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+				"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -134,7 +134,7 @@ describe("Session workspace through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["events"] = existsSync(fixture.projectStorePath())
+			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? workspaceEvents(fixture)
 				: [];
 			evidence["logs"] = fixture.logTail;

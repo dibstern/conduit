@@ -52,11 +52,11 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		slug: string,
 		sessionId: string,
 	) {
-		const db = new Database(fixture.projectStorePath(slug), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const row = db
-				.prepare("SELECT status FROM sessions WHERE id = ?")
-				.get(sessionId) as { status: string } | undefined;
+				.prepare("SELECT status FROM sessions WHERE id = ? AND project_id = ?")
+				.get(sessionId, slug) as { status: string } | undefined;
 			return row?.status;
 		} finally {
 			db.close();
@@ -199,7 +199,7 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			],
 		});
 		const snapshot = () => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				return {
 					canonical: db

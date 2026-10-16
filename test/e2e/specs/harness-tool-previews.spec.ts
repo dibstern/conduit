@@ -411,7 +411,7 @@ test("tools open as previews and expand to full detail", async ({
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath());
+	await seed(harness.daemonStorePath());
 	await harness.restart({ keepPort: true });
 
 	const driver = await harness.connect();
@@ -651,7 +651,7 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 }, testInfo) => {
 	test.setTimeout(120_000);
 	await harness.terminate();
-	await seed(harness.projectStorePath());
+	await seed(harness.daemonStorePath());
 	await harness.restart({ keepPort: true });
 
 	const { viewport, isMobile, hasTouch } = testInfo.project.use;

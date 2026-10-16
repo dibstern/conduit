@@ -220,18 +220,20 @@ export const mockAppHandlers: StepHandler[] = [
 					? { workspaceHint: path }
 					: { workspaceMismatch: { actualPath: path } }),
 			});
-			rpc.setHandler("MoveSessionWorkspace", ({ path: target }) => {
-				setSessionRowStatus(world.page, sessionId, "idle", {
-					workspaceHint: undefined,
-					workspaceMismatch: undefined,
-				});
-				return { projectSlug: "myapp", directory: target };
-			});
-			rpc.setHandler("DismissWorkspaceHint", () => {
-				setSessionRowStatus(world.page, sessionId, "idle", {
-					workspaceHint: undefined,
-				});
-				return { ok: true };
+			rpc.setStubs({
+				MoveSessionWorkspace: ({ path: target }) => {
+					setSessionRowStatus(world.page, sessionId, "idle", {
+						workspaceHint: undefined,
+						workspaceMismatch: undefined,
+					});
+					return { projectSlug: "myapp", directory: target };
+				},
+				DismissWorkspaceHint: () => {
+					setSessionRowStatus(world.page, sessionId, "idle", {
+						workspaceHint: undefined,
+					});
+					return { ok: true };
+				},
 			});
 		},
 	},
@@ -913,8 +915,6 @@ export const mockAppHandlers: StepHandler[] = [
 							},
 						},
 					}),
-				},
-				handlers: {
 					ReloadProviderSession: async (payload) => ({
 						projectSlug: "myapp",
 						sessionId: payload["sessionId"],

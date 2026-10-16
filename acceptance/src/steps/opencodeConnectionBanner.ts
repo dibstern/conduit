@@ -191,9 +191,11 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 					},
 				],
 			});
-			rpc.setHandler("CreateSession", (payload) => {
-				expect(payload["instanceId"]).toBe(instanceId);
-				throw new WsRpcError({ message: match[2] ?? "" });
+			rpc.setStubs({
+				CreateSession: (payload) => {
+					expect(payload["instanceId"]).toBe(instanceId);
+					throw new WsRpcError({ message: match[2] ?? "" });
+				},
 			});
 			await openModelPicker(world.page);
 			await world.page.getByTestId("picker-harness-opencode").click();

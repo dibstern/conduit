@@ -2,11 +2,15 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { expect, it } from "vitest";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
+import {
+	makePersistenceStoreLayer,
+	PersistenceStore,
+	type PersistenceStoreContext,
+} from "../../../src/lib/persistence/effect/live.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
 it("only discovers existing owned checkouts whose enabled rules could match", async () => {
@@ -19,10 +23,8 @@ it("only discovers existing owned checkouts whose enabled rules could match", as
 	const old = now - 10 * 86_400_000;
 	const disabled = { ...DEFAULT_WORKTREE_CLEANUP, onSettle: "off" as const };
 	try {
-		const store = projectStorageDir(root, project.slug);
-		mkdirSync(store, { recursive: true });
 		writeEventStore(
-			join(store, "events.db"),
+			join(root, "events.db"),
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				for (const id of [
@@ -52,10 +54,16 @@ it("only discovers existing owned checkouts whose enabled rules could match", as
 				VALUES ('message', 'recent-user', 'user', ${now}, ${now})`;
 			}),
 		);
+		const store = Layer.effect(
+			PersistenceStore,
+			Effect.context<PersistenceStoreContext>(),
+		).pipe(Layer.provide(makePersistenceStoreLayer(join(root, "events.db"))));
 		const candidates = async (setting: typeof DEFAULT_WORKTREE_CLEANUP) =>
 			(
 				await Effect.runPromise(
-					readColdWorktreeCleanupCandidates(project, root, setting, now),
+					readColdWorktreeCleanupCandidates(project, setting, now).pipe(
+						Effect.provide(store),
+					),
 				)
 			)
 				.map((row) => row.session_id)

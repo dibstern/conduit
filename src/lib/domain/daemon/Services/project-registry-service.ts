@@ -49,12 +49,7 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
-import { PersistenceStore } from "../../../persistence/effect/live.js";
-import {
-	chooseProjectSlug,
-	projectEventsDbPath,
-	projectStorageDir,
-} from "../../../persistence/project-storage.js";
+import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
 	type FolderIssue,
@@ -74,7 +69,6 @@ import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
-import { indexProjectSessions, SessionDirectory } from "./session-directory.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
@@ -429,20 +423,6 @@ export const addWithoutRelay = (
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
-		const directory = yield* Effect.serviceOption(SessionDirectory);
-		const daemonState = yield* Effect.serviceOption(DaemonStateTag);
-		if (Option.isSome(directory) && Option.isSome(daemonState)) {
-			const { configDir } = yield* Ref.get(daemonState.value);
-			yield* indexProjectSessions(configDir, project).pipe(
-				Effect.provideService(SessionDirectory, directory.value),
-				Effect.catchAll((cause) =>
-					Effect.logWarning(
-						"Session directory could not read registered project",
-						{ projectSlug: project.slug, cause },
-					),
-				),
-			);
-		}
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -586,10 +566,6 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
-				const directory = yield* Effect.serviceOption(SessionDirectory);
-				if (Option.isSome(directory))
-					yield* directory.value.removeProject(slug);
-
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -753,9 +729,6 @@ export const removeAll = Effect.gen(function* () {
 		(slug) =>
 			Effect.gen(function* () {
 				yield* relayCache.invalidate(slug);
-				const directory = yield* Effect.serviceOption(SessionDirectory);
-				if (Option.isSome(directory))
-					yield* directory.value.removeProject(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -1036,22 +1009,17 @@ export const saveProject = (input: SaveProjectInput) =>
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
-					const store = yield* Effect.serviceOption(PersistenceStore);
-					if (
-						Option.isNone(store) &&
-						projectEventsDbPath({ configDir, ...existing }) !==
-							resolve(projectStorageDir(configDir, existing.slug), "events.db")
-					) {
+					// Startup finds legacy history through the main folder, so moving it
+					// would orphan history that has not been imported yet.
+					const unavailableReason = (yield* DaemonStoreAvailability).get(
+						existing.slug,
+					);
+					if (unavailableReason !== undefined)
 						return yield* new WsRpcError({
-							message:
-								"Project history migration must complete before changing the main folder",
+							message: `Fix this project's history before changing its main folder: ${unavailableReason}`,
 						});
-					}
 					// A send admitted between this check and the relay swap is not blocked.
-					const count = yield* countRunningProjectSessions(
-						existing,
-						configDir,
-					).pipe(
+					const count = yield* countRunningProjectSessions(existing).pipe(
 						Effect.mapError(
 							(cause) =>
 								new WsRpcError({

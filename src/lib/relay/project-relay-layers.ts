@@ -48,8 +48,8 @@ import {
 	SessionActivityTag,
 } from "../domain/daemon/Services/session-activity.js";
 import {
-	makeSessionDirectoryLive,
 	SessionDirectory,
+	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -467,16 +467,6 @@ export function createProjectRelayLayers({
 	const sharedDirectory = config.daemonConfigContext
 		? Context.getOption(config.daemonConfigContext, SessionDirectory)
 		: Option.none();
-	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
-		? Layer.succeedContext(
-				Context.make(SessionDirectory, sharedDirectory.value),
-			)
-		: makeSessionDirectoryLive(config.configDir ?? getConfigDir(), [
-				{
-					slug: config.slug,
-					folders: [config.projectDir, ...(config.extraFolders ?? [])],
-				},
-			]);
 	const sharedStore = config.daemonConfigContext
 		? Context.getOption(config.daemonConfigContext, PersistenceStore)
 		: Option.none();
@@ -484,16 +474,40 @@ export function createProjectRelayLayers({
 		Option.isSome(sharedStore)
 			? makePersistenceProjectLayer(config.slug, {
 					sessionEventBusLayer: SessionEventBusLive,
-					sessionDirectoryLayer,
 				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
 			: makePersistenceEffectLayer(
 					config.persistenceDbPath,
 					config.slug,
 					undefined,
 					SessionEventBusLive,
-					sessionDirectoryLayer,
 				)
 	).pipe(Layer.provideMerge(activityReaders));
+	// Standalone WebSocket routing resolves only sessions owned by this relay.
+	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
+		? Layer.succeedContext(
+				Context.make(SessionDirectory, sharedDirectory.value),
+			)
+		: Layer.effect(
+				SessionDirectory,
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						projectOf: (sessionId: string) =>
+							sql<{ readonly project_id: string | null }>`
+								SELECT project_id FROM sessions WHERE id = ${sessionId}`.pipe(
+								Effect.map((rows) =>
+									rows[0]?.project_id === config.slug
+										? Option.some(config.slug)
+										: Option.none(),
+								),
+								Effect.mapError(
+									(cause) =>
+										new SessionDirectoryReadError({ sessionId, cause }),
+								),
+							),
+					};
+				}),
+			).pipe(Layer.provide(persistenceEffectLayer));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
