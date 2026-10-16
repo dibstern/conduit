@@ -19,6 +19,13 @@ export const PROVIDER_PRESENTATION = {
 		namePlaceholder: "Staging OC",
 		configDirPlaceholder: undefined,
 	},
+	cursor: {
+		logo: "cursor",
+		label: "Cursor",
+		settingsTab: "server",
+		namePlaceholder: "Work Cursor",
+		configDirPlaceholder: "~/.config/cursor/work",
+	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
 	{

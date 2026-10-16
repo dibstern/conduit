@@ -556,9 +556,13 @@ export const removeInstance = (instanceId: string) =>
 // Capabilities describe the adapter, not persisted instance configuration.
 function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const driver = instance.driver ?? "opencode";
+	const traits = getProviderDriver(driver);
 	return {
 		...instance,
-		capabilities: getProviderDriver(driver)?.sessionCapabilities ?? {
+		...(traits?.unavailableReason === undefined
+			? {}
+			: { available: false, unavailableReason: traits.unavailableReason }),
+		capabilities: traits?.sessionCapabilities ?? {
 			supportsMultiFolder: false,
 			supportsWorktree: false,
 		},

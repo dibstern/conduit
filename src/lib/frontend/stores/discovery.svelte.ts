@@ -9,7 +9,7 @@ import {
 	type BrowserDriverTraits,
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
-	KnownProviderDriverKindSchema,
+	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
 	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
@@ -150,6 +150,8 @@ export interface InstanceOption {
 	readonly isNew?: boolean;
 	/** Live status from the configured-instance source, when known. */
 	readonly status?: InstanceStatus;
+	readonly available?: boolean | undefined;
+	readonly unavailableReason?: string | undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
@@ -161,7 +163,7 @@ export interface InstanceOption {
 
 const missingHarnessDefaults = () =>
 	Object.fromEntries(
-		KnownProviderDriverKindSchema.literals.map((driver) => [
+		Object.keys(PROVIDER_DRIVERS).map((driver) => [
 			driver,
 			{ status: "missing" },
 		]),
@@ -755,6 +757,8 @@ export function getAvailableInstances(): InstanceOption[] {
 			isDefault: inst.isDefault ?? false,
 			isCustom: !inst.isDefault,
 			status: inst.status,
+			available: inst.available,
+			unavailableReason: inst.unavailableReason,
 			capabilities:
 				inst.capabilities ??
 				instanceState.providerCapabilities[driver] ??
@@ -1333,7 +1337,10 @@ export function handleHarnessDefaults(
 	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
 ): void {
 	const { _tag, ...defaults } = setting;
-	serverDiscovery.harnessDefaults = defaults;
+	serverDiscovery.harnessDefaults = {
+		...missingHarnessDefaults(),
+		...defaults,
+	};
 	fillDraftDefault();
 }
 

@@ -11,8 +11,8 @@ import {
 	Duration,
 	Effect,
 	Layer,
-	Option,
 	Queue,
+	Record,
 	Ref,
 } from "effect";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../contracts/worktree.js";
@@ -122,10 +122,7 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 			};
 		}),
 		instances,
-		accountDefaults: Option.match(accounts.defaults.claude, {
-			onNone: () => ({}),
-			onSome: (id) => ({ claude: id }),
-		}),
+		accountDefaults: Record.filterMap(accounts.defaults, (id) => id),
 		deletedAccounts: [...accounts.deleted],
 	} satisfies DaemonConfig;
 }).pipe(Effect.withSpan("configPersistence.buildSnapshot"));
