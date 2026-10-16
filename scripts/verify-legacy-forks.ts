@@ -532,10 +532,43 @@ async function verify() {
 			replayedPlacements,
 			replayable,
 		);
-		const sidebarDifferences = compareSidebars(
+		// Background work stamps a live row's last_activity outside the event log
+		// (announceBackgroundWork), so a live store can disagree with replay before
+		// any migration runs. A row is the migration's doing only if the migration
+		// could have touched it: one whose family and stored row it left exactly
+		// as they were is reported apart, not passed off as parity.
+		const sourceSidebar = new Map(
+			sidebarRows(source).map((row) => [row.session_id, row]),
+		);
+		const migratedSidebarById = new Map(
+			migratedSidebar.map((row) => [row.session_id, row]),
+		);
+		const family = (rows: Placement[], rootId: string) =>
+			rows
+				.filter(({ root_id }) => root_id === rootId)
+				.map(({ id }) => id)
+				.join();
+		const untouchedByMigration = (rootId: string) => {
+			const before = sourceSidebar.get(rootId);
+			const after = migratedSidebarById.get(rootId);
+			return (
+				before !== undefined &&
+				after !== undefined &&
+				before.last_activity === after.last_activity &&
+				before.row === after.row &&
+				family(sourcePlacements, rootId) === family(migratedPlacements, rootId)
+			);
+		};
+		const replaySidebarDifferences = compareSidebars(
 			migratedSidebar,
 			sidebarRows(replayed),
 			selectedRoots.filter((id) => !excluded.has(id)),
+		);
+		const sidebarDifferences = replaySidebarDifferences.filter(
+			({ id }) => !untouchedByMigration(id),
+		);
+		const preExistingSidebarDifferences = replaySidebarDifferences.filter(
+			({ id }) => untouchedByMigration(id),
 		);
 		const afterMessages = fingerprint(migrated, "messages");
 		const afterParts = fingerprint(migrated, "message_parts");
@@ -646,6 +679,11 @@ async function verify() {
 			sidebar: {
 				compared: selectedRoots.filter((id) => !excluded.has(id)).length,
 				differences: sidebarDifferences,
+				preExisting: {
+					differences: preExistingSidebarDifferences,
+					reason:
+						"Family and stored row unchanged by the migration; background-work stamps are not event-sourced",
+				},
 			},
 			replay: { events: extractedCounts, ...recovery },
 			unchanged: {
