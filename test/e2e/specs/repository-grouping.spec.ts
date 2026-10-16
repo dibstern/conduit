@@ -101,6 +101,9 @@ async function openProjectList(page: Page, baseUrl: string) {
 		messageCount: 0,
 	}));
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			FindFolders: () => ({ home: "/workspace", entries: [] }),
+		},
 		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
 			ListDaemonSessions: ({ scope }) => ({
@@ -113,7 +116,6 @@ async function openProjectList(page: Page, baseUrl: string) {
 			}),
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
-			FindFolders: () => ({ home: "/workspace", entries: [] }),
 			SaveProject: ({ slug: savedSlug, groupingMode }) => {
 				const stored = projects.find((project) => project.slug === savedSlug);
 				if (!stored) throw new Error(`Unknown project: ${savedSlug}`);

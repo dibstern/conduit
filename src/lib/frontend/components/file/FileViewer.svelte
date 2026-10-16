@@ -8,7 +8,8 @@
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { fileTreeState } from "../../stores/file-tree.svelte.js";
-	import { getFileContentRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import Button from "../ui/Button.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
@@ -94,14 +95,14 @@
 		truncated = false;
 		loadError = null;
 		loading = true;
-		void getFileContentRpc({ projectSlug: slug, path, ...(root !== null ? { root } : {}), ...(sessionId ? { sessionId } : {}) })
+		void rpc("GetFileContent", { projectSlug: slug, path, ...(root !== null ? { root } : {}), ...(sessionId ? { sessionId } : {}) })
 			.then((response) => {
 				if (requestId === fileContentRequestId && fileTreeState.scope === scope) applyGetFileContentResponse(response);
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
 				if (requestId !== fileContentRequestId) return;
 				loading = false;
-				loadError = "Failed to load file preview. Return to the file tree and try again.";
+				loadError = failureLine(error, "Failed to load file preview. Return to the file tree and try again.");
 			});
 	});
 

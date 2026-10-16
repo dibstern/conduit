@@ -106,6 +106,9 @@ async function setup(
 		messageDelay: 0,
 	});
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
+		},
 		handlers: {
 			SwitchPermissionMode: (params) => {
 				serverModes.set(String(params["sessionId"]), String(params["mode"]));
@@ -134,7 +137,6 @@ async function setup(
 				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 				current: "myapp",
 			}),
-			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
 			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},
 	});

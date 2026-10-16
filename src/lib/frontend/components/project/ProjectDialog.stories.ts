@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
+	type FindFolders,
 	type FindFoldersResponse,
 	ProjectSaveRejected,
 } from "../../../contracts/ws-rpc.js";
-import type { FindFoldersRpcInput } from "../../transport/ws-rpc-client.js";
 import ProjectDialog from "./ProjectDialog.svelte";
 
 const home = "/Users/dev";
@@ -17,7 +17,7 @@ const existing = [app, docs, site, `${app}/packages/sdk`];
 
 async function findFolders({
 	query,
-}: FindFoldersRpcInput): Promise<FindFoldersResponse> {
+}: ConstructorParameters<typeof FindFolders>[0]): Promise<FindFoldersResponse> {
 	if (!/^[/~]/.test(query)) return { home, entries: [] };
 	return {
 		home,
@@ -331,7 +331,9 @@ export const KeyboardSave: Story = {
 
 export const SuggestionsOpen: Story = {
 	args: {
-		findFolders: async ({ query }: FindFoldersRpcInput) => ({
+		findFolders: async ({
+			query,
+		}: ConstructorParameters<typeof FindFolders>[0]) => ({
 			home,
 			entries: suggestions.filter((entry) =>
 				entry.path.toLowerCase().includes(query.toLowerCase()),

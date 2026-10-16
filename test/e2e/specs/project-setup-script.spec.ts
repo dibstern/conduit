@@ -55,6 +55,9 @@ async function openSession(
 		messageCount: setup ? 1 : 0,
 	};
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			FindFolders: () => ({ home: "/workspace", entries: [] }),
+		},
 		handlers: {
 			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects: [project], current: slug }),
@@ -64,7 +67,6 @@ async function openSession(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			FindFolders: () => ({ home: "/workspace", entries: [] }),
 			SaveProject: ({ setupScript }) => {
 				const { setupScript: _previous, ...rest } = project;
 				project = {

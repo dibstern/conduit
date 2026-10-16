@@ -36,24 +36,7 @@ test("files, mentions and new terminals follow a session move and navigation", a
 	const folder = (sessionId: unknown) =>
 		moved && sessionId === "workspace-session" ? worktree : main;
 	rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-			GetProjects: () => ({
-				projects,
-				current: projectSlug,
-			}),
-			GetAgents: () => ({
-				projectSlug,
-				agents: [],
-				providerScope: { id: "claude", name: "Claude" },
-				instanceId: "claude",
-			}),
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+		stubs: {
 			GetFileTree: ({ sessionId }) => ({
 				projectSlug,
 				entries: [
@@ -87,6 +70,25 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				projectSlug,
 				path,
 				content: `${folder(sessionId) === worktree ? "worktree" : "main"} content`,
+			}),
+		},
+		handlers: {
+			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
+			GetProjects: () => ({
+				projects,
+				current: projectSlug,
+			}),
+			GetAgents: () => ({
+				projectSlug,
+				agents: [],
+				providerScope: { id: "claude", name: "Claude" },
+				instanceId: "claude",
+			}),
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
 			}),
 			CreatePty: ({ sessionId }) => {
 				const id = `pty-${++terminalCount}`;

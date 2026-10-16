@@ -72,6 +72,13 @@ for (const scenario of [
 			let terminalCount = 0;
 			let rpc: RpcMockControl;
 			rpc = await mockWsRpc(page, {
+				stubs: {
+					GetFileTree: () => ({
+						projectSlug,
+						entries: [],
+						...(secondary ? { roots: scenario.roots } : {}),
+					}),
+				},
 				handlers: {
 					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 					GetProjects: () => ({ projects, current: projectSlug }),
@@ -86,11 +93,6 @@ for (const scenario of [
 						availability: [],
 						hasMore: false,
 						nextCursor: null,
-					}),
-					GetFileTree: () => ({
-						projectSlug,
-						entries: [],
-						...(secondary ? { roots: scenario.roots } : {}),
 					}),
 					CreatePty: ({ root }) => {
 						const id = `pty-${++terminalCount}`;

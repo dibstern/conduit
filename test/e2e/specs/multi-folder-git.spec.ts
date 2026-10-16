@@ -94,6 +94,9 @@ for (const scenario of [
 			git,
 		};
 		await mockWsRpc(page, {
+			stubs: {
+				FindFolders: () => ({ home: "/workspace", entries: [] }),
+			},
 			handlers: {
 				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 				GetProjects: () => ({ projects: [project], current: slug }),
@@ -109,7 +112,6 @@ for (const scenario of [
 					hasMore: false,
 					nextCursor: null,
 				}),
-				FindFolders: () => ({ home: "/workspace", entries: [] }),
 			},
 		});
 		await mockRelayWebSocket(page, {

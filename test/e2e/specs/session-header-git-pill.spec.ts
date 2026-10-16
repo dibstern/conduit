@@ -89,6 +89,19 @@ async function openCheckout(
 		},
 	];
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			ListWorktrees: ({ sessionId }) => ({
+				worktrees: options.worktrees ?? [],
+				...(options.canonicalDirectory && sessionId === "header-session"
+					? { directory: options.canonicalDirectory }
+					: {}),
+			}),
+			MoveSessionWorkspace: ({ path }) => {
+				options.onmove?.(String(path));
+				if (options.moveError) throw options.moveError;
+				return { directory: String(path) };
+			},
+		},
 		handlers: {
 			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
@@ -102,17 +115,6 @@ async function openCheckout(
 				instanceId: options.provider ?? "opencode",
 			}),
 			GetInstances: () => instances,
-			ListWorktrees: ({ sessionId }) => ({
-				worktrees: options.worktrees ?? [],
-				...(options.canonicalDirectory && sessionId === "header-session"
-					? { directory: options.canonicalDirectory }
-					: {}),
-			}),
-			MoveSessionWorkspace: ({ path }) => {
-				options.onmove?.(String(path));
-				if (options.moveError) throw options.moveError;
-				return { directory: String(path) };
-			},
 			ListDaemonSessions: () => ({
 				sessions,
 				availability: [],
@@ -527,10 +529,12 @@ for (const mode of [
 			await trigger.click();
 			await page.getByRole("menuitem", { name: "Move to worktree…" }).click();
 			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
+			const toast = page.getByRole("alert");
 			await expect(
-				page.getByText("Could not move session: that folder no longer exists", {
-					exact: true,
-				}),
+				toast.getByText("Could not move session", { exact: true }),
+			).toBeVisible();
+			await expect(
+				toast.getByText("That worktree no longer exists.", { exact: true }),
 			).toBeVisible();
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
 		});

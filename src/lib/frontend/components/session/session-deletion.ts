@@ -2,7 +2,7 @@ import { confirm, uiState } from "../../stores/ui.svelte.js";
 import {
 	type DeleteSessionRpcInput,
 	getWorktreeCleanupSettingRpc,
-	inspectSessionWorktreesRpc,
+	rpc,
 } from "../../transport/ws-rpc-client.js";
 
 let pending = false;
@@ -17,7 +17,9 @@ export async function confirmSessionDeletion(
 	pending = true;
 	try {
 		const [inspections, removeOnDelete] = await Promise.all([
-			Promise.all(targets.map((target) => inspectSessionWorktreesRpc(target))),
+			Promise.all(
+				targets.map((target) => rpc("InspectSessionWorktrees", target)),
+			),
 			getWorktreeCleanupSettingRpc().then(
 				(setting) => setting.onDelete,
 				() => false,

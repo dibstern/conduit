@@ -51,6 +51,9 @@ for (const viewport of [
 				workspaceMismatch: { actualPath },
 			};
 			const rpc = await mockWsRpc(page, {
+				stubs: {
+					MoveSessionWorkspace: () => ({ projectSlug, directory: target }),
+				},
 				handlers: {
 					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 					GetProjects: () => ({
@@ -63,7 +66,6 @@ for (const viewport of [
 						hasMore: false,
 						nextCursor: null,
 					}),
-					MoveSessionWorkspace: () => ({ projectSlug, directory: target }),
 				},
 			});
 			rpc.setShellRows([session]);

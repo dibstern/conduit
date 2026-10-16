@@ -78,6 +78,14 @@ async function openDraft(
 		})),
 	};
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			FindFolders: ({ query }) => ({
+				home: "/workspace",
+				entries: query
+					? [{ path: query, isGitRepo: true, exists: true, reason: "match" }]
+					: [],
+			}),
+		},
 		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
 			GetInstances: () => instances,
@@ -112,12 +120,6 @@ async function openDraft(
 				return { mode };
 			},
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
-			FindFolders: ({ query }) => ({
-				home: "/workspace",
-				entries: query
-					? [{ path: query, isGitRepo: true, exists: true, reason: "match" }]
-					: [],
-			}),
 			SaveProject: ({ slug: editedSlug, sessionMode, title, folders }) => {
 				const savedSlug = typeof editedSlug === "string" ? editedSlug : "added";
 				const previous = projects.find((project) => project.slug === savedSlug);

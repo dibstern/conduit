@@ -13,6 +13,7 @@
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import { formatErrorDetail } from "../../../errors-utils.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
@@ -82,7 +83,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { cancelSessionRpc, continueSessionInMainFolderRpc, createSessionRpc, dismissWorkspaceHintRpc, moveSessionWorkspaceRpc, recreateSessionWorktreeRpc, renameSessionBranchRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
+	import { cancelSessionRpc, createSessionRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, syncInputDraftRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -860,16 +861,8 @@
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
 			} catch (error) {
-				if (Schema.is(WorktreeCreationError)(error)) {
-					showToast({ title: "Could not start session", variant: "error", body: error.message });
-				} else if (Schema.is(WorkspaceMoveError)(error)) {
-					const body = {
-						missing: "That worktree no longer exists.",
-						"not-a-worktree": "That folder is not a git worktree.",
-						"other-repository": "That worktree belongs to another repository.",
-						"unsupported-provider": "This provider does not support worktrees.",
-					}[error.reason];
-					showToast({ title: "Could not start session", variant: "error", body });
+				if (Schema.is(WorktreeCreationError)(error) || Schema.is(WorkspaceMoveError)(error)) {
+					toastFailure("Could not start session")(error);
 				} else {
 					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
 				}
@@ -1500,11 +1493,11 @@
 												workspaceMismatch={session.workspaceMismatch}
 												workspaceHint={session.workspaceHint}
 												loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { projectSlug: composerProjectSlug, sessionId: session.id }) : undefined}
-												onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-												ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-												onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+												onmove={(path) => rpc("MoveSessionWorkspace", { projectSlug: composerProjectSlug, sessionId: session.id, path })}
+												onrecreate={() => rpc("RecreateSessionWorktree", { projectSlug: composerProjectSlug, sessionId: session.id })}
+												oncontinue={() => rpc("ContinueSessionInMainFolder", { projectSlug: composerProjectSlug, sessionId: session.id })}
+												ondismiss={(path) => rpc("DismissWorkspaceHint", { projectSlug: composerProjectSlug, sessionId: session.id, path })}
+												onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
 											>
 												{#snippet children(attention, checkout, warning)}
 													{@render phoneMore(rows, attention, checkout, warning)}
@@ -1535,11 +1528,11 @@
 								workspaceMismatch={session.workspaceMismatch}
 								workspaceHint={session.workspaceHint}
 								loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { projectSlug: composerProjectSlug, sessionId: session.id }) : undefined}
-								onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-								ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-								onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+								onmove={(path) => rpc("MoveSessionWorkspace", { projectSlug: composerProjectSlug, sessionId: session.id, path })}
+								onrecreate={() => rpc("RecreateSessionWorktree", { projectSlug: composerProjectSlug, sessionId: session.id })}
+								oncontinue={() => rpc("ContinueSessionInMainFolder", { projectSlug: composerProjectSlug, sessionId: session.id })}
+								ondismiss={(path) => rpc("DismissWorkspaceHint", { projectSlug: composerProjectSlug, sessionId: session.id, path })}
+								onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
 							/>
 						{/key}
 					{/if}
@@ -1678,11 +1671,11 @@
 									workspaceMismatch={session.workspaceMismatch}
 									workspaceHint={session.workspaceHint}
 									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { projectSlug: composerProjectSlug, sessionId: session.id }) : undefined}
-									onmove={(path) => moveSessionWorkspaceRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrecreate={() => recreateSessionWorktreeRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									oncontinue={() => continueSessionInMainFolderRpc({ projectSlug: composerProjectSlug, sessionId: session.id })}
-									ondismiss={(path) => dismissWorkspaceHintRpc({ projectSlug: composerProjectSlug, sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => renameSessionBranchRpc({ projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
+									onmove={(path) => rpc("MoveSessionWorkspace", { projectSlug: composerProjectSlug, sessionId: session.id, path })}
+									onrecreate={() => rpc("RecreateSessionWorktree", { projectSlug: composerProjectSlug, sessionId: session.id })}
+									oncontinue={() => rpc("ContinueSessionInMainFolder", { projectSlug: composerProjectSlug, sessionId: session.id })}
+									ondismiss={(path) => rpc("DismissWorkspaceHint", { projectSlug: composerProjectSlug, sessionId: session.id, path })}
+									onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { projectSlug: composerProjectSlug, sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}

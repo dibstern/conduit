@@ -88,6 +88,16 @@ async function setup(
 			: []),
 	];
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			InspectSessionWorktrees: async ({ sessionId }) => {
+				await options.inspectionDelay;
+				if (options.failInspection)
+					throw new WsRpcError({ message: "Could not inspect worktrees" });
+				return sessionId === "local-session"
+					? { worktrees: [], removeWorktrees: false }
+					: inspection;
+			},
+		},
 		handlers: {
 			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
@@ -107,14 +117,6 @@ async function setup(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			InspectSessionWorktrees: async ({ sessionId }) => {
-				await options.inspectionDelay;
-				if (options.failInspection)
-					throw new WsRpcError({ message: "Could not inspect worktrees" });
-				return sessionId === "local-session"
-					? { worktrees: [], removeWorktrees: false }
-					: inspection;
-			},
 			DeleteSession: ({ sessionId }) => {
 				sessions = sessions.filter(({ id }) => id !== sessionId);
 				rpc.setShellRows(options.foreign ? [] : sessions);

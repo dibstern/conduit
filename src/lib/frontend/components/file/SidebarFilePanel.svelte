@@ -9,7 +9,7 @@
 	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
 	import { setFilesOpen } from "../../stores/session-view.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
-	import { getFileListRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import BlockGrid from "../ui/BlockGrid.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -52,7 +52,7 @@
 		if (!slug) return;
 		loading = true;
 		fileTreeState.browserPath = path;
-		void getFileListRpc({ projectSlug: slug, path, ...(sessionId ? { sessionId } : {}) })
+		void rpc("GetFileList", { projectSlug: slug, path, ...(sessionId ? { sessionId } : {}) })
 			.then((response) => {
 				if (fileTreeState.scope === scope) applyGetFileListResponse(response);
 			})
@@ -115,7 +115,7 @@
 		const sessionId = getCurrentSessionId();
 		const scope = fileTreeState.scope;
 		if (slug && !fileTreeState.browserChildren.has(fileBrowserKey(fullPath, root))) {
-			void getFileListRpc({ projectSlug: slug, path: fullPath, ...(root !== undefined ? { root } : {}), ...(sessionId ? { sessionId } : {}) }).then(
+			void rpc("GetFileList", { projectSlug: slug, path: fullPath, ...(root !== undefined ? { root } : {}), ...(sessionId ? { sessionId } : {}) }).then(
 				(response) => { if (fileTreeState.scope === scope) applyGetFileListResponse(response); },
 			).catch(() => undefined);
 		}

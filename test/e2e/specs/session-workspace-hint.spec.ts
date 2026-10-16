@@ -33,6 +33,13 @@ async function openHint(page: Page, relayBaseUrl: string) {
 		workspaceHint: hintPath,
 	};
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			MoveSessionWorkspace: ({ path }) => ({
+				projectSlug,
+				directory: String(path),
+			}),
+			DismissWorkspaceHint: () => ({ ok: true }),
+		},
 		handlers: {
 			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: projectSlug }),
@@ -42,11 +49,6 @@ async function openHint(page: Page, relayBaseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-			MoveSessionWorkspace: ({ path }) => ({
-				projectSlug,
-				directory: String(path),
-			}),
-			DismissWorkspaceHint: () => ({ ok: true }),
 		},
 	});
 	rpc.setShellRows([session]);

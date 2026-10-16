@@ -8,7 +8,8 @@
 	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
-	import { attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getFileTreeRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
 	import { taskDrawer } from "../session/background-tasks.svelte.js";
@@ -568,14 +569,14 @@
 			}
 			requestFileTree();
 		});
-		void getFileTreeRpc({ projectSlug: slug, ...(sessionId ? { sessionId } : {}) })
+		void rpc("GetFileTree", { projectSlug: slug, ...(sessionId ? { sessionId } : {}) })
 			.then((response) => {
 				if (!cancelled) applyGetFileTreeResponse(response);
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
 				if (!cancelled) {
 					fileTreeState.loading = false;
-					showToast("Failed to load file tree", { variant: "error" });
+					toastFailure("Failed to load file tree")(error);
 				}
 			});
 		return () => { cancelled = true; };

@@ -71,6 +71,23 @@ async function setupWithProjectManagement(
 	];
 	// The daemon answers AttachProject with the project it attached.
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			GetFileTree: (params) => ({
+				projectSlug: String(params["projectSlug"]),
+				entries: ["README.md"],
+			}),
+			FindFolders: (params) => ({
+				home: "/home/test",
+				entries: [
+					{
+						path: String(params["query"]),
+						isGitRepo: false,
+						reason: "match",
+						exists: true,
+					},
+				],
+			}),
+		},
 		handlers: {
 			AttachProject: async (params) => {
 				// A cold load without ?p attaches the daemon's default project.
@@ -120,22 +137,6 @@ async function setupWithProjectManagement(
 						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
 				};
 			},
-			GetFileTree: (params) => ({
-				projectSlug: String(params["projectSlug"]),
-				entries: ["README.md"],
-			}),
-			// Every query names one existing folder: the one typed.
-			FindFolders: (params) => ({
-				home: "/home/test",
-				entries: [
-					{
-						path: String(params["query"]),
-						isGitRepo: false,
-						reason: "match",
-						exists: true,
-					},
-				],
-			}),
 			SaveProject: (params) => {
 				const slug = String(params["slug"] ?? "new-project");
 				const title = String(params["title"] ?? "new-project");

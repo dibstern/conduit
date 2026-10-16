@@ -302,7 +302,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 		projects: [],
 		current: "test-project",
 	})),
-	getFileTreeRpc: vi.fn(async () => ({
+	rpc: vi.fn(async () => ({
 		projectSlug: "test-project",
 		files: [],
 	})),

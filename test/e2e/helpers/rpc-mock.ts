@@ -149,6 +149,12 @@ export class RpcMockControl {
 		this.responseHandlers.set(tag, handler);
 	}
 
+	stubs: StubTable = {};
+
+	setStubs(stubs: StubTable): void {
+		Object.assign(this.stubs, stubs);
+	}
+
 	getResponseHandler(tag: string): RpcHandler | undefined {
 		return this.responseHandlers.get(tag) ?? this.initialHandlers[tag];
 	}
@@ -742,7 +748,7 @@ function socketTable(
 	requests: Map<string, EffectRpcRequest[]>,
 ): StubTable {
 	// Iterating the group erases the tag/payload correlation checked by StubTable.
-	const stubs = (options.stubs ?? {}) as Readonly<
+	const stubs = control.stubs as Readonly<
 		Record<string, ((payload: Record<string, unknown>) => unknown) | undefined>
 	>;
 	const table: Record<string, (payload: never) => unknown> = {};
@@ -872,6 +878,7 @@ export async function mockWsRpc(
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
 	control.initialHandlers = options.handlers ?? {};
+	control.stubs = { ...options.stubs };
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
 	control.catalog = pendingCatalogs.get(page) ?? control.catalog;
 	subscribeMockDetail(page, (sessionId, envelope) => {

@@ -70,15 +70,7 @@ async function openSession(
 		},
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: projectSlug }),
-			ListDaemonSessions: () => ({
-				sessions: [session],
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+		stubs: {
 			RenameSessionBranch: ({ branchName }) => {
 				if (options.error) throw options.error;
 				if (typeof branchName !== "string")
@@ -100,6 +92,16 @@ async function openSession(
 				rpc.upsertShellRow(session);
 				return { ok: true };
 			},
+		},
+		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
+			GetProjects: () => ({ projects, current: projectSlug }),
+			ListDaemonSessions: () => ({
+				sessions: [session],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 		},
 	});
 	rpc.setShellRows([session]);

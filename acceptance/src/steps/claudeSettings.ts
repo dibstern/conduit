@@ -132,7 +132,7 @@ export const claudeSettingsHandlers: StepHandler[] = [
 					projectSlug,
 					harness,
 					state: {
-						pick: { providerId, modelId, effort, contextWindow },
+						pick: { providerId, modelId, effort: effort ?? "", contextWindow },
 						status: "ok",
 					},
 				}),

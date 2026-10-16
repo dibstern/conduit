@@ -62,6 +62,9 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 	};
 	let sessions: readonly Record<string, unknown>[] = [];
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			ListWorktrees: () => ({ worktrees }),
+		},
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
@@ -83,7 +86,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-			ListWorktrees: () => ({ worktrees }),
 			CreateSession: ({ projectSlug, worktreePath }) => {
 				const selected = worktrees.find(({ path }) => path === worktreePath);
 				const folder = selected?.path === docsLinked ? docs : main;

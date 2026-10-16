@@ -26,21 +26,7 @@ for (const multiple of [true, false]) {
 			};
 			let moved = false;
 			const rpc = await mockWsRpc(page, {
-				handlers: {
-					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-					GetProjects: () => ({ projects, current: projectSlug }),
-					GetAgents: () => ({
-						projectSlug,
-						agents: [],
-						providerScope: { id: "claude", name: "Claude" },
-						instanceId: "claude",
-					}),
-					ListDaemonSessions: () => ({
-						sessions: [session],
-						availability: [],
-						hasMore: false,
-						nextCursor: null,
-					}),
+				stubs: {
 					GetFileTree: () => ({
 						projectSlug,
 						entries: ["primary-only.txt", "src/", "src/index.ts"],
@@ -81,6 +67,22 @@ for (const multiple of [true, false]) {
 									? "secondary worktree content"
 									: "secondary content"
 								: "primary content",
+					}),
+				},
+				handlers: {
+					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
+					GetProjects: () => ({ projects, current: projectSlug }),
+					GetAgents: () => ({
+						projectSlug,
+						agents: [],
+						providerScope: { id: "claude", name: "Claude" },
+						instanceId: "claude",
+					}),
+					ListDaemonSessions: () => ({
+						sessions: [session],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
 					}),
 				},
 			});

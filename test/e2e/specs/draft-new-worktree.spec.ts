@@ -125,27 +125,7 @@ async function openDraft(
 	let sessions: readonly Record<string, unknown>[] = [];
 	let workspaceCreated = false;
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
-			GetModels: ({ projectSlug, instanceId }) => ({
-				projectSlug,
-				providers: modelProviders.filter(
-					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
-				),
-			}),
-			GetAgents: ({ instanceId }) => ({
-				projectSlug: "e2e-replay",
-				instanceId: instanceId ?? provider,
-				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
-				agents: [],
-			}),
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
+		stubs: {
 			GetFileTree: () => ({
 				projectSlug: "e2e-replay",
 				entries: [],
@@ -181,6 +161,28 @@ async function openDraft(
 						main: false,
 					},
 				],
+			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
+			GetModels: ({ projectSlug, instanceId }) => ({
+				projectSlug,
+				providers: modelProviders.filter(
+					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
+			GetAgents: ({ instanceId }) => ({
+				projectSlug: "e2e-replay",
+				instanceId: instanceId ?? provider,
+				providerScope: { id: instanceId ?? provider, name: "Draft provider" },
+				agents: [],
+			}),
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
 			}),
 			CreateSession: ({ projectSlug, newWorktree }) => {
 				if (options.fail)

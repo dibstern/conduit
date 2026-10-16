@@ -6,10 +6,7 @@ import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import type { SessionMode } from "../../contracts/project-file.js";
 import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
-import type {
-	WorktreeCleanup,
-	WorktreeCleanupReport,
-} from "../../contracts/worktree.js";
+import type { WorktreeCleanup } from "../../contracts/worktree.js";
 import {
 	type GetSessionSkillsResponse,
 	type GetSkillContentResponse,
@@ -37,13 +34,9 @@ import type {
 	ContinuationHandoffResponse,
 	CreateSessionResponse,
 	DetectProxyResponse,
-	FindFoldersResponse,
 	ForkSessionResponse,
 	GetAgentsResponse,
 	GetCommandsResponse,
-	GetFileContentResponse,
-	GetFileListResponse,
-	GetFileTreeResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
 	GetToolDetailsResponse,
@@ -322,25 +315,6 @@ export interface RejectQuestionRpcInput {
 	readonly toolId: string;
 }
 
-export interface GetFileTreeRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-}
-
-export interface GetFileListRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly root?: string;
-	readonly path?: string;
-}
-
-export interface GetFileContentRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId?: string;
-	readonly root?: string;
-	readonly path: string;
-}
-
 export interface GetToolDetailsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -356,11 +330,6 @@ export interface GetSkillContentRpcInput {
 export interface GetSessionSkillsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
-}
-
-export interface FindFoldersRpcInput {
-	readonly projectSlug?: string;
-	readonly query: string;
 }
 
 export interface SwitchAgentRpcInput {
@@ -643,14 +612,6 @@ export async function setPinRpc(input: {
 	return result.right;
 }
 
-export async function listBranchesRpc(projectSlug: string) {
-	return runTransportEffect(
-		callControl(projectSlug, (client) =>
-			client("ListBranches", { projectSlug }),
-		),
-	);
-}
-
 export async function resolveSessionModeRpc(projectSlug: string) {
 	return runTransportEffect(
 		callDaemon((client) => client("ResolveSessionMode", { projectSlug })),
@@ -666,90 +627,6 @@ export async function setDefaultSessionModeRpc(input: {
 			client("SetDefaultSessionMode", input),
 		),
 	);
-}
-
-export async function inspectSessionWorktreesRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}) {
-	return runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("InspectSessionWorktrees", input),
-		),
-	);
-}
-
-export async function moveSessionWorkspaceRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly path: string;
-}): Promise<void> {
-	const result = await runTransportEffect(
-		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("MoveSessionWorkspace", input),
-			),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
-}
-
-export async function renameSessionBranchRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly branchName: string;
-}): Promise<void> {
-	const result = await runTransportEffect(
-		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("RenameSessionBranch", input),
-			),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
-}
-
-export async function recreateSessionWorktreeRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}): Promise<void> {
-	const result = await runTransportEffect(
-		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("RecreateSessionWorktree", input),
-			),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
-}
-
-export async function continueSessionInMainFolderRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}): Promise<void> {
-	const result = await runTransportEffect(
-		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("ContinueSessionInMainFolder", input),
-			),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
-}
-
-export async function dismissWorkspaceHintRpc(input: {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly path: string;
-}): Promise<void> {
-	const result = await runTransportEffect(
-		Effect.either(
-			callControl(input.projectSlug, (client) =>
-				client("DismissWorkspaceHint", input),
-			),
-		),
-	);
-	if (Either.isLeft(result)) throw result.left;
 }
 
 const callCancelSession = (input: CancelSessionRpcInput) =>
@@ -956,15 +833,6 @@ const callRejectQuestion = (input: RejectQuestionRpcInput) =>
 		}).pipe(Effect.asVoid),
 	);
 
-const callGetFileTree = (input: GetFileTreeRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetFileTree", input));
-
-const callGetFileList = (input: GetFileListRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetFileList", input));
-
-const callGetFileContent = (input: GetFileContentRpcInput) =>
-	callControl(input.projectSlug, (client) => client("GetFileContent", input));
-
 const callGetToolDetails = (input: GetToolDetailsRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetToolDetails", input));
 
@@ -973,9 +841,6 @@ const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 
 const callGetSessionSkills = (input: GetSessionSkillsRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetSessionSkills", input));
-
-const callFindFolders = (input: FindFoldersRpcInput) =>
-	callControl(input.projectSlug, (client) => client("FindFolders", input));
 
 const callSwitchAgent = (input: SwitchAgentRpcInput) =>
 	callControl(input.projectSlug, (client) =>
@@ -1389,24 +1254,6 @@ export async function rejectQuestionRpc(
 	await runTransportEffect(callRejectQuestion(input));
 }
 
-export async function getFileTreeRpc(
-	input: GetFileTreeRpcInput,
-): Promise<GetFileTreeResponse> {
-	return await runTransportEffect(callGetFileTree(input));
-}
-
-export async function getFileListRpc(
-	input: GetFileListRpcInput,
-): Promise<GetFileListResponse> {
-	return await runTransportEffect(callGetFileList(input));
-}
-
-export async function getFileContentRpc(
-	input: GetFileContentRpcInput,
-): Promise<GetFileContentResponse> {
-	return await runTransportEffect(callGetFileContent(input));
-}
-
 export async function getToolDetailsRpc(
 	input: GetToolDetailsRpcInput,
 ): Promise<GetToolDetailsResponse> {
@@ -1423,17 +1270,6 @@ export async function getSessionSkillsRpc(
 	input: GetSessionSkillsRpcInput,
 ): Promise<GetSessionSkillsResponse> {
 	return await runTransportEffect(callGetSessionSkills(input));
-}
-
-export async function findFoldersRpc(
-	input: FindFoldersRpcInput,
-): Promise<FindFoldersResponse> {
-	// Keep the typed failure so the dialog can show permission issues by the field.
-	const result = await runTransportEffect(
-		Effect.either(callFindFolders(input)),
-	);
-	if (Either.isLeft(result)) throw result.left;
-	return result.right;
 }
 
 export async function switchAgentRpc(
@@ -1595,18 +1431,6 @@ export async function setWorktreeCleanupSettingRpc(
 		),
 	);
 	return result.worktreeCleanup;
-}
-
-export async function cleanUpWorktreesNowRpc(
-	projectSlug?: string,
-): Promise<WorktreeCleanupReport> {
-	return runTransportEffect(
-		callControl(undefined, (client) =>
-			client("CleanUpWorktreesNow", {
-				...(projectSlug !== undefined && { projectSlug }),
-			}),
-		),
-	);
 }
 
 export async function setAutoSettleSettingRpc(

@@ -9,7 +9,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc, setDefaultSessionModeRpc, getWorktreeCleanupSettingRpc, setWorktreeCleanupSettingRpc, cleanUpWorktreesNowRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc, setDefaultSessionModeRpc, getWorktreeCleanupSettingRpc, setWorktreeCleanupSettingRpc } from "../../transport/ws-rpc-client.js";
 	import { applyDefaultSessionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
@@ -63,7 +63,7 @@
 	function cleanUpNow(): void {
 		state.cleanupRun = { status: "running" };
 		state.cleanupDetailsOpen = false;
-		void cleanUpWorktreesNowRpc()
+		void rpc("CleanUpWorktreesNow", {})
 			.then((report) => {
 				state.cleanupRun = { status: "done", report };
 			})

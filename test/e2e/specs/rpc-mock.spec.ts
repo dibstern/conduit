@@ -178,12 +178,12 @@ test("typed and legacy entries coexist with control overrides", async ({
 
 test("a legacy invalid reply warns and becomes a defect", async ({ page }) => {
 	await mockWsRpc(page, {
-		handlers: { ListWorktrees: () => ({ worktrees: "invalid" }) },
+		handlers: {
+			GetStatus: () => ({ ...MOCK_SERVER_STATUS, clientCount: "invalid" }),
+		},
 	});
 	await openClient(page);
-	const result = await page.evaluate(() =>
-		window.callRpc("ListWorktrees", { projectSlug: "p" }),
-	);
+	const result = await page.evaluate(() => window.callRpc("GetStatus", {}));
 	expect(result).toHaveProperty("defect");
 });
 

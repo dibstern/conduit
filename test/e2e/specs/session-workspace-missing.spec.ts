@@ -69,6 +69,10 @@ async function openMissingSession(
 		workspaceMissing,
 	};
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			RecreateSessionWorktree: () => ({ directory: worktree }),
+			ContinueSessionInMainFolder: () => ({ directory: main }),
+		},
 		handlers: {
 			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: projectSlug }),
@@ -78,8 +82,6 @@ async function openMissingSession(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			RecreateSessionWorktree: () => ({ directory: worktree }),
-			ContinueSessionInMainFolder: () => ({ directory: main }),
 		},
 	});
 	rpc.setShellRows([session]);
@@ -316,13 +318,15 @@ for (const failure of [
 			reason: "branch-missing",
 			message: "Could not recreate worktree: its branch no longer exists",
 		}),
+		title: "Could not recreate worktree",
 		toast: "Could not recreate worktree: its branch no longer exists",
 	},
 	{
 		tag: "ContinueSessionInMainFolder",
 		label: "Continue in main folder",
 		error: new WorkspaceMoveError({ path: main, reason: "missing" }),
-		toast: "Could not move session: that folder no longer exists",
+		title: "Could not continue in main folder",
+		toast: "That worktree no longer exists.",
 	},
 ]) {
 	test(`${failure.label} preserves a typed recovery error toast`, async ({
@@ -331,11 +335,16 @@ for (const failure of [
 	}, testInfo) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const { rpc } = await openMissingSession(page, harness.relayBaseUrl);
-		rpc.setHandler(failure.tag, () => {
-			throw failure.error;
+		rpc.setStubs({
+			[failure.tag]: () => {
+				throw failure.error;
+			},
 		});
 		await page.getByTestId("composer-checkout").click();
 		await page.getByRole("menuitem", { name: failure.label }).click();
+		await expect(
+			page.getByRole("alert").getByText(failure.title, { exact: true }),
+		).toBeVisible();
 		await expect(page.getByRole("alert")).toContainText(failure.toast);
 		await expect(page.getByTestId("workspace-missing")).toBeVisible();
 		await capture(page, testInfo, "workspace-recovery-error");
