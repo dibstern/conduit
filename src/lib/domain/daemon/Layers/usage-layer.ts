@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Layer, Option, Ref, Schema } from "effect";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import {
 	type ClaudeUsageReaderOptions,
@@ -76,7 +77,7 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 							? [
 									{
 										id: account.id,
-										harness: "claude" as const,
+										harness: PROVIDER_DRIVERS[account.driver].usageHarness,
 										folder: account.folder,
 										...(account.env ? { env: account.env } : {}),
 									},
