@@ -35,6 +35,7 @@ async function mockSessions(
 	const sessions = Array.from({ length: total }, (_, index) => {
 		const parentID = parentOf(index);
 		return {
+			accountId: null,
 			id: `sess-${String(index).padStart(3, "0")}`,
 			title: `Session ${index}`,
 			status: "idle",
@@ -89,6 +90,8 @@ async function mockSessions(
 								session.projectSlug === LOCAL && session.parentID === undefined,
 						)
 						.map(({ id, title, status, updatedAt, settledAt }) => ({
+							accountId: null,
+							projectSlug: LOCAL,
 							id,
 							title,
 							status,
