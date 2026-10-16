@@ -48,6 +48,7 @@ negatives and checks that reads neither prepare nor mutate the store.
 | A legacy migration failure looks like an absent, healthy store. | Startup integration exercises a failed legacy rewrite and checks its availability reason. |
 | Lineage import updates already stored unavailable history through a healthy ancestor. | Startup integration checks lineage defers without changing the sidecar when unavailable owners already have shared rows. |
 | A committed import is blocked by a backup-only failure or source-changed result. | Startup integration checks both remain available. |
+| A source that changes before its import commits stays writable and is never imported. | Startup integration checks an uncommitted source-changed result blocks the project. |
 | A retained store is omitted, loses its slug, or becomes visible without registration. | Startup integration and process E2E check imported ownership, lists, search and directory visibility. |
 | A larger retained source takes a registered project's shared session. | Startup integration makes the retained store larger and checks registered seed and first-owner priority. |
 | A retained-only startup cannot create a destination without a seed. | Startup integration imports retained history without registered sources. |

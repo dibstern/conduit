@@ -406,6 +406,36 @@ describe("daemon shared-store startup", () => {
 		}
 	});
 
+	it("blocks a source that changed before its import committed", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-shared-uncommitted-"));
+		const alpha = project(root, "alpha");
+		try {
+			vi.spyOn(importer, "importRegisteredProjectStores").mockReturnValue(
+				Effect.succeed([
+					{
+						projectId: "alpha",
+						outcome: "source-changed",
+						error: new importer.DaemonStoreImportError({
+							projectId: "alpha",
+							kind: "source-changed",
+							message: "Source changed during import",
+						}),
+					},
+				]),
+			);
+			const runtime = startup(root, [alpha]);
+			try {
+				expect(await runtime.runPromise(DaemonStoreAvailability)).toEqual(
+					new Map([["alpha", "History import failed (source-changed)"]]),
+				);
+			} finally {
+				await runtime.dispose();
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps committed history available after a backup-only failure and a changed source on restart", async () => {
 		const root = mkdtempSync(
 			join(tmpdir(), "conduit-shared-backup-available-"),

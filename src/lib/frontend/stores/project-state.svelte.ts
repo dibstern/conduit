@@ -45,10 +45,11 @@ export function getProjectGroup(slug: string): ProjectGroup | undefined {
 export function getDraftProject(): string | null {
 	const params = getCurrentSearchParams();
 	const picked = params.get(DRAFT_PROJECT_PARAM);
-	if (picked) return picked;
-	const available = projectState.projects.filter(
-		(p) => !p.missing && !p.unavailableReason,
-	);
+	const isAvailable = (p: ProjectInfo) => !p.missing && !p.unavailableReason;
+	// An unknown pick may be a project list that has not loaded yet.
+	const pickedProject = projectState.projects.find((p) => p.slug === picked);
+	if (picked && (!pickedProject || isAvailable(pickedProject))) return picked;
+	const available = projectState.projects.filter(isAvailable);
 	const scope = params.get(SCOPE_PARAM);
 	const scopedProject =
 		getScopeGroupKey(scope) === null

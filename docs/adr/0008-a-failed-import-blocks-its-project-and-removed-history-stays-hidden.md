@@ -27,7 +27,8 @@ open.
 **A failed import makes the project unavailable until a restart retries it.**
 
 - The importer's results are published as one fixed availability map for the
-  process. A project is unavailable when its import outcome is `failed`, or
+  process. A project is unavailable when its import did not commit (any
+  result with an error, including a source that changed mid-copy), or
   when moving its legacy `<folder>/.conduit/events.db` failed this run. A
   legacy failure used to look like an absent store.
 - An unavailable project's relay is refused at acquisition, the same way a
@@ -43,9 +44,9 @@ open.
 
 - A failed backup rename (`backupError`): the import has committed, so the
   history is in the daemon store. The report names the failed rename.
-- `source-changed`: the import committed on an earlier run, and the source has
-  changed since. That only happens when an older build wrote to the file
-  again. Blocking would be permanent, because no retry can reconcile the two
+- `source-changed` after a committed import: the import committed on an
+  earlier run, and the source has changed since. That only happens when an
+  older build wrote to the file again. Blocking would be permanent, because no retry can reconcile the two
   copies. The report names it, and the newer rows stay in the source file.
 
 **Removed projects' stores are imported too, and stay hidden.**

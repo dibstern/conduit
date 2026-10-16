@@ -44,7 +44,7 @@ export const makeDaemonSharedStoreLayer = (
 					? readdirSync(projectsDir, { withFileTypes: true })
 							.filter(
 								(entry) =>
-									entry.isDirectory() &&
+									(entry.isDirectory() || entry.isSymbolicLink()) &&
 									!registered.has(entry.name) &&
 									existsSync(join(projectsDir, entry.name, "events.db")),
 							)
@@ -66,7 +66,9 @@ export const makeDaemonSharedStoreLayer = (
 				})),
 			]);
 			for (const result of results) {
-				if (result.outcome === "failed" && result.error) {
+				// An error means nothing committed. A marker-backed source-changed
+				// result has no error: its history is already imported.
+				if (result.error) {
 					unavailable.set(
 						result.projectId,
 						`History import failed (${result.error.kind})`,
