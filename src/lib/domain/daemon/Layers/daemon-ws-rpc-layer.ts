@@ -50,6 +50,7 @@ import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import type { AccountDirectory } from "../Services/account-directory.js";
+import { CategorySet } from "../Services/category-set.js";
 import {
 	type ConfigPersistenceTag,
 	requestConfigSave,
@@ -141,6 +142,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
 		const messageSurfacing = yield* MessageSurfacingSettings;
+		const categorySet = yield* CategorySet;
 		// Serialize process changes together with their config/persistence updates.
 		const keepAwakeLock = yield* Effect.makeSemaphore(1);
 		const tailscaleServeLock = yield* Effect.makeSemaphore(1);
@@ -726,6 +728,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							loadRelaySettings(configDir).defaultGroupingMode ?? "repository",
 					})),
 				),
+			GetCategorySet: () => categorySet.current(),
+			ReplaceCategorySet: ({ expectedVersion, nextSet }) =>
+				categorySet.replace(expectedVersion, nextSet),
 			SetDefaultGroupingMode: ({ mode }) =>
 				run(
 					Effect.gen(function* () {
