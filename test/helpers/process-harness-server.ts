@@ -60,7 +60,10 @@ function recordServerMetrics(
 		});
 		reads[read.kind] = (reads[read.kind] ?? 0) + 1;
 		source.reads[read.kind] = (source.reads[read.kind] ?? 0) + 1;
-		if (read.kind === "window" && read.range?.through !== undefined) {
+		if (
+			(read.kind === "window" || read.kind === "overflow") &&
+			read.range?.through !== undefined
+		) {
 			windows.add(read.range.through);
 			source.windows.add(read.range.through);
 			source.ranges.add(`${read.range.after}-${read.range.through}`);

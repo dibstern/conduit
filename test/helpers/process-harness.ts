@@ -603,6 +603,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "NODE_OPTIONS"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
+					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
 					| "CONDUIT_TRACE_MAX_BYTES"

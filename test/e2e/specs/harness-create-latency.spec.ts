@@ -542,3 +542,282 @@ test("creates reach every sidebar under streaming write load", async ({
 			.toEqual([]);
 	}
 });
+
+test("overflow catches up every sidebar through create and delete bursts", async ({
+	browser,
+	harness,
+}, testInfo) => {
+	test.setTimeout(280_000);
+	const contexts: BrowserContext[] = [];
+	const devices: {
+		device: number;
+		converged: boolean;
+		ms: number | null;
+		error?: string;
+	}[] = Array.from({ length: 4 }, (_, device) => ({
+		device,
+		converged: false,
+		ms: null,
+	}));
+	const created: { id: string; title: string }[] = [];
+	let deleted: typeof created = [];
+	let surviving: typeof created = [];
+	const metricsFile = join(harness.root, "overflow-catch-up-metrics.json");
+	const shellReads = { overflow: 0, window: 0, replacement: 0 };
+	const diagnosticErrors: string[] = [];
+	const cleanupErrors: string[] = [];
+	let phaseStart: number | null = null;
+	let phaseEnd: number | null = null;
+	let metricsFlushedAt: number | null = null;
+	let backgroundTicks = 0;
+	try {
+		await harness.terminate();
+		await seedSessionLoadFixture(harness.projectStorePath());
+		await harness.restart({
+			keepPort: true,
+			skipBrowserProbe: true,
+			metricsFile,
+			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
+		});
+		const driver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+		await expect
+			.poll(() => harness.generations.at(-1)?.fakeSdkActive)
+			.toBe(true);
+		const streams: string[] = [];
+		for (let index = 0; index < parameters.streams; index++) {
+			const sessionId = await driver.createSession(`Overflow stream ${index}`);
+			await Effect.runPromise(
+				driver.rpc.input.submit({
+					projectSlug: "process-test",
+					sessionId,
+					originId: driver.originId,
+					inputId: randomUUID(),
+					text: `load-stream-${index}`,
+					delivery: "queue",
+				}),
+			);
+			streams.push(sessionId);
+		}
+		const pages: Page[] = [];
+		for (const { device } of devices) {
+			const context = await browser.newContext({
+				viewport: { width: 1440, height: 900 },
+				isMobile: false,
+			});
+			contexts.push(context);
+			const page = await context.newPage();
+			pages[device] = page;
+			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
+			await expect(
+				page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
+			).toBeVisible({ timeout: 30_000 });
+		}
+		const database = new DatabaseSync(harness.projectStorePath(), {
+			readOnly: true,
+		});
+		try {
+			const tickQuery = database.prepare(`
+				SELECT coalesce(sum((length(json_extract(data, '$.text')) -
+					length(replace(json_extract(data, '$.text'), 'tick(', ''))) / 5), 0) AS n
+				FROM events WHERE type = 'text.delta'
+				AND session_id IN (${streams.map(() => "?").join(",")})
+			`);
+			const ticks = () => Number(tickQuery.get(...streams)?.["n"] ?? 0);
+			await expect.poll(ticks).toBeGreaterThan(parameters.streams * 10);
+			// Keep setup snapshots outside the measured burst, as in the latency test.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			const beforeTicks = ticks();
+			phaseStart = now();
+			await Promise.all(
+				Array.from({ length: 20 }, async (_, index) => {
+					const title = `Overflow ${index}: ${randomUUID()}`;
+					const reply = await Effect.runPromise(
+						driver.rpc
+							.CreateSession({
+								projectSlug: "process-test",
+								providerId: "claude",
+								permissionMode: "ask",
+								originId: driver.originId,
+								title,
+								model: {
+									providerId: "claude",
+									modelId: "sonnet",
+									variant: "",
+									contextWindow: "200k",
+								},
+							})
+							.pipe(Effect.timeout("15 seconds")),
+					);
+					created.push({ id: reply.sessionId, title });
+				}),
+			);
+			deleted = created.slice(0, 5);
+			surviving = created.slice(5);
+			await Promise.all(
+				deleted.map(({ id }) =>
+					Effect.runPromise(
+						driver.rpc
+							.DeleteSession({
+								projectSlug: "process-test",
+								sessionId: id,
+								originId: driver.originId,
+							})
+							.pipe(Effect.timeout("15 seconds")),
+					),
+				),
+			);
+			await Promise.all(
+				devices.map(async (device) => {
+					const page = pages[device.device];
+					if (!page) throw new Error(`Missing sidebar device ${device.device}`);
+					try {
+						const result = await page.waitForFunction(
+							({ surviving, deleted }) => {
+								const sidebar = document.querySelector(
+									"#sidebar-panel-sessions",
+								);
+								if (!sidebar) return false;
+								const allSurvived = surviving.every(({ id, title }) => {
+									const row = sidebar.querySelector(
+										`[data-session-id="${id}"]`,
+									);
+									return (
+										row !== null &&
+										row.getClientRects().length > 0 &&
+										row.textContent?.includes(title)
+									);
+								});
+								const allDeleted = deleted.every(
+									({ id, title }) =>
+										!sidebar.querySelector(`[data-session-id="${id}"]`) &&
+										!sidebar.textContent?.includes(title),
+								);
+								return allSurvived && allDeleted
+									? performance.timeOrigin + performance.now()
+									: false;
+							},
+							{ surviving, deleted },
+							{ timeout: 30_000 },
+						);
+						const at = await result.jsonValue();
+						await result.dispose();
+						if (typeof at !== "number")
+							throw new Error("Sidebar convergence did not return a timestamp");
+						device.ms = at - (phaseStart ?? at);
+						device.converged = true;
+					} catch (error) {
+						device.error = String(error);
+					}
+				}),
+			);
+			await expect.poll(ticks).toBeGreaterThan(beforeTicks);
+			backgroundTicks = ticks() - beforeTicks;
+		} finally {
+			database.close();
+		}
+	} finally {
+		phaseEnd = now();
+		if (phaseStart !== null) {
+			try {
+				await expect
+					.poll(
+						() =>
+							(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+								.flushedAt,
+					)
+					.toBeGreaterThan(phaseEnd);
+			} catch (error) {
+				diagnosticErrors.push(`Metrics flush: ${String(error)}`);
+			}
+		}
+		try {
+			await harness.terminate();
+		} catch (error) {
+			cleanupErrors.push(String(error));
+		}
+		try {
+			const metrics = JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics;
+			metricsFlushedAt = metrics.flushedAt;
+			for (const read of metrics.readModelReads) {
+				if (
+					read.source === "shell" &&
+					phaseStart !== null &&
+					read.at >= phaseStart &&
+					read.at <= phaseEnd &&
+					(read.kind === "overflow" ||
+						read.kind === "window" ||
+						read.kind === "replacement")
+				)
+					shellReads[read.kind] += 1;
+			}
+		} catch (error) {
+			diagnosticErrors.push(`Shell read measurement: ${String(error)}`);
+		}
+		for (const result of await Promise.allSettled(
+			contexts.map((context) => context.close()),
+		)) {
+			if (result.status === "rejected")
+				cleanupErrors.push(String(result.reason));
+		}
+		mkdirSync("test-results", { recursive: true });
+		const output = join(
+			"test-results",
+			`overflow-catch-up.${testInfo.project.name}.json`,
+		);
+		writeFileSync(
+			output,
+			`${JSON.stringify(
+				{
+					parameters: {
+						devices: 4,
+						creates: 20,
+						deletes: 5,
+						advanceBusCapacity: 1,
+					},
+					phaseStart,
+					phaseEnd,
+					devices,
+					created,
+					deleted,
+					surviving,
+					backgroundTicks,
+					shell: { metricsFlushedAt, reads: shellReads },
+					diagnosticErrors,
+					cleanupErrors,
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		await testInfo.attach("overflow-catch-up", {
+			path: output,
+			contentType: "application/json",
+		});
+		expect
+			.soft(shellReads.overflow, "Overflow catch-up must run")
+			.toBeGreaterThan(0);
+		expect
+			.soft(shellReads.replacement, "Shell must not replace its view")
+			.toBe(0);
+		expect.soft(created).toHaveLength(20);
+		expect.soft(deleted).toHaveLength(5);
+		expect.soft(surviving).toHaveLength(15);
+		expect
+			.soft(
+				devices.filter(({ converged }) => !converged),
+				"Every sidebar must converge",
+			)
+			.toEqual([]);
+		expect
+			.soft(diagnosticErrors, "Overflow diagnostics must be available")
+			.toEqual([]);
+		expect
+			.soft(cleanupErrors, "Isolated harness cleanup must succeed")
+			.toEqual([]);
+	}
+});
