@@ -184,13 +184,15 @@
 		const widths = [...labels, ...marks];
 		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 22 + 5 : 0) + 17 * noticeLabels.length };
 	}
-	let room = $state(0);
+	// Unmeasured until bound: a measured 0 means send left no room, which must fall to icon.
+	let room = $state<number>();
 	let hundredCh = $state(0);
 	const fit = $derived.by((): Fit => {
-		if (!control || !room || !hundredCh) return "full";
+		const available = room;
+		if (!control || available === undefined || !hundredCh) return "full";
 		const fits = (candidate: Fit) => {
 			const { ch, px } = floor(candidate);
-			return (ch * hundredCh) / 100 + px <= room;
+			return (ch * hundredCh) / 100 + px <= available;
 		};
 		return fits("full") ? "full" : checkout && fits("branch") ? "branch" : "icon";
 	});

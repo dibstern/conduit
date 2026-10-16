@@ -525,6 +525,42 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "move the desktop composer to the window's left edge",
+		match: /^the desktop composer sits at the window's left edge$/,
+		run: async ({ world }) => {
+			// A closed sidebar with Files open leaves the composer at the window's left edge.
+			await world.page.locator("#input-wrapper").evaluate((element) => {
+				element.style.left = `${12 - element.getBoundingClientRect().left}px`;
+			});
+		},
+	},
+	{
+		name: "assert the desktop model picker stays inside the window",
+		match: /^the model picker stays inside the window$/,
+		run: async ({ world }) => {
+			const picker = await box(world.page.getByTestId("model-picker"));
+			const width = world.page.viewportSize()?.width ?? 0;
+			expect(picker.x).toBeGreaterThanOrEqual(8 - 0.5);
+			expect(picker.x + picker.width).toBeLessThanOrEqual(width - 8 + 0.5);
+		},
+	},
+	{
+		name: "assert a thin composer folds the harness into the model control",
+		match: /^the icons model control reads (\S+) beside the harness logo$/,
+		run: async ({ world, match }) => {
+			const model = world.page.getByTestId(iconsControls.model);
+			await expect(model.getByTestId("harness-logo")).toBeVisible();
+			await expect(model.locator(".model-label")).toHaveText(match[1] ?? "");
+			await expect(model.getByTestId("picker-selected-context")).toHaveCount(0);
+			await expect(world.page.getByTestId(iconsControls.harness)).toHaveCount(
+				0,
+			);
+			await expect(
+				world.page.getByTestId("composer-control-divider"),
+			).toHaveCount(0);
+		},
+	},
+	{
 		name: "assert which checkout labels fit beside send",
 		match: /^the composer checkout labels are (.+)$/,
 		run: async ({ world, match }) => {
@@ -543,8 +579,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert quiet checkout yields room before left controls",
-		match: /^the icons checkout is a quiet shrinking control before send$/,
-		run: async ({ world }) => {
+		match:
+			/^the icons checkout is a quiet shrinking control before send( after the combined model control)?$/,
+		run: async ({ world, match }) => {
 			const layout = world.page.getByTestId("composer-layout");
 			const right = layout.locator('[data-slot="send"]');
 			const checkout = right.getByTestId("composer-checkout");
@@ -558,7 +595,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(checkout.locator("..")).toHaveCSS("min-width", "0px");
 			const footer = [
 				world.page.locator("#attach-btn"),
-				...Object.values(iconsControls).map((id) => world.page.getByTestId(id)),
+				...Object.values(iconsControls)
+					.filter((id) => !match[1] || id !== iconsControls.harness)
+					.map((id) => world.page.getByTestId(id)),
 				checkout,
 				right.locator("#send"),
 			];
