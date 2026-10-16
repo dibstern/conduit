@@ -1,5 +1,6 @@
 import { Effect, Sink, Stream } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../account-directory.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../domain/daemon/Services/opencode-instances-service.js";
@@ -215,7 +216,7 @@ export const subscribeDraftModels = (request: {
 				_tag: "Id",
 				id: request.instanceId,
 			});
-			if (account.driver !== "opencode")
+			if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer)
 				return yield* new WsRpcError({
 					message: "Draft model borrowing requires OpenCode",
 				});

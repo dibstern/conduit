@@ -10,7 +10,10 @@ import {
 } from "effect";
 import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
-import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 import {
 	ProjectSaveRejected,
@@ -583,8 +586,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const instance = yield* getInstance(request.instanceId);
-						// Claude instances have no process to start.
-						if (instance.driver !== "claude")
+						if (
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+						)
 							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
 						return {
 							projectSlug: request.projectSlug,
@@ -596,7 +601,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const instance = yield* getInstance(request.instanceId);
-						if (instance.driver !== "claude")
+						if (
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+						)
 							yield* openCodeInstances.stop(request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
@@ -740,7 +748,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			OpenCodeUseWorktree: (request) =>
 				Effect.gen(function* () {
 					const instance = yield* getInstance(request.instanceId);
-					if (!instance.managed || instance.driver !== "opencode")
+					if (
+						getProviderDriver(instance.driver)?.worktreeMoves !==
+							"server-declaration" ||
+						!instance.managed
+					)
 						return yield* new WsRpcError({
 							message:
 								"Declared worktree moves require a Conduit-managed OpenCode instance",

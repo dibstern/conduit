@@ -25,6 +25,7 @@ import { SessionModeSchema } from "../contracts/project-file.js";
 import { ProjectShellEnvConfigSchema } from "../contracts/project-shell-env.js";
 import {
 	AccountIdSchema,
+	getProviderDriver,
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	migrateLegacyDefaultOpencodeInstanceId,
@@ -241,9 +242,13 @@ export const sanitizeRestartMetadata = (value: unknown): unknown => {
 			const version = instance["version"];
 			const identity = instance["processIdentity"];
 			const env = instance["env"];
+			const driver = instance["driver"];
 			const invalidAuth =
 				instance["managed"] === true &&
-				instance["driver"] !== "claude" &&
+				// Legacy sanitization includes missing and unrecognized driver values.
+				(getProviderDriver(typeof driver === "string" ? driver : undefined)
+					?.runsOpenCodeServer ??
+					true) &&
 				isRecord(env) &&
 				["OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].some(
 					(key) => Object.hasOwn(env, key) && typeof env[key] !== "string",
@@ -306,7 +311,8 @@ export function resolveOpenCodeInstanceUrl(
 		: undefined;
 	if (
 		configuredInstance === undefined ||
-		(configuredInstance.driver ?? "opencode") !== "opencode"
+		!getProviderDriver(configuredInstance.driver ?? "opencode")
+			?.runsOpenCodeServer
 	) {
 		return undefined;
 	}
@@ -332,15 +338,15 @@ export function resolveClaudeLaunchConfig(
 			: { _tag: "Id", id: instanceId },
 	);
 	if (Either.isLeft(account)) throw account.left;
-	if (account.right.driver !== "claude")
-		throw new AccountUnroutable({ ref: { _tag: "Id", id: account.right.id } });
-	return {
-		folderSource:
-			account.right.configuredFolder === undefined
-				? "implicitDefault"
-				: "account",
-		configDir: account.right.folder,
-	};
+	if (account.right.driver === "claude")
+		return {
+			folderSource:
+				account.right.configuredFolder === undefined
+					? "implicitDefault"
+					: "account",
+			configDir: account.right.folder,
+		};
+	throw new AccountUnroutable({ ref: { _tag: "Id", id: account.right.id } });
 }
 
 /** Default config for first-startup when no daemon.json exists. */
