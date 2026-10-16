@@ -62,13 +62,13 @@ async function setup(
 			accountId: null,
 			id: "delete-session",
 			title: "Delete this session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 			...(inspection.worktrees.length > 0
 				? {
 						workspace: {
-							cause: "launch",
-							origin: "conduit",
+							cause: "launch" as const,
+							origin: "conduit" as const,
 							worktrees: { [folder]: worktree },
 						},
 						git: { branch: "conduit/session-delete", worktree: "app" },
@@ -81,15 +81,40 @@ async function setup(
 						accountId: null,
 						id: "local-session",
 						title: "Local session",
-						status: "idle",
+						status: "idle" as const,
 						projectSlug,
 					},
 				]
 			: []),
 	];
 	const rpc = await mockWsRpc(page, {
+		stubs: {
+			InspectSessionWorktrees: async ({ sessionId }) => {
+				await options.inspectionDelay;
+				if (options.failInspection)
+					throw new WsRpcError({ message: "Could not inspect worktrees" });
+				return sessionId === "local-session"
+					? { worktrees: [], removeWorktrees: false }
+					: inspection;
+			},
+			ListDaemonSessions: () => ({
+				sessions: options.foreign ? sessions : [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			DeleteSession: ({ sessionId }) => {
+				sessions = sessions.filter(({ id }) => id !== sessionId);
+				rpc.setShellRows(options.foreign ? [] : sessions);
+				return { ok: true, worktreeWarnings: options.warnings ?? [] };
+			},
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
+				providers: [],
+			}),
+		},
 		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetWorktreeCleanupSetting: () => {
 				if (options.failCleanupSetting)
@@ -100,25 +125,6 @@ async function setup(
 						onDelete: options.onDelete ?? false,
 					},
 				};
-			},
-			ListDaemonSessions: () => ({
-				sessions: options.foreign ? sessions : [],
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
-			InspectSessionWorktrees: async ({ sessionId }) => {
-				await options.inspectionDelay;
-				if (options.failInspection)
-					throw new WsRpcError({ message: "Could not inspect worktrees" });
-				return sessionId === "local-session"
-					? { worktrees: [], removeWorktrees: false }
-					: inspection;
-			},
-			DeleteSession: ({ sessionId }) => {
-				sessions = sessions.filter(({ id }) => id !== sessionId);
-				rpc.setShellRows(options.foreign ? [] : sessions);
-				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
 		},
 	});

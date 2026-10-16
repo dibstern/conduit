@@ -33,7 +33,7 @@ for (const viewport of [
 				accountId: null,
 				id: "mismatched-session",
 				title: "Workspace mismatch",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 				provider: "claude",
 				git: {
@@ -44,26 +44,33 @@ for (const viewport of [
 					target === main
 						? null
 						: {
-								cause: "user",
-								origin: "existing",
+								cause: "user" as const,
+								origin: "existing" as const,
 								worktrees: { [main]: target },
 							},
 				workspaceMismatch: { actualPath },
 			};
 			const rpc = await mockWsRpc(page, {
-				handlers: {
-					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-					GetProjects: () => ({
-						projects,
-						current: projectSlug,
-					}),
+				stubs: {
+					MoveSessionWorkspace: () => ({ projectSlug, directory: target }),
 					ListDaemonSessions: () => ({
 						sessions: [session],
 						availability: [],
 						hasMore: false,
 						nextCursor: null,
 					}),
-					MoveSessionWorkspace: () => ({ projectSlug, directory: target }),
+					GetModels: (input) => ({
+						defaultOpenCodeInstanceId: "opencode",
+						projectSlug:
+							"projectSlug" in input ? input.projectSlug : projectSlug,
+						providers: [],
+					}),
+				},
+				handlers: {
+					GetProjects: () => ({
+						projects,
+						current: projectSlug,
+					}),
 				},
 			});
 			rpc.setShellRows([session]);

@@ -78,26 +78,38 @@ async function openDraft(
 		})),
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: slug }),
-			GetInstances: () => instances,
-			GetModels: ({ projectSlug, instanceId }) => ({
-				projectSlug,
-				providers: modelProviders.filter(
-					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
-				),
-			}),
-			GetAgents: ({ projectSlug, instanceId }) => ({
-				projectSlug,
-				instanceId,
-				providerScope: { id: instanceId ?? "claude", name: "Provider" },
-				agents: [],
+		stubs: {
+			FindFolders: ({ query }) => ({
+				home: "/workspace",
+				entries: query
+					? [{ path: query, isGitRepo: true, exists: true, reason: "match" }]
+					: [],
 			}),
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
+			}),
+			CreateSession: ({ projectSlug }) => ({
+				projectSlug,
+				sessionId: "created-session",
+			}),
+			PreWarmSession: () => undefined,
+			PreWarmDraft: () => undefined,
+			GetModels: (input) => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
+				providers: modelProviders.filter(
+					({ id }) =>
+						id === (input.instanceId === "claude" ? "claude" : "anthropic"),
+				),
+			}),
+			GetAgents: (input) => ({
+				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
+				instanceId: input.instanceId,
+				providerScope: { id: input.instanceId ?? "claude", name: "Provider" },
+				agents: [],
 			}),
 			ResolveSessionMode: ({ projectSlug }) =>
 				options.resolve?.(String(projectSlug)) ?? {
@@ -111,13 +123,11 @@ async function openDraft(
 				rpc.setProjectSetting({ _tag: "defaultSessionMode", mode });
 				return { mode };
 			},
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: slug }),
+			GetInstances: () => instances,
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
-			FindFolders: ({ query }) => ({
-				home: "/workspace",
-				entries: query
-					? [{ path: query, isGitRepo: true, exists: true, reason: "match" }]
-					: [],
-			}),
 			SaveProject: ({ slug: editedSlug, sessionMode, title, folders }) => {
 				const savedSlug = typeof editedSlug === "string" ? editedSlug : "added";
 				const previous = projects.find((project) => project.slug === savedSlug);
@@ -138,12 +148,6 @@ async function openDraft(
 				projects = [...projects.filter((p) => p.slug !== savedSlug), saved];
 				return { savedSlug, projects, warnings: [] };
 			},
-			CreateSession: ({ projectSlug }) => ({
-				projectSlug,
-				sessionId: "created-session",
-			}),
-			PreWarmSession: () => ({ ok: true }),
-			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -300,8 +304,10 @@ for (const viewport of [
 				({ tag }) => tag === "PreWarmDraft",
 			);
 			expect(warm.payload["draftId"]).toEqual(expect.any(String));
-			rpc.setHandler("CreateSession", () => {
-				throw new WsRpcError({ message: "simulated create failure" });
+			rpc.setStubs({
+				CreateSession: () => {
+					throw new WsRpcError({ message: "simulated create failure" });
+				},
 			});
 			await input.fill("Keep this message after failure");
 			await press(page.locator("#send"));
@@ -317,9 +323,11 @@ for (const viewport of [
 				_tag: "CreateSession",
 			});
 
-			rpc.setResponse("CreateSession", {
-				projectSlug: slug,
-				sessionId: "created-session",
+			rpc.setStubs({
+				CreateSession: () => ({
+					projectSlug: slug,
+					sessionId: "created-session",
+				}),
 			});
 			await press(page.locator("#send"));
 			await expect

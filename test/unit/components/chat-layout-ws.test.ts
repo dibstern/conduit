@@ -274,38 +274,36 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 	runTransportEffect: vi.fn(async () => undefined),
 }));
 
-vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	resolveSessionRpc: vi.fn(async () => ({
+const resolveSession = vi.hoisted(() =>
+	vi.fn(async (_input: unknown) => ({
 		projectSlug: "test-project" as string | null,
 	})),
+);
+
+vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	attachProjectRpc: vi.fn(async () => ({
 		projectSlug: null as string | null,
 		sessionSlug: null as string | null,
 	})),
-	listDaemonSessionsRpc: vi.fn(async () => ({
-		sessions: [],
-		availability: [],
-		hasMore: false,
-		nextCursor: null,
-	})),
-	getAgentsRpc: vi.fn(async () => {
-		throw new Error("agents temporarily unavailable");
-	}),
-	getModelsRpc: vi.fn(async () => {
-		throw new Error("models temporarily unavailable");
-	}),
-	getCommandsRpc: vi.fn(async () => {
-		throw new Error("commands temporarily unavailable");
-	}),
 	getProjectsRpc: vi.fn(async () => ({
 		projectSlug: "test-project",
 		projects: [],
 		current: "test-project",
 	})),
-	getFileTreeRpc: vi.fn(async () => ({
-		projectSlug: "test-project",
-		files: [],
-	})),
+	rpc: vi.fn((tag: string, input: unknown) => {
+		if (tag === "ResolveSession") return resolveSession(input);
+		if (tag === "ListDaemonSessions")
+			return Promise.resolve({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			});
+		if (["GetAgents", "GetModels", "GetCommands"].includes(tag)) {
+			return Promise.reject(new Error("discovery temporarily unavailable"));
+		}
+		return Promise.resolve({ projectSlug: "test-project", files: [] });
+	}),
 }));
 
 // Imports (after mocks)
@@ -331,10 +329,7 @@ import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { onProjectAttached } from "../../../src/lib/frontend/stores/ws-listeners.js";
 import { runTransportEffect } from "../../../src/lib/frontend/transport/runtime.js";
-import {
-	attachProjectRpc,
-	resolveSessionRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { attachProjectRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
 function attach(slug: string): void {
 	attachedProjectState.slug = slug;
@@ -370,7 +365,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		routerState.sessionNotFound = false;
 		sessionState.currentId = null;
 		sessionViewState.compact = false;
-		vi.mocked(resolveSessionRpc).mockResolvedValue({
+		vi.mocked(resolveSession).mockResolvedValue({
 			projectSlug: "test-project",
 		});
 		vi.mocked(attachProjectRpc).mockImplementation(async ({ sessionId }) => ({
@@ -440,7 +435,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		replaceRoute("/s/ses_abc123");
 		flushSync();
 		await tick();
-		expect(resolveSessionRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(resolveSession).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "ses_abc123",
 		});
 		expect(switchToSession).toHaveBeenCalledExactlyOnceWith(
@@ -454,7 +449,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		attach("test-project");
 		await tick();
 		vi.clearAllMocks();
-		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+		vi.mocked(resolveSession).mockResolvedValueOnce({
 			projectSlug: "other-project",
 		});
 		replaceRoute("/s/session-b");
@@ -497,7 +492,7 @@ describe("ChatLayout RPC lifecycle", () => {
 			sessionId: "cold-session",
 			originId: "browser-client-1",
 		});
-		expect(resolveSessionRpc).not.toHaveBeenCalled();
+		expect(resolveSession).not.toHaveBeenCalled();
 		expect(
 			vi.mocked(attachProjectRpc).mock.invocationCallOrder[0],
 		).toBeLessThan(vi.mocked(switchToSession).mock.invocationCallOrder[0] ?? 0);
@@ -508,7 +503,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		attach("test-project");
 		await tick();
 		sessionState.currentId = "session-a";
-		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+		vi.mocked(resolveSession).mockResolvedValueOnce({
 			projectSlug: "other-project",
 		});
 		window.history.pushState(null, "", "/s/session-b");
@@ -522,7 +517,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		);
 		sessionState.currentId = "session-b";
 		attach("other-project");
-		vi.mocked(resolveSessionRpc).mockResolvedValueOnce({
+		vi.mocked(resolveSession).mockResolvedValueOnce({
 			projectSlug: "test-project",
 		});
 		window.history.replaceState(null, "", "/s/session-a");
@@ -534,7 +529,7 @@ describe("ChatLayout RPC lifecycle", () => {
 				"test-project",
 			),
 		);
-		expect(resolveSessionRpc).toHaveBeenCalledTimes(2);
+		expect(resolveSession).toHaveBeenCalledTimes(2);
 	});
 
 	it("does not resolve or select a session at the list front door", async () => {
@@ -542,7 +537,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		attach("test-project");
 		flushSync();
 		await tick();
-		expect(resolveSessionRpc).not.toHaveBeenCalled();
+		expect(resolveSession).not.toHaveBeenCalled();
 		expect(switchToSession).not.toHaveBeenCalled();
 		expect(sessionState.currentId).toBeNull();
 	});

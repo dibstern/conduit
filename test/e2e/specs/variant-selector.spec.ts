@@ -33,11 +33,11 @@ async function setupWithVariants(
 ): Promise<VariantSetupControl> {
 	const rpcCalls: Record<string, unknown>[] = [];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			SwitchVariant: (params) => {
-				rpcCalls.push(params);
+				rpcCalls.push({ ...params });
 				return {
-					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					projectSlug: "myapp",
 					variant: String(params["variant"] ?? ""),
 					variants: ["low", "medium", "high", "max"],
 				};
@@ -67,9 +67,9 @@ async function setupWithoutVariants(
 	baseURL?: string,
 ): Promise<WsMockControl> {
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			SwitchVariant: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				projectSlug: "myapp",
 				variant: String(params["variant"] ?? ""),
 				variants: [],
 			}),

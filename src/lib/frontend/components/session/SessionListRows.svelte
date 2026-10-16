@@ -6,8 +6,8 @@
 	import { isSessionSnoozed, isSessionWoken, sessionState, switchToSession } from "../../stores/session.svelte.js";
 	import { getSessionHref } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { unsnoozeSessionRpc } from "../../transport/ws-rpc-client.js";
-	import { showToast } from "../../stores/ui.svelte.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { touch } from "../../utils/attention.js";
 	import { setSessionStatusFilter, type SessionStatusFilter } from "../../stores/session-scope.js";
 	import { setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
@@ -53,8 +53,8 @@
 		touch(session, "sidebar-pick");
 		const projectSlug = session.projectSlug;
 		if (projectSlug && isSessionWoken(session, sessionState.now)) {
-			unsnoozeSessionRpc({ sessionId: session.id, originId: getBrowserClientId() })
-				.catch(() => showToast("Couldn't clear the wake", { variant: "error" }));
+			rpc("UnsnoozeSession", { sessionId: session.id, originId: getBrowserClientId() })
+				.catch(toastFailure("Couldn't clear the wake"));
 		}
 		if (session.id !== sessionState.currentId) switchToSession(session.id, session.projectSlug);
 	}

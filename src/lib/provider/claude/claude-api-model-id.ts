@@ -20,9 +20,8 @@ const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 > = {
 	"claude-fable-5-1": OPTIONS_1M_DEFAULT,
 	"claude-fable-5": OPTIONS_1M_DEFAULT,
-	// Catalogs are asymmetric: today Opus is advertised as the alias `opus[1m]`
-	// and only resolves to `claude-opus-5-5[1m]`. Fable used to be an alias too
-	// and is now advertised as a full id, so carry the full-id row as well.
+	// The 0.3.301 catalog advertises `opus[1m]` and the bare `fable` alias.
+	// Fable is natively 1M, with no context-window suffix or selector.
 	"claude-opus-5-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-5": OPTIONS_1M_DEFAULT,
 	"claude-opus-4-8": undefined,
@@ -35,6 +34,7 @@ const CONTEXT_WINDOW_OPTIONS_BY_MODEL: Readonly<
 	opus: OPTIONS_1M_DEFAULT,
 	sonnet: OPTIONS_200K_DEFAULT,
 	haiku: undefined,
+	fable: undefined,
 	// The catalog's "default" entry resolves to whichever model Claude Code
 	// recommends, so conduit cannot say which windows it offers. Present and
 	// explicitly undefined: no selector, by decision rather than by omission.

@@ -2,10 +2,7 @@ import {
 	getCurrentSessionId,
 	getCurrentSlug,
 } from "../../stores/router.svelte.js";
-import {
-	getFileContentRpc,
-	getFileListRpc,
-} from "../../transport/ws-rpc-client.js";
+import { rpc } from "../../transport/ws-rpc-client.js";
 import { formatFileSize } from "../../utils/format.js";
 
 // Anthropic's API enforces a 5 MB limit on the base64 string (not the decoded
@@ -113,7 +110,7 @@ export function fetchFileContent(
 ): Promise<{ content: string; binary?: boolean }> {
 	if (!slug) return Promise.reject(new Error("No project selected"));
 	const sessionId = getCurrentSessionId();
-	return getFileContentRpc({
+	return rpc("GetFileContent", {
 		...(sessionId ? { sessionId } : { projectSlug: slug }),
 		path,
 	}).then((response) => ({
@@ -129,7 +126,7 @@ export function fetchDirectoryListing(
 	const requestPath = path.replace(/\/$/, "");
 	if (!slug) return Promise.reject(new Error("No project selected"));
 	const sessionId = getCurrentSessionId();
-	return getFileListRpc({
+	return rpc("GetFileList", {
 		...(sessionId ? { sessionId } : { projectSlug: slug }),
 		path: requestPath,
 	}).then((response) =>

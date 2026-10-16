@@ -89,22 +89,12 @@ async function openCheckout(
 		},
 	];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetAgents: () => ({
-				projectSlug: "e2e-replay",
-				agents: [],
-				providerScope: {
-					id: options.provider ?? "opencode",
-					name: "Session provider",
-				},
-				instanceId: options.provider ?? "opencode",
-			}),
-			GetInstances: () => instances,
-			ListWorktrees: ({ sessionId }) => ({
+		stubs: {
+			ListWorktrees: (scope) => ({
 				worktrees: options.worktrees ?? [],
-				...(options.canonicalDirectory && sessionId === "header-session"
+				...(options.canonicalDirectory &&
+				"sessionId" in scope &&
+				scope.sessionId === "header-session"
 					? { directory: options.canonicalDirectory }
 					: {}),
 			}),
@@ -118,6 +108,20 @@ async function openCheckout(
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
+			}),
+			GetModels: () => ({
+				defaultOpenCodeInstanceId: "opencode",
+				projectSlug: "e2e-replay",
+				providers: [],
+			}),
+			GetAgents: () => ({
+				projectSlug: "e2e-replay",
+				agents: [],
+				providerScope: {
+					id: options.provider ?? "opencode",
+					name: "Session provider",
+				},
+				instanceId: options.provider ?? "opencode",
 			}),
 			GetSessionSkills: () => ({
 				loads: options.skills
@@ -133,6 +137,10 @@ async function openCheckout(
 						]
 					: [],
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 		},
 		...(options.viewActivity
 			? {
@@ -527,10 +535,12 @@ for (const mode of [
 			await trigger.click();
 			await page.getByRole("menuitem", { name: "Move to worktree…" }).click();
 			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
+			const toast = page.getByRole("alert");
 			await expect(
-				page.getByText("Could not move session: that folder no longer exists", {
-					exact: true,
-				}),
+				toast.getByText("Could not move session", { exact: true }),
+			).toBeVisible();
+			await expect(
+				toast.getByText("That worktree no longer exists.", { exact: true }),
 			).toBeVisible();
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
 		});
