@@ -86,7 +86,7 @@ describe("an unanswered OpenCode user message", () => {
 				delivery: "queue",
 			}),
 		);
-		expect(accepted).toEqual({ ok: true, sessionId });
+		expect(accepted).toEqual({ ok: true, sessionId, handedOff: false });
 		await vi.waitFor(() =>
 			expect(ledger(fixture, sessionId).queued).toEqual([inputId]),
 		);
