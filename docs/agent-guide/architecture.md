@@ -57,7 +57,8 @@ Catch-up sources read a shared window through the newest queued advance, includi
 unrouted advances, and send row deltas plus durable tombstones. They replace the
 view with a snapshot only when tombstones cannot cover the cursor or the source
 requires a rebase. `CONDUIT_TEST_ADVANCE_BUS_CAPACITY` changes only the advances
-buffer capacity, and only with `NODE_ENV=test`.
+buffer capacity, and only with `NODE_ENV=test`. Both buffers hold at least two
+advances: Effect's 1-slot PubSub can hand one subscriber's share to another.
 Detail windows include message and part removals retained across message
 recreation, so overflowing open session views catch up with deltas. Ordinary
 detail resumes keep their existing policy.

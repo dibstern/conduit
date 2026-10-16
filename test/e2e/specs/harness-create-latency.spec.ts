@@ -647,7 +647,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			keepPort: true,
 			skipBrowserProbe: true,
 			metricsFile,
-			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "1" },
+			serviceEnvironment: { CONDUIT_TEST_ADVANCE_BUS_CAPACITY: "2" },
 		});
 		const driver = await harness.connect(
 			undefined,
@@ -845,7 +845,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 						devices: 4,
 						creates: 20,
 						deletes: 5,
-						advanceBusCapacity: 1,
+						advanceBusCapacity: 2,
 					},
 					phaseStart,
 					phaseEnd,
