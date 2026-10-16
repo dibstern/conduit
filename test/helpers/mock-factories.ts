@@ -16,10 +16,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Layer, Option, Stream } from "effect";
+import { Effect, Either, Layer, Option, Record, Stream } from "effect";
 import { afterAll, vi } from "vitest";
 import type { Account } from "../../src/lib/contracts/account.js";
-import { AccountIdSchema } from "../../src/lib/contracts/provider-instance.js";
+import {
+	AccountIdSchema,
+	PROVIDER_DRIVERS,
+} from "../../src/lib/contracts/provider-instance.js";
 import {
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
@@ -838,11 +841,11 @@ export function makeMockAccountDirectory(
 			accounts,
 			launchLogin: configuredClaudeConfigDir("/isolated-test-login"),
 			maxAccounts: 5,
-			defaults: {
-				claude: Option.fromNullable(
-					accounts.find((account) => account.driver === "claude")?.id,
+			defaults: Record.map(PROVIDER_DRIVERS, (_, driver) =>
+				Option.fromNullable(
+					accounts.find((account) => account.driver === driver)?.id,
 				),
-			},
+			),
 			deleted: [],
 		}),
 	);

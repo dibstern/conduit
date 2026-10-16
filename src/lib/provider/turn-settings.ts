@@ -1,5 +1,9 @@
 import { Data, Either } from "effect";
-import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
+import {
+	isKnownDriverKind,
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+} from "../contracts/provider-instance.js";
 import type { RelaySettings } from "../relay/relay-settings.js";
 import {
 	claudeApiModelId,
@@ -11,11 +15,14 @@ import type {
 	ModelSelection,
 } from "./types.js";
 
-export type Harness = "claude" | "opencode";
+export type Harness = KnownProviderDriverKind;
 
 /** Model namespaces identify a harness, independently of account bindings. */
 export function harnessForModelProvider(providerId: string): Harness {
-	return providerId === "claude" ? "claude" : "opencode";
+	return isKnownDriverKind(providerId) &&
+		PROVIDER_DRIVERS[providerId].catalogSource === "discovery"
+		? providerId
+		: "opencode";
 }
 
 export interface TurnPick {

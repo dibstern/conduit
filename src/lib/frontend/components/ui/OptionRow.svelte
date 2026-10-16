@@ -16,7 +16,7 @@
 		testId,
 		itemTestId,
 	}: {
-		options: readonly { value: T; label: string; locked?: boolean }[];
+		options: readonly { value: T; label: string; locked?: boolean; lockedReason?: string | undefined }[];
 		value: T;
 		onChange: (value: T) => void;
 		item: Snippet<[{ value: T; label: string; locked?: boolean }, boolean]>;
@@ -89,7 +89,7 @@
 			disabled={option.locked}
 			aria-label={option.label}
 			aria-disabled={option.locked ? "true" : undefined}
-			aria-describedby={option.locked && lockedReason ? reasonId : undefined}
+			aria-describedby={option.locked ? (option.lockedReason ? `${reasonId}-${option.value}` : lockedReason ? reasonId : undefined) : undefined}
 			data-testid={itemTestId?.(option.value)}
 			class={itemClass}
 		>
@@ -100,6 +100,11 @@
 {#if lockedReason && options.some((option) => option.locked)}
 	<span id={reasonId} class="sr-only">{lockedReason}</span>
 {/if}
+{#each options as option (option.value)}
+	{#if option.locked && option.lockedReason}
+		<span id={`${reasonId}-${option.value}`} class="sr-only">{option.lockedReason}</span>
+	{/if}
+{/each}
 
 <style>
 	:global(.option-row[data-layout="segmented"]) {

@@ -17,6 +17,7 @@ import {
 	Layer,
 	Option,
 	PubSub,
+	Record,
 	Ref,
 	Stream,
 } from "effect";
@@ -172,16 +173,25 @@ const readHarnessDefaults = Effect.gen(function* () {
 				)
 			: undefined;
 	const directory = yield* Effect.serviceOption(AccountDirectory);
-	const defaultAccount = Option.isSome(directory)
-		? yield* directory.value.defaultFor("claude")
-		: Option.none();
-	const claudeModels = Option.isSome(defaultAccount)
-		? (facts[`providerModels:${defaultAccount.value.id}`] ??
-			facts.providerModels)
-		: facts.providerModels;
-	const claudeCatalog = claudeModels
-		? catalogFromProviderList(claudeModels.providers)
-		: undefined;
+	const catalogs = yield* Effect.all(
+		Record.map(PROVIDER_DRIVERS, (traits, driver) =>
+			Effect.gen(function* () {
+				if (traits.catalogSource === "server") return openCodeCatalog;
+				const account = Option.isSome(directory)
+					? yield* directory.value.defaultFor(driver)
+					: Option.none();
+				const models = Option.isSome(account)
+					? (facts[`providerModels:${account.value.id}`] ??
+						facts.providerModels)
+					: facts.providerModels;
+				return models
+					? catalogFromProviderList(models.providers).filter(
+							(model) => harnessForModelProvider(model.providerId) === driver,
+						)
+					: undefined;
+			}),
+		),
+	);
 	const state = (harness: Harness): HarnessDefaultState => {
 		const candidate = harnessDefaultPick(
 			harness,
@@ -194,10 +204,7 @@ const readHarnessDefaults = Effect.gen(function* () {
 			effort: candidate.effort,
 			contextWindow: candidate.contextWindow,
 		};
-		const catalog =
-			PROVIDER_DRIVERS[harness].catalogSource === "discovery"
-				? claudeCatalog
-				: openCodeCatalog;
+		const catalog = catalogs[harness];
 		if (
 			catalog === undefined &&
 			harnessForModelProvider(pick.providerId) === harness
@@ -217,8 +224,7 @@ const readHarnessDefaults = Effect.gen(function* () {
 	};
 	return {
 		_tag: "harnessDefaults",
-		claude: state("claude"),
-		opencode: state("opencode"),
+		...Record.map(PROVIDER_DRIVERS, (_, driver) => state(driver)),
 	} as const;
 });
 

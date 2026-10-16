@@ -69,7 +69,10 @@
 		}
 		return grouped;
 	});
-	const configDirectoryDrivers = $derived(DRIVER_OPTIONS.filter((driver) => getDriverTraits(driver)?.accountKind === "config-directory"));
+	const configDirectoryDrivers = $derived(DRIVER_OPTIONS.filter((driver) => {
+		const traits = getDriverTraits(driver);
+		return traits?.accountKind === "config-directory" && (!traits.unavailableReason || (instancesByDriver[driver]?.length ?? 0) > 0);
+	}));
 	const serverInstances = $derived(instances.filter((inst) => getProviderPresentation(inst.driver ?? "opencode") && getInstanceTraits(inst.id)?.runsOpenCodeServer));
 	const unknownInstances = $derived(instances.filter((inst) => !getProviderPresentation(inst.driver ?? "opencode")));
 	const formTraits = $derived(getDriverTraits(state.formDriver));
@@ -353,7 +356,7 @@
 			<div class="border border-border-subtle bg-bg-surface rounded-[9px] overflow-hidden" data-testid="{driver}-accounts-list">
 				<div class="flex items-center gap-[8px] bg-[rgba(var(--overlay-rgb),0.015)] px-[12px] py-[7px] text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-muted flex-wrap">
 					<h4>{presentation.label} accounts</h4>
-					{#if getDriverTraits(driver)?.usageHarness}
+					{#if getDriverTraits(driver)?.usageHarness && accounts.some((account) => account.usageEligible !== false)}
 						<span class="ml-auto flex flex-wrap items-center justify-end gap-1 text-[11px] font-normal normal-case tracking-normal">
 							<span>Usage and switch order: </span>
 							<Button variant="ghost-accent" hoverFill="none" size="content" class="text-[11px] hover:underline" data-testid="{driver}-accounts-usage-link" onclick={onOpenUsage}>Usage ›</Button>
@@ -379,7 +382,7 @@
 									<dt class="text-text-muted">Config dir</dt>
 									<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
 									<dt class="text-text-muted">Used by</dt>
-									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
+									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : inst.usageEligible !== false && getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
 								</dl>
 								<div class="flex flex-wrap items-center gap-2">
 									<Button variant="ghost-accent" size="content" class="px-3 py-1 text-xs rounded border border-border" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>

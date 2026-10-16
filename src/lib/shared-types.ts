@@ -822,6 +822,8 @@ export interface OpenCodeInstance {
 	/** Published directory default marker; runtime records need not store it. */
 	isDefault?: boolean;
 	usageEligible?: boolean;
+	available?: boolean;
+	unavailableReason?: string;
 	id: string;
 	name: string;
 	port: number;
