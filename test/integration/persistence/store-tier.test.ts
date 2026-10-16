@@ -3,9 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
-import { Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { PersistenceServiceTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
@@ -35,33 +34,17 @@ import {
 
 afterEach(() => vi.restoreAllMocks());
 
-function directoryStub() {
-	const replacements: { projectId: string; sessionIds: string[] }[] = [];
-	const layer = Layer.succeed(SessionDirectory, {
-		projectOf: () => Effect.succeed(Option.none()),
-		record: () => Effect.void,
-		remove: () => Effect.void,
-		removeProject: () => Effect.void,
-		replaceProject: (projectId, sessionIds) =>
-			Effect.sync(() => {
-				replacements.push({ projectId, sessionIds: [...sessionIds].sort() });
-			}),
-	});
-	return { layer, replacements };
-}
-
 // Match the relay's daemonConfigContext path: these layers borrow the built
 // Context. They must not acquire the store layer inside either project scope.
 function projectLayer(
 	projectId: string,
 	store: Context.Context<PersistenceStoreContext>,
-	directory = directoryStub(),
 ) {
 	const config = { daemonConfigContext: Context.make(PersistenceStore, store) };
 	const shared = Context.get(config.daemonConfigContext, PersistenceStore);
-	return makePersistenceProjectLayer(projectId, {
-		sessionDirectoryLayer: directory.layer,
-	}).pipe(Layer.provideMerge(Layer.succeedContext(shared)));
+	return makePersistenceProjectLayer(projectId).pipe(
+		Layer.provideMerge(Layer.succeedContext(shared)),
+	);
 }
 
 function events(project: string, suffix: string) {
@@ -158,7 +141,7 @@ function normalized(value: unknown, key = ""): unknown {
 }
 
 describe("store and project persistence tiers", () => {
-	it("isolates projects, serializes store-wide recovery, refreshes project directories and borrows store lifetime", async () => {
+	it("isolates projects, serializes store-wide recovery and borrows store lifetime", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-store-tier-"));
 		const filename = join(root, "events.db");
 		const projected = new Map<string, number>();
@@ -183,23 +166,12 @@ describe("store and project persistence tiers", () => {
 				Effect.context<PersistenceStoreContext>(),
 			);
 			const storeRunner = Context.get(context, ProjectionRunnerEffectTag);
-			const directoryA = directoryStub();
-			const directoryB = directoryStub();
-			const a = ManagedRuntime.make(projectLayer("alpha", context, directoryA));
-			const b = ManagedRuntime.make(projectLayer("beta", context, directoryB));
+			const a = ManagedRuntime.make(projectLayer("alpha", context));
+			const b = ManagedRuntime.make(projectLayer("beta", context));
 			try {
 				for (const runtime of [a, b]) {
 					const runner = await runtime.runPromise(ProjectionRunnerEffectTag);
-					expect(runner).not.toBe(storeRunner);
-					for (const method of [
-						"projectEvent",
-						"projectBatch",
-						"nextVersion",
-						"getFailures",
-						"isRecovered",
-						"markRecovered",
-					] as const)
-						expect(runner[method]).toBe(storeRunner[method]);
+					expect(runner).toBe(storeRunner);
 					await runtime.runPromise(runner.recover());
 				}
 				for (const [runtime, project] of [
@@ -230,8 +202,6 @@ describe("store and project persistence tiers", () => {
 							eventStore.appendBatch(events(project, "tail")),
 						),
 					);
-				directoryA.replacements.length = 0;
-				directoryB.replacements.length = 0;
 				const cursors = Context.get(context, ProjectorCursorEffectTag);
 				const listAll = cursors.listAll;
 				// Yield after releasing the SELECT's connection lock. Without the
@@ -256,19 +226,6 @@ describe("store and project persistence tiers", () => {
 				expect(
 					results.filter((result) => result.totalReplayed === 0),
 				).toHaveLength(1);
-				expect(directoryA.replacements).toEqual([
-					{ projectId: "alpha", sessionIds: ["alpha-live", "alpha-tail"] },
-				]);
-				expect(directoryB.replacements).toEqual([
-					{ projectId: "beta", sessionIds: ["beta-live", "beta-tail"] },
-				]);
-				// Even a caught-up recovery must refresh the directory.
-				await a.runPromise(
-					Effect.flatMap(ProjectionRunnerEffectTag, (runner) =>
-						runner.recover(),
-					),
-				);
-				expect(directoryA.replacements).toHaveLength(2);
 				const readsA = await a.runPromise(readProject("alpha"));
 				expect(readsA).toEqual([
 					expectedSession("alpha", "live"),
@@ -301,13 +258,11 @@ describe("store and project persistence tiers", () => {
 							projectId: "alpha",
 							hash: projectManifest(filename, "alpha").hash,
 							reads: readsA,
-							replacements: directoryA.replacements,
 						},
 						{
 							projectId: "beta",
 							hash: projectManifest(filename, "beta").hash,
 							reads: readsB,
-							replacements: directoryB.replacements,
 						},
 					],
 				});

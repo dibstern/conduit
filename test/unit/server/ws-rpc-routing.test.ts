@@ -1,11 +1,12 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
-	Context,
+	type Context,
 	Effect,
 	Exit,
 	Layer,
 	ManagedRuntime,
+	Option,
 	Scope,
 	Stream,
 } from "effect";
@@ -21,10 +22,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import {
-	makeSessionDirectoryLive,
-	SessionDirectory,
-} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
@@ -46,11 +44,12 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
-const sessionDirectory = makeSessionDirectoryLive("/unused", []).pipe(
-	Layer.tap((context) =>
-		Context.get(context, SessionDirectory).record("project-a", ["session-a"]),
-	),
-);
+const sessionDirectory = Layer.succeed(SessionDirectory, {
+	projectOf: (sessionId) =>
+		Effect.succeed(
+			sessionId === "session-a" ? Option.some("project-a") : Option.none(),
+		),
+});
 describe("routed RPC server", () => {
 	it.scoped(
 		"rejects session creation without a project even with a relay default",

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,13 +12,10 @@ import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
-import {
-	resolveDaemonOpenCodeSession,
-	resolveDaemonSession,
-} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import { resolveDaemonOpenCodeSession } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
-	makeSessionDirectoryLive,
+	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -29,18 +26,14 @@ import {
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import * as wsRpcHandler from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
-// Failure modes: a cold non-first project is missed; resolve reopens stores;
-// writes publish ownership before commit or miss direct child/adoption writes;
-// cascades leave stale ids; project removal keeps ids; OpenCode aliases hide
-// ambiguous adoption when two projects share a folder.
-// Shared ids must retain every owner through record, replacement and removal;
-// neither direct lookups nor daemon readers may select an ambiguous owner.
+// Failure modes: a cold non-first project is missed; session routing starts a
+// relay before its owner is known; direct child writes and cascades leave stale
+// ownership; rolled-back sessions become visible.
 const roots: string[] = [];
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -57,89 +50,35 @@ function fixture() {
 		title: slug,
 		folders: [folder],
 	}));
-	for (const { slug } of projects) {
-		const storage = projectStorageDir(root, slug);
-		mkdirSync(storage, { recursive: true });
-		writeEventStore(
-			join(storage, "events.db"),
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, provider_sid, title, status, created_at, updated_at)
-				VALUES (${`ses_${slug}`}, 'opencode', 'shared-provider-id', ${slug}, 'idle', 1, 1)`;
-			}),
-		);
-	}
+	writeEventStore(
+		join(root, "events.db"),
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			for (const { slug } of projects)
+				yield* sql`INSERT INTO sessions (id, provider, provider_sid, title, status, created_at, updated_at, project_id)
+				VALUES (${`ses_${slug}`}, 'opencode', 'shared-provider-id', ${slug}, 'idle', 1, 1, ${slug})`;
+		}),
+	);
+
 	return { root, projects };
 }
 
-it.effect.each(["remove", "removeProject", "replaceProject"] as const)(
-	"shared session ownership remains ambiguous until one owner is removed by %s",
-	(operation) =>
-		Effect.gen(function* () {
-			const directory = yield* SessionDirectory;
-			yield* directory.record("b", ["shared", "b-only"]);
-			yield* directory.record("a", ["shared", "a-only"]);
-			yield* directory.record("a", ["shared"]);
-			yield* directory.replaceProject("a", ["shared", "a-only"]);
-			const ambiguous = {
-				_tag: "Left",
-				left: {
-					_tag: "AmbiguousSession",
-					sessionId: "shared",
-					projectSlugs: ["a", "b"],
-					message: "OpenCode session belongs to more than one Conduit project",
-				},
-			};
-			expect(yield* Effect.either(directory.projectOf("shared"))).toMatchObject(
-				ambiguous,
-			);
-			expect(
-				yield* Effect.either(resolveDaemonSession("shared")),
-			).toMatchObject(ambiguous);
-			if (operation === "remove")
-				yield* directory.remove("a", ["shared", "a-only"]);
-			else if (operation === "removeProject")
-				yield* directory.removeProject("a");
-			else {
-				yield* directory.replaceProject("a", ["replacement"]);
-				expect(yield* directory.projectOf("replacement")).toEqual(
-					Option.some("a"),
-				);
-			}
-			expect(yield* directory.projectOf("shared")).toEqual(Option.some("b"));
-			expect(yield* directory.projectOf("b-only")).toEqual(Option.some("b"));
-			expect(yield* directory.projectOf("a-only")).toEqual(Option.none());
-			yield* directory.remove("b", ["shared"]);
-			expect(yield* directory.projectOf("shared")).toEqual(Option.none());
-		}).pipe(Effect.provide(makeSessionDirectoryLive("/unused", []))),
-);
-
 it.scoped(
-	"ResolveSession and AttachProject find a cold non-first project without opening stores",
+	"ResolveSession and AttachProject find the stored owner of a cold non-first project",
 	() => {
 		const { root, projects } = fixture();
 		return Effect.gen(function* () {
-			const context = yield* Layer.build(
-				makeSessionDirectoryLive(root, projects),
-			);
-			const directory = yield* SessionDirectory.pipe(Effect.provide(context));
 			const attachFactory = vi.spyOn(
 				wsRpcHandler,
 				"makeRoutedWsRpcWebSocketHandler",
 			);
 			const daemon = makeDaemonRpcTestLayer(projects, undefined, {
 				configDir: root,
-				sessionDirectory: Layer.succeed(SessionDirectory, directory),
 			});
+			const context = yield* Layer.build(daemon);
 			const handlers = yield* DaemonWsRpcHandlersTag.pipe(
-				Effect.provide(daemon),
-				Effect.provideService(SessionDirectory, directory),
+				Effect.provide(context),
 			);
-			// A reopened database cannot contain sessions. Both stores are now absent.
-			for (const { slug } of projects) {
-				const filename = join(projectStorageDir(root, slug), "events.db");
-				renameSync(filename, `${filename}.hidden`);
-			}
 			expect(
 				yield* handlers.ResolveSession(
 					new ResolveSession({ sessionId: "ses_b" }),
@@ -154,8 +93,7 @@ it.scoped(
 				WebSocketRoutingLive.pipe(
 					Layer.provide(
 						Layer.mergeAll(
-							daemon,
-							Layer.succeed(SessionDirectory, directory),
+							Layer.succeedContext(context),
 							Layer.effect(
 								HttpServerRefTag,
 								Ref.make<import("node:http").Server | null>(createServer()),
@@ -185,11 +123,20 @@ it.scoped(
 );
 
 it.scoped(
-	"committed creates, direct child stamps and cascaded deletes keep the directory current",
+	"shared lookups reflect committed creates, child stamps and cascaded deletes",
 	() =>
 		Effect.gen(function* () {
 			const context = yield* Layer.build(
-				makeSessionDirectoryLive("/unused", []),
+				makeSharedSessionDirectoryLive.pipe(
+					Layer.provideMerge(
+						Layer.merge(
+							makePersistenceEffectLayer(":memory:", "b"),
+							makeProjectRegistryLive([
+								{ slug: "b", title: "B", folders: ["/unused"] },
+							]),
+						),
+					),
+				),
 			);
 			const directory = yield* SessionDirectory.pipe(Effect.provide(context));
 			yield* Effect.gen(function* () {
@@ -207,7 +154,7 @@ it.scoped(
 					stamp(() =>
 						Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
-							yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at) VALUES ('child', 'claude', 'Child', 'idle', 'parent', 1, 1)`;
+							yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at, project_id) VALUES ('child', 'claude', 'Child', 'idle', 'parent', 1, 1, 'b')`;
 							return ["child"];
 						}),
 					),
@@ -218,7 +165,7 @@ it.scoped(
 						stamp(() =>
 							Effect.gen(function* () {
 								const sql = yield* SqlClient.SqlClient;
-								yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('rolled-back', 'claude', 'Bad', 'idle', 1, 1)`;
+								yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id) VALUES ('rolled-back', 'claude', 'Bad', 'idle', 1, 1, 'b')`;
 								return ["rolled-back"];
 							}),
 						).pipe(Effect.andThen(Effect.fail("rollback"))),
@@ -237,25 +184,12 @@ it.scoped(
 				]);
 				expect(yield* directory.projectOf("parent")).toEqual(Option.none());
 				expect(yield* directory.projectOf("child")).toEqual(Option.none());
-				yield* commit([
-					canonicalEvent(
-						"session.created",
-						"remaining",
-						{ sessionId: "remaining", title: "Remaining", provider: "claude" },
-						{ provider: "claude" },
-					),
-				]);
-				yield* directory.removeProject("b");
-				expect(yield* directory.projectOf("remaining")).toEqual(Option.none());
-			}).pipe(
-				Effect.provide(makePersistenceEffectLayer(":memory:", "b")),
-				Effect.provideService(SessionDirectory, directory),
-			);
+			}).pipe(Effect.provide(context));
 		}),
 );
 
 it.scoped(
-	"OpenCode adoption by two projects sharing a folder is explicitly ambiguous",
+	"OpenCode adoption rejects two stored projects sharing the provider id",
 	() => {
 		const { root, projects } = fixture();
 		return Effect.gen(function* () {

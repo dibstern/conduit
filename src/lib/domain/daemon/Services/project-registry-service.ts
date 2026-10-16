@@ -69,7 +69,6 @@ import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
-import { indexProjectSessions, SessionDirectory } from "./session-directory.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
@@ -424,20 +423,6 @@ export const addWithoutRelay = (
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
-		const directory = yield* Effect.serviceOption(SessionDirectory);
-		const daemonState = yield* Effect.serviceOption(DaemonStateTag);
-		if (Option.isSome(directory) && Option.isSome(daemonState)) {
-			const { configDir } = yield* Ref.get(daemonState.value);
-			yield* indexProjectSessions(configDir, project).pipe(
-				Effect.provideService(SessionDirectory, directory.value),
-				Effect.catchAll((cause) =>
-					Effect.logWarning(
-						"Session directory could not read registered project",
-						{ projectSlug: project.slug, cause },
-					),
-				),
-			);
-		}
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -581,10 +566,6 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
-				const directory = yield* Effect.serviceOption(SessionDirectory);
-				if (Option.isSome(directory))
-					yield* directory.value.removeProject(slug);
-
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -748,9 +729,6 @@ export const removeAll = Effect.gen(function* () {
 		(slug) =>
 			Effect.gen(function* () {
 				yield* relayCache.invalidate(slug);
-				const directory = yield* Effect.serviceOption(SessionDirectory);
-				if (Option.isSome(directory))
-					yield* directory.value.removeProject(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
