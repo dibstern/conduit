@@ -444,7 +444,6 @@ test("an open recreated message catches up through overflow without replacing it
 		Effect.runPromise(
 			driver.rpc
 				.RenameSession({
-					projectSlug: "process-test",
 					sessionId,
 					title,
 					originId: driver.originId,
