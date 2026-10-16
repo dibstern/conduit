@@ -5,26 +5,19 @@ import {
 	copyFileSync,
 	mkdirSync,
 	mkdtempSync,
-	realpathSync,
 	rmSync,
 	statSync,
 	symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
 import { Effect, Either, ManagedRuntime } from "effect";
 import { expect, it } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
-import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
-import {
-	type CanonicalEvent,
-	canonicalEvent,
-} from "../../../src/lib/persistence/events.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	DaemonStoreImportError,
 	importProjectStore,
@@ -32,12 +25,13 @@ import {
 	seedDaemonStore,
 } from "../../../src/lib/persistence/migrations/daemon-store-import.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
-import { makeClaudeRunnerReceiptStore } from "../../../src/lib/provider/claude/claude-runner-receipts.js";
-import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
 import {
 	daemonStoreAssertions,
+	createProjectStoreFixture as fixture,
 	type ProjectManifest,
+	type ProjectStoreFixture,
 	projectManifest,
+	projectStoreBackup,
 	sourceChecksums,
 	storeImportPosition,
 	storeTableCounts,
@@ -45,433 +39,7 @@ import {
 } from "../../helpers/daemon-store-import-manifest.js";
 
 const artifact = "test-results/82tn4-import-manifest.json";
-type Project = { projectId: string; sourcePath: string };
-
-async function fixture(
-	root: string,
-	projectId: string,
-	options: {
-		sessionId?: string;
-		large?: boolean;
-		synthetic?: boolean;
-		unprojected?: boolean;
-		eventSequenceStart?: number;
-		outboxSequence?: number;
-	} = {},
-): Promise<Project> {
-	const folder = join(root, projectId);
-	mkdirSync(folder, { recursive: true });
-	const sourcePath = join(folder, "events.db");
-	const runtime = ManagedRuntime.make(
-		makePersistenceEffectLayer(sourcePath, projectId),
-	);
-	const id = options.sessionId ?? `ses_${projectId}`;
-	const user = `${id}_user`;
-	const assistant = `${id}_assistant`;
-	const time = { provider: "claude", createdAt: 1000 };
-	const events: CanonicalEvent[] = [
-		canonicalEvent(
-			"session.created",
-			id,
-			{ sessionId: id, title: "Imported history", provider: "claude" },
-			time,
-		),
-		canonicalEvent(
-			"message.created",
-			id,
-			{ sessionId: id, messageId: user, role: "user" },
-			time,
-		),
-		canonicalEvent(
-			"message.created",
-			id,
-			{ sessionId: id, messageId: assistant, role: "assistant" },
-			time,
-		),
-		canonicalEvent(
-			"text.delta",
-			id,
-			{
-				messageId: assistant,
-				partId: `${id}_text`,
-				text: options.large
-					? "long transcript ".repeat(40_000)
-					: "Complete transcript",
-			},
-			time,
-		),
-		canonicalEvent(
-			"thinking.start",
-			id,
-			{ messageId: assistant, partId: `${id}_thinking` },
-			time,
-		),
-		canonicalEvent(
-			"thinking.delta",
-			id,
-			{ messageId: assistant, partId: `${id}_thinking`, text: "Thinking" },
-			time,
-		),
-		canonicalEvent(
-			"thinking.end",
-			id,
-			{ messageId: assistant, partId: `${id}_thinking` },
-			time,
-		),
-		canonicalEvent(
-			"tool.started",
-			id,
-			{
-				messageId: assistant,
-				partId: `${id}_tool`,
-				callId: `${id}_call`,
-				toolName: "Bash",
-				input: { tool: "Bash", command: "pwd" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"tool.completed",
-			id,
-			{
-				messageId: assistant,
-				partId: `${id}_tool`,
-				result: "fixture",
-				duration: 10,
-				metadata: {},
-			},
-			time,
-		),
-		canonicalEvent(
-			"turn.completed",
-			id,
-			{
-				messageId: assistant,
-				userMessageId: user,
-				cost: 0.03,
-				duration: 20,
-				tokens: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1 },
-			},
-			time,
-		),
-		canonicalEvent(
-			"session.created",
-			`${id}_fork`,
-			{ sessionId: `${id}_fork`, title: "Fork", provider: "claude" },
-			time,
-		),
-		canonicalEvent(
-			"session.forked",
-			`${id}_fork`,
-			{ sessionId: `${id}_fork`, parentId: id, forkPointEvent: assistant },
-			time,
-		),
-		canonicalEvent(
-			"session.created",
-			`${id}_child`,
-			{
-				sessionId: `${id}_child`,
-				title: "Subagent",
-				provider: "claude",
-				parentId: id,
-			},
-			time,
-		),
-		canonicalEvent(
-			"tool.started",
-			id,
-			{
-				messageId: assistant,
-				partId: `${id}_task`,
-				callId: `${id}_task_call`,
-				toolName: "Task",
-				input: { tool: "Task", description: "Child", prompt: "Continue" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"tool.running",
-			id,
-			{
-				messageId: assistant,
-				partId: `${id}_task`,
-				metadata: {
-					childSessionId: `${id}_child`,
-					providerTaskId: `${id}_provider_task`,
-				},
-			},
-			time,
-		),
-		canonicalEvent(
-			"permission.asked",
-			id,
-			{
-				id: `${id}_pending`,
-				sessionId: id,
-				toolName: "Bash",
-				input: { command: "pwd" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"permission.asked",
-			id,
-			{
-				id: `${id}_resolved`,
-				sessionId: id,
-				toolName: "Bash",
-				input: { command: "ls" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"permission.resolved",
-			id,
-			{ id: `${id}_resolved`, decision: "once" },
-			time,
-		),
-		canonicalEvent(
-			"session.provider_changed",
-			id,
-			{ sessionId: id, oldProvider: "claude", newProvider: "opencode" },
-			time,
-		),
-		canonicalEvent(
-			"input.admitted",
-			id,
-			{
-				sessionId: id,
-				inputId: `${id}_queue_1`,
-				delivery: "queue",
-				request: { text: "queued first" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"input.admitted",
-			id,
-			{
-				sessionId: id,
-				inputId: `${id}_queue_2`,
-				delivery: "queue",
-				request: { text: "queued second" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"input.admitted",
-			id,
-			{
-				sessionId: id,
-				inputId: `${id}_removed`,
-				delivery: "steer",
-				request: { text: "cancelled" },
-			},
-			time,
-		),
-		canonicalEvent(
-			"input.cancelled",
-			id,
-			{ sessionId: id, inputId: `${id}_removed` },
-			time,
-		),
-		canonicalEvent(
-			"message.created",
-			id,
-			{ sessionId: id, messageId: `${id}_gone`, role: "assistant" },
-			time,
-		),
-		canonicalEvent(
-			"text.delta",
-			id,
-			{ messageId: `${id}_gone`, partId: `${id}_gone_part`, text: "remove me" },
-			time,
-		),
-		canonicalEvent(
-			"message.part.removed",
-			id,
-			{ messageId: `${id}_gone`, partId: `${id}_gone_part` },
-			time,
-		),
-		canonicalEvent("message.removed", id, { messageId: `${id}_gone` }, time),
-		canonicalEvent(
-			"message.created",
-			id,
-			{ sessionId: id, messageId: `${id}_user_second`, role: "user" },
-			time,
-		),
-		canonicalEvent(
-			"text.delta",
-			id,
-			{
-				messageId: `${id}_user_second`,
-				partId: `${id}_user_second_text`,
-				text: "Second turn",
-			},
-			time,
-		),
-		canonicalEvent(
-			"session.created",
-			`${id}_deleted`,
-			{ sessionId: `${id}_deleted`, title: "Deleted", provider: "claude" },
-			time,
-		),
-		canonicalEvent(
-			"session.deleted",
-			`${id}_deleted`,
-			{ sessionId: `${id}_deleted` },
-			time,
-		),
-		canonicalEvent(
-			"session.workspace_changed",
-			id,
-			{
-				sessionId: id,
-				worktrees: {},
-				path: "/fixture/worktree",
-				cause: "user",
-				origin: "existing",
-			},
-			time,
-		),
-		canonicalEvent(
-			"session.workspace_hint_changed",
-			id,
-			{ path: "/fixture/other" },
-			time,
-		),
-	];
-	if (options.synthetic)
-		events.push(
-			canonicalEvent(
-				"session.compaction",
-				id,
-				{ sessionId: id, state: "completed", detail: "Compacted" },
-				time,
-			),
-			canonicalEvent(
-				"turn.error",
-				id,
-				{
-					messageId: `${id}_failed`,
-					userMessageId: user,
-					error: "Fixture error",
-					code: "FIXTURE",
-				},
-				time,
-			),
-		);
-	try {
-		await runtime.runPromise(
-			Effect.gen(function* () {
-				const runner = yield* ProjectionRunnerEffectTag;
-				yield* runner.recover();
-				const sql = yield* SqlClient.SqlClient;
-				if (options.eventSequenceStart !== undefined)
-					yield* sql`INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ${options.eventSequenceStart})`;
-				const write = yield* makeCommitAndSignal;
-				// Equal timestamps exercise turns' and pending_inputs' rowid tie-breaks.
-				for (const event of events) yield* write([event]);
-				const [move] = yield* sql<{
-					sequence: number;
-				}>`SELECT sequence FROM events WHERE session_id = ${id} AND type = 'session.workspace_changed'`;
-				if (!move)
-					return yield* Effect.die(new Error("Missing fixture workspace move"));
-				yield* write([
-					canonicalEvent(
-						"input.sent",
-						id,
-						{
-							sessionId: id,
-							inputId: `${id}_queue_1`,
-							workspaceMoveSequence: move.sequence,
-						},
-						time,
-					),
-				]);
-				const state = yield* ProviderStateEffectTag;
-				yield* state.saveUpdates(id, [
-					{
-						key: "nativeThread:opencode",
-						value: JSON.stringify({
-							resumeSessionId: `${id}_native`,
-							firstSequence: 0,
-							deliveredThrough: 0,
-						}),
-					},
-					{ key: "turnCount", value: "2" },
-				]);
-				const thread = (yield* state.getState(id))["nativeThread:opencode"];
-				const repository = new DurableCommandCommitRepository(sql, projectId);
-				const requestSequence = options.outboxSequence ?? 7;
-				yield* repository.commit({
-					events: [],
-					readModelRows: [],
-					receipt: {
-						commandId: `${id}_command`,
-						commandType: "send_turn",
-						sessionId: id,
-						status: "side_effect_requested",
-						fingerprintHash: "fixture-hash",
-						fingerprintVersion: 2,
-						acceptedSequence: requestSequence,
-						sideEffectSequence: requestSequence,
-						createdAt: 1000,
-						updatedAt: 1000,
-					},
-					outboxRequests: [
-						{
-							requestSequence,
-							commandId: `${id}_command`,
-							sessionId: id,
-							providerId: "opencode",
-							effectType: "send_turn",
-							payloadJson: JSON.stringify({
-								providerState: { "nativeThread:opencode": thread },
-								prompt: "fixture",
-							}),
-						},
-					],
-				});
-				const receipts = yield* makeClaudeRunnerReceiptStore(sql);
-				yield* receipts.attach(`${projectId}_runner`, "fixture-attachment");
-				yield* receipts.acknowledge(
-					`${projectId}_runner`,
-					1,
-					{},
-					"fixture-attachment",
-				);
-				yield* sql`INSERT INTO claude_runner_permission_replies VALUES (${id}, ${`${id}_resolved`}, '{"decision":"allow"}')`;
-				// These primary/legacy records have no current canonical event producer.
-				yield* sql`INSERT INTO tool_content VALUES (${`${id}_blob`}, ${id}, 'saved tool result', 1000)`;
-				yield* sql`INSERT INTO sent_alerts VALUES (${id}, 'turn-finished', ${assistant}, 1000, 'delivered', 'fixture-claim')`;
-				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
-				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
-				yield* sql`INSERT INTO session_goal_checks VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;
-				yield* sql`INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, 'opencode', 'opencode', 'idle', 1000, 1000)`;
-				yield* sql`INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${user}, ${`${id}_command`}, 'completed', 1000, 1000)`;
-				yield* sql`INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${`${id}_legacy_permission`}, 'permission', 'resolved', 1000, 1000)`;
-				yield* sql`INSERT INTO provider_command_tombstones (project_key, scope_kind, scope_id, session_id, event_sequence, reason_code, tombstoned_at) VALUES (${projectId}, 'turn', ${`${id}_old_turn`}, ${id}, ${move.sequence}, 'deleted', 1000)`;
-				yield* sql`UPDATE provider_command_meta SET last_applied_sequence = ${move.sequence} WHERE project_key = ${projectId}`;
-				yield* sql`INSERT INTO projection_failures (projector_name, event_sequence, event_type, session_id, error, failed_at) VALUES ('fixture-diagnostic', ${move.sequence}, 'session.workspace_changed', ${id}, 'historical diagnostic', 1000)`;
-				if (options.unprojected) {
-					const store = yield* EventStoreEffectTag;
-					yield* store.append(
-						canonicalEvent(
-							"session.renamed",
-							id,
-							{ sessionId: id, title: "Unprojected tail" },
-							time,
-						),
-					);
-				}
-			}),
-		);
-	} finally {
-		await runtime.dispose();
-	}
-	return { projectId, sourcePath: realpathSync(sourcePath) };
-}
+type Project = ProjectStoreFixture;
 
 it("imports complete projects without changing sources and rolls back rejected projects", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-daemon-import-"));
@@ -483,9 +51,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		}[];
 		idempotency: boolean;
 		sourceChecksums: boolean;
-		collisionRollback: boolean;
+		sharedSessionsExcluded: boolean;
 		independentProject: boolean;
-		sourceTailRejected: boolean;
+		sourceTailRecovered: boolean;
 		destinationTailRejected: boolean;
 		changedSourceReported: boolean;
 		invariants: ReturnType<typeof daemonStoreAssertions>[];
@@ -498,9 +66,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		projects: [],
 		idempotency: false,
 		sourceChecksums: false,
-		collisionRollback: false,
+		sharedSessionsExcluded: false,
 		independentProject: false,
-		sourceTailRejected: false,
+		sourceTailRecovered: false,
 		destinationTailRejected: false,
 		changedSourceReported: false,
 		invariants: [],
@@ -624,8 +192,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		}
 		evidence.sourceChecksums = projects.every(
 			(project, index) =>
-				JSON.stringify(sourceChecksums(project.sourcePath)) ===
-				JSON.stringify(checksums[index]),
+				JSON.stringify(
+					sourceChecksums(projectStoreBackup(project.sourcePath)),
+				) === JSON.stringify(checksums[index]),
 		);
 		expect(evidence.sourceChecksums).toBe(true);
 		const counts = storeTableCounts(destination);
@@ -649,13 +218,20 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const rejected = await Effect.runPromise(
 			Effect.either(importProjectStore(configDir, collision)),
 		);
-		expect(Either.isLeft(rejected)).toBe(true);
-		if (Either.isLeft(rejected)) {
-			expect(rejected.left).toBeInstanceOf(DaemonStoreImportError);
-			expect(rejected.left.kind).toBe("collision");
-		}
-		expect(storeTableCounts(destination)).toEqual(counts);
-		evidence.collisionRollback = true;
+		expect(Either.isRight(rejected) && rejected.right).toMatchObject({
+			outcome: "imported",
+			importedEvents: 0,
+			sharedSessions: [
+				"ses_beta",
+				"ses_beta_child",
+				"ses_beta_deleted",
+				"ses_beta_fork",
+			],
+		});
+		expect(
+			projectManifest(destination, beta.projectId, before[0]).tables,
+		).toEqual(before[0]?.tables);
+		evidence.sharedSessionsExcluded = true;
 		const delta = await fixture(root, "delta");
 		const deltaPosition = storeImportPosition(destination);
 		const independent = await Effect.runPromise(
@@ -664,8 +240,11 @@ it("imports complete projects without changing sources and rolls back rejected p
 		expect(
 			independent.map((entry) => entry.outcome),
 			JSON.stringify(independent),
-		).toEqual(["failed", "imported"]);
-		const deltaBefore = projectManifest(delta.sourcePath, delta.projectId);
+		).toEqual(["skipped", "imported"]);
+		const deltaBefore = projectManifest(
+			projectStoreBackup(delta.sourcePath),
+			delta.projectId,
+		);
 		expect(
 			projectManifest(destination, delta.projectId, deltaBefore).tables,
 		).toEqual(deltaBefore.tables);
@@ -679,25 +258,33 @@ it("imports complete projects without changing sources and rolls back rejected p
 			expect.soft(passed, `delta: ${name}`).toBe(true);
 
 		const lagging = await fixture(root, "lagging", { unprojected: true });
-		const stableCounts = storeTableCounts(destination);
+		let stableCounts = storeTableCounts(destination);
 		const tail = await Effect.runPromise(
 			Effect.either(importProjectStore(configDir, lagging)),
 		);
-		expect(Either.isLeft(tail) && tail.left.kind).toBe("unprojected-tail");
-		expect(storeTableCounts(destination)).toEqual(stableCounts);
-		evidence.sourceTailRejected = true;
+		expect(Either.isRight(tail) && tail.right.outcome).toBe("imported");
+		const recovered = new Database(destination, { readonly: true });
+		try {
+			expect(
+				recovered
+					.prepare("SELECT title FROM sessions WHERE id = 'ses_lagging'")
+					.get(),
+			).toEqual({ title: "Unprojected tail" });
+		} finally {
+			recovered.close();
+		}
+		stableCounts = storeTableCounts(destination);
+		evidence.sourceTailRecovered = true;
 		const seedConfig = join(root, "bad-seed");
 		mkdirSync(seedConfig);
 		const seedTail = await Effect.runPromise(
 			Effect.either(seedDaemonStore(seedConfig, lagging)),
 		);
-		expect(Either.isLeft(seedTail) && seedTail.left.kind).toBe(
-			"unprojected-tail",
-		);
+		expect(Either.isRight(seedTail) && seedTail.right.outcome).toBe("seeded");
 
 		for (const mutation of [
 			"UPDATE provider_command_sessions SET last_sequence = 1",
-			"DELETE FROM effect_sql_migrations WHERE migration_id = (SELECT MAX(migration_id) FROM effect_sql_migrations)",
+			"DROP TABLE daemon_store_imports; DELETE FROM effect_sql_migrations WHERE migration_id = 60",
 		]) {
 			const unsupported = await fixture(
 				root,
@@ -712,10 +299,15 @@ it("imports complete projects without changing sources and rolls back rejected p
 			const failed = await Effect.runPromise(
 				Effect.either(importProjectStore(configDir, unsupported)),
 			);
-			expect(Either.isLeft(failed) && failed.left.kind).toBe(
-				"unsupported-source",
-			);
-			expect(storeTableCounts(destination)).toEqual(stableCounts);
+			if (mutation.startsWith("UPDATE")) {
+				expect(Either.isLeft(failed) && failed.left.kind).toBe(
+					"unsupported-source",
+				);
+				expect(storeTableCounts(destination)).toEqual(stableCounts);
+			} else {
+				expect(Either.isRight(failed) && failed.right.outcome).toBe("imported");
+				stableCounts = storeTableCounts(destination);
+			}
 		}
 		const tombstoneCollision = await fixture(root, "tombstone-collision");
 		const tombstoneDb = new Database(tombstoneCollision.sourcePath);
@@ -729,7 +321,11 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const tombstone = await Effect.runPromise(
 			Effect.either(importProjectStore(configDir, tombstoneCollision)),
 		);
-		expect(Either.isLeft(tombstone) && tombstone.left.kind).toBe("collision");
+		expect(Either.isLeft(tombstone)).toBe(true);
+		if (Either.isLeft(tombstone)) {
+			expect(tombstone.left).toBeInstanceOf(DaemonStoreImportError);
+			expect(tombstone.left.kind).toBe("collision");
+		}
 		expect(storeTableCounts(destination)).toEqual(stableCounts);
 		const orphanCollision = await fixture(root, "orphan-collision");
 		const orphanDb = new Database(orphanCollision.sourcePath);
@@ -745,8 +341,11 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const orphan = await Effect.runPromise(
 			Effect.either(importProjectStore(configDir, orphanCollision)),
 		);
-		expect(Either.isLeft(orphan) && orphan.left.kind).toBe("collision");
-		expect(storeTableCounts(destination)).toEqual(stableCounts);
+		expect(Either.isRight(orphan) && orphan.right).toMatchObject({
+			outcome: "imported",
+			sharedSessions: ["ses_beta"],
+		});
+		stableCounts = storeTableCounts(destination);
 
 		// A retired session can survive only in durable command state. Its
 		// project-qualified legacy key must not hide a global session collision.
@@ -765,7 +364,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		const retained = await Effect.runPromise(
 			Effect.either(importProjectStore(configDir, retainedCollision)),
 		);
-		expect(Either.isLeft(retained) && retained.left.kind).toBe("collision");
+		expect(Either.isLeft(retained) && retained.left.kind).toBe(
+			"unsupported-source",
+		);
 		expect(storeTableCounts(destination)).toEqual(retainedCounts);
 		const cleanupRetained = new Database(destination);
 		try {
@@ -778,9 +379,17 @@ it("imports complete projects without changing sources and rolls back rejected p
 			cleanupRetained.close();
 		}
 
-		walWriter
-			.prepare("UPDATE sessions SET history_complete = 1 WHERE id = ?")
-			.run("ses_beta");
+		walWriter.close();
+		walWriter = undefined;
+		copyFileSync(projectStoreBackup(beta.sourcePath), beta.sourcePath);
+		const recreated = new Database(beta.sourcePath);
+		try {
+			recreated
+				.prepare("UPDATE sessions SET history_complete = 1 WHERE id = ?")
+				.run("ses_beta");
+		} finally {
+			recreated.close();
+		}
 		const changed = await Effect.runPromise(
 			importRegisteredProjectStores(configDir, [beta]),
 		);
@@ -923,7 +532,7 @@ it("imports complete projects without changing sources and rolls back rejected p
 				projectManifest(symlinkDestination, source.projectId, prior).tables,
 				`WAL frames for ${source.projectId}`,
 			).toEqual(prior.tables);
-			expect(sourceChecksums(source.sourcePath)).toEqual(
+			expect(sourceChecksums(projectStoreBackup(source.sourcePath))).toEqual(
 				symlinkChecksums[index],
 			);
 		}
@@ -943,7 +552,7 @@ it("imports complete projects without changing sources and rolls back rejected p
 							"SELECT source_path FROM daemon_store_imports WHERE project_id = ?",
 						)
 						.get(source.projectId),
-				).toEqual({ source_path: realpathSync(source.sourcePath) });
+				).toEqual({ source_path: source.sourcePath });
 		} finally {
 			markers.close();
 		}
