@@ -191,6 +191,7 @@ export interface OrchestrationEngineOptions {
 }
 
 interface DurableCommandRuntime {
+	readonly projectId: string;
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
@@ -253,6 +254,7 @@ export class OrchestrationEngine {
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
+				projectId: durable.projectKey,
 				commit: new DurableCommandCommitRepository(
 					durable.sql,
 					durable.projectKey,
@@ -266,6 +268,7 @@ export class OrchestrationEngine {
 				// ProviderRuntimeIngestion (no-op sink when none is supplied).
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
+					projectId: durable.projectKey,
 					registry: this.registry,
 					ingestion: durable.ingestion ?? { ingest: () => Effect.succeed(0) },
 					...(durable.persistHandoffDelivered
@@ -409,6 +412,10 @@ export class OrchestrationEngine {
 				.checkReceipt(command.commandId)
 				.pipe(Effect.orDie);
 			if (existing) {
+				if (existing.projectId !== durable.projectId)
+					return yield* Effect.fail(
+						new CommandFingerprintMismatch({ commandId: command.commandId }),
+					);
 				// The stored hash is only comparable to a freshly computed one within
 				// the same fingerprint scheme version. A version mismatch (a receipt
 				// written under an older scheme) is treated as a fingerprint mismatch:
@@ -440,6 +447,7 @@ export class OrchestrationEngine {
 						UPDATE provider_command_outbox
 						SET status = 'failed', error_code = 'orphaned', updated_at = ${durable.now()}
 						WHERE command_id = ${command.commandId}
+						  AND project_key = ${durable.projectId}
 						  AND status IN ('pending', 'running', 'retryable_failed')`.pipe(
 						Effect.orDie,
 					);

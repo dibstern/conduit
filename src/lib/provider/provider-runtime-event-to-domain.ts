@@ -403,9 +403,11 @@ export function translateProviderRuntimeEventToDomain(
 		}
 
 		case "turn.model_resolved": {
+			const messageId = stringField(data["messageId"]);
 			const requestedModel = stringField(data["requestedModel"]);
 			const expectedModel = stringField(data["expectedModel"]);
 			const payload = {
+				...(messageId ? { messageId } : {}),
 				...(requestedModel !== undefined ? { requestedModel } : {}),
 				...(expectedModel !== undefined ? { expectedModel } : {}),
 				actualModel: stringField(data["actualModel"]) ?? "",

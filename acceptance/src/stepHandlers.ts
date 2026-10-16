@@ -13,7 +13,12 @@ import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
 import { composerSetGoalHandlers } from "./steps/composerSetGoal.js";
 import { composerWordsHandlers } from "./steps/composerWords.js";
+import { cursorAuthHandlers } from "./steps/cursorAuth.js";
+import { cursorModelParametersHandlers } from "./steps/cursorModelParameters.js";
+import { cursorQuestionHandlers } from "./steps/cursorQuestion.js";
 import { cursorSkillsHandlers } from "./steps/cursorSkills.js";
+import { cursorSubagentsHandlers } from "./steps/cursorSubagents.js";
+import { cursorToolsHandlers } from "./steps/cursorTools.js";
 import { cursorTurnHandlers } from "./steps/cursorTurn.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { harnessHandlers } from "./steps/harness.js";
@@ -60,8 +65,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...usageSettingsHandlers,
 	...usageWarningStripHandlers,
 	...composerSendAtResetHandlers,
+	...cursorModelParametersHandlers,
+	...cursorQuestionHandlers,
 	...cursorSkillsHandlers,
 	...cursorTurnHandlers,
+	...cursorAuthHandlers,
+	...cursorToolsHandlers,
+	...cursorSubagentsHandlers,
 	...cursorUsageErrorsHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the

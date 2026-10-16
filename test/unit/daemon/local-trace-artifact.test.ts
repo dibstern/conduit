@@ -499,6 +499,7 @@ describe("local trace artifact Effect tracer", () => {
 						maxBytes: 1024 * 1024,
 						maxFiles: 2,
 						bufferSize: 1,
+						minMs: 0,
 					}),
 				),
 			);
@@ -519,6 +520,7 @@ describe("local trace artifact Effect tracer", () => {
 								maxBytes: 1024 * 1024,
 								maxFiles: 2,
 								bufferSize: 50,
+								minMs: 0,
 							}),
 						),
 					),
@@ -593,6 +595,7 @@ describe("local trace artifact Effect tracer", () => {
 							maxBytes: 1024 * 1024,
 							maxFiles: 2,
 							bufferSize: 1,
+							minMs: 0,
 						}),
 						// biome-ignore lint/suspicious/noExplicitAny: mock shape satisfies the subset of PinoLogger used by the bridge
 						makePinoLoggerLive(root as any),
@@ -621,7 +624,11 @@ describe("local trace artifact Effect tracer", () => {
 							},
 						],
 					})(Effect.void);
-				}).pipe(Effect.withSpan("parent.span"));
+				}).pipe(
+					Effect.withSpan("parent.span", {
+						attributes: { sessionId: "debug-session" },
+					}),
+				);
 				const parentRecord = yield* waitForRecord(
 					path,
 					(record) => record["name"] === "parent.span",
@@ -662,6 +669,7 @@ describe("local trace artifact Effect tracer", () => {
 					maxBytes: 1024 * 1024,
 					maxFiles: 2,
 					bufferSize: 1,
+					sessionId: "debug-session",
 				}),
 			),
 		);

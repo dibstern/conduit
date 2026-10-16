@@ -34,19 +34,22 @@ export const worktreeUsers = (sessionId: string) =>
 		const sql = yield* SqlClient.SqlClient;
 		const local = yield* sql<{
 			id: string;
+			project_id: string;
 			workspace: string;
-		}>`SELECT id, workspace FROM sessions WHERE id != ${sessionId} AND workspace IS NOT NULL`;
-		const uses = (yield* Effect.forEach(local, ({ id, workspace }) =>
-			Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
-				workspace,
-			).pipe(
-				Effect.map((value) =>
-					Object.values(value.worktrees).map((path) => ({
-						key: `${config.slug}:${id}`,
-						path,
-					})),
+		}>`SELECT id, project_id, workspace FROM sessions WHERE id != ${sessionId} AND workspace IS NOT NULL`;
+		const uses = (yield* Effect.forEach(
+			local,
+			({ id, project_id, workspace }) =>
+				Schema.decodeUnknown(Schema.parseJson(SessionWorkspaceSchema))(
+					workspace,
+				).pipe(
+					Effect.map((value) =>
+						Object.values(value.worktrees).map((path) => ({
+							key: `${project_id}:${id}`,
+							path,
+						})),
+					),
 				),
-			),
 		)).flat();
 		let unknown = false;
 		const daemon = yield* Effect.serviceOption(DaemonSessionQueryServiceTag);

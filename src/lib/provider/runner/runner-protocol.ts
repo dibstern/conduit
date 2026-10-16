@@ -80,6 +80,10 @@ export interface RunnerHello {
 		readonly result?: TurnResult;
 		readonly failure?: SessionFailure;
 	}[];
+	readonly sendCommands?: readonly {
+		readonly commandId: string;
+		readonly attempt: number;
+	}[];
 	readonly config?: {
 		readonly workspaceRoot: string;
 		readonly extraFolders?: readonly string[];
@@ -130,6 +134,10 @@ export type RunnerMessage =
 	  }
 	| { readonly type: "upgrade-cancel" | "upgrade-activate" }
 	| { readonly type: "idle-exit" | "idle-exit-ack" }
+	| {
+			readonly type: "settled-commands" | "settled-commands-ack";
+			readonly commands: NonNullable<RunnerHello["sendCommands"]>;
+	  }
 	| {
 			readonly type: "command-accepted";
 			readonly commandId: string;

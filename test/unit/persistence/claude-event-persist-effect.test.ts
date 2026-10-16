@@ -126,9 +126,9 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 				yield* projectionRunner.recover();
 				yield* sql`
 				INSERT INTO sessions (
-					id, provider, provider_sid, title, status, created_at, updated_at
+					id, project_id, provider, provider_sid, title, status, created_at, updated_at
 				) VALUES (
-					${sessionId}, 'opencode', ${sessionId}, 'OpenCode Session', 'idle', 1, 1
+					${sessionId}, 'test-project', 'opencode', ${sessionId}, 'OpenCode Session', 'idle', 1, 1
 				)`;
 				const delayedCreation = yield* eventStore.append(
 					canonicalEvent(

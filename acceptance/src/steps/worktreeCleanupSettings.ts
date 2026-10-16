@@ -33,11 +33,13 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		match:
 			/^worktree cleanup (asks about|removes) worktrees of deleted sessions$/,
 		run: ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("GetWorktreeCleanupSetting", {
-				worktreeCleanup: {
-					...DEFAULT_WORKTREE_CLEANUP,
-					onDelete: match[1] === "removes",
-				},
+			requireRpcControl(world.page).setStubs({
+				GetWorktreeCleanupSetting: () => ({
+					worktreeCleanup: {
+						...DEFAULT_WORKTREE_CLEANUP,
+						onDelete: match[1] === "removes",
+					},
+				}),
 			});
 		},
 	},

@@ -20,6 +20,7 @@ interface LatestTurnRow {
 }
 
 export const readPersistedAutoSettleFacts = (
+	projectId: string,
 	now: number,
 	sessionId?: string,
 	projectDir?: string,
@@ -27,7 +28,8 @@ export const readPersistedAutoSettleFacts = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const rows = yield* sql<SessionRow>`SELECT * FROM sessions
-			WHERE ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;
+			WHERE project_id = ${projectId}
+				AND ${sessionId === undefined ? sql`parent_id IS NULL` : sql`id = ${sessionId}`}`;
 		if (rows.length === 0) return new Map<string, AutoSettleFacts>();
 		const ids = rows.map((row) => row.id);
 		const placeholders = ids.map(() => "?").join(",");
@@ -75,10 +77,10 @@ export const readPersistedAutoSettleFacts = (
 			`SELECT session_id, merged_head FROM (
 				SELECT session_id, json_extract(data, '$.mergedHead') AS merged_head,
 					ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY sequence DESC) AS rank
-				FROM events WHERE type = 'session.settled' AND json_type(data, '$.mergedHead') = 'text'
+				FROM events WHERE project_id = ? AND type = 'session.settled' AND json_type(data, '$.mergedHead') = 'text'
 					AND session_id IN (${placeholders})
 			) WHERE rank = 1`,
-			ids,
+			[projectId, ...ids],
 		);
 		const settledHeadBySession = new Map(
 			merges.map((item) => [item.session_id, item.merged_head]),

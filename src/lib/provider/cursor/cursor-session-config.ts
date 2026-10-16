@@ -2,6 +2,7 @@ import type { SessionPermissionMode } from "../../shared-types.js";
 import type {
 	CursorAgentOptions,
 	CursorCredential,
+	CursorModelParameter,
 	CursorSendOptions,
 } from "./sdk-port.js";
 
@@ -22,6 +23,7 @@ export function cursorSessionConfig(input: {
 	readonly extraFolders: readonly string[];
 	readonly permissionMode?: SessionPermissionMode | undefined;
 	readonly modelId: string;
+	readonly modelParams?: readonly CursorModelParameter[] | undefined;
 	readonly credential: Pick<CursorCredential, "fingerprint">;
 }): CursorSessionConfig {
 	const mode = input.permissionMode ?? "ask";
@@ -50,18 +52,17 @@ export function cursorSessionConfig(input: {
 				"semSearch",
 				"updateTodos",
 				"readTodos",
+				"task",
 			],
-			disallowedTools: ["task", "askQuestion"],
-			customToolNames: [],
+			disallowedTools: ["askQuestion"],
+			customToolNames: ["ask_user"],
 			subagentInherit: { reportedWorkspacePath: input.workspaceRoot },
 			credentialFingerprint: input.credential.fingerprint,
 		},
 		send: {
 			model: {
 				id: input.modelId,
-				...(input.modelId === "composer-2.5"
-					? { params: [{ id: "fast", value: "false" }] }
-					: {}),
+				params: input.modelParams ?? [],
 			},
 			mode: mode === "plan" ? "plan" : "agent",
 		},

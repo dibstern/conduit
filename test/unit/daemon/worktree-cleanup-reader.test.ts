@@ -40,11 +40,11 @@ it("only discovers existing owned checkouts whose enabled rules could match", as
 					if (id !== "missing") mkdirSync(path);
 					if (id !== "deleted")
 						yield* sql`INSERT INTO sessions
-					(id, provider, title, status, created_at, updated_at, last_message_at, settled_at)
-					VALUES (${id}, 'claude', ${id}, 'idle', ${old}, ${old},
+					(id, project_id, provider, title, status, created_at, updated_at, last_message_at, settled_at)
+					VALUES (${id}, ${project.slug}, 'claude', ${id}, 'idle', ${old}, ${old},
 					${id === "no-activity" ? null : id === "idle" ? now : old}, ${id === "settled" ? now : null})`;
-					yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, provider, created_at)
-					VALUES (${id}, ${id}, 1, 'session.workspace_changed', ${JSON.stringify({ cause: "launch", origin: id === "external" ? "external" : "conduit", worktrees: { [project.folders[0]]: path } })}, 'claude', ${old})`;
+					yield* sql`INSERT INTO events (event_id, project_id, session_id, stream_version, type, data, provider, created_at)
+					VALUES (${id}, ${project.slug}, ${id}, 1, 'session.workspace_changed', ${JSON.stringify({ cause: "launch", origin: id === "external" ? "external" : "conduit", worktrees: { [project.folders[0]]: path } })}, 'claude', ${old})`;
 				}
 				yield* sql`INSERT INTO turns (id, session_id, state, requested_at, completed_at)
 				VALUES ('turn', 'recent-turn', 'completed', ${old}, ${now})`;

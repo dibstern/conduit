@@ -192,7 +192,10 @@ describe("makeDaemonLive wiring", () => {
 
 		return Effect.gen(function* () {
 			try {
-				yield* Effect.withSpan("daemon.wiring.trace")(Effect.void);
+				// Failed spans bypass the duration floor, so this instant span is kept.
+				yield* Effect.withSpan("daemon.wiring.trace")(
+					Effect.fail("traced"),
+				).pipe(Effect.ignore);
 				const record = yield* waitForTraceRecord(
 					tracePath,
 					(candidate) => candidate["name"] === "daemon.wiring.trace",

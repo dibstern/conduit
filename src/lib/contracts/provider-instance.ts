@@ -71,6 +71,8 @@ export interface ProviderDriverTraits {
 	readonly steering: "native" | "queue";
 	/** provider-instance.test.ts pins false until restart-safe prompt replies are captured. */
 	readonly promptsSurviveRestart: boolean;
+	/** cursor-subagents.test.ts pins child transcripts that cannot be resumed. */
+	readonly readOnlySubagents: boolean;
 }
 
 /** Driver contracts pinned by provider captures, independent of implementations. */
@@ -107,6 +109,7 @@ export const PROVIDER_DRIVERS = {
 		steering: "native",
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
+		readOnlySubagents: false,
 	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
@@ -143,6 +146,7 @@ export const PROVIDER_DRIVERS = {
 		steering: "queue",
 		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
 		promptsSurviveRestart: false,
+		readOnlySubagents: false,
 	},
 	cursor: {
 		composerModeControl: "permission-mode", // cursor-turn.feature pins the no-per-call-approval notice.
@@ -158,7 +162,7 @@ export const PROVIDER_DRIVERS = {
 		runsOpenCodeServer: false, // Cursor must never start or borrow OpenCode.
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
 		interactionSink: "auto-approving", // cursor-session-config allows gated calls; sandbox is the interim boundary.
-		supportsNativeResume: false, // Same-runner resume is pinned; native-thread transfer/recovery belongs to xqsg.6.
+		supportsNativeResume: false, // cursor-recovery.test.ts pins owned-store resume; cross-account native-thread transfer is unproven.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
 		accountKind: "config-directory", // Keep runner account configuration separate from servers.
 		defaultAccountSource: "selection", // Cursor owns its selected account default.
@@ -173,8 +177,9 @@ export const PROVIDER_DRIVERS = {
 		// test/fixtures/cursor-sdk-traces/steer.jsonl (xqsg.22) pins text on a live local run only.
 		// Cloud runs, handles reacquired after restart and images get revert_to_followup and requeue (xqsg.20).
 		steering: "native",
-		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
-		promptsSurviveRestart: false,
+		readOnlySubagents: true, // cursor-subagents.test.ts pins rejection of child input.
+		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.
+		promptsSurviveRestart: true,
 	},
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 

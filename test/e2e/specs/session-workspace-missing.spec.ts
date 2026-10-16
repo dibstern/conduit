@@ -51,7 +51,7 @@ async function openMissingSession(
 		{
 			slug: projectSlug,
 			title: "Workspace project",
-			folders: [main, ...Object.keys(extraWorktrees)],
+			folders: [main, ...Object.keys(extraWorktrees)] as const,
 		},
 	];
 	const session = {
@@ -83,8 +83,6 @@ async function openMissingSession(
 				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});

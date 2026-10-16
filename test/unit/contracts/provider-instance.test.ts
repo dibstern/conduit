@@ -8,12 +8,12 @@ import {
 
 describe("provider-instance contracts", () => {
 	it.each([
-		["claude", "native"],
-		["opencode", "queue"],
-		["cursor", "native"],
-	] as const)("%s pins steering to %s and keeps prompts volatile", (driver, steering) => {
+		["claude", "native", false],
+		["opencode", "queue", false],
+		["cursor", "native", true],
+	] as const)("%s pins steering and prompt durability", (driver, steering, durable) => {
 		expect(PROVIDER_DRIVERS[driver].steering).toBe(steering);
-		expect(PROVIDER_DRIVERS[driver].promptsSurviveRestart).toBe(false);
+		expect(PROVIDER_DRIVERS[driver].promptsSurviveRestart).toBe(durable);
 	});
 
 	it("isKnownDriverKind distinguishes the closed known set from unknown strings", () => {

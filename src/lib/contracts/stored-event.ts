@@ -616,6 +616,7 @@ export const CanonicalEvents = {
 	),
 	"turn.model_resolved": live(
 		Schema.Struct({
+			messageId: Schema.optionalWith(Schema.String, { exact: true }),
 			requestedModel: Schema.optionalWith(NonEmptyStringSchema, {
 				exact: true,
 			}),

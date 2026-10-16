@@ -69,8 +69,6 @@ async function openSession(
 				nextCursor: null,
 			}),
 			...stubs,
-		},
-		handlers: {
 			AttachProject: () => ({ projectSlug, sessionSlug: projectSlug }),
 		},
 	});
