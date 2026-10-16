@@ -49,7 +49,10 @@ import {
 	watchCatalogs,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { fileTreeState } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
-import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
+import {
+	applyInstanceListResponse,
+	instanceState,
+} from "../../../src/lib/frontend/stores/instance.svelte.js";
 import {
 	getDraftProject,
 	projectState,
@@ -66,6 +69,7 @@ import {
 import { setSessionScope } from "../../../src/lib/frontend/stores/session-scope.js";
 import { todoState } from "../../../src/lib/frontend/stores/todo.svelte.js";
 import { savedDraw } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { turn } from "../../../src/lib/frontend/stores/turn.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { drawSavedShell } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
@@ -113,6 +117,8 @@ beforeEach(async () => {
 	routerState.sessionNotFound = false;
 	attachedProjectState.slug = null;
 	clearSessionState();
+	projectState.projects = [];
+	projectState.newSessionProject = null;
 	savedDraw.sessionId = null;
 	savedMock.openSavedTranscript.mockResolvedValue(undefined);
 	table = {
@@ -127,6 +133,126 @@ beforeEach(async () => {
 	runtimeMock.runTransportEffect.mockImplementation((effect) =>
 		runtime.runPromise(effect),
 	);
+});
+
+describe("turn readiness for the shown scope", () => {
+	beforeEach(() => {
+		clearDiscoveryState();
+		sessionState.currentId = null;
+		projectState.projects = [
+			{ slug: "ready", title: "Ready", folders: ["/ready"] },
+		];
+		projectState.newSessionProject = "ready";
+		attachedProjectState.slug = "ready";
+		replaceRoute("/new?project=ready");
+		applyInstanceListResponse({
+			instances: ["ready-account", "ready-other"].map((id) => ({
+				id,
+				name: id,
+				driver: "opencode",
+				isDefault: id === "ready-account",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 0,
+				capabilities: { supportsMultiFolder: false, supportsWorktree: false },
+			})),
+		});
+	});
+	afterEach(() => {
+		clearDiscoveryState();
+		applyInstanceListResponse({ instances: [] });
+	});
+
+	function pickModel() {
+		const providers = [
+			{
+				id: "openai",
+				name: "OpenAI",
+				configured: true,
+				models: [{ id: "gpt", name: "GPT", provider: "openai" }],
+			},
+		];
+		handleDefaultModelInfo({ model: "gpt", provider: "openai" });
+		handleModelList({ providers });
+		applyGetModelsResponse({
+			projectSlug: "ready",
+			instanceId: "ready-account",
+			providers,
+			active: { model: "gpt", provider: "openai" },
+		});
+	}
+
+	it("a placed session is ready without a draft model pick", () => {
+		seedSessions([
+			{ id: "ready-placed", title: "Ready", projectSlug: "ready" },
+		]);
+		module.selection.open("ready-placed");
+		expect(getDraftPick()).toBeUndefined();
+		expect(turn().ready).toBe(true);
+	});
+	it.each([
+		"placing",
+		"drawn",
+	] as const)("an unplaced %s session is not ready", (kind) => {
+		const sessionId = `ready-${kind}`;
+		module.selection.open(sessionId);
+		if (kind === "drawn") savedDraw.sessionId = sessionId;
+		expect(module.selection.shown.kind).toBe(kind);
+		expect(turn().ready).toBe(false);
+	});
+	it("a draft without its account's model pick is not ready", () => {
+		expect(getEffectiveInstanceId()).toBe("ready-account");
+		expect(getDraftPick()).toBeUndefined();
+		expect(turn().ready).toBe(false);
+	});
+	it("a supported draft with its account's model pick is ready", () => {
+		pickModel();
+		expect(getDraftPick()?.instanceId).toBe("ready-account");
+		expect(turn().ready).toBe(true);
+	});
+	it("another account's model pick does not make the draft ready", () => {
+		pickModel();
+		selectInstance("ready-other");
+		expect(getEffectiveInstanceId()).toBe("ready-other");
+		expect(getDraftPick()).toBeUndefined();
+		expect(turn().ready).toBe(false);
+	});
+	it.each([
+		false,
+		true,
+	])("a multifolder draft is ready only when supported: %s", (supported) => {
+		pickModel();
+		projectState.projects = [
+			{
+				slug: "ready",
+				title: "Ready",
+				folders: ["/ready", "/second"],
+			},
+		];
+		const account = instanceState.instances.find(
+			(item) => item.id === "ready-account",
+		);
+		if (!account) throw new Error("missing account");
+		account.capabilities = {
+			supportsMultiFolder: supported,
+			supportsWorktree: false,
+		};
+		expect(getDraftPick()).toBeDefined();
+		expect(turn().ready).toBe(supported);
+	});
+	it("a loaded directory with no account stays ready for the actionable send failure", () => {
+		applyInstanceListResponse({ instances: [] });
+		expect(instanceState.loaded).toBe(true);
+		expect(getEffectiveInstanceId()).toBeUndefined();
+		expect(turn().ready).toBe(true);
+	});
+	it("an account directory still loading cannot make a draft ready", () => {
+		applyInstanceListResponse({ instances: [] });
+		instanceState.loaded = false;
+		expect(turn().ready).toBe(false);
+	});
 });
 afterEach(async () => {
 	stop?.();
@@ -144,6 +270,106 @@ afterEach(async () => {
 });
 
 describe("session selection at the browser RPC wire", () => {
+	it("follow without a captured scope neither places a session nor moves the route", () => {
+		replaceRoute("/?");
+		module.selection.follow(null, "follow-no-scope", "push");
+		expect(routerState.path).toBe("/");
+		module.selection.open("follow-no-scope");
+		expect(module.selection.shown).toEqual({
+			kind: "placing",
+			sessionId: "follow-no-scope",
+		});
+	});
+	it("follow places a draft's new session before showing it, without a resolve", () => {
+		replaceRoute("/new?project=follow-project");
+		const from = module.selection.scope;
+		expect(from).toEqual({ project: "follow-project", sessionId: null });
+		if (!from) throw new Error("draft has no scope");
+
+		module.selection.follow(from, "follow-created", "push");
+
+		expect(routerState.path).toBe("/s/follow-created");
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			project: "follow-project",
+			sessionId: "follow-created",
+		});
+		expect(calls("ResolveSession")).toHaveLength(0);
+	});
+	it("follow compares the scope's project and session values", () => {
+		seedSessions([{ id: "follow-parent", title: "Parent", projectSlug: "A" }]);
+		module.selection.open("follow-parent");
+		const from = { project: "A", sessionId: "follow-parent" };
+		expect(module.selection.scope).toEqual(from);
+		expect(module.selection.scope).not.toBe(from);
+
+		module.selection.follow(from, "follow-side", "push");
+
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			project: "A",
+			sessionId: "follow-side",
+		});
+	});
+	it.each([
+		"session",
+		"project",
+		"draft",
+		"home",
+	] as const)("a follow after opening another %s places only its reply's session and leaves the route alone", (destination) => {
+		const suffix = `follow-late-${destination}`;
+		seedSessions([
+			{ id: `${suffix}-parent`, title: "Parent", projectSlug: "A" },
+			{ id: `${suffix}-other`, title: "Other", projectSlug: "B" },
+		]);
+		module.selection.open(`${suffix}-parent`);
+		const from = module.selection.scope;
+		if (!from) throw new Error("parent has no scope");
+		if (destination === "session") module.selection.open(`${suffix}-other`);
+		else if (destination === "project") module.selection.openDraft("B");
+		else if (destination === "draft") module.selection.openDraft("A");
+		else replaceRoute("/?");
+		const path = routerState.path;
+		const search = routerState.search;
+		const shown = module.selection.shown;
+
+		module.selection.follow(from, `${suffix}-reply`, "replace");
+
+		expect(routerState.path).toBe(path);
+		expect(routerState.search).toBe(search);
+		expect(module.selection.shown).toEqual(shown);
+		module.selection.open(`${suffix}-reply`);
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			project: "A",
+			sessionId: `${suffix}-reply`,
+		});
+		module.selection.open(`${suffix}-unrelated`);
+		expect(module.selection.shown).toEqual({
+			kind: "placing",
+			sessionId: `${suffix}-unrelated`,
+		});
+		expect(calls("ResolveSession")).toHaveLength(0);
+	});
+	it("a draft follow cannot replace a newly selected project's draft", () => {
+		replaceRoute("/new?project=follow-A");
+		const from = module.selection.scope;
+		if (!from) throw new Error("draft has no scope");
+		module.selection.openDraft("follow-B");
+
+		module.selection.follow(from, "follow-draft-late", "push");
+
+		expect(module.selection.shown).toEqual({
+			kind: "draft",
+			project: "follow-B",
+		});
+		module.selection.open("follow-draft-late");
+		expect(module.selection.shown).toEqual({
+			kind: "placed",
+			project: "follow-A",
+			sessionId: "follow-draft-late",
+		});
+	});
 	it("a late attach places its own id without moving the session now shown", async () => {
 		const pending = deferred<Attach>();
 		table.AttachProject = () => pending.promise;

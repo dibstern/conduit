@@ -530,6 +530,7 @@ describe("discovery catalogs over the RPC wire", () => {
 				.flatMap((group) => group.models.map((model) => model.name)),
 		).toEqual(["Other account model"]);
 		attachedProjectState.slug = "project-b";
+		routerState.search = "?project=project-b";
 		expect(discovery.discoveryState.providers).toEqual([]);
 	});
 
@@ -612,6 +613,7 @@ describe("discovery catalogs over the RPC wire", () => {
 		viewProjectSettings("project-a");
 		await vi.waitFor(() => expect(settingsProjects).toEqual(["project-a"]));
 		attachedProjectState.slug = "project-b";
+		routerState.search = "?project=project-b";
 		settingsRead.resolve({
 			_tag: "snapshot",
 			sequence: 1,
@@ -640,6 +642,7 @@ describe("discovery catalogs over the RPC wire", () => {
 			),
 		).toEqual([]);
 		attachedProjectState.slug = "project-a";
+		routerState.search = "?project=project-a";
 		expect(
 			discovery.discoveryState.providers.flatMap((provider) =>
 				provider.models.map((model) => model.name),

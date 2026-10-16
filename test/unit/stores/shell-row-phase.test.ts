@@ -11,6 +11,11 @@ import {
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import {
+	replaceRoute,
+	routerState,
+} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
+import {
 	applyFamilyChange,
 	clearSessionState,
 	resetSessionFamily,
@@ -185,10 +190,11 @@ describe("turn control sends over the browser RPC wire", () => {
 	) => void;
 	let reject: (error: Error) => void;
 	let inputId: string;
+	let wire: ReturnType<typeof makeRpcWire>;
 	const request = () =>
 		control.send({ sessionId: "s", text: "Hello", delivery: "queue" });
 	const serve = (table: StubTable = {}) => {
-		const wire = makeRpcWire({
+		wire = makeRpcWire({
 			"input.submit": (input) => {
 				inputId = input.inputId;
 				return new Promise((resolve, fail) => {
@@ -212,7 +218,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		});
 	beforeEach(async () => {
 		control = await import("../../../src/lib/frontend/stores/turn.svelte.js");
-		vi.stubGlobal("location", { protocol: "http:", host: "localhost:2633" });
+		replaceRoute("/s/s");
 		sessionMessages.clear();
 		permissionsState.pendingPermissions = [];
 		permissionsState.pendingQuestions = [];
@@ -225,16 +231,187 @@ describe("turn control sends over the browser RPC wire", () => {
 	});
 	afterEach(async () => {
 		await runtime?.dispose();
-		for (const id of ["s", "side", "created"])
-			applySessionChange({ _tag: "remove", id, deleted: true });
+		for (const id of ["s", "side", "created", "redirected", "other"]) {
+			control.deleteTurn(id);
+			applySessionChange({ _tag: "remove", id });
+		}
 		clearSessionState();
 		sessionMessages.clear();
 		vi.unstubAllGlobals();
 	});
 
+	it("a late redirect places its destination without moving the newly opened session", async () => {
+		const sent = request();
+		await received();
+		applySessionChange({
+			_tag: "upsert",
+			item: { ...row("idle"), id: "other", projectSlug: "project-b" },
+		});
+		selection.open("other");
+		reply({ ok: true, sessionId: "redirected", handedOff: true });
+		await expect(sent).resolves.toEqual({ kind: "started" });
+
+		expect(routerState.path).toBe("/s/other");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-b",
+			sessionId: "other",
+		});
+		expect(control.turn().working).toBe(false);
+		selection.open("redirected");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "redirected",
+		});
+		expect(control.turn().working).toBe(true);
+	});
+
+	it("a redirect follows while the original scope is still shown", async () => {
+		const sent = request();
+		await received();
+		reply({ ok: true, sessionId: "redirected", handedOff: true });
+		await expect(sent).resolves.toEqual({ kind: "started" });
+		expect(routerState.path).toBe("/s/redirected");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "redirected",
+		});
+		expect(control.turn().working).toBe(true);
+	});
+
+	it.each([
+		false,
+		true,
+	])("a draft create followed by a redirect respects navigation away: %s", async (left) => {
+		await runtime.dispose();
+		serve({
+			CreateSession: () => ({ projectSlug: "project-a", sessionId: "created" }),
+		});
+		sessionState.currentId = null;
+		replaceRoute("/new?project=project-a");
+		const sent = control.send({
+			draft: {
+				projectSlug: "project-a",
+				originId: "browser",
+				draftId: "redirect-draft",
+				permissionMode: "ask",
+			},
+			text: "Hello",
+			delivery: "queue",
+		});
+		await received();
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "created",
+		});
+		if (left) selection.openDraft("project-b");
+		reply({ ok: true, sessionId: "redirected", handedOff: true });
+		await expect(sent).resolves.toEqual({ kind: "started" });
+		expect(selection.shown).toEqual(
+			left
+				? { kind: "draft", project: "project-b" }
+				: { kind: "placed", project: "project-a", sessionId: "redirected" },
+		);
+		selection.open("redirected");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "redirected",
+		});
+	});
+
+	it("a draft create completing after a project change places its session without navigating", async () => {
+		await runtime.dispose();
+		let created!: (reply: { projectSlug: string; sessionId: string }) => void;
+		serve({
+			CreateSession: () =>
+				new Promise((resolve) => {
+					created = resolve;
+				}),
+		});
+		sessionState.currentId = null;
+		replaceRoute("/new?project=project-a");
+		const sent = control.send({
+			draft: {
+				projectSlug: "project-a",
+				originId: "browser",
+				draftId: "late-draft",
+				permissionMode: "ask",
+			},
+			text: "Hello",
+			delivery: "queue",
+		});
+		await vi.waitFor(() => expect(created).toBeTypeOf("function"));
+		selection.openDraft("project-b");
+		created({ projectSlug: "project-a", sessionId: "created" });
+		await received();
+		expect(selection.shown).toEqual({ kind: "draft", project: "project-b" });
+		reply({ ok: true, sessionId: "created", handedOff: true });
+		await sent;
+		selection.open("created");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "created",
+		});
+	});
+
+	it.each([
+		false,
+		true,
+	])("a side-thread start follows only the captured parent scope and records no intent: left=%s", async (left) => {
+		await runtime.dispose();
+		let started!: (reply: { sessionId: string }) => void;
+		serve({
+			StartSideThread: () =>
+				new Promise((resolve) => {
+					started = resolve;
+				}),
+		});
+		const sent = control.send({
+			sideThread: { sessionId: "s", title: "Side" },
+			text: "Ask on the side",
+			delivery: "queue",
+		});
+		await vi.waitFor(() => expect(started).toBeTypeOf("function"));
+		expect(control.turn().working).toBe(false);
+		expect(
+			wire.requests.filter((request) => request.tag === "input.submit"),
+		).toHaveLength(0);
+		if (left) selection.openDraft("project-b");
+		started({ sessionId: "side" });
+		await expect(sent).resolves.toEqual({ kind: "started" });
+		expect(selection.shown).toEqual(
+			left
+				? { kind: "draft", project: "project-b" }
+				: { kind: "placed", project: "project-a", sessionId: "side" },
+		);
+		selection.open("side");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "side",
+		});
+		getOrCreateSessionSlot("side");
+		expect(control.turn().working).toBe(false);
+		applyFamilyFeedChange({
+			_tag: "upsert",
+			item: { ...row("busy"), id: "side", parentID: "s", sideThread: true },
+		});
+		expect(control.turn().working).toBe(true);
+		applyFamilyFeedChange({
+			_tag: "upsert",
+			item: { ...row("idle"), id: "side", parentID: "s", sideThread: true },
+		});
+		expect(control.turn().working).toBe(false);
+	});
+
 	it("a guessed start clears working when the inbox queues and displays the queued input", async () => {
 		const sent = request();
-		expect(control.turn("s").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		await received();
 		const { messages } = getOrCreateSessionSlot("s");
 		messages.transcript = {
@@ -256,7 +433,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		};
 		reply({ ok: true, sessionId: "s", handedOff: false });
 		await expect(sent).resolves.toEqual({ kind: "waiting" });
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 		expect(messages.transcript.pending).toMatchObject([
 			{ request: { text: "Hello" }, state: "queued" },
 		]);
@@ -289,14 +466,14 @@ describe("turn control sends over the browser RPC wire", () => {
 				text: "6",
 				delivery: "queue",
 			});
-			expect(control.turn("s").working).toBe(true);
+			expect(control.turn().working).toBe(true);
 			await vi.advanceTimersByTimeAsync(10_001);
 			expect(sent).toEqual(["0", "1", "2", "3", "4", "5", "6"]);
 			await expect(Promise.all([sixth, seventh])).resolves.toEqual([
 				{ kind: "started" },
 				{ kind: "started" },
 			]);
-			expect(control.turn("s").working).toBe(false);
+			expect(control.turn().working).toBe(false);
 		} finally {
 			_resetRateLimit();
 			vi.useRealTimers();
@@ -308,11 +485,11 @@ describe("turn control sends over the browser RPC wire", () => {
 			{ toolId: "q", sessionId: "s", questions: [] },
 		];
 		const sent = request();
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 		await received();
 		reply({ ok: true, sessionId: "s", handedOff: true });
 		await expect(sent).resolves.toEqual({ kind: "started" });
-		expect(control.turn("s").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		end();
 	});
 
@@ -330,10 +507,10 @@ describe("turn control sends over the browser RPC wire", () => {
 				...(known ? { lastTurnEndInputId: inputId } : {}),
 			},
 		});
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 		reply({ ok: true, sessionId: "s", handedOff: true });
 		await sent;
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("an unknown interruption settles the starter while the queued handoff follows the server phase", async () => {
@@ -356,14 +533,14 @@ describe("turn control sends over the browser RPC wire", () => {
 			_tag: "upsert",
 			item: { ...row("idle"), lastTurnEndVersion: 2 },
 		});
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 		applySessionChange({
 			_tag: "upsert",
 			item: { ...row("busy"), lastTurnEndVersion: 2 },
 		});
-		expect(control.turn("s").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		end("queued-input", 3);
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("an unknown interruption cannot settle a send pressed at its advanced baseline", async () => {
@@ -374,7 +551,7 @@ describe("turn control sends over the browser RPC wire", () => {
 			_tag: "upsert",
 			item: { ...row("idle"), lastTurnEndVersion: 2 },
 		});
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 		inputId = "";
 		const next = request();
 		await received();
@@ -384,12 +561,12 @@ describe("turn control sends over the browser RPC wire", () => {
 		});
 		firstReply({ ok: true, sessionId: "s", handedOff: true });
 		await first;
-		expect(control.turn("s").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		reply({ ok: true, sessionId: "s", handedOff: true });
 		await next;
-		expect(control.turn("s").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		end(inputId, 3);
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it.each([
@@ -401,7 +578,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		if (busy) upsert("busy");
 		reject(new Error("socket closed"));
 		await expect(sent).resolves.toEqual({ kind: "failed" });
-		expect(control.turn("s").working).toBe(busy);
+		expect(control.turn().working).toBe(busy);
 	});
 
 	it("a refused steer resolves with the server reason", async () => {
@@ -417,7 +594,7 @@ describe("turn control sends over the browser RPC wire", () => {
 			kind: "refused",
 			reason: "model_differs",
 		});
-		expect(control.turn("s").refusal).toMatchObject({
+		expect(control.turn().refusal).toMatchObject({
 			reason: "model_differs",
 		});
 	});
@@ -431,7 +608,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		snapshot(status);
 		reply({ ok: true, sessionId: "s", handedOff: true });
 		await sent;
-		expect(control.turn("s").working).toBe(status === "busy");
+		expect(control.turn().working).toBe(status === "busy");
 	});
 
 	it("a reconnect after this and a later queued turn ended leaves working off", async () => {
@@ -449,10 +626,12 @@ describe("turn control sends over the browser RPC wire", () => {
 				},
 			],
 		});
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
-	it("a draft's first send works before the created session row arrives", async () => {
+	it("a draft's first send follows the placed session and works before its row arrives", async () => {
+		sessionState.currentId = null;
+		replaceRoute("/new?project=project-a");
 		await runtime.dispose();
 		serve({
 			CreateSession: () => ({ projectSlug: "project-a", sessionId: "created" }),
@@ -468,13 +647,19 @@ describe("turn control sends over the browser RPC wire", () => {
 			delivery: "queue",
 		});
 		await received();
-		expect(control.turn("created").working).toBe(true);
+		expect(routerState.path).toBe("/s/created");
+		expect(selection.shown).toEqual({
+			kind: "placed",
+			project: "project-a",
+			sessionId: "created",
+		});
+		expect(control.turn().working).toBe(true);
 		reply({ ok: true, sessionId: "created", handedOff: true });
 		await sent;
 		resetSessionFamily();
 		const created = { ...row("idle"), id: "created" };
 		applyFamilyFeedChange({ _tag: "snapshot", rows: [created] });
-		expect(control.turn("created").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		applyFamilyFeedChange({
 			_tag: "upsert",
 			item: {
@@ -483,8 +668,9 @@ describe("turn control sends over the browser RPC wire", () => {
 				lastTurnEndInputId: inputId,
 			},
 		});
-		expect(control.turn("created").working).toBe(false);
-		applySessionChange({ _tag: "remove", id: "created", deleted: true });
+		expect(control.turn().working).toBe(false);
+		control.deleteTurn("created");
+		applySessionChange({ _tag: "remove", id: "created" });
 	});
 
 	it("an accepted steer resolves waiting and ends with the running turn", async () => {
@@ -498,7 +684,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		reply({ ok: true, sessionId: "s", handedOff: true });
 		await expect(sent).resolves.toEqual({ kind: "waiting" });
 		end("original-turn");
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("a usage-held send stays queued without working", async () => {
@@ -517,11 +703,11 @@ describe("turn control sends over the browser RPC wire", () => {
 			},
 		];
 		const sent = request();
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 		await received();
 		reply({ ok: true, sessionId: "s", handedOff: false });
 		await expect(sent).resolves.toEqual({ kind: "waiting" });
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it.each([
@@ -535,6 +721,7 @@ describe("turn control sends over the browser RPC wire", () => {
 			sideThread: true,
 		};
 		applyFamilyFeedChange({ _tag: "snapshot", rows: [row("idle"), child] });
+		replaceRoute("/s/side");
 		const sent = control.send({
 			sessionId: "side",
 			text: "Hello",
@@ -554,7 +741,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		}
 		reply({ ok: true, sessionId: "side", handedOff: true });
 		await sent;
-		expect(control.turn("side").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("a guessed wait whose turn ends before the reply stays idle", async () => {
@@ -566,7 +753,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		end();
 		reply({ ok: true, sessionId: "s", handedOff: true });
 		await sent;
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("the guess ignores rolled-up processing and prompts belonging to descendants or no session", async () => {
@@ -585,22 +772,32 @@ describe("turn control sends over the browser RPC wire", () => {
 			questions: [],
 		}));
 		const sent = request();
-		expect(control.turn("s").working).toBe(true);
+		expect(control.turn().working).toBe(true);
 		await received();
 		reply({ ok: true, sessionId: "s", handedOff: false });
 		await sent;
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("leaving a feed keeps the intent but deleting the session defeats a late reply", async () => {
-		const sent = request();
+		const id = "deleted-with-late-reply";
+		applySessionChange({ _tag: "upsert", item: { ...row("idle"), id } });
+		selection.open(id);
+		const from = selection.scope;
+		if (!from) throw new Error("session has no scope");
+		selection.follow(from, id, "replace");
+		const sent = control.send({
+			sessionId: id,
+			text: "Hello",
+			delivery: "queue",
+		});
 		await received();
-		applySessionChange({ _tag: "remove", id: "s" });
-		expect(control.turn("s").working).toBe(true);
-		applySessionChange({ _tag: "remove", id: "s", deleted: true });
-		reply({ ok: true, sessionId: "s", handedOff: true });
+		applySessionChange({ _tag: "remove", id });
+		expect(control.turn().working).toBe(true);
+		applySessionChange({ _tag: "remove", id, deleted: true });
+		reply({ ok: true, sessionId: id, handedOff: true });
 		await sent;
-		expect(control.turn("s").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 
 	it("a family reconnect clears a live side-thread intent even after later turns ended", async () => {
@@ -611,6 +808,7 @@ describe("turn control sends over the browser RPC wire", () => {
 			sideThread: true,
 		};
 		applyFamilyFeedChange({ _tag: "snapshot", rows: [child] });
+		replaceRoute("/s/side");
 		const sent = control.send({
 			sessionId: "side",
 			text: "Hello",
@@ -623,6 +821,6 @@ describe("turn control sends over the browser RPC wire", () => {
 		});
 		reply({ ok: true, sessionId: "side", handedOff: true });
 		await sent;
-		expect(control.turn("side").working).toBe(false);
+		expect(control.turn().working).toBe(false);
 	});
 });

@@ -13,7 +13,10 @@ import {
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
-import { seedDaemonSessions } from "../stores/session-fixtures.js";
+import {
+	seedDaemonSessions,
+	seedSessions,
+} from "../stores/session-fixtures.js";
 
 vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
@@ -21,7 +24,7 @@ vi.mock(
 		...(await original<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		rpc: vi.fn(async () => ({ ok: true })),
+		rpc: vi.fn(() => Promise.resolve({ ok: true })),
 	}),
 );
 
@@ -105,6 +108,7 @@ describe("InputArea build reload recovery", () => {
 		sessionState.currentId = null;
 		attachedProjectState.slug = null;
 		seedDaemonSessions([]);
+		seedSessions([]);
 		sessionStorage.clear();
 	});
 
@@ -128,7 +132,7 @@ describe("InputArea build reload recovery", () => {
 	});
 
 	it("stops a loaded foreign session by session id", async () => {
-		seedDaemonSessions([
+		seedSessions([
 			{
 				id: sessionId,
 				title: "Foreign session",
