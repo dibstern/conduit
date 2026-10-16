@@ -81,10 +81,9 @@ export { isBusy };
 // Nothing outside can write it: `sessionState` hands it out as a `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
+const isFamilyRoot = (row: Pick<SessionInfo, "parentID">) => !row.parentID;
 const rootSessions = $derived(
-	[...serverSessions.values()].filter(
-		(row) => !row.parentID && !row.sideThread,
-	),
+	[...serverSessions.values()].filter(isFamilyRoot),
 );
 // The viewed session's family (root and descendants), owned by its
 // SubscribeSessionFamily feed: `applyFamilyChange` is the only writer.
@@ -930,8 +929,7 @@ export function getFilteredSessions(): SessionInfo[] {
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		sessions = sessionState.searchResults.flatMap((session) => {
-			if (session.parentID || session.sideThread || !inScope(session))
-				return [];
+			if (!isFamilyRoot(session) || !inScope(session)) return [];
 			if (session.projectSlug !== searchSlug) {
 				return [session];
 			}
@@ -946,10 +944,7 @@ export function getFilteredSessions(): SessionInfo[] {
 		// project too, so the local filter and the landing results agree -- which is
 		// why these no longer have to stand down to avoid flashing in and out.
 		const foreignSessions = sessionState.daemonSessions.filter(
-			(session) =>
-				session.projectSlug !== currentSlug &&
-				!session.parentID &&
-				!session.sideThread,
+			(session) => session.projectSlug !== currentSlug && isFamilyRoot(session),
 		);
 		sessions = [...localSessions, ...foreignSessions].filter(inScope);
 		if (query)

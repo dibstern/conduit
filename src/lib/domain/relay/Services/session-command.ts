@@ -59,6 +59,14 @@ import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
 
+export const forkPlacement = (
+	sourceId: string,
+	sideThread: boolean,
+): { readonly parentId: string; readonly sideThread?: true } => ({
+	parentId: sourceId,
+	...(sideThread ? { sideThread: true } : {}),
+});
+
 const sideThreadTitle = (question: string) =>
 	normalizeSessionTitle(question)
 		.slice(0, SIDE_THREAD_TITLE_MAX_LENGTH)
@@ -547,10 +555,9 @@ export const forkOpenCodeSession = (
 							sessionId: session.id,
 							title,
 							provider: account.id,
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
@@ -835,10 +842,9 @@ const forkSessionInWorkspace = (
 							...(parentThread
 								? { providerSessionId: forked.sdkSessionId }
 								: {}),
-							parentId: parentSessionId,
+							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
-										sideThread: true,
 										permissionMode: "ask" as const,
 										startInputId: side.inputId,
 									}
