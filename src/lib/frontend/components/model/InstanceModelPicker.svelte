@@ -107,8 +107,9 @@
 		instances.find((i) => i.id === selectedId) ?? null,
 	);
 	const selectedDriver = $derived(
-		selectedInstance?.driver ?? (sessionState.currentId ? getSessionDriver(sessionState.currentId) : undefined) ??
-			((discoveryState.currentProviderId || discoveryState.defaultProviderId) === "claude" ? "claude" : discoveryState.currentProviderId || discoveryState.defaultProviderId ? "opencode" : ""),
+		// A session shows only its own stored harness: never the draft default, and nothing until its pick loads.
+		sessionState.currentId ? (sessionLoading ? undefined : getSessionDriver(sessionState.currentId)) :
+			selectedInstance?.driver ?? ((discoveryState.currentProviderId || discoveryState.defaultProviderId) === "claude" ? "claude" : discoveryState.currentProviderId || discoveryState.defaultProviderId ? "opencode" : ""),
 	);
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),

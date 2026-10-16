@@ -110,12 +110,15 @@
 	$effect(() => {
 		const projectSlug = draftSlug;
 		const instanceId = draftAccountId;
-		if (!projectSlug || !instanceId || !draftIsClaude || !getIsConnected()) return;
-		const applyModels = followModelsRead();
+		if (!projectSlug || !instanceId || !getIsConnected()) return;
 		let active = true;
-		void getModelsRpc({ projectSlug, instanceId })
-			.then((response) => { if (active) applyModels(response); })
-			.catch(() => undefined);
+		// OpenCode draft models arrive through viewDraftModels; agents have no subscription.
+		if (draftIsClaude) {
+			const applyModels = followModelsRead();
+			void getModelsRpc({ projectSlug, instanceId })
+				.then((response) => { if (active) applyModels(response); })
+				.catch(() => undefined);
+		}
 		void getAgentsRpc({ projectSlug, instanceId })
 			.then((response) => { if (active) applyGetAgentsResponse(response); })
 			.catch(() => undefined);
