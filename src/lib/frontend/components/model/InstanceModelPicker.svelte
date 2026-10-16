@@ -670,7 +670,7 @@
 							<SegmentedControl
 								bind:value={() => effort.current ?? "", (value) => effort.select(value)}
 								options={effortSegments}
-								variant="picker"
+								variant={effortSegments.length > 5 ? "picker-context" : "picker"}
 								label="Effort"
 							/>
 						{:else}

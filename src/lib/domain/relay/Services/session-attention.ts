@@ -20,8 +20,7 @@ import { announceSidebar } from "../../../persistence/effect/sidebar-projection.
  * file from writing the column.
  */
 
-const MARKABLE =
-	"parent_id IS NULL OR fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL";
+const MARKABLE = "parent_id IS NULL OR side_thread = 1";
 
 const writeSeen = (
 	sessionId: string,

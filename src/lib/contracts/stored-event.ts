@@ -616,6 +616,7 @@ export const CanonicalEvents = {
 	),
 	"turn.model_resolved": live(
 		Schema.Struct({
+			messageId: Schema.optionalWith(Schema.String, { exact: true }),
 			requestedModel: Schema.optionalWith(NonEmptyStringSchema, {
 				exact: true,
 			}),
@@ -669,6 +670,7 @@ export const CanonicalEvents = {
 			title: Schema.String,
 			provider: Schema.String,
 			parentId: Schema.optionalWith(Schema.String, { exact: true }),
+			forkedFrom: Schema.optionalWith(Schema.String, { exact: true }),
 			forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
 			forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
 			forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),

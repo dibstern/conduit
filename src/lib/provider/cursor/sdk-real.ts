@@ -61,7 +61,14 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 								reason: "Cursor custom tool handler is missing",
 							});
 						}
-						return [name, tool];
+						return [
+							name,
+							{
+								description: tool.description,
+								inputSchema: tool.inputSchema,
+								execute: (args, context) => tool.execute(args, context),
+							} satisfies import("@cursor/sdk").SDKCustomTool,
+						];
 					}),
 				),
 				subagentInherit: options.subagentInherit,
@@ -214,9 +221,15 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		},
 		async modelsList(credential) {
 			try {
-				return await (await load()).Cursor.models.list({
+				const models = await (await load()).Cursor.models.list({
 					apiKey: credential.apiKey,
 				});
+				return models.map(({ id, displayName, parameters, variants }) => ({
+					id,
+					displayName,
+					...(parameters ? { parameters } : {}),
+					...(variants ? { variants } : {}),
+				}));
 			} catch (cause) {
 				throw cursorSdkFailure("models.list", cause);
 			}

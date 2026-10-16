@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
+import { Either, Schema } from "effect";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
 	CursorAuthStatus,
+	CursorCustomTool,
 	CursorModel,
 	CursorRuntimeProbe,
 	CursorSdkPort,
@@ -20,11 +22,47 @@ function object(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const decodeModels = Schema.decodeUnknownEither(
+	Schema.Array(
+		Schema.Struct({
+			id: Schema.String,
+			displayName: Schema.String,
+			parameters: Schema.optional(
+				Schema.Array(
+					Schema.Struct({
+						id: Schema.String,
+						displayName: Schema.optional(Schema.String),
+						values: Schema.Array(
+							Schema.Struct({
+								value: Schema.String,
+								displayName: Schema.optional(Schema.String),
+							}),
+						),
+					}),
+				),
+			),
+			variants: Schema.optional(
+				Schema.Array(
+					Schema.Struct({
+						params: Schema.Array(
+							Schema.Struct({ id: Schema.String, value: Schema.String }),
+						),
+						displayName: Schema.String,
+						isDefault: Schema.optional(Schema.Boolean),
+					}),
+				),
+			),
+		}),
+	),
+);
+
 export function createTraceCursorSdkPort(
 	path: string,
 	playback: {
 		readonly closeDelayMs?: number;
 		readonly disposeDelayMs?: number;
+		readonly deltaDelayMs?: number;
+		readonly waitDelayMs?: number;
 		readonly cancelTerminalDelayMs?: number;
 		readonly cancelNeverSettles?: boolean;
 	} = {},
@@ -98,7 +136,11 @@ export function createTraceCursorSdkPort(
 		if (row?.kind.endsWith(".error")) throw cursorSdkFailure(kind, row.data);
 		return row?.data;
 	};
-	const agent = (id: string, options: CursorAgentOptions): CursorAgent => {
+	const agent = (
+		id: string,
+		options: CursorAgentOptions,
+		customTools: Readonly<Record<string, CursorCustomTool>> = {},
+	): CursorAgent => {
 		let closed: Promise<void> | undefined;
 		const closeDelayMs = playback.closeDelayMs ?? 0;
 		const cwd = agentCwds.get(id);
@@ -147,6 +189,17 @@ export function createTraceCursorSdkPort(
 				const turn = rows.slice(start, starts[startIndex + 1] ?? rows.length);
 				const sendError = turn.find((row) => row.kind === "send.error");
 				if (sendError) throw cursorSdkFailure("agent.send", sendError.data);
+				const toolNames = new Map<string, string>();
+				const trackTool = (value: unknown): void => {
+					if (!object(value)) return;
+					if (value["type"] === "tool-call-delta")
+						trackTool(value["taskUpdate"]);
+					const tool = value["toolCall"];
+					if (!object(tool) || !object(tool["args"])) return;
+					const name = tool["args"]["toolName"];
+					if (typeof value["callId"] === "string" && typeof name === "string")
+						toolNames.set(value["callId"], name);
+				};
 				const handle = turn.find((row) => row.kind === "run.handle")?.data;
 				if (!object(handle) || typeof handle["id"] !== "string") {
 					throw new CursorSdkFailure({
@@ -214,7 +267,38 @@ export function createTraceCursorSdkPort(
 											row.data["status"] !== "RUNNING"))
 								)
 									await waiting;
-								if (row.kind === "delta") onDelta(row.data);
+								if (row.kind === "delta") {
+									trackTool(row.data);
+									if (playback.deltaDelayMs)
+										await setTimeout(playback.deltaDelayMs);
+									onDelta(row.data);
+								}
+								if (row.kind === "custom.start" && object(row.data)) {
+									const context = row.data["context"];
+									const args = row.data["args"];
+									if (object(context) && object(args)) {
+										const callId = context["toolCallId"];
+										const sessionId = context["sessionId"];
+										const name =
+											typeof row.data["toolName"] === "string"
+												? row.data["toolName"]
+												: typeof callId === "string"
+													? toolNames.get(callId)
+													: undefined;
+										const tool = name ? customTools[name] : undefined;
+										if (tool) {
+											const callback = tool.execute(args, {
+												...(typeof callId === "string"
+													? { toolCallId: callId }
+													: {}),
+												...(typeof sessionId === "string" ? { sessionId } : {}),
+											});
+											// Captured cancel becomes terminal independently of a host callback.
+											if (needsCancel) void callback.catch(() => {});
+											else await callback;
+										}
+									}
+								}
 								if (row.kind === "stream") yield row.data;
 								if (row.kind === "stream.error") {
 									throw cursorSdkFailure("run.stream", row.data);
@@ -225,7 +309,11 @@ export function createTraceCursorSdkPort(
 							complete();
 						}
 					})(),
-					wait: () => waiting,
+					async wait() {
+						await streamed;
+						if (playback.waitDelayMs) await setTimeout(playback.waitDelayMs);
+						return waiting;
+					},
 					async cancel() {
 						cancel();
 					},
@@ -313,21 +401,14 @@ export function createTraceCursorSdkPort(
 		async modelsList(): Promise<readonly CursorModel[]> {
 			const data = result("models.list");
 			const models = object(data) ? data["models"] : data;
-			if (
-				!Array.isArray(models) ||
-				!models.every(
-					(model): model is CursorModel =>
-						object(model) &&
-						typeof model["id"] === "string" &&
-						typeof model["displayName"] === "string",
-				)
-			) {
+			const decoded = decodeModels(models);
+			if (Either.isLeft(decoded)) {
 				throw new CursorSdkFailure({
 					operation: "models.list",
 					reason: "Invalid Cursor model list trace",
 				});
 			}
-			return models;
+			return decoded.right;
 		},
 		async openStore() {
 			let disposed: Promise<void> | undefined;
@@ -344,7 +425,7 @@ export function createTraceCursorSdkPort(
 		async primeSandbox() {
 			result("sandbox.prime");
 		},
-		async createAgent(options) {
+		async createAgent(options, _credential, _store, customTools) {
 			const created = result("created");
 			if (!object(created) || typeof created["agentId"] !== "string") {
 				throw new CursorSdkFailure({
@@ -352,10 +433,10 @@ export function createTraceCursorSdkPort(
 					reason: "Cursor trace contains no captured agent",
 				});
 			}
-			return agent(created["agentId"], options);
+			return agent(created["agentId"], options, customTools);
 		},
-		async resumeAgent(id, options) {
-			return agent(id, options);
+		async resumeAgent(id, options, _credential, _store, customTools) {
+			return agent(id, options, customTools);
 		},
 	};
 }

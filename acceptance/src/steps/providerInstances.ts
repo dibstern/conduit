@@ -43,10 +43,13 @@ export function seedUsageLimits(
 	setting: ReturnType<typeof usageLimits>,
 ): void {
 	const rpc = requireRpcControl(page);
-	rpc.setResponse("GetUsageLimitsSetting", setting);
-	rpc.setHandler("SetUsageLimitsSetting", (params) => {
-		rpc.setResponse("GetUsageLimitsSetting", params);
-		return params;
+	rpc.setStubs({
+		GetUsageLimitsSetting: () => setting,
+		SetUsageLimitsSetting: ({ usageLimits }) => {
+			const saved = { usageLimits };
+			rpc.setStubs({ GetUsageLimitsSetting: () => saved });
+			return saved;
+		},
 	});
 }
 
@@ -801,9 +804,11 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "seed daemon supervision",
 		match: /^the daemon is (supervised|unsupervised)$/,
 		run: ({ world, match }) => {
-			requireRpcControl(world.page).setResponse("GetStatus", {
-				...MOCK_SERVER_STATUS,
-				supervised: match[1] === "supervised",
+			requireRpcControl(world.page).setStubs({
+				GetStatus: () => ({
+					...MOCK_SERVER_STATUS,
+					supervised: match[1] === "supervised",
+				}),
 			});
 		},
 	},

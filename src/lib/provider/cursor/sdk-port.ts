@@ -1,6 +1,28 @@
 export interface CursorModel {
 	readonly id: string;
 	readonly displayName: string;
+	readonly parameters?:
+		| readonly {
+				readonly id: string;
+				readonly displayName?: string | undefined;
+				readonly values: readonly {
+					readonly value: string;
+					readonly displayName?: string | undefined;
+				}[];
+		  }[]
+		| undefined;
+	readonly variants?:
+		| readonly {
+				readonly params: readonly CursorModelParameter[];
+				readonly displayName: string;
+				readonly isDefault?: boolean | undefined;
+		  }[]
+		| undefined;
+}
+
+export interface CursorModelParameter {
+	readonly id: string;
+	readonly value: string;
 }
 
 export type CursorAuthStatus =
@@ -54,10 +76,7 @@ export interface CursorAgentOptions {
 export interface CursorSendOptions {
 	readonly model: {
 		readonly id: string;
-		readonly params?: readonly {
-			readonly id: string;
-			readonly value: string;
-		}[];
+		readonly params?: readonly CursorModelParameter[];
 	};
 	readonly mode: "agent" | "plan";
 	readonly local?: { readonly force: true };
@@ -65,10 +84,20 @@ export interface CursorSendOptions {
 
 export interface CursorCustomTool {
 	readonly description: string;
+	readonly inputSchema: Record<string, CursorJsonValue>;
 	readonly execute: (
 		args: Readonly<Record<string, unknown>>,
+		context: { readonly toolCallId?: string; readonly sessionId?: string },
 	) => Promise<string>;
 }
+
+type CursorJsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| CursorJsonValue[]
+	| { [key: string]: CursorJsonValue };
 
 export interface CursorStore {
 	dispose(): Promise<void>;

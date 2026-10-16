@@ -31,12 +31,7 @@
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
-	import {
-		rpc,
-		getClaudeSettingsRpc,
-		resolveClaudeSettingsRpc,
-		setClaudeSettingsRpc,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { createFrontendLogger } from "../../utils/logger.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import Button from "../ui/Button.svelte";
@@ -144,7 +139,7 @@
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
 		let cancelled = false;
-		void getClaudeSettingsRpc({ projectSlug })
+		void rpc("GetClaudeSettings", { projectSlug })
 			.then((response) => {
 				if (!cancelled) applyClaudeSettingsResponse(response);
 			})
@@ -166,7 +161,7 @@
 
 		let cancelled = false;
 		beginClaudeSettingsResolution(projectSlug);
-		void resolveClaudeSettingsRpc({ ...(sessionId ? { sessionId } : { projectSlug }), instanceId })
+		void rpc("ResolveClaudeSettings", { ...(sessionId ? { sessionId } : { projectSlug }), instanceId })
 			.then((response) => {
 				if (!cancelled && workspace === requestedWorkspace) applyResolvedClaudeSettingsResponse(response);
 			})
@@ -195,11 +190,11 @@
 		const undoWrite = proposeClaudeSettingsOverrides(overrides);
 		setClaudeSettingEdited(key, edited);
 		try {
-			await setClaudeSettingsRpc({ projectSlug, overrides });
-		} catch {
+			await rpc("SetClaudeSettings", { projectSlug, overrides });
+		} catch (error) {
 			undoWrite();
 			setClaudeSettingEdited(key, wasEdited);
-			showToast("Failed to save Claude settings", { variant: "warn" });
+			toastFailure("Failed to save Claude settings", "warn")(error);
 		}
 	}
 

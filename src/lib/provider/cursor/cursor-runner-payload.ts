@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
+import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
@@ -14,6 +15,8 @@ import type {
 } from "../runner/session-runner.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
+import { cursorAskUserTool } from "./cursor-questions.js";
+import { CursorModelParameters } from "./cursor-runner-driver.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
 import { CursorTurnEvents } from "./cursor-turn-events.js";
@@ -51,6 +54,7 @@ interface CursorSession {
 	run?: CursorRun | undefined;
 	busy: boolean;
 	cancelRequested: boolean;
+	questionAbort?: AbortController | undefined;
 	onCancel?: (() => void) | undefined;
 }
 
@@ -59,6 +63,7 @@ const decodeTerminal = Schema.decodeUnknownEither(
 		status: Schema.Literal("finished", "cancelled", "error"),
 		requestId: Schema.optional(Schema.String),
 		durationMs: Schema.optional(Schema.Number),
+		model: Schema.optional(Schema.Struct({ id: Schema.String })),
 		usage: Schema.optional(Schema.Unknown),
 		error: Schema.optional(
 			Schema.Struct({
@@ -95,6 +100,7 @@ type Update =
 	| { readonly channel: "interrupt-timeout" }
 	| { readonly channel: "delta"; readonly value: unknown }
 	| { readonly channel: "stream"; readonly value: unknown }
+	| { readonly channel: "question"; readonly answer: Effect.Effect<void> }
 	| {
 			readonly channel: "wait";
 			readonly result: Either.Either<unknown, SessionFailure>;
@@ -157,6 +163,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 				return Effect.succeed(this.result(session, "steer-declined", 0));
 			session.busy = true;
 			session.cancelRequested = false;
+			const questionAbort = new AbortController();
+			session.questionAbort = questionAbort;
 			const started = Date.now();
 			const storePath = join(
 				this.deps.daemonConfigDir,
@@ -174,6 +182,25 @@ export class CursorRunnerPayload implements RunnerPayload {
 				input.sessionId,
 				createEventId(),
 				sink,
+				session.cwd,
+				{
+					instanceId: input.instanceId,
+					ensure: (child) => {
+						const sinkId = this.sinks.sinkId(sink);
+						return sinkId
+							? this.emit({
+									type: "ensure-subagent-session",
+									sinkId,
+									input: child,
+								}).pipe(
+									Effect.asVoid,
+									Effect.mapError(
+										(cause) => new EventSinkIngestionError({ cause }),
+									),
+								)
+							: Effect.void;
+					},
+				},
 			);
 			const finish = (
 				status: "completed" | "interrupted" | "error",
@@ -196,6 +223,17 @@ export class CursorRunnerPayload implements RunnerPayload {
 
 			return Effect.scoped(
 				Effect.gen(this, function* () {
+					const queue = yield* Queue.unbounded<Update>();
+					const customTools = {
+						ask_user: cursorAskUserTool(
+							sink,
+							events,
+							questionAbort.signal,
+							(answer) => {
+								Queue.unsafeOffer(queue, { channel: "question", answer });
+							},
+						),
+					};
 					// The daemon places only sends that reach an idle session, so a send
 					// that starts here just after a turn ends places its own message
 					// (placement is idempotent). A continuation places nothing: it
@@ -244,6 +282,19 @@ export class CursorRunnerPayload implements RunnerPayload {
 							"sandbox_unavailable",
 							"Cursor sandbox initialization failed; restart the runner before retrying",
 						);
+					const modelParams =
+						input.providerState["cursor.modelParams"] === undefined
+							? undefined
+							: yield* Schema.decodeUnknown(CursorModelParameters)(
+									input.providerState["cursor.modelParams"],
+								).pipe(
+									Effect.mapError(
+										(): SessionFailure => ({
+											operation: "model parameters",
+											message: "Invalid Cursor model parameters",
+										}),
+									),
+								);
 					const recovery = yield* sdkCall("read interrupted run", async () => {
 						let text: string;
 						try {
@@ -311,6 +362,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						extraFolders: input.extraFolders,
 						permissionMode: input.permissionMode,
 						modelId: input.model.modelId,
+						modelParams,
 						credential,
 					});
 					if (
@@ -348,7 +400,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 							);
 							this.primed = true;
 						}
-						const customTools = {};
 						const agent = yield* Effect.acquireRelease(
 							sdkCall("agent open", () =>
 								session.agentId
@@ -389,7 +440,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 						session.open = { agent, store, options: config.agent };
 					}
 					events.refs.providerSessionId = session.agentId;
-					const queue = yield* Queue.unbounded<Update>();
 					const agent = session.open.agent;
 					const readUsage = sdkCall("usage", () => agent.getUsage()).pipe(
 						Effect.timeout("2 seconds"),
@@ -523,6 +573,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 							yield* events.stream(update.value);
 							continue;
 						}
+						if (update.channel === "question") {
+							yield* Effect.forkScoped(update.answer);
+							continue;
+						}
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
 						yield* Fiber.interrupt(stream);
 						for (const pending of yield* Queue.takeAll(queue)) {
@@ -548,6 +602,16 @@ export class CursorRunnerPayload implements RunnerPayload {
 							);
 						if (terminal.right.requestId)
 							events.refs.providerRequestId = terminal.right.requestId;
+						if (terminal.right.model?.id)
+							yield* events.push("turn.model_resolved", {
+								messageId: events.messageId,
+								requestedModel: input.model.modelId,
+								expectedModel:
+									input.model.modelId === "default"
+										? terminal.right.model.id
+										: input.model.modelId,
+								actualModel: terminal.right.model.id,
+							});
 						events.reconcileUsage(terminal.right.usage);
 						const afterUsage = yield* readUsage;
 						if (beforeUsage?.cost && afterUsage?.cost) {
@@ -642,6 +706,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							"retryable" in failure && failure.retryable === true,
 						),
 					),
+					Effect.ensuring(Effect.sync(() => questionAbort.abort())),
 				),
 			).pipe(
 				Effect.ensuring(
@@ -649,6 +714,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 						acceptingUpdates = false;
 						session.busy = false;
 						session.run = undefined;
+						session.questionAbort = undefined;
 						session.onCancel = undefined;
 					}),
 				),
@@ -657,6 +723,13 @@ export class CursorRunnerPayload implements RunnerPayload {
 						// Cleanup and admission readiness precede the terminal publication.
 						// Otherwise an inbox input can be removed while this payload is busy.
 						const durationMs = Date.now() - started;
+						yield* events.finishChildren(
+							result.status === "completed"
+								? "completed"
+								: result.status === "interrupted"
+									? "interrupted"
+									: "error",
+						);
 						yield* events.endThinking();
 						if (result.status === "completed")
 							yield* events.push("turn.completed", {
@@ -714,7 +787,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 	interrupt(sessionId: string) {
 		return Effect.suspend(() => {
 			const session = this.sessions.get(sessionId);
-			if (session) session.cancelRequested = true;
+			if (session) {
+				session.cancelRequested = true;
+				session.questionAbort?.abort();
+			}
 			session?.onCancel?.();
 			return Effect.void;
 		});

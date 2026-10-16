@@ -1007,13 +1007,13 @@ test.describe("Session unread dot", () => {
 			await report.check(testInfo, "sub-agent");
 			await windows.B.context().close();
 		});
-		// Counts group by root conversation: the sidebar lists roots only, so a
-		// fork's unread turn end lifts its root's row, and a root and fork both
-		// unread still count once. The root is seeded from the mock's stream so
+		// Counts group by root conversation. A Fork is its own root, so its
+		// unread turn end marks its own row, never its Source's (ADR-0007), and a
+		// Source and Fork both unread count twice. The root is seeded from the mock's stream so
 		// it is an OpenCode row: this lane's initial session is recorded as
 		// Claude, and a Claude fork copies the SDK transcript on disk, which a
 		// replay does not have.
-		test("a root with an unread fork counts once", async ({
+		test("an unread fork is its own row, not its source's", async ({
 			page,
 			browser,
 			relayUrl,
@@ -1048,7 +1048,7 @@ test.describe("Session unread dot", () => {
 				await report.record("root seen", windows, rootId);
 			});
 
-			await test.step("a fork's turn end lifts its seen root", async () => {
+			await test.step("a fork's turn end marks the fork, not its seen source", async () => {
 				await new SidebarPage(windows.A).openContextMenu(rootId);
 				await windows.A.getByTestId("session-ctx-fork").click();
 				await expect
@@ -1056,20 +1056,21 @@ test.describe("Session unread dot", () => {
 						() =>
 							query<{ id: string }>(
 								harness,
-								"SELECT id FROM sessions WHERE id = ? AND parent_id = ? AND (fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL)",
+								"SELECT id FROM sessions WHERE id = ? AND parent_id IS NULL AND forked_from = ? AND (fork_point_event IS NOT NULL OR fork_point_timestamp IS NOT NULL)",
 								forkId,
 								rootId,
 							).length,
 					)
 					.toBe(1);
 				await endTurn("opencode", windows, harness, forkId, "Fork turn");
-				await expectDot(windows, rootId, true);
+				await expectDot(windows, forkId, true);
+				await expectDot(windows, rootId, false);
 				await expectUnreadCount(1);
 				await report.record("fork unread", windows, rootId);
 				await report.record("fork unread", windows, forkId);
 			});
 
-			await test.step("root and fork both unread count once", async () => {
+			await test.step("a source and its fork both unread count twice", async () => {
 				// The recording has two turns and both are spent, so the root goes
 				// unread again by hand.
 				await new SidebarPage(windows.A).openContextMenu(rootId);
@@ -1085,7 +1086,8 @@ test.describe("Session unread dot", () => {
 					)
 					.toBe(1);
 				await expectDot(windows, rootId, true);
-				await expectUnreadCount(1);
+				await expectDot(windows, forkId, true);
+				await expectUnreadCount(2);
 				await report.record("both unread", windows, rootId);
 				await report.record("both unread", windows, forkId);
 			});
