@@ -140,11 +140,10 @@ If something ever needs it, `SessionAttention` is the single place to add it.
   list and never resolved descendants at all).
 - The two session projectors are one handler table. `sessions` is written by a
   sync projector and an Effect projector that implemented the same nine event
-  types twice as parallel if-chains, kept in step by hand and checked only at
-  runtime by `assertHandledOrIgnored` plus a snapshot. Adding `session.deleted`
+  types twice as parallel if-chains, kept in step by hand. Adding `session.deleted`
   meant editing four places, none of which the compiler checked. They now share
-  `Record<SessionHandledType, Handler>`, so a missing handler is a type error
-  and `handles` is derived from the table rather than maintained alongside it
+  one typed handler table. Each key determines its handler's event payload,
+  and `handles` derives from those keys rather than a separately written union
   (conduit-test-48mo.4).
 - The handlers return statements instead of executing them. A handler is
   `(event) => readonly SessionStatement[]`, a pure function; each runtime then
@@ -152,9 +151,11 @@ If something ever needs it, `SessionAttention` is the single place to add it.
   abstracting over `void` and `Effect<void>`, which TypeScript cannot express
   without higher-kinded types — the reason an earlier attempt at this stalled.
   Nothing effectful crosses the interface, so the problem does not arise, and
-  the two projectors collapse to a three-line loop each. `assertHandledOrIgnored`
-  stays where it is still earning its keep: the projectors that remain
-  imperative if-chains.
+  the two projectors collapse to a three-line loop each. Every live canonical
+  event must be handled by at least one projector or listed in `UNPROJECTED`
+  with a reason.
+  The compiler rejects missing or stale entries, and each projector body only
+  receives events from its handled list.
 - `events` deliberately has no foreign key to `sessions`, so no cascade can
   reach it. The event log outlives the read-model rows projected from it; that
   is what makes a rebuild possible, and it is why 0004 dropped that key.
