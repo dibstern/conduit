@@ -727,7 +727,9 @@ body:has(dialog:modal) {
 }
 
 /* See the comment on the element in ChatLayout.svelte. `pointer-events: none`
-   is safe: WebKit's sampler first hit-tests ignoring pointer-events. */
+   is safe: WebKit's sampler first hit-tests ignoring pointer-events. z-index 1
+   paints it over #app, which comes later and would otherwise be hit first;
+   #session-chrome (z-dropdown) still paints over it. */
 #layout.layout-compact #compact-top-edge {
 	display: block;
 	position: fixed;
@@ -735,13 +737,17 @@ body:has(dialog:modal) {
 	left: 0;
 	right: 0;
 	height: 12px;
+	z-index: 1;
 	background: var(--color-bg-surface);
 	pointer-events: none;
 }
 
-/* The phone session list is bg-bg, not the session bar's bg-surface. */
+/* The phone session list is bg-bg, not the session bar's bg-surface. #app is
+   hidden here, so stay under the list header's icon buttons (positioned), whose
+   pressed and focus states would lose their top 12px in a browser tab. */
 #layout.layout-compact.phone-list-screen #compact-top-edge {
 	background: var(--color-bg);
+	z-index: auto;
 }
 
 #layout.layout-compact.phone-list-screen #sidebar {

@@ -8,7 +8,7 @@ import type {
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import type { FolderIssue } from "../../../project-folders.js";
-import type { ClaudeRuntimeError } from "../../../provider/event-sink-errors.js";
+import type { RunnerProcessError } from "../../../provider/runner/process-session-runner.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { AccountDirectory } from "./account-directory.js";
@@ -44,12 +44,12 @@ export interface EffectDaemonHandle {
 		| ProjectSaveRejected
 		| WsRpcError
 		| ProjectNotFound
-		| ClaudeRuntimeError
+		| RunnerProcessError
 		| import("./project-registry-service.js").ProjectAlreadyExists
 	>;
 	readonly removeProject: (
 		slug: string,
-	) => Effect.Effect<void, ProjectNotFound | ClaudeRuntimeError | WsRpcError>;
+	) => Effect.Effect<void, ProjectNotFound | RunnerProcessError | WsRpcError>;
 	readonly getStatus: () => Effect.Effect<DaemonStatus>;
 	readonly getProjects: () => Effect.Effect<ReadonlyArray<StoredProject>>;
 	readonly getInstances: () => Effect.Effect<ReadonlyArray<OpenCodeInstance>>;

@@ -33,6 +33,7 @@ import {
 } from "../../../daemon/daemon-lifecycle.js";
 import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
+import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
 import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
 import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import {
@@ -637,6 +638,17 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		Layer.scopedDiscard(
+			Effect.acquireRelease(Effect.sync(startContentionMetrics), (metrics) =>
+				Effect.tryPromise(async () => {
+					await metrics?.close();
+				}).pipe(
+					Effect.catchAll((error) =>
+						Effect.logError("Contention metrics shutdown failed", error),
+					),
+				),
+			),
+		),
 		options.persistedConfig === undefined
 			? Layer.empty
 			: Layer.effectDiscard(
