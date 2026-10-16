@@ -403,10 +403,14 @@
 				)
 			: null,
 	);
-	const parentSession = $derived.by(() => {
-		const id = primary ? sessionState.currentParentId : activeSession?.parentID;
-		return id ? findSession(id) : null;
-	});
+	// The fork point and lineage arrive together, so a row with a fork point
+	// and no lineage outlived its Source; until then the announcement stands in.
+	const forkedFrom = $derived(
+		activeSession?.forkPointMessageId || activeSession?.forkMessageId || activeSession?.forkPointTimestamp
+			? activeSession?.forkedFrom
+			: primary ? sessionState.currentFork?.forkedFrom : undefined,
+	);
+	const sourceSession = $derived(forkedFrom ? findSession(forkedFrom) : null);
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
 		projectInheritedTurns(forkSplit?.inherited ?? [], false),
@@ -624,8 +628,8 @@
 		</ForkContextBlock>
 
 		<ForkDivider
-			parentTitle={parentSession?.title ?? "parent session"}
-			parentId={activeSession?.parentID ?? ""}
+			sourceTitle={sourceSession?.title ?? "parent session"}
+			sourceId={forkedFrom}
 		/>
 
 		{#each currentTurns as turn (turn.id)}

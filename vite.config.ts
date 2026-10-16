@@ -85,11 +85,14 @@ const config = defineConfig({
 		outDir: "../../../dist/frontend",
 		emptyOutDir: true,
 		sourcemap: true,
-		target: "es2022",
+		// Tailwind v4's browser floor (all ES2022+). CSS inherits it: an older
+		// target makes Lightning CSS rewrite every oklch colour to hex/lab
+		// fallbacks that gamut-map differently. Storybook only forwards `target`.
+		target: ["chrome111", "edge111", "firefox128", "safari16.4"],
 		// highlight.js (all languages), mermaid, and xterm load on demand.
-		// The main chunk is ~1.34 MB; keep the warning just above that.
+		// Keep the main chunk's size budget at ~1.4 MB.
 		chunkSizeWarningLimit: 1400,
-		rollupOptions: {
+		rolldownOptions: {
 			input: {
 				index: resolve(import.meta.dirname, "src/lib/frontend/index.html"),
 				sw: resolve(import.meta.dirname, "src/lib/frontend/sw.ts"),
@@ -98,15 +101,17 @@ const config = defineConfig({
 				// Service worker must be at /sw.js with no content hash
 				entryFileNames: (chunk) =>
 					chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js",
-				manualChunks: {
+				codeSplitting: {
 					// Isolate Effect.ts into its own chunk for lazy-loading.
 					// @effect/schema is merged into `effect` as of Effect 3.x.
-					effect: ["effect"],
+					groups: [
+						{ name: "effect", test: /[\\/]node_modules[\\/]effect[\\/]/ },
+					],
 				},
 			},
 		},
 	},
-	// In Vite 6 `preview.proxy` falls back to `server.proxy`. The dev-only
+	// In Vite 8 `preview.proxy` still falls back to `server.proxy`. The dev-only
 	// proxy targets (localhost:2633) aren't running during E2E tests that use
 	// `vite preview`, so disable preview-mode proxying to avoid noisy
 	// ECONNREFUSED errors.

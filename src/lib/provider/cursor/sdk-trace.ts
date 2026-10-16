@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { CursorSdkFailure } from "./sdk-error.js";
+import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
@@ -33,13 +33,13 @@ export function createCursorSdkTrace(
 			collectSecrets(child);
 		}
 	};
+	const redactText = (value: string): string => {
+		let text = value.replace(PRIVATE_HOME, "/home/test");
+		for (const secret of secrets) text = text.split(secret).join("[REDACTED]");
+		return text;
+	};
 	const redact = (value: unknown): unknown => {
-		if (typeof value === "string") {
-			let text = value.replace(PRIVATE_HOME, "/home/test");
-			for (const secret of secrets)
-				text = text.split(secret).join("[REDACTED]");
-			return text;
-		}
+		if (typeof value === "string") return redactText(value);
 		if (Array.isArray(value)) return value.map(redact);
 		if (value && typeof value === "object") {
 			return Object.fromEntries(
@@ -52,6 +52,7 @@ export function createCursorSdkTrace(
 		return value;
 	};
 	return {
+		redactText,
 		protect(secret: string) {
 			if (secret) secrets.add(secret);
 		},
@@ -91,6 +92,12 @@ export function teeCursorSdkPort(
 		const apiKey = process.env["CURSOR_API_KEY"]?.trim();
 		if (apiKey) trace.protect(apiKey);
 	}
+	const failure = (kind: string, cause: unknown): CursorSdkFailure => {
+		const error = cursorSdkFailure(kind, cause);
+		const reason = trace.redactText(error.reason);
+		trace.record(`${kind}.error`, { ...error.sdkError, message: reason });
+		return new CursorSdkFailure({ ...error, reason });
+	};
 	const call = async <A>(
 		kind: string,
 		options: unknown,
@@ -110,13 +117,7 @@ export function teeCursorSdkPort(
 			trace.record(kind, result ?? null);
 			return result;
 		} catch (cause) {
-			// SDK errors may echo credentials. Keep both trace and caller safe.
-			const message =
-				cause instanceof CursorSdkFailure
-					? cause.reason
-					: `Cursor ${kind} failed`;
-			trace.record(`${kind}.error`, { message });
-			throw new CursorSdkFailure({ operation: kind, reason: message });
+			throw failure(kind, cause);
 		}
 	};
 	const stores = new WeakMap<CursorStore, CursorStore>();
@@ -134,6 +135,7 @@ export function teeCursorSdkPort(
 			autoReview: options.autoReview,
 			customTools: options.customToolNames,
 			subagentInherit: options.subagentInherit,
+			enableAgentRetries: true,
 		},
 	});
 	const recordedTools = (
@@ -178,27 +180,39 @@ export function teeCursorSdkPort(
 									yield message;
 								}
 								trace.record("stream.end", {});
-							} catch {
-								trace.record("stream.error", {
-									message: "Cursor stream failed",
-								});
-								throw new CursorSdkFailure({
-									operation: "run.stream",
-									reason: "Cursor stream failed",
-								});
+							} catch (cause) {
+								throw failure("stream", cause);
 							}
 						})(),
-						wait: () => call("wait.result", {}, () => run.wait()),
+						async wait() {
+							const result = await call("wait.result", {}, () => run.wait());
+							if (
+								result !== null &&
+								typeof result === "object" &&
+								"error" in result &&
+								result.error !== null &&
+								typeof result.error === "object" &&
+								"message" in result.error &&
+								typeof result.error.message === "string"
+							) {
+								return {
+									...result,
+									error: {
+										...result.error,
+										message: trace.redactText(result.error.message),
+									},
+								};
+							}
+							return result;
+						},
 						cancel: () => call("cancel", { runId: run.id }, () => run.cancel()),
 					};
-				} catch {
-					trace.record("send.error", { message: "Cursor send failed" });
-					throw new CursorSdkFailure({
-						operation: "agent.send",
-						reason: "Cursor send failed",
-					});
+				} catch (cause) {
+					throw failure("send", cause);
 				}
 			},
+			getUsage: () =>
+				call("usage", { agentId: agent.id }, () => agent.getUsage()),
 			close() {
 				return (closed ??= (async () => {
 					await call("close", { agentId: agent.id }, () => agent.close());
@@ -268,14 +282,8 @@ export function teeCursorSdkPort(
 				);
 				trace.record("created", { agentId: agent.id });
 				return wrapAgent(agent);
-			} catch {
-				trace.record("create.error", {
-					message: "Cursor agent creation failed",
-				});
-				throw new CursorSdkFailure({
-					operation: "agent.create",
-					reason: "Cursor agent creation failed",
-				});
+			} catch (cause) {
+				throw failure("create", cause);
 			}
 		},
 		async resumeAgent(id, options, credential, store, customTools) {
@@ -294,12 +302,8 @@ export function teeCursorSdkPort(
 				);
 				trace.record("resumed", { agentId: agent.id });
 				return wrapAgent(agent);
-			} catch {
-				trace.record("resume.error", { message: "Cursor agent resume failed" });
-				throw new CursorSdkFailure({
-					operation: "agent.resume",
-					reason: "Cursor agent resume failed",
-				});
+			} catch (cause) {
+				throw failure("resume", cause);
 			}
 		},
 	};

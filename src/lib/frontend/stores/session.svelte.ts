@@ -75,10 +75,9 @@ export { isBusy };
 // Nothing outside can write it: `sessionState` hands it out as a `ReadonlyMap`.
 
 const serverSessions = $derived(sessionSubscription.rows);
+const isFamilyRoot = (row: Pick<SessionInfo, "parentID">) => !row.parentID;
 const rootSessions = $derived(
-	[...serverSessions.values()].filter(
-		(row) => !row.parentID && !row.sideThread,
-	),
+	[...serverSessions.values()].filter(isFamilyRoot),
 );
 // The viewed session's family (root and descendants), owned by its
 // SubscribeSessionFamily feed: `applyFamilyChange` is the only writer.
@@ -92,9 +91,7 @@ export function parentOf(id: string): string | null {
 	return (
 		serverSessions.get(id)?.parentID ??
 		familySessions.find((row) => row.id === id)?.parentID ??
-		(clientSession.announcedParent?.sessionId === id
-			? clientSession.announcedParent.parentId
-			: null)
+		null
 	);
 }
 
@@ -145,9 +142,9 @@ export function setAttachedProject(slug: string): void {
 
 const clientSession = $state({
 	currentId: null as string | null,
-	announcedParent: null as {
+	announcedFork: null as {
 		sessionId: string;
-		parentId: string;
+		forkedFrom: string;
 		forkMessageId?: string;
 		forkPointTimestamp?: number;
 	} | null,
@@ -232,11 +229,10 @@ export const sessionState = {
 	},
 	get currentFork() {
 		const id = clientSession.currentId;
-		if (clientSession.announcedParent?.sessionId === id)
-			return clientSession.announcedParent;
-		// An OpenCode fork is projected before its parent is recorded, and the
-		// shell keeps that stale root row; the family row carries the lineage.
-		return familySessions.find((row) => row.id === id && row.parentID) ?? null;
+		// Stands in until the Fork's row arrives with its lineage.
+		return clientSession.announcedFork?.sessionId === id
+			? clientSession.announcedFork
+			: null;
 	},
 	set currentId(id: string | null) {
 		clientSession.currentId = id;
@@ -822,16 +818,16 @@ export function applySearchResultsResponse(
  * arrives. Only the forking tab announces it.
  */
 export function followFork(response: ForkSessionResponse): void {
-	clientSession.announcedParent = {
+	clientSession.announcedFork = {
 		sessionId: response.sessionId,
-		parentId: response.parentId,
+		forkedFrom: response.forkedFrom,
 		...(response.forkMessageId && { forkMessageId: response.forkMessageId }),
 		...(response.forkPointTimestamp != null && {
 			forkPointTimestamp: response.forkPointTimestamp,
 		}),
 	};
 	showToast(
-		`Forked from "${findSession(response.parentId)?.title || "session"}"`,
+		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
 	if (clientSession.currentId !== response.sessionId)
 		switchToSession(response.sessionId, response.projectSlug);
@@ -933,8 +929,7 @@ export function getFilteredSessions(): SessionInfo[] {
 			sessionState.rootSessions.map((session) => [session.id, session]),
 		);
 		sessions = sessionState.searchResults.flatMap((session) => {
-			if (session.parentID || session.sideThread || !inScope(session))
-				return [];
+			if (!isFamilyRoot(session) || !inScope(session)) return [];
 			if (session.projectSlug !== searchSlug) {
 				return [session];
 			}
@@ -949,10 +944,7 @@ export function getFilteredSessions(): SessionInfo[] {
 		// project too, so the local filter and the landing results agree -- which is
 		// why these no longer have to stand down to avoid flashing in and out.
 		const foreignSessions = sessionState.daemonSessions.filter(
-			(session) =>
-				session.projectSlug !== currentSlug &&
-				!session.parentID &&
-				!session.sideThread,
+			(session) => session.projectSlug !== currentSlug && isFamilyRoot(session),
 		);
 		sessions = [...localSessions, ...foreignSessions].filter(inScope);
 		if (query)
@@ -1030,8 +1022,8 @@ export function switchToSession(
 
 	clientSession.currentId = sessionId;
 	clearDraftSelection();
-	if (clientSession.announcedParent?.sessionId !== sessionId)
-		clientSession.announcedParent = null;
+	if (clientSession.announcedFork?.sessionId !== sessionId)
+		clientSession.announcedFork = null;
 	activateSessionChatState(sessionId);
 	if (previousId !== sessionId) {
 		updateContextPercent(0);
@@ -1141,7 +1133,7 @@ export function clearSessionState(): void {
 		clearSessionChatState(id);
 	}
 	clientSession.currentId = null;
-	clientSession.announcedParent = null;
+	clientSession.announcedFork = null;
 	setSearchQuery("");
 	resetSessionFamily();
 	readMarks.clear();

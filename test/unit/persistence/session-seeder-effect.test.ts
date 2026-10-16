@@ -64,8 +64,10 @@ describe("EffectSessionSeeder", () => {
 					title: "Child",
 					provider: "opencode",
 				}),
-				canonicalEvent("session.forked", "child", {
+				canonicalEvent("session.created", "child", {
 					sessionId: "child",
+					title: "Child",
+					provider: "opencode",
 					parentId: "parent",
 				}),
 			]);

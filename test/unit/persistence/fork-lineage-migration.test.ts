@@ -20,7 +20,11 @@ import {
 	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { serializeRecent } from "../../../src/lib/daemon/recent-projects.js";
-import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
+import {
+	effectMigrationEntries,
+	makeEffectSqlMigrator,
+} from "../../../src/lib/persistence/effect/migrations.js";
+import { refreshSidebar } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { migrateForkLineage } from "../../../src/lib/persistence/migrations/fork-lineage-import.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 
@@ -34,15 +38,116 @@ const migrateWithConfig = (dir: string) =>
 		return yield* migrateForkLineage(dir, config);
 	});
 
-function makePersistenceEffectLayer(filename: string) {
+function makePersistenceEffectLayer(filename: string, lineage = false) {
 	const sqlite = SqliteNode.layer({ filename }).pipe(
 		Layer.provide(Reactivity.layer),
 	);
 	return Layer.merge(
 		sqlite,
-		Layer.effectDiscard(makeEffectSqlMigrator()).pipe(Layer.provide(sqlite)),
+		Layer.effectDiscard(
+			makeEffectSqlMigrator(
+				lineage
+					? effectMigrationEntries
+					: Object.fromEntries(
+							Object.entries(effectMigrationEntries).filter(
+								([key]) => key < "0061_sessions_lineage",
+							),
+						),
+			),
+		).pipe(Layer.provide(sqlite)),
 	);
 }
+
+it.each([
+	false,
+	true,
+])("imports sidecar lineage and keeps Forks top-level, legacy containment: %s", async (contained) => {
+	const dir = mkdtempSync(join(tmpdir(), "fork-migration-lineage-"));
+	const project = join(dir, "project");
+	const filename = join(projectStorageDir(dir, "project"), "events.db");
+	const sidecar = join(dir, "fork-metadata.json");
+	try {
+		mkdirSync(project, { recursive: true });
+		mkdirSync(projectStorageDir(dir, "project"), { recursive: true });
+		writeFileSync(
+			join(dir, "recent.json"),
+			serializeRecent([{ directory: project, slug: "project", lastUsed: 1 }]),
+		);
+		const entry = JSON.stringify({
+			child: { parentID: "parent", forkMessageId: "boundary" },
+			side: { parentID: "parent", forkMessageId: "boundary" },
+		});
+		writeFileSync(sidecar, entry);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, parent_id, side_thread, root_id, created_at, updated_at)
+					VALUES ('parent', 'opencode', NULL, 0, 'parent', 1, 1),
+					('child', 'opencode', ${contained ? "parent" : null}, 0, ${contained ? "parent" : "child"}, 1, 1),
+					('agent', 'opencode', 'child', 0, ${contained ? "parent" : "child"}, 1, 1),
+					('side', 'opencode', 'parent', 1, 'parent', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+					VALUES ('boundary', 'parent', 'assistant', 200, 200)`;
+				yield* refreshSidebar(["parent", "child"], 0);
+				// The importer runs before project migrations during an upgrade.
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 60`;
+			}).pipe(Effect.provide(makePersistenceEffectLayer(filename, true))),
+		);
+		await Effect.runPromise(migrateWithConfig(dir));
+		const snapshot = () =>
+			Effect.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					expect(
+						yield* sql`SELECT parent_id, forked_from, root_id,
+						fork_point_event, fork_point_timestamp, fork_point_message_id
+						FROM sessions WHERE id = 'child'`,
+					).toEqual([
+						{
+							parent_id: null,
+							forked_from: "parent",
+							root_id: "child",
+							fork_point_event: "boundary",
+							fork_point_timestamp: 200,
+							fork_point_message_id: "boundary",
+						},
+					]);
+					expect(
+						yield* sql`SELECT parent_id, forked_from, side_thread, root_id FROM sessions WHERE id = 'side'`,
+					).toEqual([
+						{
+							parent_id: "parent",
+							forked_from: "parent",
+							side_thread: 1,
+							root_id: "parent",
+						},
+					]);
+					const [child] = yield* sql<{
+						version: number;
+					}>`SELECT version FROM sessions WHERE id = 'child'`;
+					expect(child?.version).toBeGreaterThan(0);
+					expect(
+						yield* sql`SELECT root_id, version FROM sessions WHERE id = 'agent'`,
+					).toEqual([
+						{ root_id: "child", version: contained ? child?.version : 0 },
+					]);
+					return {
+						sessions: yield* sql`SELECT * FROM sessions ORDER BY id`,
+						sidebar:
+							yield* sql`SELECT * FROM session_sidebar ORDER BY session_id`,
+						counter: yield* sql`SELECT * FROM read_model_counter`,
+					};
+				}).pipe(Effect.provide(makePersistenceEffectLayer(filename, true))),
+			);
+		const imported = await snapshot();
+		expect(existsSync(sidecar)).toBe(false);
+		writeFileSync(sidecar, entry);
+		await Effect.runPromise(migrateWithConfig(dir));
+		expect(await snapshot()).toEqual(imported);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 it.each([
 	"publish",

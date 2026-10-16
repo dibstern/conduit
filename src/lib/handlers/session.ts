@@ -647,7 +647,7 @@ export const forkSessionForClient = ({
 
 		return {
 			id: forked.id,
-			parentId: sessionId,
+			forkedFrom: sessionId,
 			...(forkMessageId && { forkMessageId }),
 			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		};

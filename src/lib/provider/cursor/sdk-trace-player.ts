@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
-import { CursorSdkFailure } from "./sdk-error.js";
+import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
@@ -26,6 +26,8 @@ export function createTraceCursorSdkPort(
 	playback: {
 		readonly closeDelayMs?: number;
 		readonly disposeDelayMs?: number;
+		readonly cancelTerminalDelayMs?: number;
+		readonly cancelNeverSettles?: boolean;
 	} = {},
 ): CursorSdkPort {
 	let contents: string | undefined;
@@ -33,6 +35,7 @@ export function createTraceCursorSdkPort(
 	let sendIndex = 0;
 	const agentCwds = new Map<string, string>();
 	const cursors = new Map<string, number>();
+	const activeRuns = new Map<string, string>();
 	const reload = () => {
 		let next: string;
 		try {
@@ -84,16 +87,16 @@ export function createTraceCursorSdkPort(
 	const result = (kind: string): unknown => {
 		reload();
 		const matches = rows.filter(
-			(row) => row.kind === kind || row.kind === `${kind}.error`,
+			(row) =>
+				row.kind === kind ||
+				row.kind === `${kind}.error` ||
+				(kind === "created" && row.kind === "create.error") ||
+				(kind === "resumed" && row.kind === "resume.error"),
 		);
 		const index = cursors.get(kind) ?? 0;
 		const row = matches[Math.min(index, matches.length - 1)];
 		cursors.set(kind, index + 1);
-		if (row?.kind.endsWith(".error"))
-			throw new CursorSdkFailure({
-				operation: kind,
-				reason: `Cursor ${kind} failed`,
-			});
+		if (row?.kind.endsWith(".error")) throw cursorSdkFailure(kind, row.data);
 		return row?.data;
 	};
 	const agent = (
@@ -113,11 +116,31 @@ export function createTraceCursorSdkPort(
 		agentCwds.set(id, options.cwd);
 		return {
 			id,
-			async send(_prompt, _options, onDelta) {
+			async send(_prompt, sendOptions, onDelta) {
+				if (activeRuns.has(id)) {
+					throw cursorSdkFailure("agent.send", {
+						name: "AgentBusyError",
+						message: "Cursor agent already has a live run",
+						code: "agent_busy",
+						isRetryable: false,
+					});
+				}
 				reload();
 				const starts = rows.flatMap((row, index) =>
 					row.kind === "send.options" ? [index] : [],
 				);
+				if (sendOptions.local?.force && sendIndex === 0) {
+					const first = rows.slice(starts[0], starts[1]);
+					if (
+						first.some(
+							(row) =>
+								row.kind === "wait.result" &&
+								object(row.data) &&
+								row.data["status"] === "cancelled",
+						)
+					)
+						sendIndex++;
+				}
 				const startIndex = Math.min(sendIndex++, starts.length - 1);
 				const start = starts[startIndex];
 				if (start === undefined) {
@@ -127,6 +150,8 @@ export function createTraceCursorSdkPort(
 					});
 				}
 				const turn = rows.slice(start, starts[startIndex + 1] ?? rows.length);
+				const sendError = turn.find((row) => row.kind === "send.error");
+				if (sendError) throw cursorSdkFailure("agent.send", sendError.data);
 				const toolNames = new Map<string, string>();
 				const trackTool = (value: unknown): void => {
 					if (!object(value)) return;
@@ -149,6 +174,7 @@ export function createTraceCursorSdkPort(
 				const terminal = turn.find((row) => row.kind === "wait.result")?.data;
 				const needsCancel =
 					object(terminal) && terminal["status"] === "cancelled";
+				const delayedCancel = needsCancel && startIndex === 0;
 				let cancel: () => void = () => {};
 				const cancelled = new Promise<void>((resolve) => {
 					cancel = resolve;
@@ -157,12 +183,53 @@ export function createTraceCursorSdkPort(
 				const streamed = new Promise<void>((resolve) => {
 					complete = resolve;
 				});
+				activeRuns.set(id, runId);
+				const waiting = (async () => {
+					if (needsCancel) {
+						await cancelled;
+						if (delayedCancel && playback.cancelNeverSettles)
+							await new Promise<never>(() => {});
+						if (delayedCancel && (playback.cancelTerminalDelayMs ?? 0) > 0)
+							await setTimeout(playback.cancelTerminalDelayMs);
+					} else await streamed;
+					const waitError = turn.find(
+						(row) =>
+							row.kind === "wait.error" || row.kind === "wait.result.error",
+					);
+					if (waitError) throw cursorSdkFailure("run.wait", waitError.data);
+					if (
+						!object(terminal) ||
+						!["finished", "cancelled", "error"].includes(
+							String(terminal["status"]),
+						)
+					) {
+						const streamError = turn.find((row) => row.kind === "stream.error");
+						if (streamError)
+							throw cursorSdkFailure("run.stream", streamError.data);
+						throw new CursorSdkFailure({
+							operation: "run.wait",
+							reason: "Cursor stream ended without a terminal status",
+						});
+					}
+					return terminal;
+				})().finally(() => {
+					if (activeRuns.get(id) === runId) activeRuns.delete(id);
+				});
+				void waiting.catch(() => {});
 				return {
 					id: runId,
 					stream: (async function* () {
 						try {
 							for (const row of turn) {
-								if (needsCancel && row.kind === "wait.result") await cancelled;
+								if (
+									needsCancel &&
+									(row.kind === "wait.result" ||
+										(row.kind === "stream" &&
+											object(row.data) &&
+											row.data["type"] === "status" &&
+											row.data["status"] !== "RUNNING"))
+								)
+									await waiting;
 								if (row.kind === "delta") {
 									trackTool(row.data);
 									onDelta(row.data);
@@ -195,10 +262,7 @@ export function createTraceCursorSdkPort(
 								}
 								if (row.kind === "stream") yield row.data;
 								if (row.kind === "stream.error") {
-									throw new CursorSdkFailure({
-										operation: "run.stream",
-										reason: "Cursor captured stream failed",
-									});
+									throw cursorSdkFailure("run.stream", row.data);
 								}
 								if (row.kind === "stream.end") break;
 							}
@@ -206,37 +270,14 @@ export function createTraceCursorSdkPort(
 							complete();
 						}
 					})(),
-					async wait() {
-						await streamed;
-						if (needsCancel) await cancelled;
-						if (
-							turn.some(
-								(row) =>
-									row.kind === "wait.error" || row.kind === "wait.result.error",
-							)
-						) {
-							throw new CursorSdkFailure({
-								operation: "run.wait",
-								reason: "Cursor captured wait failed",
-							});
-						}
-						if (
-							!object(terminal) ||
-							!["finished", "cancelled", "error"].includes(
-								String(terminal["status"]),
-							)
-						) {
-							throw new CursorSdkFailure({
-								operation: "run.wait",
-								reason: "Cursor stream ended without a terminal status",
-							});
-						}
-						return terminal;
-					},
+					wait: () => waiting,
 					async cancel() {
 						cancel();
 					},
 				};
+			},
+			async getUsage() {
+				return result("usage");
 			},
 			close() {
 				return (closed ??=
