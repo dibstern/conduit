@@ -20,6 +20,7 @@ Scenario Outline: Cursor skills stay scoped to their account and send as slash c
   Then the draft composer uses Cursor with model composer-2.5
   When I type / into the composer
   Then the Cursor command menu lists exactly /cursor-review, /nested-audit
+  And the screen region visually matches cursor-skills-menu at <threshold> percent
   And the command menu does not offer /commit
   When I pick the Cursor skill cursor-review
   Then the composer contains the Cursor invocation /cursor-review
@@ -29,6 +30,6 @@ Scenario Outline: Cursor skills stay scoped to their account and send as slash c
   And the relay receives the sent text /cursor-review inspect this change
 
 Examples:
-  | tier  |
-  | wide  |
-  | phone |
+  | tier  | threshold |
+  | wide  | 98        |
+  | phone | 98        |
