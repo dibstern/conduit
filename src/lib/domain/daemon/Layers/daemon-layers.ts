@@ -107,6 +107,7 @@ import {
 } from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
+import { CategorySetLive } from "./category-set-layer.js";
 import {
 	ConfigPersistenceLive,
 	ConfigPersistenceTag,
@@ -689,6 +690,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provide(EnsureCertsLive),
 	);
 	const services = Layer.mergeAll(
+		CategorySetLive(configDir),
 		AuthManagerFromConfigLive,
 		tlsCertWithDeps,
 		EnsureCertsLive,

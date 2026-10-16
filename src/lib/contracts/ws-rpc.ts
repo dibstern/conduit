@@ -16,6 +16,11 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import {
+	CategorySetContentsSchema,
+	CategorySetRejected,
+	CategorySetSchema,
+} from "./category-set.js";
+import {
 	WorktreeBranchRenameError,
 	WorktreeCleanupReportSchema,
 	WorktreeCleanupSchema,
@@ -1621,6 +1626,27 @@ export class GetDefaultGroupingMode extends Schema.TaggedRequest<GetDefaultGroup
 	},
 ) {}
 
+export class GetCategorySet extends Schema.TaggedRequest<GetCategorySet>()(
+	"GetCategorySet",
+	{
+		failure: WsRpcError,
+		success: CategorySetSchema,
+		payload: {},
+	},
+) {}
+
+export class ReplaceCategorySet extends Schema.TaggedRequest<ReplaceCategorySet>()(
+	"ReplaceCategorySet",
+	{
+		failure: Schema.Union(WsRpcError, CategorySetRejected),
+		success: CategorySetSchema,
+		payload: {
+			expectedVersion: Schema.NonNegativeInt,
+			nextSet: CategorySetContentsSchema,
+		},
+	},
+) {}
+
 export class SetHiddenEntries extends Schema.TaggedRequest<SetHiddenEntries>()(
 	"SetHiddenEntries",
 	{
@@ -2827,6 +2853,8 @@ const wsRpcRequests = [
 	ResolveSessionMode,
 	SetDefaultGroupingMode,
 	GetDefaultGroupingMode,
+	GetCategorySet,
+	ReplaceCategorySet,
 	SetHiddenEntries,
 	GetClaudeSettings,
 	SetClaudeSettings,

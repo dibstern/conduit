@@ -1,5 +1,6 @@
 import { Deferred, Effect, Layer, Ref } from "effect";
 import type { AccountsState } from "../../src/lib/account-directory.js";
+import { CategorySetLive } from "../../src/lib/domain/daemon/Layers/category-set-layer.js";
 import { ShutdownSignalTag } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { DaemonWsRpcHandlersLive } from "../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { KeepAwakeTag } from "../../src/lib/domain/daemon/Layers/keep-awake-layer.js";
@@ -81,6 +82,7 @@ export const makeDaemonRpcTestLayer = (
 	} = {},
 ) => {
 	const base = Layer.mergeAll(
+		CategorySetLive(options.configDir ?? "/tmp/daemon-rpc-fixture"),
 		makeSessionDirectoryLive(
 			options.configDir ?? "/tmp/daemon-rpc-fixture",
 			projects,
