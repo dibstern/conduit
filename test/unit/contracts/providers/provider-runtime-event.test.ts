@@ -2,17 +2,24 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import { Either, Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
 	ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES,
 	HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES,
+	type ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventSchema,
+	type ProviderRuntimeEventType,
 	ProviderRuntimeEventTypeSchema,
 	ProviderRuntimeProviderRefsSchema,
 	ProviderRuntimeRawSourceSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { CANONICAL_EVENT_TYPES } from "../../../../src/lib/persistence/events.js";
+import {
+	CANONICAL_EVENT_TYPES,
+	type CanonicalEventType,
+	type EventPayloadMap,
+} from "../../../../src/lib/persistence/events.js";
+import { claudeRuntimeEvent } from "../../../../src/lib/provider/claude/claude-runtime-event.js";
 
 const baseEvent = {
 	eventId: "evt_1",
@@ -50,6 +57,29 @@ function tsFiles(dir: string): string[] {
 }
 
 describe("ProviderRuntimeEvent contracts", () => {
+	it("keeps canonical and provider-runtime payload vocabularies separate", () => {
+		expectTypeOf<keyof EventPayloadMap>().toEqualTypeOf<CanonicalEventType>();
+		expectTypeOf<
+			keyof ProviderRuntimeEventPayloadMap
+		>().toEqualTypeOf<ProviderRuntimeEventType>();
+	});
+
+	it("type-checks workspace-change payloads in the runtime constructor", () => {
+		const makeEvent = claudeRuntimeEvent;
+		const event = makeEvent("workspace.changed", "session_1", {
+			path: "/repo",
+			source: "tool",
+		});
+		expect(event.data).toEqual({ path: "/repo", source: "tool" });
+
+		// @ts-expect-error Workspace paths must be strings.
+		makeEvent("workspace.changed", "s", { path: 123, source: "tool" });
+		// @ts-expect-error Workspace changes require their source.
+		makeEvent("workspace.changed", "s", { path: "/repo" });
+		// @ts-expect-error Workspace changes only come from tools or startup.
+		makeEvent("workspace.changed", "s", { path: "/repo", source: "other" });
+	});
+
 	it("accepts a content-addressed OpenCode REST snapshot envelope", () => {
 		expect(
 			Either.isRight(
@@ -484,7 +514,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 	it("stays implementation-free", () => {
 		const source = readFileSync(CONTRACT_SOURCE, "utf8");
 		const imports = Array.from(
-			source.matchAll(/^import\s+.*\s+from\s+["']([^"']+)["'];$/gm),
+			source.matchAll(/^import\s+(?!type\b).*\s+from\s+["']([^"']+)["'];$/gm),
 			(match) => match[1],
 		);
 
