@@ -1414,32 +1414,34 @@ export const makeTurnProjector = defineProjector(() => ({
 				return { sessions: owners(written), messages: ids(written) };
 			}
 
-			// Attributed to the newest open turn rather than by id, because the
-			// event carries no key that reaches a turns row: turns.id is the user
-			// message id, while the provider's turnId is a per-send uuid. This is
-			// exact only while a session has at most one turn in flight. The
-			// Claude translator is the sole emitter and its runtime serializes
-			// turn admission, so a turn's model_resolved always lands before the
-			// next turn's row exists. A second emitter, or concurrent turns,
-			// needs a real key first (tracked in conduit-test-7i3).
+			// Cursor reports its actual model at wait(), after the turn may have
+			// settled. Its assistant message identifies that turn exactly. Legacy
+			// Claude init events arrive before a reply and use the newest open turn.
 			if (isEventType(event, "turn.model_resolved")) {
+				const target = event.data.messageId
+					? sql`SELECT turn_id FROM messages
+						WHERE id = ${event.data.messageId} AND session_id = ${event.sessionId}`
+					: sql`SELECT id FROM turns
+						WHERE session_id = ${event.sessionId}
+							AND state IN ('pending', 'running')
+						ORDER BY requested_at DESC LIMIT 1`;
+				const written = yield* sql<OwnedRow & { id: string }>`
+					UPDATE turns
+					SET requested_model = ${event.data.requestedModel ?? null},
+						expected_model = ${event.data.expectedModel ?? null},
+						actual_model = ${event.data.actualModel}
+					WHERE session_id = ${event.sessionId} AND id = (${target})
+					RETURNING id, session_id`;
+				if (event.data.messageId && written.length) {
+					// Keyed resolution also associates its prompt with the resolved turn.
+					// The history adapter carries execution from that prompt to UserMessage.
+					yield* sql`UPDATE messages SET turn_id = id
+						WHERE session_id = ${event.sessionId}
+						AND id IN ${sql.in(written.map(({ id }) => id))}`;
+				}
 				return {
-					sessions: owners(
-						yield* sql<OwnedRow>`
-							UPDATE turns
-							SET requested_model = ${event.data.requestedModel ?? null},
-								expected_model = ${event.data.expectedModel ?? null},
-								actual_model = ${event.data.actualModel}
-							WHERE id = (
-								SELECT id FROM turns
-								WHERE session_id = ${event.sessionId}
-									AND state IN ('pending', 'running')
-								ORDER BY requested_at DESC
-								LIMIT 1
-							)
-							RETURNING session_id`,
-					),
-					messages: [],
+					sessions: owners(written),
+					messages: event.data.messageId ? ids(written) : [],
 				};
 			}
 			return { sessions: [], messages: [] };
