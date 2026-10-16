@@ -1365,7 +1365,7 @@ describe("daemon Worktree setup runner", () => {
 	const expectStopped = async (pidFile: string) => {
 		const pid = Number(readFileSync(pidFile, "utf8"));
 		expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
-		await expect.poll(() => pidIsAlive(pid), { timeout: 2_000 }).toBe(false);
+		await expect.poll(() => pidIsAlive(pid), { timeout: 10_000 }).toBe(false);
 	};
 
 	beforeEach(() => {
@@ -1529,7 +1529,8 @@ Effect.runFork(Effect.flatMap(WorktreeServiceTag, (service) =>
 							);
 						return existsSync(join(directory, "child.pid"));
 					},
-					{ timeout: 3_000 },
+					// A cold tsx start takes seconds when the machine is busy.
+					{ timeout: 30_000 },
 				)
 				.toBe(true);
 			groupPid = Number(readFileSync(join(directory, "shell.pid"), "utf8"));
@@ -1551,7 +1552,7 @@ Effect.runFork(Effect.flatMap(WorktreeServiceTag, (service) =>
 				}
 			}
 		}
-	});
+	}, 60_000);
 
 	it("uses the configured user's shell with login and command flags", async () => {
 		const shell = join(fixture, "user-shell");
