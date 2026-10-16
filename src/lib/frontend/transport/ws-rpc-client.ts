@@ -101,6 +101,7 @@ export interface GetAgentsRpcInput {
 export interface GetCommandsRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId?: string;
+	readonly instanceId?: string;
 }
 
 export interface GetProjectsRpcInput {

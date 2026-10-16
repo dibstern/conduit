@@ -122,6 +122,9 @@
 		void getAgentsRpc({ projectSlug, instanceId })
 			.then((response) => { if (active) applyGetAgentsResponse(response); })
 			.catch(() => undefined);
+		void getCommandsRpc({ projectSlug, instanceId })
+			.then((response) => { if (active) applyGetCommandsResponse(response); })
+			.catch(() => undefined);
 		return () => { active = false; };
 	});
 	// Navigation can arrive while disconnected; it must wake the socket before
@@ -164,8 +167,9 @@
 		const projectSlug = attachedProjectState.slug;
 		if (!projectSlug) return;
 		let active = true;
-		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) }).then((response) => {
-			if (active) applyGetCommandsResponse(response);
+		const instanceId = sessionId ? undefined : getEffectiveInstanceId();
+		void getCommandsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}), ...(instanceId ? { instanceId } : {}) }).then((response) => {
+			if (active && (sessionId || instanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 		}).catch(() => undefined);
 		return () => { active = false; };
 	});
@@ -511,9 +515,10 @@
 			void getCommandsRpc({
 				projectSlug: slug,
 				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
-					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace) applyGetCommandsResponse(response);
+					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 				})
 				.catch(() => undefined);
 			void getProjectsRpc({ projectSlug: slug })

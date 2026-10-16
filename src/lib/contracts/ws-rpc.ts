@@ -1123,6 +1123,7 @@ export class GetCommands extends Schema.TaggedRequest<GetCommands>()(
 		payload: {
 			projectSlug: NonEmptyString,
 			sessionId: Schema.optional(Schema.String),
+			instanceId: Schema.optional(Schema.String),
 		},
 	},
 ) {}
