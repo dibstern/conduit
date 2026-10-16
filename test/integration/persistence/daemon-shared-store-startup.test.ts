@@ -261,14 +261,16 @@ describe("daemon shared-store startup", () => {
 				const lineage = await runtime.runPromise(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
-						return yield* sql`SELECT project_id, parent_id, root_id, fork_point_event, fork_point_timestamp FROM sessions WHERE id = 'child'`;
+						return yield* sql`SELECT project_id, parent_id, forked_from, root_id, fork_point_event, fork_point_timestamp FROM sessions WHERE id = 'child'`;
 					}),
 				);
+				// ADR-0007: a Fork keeps its Source as lineage, not containment.
 				expect(lineage).toEqual([
 					{
 						project_id: "beta",
-						parent_id: "parent",
-						root_id: "parent",
+						parent_id: null,
+						forked_from: "parent",
+						root_id: "child",
 						fork_point_event: "parent-message",
 						fork_point_timestamp: 2000,
 					},
@@ -461,13 +463,14 @@ describe("daemon shared-store startup", () => {
 						Effect.flatMap(
 							SqlClient.SqlClient,
 							(sql) =>
-								sql`SELECT project_id, parent_id, fork_point_event FROM sessions WHERE id = 'later'`,
+								sql`SELECT project_id, parent_id, forked_from, fork_point_event FROM sessions WHERE id = 'later'`,
 						),
 					),
 				).toEqual([
 					{
 						project_id: "beta",
-						parent_id: "parent",
+						parent_id: null,
+						forked_from: "parent",
 						fork_point_event: "parent-message",
 					},
 				]);
