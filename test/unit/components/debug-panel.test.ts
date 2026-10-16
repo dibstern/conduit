@@ -9,13 +9,15 @@ interface SetLogLevelInput {
 }
 
 const setLogLevelRpcSpy = vi.hoisted(() =>
-	vi.fn<(input: SetLogLevelInput) => Promise<void>>(async () => {
-		throw new Error("RPC unavailable");
-	}),
+	vi.fn<(input: SetLogLevelInput) => Promise<void>>(() =>
+		Promise.reject(new Error("RPC unavailable")),
+	),
 );
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	setLogLevelRpc: (input: SetLogLevelInput) => setLogLevelRpcSpy(input),
+	rpc: vi.fn((tag: string, input: SetLogLevelInput) =>
+		tag === "SetLogLevel" ? setLogLevelRpcSpy(input) : Promise.resolve(),
+	),
 }));
 
 describe("DebugPanel", () => {

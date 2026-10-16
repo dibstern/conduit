@@ -725,31 +725,16 @@ function defaultHandler(
 ): RpcHandler | undefined {
 	return (
 		(tag === "GetProjects" ? control.projectsHandler() : undefined) ??
-		(tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
-		(tag === "GetDefaultGroupingMode"
-			? () => ({ mode: "repository" })
-			: undefined) ??
-		(tag === "GetWorktreeCleanupSetting"
-			? () => ({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP })
-			: tag === "SetWorktreeCleanupSetting"
-				? ({ worktreeCleanup }) => ({ worktreeCleanup })
-				: undefined) ??
-		(tag === "GetUsageLimitsSetting"
-			? () => ({
-					usageLimits: { autoResume: false, autoSwitch: false, order: [] },
+		(tag === "AttachProject"
+			? ({ projectSlug, sessionId }) => ({
+					projectSlug:
+						typeof projectSlug === "string" ? projectSlug : control.projectSlug,
+					sessionSlug:
+						typeof sessionId === "string" ? control.projectSlug : null,
 				})
-			: tag === "AttachProject"
-				? ({ projectSlug, sessionId }) => ({
-						projectSlug:
-							typeof projectSlug === "string"
-								? projectSlug
-								: control.projectSlug,
-						sessionSlug:
-							typeof sessionId === "string" ? control.projectSlug : null,
-					})
-				: tag === "InspectSessionWorktrees"
-					? () => ({ worktrees: [], removeWorktrees: false })
-					: undefined)
+			: tag === "InspectSessionWorktrees"
+				? () => ({ worktrees: [], removeWorktrees: false })
+				: undefined)
 	);
 }
 
@@ -927,6 +912,20 @@ export async function mockWsRpc(
 		ViewSession: () => ({ ok: true }),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		GetStatus: () => MOCK_SERVER_STATUS,
+		GetDefaultGroupingMode: () => ({ mode: "repository" }),
+		GetWorktreeCleanupSetting: () => ({
+			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
+		}),
+		SetWorktreeCleanupSetting: ({ worktreeCleanup }) => ({ worktreeCleanup }),
+		GetUsageLimitsSetting: () => ({
+			usageLimits: {
+				autoResume: false,
+				autoSwitch: false,
+				warnAt: 80,
+				order: [],
+			},
+		}),
 		...options.stubs,
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
