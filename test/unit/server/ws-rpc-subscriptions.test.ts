@@ -174,7 +174,7 @@ describe("subscription RPC handlers", () => {
 	});
 
 	it.scoped(
-		"shell snapshots roots and republishes the root when its fork changes",
+		"shell snapshots Forks as roots and republishes their own rows",
 		() =>
 			Effect.gen(function* () {
 				const runner = yield* ProjectionRunnerEffectTag;
@@ -216,12 +216,13 @@ describe("subscription RPC handlers", () => {
 				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "snapshot",
 					sequence: createdVersion,
-					rows: [expect.objectContaining({ id: "parent-1" })],
+					rows: [
+						expect.objectContaining({ id: "parent-1" }),
+						expect.objectContaining({ id: "fork-1", forkedFrom: "parent-1" }),
+					],
 				});
 				expect(yield* Queue.take(envelopes)).toEqual({ _tag: "synchronized" });
-				// The fork's title is not on its root's row, so the rename moves
-				// nothing; the fork starting work does.
-				yield* commit(
+				const renamedVersion = yield* commit(
 					canonicalEvent(
 						"session.renamed",
 						"fork-1",
@@ -229,6 +230,14 @@ describe("subscription RPC handlers", () => {
 						{ provider: "opencode", createdAt: 2 },
 					),
 				);
+				expect(yield* Queue.take(envelopes)).toMatchObject({
+					_tag: "upsert",
+					sequence: renamedVersion,
+					item: expect.objectContaining({
+						id: "fork-1",
+						title: "Renamed fork",
+					}),
+				});
 				const busyVersion = yield* commit(
 					canonicalEvent(
 						"session.status",
@@ -241,7 +250,7 @@ describe("subscription RPC handlers", () => {
 					_tag: "upsert",
 					sequence: busyVersion,
 					item: expect.objectContaining({
-						id: "parent-1",
+						id: "fork-1",
 						attention: "working",
 					}),
 				});
@@ -257,7 +266,7 @@ describe("subscription RPC handlers", () => {
 					{
 						_tag: "upsert",
 						sequence: busyVersion,
-						item: expect.objectContaining({ id: "parent-1" }),
+						item: expect.objectContaining({ id: "fork-1" }),
 					},
 					{ _tag: "synchronized" },
 				]);
