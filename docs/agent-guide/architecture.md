@@ -56,9 +56,9 @@ unrouted advances, and send row deltas plus durable tombstones. They replace the
 view with a snapshot only when tombstones cannot cover the cursor or the source
 requires a rebase. `CONDUIT_TEST_ADVANCE_BUS_CAPACITY` changes only the advances
 buffer capacity, and only with `NODE_ENV=test`.
-Detail windows conservatively require replacement after overflow: recreating a
-message clears its tombstone after cascading its old parts, so a range cannot
-recover every part removal. Ordinary detail resumes keep their existing policy.
+Detail windows include message and part removals retained across message
+recreation, so overflowing open session views catch up with deltas. Ordinary
+detail resumes keep their existing policy.
 
 ## Effect Ownership Guardrails
 

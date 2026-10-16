@@ -1290,7 +1290,7 @@
 		<SubagentBackBar bind:this={subagentBackBarRef} />
 
 		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
-			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
+			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 
 		{#if isGoalCommand}
@@ -1697,7 +1697,7 @@
 			</div>
 		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
-			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} /></div>
+			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 	</div>
 </div>
