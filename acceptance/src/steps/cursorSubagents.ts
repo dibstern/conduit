@@ -77,7 +77,7 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 				{
 					id: "cursor-subagents-parent-user",
 					role: "user",
-					time: { created: 1 },
+					time: { created: PINNED_CLOCK_MS - 2 * 60_000 },
 					parts: [
 						{
 							id: "cursor-subagents-parent-prompt",
@@ -89,7 +89,7 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 				{
 					id: "cursor-turn-assistant",
 					role: "assistant",
-					time: { created: 2 },
+					time: { created: PINNED_CLOCK_MS - 90_000 },
 					parts: [
 						{
 							id: taskId,
@@ -129,7 +129,7 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 				{
 					id: childMessageId,
 					role: "assistant",
-					time: { created: 4 },
+					time: { created: PINNED_CLOCK_MS - 60_000 },
 					parts: [
 						{
 							id: "cursor-subagents-child-thinking",
