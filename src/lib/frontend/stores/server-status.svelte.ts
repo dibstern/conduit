@@ -10,13 +10,10 @@ import type {
 	ServerStatus,
 } from "../../contracts/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../shared-types.js";
+import { failureLine, toastFailure } from "../transport/rpc-errors.js";
 import type { WsRpcSubscriptions } from "../transport/shared-client.js";
 import type { WsRpcError } from "../transport/ws-rpc.js";
-import {
-	getServerStatusRpc,
-	restartServerRpc,
-	shutdownServerRpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import {
 	claimBuildReload,
 	refreshAppShell,
@@ -64,15 +61,14 @@ export async function refreshServerStatus(): Promise<void> {
 	serverStatus.loading = true;
 	serverStatus.error = null;
 	try {
-		const status = await getServerStatusRpc();
+		const status = await rpc("GetStatus", {});
 		if (request !== statusRequest) return;
 		serverStatus.status = status;
 		serverStatus.loading = false;
 	} catch (error: unknown) {
 		if (request !== statusRequest) return;
 		serverStatus.loading = false;
-		serverStatus.error =
-			error instanceof Error ? error.message : "Could not load server status.";
+		serverStatus.error = failureLine(error, "Could not load server status.");
 	}
 }
 
@@ -85,14 +81,12 @@ export async function restartServer(): Promise<void> {
 		return;
 	serverStatus.restartInFlight = true;
 	try {
-		await restartServerRpc();
+		await rpc("RestartWithConfig", {});
 		serverStatus.restartAccepted = true;
 		removeBanner(SERVER_UPDATE_BANNER_ID);
 		showToast("Restarting conduit…");
 	} catch (error: unknown) {
-		const reason =
-			error instanceof Error ? error.message : "the daemon rejected it.";
-		showToast(`Failed to restart conduit: ${reason}`, { variant: "error" });
+		toastFailure("Failed to restart conduit")(error);
 		if (serverUpdateAvailable) showServerUpdateBanner();
 	} finally {
 		serverStatus.restartInFlight = false;
@@ -102,7 +96,7 @@ export async function restartServer(): Promise<void> {
 export async function shutdownServer(): Promise<void> {
 	serverStatus.shutdownInFlight = true;
 	try {
-		await shutdownServerRpc();
+		await rpc("Shutdown", {});
 	} finally {
 		serverStatus.shutdownInFlight = false;
 	}

@@ -1,6 +1,27 @@
+<script module lang="ts">
+	import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+
+	// Saves stay ordered across Settings tab mounts, and loads wait for their flush.
+	let usageLimitsSaves: Promise<void> = Promise.resolve();
+
+	async function getUsageLimitsSettingRpc(): Promise<UsageLimitsSetting> {
+		await usageLimitsSaves;
+		const result = await rpc("GetUsageLimitsSetting", {});
+		return result.usageLimits;
+	}
+
+	async function setUsageLimitsSettingRpc(usageLimits: UsageLimitsSetting): Promise<UsageLimitsSetting> {
+		const request = usageLimitsSaves.then(() => rpc("SetUsageLimitsSetting", { usageLimits }));
+		usageLimitsSaves = request.then(() => undefined, () => undefined);
+		const result = await request;
+		return result.usageLimits;
+	}
+</script>
+
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
-	import type { UsageLimitsSetting, UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
+	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -9,7 +30,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { getUsageLimitsSettingRpc, setUsageLimitsSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Button from "../ui/Button.svelte";
@@ -57,8 +78,8 @@
 				applyUsageLimitsSetting(loaded);
 				if (current && saveTicket === 0) setting = confirmed = loaded;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load usage limit settings", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load usage limit settings")(error);
 			});
 		return () => { current = false; };
 	});
@@ -71,9 +92,9 @@
 		try {
 			confirmed = await setUsageLimitsSettingRpc(next);
 			if (ticket === saveTicket) setting = confirmed;
-		} catch {
+		} catch (error) {
 			if (ticket === saveTicket) setting = confirmed;
-			showToast("Couldn't save usage limit settings", { variant: "error" });
+			toastFailure("Couldn't save usage limit settings")(error);
 		}
 		if (setting) applyUsageLimitsSetting(setting);
 	}
