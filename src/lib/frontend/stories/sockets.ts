@@ -19,8 +19,10 @@
 type Listener = (event?: unknown) => void;
 
 // Module scope, not per socket: the RPC client outlives a story and keeps the
-// socket an earlier story opened, so a story cannot swap in a failing one.
+// socket an earlier story opened, so a story's configuration must reach sockets
+// it did not create.
 const failingRequests = new Set<string>();
+let sessionProject: string | null = null;
 
 /**
  * Answers every `tag` request on the fake sockets with a WsRpcError until the
@@ -34,10 +36,13 @@ export function failRpc(tag: string): () => void {
 /**
  * Replaces `globalThis.WebSocket` with a socket that opens on the next tick and
  * stays open. Returns a cleanup that restores the original, suitable for
- * returning straight from a story's `beforeEach`.
+ * returning straight from a story's `beforeEach`. `project` is the
+ * project AttachProject reports for a session route, whose transcript then
+ * opens empty and settled; null means the session does not exist.
  */
-export function connectedSocket(): () => void {
+export function connectedSocket(project: string | null = null): () => void {
 	const RealWebSocket = globalThis.WebSocket;
+	sessionProject = project;
 
 	class OpenSocket {
 		static readonly CONNECTING = 0;
@@ -77,7 +82,7 @@ export function connectedSocket(): () => void {
 				_tag?: string;
 				id?: string;
 				tag?: string;
-				payload?: { projectSlug?: string };
+				payload?: { projectSlug?: string; sessionId?: string };
 			} = JSON.parse(data);
 			if (request._tag === "Ping") {
 				this.emit(
@@ -108,6 +113,26 @@ export function connectedSocket(): () => void {
 					}),
 				);
 			}
+			// A session that exists opens on an empty transcript, already settled.
+			if (
+				request._tag === "Request" &&
+				request.tag === "SubscribeSessionDetail" &&
+				sessionProject
+			) {
+				this.emit(
+					"message",
+					new MessageEvent("message", {
+						data: JSON.stringify({
+							_tag: "Chunk",
+							requestId: request.id,
+							values: [
+								{ _tag: "snapshot", rows: [], sequence: 1, hasMore: false },
+								{ _tag: "synchronized" },
+							],
+						}),
+					}),
+				);
+			}
 			if (request._tag === "Request" && request.tag === "AttachProject") {
 				this.emit(
 					"message",
@@ -117,7 +142,12 @@ export function connectedSocket(): () => void {
 							requestId: request.id,
 							exit: {
 								_tag: "Success",
-								value: { projectSlug: request.payload?.projectSlug ?? null },
+								value: request.payload?.sessionId
+									? { projectSlug: sessionProject, sessionSlug: sessionProject }
+									: {
+											projectSlug: request.payload?.projectSlug ?? null,
+											sessionSlug: null,
+										},
 							},
 						}),
 					}),
@@ -142,5 +172,6 @@ export function connectedSocket(): () => void {
 	globalThis.WebSocket = OpenSocket as unknown as typeof WebSocket;
 	return () => {
 		globalThis.WebSocket = RealWebSocket;
+		sessionProject = null;
 	};
 }

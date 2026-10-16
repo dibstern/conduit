@@ -11,8 +11,10 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import type { SessionPermissionMode } from "../../types.js";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
@@ -49,6 +51,7 @@ function seedModel(provider: "claude" | "opencode"): void {
 			models: [{ id: "story-model", name: "Story model", provider }],
 		},
 	];
+	instanceState.instances = [mockClaudeAccount, mockOpenCodeAccount];
 	handleModelList({ providers });
 	selectInstance(provider);
 	applyGetModelsResponse({
@@ -123,6 +126,7 @@ const meta = {
 	parameters: { layout: "centered" },
 	beforeEach: () => {
 		const previousSession = sessionState.currentId;
+		const previousInstances = instanceState.instances;
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
 		sessionState.currentId = null;
@@ -132,6 +136,7 @@ const meta = {
 			restoreViewport();
 			clearDiscoveryState();
 			sessionState.currentId = previousSession;
+			instanceState.instances = previousInstances;
 		};
 	},
 } satisfies Meta<typeof PermissionModeSelector>;
@@ -342,12 +347,9 @@ export const Responsive: Story = {
 	beforeEach: () => viewport(393),
 	play: async ({ canvasElement }) => {
 		await assertMode(canvasElement, "ask");
-		const restoreViewport = viewport(768);
-		try {
-			await assertMode(canvasElement, "ask");
-		} finally {
-			restoreViewport();
-		}
+		// Phone hides the default mode, so end wide for the capture; the story's
+		// cleanup restores the viewport.
+		viewport(768);
 		await assertMode(canvasElement, "ask");
 	},
 };
@@ -356,7 +358,6 @@ export const OpenCodeNormalizesAuto: Story = {
 	beforeEach: () => {
 		seedModel("opencode");
 		setMode("auto");
-		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
 		await assertMode(canvasElement, "ask");

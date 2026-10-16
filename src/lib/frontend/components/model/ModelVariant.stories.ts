@@ -9,15 +9,19 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { mockClaudeAccount } from "../../stories/mocks.js";
 import ModelVariant from "./ModelVariant.svelte";
 
 const onOpen = fn();
 const fourLevels = ["low", "medium", "high", "max"];
 const fiveLevels = ["low", "medium", "high", "xhigh", "max"];
 
+/** A draft reads its effort levels from its account's catalog, so the account must exist. */
 function seed(variant = "", variants = fourLevels) {
+	instanceState.instances = [mockClaudeAccount];
 	handleModelList({
 		providers: [
 			{
@@ -95,6 +99,7 @@ const meta = {
 	beforeEach: ({ parameters }) => {
 		const compact = sessionViewState.compact;
 		const composerWidth = sessionViewState.composerWidth;
+		const instances = instanceState.instances;
 		clearDiscoveryState();
 		// A draft changes local discovery state without a session or RPC connection.
 		sessionState.currentId = null;
@@ -111,6 +116,7 @@ const meta = {
 			else Reflect.deleteProperty(window, "innerWidth");
 			window.dispatchEvent(new Event("resize"));
 			clearDiscoveryState();
+			instanceState.instances = instances;
 		};
 	},
 } satisfies Meta<typeof ModelVariant>;

@@ -147,8 +147,10 @@ export const MultiFolderUnknown: Story = {
 		await expect(startChip).not.toHaveAttribute("aria-describedby");
 		await expect(canvas.queryByTestId("draft-provider-explanation")).toBeNull();
 		await userEvent.click(startChip);
+		// An account that reports nothing gets its driver's capabilities, and
+		// OpenCode can start a new worktree.
 		await expect(canvas.getByRole("menu")).toHaveTextContent(
-			"New worktree Not supported by Folder provider",
+			"New worktree Requires a Git folder",
 		);
 	},
 };

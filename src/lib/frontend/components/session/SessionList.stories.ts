@@ -82,7 +82,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Empty: Story = {};
+// An unsettled list draws the loading skeleton; the empty state needs the
+// server to have sent an empty snapshot.
+export const Empty: Story = {
+	beforeEach: () => seedSessions([]),
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByText("No sessions yet"),
+		).toBeVisible();
+	},
+};
 
 export const SelectMode: Story = {
 	name: "Select mode, two selected",

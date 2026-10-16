@@ -73,6 +73,7 @@ function populateInstances() {
 				id: "claude",
 				name: "Personal Claude",
 				driver: "claude",
+				isDefault: true,
 				configDir: "~/.claude",
 				port: 0,
 				managed: false,
@@ -735,9 +736,8 @@ export const DefaultClaudeAccountEdit: Story = {
 		await userEvent.click(
 			account.getByRole("button", { name: /Personal Claude/ }),
 		);
-		await expect(
-			account.queryByTestId("remove-instance-btn"),
-		).not.toBeInTheDocument();
+		// Every account can be removed, the default included (conduit-test-g4zp.10).
+		await expect(account.getByTestId("remove-instance-btn")).toBeVisible();
 		await expect(
 			account.queryByText("Applies after restart"),
 		).not.toBeInTheDocument();

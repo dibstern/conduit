@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
 import { uiState } from "../../stores/ui.svelte.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import Sidebar from "./Sidebar.svelte";
 
 const meta = {
@@ -11,6 +12,10 @@ const meta = {
 	beforeEach: () => {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
+		// An unsettled list draws the loading skeleton; these stories show the
+		// empty sidebar the server confirmed.
+		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
+		applySessionChange({ _tag: "synchronized" });
 	},
 } satisfies Meta<typeof Sidebar>;
 
