@@ -59,7 +59,7 @@ export const discoverCursorEffect = (
 			supportsTools: true,
 			supportsThinking: true,
 			supportsPermissions: false,
-			supportsQuestions: false,
+			supportsQuestions: true,
 			supportsAttachments: false,
 			supportsFork: false,
 			supportsRevert: false,

@@ -352,10 +352,11 @@
 	const projectCurrentTurns = turnProjection();
 	const turns = $derived(projectTurns(chat.messages, processing));
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
-	const transcriptToolIds = $derived.by(() => {
+	// Only tools that render QuestionCard inline own their pending questions.
+	const questionCardToolIds = $derived.by(() => {
 		const ids = new Set<string>();
 		for (const message of chat.messages) {
-			if (message.type === "tool") ids.add(message.id);
+			if (message.type === "tool" && message.name === "AskUserQuestion") ids.add(message.id);
 		}
 		return ids;
 	});
@@ -374,8 +375,8 @@
 		permissionsState.pendingQuestions.filter(
 			(question) =>
 				familyIds.has(question.sessionId) &&
-				!transcriptToolIds.has(question.toolId) &&
-				(!question.toolUseId || !transcriptToolIds.has(question.toolUseId)),
+				!questionCardToolIds.has(question.toolId) &&
+				(!question.toolUseId || !questionCardToolIds.has(question.toolUseId)),
 		),
 	);
 

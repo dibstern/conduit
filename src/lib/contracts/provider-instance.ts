@@ -173,8 +173,8 @@ export const PROVIDER_DRIVERS = {
 		// test/fixtures/cursor-sdk-traces/steer.jsonl (xqsg.22) pins text on a live local run only.
 		// Cloud runs, handles reacquired after restart and images get revert_to_followup and requeue (xqsg.20).
 		steering: "native",
-		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
-		promptsSurviveRestart: false,
+		// cursor-question.test.ts pins an ask_user wait answered after daemon restart on the retained runner.
+		promptsSurviveRestart: true,
 	},
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 

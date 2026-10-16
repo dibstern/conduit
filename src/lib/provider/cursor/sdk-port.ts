@@ -64,10 +64,20 @@ export interface CursorSendOptions {
 
 export interface CursorCustomTool {
 	readonly description: string;
+	readonly inputSchema: Record<string, CursorJsonValue>;
 	readonly execute: (
 		args: Readonly<Record<string, unknown>>,
+		context: { readonly toolCallId?: string; readonly sessionId?: string },
 	) => Promise<string>;
 }
+
+type CursorJsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| CursorJsonValue[]
+	| { [key: string]: CursorJsonValue };
 
 export interface CursorStore {
 	dispose(): Promise<void>;

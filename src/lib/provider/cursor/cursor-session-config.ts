@@ -8,6 +8,7 @@ import type {
 export interface CursorSessionConfig {
 	readonly agent: CursorAgentOptions;
 	readonly send: CursorSendOptions;
+	readonly questionRule: string;
 	readonly hookPolicy: {
 		readonly gatedToolCall: "allow";
 		readonly perCallApproval: "unsupported";
@@ -52,7 +53,7 @@ export function cursorSessionConfig(input: {
 				"readTodos",
 			],
 			disallowedTools: ["task", "askQuestion"],
-			customToolNames: [],
+			customToolNames: ["ask_user"],
 			subagentInherit: { reportedWorkspacePath: input.workspaceRoot },
 			credentialFingerprint: input.credential.fingerprint,
 		},
@@ -66,5 +67,7 @@ export function cursorSessionConfig(input: {
 			mode: mode === "plan" ? "plan" : "agent",
 		},
 		hookPolicy: { gatedToolCall: "allow", perCallApproval: "unsupported" },
+		questionRule:
+			"<conduit_rules>Use the ask_user custom tool for clarifying questions so the user can answer in Conduit. Do not use askQuestion. Await the answer before continuing.</conduit_rules>",
 	};
 }

@@ -51,7 +51,14 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 								reason: "Cursor custom tool handler is missing",
 							});
 						}
-						return [name, tool];
+						return [
+							name,
+							{
+								description: tool.description,
+								inputSchema: tool.inputSchema,
+								execute: (args, context) => tool.execute(args, context),
+							} satisfies import("@cursor/sdk").SDKCustomTool,
+						];
 					}),
 				),
 				subagentInherit: options.subagentInherit,

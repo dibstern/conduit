@@ -13,6 +13,7 @@ import type {
 } from "../runner/session-runner.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
+import { cursorAskUserTool } from "./cursor-questions.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
 import { CursorTurnEvents } from "./cursor-turn-events.js";
@@ -45,6 +46,7 @@ interface CursorSession {
 	run?: CursorRun | undefined;
 	busy: boolean;
 	cancelRequested: boolean;
+	questionAbort?: AbortController | undefined;
 }
 
 const decodeTerminal = Schema.decodeUnknownEither(
@@ -64,6 +66,7 @@ const decodeTerminal = Schema.decodeUnknownEither(
 type Update =
 	| { readonly channel: "delta"; readonly value: unknown }
 	| { readonly channel: "stream"; readonly value: unknown }
+	| { readonly channel: "question"; readonly answer: Effect.Effect<void> }
 	| {
 			readonly channel: "wait";
 			readonly result: Either.Either<unknown, SessionFailure>;
@@ -124,6 +127,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 				return Effect.succeed(this.result(session, "steer-declined", 0));
 			session.busy = true;
 			session.cancelRequested = false;
+			const questionAbort = new AbortController();
+			session.questionAbort = questionAbort;
 			const started = Date.now();
 			const events = new CursorTurnEvents(
 				input.sessionId,
@@ -141,6 +146,17 @@ export class CursorRunnerPayload implements RunnerPayload {
 
 			return Effect.scoped(
 				Effect.gen(this, function* () {
+					const queue = yield* Queue.unbounded<Update>();
+					const customTools = {
+						ask_user: cursorAskUserTool(
+							sink,
+							events,
+							questionAbort.signal,
+							(answer) => {
+								Queue.unsafeOffer(queue, { channel: "question", answer });
+							},
+						),
+					};
 					// The daemon places only sends that reach an idle session, so a send
 					// that starts here just after a turn ends places its own message
 					// (placement is idempotent). A continuation places nothing: it
@@ -234,7 +250,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 							);
 							this.primed = true;
 						}
-						const customTools = {};
 						const agent = yield* Effect.acquireRelease(
 							sdkCall("agent open", () =>
 								session.agentId
@@ -269,12 +284,15 @@ export class CursorRunnerPayload implements RunnerPayload {
 						session.open = { agent, store, options: config.agent };
 					}
 					events.refs.providerSessionId = session.agentId;
-					const queue = yield* Queue.unbounded<Update>();
 					const agent = session.open.agent;
 					const run = yield* sdkCall("send", () =>
-						agent.send(input.prompt, config.send, (value) => {
-							Queue.unsafeOffer(queue, { channel: "delta", value });
-						}),
+						agent.send(
+							`${config.questionRule}\n\n${input.prompt}`,
+							config.send,
+							(value) => {
+								Queue.unsafeOffer(queue, { channel: "delta", value });
+							},
+						),
 					);
 					session.run = run;
 					if (session.cancelRequested) yield* this.interrupt(input.sessionId);
@@ -325,6 +343,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 							yield* events.stream(update.value);
 							continue;
 						}
+						if (update.channel === "question") {
+							yield* Effect.forkScoped(update.answer);
+							continue;
+						}
 						// Stream closure and turn-ended deltas never settle a turn. Only wait does.
 						yield* Fiber.interrupt(stream);
 						for (const pending of yield* Queue.takeAll(queue)) {
@@ -370,12 +392,14 @@ export class CursorRunnerPayload implements RunnerPayload {
 								: "Cursor turn failed",
 						),
 					),
+					Effect.ensuring(Effect.sync(() => questionAbort.abort())),
 				),
 			).pipe(
 				Effect.ensuring(
 					Effect.sync(() => {
 						session.busy = false;
 						session.run = undefined;
+						session.questionAbort = undefined;
 					}),
 				),
 				Effect.flatMap((result) =>
@@ -424,7 +448,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 	interrupt(sessionId: string) {
 		return Effect.suspend(() => {
 			const session = this.sessions.get(sessionId);
-			if (session) session.cancelRequested = true;
+			if (session) {
+				session.cancelRequested = true;
+				session.questionAbort?.abort();
+			}
 			const run = session?.run;
 			return run ? sdkCall("cancel", () => run.cancel()) : Effect.void;
 		});

@@ -93,3 +93,37 @@ conversation. With `NODE_ENV=test`, `CONDUIT_TEST_CURSOR_CLOSE_DELAY_MS` and
 scheduling only, without adding or modifying SDK wire fields. The test submits
 its second input after the tee's `close.call` marker and before agent disposal,
 then verifies both turns and the remembered code word reach durable history.
+
+## Question replay cases (conduit-test-xqsg.9)
+
+These are minimal derivatives of real SDK captures. The source headers, wire
+envelopes, IDs, timestamps, results and unrelated tools remain unchanged, apart
+from the scenario name. The custom-tools option key `human` and every MCP
+`custom-user-tools` call's `toolName` become `ask_user`. Existing MCP `args`
+fields and the matching `custom.start.args` become one question: "Which deployment?",
+header "Deployment", options Blue / "Blue deployment" and Green / "Green
+deployment", `multiSelect: false`, `custom: true`.
+
+- `question-basic.jsonl` comes from `custom-auto-block-minutes.jsonl`.
+- `question-subagent.jsonl` comes from
+  `subagent-foreground-default-fixed.jsonl`. The asking tool call remains an
+  `mcp` nested under the Task's `tool-call-delta.taskUpdate`; its context's
+  `sessionId` still equals the parent ID. The Task retains `subagentType.name`
+  `spike`, so the expected question header is "spike: Deployment".
+- `question-cancel.jsonl` comes from `cancel.jsonl`. Its cancelled wait and
+  followup turns remain captured values.
+
+`cursor-question.test.ts` adds an unchanged `models.list` row from `basic.jsonl`
+and the redacted `credential.store` result to temporary replay files, as the
+text-turn process suite does. The tool callback result is the actual answer
+recorded by the tee's `custom.result`, not the source capture's old human reply.
+The suite writes assertions, SDK operations, durable question events, daemon
+generations and owned-runner cleanup to `test-results/conduit-test-xqsg.9.json`.
+
+The temporary basic replay appends its captured send segment a second time,
+changing only the custom tool call ID to `<captured-id>-second`. This keeps
+two turns' durable requests distinct while preserving the same SDK field
+shapes. The malformed/duplicate case changes the first segment's question
+arguments to `{questions: []}` and duplicates the second segment's unchanged
+`custom.start` row. It asserts an invalid call makes no pending question, then
+one answer settles both deliveries of the same valid tool call.
