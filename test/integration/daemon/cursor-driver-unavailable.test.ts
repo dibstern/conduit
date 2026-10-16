@@ -221,7 +221,7 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 			cursorState.events.find(({ type }) => type === "turn.error")?.data[
 				"error"
 			],
-		).toContain("Cursor turn preparation not installed");
+		).toContain("Cursor requires a credential");
 		expect(
 			cursorState.events.filter(
 				({ provider }) => provider === "opencode" || provider === "claude",

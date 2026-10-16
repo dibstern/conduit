@@ -56,8 +56,8 @@ export const discoverCursorEffect = (
 				name: model.displayName,
 				providerId: "cursor",
 			})),
-			supportsTools: false,
-			supportsThinking: false,
+			supportsTools: true,
+			supportsThinking: true,
 			supportsPermissions: false,
 			supportsQuestions: false,
 			supportsAttachments: false,
@@ -72,12 +72,11 @@ export const makeCursorRunnerDriver = (
 ): RunnerDriverPieces => ({
 	driverKind: "cursor",
 	discoverEffect: () => discoverCursorEffect(port),
-	prepareTurnEffect: () =>
-		Effect.fail(
-			new ProviderInstanceFailure({
-				providerId: "cursor",
-				operation: "sendTurn",
-				cause: new Error("Cursor turn preparation not installed"),
-			}),
-		),
+	prepareTurnEffect: (input) =>
+		Effect.succeed({
+			input: {
+				...input,
+				instanceId: input.account?.id ?? input.instanceId ?? "cursor",
+			},
+		}),
 });

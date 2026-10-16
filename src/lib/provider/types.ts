@@ -125,6 +125,8 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "auth_required"
+	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
 	| "interrupted"
