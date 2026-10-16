@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { Effect } from "effect";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
 import {
@@ -28,7 +29,12 @@ import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
+import { connectedSocket } from "../../stories/sockets.js";
+import { runTransportEffect } from "../../transport/runtime.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
+import { WsRpcClients } from "../../transport/shared-client.js";
+import type { OpenCodeInstance } from "../../types.js";
 import InputArea from "./InputArea.svelte";
 
 const testId = "story-input";
@@ -132,13 +138,34 @@ function setupDiscovery() {
 	});
 }
 
+/** The composer names the session's account, so the session needs a row. */
+function seedSessionAccount(account: OpenCodeInstance): void {
+	instanceState.instances = [account];
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: Date.now(),
+		rows: [
+			{
+				accountId: account.id,
+				id: testId,
+				projectSlug: "conduit",
+				title: "Composer",
+				status: "idle",
+			},
+		],
+	});
+}
+
 const meta = {
 	title: "Input/InputArea",
 	component: InputArea,
 	tags: ["autodocs"],
 	parameters: { layout: "fullscreen" },
 	beforeEach: () => {
+		const sessions = [...sessionState.sessions.values()];
+		const instances = instanceState.instances;
 		setComposerPreferences({ controls: "icons", contextWarning: 80 });
+		seedSessionAccount(mockOpenCodeAccount);
 		sessionState.currentId = testId;
 		phaseToIdle(getOrCreateSessionActivity(testId));
 		getOrCreateSessionMessages(testId).contextPercent = 0;
@@ -146,6 +173,18 @@ const meta = {
 		fileTreeState.entries = fileEntries;
 		fileTreeState.loading = false;
 		fileTreeState.loaded = true;
+		// A real socket never opens under a static server and would hold every
+		// later dial in "Connecting".
+		const restoreSocket = connectedSocket();
+		return () => {
+			restoreSocket();
+			instanceState.instances = instances;
+			applySessionChange({
+				_tag: "snapshot",
+				sequence: Date.now(),
+				rows: sessions,
+			});
+		};
 	},
 } satisfies Meta<typeof InputArea>;
 
@@ -268,6 +307,11 @@ function setupWords(phone: boolean) {
 	const composerWidth = sessionViewState.composerWidth;
 	const root = document.getElementById("storybook-root");
 	const style = root?.getAttribute("style");
+	// The app dials its RPC socket at startup. Left to the picker's first read,
+	// the dial flips the composer to "Connecting" and takes the picker away.
+	void runTransportEffect(
+		Effect.flatMap(WsRpcClients, (clients) => clients.forProject("conduit")),
+	);
 	Object.defineProperty(window, "innerWidth", {
 		configurable: true,
 		value: phone ? 393 : 1440,
@@ -392,9 +436,10 @@ export const WordsDesktop: Story = {
 		}
 		await expect(row).toBeVisible();
 		await expect(row.querySelector(".glyph")).toBeNull();
-		await expect(canvas.getByTestId("composer-word-model")).toHaveTextContent(
-			phone ? "S5" : "Sonnet 5",
-		);
+		// The row shows "Connecting" until the fake socket opens.
+		await expect(
+			await canvas.findByTestId("composer-word-model"),
+		).toHaveTextContent(phone ? "S5" : "Sonnet 5");
 		if (phone)
 			await expect(canvas.queryByTestId("composer-word-context")).toBeNull();
 		else
@@ -423,7 +468,11 @@ export const WordsDesktop: Story = {
 			composer.getBoundingClientRect().bottom,
 		);
 		await userEvent.click(canvas.getByTestId("composer-word-effort"));
-		await expect(await body.findByTestId("picker-row-effort")).toBeVisible();
+		// The phone sheet's <dialog> renders closed and calls showModal() from an
+		// effect, so its rows turn visible a tick after they mount.
+		await waitFor(() =>
+			expect(body.getByTestId("picker-row-effort")).toBeVisible(),
+		);
 		await userEvent.click(body.getByTestId("picker-effort-option-xhigh"));
 		await expect(canvas.getByTestId("composer-word-effort")).toHaveTextContent(
 			"xhigh",
@@ -531,6 +580,8 @@ function setupGoal(
 		},
 		testId,
 	);
+	// Goals are a Claude feature.
+	seedSessionAccount(mockClaudeAccount);
 	goalStorySetAt = Math.max(goalStorySetAt + 1, Date.now() - 41 * 60_000);
 	const activeGoal = {
 		condition: "All 38 scenarios pass",

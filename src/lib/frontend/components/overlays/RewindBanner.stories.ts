@@ -4,9 +4,14 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 } from "../../stores/chat.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
-import { mockSession } from "../../stories/mocks.js";
+import {
+	mockClaudeAccount,
+	mockOpenCodeAccount,
+	mockSession,
+} from "../../stories/mocks.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import RewindBanner from "./RewindBanner.svelte";
 
@@ -23,7 +28,12 @@ function seed({
 	selectedUuid?: string | null;
 	pending?: boolean;
 	provider?: "opencode" | "claude";
-} = {}): void {
+} = {}): () => void {
+	// Whether files rewind too comes from the session's account's driver.
+	const account =
+		provider === "claude" ? mockClaudeAccount : mockOpenCodeAccount;
+	const instances = instanceState.instances;
+	instanceState.instances = [account];
 	uiState.rewindActive = active;
 	uiState.rewindSelectedUuid = selectedUuid;
 	applySessionChange({
@@ -32,6 +42,7 @@ function seed({
 			{
 				...mockSession,
 				id: storySessionId,
+				accountId: account.id,
 				model: { provider, model: "story-model" },
 			},
 		],
@@ -53,6 +64,9 @@ function seed({
 				partOrder: new Map(),
 			}
 		: null;
+	return () => {
+		instanceState.instances = instances;
+	};
 }
 
 const meta = {
@@ -70,9 +84,7 @@ type Story = StoryObj<typeof meta>;
 
 /** Rewind mode active — banner showing at top. */
 export const Active: Story = {
-	beforeEach: () => {
-		seed({ active: true });
-	},
+	beforeEach: () => seed({ active: true }),
 };
 
 /** Rewind mode with a message selected — confirmation modal showing. */
@@ -80,9 +92,7 @@ export const WithModal: Story = {
 	// The confirmation modal is a fixed full-viewport backdrop; without this the
 	// baseline is a 34px strip of the banner and the modal is absent.
 	tags: ["viewport-capture"],
-	beforeEach: () => {
-		seed({ active: true, selectedUuid: "msg-abc-123" });
-	},
+	beforeEach: () => seed({ active: true, selectedUuid: "msg-abc-123" }),
 };
 
 /** Rewind mode off — nothing visible. */

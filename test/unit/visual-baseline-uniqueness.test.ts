@@ -81,12 +81,10 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// Verified legitimate (conduit-test-dfvd composer redesign).
 	"input-attachmenu--open | input-attachmenu--open-code":
 		"Open uses the default OpenCode provider; OpenCode asserts the disabled 'Claude only' Goal entry in play()",
-	"input-inputarea--words-desktop | input-inputarea--words-phone":
-		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
-	"input-inputarea--words-desktop-light | input-inputarea--words-phone-light":
-		"only the mobile capture matches: the mobile viewport is already narrower than both stories' frame widths",
-	"input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--phone-open-code-cycle | input-permissionmodeselector--responsive":
-		"all three end on the phone-width OpenCode ASK badge; the cycle, normalisation and breakpoint are asserted in play()",
+	"input-permissionmodeselector--default | input-permissionmodeselector--open-code-normalizes-auto | input-permissionmodeselector--responsive":
+		"all three end on the wide Ask badge (phone hides the default mode, bn6x.9); normalisation and the breakpoint are asserted in play()",
+	"input-permissionmodeselector--phone-claude-cycle | input-permissionmodeselector--phone-keyboard | input-permissionmodeselector--phone-select-closes":
+		"the phone badge draws the same plain shield for every non-default mode (bn6x.9); each story asserts its final mode in play()",
 	"layout-sessionbar--expanded-by-chevron | layout-sessionbar--goal-cleared | layout-sessionbar--phone-claude-header | layout-sessionbar--phone-no-checkout | layout-sessionbar--phone-open-code-header":
 		"a cleared goal renders no subtitle and the A1 header (bn6x.10) shows no checkout, account pill or instance badge for either harness, so all five end on the plain expanded phone bar; the header stories assert those absences in play()",
 

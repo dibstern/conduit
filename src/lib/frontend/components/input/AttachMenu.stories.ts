@@ -7,7 +7,9 @@ import {
 	handleModelList,
 	selectInstance,
 } from "../../stores/discovery.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
+import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import AttachMenu from "./AttachMenu.svelte";
 
 function seedModel(provider: "claude" | "opencode"): void {
@@ -19,6 +21,7 @@ function seedModel(provider: "claude" | "opencode"): void {
 			models: [{ id: "story-model", name: "Story model", provider }],
 		},
 	];
+	instanceState.instances = [mockClaudeAccount, mockOpenCodeAccount];
 	handleModelList({ providers });
 	selectInstance(provider);
 	applyGetModelsResponse({
@@ -36,12 +39,14 @@ const meta = {
 	parameters: { layout: "centered" },
 	beforeEach: () => {
 		const previousSession = sessionState.currentId;
+		const previousInstances = instanceState.instances;
 		clearDiscoveryState();
 		sessionState.currentId = null;
 		seedModel("opencode");
 		return () => {
 			clearDiscoveryState();
 			sessionState.currentId = previousSession;
+			instanceState.instances = previousInstances;
 		};
 	},
 	args: {

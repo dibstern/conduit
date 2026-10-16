@@ -1,6 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
+import {
+	applyGetModelsResponse,
+	clearDiscoveryState,
+	handleModelList,
+} from "../../stores/discovery.svelte.js";
 import { clearFileTreeState } from "../../stores/file-tree.svelte.js";
+import { instanceState } from "../../stores/instance.svelte.js";
+import { projectState } from "../../stores/project.svelte.js";
 import {
 	attachedProjectState,
 	routerState,
@@ -15,9 +22,21 @@ import {
 	applyGetFileContentResponse,
 	applyGetFileListResponse,
 } from "../../stores/ws-listeners.js";
-import { mockFileContent, mockFileTree } from "../../stories/mocks.js";
+import {
+	mockClaudeAccount,
+	mockFileContent,
+	mockFileTree,
+} from "../../stories/mocks.js";
 import { connectedSocket, failRpc } from "../../stories/sockets.js";
+import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import ChatLayout from "./ChatLayout.svelte";
+
+const claudeProvider = {
+	id: "claude",
+	name: "Claude",
+	configured: true,
+	models: [{ id: "story-model", name: "Story model", provider: "claude" }],
+};
 
 /**
  * A deliberately fake version string, not the one from package.json. It renders
@@ -73,12 +92,27 @@ const meta = {
 		routerState.path = "/";
 		routerState.search = "?p=test-project";
 		attachedProjectState.slug = null;
+		// The fake socket answers no queries, so seed what the server would send:
+		// the project list, an account with its models, and an empty, settled
+		// session list.
+		const projects = projectState.projects;
+		const instances = instanceState.instances;
+		projectState.projects = [
+			{ slug: "test-project", title: "test-project", folders: ["/src/test"] },
+		];
+		instanceState.instances = [mockClaudeAccount];
+		handleModelList({ providers: [claudeProvider] });
+		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
+		applySessionChange({ _tag: "synchronized" });
 		// Static Storybook hosting needs a socket that completes its connection.
-		const restoreSocket = connectedSocket();
+		const restoreSocket = connectedSocket("test-project");
 		const restoreFetch = stubProjectFetches();
 		return () => {
 			restoreFetch();
 			restoreSocket();
+			projectState.projects = projects;
+			instanceState.instances = instances;
+			clearDiscoveryState();
 			attachedProjectState.slug = null;
 			routerState.search = "";
 		};
@@ -122,10 +156,42 @@ export const Default: Story = { play: expectLayoutVisible };
  */
 const SESSION_PATH = "/s/story-session";
 
+/**
+ * Routes to a session whose row names an account the composer knows, with the
+ * model the server would report for it; the fake socket opens its transcript
+ * empty and settled.
+ */
+function openStorySession(): void {
+	routerState.path = SESSION_PATH;
+	applySessionChange({
+		_tag: "snapshot",
+		sequence: Date.now(),
+		rows: [
+			{
+				id: "story-session",
+				accountId: mockClaudeAccount.id,
+				title: "Story session",
+				status: "idle",
+				projectSlug: "test-project",
+			},
+		],
+	});
+	applySessionChange({ _tag: "synchronized" });
+	applyGetModelsResponse(
+		{
+			projectSlug: "test-project",
+			instanceId: mockClaudeAccount.id,
+			providers: [claudeProvider],
+			active: { model: "story-model", provider: "claude" },
+		},
+		"story-session",
+	);
+}
+
 export const SidebarCollapsed: Story = {
 	beforeEach: () => {
 		uiState.sidebarCollapsed = true;
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: expectLayoutVisible,
 };
@@ -140,7 +206,7 @@ export const SidebarCollapsed: Story = {
  */
 export const WithRewindBanner: Story = {
 	beforeEach: () => {
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: async (context) => {
 		await expectLayoutVisible(context);
@@ -161,9 +227,11 @@ async function showFilesTree(
 ): Promise<void> {
 	await expectLayoutVisible(context);
 	setFilesOpen(true);
+	// The pane mounts before its lazily imported panel, which is what listens
+	// for the listing.
 	await waitFor(() => {
 		expect(
-			context.canvasElement.querySelector('[data-testid="side-pane-files"]'),
+			context.canvasElement.querySelector("#sidebar-panel-files"),
 		).not.toBeNull();
 	});
 	applyGetFileListResponse({
@@ -178,14 +246,14 @@ async function showFilesTree(
 
 export const FilesTree: Story = {
 	beforeEach: () => {
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: showFilesTree,
 };
 
 export const FilesPreview: Story = {
 	beforeEach: () => {
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: async (context) => {
 		await showFilesTree(context);
@@ -215,7 +283,7 @@ export const FilesPreview: Story = {
 
 export const FilesPreviewError: Story = {
 	beforeEach: () => {
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: async (context) => {
 		await showFilesTree(context);
@@ -238,7 +306,7 @@ export const FilesPreviewError: Story = {
 
 export const FilesExpanded: Story = {
 	beforeEach: () => {
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: async (context) => {
 		await showFilesTree(context);
@@ -255,7 +323,7 @@ export const FilesExpanded: Story = {
 
 export const FilesForcedExpanded: Story = {
 	beforeEach: () => {
-		routerState.path = SESSION_PATH;
+		openStorySession();
 	},
 	play: async (context) => {
 		context.canvasElement.style.width = "800px";
