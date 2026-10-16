@@ -7,10 +7,9 @@
 	import { GroupingModeSchema } from "../../../shared-types.js";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
 	import { projectState } from "../../stores/project-state.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
-	import { rpc, getAutoSettleSettingRpc, setAutoSettleSettingRpc, getDefaultGroupingModeRpc, setDefaultGroupingModeRpc, getWorktreeCleanupSettingRpc, setWorktreeCleanupSettingRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { applyDefaultSessionMode, discoveryState } from "../../stores/discovery.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
@@ -49,13 +48,13 @@
 		const next = { ...previous, ...patch };
 		state.cleanup = next;
 		state.cleanupSaving = true;
-		void setWorktreeCleanupSettingRpc(next)
-			.then((saved) => {
+		void rpc("SetWorktreeCleanupSetting", { worktreeCleanup: next })
+			.then(({ worktreeCleanup: saved }) => {
 				state.cleanup = saved;
 			})
-			.catch(() => {
+			.catch((error) => {
 				state.cleanup = previous;
-				showToast("Couldn't save worktree cleanup setting", { variant: "error" });
+				toastFailure("Couldn't save worktree cleanup setting")(error);
 			})
 			.finally(() => {
 				state.cleanupSaving = false;
@@ -80,26 +79,26 @@
 		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
 		let current = true;
 		const groupingReadRevision = untrack(() => projectState.defaultGroupingRevision);
-		void getAutoSettleSettingRpc()
-			.then((days) => {
+		void rpc("GetAutoSettleSetting", {})
+			.then(({ autoSettleAfterDays: days }) => {
 				if (current && !state.autoSettleSaving) state.autoSettleDays = days;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load auto-settle setting", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load auto-settle setting")(error);
 			});
-		void getDefaultGroupingModeRpc()
-			.then((mode) => {
+		void rpc("GetDefaultGroupingMode", {})
+			.then(({ mode }) => {
 				if (current && groupingReadRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = mode;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load grouping setting", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load grouping setting")(error);
 			});
-		void getWorktreeCleanupSettingRpc()
-			.then((cleanup) => {
+		void rpc("GetWorktreeCleanupSetting", {})
+			.then(({ worktreeCleanup: cleanup }) => {
 				if (current && !state.cleanupSaving) state.cleanup = cleanup;
 			})
-			.catch(() => {
-				if (current) showToast("Couldn't load worktree cleanup setting", { variant: "error" });
+			.catch((error) => {
+				if (current) toastFailure("Couldn't load worktree cleanup setting")(error);
 			});
 		return () => { current = false; };
 	});
@@ -113,11 +112,11 @@
 				if (!Schema.is(GroupingModeSchema)(mode)) return;
 				const groupingSaveRevision = ++projectState.defaultGroupingRevision;
 				state.groupingSaving = true;
-				void setDefaultGroupingModeRpc(mode)
-					.then((saved) => {
+				void rpc("SetDefaultGroupingMode", { mode })
+					.then(({ mode: saved }) => {
 						if (groupingSaveRevision === projectState.defaultGroupingRevision) projectState.defaultGroupingMode = saved;
 					})
-					.catch(() => { showToast("Couldn't save grouping setting", { variant: "error" }); })
+					.catch(toastFailure("Couldn't save grouping setting"))
 					.finally(() => { state.groupingSaving = false; });
 			}}>
 				<option value="repository">By repository</option>
@@ -169,13 +168,11 @@
 					const value = event.currentTarget.value;
 					const next = value === "never" ? null : Number(value);
 					state.autoSettleSaving = true;
-					void setAutoSettleSettingRpc(next)
-						.then((days) => {
+					void rpc("SetAutoSettleSetting", { autoSettleAfterDays: next })
+						.then(({ autoSettleAfterDays: days }) => {
 							state.autoSettleDays = days;
 						})
-						.catch(() => {
-							showToast("Couldn't save auto-settle setting", { variant: "error" });
-						})
+						.catch(toastFailure("Couldn't save auto-settle setting"))
 						.finally(() => {
 							state.autoSettleSaving = false;
 						});

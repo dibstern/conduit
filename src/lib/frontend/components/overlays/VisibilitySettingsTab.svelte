@@ -16,7 +16,7 @@
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
-	import { rpc, setHiddenEntriesRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	const log = createFrontendLogger("push");
 	let modelsFetchPending = $state(false);
 	const hiddenModelSet = $derived(new Set(discoveryState.hiddenModels));
@@ -152,10 +152,10 @@
 		}
 		const undoHidden = chooseHiddenEntries(update);
 		try {
-			applyHiddenEntriesSet(await setHiddenEntriesRpc({ projectSlug, ...update }));
-		} catch {
+			applyHiddenEntriesSet(await rpc("SetHiddenEntries", { projectSlug, ...update }));
+		} catch (error) {
 			undoHidden();
-			showToast("Failed to save visibility settings", { variant: "warn" });
+			toastFailure("Failed to save visibility settings", "warn")(error);
 		}
 	}
 

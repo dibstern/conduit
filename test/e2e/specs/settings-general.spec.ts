@@ -24,7 +24,7 @@ for (const [viewportName, viewport] of [
 				);
 			});
 			await mockWsRpc(page, {
-				handlers: {
+				stubs: {
 					GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 				},
 			});

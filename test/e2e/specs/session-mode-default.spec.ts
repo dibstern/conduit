@@ -79,6 +79,7 @@ async function openDraft(
 	};
 	const rpc = await mockWsRpc(page, {
 		stubs: {
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			FindFolders: ({ query }) => ({
 				home: "/workspace",
 				entries: query
@@ -127,7 +128,6 @@ async function openDraft(
 		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
 			GetInstances: () => instances,
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			SaveProject: ({ slug: editedSlug, sessionMode, title, folders }) => {
 				const savedSlug = typeof editedSlug === "string" ? editedSlug : "added";
 				const previous = projects.find((project) => project.slug === savedSlug);
