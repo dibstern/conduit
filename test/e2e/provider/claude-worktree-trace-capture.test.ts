@@ -90,7 +90,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 			const repo = join(root, "repo");
 			const linkedWorktree = join(root, "repo-wt");
 			const enteredWorktree = join(repo, ".claude/worktrees", WORKTREE_NAME);
-			const configuredDir = process.env["CLAUDE_CONFIG_DIR"];
+			const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
 			const configDir = configuredDir ?? join(homedir(), ".claude");
 			const launchConfigDir =
 				configuredDir === undefined

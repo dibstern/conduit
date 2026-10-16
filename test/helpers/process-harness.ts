@@ -796,7 +796,8 @@ Object.assign(ClaudeDriver, { create: deps => {
 								),
 							}),
 					CLAUDE_CONFIG_DIR: this.realSdk
-						? (process.env["CLAUDE_CONFIG_DIR"] ?? join(homedir(), ".claude"))
+						? (process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
+							join(homedir(), ".claude"))
 						: join(this.root, "claude"),
 					OPENCODE_URL: this.defaultOpenCodeUrl,
 					...(this.opencodeRecording
@@ -809,7 +810,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 								USER: userInfo().username,
 								CLAUDE_SECURESTORAGE_CONFIG_DIR:
 									process.env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ??
-									process.env["CLAUDE_CONFIG_DIR"] ??
+									process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"] ??
 									"",
 							}
 						: {}),
