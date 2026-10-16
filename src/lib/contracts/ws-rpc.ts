@@ -283,6 +283,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
 	isDefault: Schema.optional(Schema.Boolean),
 	usageEligible: Schema.optional(Schema.Boolean),
+	cursorUsageSource: Schema.optional(
+		Schema.Literal("token", "keychain", "can_enable", "unsupported"),
+	),
 	available: Schema.optional(Schema.Boolean),
 	unavailableReason: Schema.optional(Schema.String),
 	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
@@ -1439,6 +1442,18 @@ export class SetUsageLimitsSetting extends Schema.TaggedRequest<SetUsageLimitsSe
 		failure: WsRpcError,
 		success: UsageLimitsSettingResponseSchema,
 		payload: { usageLimits: UsageLimitsSettingSchema },
+	},
+) {}
+
+export class SetCursorUsageKeychain extends Schema.TaggedRequest<SetCursorUsageKeychain>()(
+	"SetCursorUsageKeychain",
+	{
+		failure: WsRpcError,
+		success: Schema.Struct({
+			enabled: Schema.Boolean,
+			reason: Schema.optional(Schema.String),
+		}),
+		payload: { accountId: NonEmptyString, enabled: Schema.Boolean },
 	},
 ) {}
 
@@ -3071,6 +3086,7 @@ const wsRpcRequests = [
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
+	SetCursorUsageKeychain,
 	ScanNow,
 	DetectProxy,
 	ListPtys,

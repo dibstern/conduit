@@ -21,6 +21,7 @@ import { cursorSteerHandlers } from "./steps/cursorSteer.js";
 import { cursorSubagentsHandlers } from "./steps/cursorSubagents.js";
 import { cursorToolsHandlers } from "./steps/cursorTools.js";
 import { cursorTurnHandlers } from "./steps/cursorTurn.js";
+import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
@@ -75,6 +76,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...cursorToolsHandlers,
 	...cursorSubagentsHandlers,
 	...cursorUsageErrorsHandlers,
+	...cursorUsageHandlers,
 	...opencodeConnectionBannerHandlers,
 	// Before composer: its "the transcript shows (.*)" would swallow the
 	// feed's more specific "the transcript shows a loading skeleton".

@@ -96,6 +96,7 @@ describe("account directory reads", () => {
 		const input = state();
 		const alias = {
 			driver: "opencode" as const,
+			usageEligible: false as const,
 			id: AccountIdSchema.make("claude-sdk"),
 			name: "Alias account",
 		};

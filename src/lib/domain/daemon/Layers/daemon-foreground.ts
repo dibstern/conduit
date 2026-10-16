@@ -157,6 +157,9 @@ const buildInitialRuntimeConfig = (
 		...(persisted?.usageLimits !== undefined && {
 			usageLimits: persisted.usageLimits,
 		}),
+		...(persisted?.cursorUsageBinding !== undefined && {
+			cursorUsageBinding: persisted.cursorUsageBinding,
+		}),
 		...(keepAwakeCommand !== undefined && { keepAwakeCommand }),
 		...(keepAwakeArgs !== undefined && { keepAwakeArgs }),
 		...(persisted?.newSessionProject !== undefined && {

@@ -94,6 +94,19 @@ scheduling only, without adding or modifying SDK wire fields. The test submits
 its second input after the tee's `close.call` marker and before agent disposal,
 then verifies both turns and the remembered code word reach durable history.
 
+## Usage replay cases (conduit-test-xqsg.15)
+
+`cursor-usage.test.ts` makes a temporary copy of `basic.jsonl` under its
+isolated process-harness root. It adds only the redacted `credential.store`
+result used by turn replay, leaving the captured catalogue, deltas, messages
+and wait result unchanged. The copy is removed with the harness.
+
+Usage itself does not come from the SDK: a local HTTP server supplies dashboard
+responses, and a test-only JSON file supplies synthetic Keychain JWTs and read
+counts. These are explicit boundary stubs, not SDK capture shapes. The suite
+writes readings, request counts, credential labels and cleanup observations to
+`test-results/conduit-test-xqsg.15.json`, without tokens or JWT subjects.
+
 ## Recovery replay cases (conduit-test-xqsg.6)
 
 `turn-never-sent.jsonl` derives from `basic.jsonl`. It adds the captured
