@@ -91,19 +91,11 @@ const catalogs = new WeakMap<
 			string,
 			{
 				expiresAt: number;
-				generation: number;
 				models: readonly ModelInfo[];
 			}
 		>;
 	}
 >();
-const generations = new Map<string, number>();
-
-/** Login/logout invalidates every port's catalog for this account, including in-flight lists. */
-export function invalidateCursorCatalog(accountId: string): void {
-	generations.set(accountId, (generations.get(accountId) ?? 0) + 1);
-}
-
 export const discoverCursorEffect = (
 	port?: CursorSdkPort,
 	account?: Account,
@@ -134,8 +126,11 @@ export const discoverCursorEffect = (
 					"discover.auth-required",
 				),
 			);
-		const accountId = account?.id ?? "cursor";
-		const key = JSON.stringify([accountId, credential.fingerprint]);
+		// Keyed by credential, so a login or logout reads a fresh catalog.
+		const key = JSON.stringify([
+			account?.id ?? "cursor",
+			credential.fingerprint,
+		]);
 		let catalog = catalogs.get(adapter);
 		if (!catalog) {
 			catalog = { entries: new Map(), lock: Effect.unsafeMakeSemaphore(1) };
@@ -145,13 +140,7 @@ export const discoverCursorEffect = (
 		const models = yield* lock.withPermits(1)(
 			Effect.gen(function* () {
 				const cached = cache.get(key);
-				const generation = generations.get(accountId) ?? 0;
-				if (
-					cached &&
-					cached.generation === generation &&
-					cached.expiresAt > Date.now()
-				)
-					return cached.models;
+				if (cached && cached.expiresAt > Date.now()) return cached.models;
 				cache.delete(key);
 				const listed = yield* Effect.tryPromise({
 					try: () => adapter.modelsList(credential),
@@ -175,12 +164,7 @@ export const discoverCursorEffect = (
 					Number.isFinite(ttlOverride) && ttlOverride > 0
 						? ttlOverride
 						: 30 * 60_000;
-				if (generation === (generations.get(accountId) ?? 0))
-					cache.set(key, {
-						generation,
-						expiresAt: Date.now() + ttlMs,
-						models,
-					});
+				cache.set(key, { expiresAt: Date.now() + ttlMs, models });
 				return models;
 			}),
 		);
