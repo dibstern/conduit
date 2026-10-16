@@ -28,7 +28,7 @@ import type {
 import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
-import { setLogFormat, setLogLevel } from "../../../logger.js";
+import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
 import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
 import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
 import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
@@ -242,6 +242,7 @@ export async function startForegroundDaemon(
 		});
 	}
 	mkdirSync(configDir, { recursive: true });
+	setLogFile(join(configDir, "daemon.log"));
 
 	let runtime: ManagedRuntime.ManagedRuntime<
 		ForegroundRuntimeRequirements,
