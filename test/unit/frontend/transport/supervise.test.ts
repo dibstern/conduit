@@ -93,7 +93,7 @@ const inMemoryTransport = Effect.gen(function* () {
 				Layer.effect(RpcClient.Protocol, protocol),
 			).pipe(
 				Effect.flatMap((ctx) =>
-					Effect.provide(RpcClient.make(WsRpcGroup), ctx),
+					Effect.provide(RpcClient.make(WsRpcGroup, { flatten: true }), ctx),
 				),
 			);
 		});
