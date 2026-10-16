@@ -1970,7 +1970,6 @@ describe("handlePermissionResponse", () => {
 				const releaseSend = yield* Deferred.make<void>();
 				const instance: ProviderInstance = {
 					providerId: "claude",
-					steering: false,
 					discoverEffect: vi.fn(() =>
 						Effect.succeed({
 							models: [],
