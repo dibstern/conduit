@@ -1007,7 +1007,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literal("unknown-session")),
+	code: Schema.optional(Schema.Literal("unknown-session", "ambiguous-session")),
 }) {}
 
 export class GetStatus extends Schema.TaggedRequest<GetStatus>()("GetStatus", {

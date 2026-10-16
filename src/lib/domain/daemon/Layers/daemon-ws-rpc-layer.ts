@@ -738,6 +738,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			ResolveSession: (request) =>
 				run(
 					resolveDaemonSession(request.sessionId).pipe(
+						Effect.mapError(
+							(error) =>
+								new WsRpcError({
+									code: "ambiguous-session",
+									message: error.message,
+								}),
+						),
 						Effect.flatMap((projectSlug) =>
 							projectSlug === null
 								? Effect.fail(

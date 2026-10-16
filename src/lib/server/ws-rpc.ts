@@ -314,7 +314,15 @@ export const makeRoutedWsRpcServerLayer = <
 			const projectSlugFor = (payload: object, fallback?: string) =>
 				Effect.gen(function* () {
 					if ("sessionId" in payload && typeof payload.sessionId === "string") {
-						const owner = yield* directory.projectOf(payload.sessionId);
+						const owner = yield* directory.projectOf(payload.sessionId).pipe(
+							Effect.mapError(
+								(error) =>
+									new WsRpcError({
+										code: "ambiguous-session",
+										message: error.message,
+									}),
+							),
+						);
 						if (Option.isNone(owner))
 							return yield* new WsRpcError({
 								code: "unknown-session",

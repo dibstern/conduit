@@ -10,7 +10,10 @@ import { AuthManager } from "../../../src/lib/auth.js";
 import { ResolveSession } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
-import { resolveDaemonOpenCodeSession } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import {
+	resolveDaemonOpenCodeSession,
+	resolveDaemonSession,
+} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	makeSessionDirectoryLive,
@@ -34,6 +37,8 @@ import { writeEventStore } from "../../helpers/persistence-factories.js";
 // writes publish ownership before commit or miss direct child/adoption writes;
 // cascades leave stale ids; project removal keeps ids; OpenCode aliases hide
 // ambiguous adoption when two projects share a folder.
+// Shared ids must retain every owner through record, replacement and removal;
+// neither direct lookups nor daemon readers may select an ambiguous owner.
 const roots: string[] = [];
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -64,6 +69,48 @@ function fixture() {
 	}
 	return { root, projects };
 }
+
+it.effect.each(["remove", "removeProject", "replaceProject"] as const)(
+	"shared session ownership remains ambiguous until one owner is removed by %s",
+	(operation) =>
+		Effect.gen(function* () {
+			const directory = yield* SessionDirectory;
+			yield* directory.record("b", ["shared", "b-only"]);
+			yield* directory.record("a", ["shared", "a-only"]);
+			yield* directory.record("a", ["shared"]);
+			yield* directory.replaceProject("a", ["shared", "a-only"]);
+			const ambiguous = {
+				_tag: "Left",
+				left: {
+					_tag: "AmbiguousSession",
+					sessionId: "shared",
+					projectSlugs: ["a", "b"],
+					message: "OpenCode session belongs to more than one Conduit project",
+				},
+			};
+			expect(yield* Effect.either(directory.projectOf("shared"))).toMatchObject(
+				ambiguous,
+			);
+			expect(
+				yield* Effect.either(resolveDaemonSession("shared")),
+			).toMatchObject(ambiguous);
+			if (operation === "remove")
+				yield* directory.remove("a", ["shared", "a-only"]);
+			else if (operation === "removeProject")
+				yield* directory.removeProject("a");
+			else {
+				yield* directory.replaceProject("a", ["replacement"]);
+				expect(yield* directory.projectOf("replacement")).toEqual(
+					Option.some("a"),
+				);
+			}
+			expect(yield* directory.projectOf("shared")).toEqual(Option.some("b"));
+			expect(yield* directory.projectOf("b-only")).toEqual(Option.some("b"));
+			expect(yield* directory.projectOf("a-only")).toEqual(Option.none());
+			yield* directory.remove("b", ["shared"]);
+			expect(yield* directory.projectOf("shared")).toEqual(Option.none());
+		}).pipe(Effect.provide(makeSessionDirectoryLive("/unused", []))),
+);
 
 it.scoped(
 	"ResolveSession and AttachProject find a cold non-first project without opening stores",

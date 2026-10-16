@@ -342,6 +342,14 @@ export const WebSocketRoutingLive: Layer.Layer<
 
 		const attachProject: AttachDaemonProject = (payload) =>
 			resolveAttachSlug(payload).pipe(
+				Effect.catchTag(
+					"AmbiguousSession",
+					(error) =>
+						new WsRpcError({
+							code: "ambiguous-session",
+							message: error.message,
+						}),
+				),
 				Effect.mapError((cause) =>
 					cause instanceof WsRpcError
 						? cause

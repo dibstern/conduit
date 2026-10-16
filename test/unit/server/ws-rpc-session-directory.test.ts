@@ -25,6 +25,47 @@ import {
 // Failure modes: payload/default project overrides ownership; missing ids touch
 // a relay; subscriptions route differently from unary session operations.
 it.scoped(
+	"ambiguous sessions reject unary and streaming RPCs without dispatching to either owner",
+	() =>
+		Effect.gen(function* () {
+			const directory = yield* SessionDirectory.pipe(
+				Effect.provide(makeSessionDirectoryLive("/unused", [])),
+			);
+			yield* directory.record("a", ["shared"]);
+			yield* directory.record("b", ["shared"]);
+			const resolve = vi.fn(() =>
+				Effect.fail(new WsRpcError({ message: "Unexpected relay dispatch" })),
+			);
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+				Effect.provide(
+					makeRoutedWsRpcServerLayer(resolve, undefined, "a").pipe(
+						Layer.provide(Layer.succeed(SessionDirectory, directory)),
+					),
+				),
+			);
+			const ambiguous = {
+				_tag: "Left",
+				left: {
+					_tag: "WsRpcError",
+					code: "ambiguous-session",
+					message: "OpenCode session belongs to more than one Conduit project",
+				},
+			};
+			expect(
+				yield* Effect.either(client.MarkSessionRead({ sessionId: "shared" })),
+			).toMatchObject(ambiguous);
+			expect(
+				yield* Effect.either(
+					client
+						.SubscribeSessionTodos({ sessionId: "shared" })
+						.pipe(Stream.runDrain),
+				),
+			).toMatchObject(ambiguous);
+			expect(resolve).not.toHaveBeenCalled();
+		}),
+);
+
+it.scoped(
 	"unary and streaming session RPCs route by the directory and unknown ids fail before relay startup",
 	() =>
 		Effect.gen(function* () {
