@@ -191,6 +191,73 @@ const STRICT_ARIA = {
 
 export const Empty: Story = {};
 
+/**
+ * Text inserted in one go past the height cap, the way IME commits, dictation
+ * and `insertText` deliver it: the browser reveals the caret before the mirror
+ * has grown the row, so the composer itself has to bring the caret's line into
+ * its scroll window. The textarea never scrolls on its own, which keeps the
+ * highlight mirror (which never scrolls either) under it.
+ */
+export const OverflowingInsert: Story = {
+	play: async ({ canvasElement }) => {
+		const textarea = within(canvasElement).getByRole<HTMLTextAreaElement>(
+			"textbox",
+			{ name: "Message" },
+		);
+		const mirror = textarea.parentElement?.querySelector(
+			"[aria-hidden='true']",
+		);
+		const scroller = textarea.parentElement?.parentElement;
+		if (!mirror || !scroller) throw new Error("composer layers not found");
+		textarea.focus();
+		// The native editing path (unlike userEvent, which sets the value from JS).
+		document.execCommand(
+			"insertText",
+			false,
+			Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n"),
+		);
+
+		// The caret is on the draft's last line.
+		const expectCaretOnLastLineVisible = () =>
+			waitFor(() => {
+				const style = getComputedStyle(textarea);
+				const box = textarea.getBoundingClientRect();
+				const view = scroller.getBoundingClientRect();
+				const caretBottom = box.bottom - parseFloat(style.paddingBottom);
+				const caretTop = caretBottom - parseFloat(style.lineHeight);
+				expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+				expect(caretTop).toBeGreaterThanOrEqual(view.top - 1);
+				expect(caretBottom).toBeLessThanOrEqual(view.bottom + 1);
+				expect(textarea.scrollTop).toBe(0);
+				expect(mirror.getBoundingClientRect().toJSON()).toEqual(box.toJSON());
+			});
+		await expectCaretOnLastLineVisible();
+
+		// A mid-word insert that wraps its word onto a new last line: the text
+		// after the caret decides where the caret lands. Pad a final line until
+		// its word sits on the wrap boundary, then grow the word from its middle.
+		const word = "bbbbbbbb";
+		document.execCommand("insertText", false, `\n ${word}`);
+		const lineStart = textarea.value.length - word.length - 1;
+		const rows = () => mirror.getBoundingClientRect().height;
+		const flush = () => new Promise(requestAnimationFrame);
+		await flush();
+		const height = rows();
+		while (rows() === height) {
+			textarea.setSelectionRange(lineStart, lineStart);
+			document.execCommand("insertText", false, "a");
+			await flush();
+		}
+		document.execCommand("delete");
+		await flush();
+		const middle = textarea.value.length - word.length / 2;
+		textarea.setSelectionRange(middle, middle);
+		document.execCommand("insertText", false, "bbbb");
+		await waitFor(() => expect(rows()).toBeGreaterThan(height));
+		await expectCaretOnLastLineVisible();
+	},
+};
+
 function setupWords(phone: boolean) {
 	const width = Object.getOwnPropertyDescriptor(window, "innerWidth");
 	const path = routerState.path;
