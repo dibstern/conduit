@@ -20,7 +20,8 @@
 	import { clock } from "../../stores/clock.svelte.js";
 	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { dismissCutOffRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { sessionGoals } from "../../stores/goal.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
@@ -29,7 +30,6 @@
 	import {
 		uiState,
 		selectRewindMessage,
-		showToast,
 	} from "../../stores/ui.svelte.js";
 	import { permissionsState, getLocalPermissions } from "../../stores/permissions.svelte.js";
 	import { createScrollController } from "../../stores/scroll-controller.svelte.js";
@@ -390,8 +390,8 @@
 		const sessionId = activeSession?.id;
 		const projectSlug = activeSession?.projectSlug;
 		if (!sessionId || !projectSlug) return;
-		dismissCutOffRpc({ projectSlug, sessionId, originId: getBrowserClientId() })
-			.catch(() => showToast("Couldn't dismiss the cut-off", { variant: "error" }));
+		rpc("DismissCutOff", { projectSlug, sessionId, originId: getBrowserClientId() })
+			.catch(toastFailure("Couldn't dismiss the cut-off"));
 	}
 	const forkSplit = $derived(
 		isFork

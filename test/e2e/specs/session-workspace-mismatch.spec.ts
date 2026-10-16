@@ -33,7 +33,7 @@ for (const viewport of [
 				accountId: null,
 				id: "mismatched-session",
 				title: "Workspace mismatch",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 				provider: "claude",
 				git: {
@@ -44,8 +44,8 @@ for (const viewport of [
 					target === main
 						? null
 						: {
-								cause: "user",
-								origin: "existing",
+								cause: "user" as const,
+								origin: "existing" as const,
 								worktrees: { [main]: target },
 							},
 				workspaceMismatch: { actualPath },
@@ -53,18 +53,18 @@ for (const viewport of [
 			const rpc = await mockWsRpc(page, {
 				stubs: {
 					MoveSessionWorkspace: () => ({ projectSlug, directory: target }),
+					ListDaemonSessions: () => ({
+						sessions: [session],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
 				},
 				handlers: {
 					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 					GetProjects: () => ({
 						projects,
 						current: projectSlug,
-					}),
-					ListDaemonSessions: () => ({
-						sessions: [session],
-						availability: [],
-						hasMore: false,
-						nextCursor: null,
 					}),
 				},
 			});

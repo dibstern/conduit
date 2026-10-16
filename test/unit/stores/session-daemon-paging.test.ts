@@ -15,13 +15,11 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	createSessionRpc: vi.fn(),
 	getAgentsRpc: vi.fn(),
 	getCommandsRpc: vi.fn(),
 	getModelsRpc: vi.fn(),
-	listDaemonSessionsRpc: vi.fn(),
+	rpc: vi.fn(),
 	switchPermissionModeRpc: vi.fn(),
-	viewSessionRpc: vi.fn(),
 }));
 
 import {
@@ -41,9 +39,9 @@ import {
 	setSearchQuery,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
 import type { ListDaemonSessionsResponse } from "../../../src/lib/frontend/transport/ws-rpc.js";
-import { listDaemonSessionsRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc as callRpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 
-const rpc = vi.mocked(listDaemonSessionsRpc);
+const rpc = vi.mocked(callRpc<"ListDaemonSessions">);
 
 /** Rows are named after their position in the full expected ordering, so a
  *  duplicate, a gap or a reorder is visible in the assertion itself. */
@@ -145,7 +143,7 @@ describe("cross-project browse paging", () => {
 
 		await loadMoreDaemonSessions();
 
-		expect(rpc).toHaveBeenCalledWith({
+		expect(rpc).toHaveBeenCalledWith("ListDaemonSessions", {
 			projectSlug: "project-a",
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			cursor: { updatedAt: 999, id: "s1" },
@@ -208,7 +206,7 @@ describe("cross-project search", () => {
 
 		await searchSessions("  session  ", true);
 
-		expect(rpc).toHaveBeenCalledWith({
+		expect(rpc).toHaveBeenCalledWith("ListDaemonSessions", {
 			projectSlug: "project-a",
 			roots: true,
 			search: "session",
@@ -333,7 +331,7 @@ describe("project scope", () => {
 
 		await loadDaemonSessions();
 
-		expect(rpc).toHaveBeenCalledWith({
+		expect(rpc).toHaveBeenCalledWith("ListDaemonSessions", {
 			projectSlug: "project-a",
 			limit: DAEMON_SESSION_PAGE_SIZE,
 			roots: true,
@@ -352,6 +350,7 @@ describe("project scope", () => {
 		await searchSessions("session", true);
 
 		expect(rpc).toHaveBeenCalledWith(
+			"ListDaemonSessions",
 			expect.objectContaining({ scope: "project-b" }),
 		);
 		expect(getFilteredSessions().map((s) => s.id)).toEqual(["s1"]);

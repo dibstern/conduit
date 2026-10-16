@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { preWarmSessionRpc } = vi.hoisted(() => ({
-	preWarmSessionRpc: vi.fn<() => Promise<void>>(),
+const { rpc } = vi.hoisted(() => ({
+	rpc: vi.fn<() => Promise<void>>(),
 }));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	preWarmSessionRpc,
+	rpc,
 }));
 
 let requestSessionPreWarm: typeof import("../../../src/lib/frontend/utils/session-prewarm.js").requestSessionPreWarm;
@@ -12,7 +12,7 @@ let requestSessionPreWarm: typeof import("../../../src/lib/frontend/utils/sessio
 beforeEach(async () => {
 	vi.useFakeTimers();
 	vi.resetModules();
-	preWarmSessionRpc.mockReset().mockResolvedValue(undefined);
+	rpc.mockReset().mockResolvedValue(undefined);
 	({ requestSessionPreWarm } = await import(
 		"../../../src/lib/frontend/utils/session-prewarm.js"
 	));
@@ -24,15 +24,15 @@ describe("session pre-warm requests", () => {
 		requestSessionPreWarm("project", "session");
 		requestSessionPreWarm("project", "session");
 		await vi.advanceTimersByTimeAsync(99);
-		expect(preWarmSessionRpc).not.toHaveBeenCalled();
+		expect(rpc).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(1);
-		expect(preWarmSessionRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(rpc).toHaveBeenCalledExactlyOnceWith("PreWarmSession", {
 			projectSlug: "project",
 			sessionId: "session",
 		});
 		requestSessionPreWarm("project", "session");
 		await vi.advanceTimersByTimeAsync(100);
-		expect(preWarmSessionRpc).toHaveBeenCalledTimes(1);
+		expect(rpc).toHaveBeenCalledTimes(1);
 	});
 
 	it("warms the latest session after rapid navigation", async () => {
@@ -40,7 +40,7 @@ describe("session pre-warm requests", () => {
 		await vi.advanceTimersByTimeAsync(50);
 		requestSessionPreWarm("other-project", "new");
 		await vi.advanceTimersByTimeAsync(100);
-		expect(preWarmSessionRpc).toHaveBeenCalledExactlyOnceWith({
+		expect(rpc).toHaveBeenCalledExactlyOnceWith("PreWarmSession", {
 			projectSlug: "other-project",
 			sessionId: "new",
 		});
@@ -52,7 +52,7 @@ describe("session pre-warm requests", () => {
 		requestSessionPreWarm("project", null);
 		requestSessionPreWarm(null, "session");
 		await vi.advanceTimersByTimeAsync(100);
-		expect(preWarmSessionRpc).not.toHaveBeenCalled();
+		expect(rpc).not.toHaveBeenCalled();
 	});
 
 	it("can ask again after the cooldown so an idle runner can be recreated", async () => {
@@ -60,22 +60,22 @@ describe("session pre-warm requests", () => {
 		await vi.advanceTimersByTimeAsync(1100);
 		requestSessionPreWarm("project", "session");
 		await vi.advanceTimersByTimeAsync(100);
-		expect(preWarmSessionRpc).toHaveBeenCalledTimes(2);
+		expect(rpc).toHaveBeenCalledTimes(2);
 	});
 
 	it("returns immediately while initialization remains pending", async () => {
-		preWarmSessionRpc.mockImplementation(() => new Promise(() => {}));
+		rpc.mockImplementation(() => new Promise(() => {}));
 		expect(requestSessionPreWarm("project", "session")).toBeUndefined();
 		await vi.advanceTimersByTimeAsync(100);
-		expect(preWarmSessionRpc).toHaveBeenCalledTimes(1);
+		expect(rpc).toHaveBeenCalledTimes(1);
 	});
 
 	it("ignores failures and allows later focus to retry", async () => {
-		preWarmSessionRpc.mockRejectedValue(new Error("Runner unavailable"));
+		rpc.mockRejectedValue(new Error("Runner unavailable"));
 		requestSessionPreWarm("project", "session");
 		await vi.advanceTimersByTimeAsync(1100);
 		requestSessionPreWarm("project", "session");
 		await vi.advanceTimersByTimeAsync(100);
-		expect(preWarmSessionRpc).toHaveBeenCalledTimes(2);
+		expect(rpc).toHaveBeenCalledTimes(2);
 	});
 });

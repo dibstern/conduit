@@ -32,22 +32,28 @@ for (const viewport of [
 			accountId: null,
 			id: "moved-back-session",
 			title: "Removed worktree",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 			provider: "claude",
 			git: { branch: "main" },
-			workspace: { cause: "missing", origin: "existing", worktrees: {} },
+			workspace: {
+				cause: "missing" as const,
+				origin: "existing" as const,
+				worktrees: {},
+			},
 		};
 		const rpc = await mockWsRpc(page, {
-			handlers: {
-				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-				GetProjects: () => ({ projects, current: projectSlug }),
+			stubs: {
 				ListDaemonSessions: () => ({
 					sessions: [session],
 					availability: [],
 					hasMore: false,
 					nextCursor: null,
 				}),
+			},
+			handlers: {
+				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
+				GetProjects: () => ({ projects, current: projectSlug }),
 			},
 		});
 		rpc.setShellRows([session]);
@@ -77,8 +83,8 @@ for (const viewport of [
 		rpc.upsertShellRow({
 			...session,
 			workspace: {
-				cause: "user",
-				origin: "existing",
+				cause: "user" as const,
+				origin: "existing" as const,
 				worktrees: { [main]: "/workspace/next-worktree" },
 			},
 			git: { branch: "next", worktree: "next-worktree" },

@@ -8,7 +8,7 @@
 	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
-	import { rpc, attachProjectRpc, resolveSessionRpc, getAgentsRpc, getCommandsRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc, attachProjectRpc, getAgentsRpc, getCommandsRpc, getModelsRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -709,9 +709,9 @@
 			if (!attachedSlug) return;
 			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
-			void resolveSessionRpc({ sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
+			void rpc("ResolveSession", { sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
 				placeSession(sessionId, projectSlug);
-			}).catch(() => { if (!cancelled) showToast("Failed to open session", { variant: "error" }); });
+			}).catch((error) => { if (!cancelled) toastFailure("Failed to open session")(error); });
 		});
 		return () => { cancelled = true; };
 	});

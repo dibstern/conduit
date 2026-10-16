@@ -20,7 +20,7 @@ type ProjectManagementControl = WsMockControl & { rpc: RpcMockControl };
 type MockSession = {
 	id: string;
 	title: string;
-	status: string;
+	status: "idle";
 	projectSlug: string;
 	updatedAt: number;
 	messageCount: number;
@@ -55,7 +55,7 @@ async function setupWithProjectManagement(
 		{
 			id: "sess-si-001",
 			title: "Test session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug: "myapp",
 			updatedAt: Date.now(),
 			messageCount: 0,
@@ -63,7 +63,7 @@ async function setupWithProjectManagement(
 		{
 			id: "sess-library-001",
 			title: "Library session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug: "mylib",
 			updatedAt: Date.now(),
 			messageCount: 0,
@@ -87,6 +87,31 @@ async function setupWithProjectManagement(
 					},
 				],
 			}),
+			ListDaemonSessions: async (params) => {
+				await new Promise((resolve) => setTimeout(resolve, 150));
+				const limit = Number(params["limit"] ?? Infinity);
+				const cursor = params["cursor"] as { id: string } | undefined;
+				const scoped = sessions
+					.filter(
+						(session) =>
+							!params["scope"] || session.projectSlug === params["scope"],
+					)
+					.sort((a, b) => b.updatedAt - a.updatedAt);
+				const start = cursor
+					? scoped.findIndex((session) => session.id === cursor.id) + 1
+					: 0;
+				const page = scoped.slice(start, start + limit);
+				const last = page.at(-1);
+				const hasMore = start + limit < scoped.length;
+				return {
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					sessions: page.map((session) => ({ accountId: null, ...session })),
+					availability: [],
+					hasMore,
+					nextCursor:
+						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
+				};
+			},
 		},
 		handlers: {
 			AttachProject: async (params) => {
@@ -112,31 +137,6 @@ async function setupWithProjectManagement(
 				),
 				roots: true,
 			}),
-			ListDaemonSessions: async (params) => {
-				await new Promise((resolve) => setTimeout(resolve, 150));
-				const limit = Number(params["limit"] ?? Infinity);
-				const cursor = params["cursor"] as { id: string } | undefined;
-				const scoped = sessions
-					.filter(
-						(session) =>
-							!params["scope"] || session.projectSlug === params["scope"],
-					)
-					.sort((a, b) => b.updatedAt - a.updatedAt);
-				const start = cursor
-					? scoped.findIndex((session) => session.id === cursor.id) + 1
-					: 0;
-				const page = scoped.slice(start, start + limit);
-				const last = page.at(-1);
-				const hasMore = start + limit < scoped.length;
-				return {
-					projectSlug: String(params["projectSlug"] ?? "myapp"),
-					sessions: page,
-					availability: [],
-					hasMore,
-					nextCursor:
-						hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null,
-				};
-			},
 			SaveProject: (params) => {
 				const slug = String(params["slug"] ?? "new-project");
 				const title = String(params["title"] ?? "new-project");
@@ -179,9 +179,9 @@ async function setupWithProjectManagement(
 				{
 					_tag: "snapshot",
 					sequence: 1,
-					rows: sessions.filter(
-						(session) => session.projectSlug === params["projectSlug"],
-					),
+					rows: sessions
+						.filter((session) => session.projectSlug === params["projectSlug"])
+						.map((session) => ({ accountId: null, ...session })),
 				},
 				{ _tag: "synchronized" },
 			],
@@ -405,9 +405,11 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	await page.screenshot({
 		path: testInfo.outputPath("unknown-provider-start.png"),
 	});
-	control.rpc.setResponse("CreateSession", {
-		projectSlug: "myapp",
-		sessionId: "sess-unknown-capabilities",
+	control.rpc.setStubs({
+		CreateSession: () => ({
+			projectSlug: "myapp",
+			sessionId: "sess-unknown-capabilities",
+		}),
 	});
 	await input.press("Enter");
 	await expect
@@ -476,7 +478,7 @@ test("direct project URL scopes the list and another URL switches projects", asy
 		{
 			id: "sess-si-001",
 			title: "Test session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug: "myapp",
 			updatedAt: Date.now(),
 			messageCount: 0,
@@ -545,7 +547,7 @@ test("clearing the scope after adding a project pages in every session", async (
 	const many = Array.from({ length: 45 }, (_, index) => ({
 		id: `sess-many-${String(index).padStart(2, "0")}`,
 		title: `Many ${index}`,
-		status: "idle",
+		status: "idle" as const,
 		projectSlug: "myapp",
 		updatedAt: now - 1000 - index,
 		messageCount: 0,
@@ -576,7 +578,7 @@ test("switching projects while the list pages does not fail the switch", async (
 		Array.from({ length: 45 }, (_, index) => ({
 			id: `sess-${projectSlug}-${String(index).padStart(2, "0")}`,
 			title: `${projectSlug} ${index}`,
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 			updatedAt: now - 1000 - index,
 			messageCount: 0,

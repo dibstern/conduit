@@ -101,6 +101,12 @@ async function openCheckout(
 				if (options.moveError) throw options.moveError;
 				return { directory: String(path) };
 			},
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 		},
 		handlers: {
 			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
@@ -115,12 +121,6 @@ async function openCheckout(
 				instanceId: options.provider ?? "opencode",
 			}),
 			GetInstances: () => instances,
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
 			GetSessionSkills: () => ({
 				loads: options.skills
 					? [

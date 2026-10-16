@@ -58,11 +58,11 @@ for (const scenario of [
 				accountId: null,
 				id: "terminal-folders-session",
 				title: "Terminal folders session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 				workspace: {
-					cause: "user",
-					origin: "existing",
+					cause: "user" as const,
+					origin: "existing" as const,
 					worktrees: {
 						[primary]: "/workspace/web-worktree",
 						...(secondary ? { [secondary]: "/workspace/api-worktree" } : {}),
@@ -78,6 +78,12 @@ for (const scenario of [
 						entries: [],
 						...(secondary ? { roots: scenario.roots } : {}),
 					}),
+					ListDaemonSessions: () => ({
+						sessions: [session],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
 				},
 				handlers: {
 					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
@@ -87,12 +93,6 @@ for (const scenario of [
 						agents: [],
 						providerScope: { id: "claude", name: "Claude" },
 						instanceId: "claude",
-					}),
-					ListDaemonSessions: () => ({
-						sessions: [session],
-						availability: [],
-						hasMore: false,
-						nextCursor: null,
 					}),
 					CreatePty: ({ root }) => {
 						const id = `pty-${++terminalCount}`;

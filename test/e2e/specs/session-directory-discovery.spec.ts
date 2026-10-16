@@ -59,16 +59,18 @@ test("settings, commands and skill documents follow a workspace change and sessi
 		{ slug: "e2e-replay", title: "Discovery project", folders: [main] },
 	];
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
-			GetInstances: () => instances,
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions,
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
+		},
+		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
+			GetInstances: () => instances,
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",
 				agents: [],

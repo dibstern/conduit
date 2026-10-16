@@ -109,13 +109,13 @@ async function setup(
 		stubs: {
 			GetFileTree: () => ({ projectSlug: "myapp", entries: [] }),
 			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+			ViewSession: () => ({ ok: true }),
 		},
 		handlers: {
 			SwitchPermissionMode: (params) => {
 				serverModes.set(String(params["sessionId"]), String(params["mode"]));
 				return { projectSlug: "myapp", mode: params["mode"] };
 			},
-			ViewSession: () => ({ ok: true }),
 			GetAgents: () => ({
 				projectSlug: "myapp",
 				providerScope: { id: "opencode", name: "OpenCode" },

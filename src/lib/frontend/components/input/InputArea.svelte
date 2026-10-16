@@ -11,8 +11,8 @@
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
+	import { AccountIdSchema } from "../../../contracts/provider-instance.js";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
-	import { formatErrorDetail } from "../../../errors-utils.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -83,7 +83,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import { lookupSummarizer } from "../../utils/tool-summarizers/index.js";
 	import { isPaused, segmentTurns, workingTime } from "../../utils/turns.js";
-	import { createSessionRpc, resolveSessionModeRpc, rpc, startSideThreadRpc, type PreWarmDraftRpcInput } from "../../transport/ws-rpc-client.js";
+	import { resolveSessionModeRpc, rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
@@ -224,7 +224,7 @@
 		requestSessionPreWarm(currentSession ? currentSession.projectSlug : getCurrentSlug(), sessionState.currentId);
 		return () => requestSessionPreWarm(null, null);
 	});
-	function draftSessionPayload(projectSlug: string | null): PreWarmDraftRpcInput | undefined {
+	function draftSessionPayload(projectSlug: string | null) {
 		const displayed = getDraftPick();
 		if (!projectSlug || !displayed) return undefined;
 		return {
@@ -232,6 +232,7 @@
 			originId: getBrowserClientId(),
 			draftId,
 			...displayed,
+			instanceId: AccountIdSchema.make(displayed.instanceId),
 			...(draftWorktree ? { worktreePath: draftWorktree.path } : {}),
 			...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 		};
@@ -733,7 +734,7 @@
 		startingSideThread = true;
 		try {
 			const images = draftImages.map((image) => image.dataUrl);
-			const { sessionId } = await startSideThreadRpc({
+			const { sessionId } = await rpc("StartSideThread", {
 				projectSlug,
 				parentSessionId,
 				title: question,
@@ -749,7 +750,7 @@
 			}
 			return true;
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+			toastFailure("Failed to start Side Thread")(error);
 			return false;
 		} finally {
 			startingSideThread = false;
@@ -850,7 +851,7 @@
 				}
 				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
 				draftSend.sessionId = null;
-				const created = await createSessionRpc({
+				const created = await rpc("CreateSession", {
 					...payload,
 					...(draftNewWorktree ? { newWorktree: true } : {}),
 				});
@@ -864,7 +865,7 @@
 				if (Schema.is(WorktreeCreationError)(error) || Schema.is(WorkspaceMoveError)(error)) {
 					toastFailure("Could not start session")(error);
 				} else {
-					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
+					toastFailure("Failed to create session")(error);
 				}
 				draftSend.message = null;
 				if (unsent && !sessionState.currentId && !inputText) {

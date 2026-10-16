@@ -1,8 +1,4 @@
-import {
-	type PreWarmDraftRpcInput,
-	preWarmDraftRpc,
-	preWarmSessionRpc,
-} from "../transport/ws-rpc-client.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 
 let pending: ReturnType<typeof setTimeout> | undefined;
 let pendingKey: string | undefined;
@@ -28,7 +24,9 @@ export function requestSessionPreWarm(
 		pendingKey = undefined;
 		lastKey = key;
 		lastRequestedAt = Date.now();
-		void preWarmSessionRpc({ projectSlug, sessionId }).catch(() => undefined);
+		void rpc("PreWarmSession", { projectSlug, sessionId }).catch(
+			() => undefined,
+		);
 	}, 100);
 }
 
@@ -38,7 +36,9 @@ let draftLastKey: string | undefined;
 let draftLastRequestedAt = 0;
 
 /** Draft hints follow the displayed creation payload without delaying send. */
-export function requestDraftPreWarm(input?: PreWarmDraftRpcInput): void {
+export function requestDraftPreWarm(
+	input?: Parameters<typeof rpc<"PreWarmDraft">>[1],
+): void {
 	const key = input ? JSON.stringify(input) : undefined;
 	if (key && key === draftPendingKey) return;
 	clearTimeout(draftPending);
@@ -52,6 +52,6 @@ export function requestDraftPreWarm(input?: PreWarmDraftRpcInput): void {
 		draftPendingKey = undefined;
 		draftLastKey = key;
 		draftLastRequestedAt = Date.now();
-		void preWarmDraftRpc(input).catch(() => undefined);
+		void rpc("PreWarmDraft", input).catch(() => undefined);
 	}, 100);
 }

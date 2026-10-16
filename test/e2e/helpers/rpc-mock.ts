@@ -689,22 +689,18 @@ function defaultHandler(
 			? () => ({
 					usageLimits: { autoResume: false, autoSwitch: false, order: [] },
 				})
-			: tag === "ResolveSession"
-				? () => ({ projectSlug: control.projectSlug })
-				: tag === "AttachProject"
-					? ({ projectSlug, sessionId }) => ({
-							projectSlug:
-								typeof projectSlug === "string"
-									? projectSlug
-									: control.projectSlug,
-							sessionSlug:
-								typeof sessionId === "string" ? control.projectSlug : null,
-						})
-					: tag === "ViewSession"
-						? () => ({ ok: true })
-						: tag === "InspectSessionWorktrees"
-							? () => ({ worktrees: [], removeWorktrees: false })
-							: undefined)
+			: tag === "AttachProject"
+				? ({ projectSlug, sessionId }) => ({
+						projectSlug:
+							typeof projectSlug === "string"
+								? projectSlug
+								: control.projectSlug,
+						sessionSlug:
+							typeof sessionId === "string" ? control.projectSlug : null,
+					})
+				: tag === "InspectSessionWorktrees"
+					? () => ({ worktrees: [], removeWorktrees: false })
+					: undefined)
 	);
 }
 
@@ -878,6 +874,8 @@ export async function mockWsRpc(
 	control.initialHandlers = options.handlers ?? {};
 	control.stubs = {
 		"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+		ResolveSession: () => ({ projectSlug: control.projectSlug }),
+		ViewSession: () => ({ ok: true }),
 		...options.stubs,
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
@@ -966,8 +964,6 @@ export async function ensureMockTranscriptRpc(
 				sessionId,
 				...mockDetailPage(page, sessionId, before),
 			}),
-		},
-		handlers: {
 			ViewSession: () => ({ ok: true }),
 			ResolveSession: ({ projectSlug }) => ({
 				projectSlug: String(projectSlug ?? "e2e-replay"),

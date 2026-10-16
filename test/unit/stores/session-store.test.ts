@@ -485,7 +485,7 @@ describe("switchToSession", () => {
 			routerState.path = "/";
 			switchToSession("new-session", undefined, viewSession);
 			expect(routerState.path).toBe("/s/new-session");
-			expect(viewSession).toHaveBeenCalledWith({
+			expect(viewSession).toHaveBeenCalledWith("ViewSession", {
 				projectSlug: "attached-project",
 				sessionId: "new-session",
 				originId: expect.any(String),
@@ -500,7 +500,7 @@ describe("switchToSession", () => {
 		try {
 			const viewSession = vi.fn().mockResolvedValue({ ok: true });
 			switchToSession("foreign", "project-b", viewSession);
-			expect(viewSession).toHaveBeenCalledWith({
+			expect(viewSession).toHaveBeenCalledWith("ViewSession", {
 				projectSlug: "project-b",
 				sessionId: "foreign",
 				originId: expect.any(String),
@@ -517,7 +517,7 @@ describe("switchToSession", () => {
 
 		switchToSession("new-session", "project-a", viewSession);
 
-		expect(viewSession).toHaveBeenCalledWith({
+		expect(viewSession).toHaveBeenCalledWith("ViewSession", {
 			projectSlug: "project-a",
 			sessionId: "new-session",
 			originId: expect.any(String),

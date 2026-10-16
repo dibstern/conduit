@@ -30,6 +30,7 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	import {
 		getClaudeSettingsRpc,
 		resolveClaudeSettingsRpc,
@@ -302,8 +303,8 @@
 		try {
 			await reloadProviderSession(projectSlug, sessionId);
 			showToast("Session reloaded");
-		} catch {
-			showToast("Failed to reload the session", { variant: "warn" });
+		} catch (error) {
+			toastFailure("Failed to reload the session", "warn")(error);
 		} finally {
 			reloadInFlight = false;
 		}

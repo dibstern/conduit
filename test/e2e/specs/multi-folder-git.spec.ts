@@ -96,6 +96,12 @@ for (const scenario of [
 		await mockWsRpc(page, {
 			stubs: {
 				FindFolders: () => ({ home: "/workspace", entries: [] }),
+				ListDaemonSessions: () => ({
+					sessions: [session],
+					availability: [],
+					hasMore: false,
+					nextCursor: null,
+				}),
 			},
 			handlers: {
 				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
@@ -105,12 +111,6 @@ for (const scenario of [
 					agents: [],
 					providerScope: { id: "claude", name: "Claude" },
 					instanceId: "claude",
-				}),
-				ListDaemonSessions: () => ({
-					sessions: [session],
-					availability: [],
-					hasMore: false,
-					nextCursor: null,
 				}),
 			},
 		});

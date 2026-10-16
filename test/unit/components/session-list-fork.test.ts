@@ -10,10 +10,7 @@ import {
 	clearSessionState,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import {
-	forkSessionRpc,
-	viewSessionRpc,
-} from "../../../src/lib/frontend/transport/ws-rpc-client.js";
+import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
 	clearSessionSearch,
 	seedDaemonSessions,
@@ -27,8 +24,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		forkSessionRpc: vi.fn(),
-		viewSessionRpc: vi.fn().mockResolvedValue(undefined),
+		rpc: vi.fn(),
 		getAgentsRpc: vi.fn().mockReturnValue(new Promise(() => undefined)),
 		getCommandsRpc: vi.fn().mockReturnValue(new Promise(() => undefined)),
 	}),
@@ -68,7 +64,7 @@ describe("SessionList fork", () => {
 	// Nothing else announces the fork, so the list must open it itself once
 	// ForkSession answers.
 	it("opens the fork of a session that is not the open one", async () => {
-		vi.mocked(forkSessionRpc).mockResolvedValue({
+		vi.mocked(rpc).mockResolvedValue({
 			projectSlug: "current-project",
 			sessionId: "fork",
 			parentId: "other",
@@ -80,12 +76,14 @@ describe("SessionList fork", () => {
 		await fireEvent.contextMenu(row);
 		await fireEvent.click(await screen.findByTestId("session-ctx-fork"));
 
-		expect(forkSessionRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"ForkSession",
 			expect.objectContaining({ sessionId: "other" }),
 		);
 		await vi.waitFor(() => expect(sessionState.currentId).toBe("fork"));
 		expect(routerState.path).toContain("/s/fork");
-		expect(viewSessionRpc).toHaveBeenCalledWith(
+		expect(rpc).toHaveBeenCalledWith(
+			"ViewSession",
 			expect.objectContaining({
 				projectSlug: "current-project",
 				sessionId: "fork",

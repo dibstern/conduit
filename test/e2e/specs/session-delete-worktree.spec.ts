@@ -62,13 +62,13 @@ async function setup(
 			accountId: null,
 			id: "delete-session",
 			title: "Delete this session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 			...(inspection.worktrees.length > 0
 				? {
 						workspace: {
-							cause: "launch",
-							origin: "conduit",
+							cause: "launch" as const,
+							origin: "conduit" as const,
 							worktrees: { [folder]: worktree },
 						},
 						git: { branch: "conduit/session-delete", worktree: "app" },
@@ -81,7 +81,7 @@ async function setup(
 						accountId: null,
 						id: "local-session",
 						title: "Local session",
-						status: "idle",
+						status: "idle" as const,
 						projectSlug,
 					},
 				]
@@ -97,6 +97,17 @@ async function setup(
 					? { worktrees: [], removeWorktrees: false }
 					: inspection;
 			},
+			ListDaemonSessions: () => ({
+				sessions: options.foreign ? sessions : [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			DeleteSession: ({ sessionId }) => {
+				sessions = sessions.filter(({ id }) => id !== sessionId);
+				rpc.setShellRows(options.foreign ? [] : sessions);
+				return { ok: true, worktreeWarnings: options.warnings ?? [] };
+			},
 		},
 		handlers: {
 			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
@@ -110,17 +121,6 @@ async function setup(
 						onDelete: options.onDelete ?? false,
 					},
 				};
-			},
-			ListDaemonSessions: () => ({
-				sessions: options.foreign ? sessions : [],
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
-			DeleteSession: ({ sessionId }) => {
-				sessions = sessions.filter(({ id }) => id !== sessionId);
-				rpc.setShellRows(options.foreign ? [] : sessions);
-				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
 		},
 	});

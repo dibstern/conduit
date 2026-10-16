@@ -4,7 +4,6 @@ import { Cause, Effect, Either, HashSet } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
 import type { SessionMode } from "../../contracts/project-file.js";
-import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import type { WorktreeCleanup } from "../../contracts/worktree.js";
 import {
 	type GetSessionSkillsResponse,
@@ -31,19 +30,15 @@ export { makeWsRpcUrl, type WsRpcLocation } from "./shared-client.js";
 import type {
 	ClaudeSettingsResponse,
 	ContinuationHandoffResponse,
-	CreateSessionResponse,
 	DetectProxyResponse,
-	ForkSessionResponse,
 	GetAgentsResponse,
 	GetCommandsResponse,
 	GetModelsResponse,
 	GetProjectsResponse,
 	InstanceListResponse,
-	ListDaemonSessionsResponse,
 	PreviewContinuationResponse,
 	ProjectMutationResponse,
 	QuotaForAccountsResponse,
-	ReloadProviderSessionResponse,
 	ResolveClaudeSettingsResponse,
 	RpcLogLevel,
 	SaveProjectResponse,
@@ -56,7 +51,6 @@ import type {
 	SwitchModelResponse,
 	SwitchPermissionModeResponse,
 	SwitchVariantResponse,
-	ViewSessionResponse,
 } from "./ws-rpc.js";
 
 type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
@@ -201,71 +195,10 @@ export interface ClosePtyRpcInput {
 	readonly ptyId: string;
 }
 
-export interface CreateSessionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly draftId?: string;
-	readonly title?: string;
-	/** Harness instance to bind the session to (preferred over providerId). */
-	readonly instanceId?: string;
-	readonly providerId?: string;
-	readonly worktreePath?: string;
-	readonly newWorktree?: boolean;
-	readonly worktreeBase?: string;
-	readonly permissionMode: SessionPermissionMode;
-	/** The draft composer's displayed pick, including an untouched default. */
-	readonly model?: {
-		readonly modelId: string;
-		readonly providerId: string;
-		readonly variant?: string;
-		readonly contextWindow?: string;
-	};
-}
-
-export interface ViewSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId: string;
-}
-
-export interface PreWarmSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-}
-
-export type PreWarmDraftRpcInput = Omit<
-	CreateSessionRpcInput,
-	"title" | "newWorktree" | "draftId"
-> & { readonly draftId: string };
-
 export interface AttachProjectRpcInput {
 	readonly projectSlug?: string;
 	readonly sessionId?: string;
 	readonly originId: string;
-}
-
-export interface DeleteSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-	readonly removeWorktrees?: boolean;
-}
-
-export interface ForkSessionRpcInput {
-	readonly projectSlug: string;
-	readonly originId: string;
-	readonly sessionId?: string;
-	readonly messageId?: string;
-}
-
-export interface StartSideThreadRpcInput {
-	readonly projectSlug: string;
-	readonly parentSessionId: string;
-	readonly title: string;
-	readonly inputId: string;
-	readonly text: string;
-	readonly images?: readonly string[];
-	readonly originId?: string;
 }
 
 export interface GetSkillContentRpcInput {
@@ -347,70 +280,6 @@ export interface ResolveClaudeSettingsRpcInput {
 	readonly sessionId?: string;
 }
 
-export interface ReloadProviderSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly commandId: string;
-	readonly originId?: string;
-}
-
-export interface RenameSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly title: string;
-	readonly originId?: string;
-}
-
-export interface MarkSessionReadRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
-export interface MarkSessionSeenRpcInput extends MarkSessionReadRpcInput {
-	readonly upTo: number;
-}
-
-export interface SetSessionSettledRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly settled: boolean;
-	readonly originId?: string;
-}
-
-export interface SetSessionPinnedRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly pinned: boolean;
-	readonly originId?: string;
-}
-
-export interface SetSessionAutoSettleRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly disabled: boolean;
-	readonly originId?: string;
-}
-
-export interface SnoozeSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly until: number | null;
-	readonly originId?: string;
-}
-
-export interface UnsnoozeSessionRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
-export interface DismissCutOffRpcInput {
-	readonly projectSlug: string;
-	readonly sessionId: string;
-	readonly originId?: string;
-}
-
 export interface ContinueSessionRpcInput {
 	readonly projectSlug: string;
 	readonly sessionId: string;
@@ -455,19 +324,6 @@ export interface SwitchPermissionModeRpcInput {
 	readonly sessionId: string;
 	readonly mode: SessionPermissionMode;
 	readonly originId?: string;
-}
-
-export interface ListDaemonSessionsRpcInput {
-	readonly projectSlug: string;
-	readonly limit?: number;
-	readonly roots?: boolean;
-	readonly search?: string;
-	readonly cursor?: {
-		readonly updatedAt: number;
-		readonly id: string;
-	};
-	readonly scope?: string;
-	readonly exclude?: string;
 }
 
 export const LOG_LEVELS = RpcLogLevelSchema.literals;
@@ -622,83 +478,8 @@ const callClosePty = (input: ClosePtyRpcInput) =>
 		client("ClosePty", input).pipe(Effect.asVoid),
 	);
 
-const callCreateSession = (input: CreateSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("CreateSession", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			...(input.draftId != null ? { draftId: input.draftId } : {}),
-			...(input.title != null ? { title: input.title } : {}),
-			...(input.instanceId != null
-				? { instanceId: AccountIdSchema.make(input.instanceId) }
-				: {}),
-			...(input.providerId != null ? { providerId: input.providerId } : {}),
-			...(input.model != null ? { model: input.model } : {}),
-			permissionMode: input.permissionMode,
-			...(input.worktreePath != null
-				? { worktreePath: input.worktreePath }
-				: {}),
-			...(input.newWorktree ? { newWorktree: true } : {}),
-			...(input.worktreeBase != null
-				? { worktreeBase: input.worktreeBase }
-				: {}),
-		}),
-	);
-
-const callViewSession = (input: ViewSessionRpcInput) =>
-	callControl(input.projectSlug, (client) => client("ViewSession", input));
-
-const callPreWarmSession = (input: PreWarmSessionRpcInput) =>
-	callControl(input.projectSlug, (client) => client("PreWarmSession", input));
-
-const callPreWarmDraft = (input: PreWarmDraftRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("PreWarmDraft", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			draftId: input.draftId,
-			...(input.instanceId != null
-				? { instanceId: AccountIdSchema.make(input.instanceId) }
-				: {}),
-			...(input.providerId != null ? { providerId: input.providerId } : {}),
-			...(input.model != null ? { model: input.model } : {}),
-			permissionMode: input.permissionMode,
-			...(input.worktreePath != null
-				? { worktreePath: input.worktreePath }
-				: {}),
-			...(input.worktreeBase != null
-				? { worktreeBase: input.worktreeBase }
-				: {}),
-		}),
-	);
-
 const callAttachProject = (input: AttachProjectRpcInput) =>
 	callControl(input.projectSlug, (client) => client("AttachProject", input));
-
-const callDeleteSession = (input: DeleteSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("DeleteSession", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			...(input.originId != null ? { originId: input.originId } : {}),
-			...(input.removeWorktrees === undefined
-				? {}
-				: { removeWorktrees: input.removeWorktrees }),
-		}),
-	);
-
-const callForkSession = (input: ForkSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("ForkSession", {
-			projectSlug: input.projectSlug,
-			originId: input.originId,
-			...(input.sessionId != null ? { sessionId: input.sessionId } : {}),
-			...(input.messageId != null ? { messageId: input.messageId } : {}),
-		}),
-	);
-
-const callStartSideThread = (input: StartSideThreadRpcInput) =>
-	callControl(input.projectSlug, (client) => client("StartSideThread", input));
 
 const callGetSkillContent = (input: GetSkillContentRpcInput) =>
 	callControl(input.projectSlug, (client) => client("GetSkillContent", input));
@@ -792,66 +573,6 @@ const callResolveClaudeSettings = (input: ResolveClaudeSettingsRpcInput) =>
 		client("ResolveClaudeSettings", input),
 	);
 
-const callReloadProviderSession = (input: ReloadProviderSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("ReloadProviderSession", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			commandId: input.commandId,
-			...(input.originId ? { originId: input.originId } : {}),
-		}),
-	);
-
-const callRenameSession = (input: RenameSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("RenameSession", {
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-			title: input.title,
-			...(input.originId ? { originId: input.originId } : {}),
-		}).pipe(Effect.asVoid),
-	);
-
-const callSetSessionSettled = (input: SetSessionSettledRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SetSessionSettled", input).pipe(Effect.asVoid),
-	);
-
-const callMarkSessionUnread = (input: MarkSessionReadRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("MarkSessionUnread", input).pipe(Effect.asVoid),
-	);
-
-const callMarkSessionRead = (input: MarkSessionReadRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("MarkSessionRead", input).pipe(Effect.asVoid),
-	);
-
-const callMarkSessionSeen = (input: MarkSessionSeenRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("MarkSessionSeen", input).pipe(Effect.asVoid),
-	);
-
-const callSetSessionPinned = (input: SetSessionPinnedRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SetSessionPinned", input).pipe(Effect.asVoid),
-	);
-
-const callSetSessionAutoSettle = (input: SetSessionAutoSettleRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SetSessionAutoSettle", input).pipe(Effect.asVoid),
-	);
-
-const callSnoozeSession = (input: SnoozeSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("SnoozeSession", input).pipe(Effect.asVoid),
-	);
-
-const callUnsnoozeSession = (input: UnsnoozeSessionRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("UnsnoozeSession", input).pipe(Effect.asVoid),
-	);
-
 const callSwitchVariant = (input: SwitchVariantRpcInput) =>
 	callControl(input.projectSlug, (client) =>
 		client("SwitchVariant", {
@@ -870,11 +591,6 @@ const callSwitchPermissionMode = (input: SwitchPermissionModeRpcInput) =>
 			mode: input.mode,
 			...(input.originId ? { originId: input.originId } : {}),
 		}),
-	);
-
-const callListDaemonSessions = (input: ListDaemonSessionsRpcInput) =>
-	callControl(input.projectSlug, (client) =>
-		client("ListDaemonSessions", input),
 	);
 
 const callSetLogLevel = (input: SetLogLevelRpcInput) =>
@@ -1020,59 +736,11 @@ export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
 	await runTransportEffect(callClosePty(input));
 }
 
-export async function createSessionRpc(
-	input: CreateSessionRpcInput,
-): Promise<CreateSessionResponse> {
-	const result = await runTransportEffect(
-		Effect.either(callCreateSession(input)),
-	);
-	if (Either.isLeft(result)) throw result.left;
-	return result.right;
-}
-
-export async function viewSessionRpc(
-	input: ViewSessionRpcInput,
-): Promise<ViewSessionResponse> {
-	return await runTransportEffect(callViewSession(input));
-}
-
-export async function preWarmSessionRpc(
-	input: PreWarmSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callPreWarmSession(input));
-}
-
-export async function preWarmDraftRpc(
-	input: PreWarmDraftRpcInput,
-): Promise<void> {
-	await runTransportEffect(callPreWarmDraft(input));
-}
-
 export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
 	readonly projectSlug: string | null;
 	readonly sessionSlug: string | null;
 }> {
 	return runTransportEffect(callAttachProject(input));
-}
-
-export async function deleteSessionRpc(input: DeleteSessionRpcInput) {
-	return runTransportEffect(callDeleteSession(input));
-}
-
-export async function forkSessionRpc(
-	input: ForkSessionRpcInput,
-): Promise<ForkSessionResponse> {
-	return await runTransportEffect(callForkSession(input));
-}
-
-export async function startSideThreadRpc(
-	input: StartSideThreadRpcInput,
-): Promise<{ readonly sessionId: string }> {
-	const result = await runTransportEffect(
-		Effect.either(callStartSideThread(input)),
-	);
-	if (Either.isLeft(result)) throw result.left;
-	return result.right;
 }
 
 export async function getSkillContentRpc(
@@ -1163,66 +831,6 @@ export async function resolveClaudeSettingsRpc(
 	return await runTransportEffect(callResolveClaudeSettings(input));
 }
 
-export async function reloadProviderSessionRpc(
-	input: ReloadProviderSessionRpcInput,
-): Promise<ReloadProviderSessionResponse> {
-	return await runTransportEffect(callReloadProviderSession(input));
-}
-
-export async function renameSessionRpc(
-	input: RenameSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callRenameSession(input));
-}
-
-export async function setSessionSettledRpc(
-	input: SetSessionSettledRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSetSessionSettled(input));
-}
-
-export async function markSessionUnreadRpc(
-	input: MarkSessionReadRpcInput,
-): Promise<void> {
-	await runTransportEffect(callMarkSessionUnread(input));
-}
-
-export async function markSessionReadRpc(
-	input: MarkSessionReadRpcInput,
-): Promise<void> {
-	await runTransportEffect(callMarkSessionRead(input));
-}
-
-/**
- * Resolves "disconnected" when the report never reached the server (socket
- * down or dropped mid-flight), so the caller can hold it for reconnect. A
- * server-side failure still rejects.
- */
-export function markSessionSeenRpc(
-	input: MarkSessionSeenRpcInput,
-): Promise<"saved" | "disconnected"> {
-	return runTransportEffect(
-		callMarkSessionSeen(input).pipe(
-			Effect.as("saved" as const),
-			Effect.catchTag("RpcClientError", () =>
-				Effect.succeed("disconnected" as const),
-			),
-		),
-	);
-}
-
-export async function setSessionPinnedRpc(
-	input: SetSessionPinnedRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSetSessionPinned(input));
-}
-
-export async function setSessionAutoSettleRpc(
-	input: SetSessionAutoSettleRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSetSessionAutoSettle(input));
-}
-
 export async function getAutoSettleSettingRpc(): Promise<number | null> {
 	const result = await runTransportEffect(
 		callControl(undefined, (client) => client("GetAutoSettleSetting", {})),
@@ -1288,28 +896,6 @@ export async function setUsageLimitsSettingRpc(
 	return result.usageLimits;
 }
 
-export async function snoozeSessionRpc(
-	input: SnoozeSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callSnoozeSession(input));
-}
-
-export async function unsnoozeSessionRpc(
-	input: UnsnoozeSessionRpcInput,
-): Promise<void> {
-	await runTransportEffect(callUnsnoozeSession(input));
-}
-
-export async function dismissCutOffRpc(
-	input: DismissCutOffRpcInput,
-): Promise<void> {
-	await runTransportEffect(
-		callControl(input.projectSlug, (client) =>
-			client("DismissCutOff", input).pipe(Effect.asVoid),
-		),
-	);
-}
-
 export async function continueSessionRpc(
 	input: ContinueSessionRpcInput,
 ): Promise<void> {
@@ -1373,25 +959,6 @@ export async function switchPermissionModeRpc(
 	input: SwitchPermissionModeRpcInput,
 ): Promise<SwitchPermissionModeResponse> {
 	return await runTransportEffect(callSwitchPermissionMode(input));
-}
-
-export interface ResolveSessionRpcInput {
-	readonly projectSlug?: string;
-	readonly sessionId: string;
-}
-
-export async function resolveSessionRpc(
-	input: ResolveSessionRpcInput,
-): Promise<{ readonly projectSlug: string | null }> {
-	return await runTransportEffect(
-		callControl(input.projectSlug, (client) => client("ResolveSession", input)),
-	);
-}
-
-export async function listDaemonSessionsRpc(
-	input: ListDaemonSessionsRpcInput,
-): Promise<ListDaemonSessionsResponse> {
-	return await runTransportEffect(callListDaemonSessions(input));
 }
 
 export async function setLogLevelRpc(

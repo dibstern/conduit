@@ -9,12 +9,11 @@ import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
-	call: vi.fn<(tag: string, payload: unknown) => Promise<unknown>>(
-		async () => ({ ok: true }),
+	call: vi.fn<(tag: string, payload: unknown) => Promise<unknown>>((tag) =>
+		tag === "ForkSession"
+			? new Promise<never>(() => {})
+			: Promise.resolve({ ok: true }),
 	),
-	forkSessionRpc: vi.fn<
-		typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js").forkSessionRpc
-	>(() => new Promise<never>(() => {})),
 }));
 
 vi.mock(
@@ -369,7 +368,8 @@ describe("Task drawer transcript", () => {
 		await fireEvent.click(
 			within(pane).getByRole("button", { name: "Fork from here" }),
 		);
-		expect(rpc.forkSessionRpc).toHaveBeenCalledWith(
+		expect(rpc.call).toHaveBeenCalledWith(
+			"ForkSession",
 			expect.objectContaining({
 				sessionId: childId,
 				messageId: `${childId}-reply`,

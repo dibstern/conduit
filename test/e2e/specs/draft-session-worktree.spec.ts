@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
+import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import type { WorktreeInfo } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
@@ -60,10 +61,50 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			},
 		],
 	};
-	let sessions: readonly Record<string, unknown>[] = [];
+	let sessions: readonly SessionInfo[] = [];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ListWorktrees: () => ({ worktrees }),
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			CreateSession: ({ projectSlug, worktreePath }) => {
+				const selected = worktrees.find(({ path }) => path === worktreePath);
+				const folder = selected?.path === docsLinked ? docs : main;
+				sessions = [
+					{
+						accountId: null,
+						id: "draft-session",
+						title: "Started from draft",
+						status: "idle" as const,
+						projectSlug,
+						workspace: selected
+							? {
+									cause: "launch",
+									worktrees: { [folder]: selected.path },
+									origin: "existing",
+								}
+							: null,
+						git: {
+							branch: selected?.branch ?? "main",
+							...(selected && !selected.main
+								? {
+										worktree: selected.path.slice(
+											selected.path.lastIndexOf("/") + 1,
+										),
+									}
+								: {}),
+						},
+					},
+				];
+				rpc.setShellRows(sessions);
+				return { projectSlug, sessionId: "draft-session" };
+			},
+			PreWarmSession: () => undefined,
+			PreWarmDraft: () => undefined,
 		},
 		handlers: {
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
@@ -80,41 +121,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				providerScope: { id: provider, name: "Draft provider" },
 				agents: [],
 			}),
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
-			}),
-			CreateSession: ({ projectSlug, worktreePath }) => {
-				const selected = worktrees.find(({ path }) => path === worktreePath);
-				const folder = selected?.path === docsLinked ? docs : main;
-				sessions = [
-					{
-						id: "draft-session",
-						title: "Started from draft",
-						status: "idle",
-						projectSlug,
-						workspace: selected
-							? {
-									cause: "launch",
-									worktrees: { [folder]: selected.path },
-									origin: "existing",
-								}
-							: null,
-						git: {
-							branch: selected?.branch ?? "main",
-							...(selected && !selected.main
-								? { worktree: selected.path.split("/").at(-1) }
-								: {}),
-						},
-					},
-				];
-				rpc.setShellRows(sessions);
-				return { projectSlug, sessionId: "draft-session" };
-			},
-			PreWarmSession: () => ({ ok: true }),
-			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -355,8 +361,10 @@ for (const mode of [
 			harness,
 		}) => {
 			const rpc = await openDraft(page, harness.relayBaseUrl);
-			rpc.setHandler("CreateSession", () => {
-				throw new WorkspaceMoveError({ path: linked, reason: "missing" });
+			rpc.setStubs({
+				CreateSession: () => {
+					throw new WorkspaceMoveError({ path: linked, reason: "missing" });
+				},
 			});
 			await page.locator("#input").fill("Keep this prompt");
 			await press(page.getByTestId("draft-start-chip"));

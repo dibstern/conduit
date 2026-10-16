@@ -85,6 +85,18 @@ async function openDraft(
 					? [{ path: query, isGitRepo: true, exists: true, reason: "match" }]
 					: [],
 			}),
+			ListDaemonSessions: () => ({
+				sessions: [],
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
+			CreateSession: ({ projectSlug }) => ({
+				projectSlug,
+				sessionId: "created-session",
+			}),
+			PreWarmSession: () => undefined,
+			PreWarmDraft: () => undefined,
 		},
 		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
@@ -100,12 +112,6 @@ async function openDraft(
 				instanceId,
 				providerScope: { id: instanceId ?? "claude", name: "Provider" },
 				agents: [],
-			}),
-			ListDaemonSessions: () => ({
-				sessions: [],
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
 			}),
 			ResolveSessionMode: ({ projectSlug }) =>
 				options.resolve?.(String(projectSlug)) ?? {
@@ -140,12 +146,6 @@ async function openDraft(
 				projects = [...projects.filter((p) => p.slug !== savedSlug), saved];
 				return { savedSlug, projects, warnings: [] };
 			},
-			CreateSession: ({ projectSlug }) => ({
-				projectSlug,
-				sessionId: "created-session",
-			}),
-			PreWarmSession: () => ({ ok: true }),
-			PreWarmDraft: () => undefined,
 		},
 	});
 	await mockRelayWebSocket(page, {
@@ -302,8 +302,10 @@ for (const viewport of [
 				({ tag }) => tag === "PreWarmDraft",
 			);
 			expect(warm.payload["draftId"]).toEqual(expect.any(String));
-			rpc.setHandler("CreateSession", () => {
-				throw new WsRpcError({ message: "simulated create failure" });
+			rpc.setStubs({
+				CreateSession: () => {
+					throw new WsRpcError({ message: "simulated create failure" });
+				},
 			});
 			await input.fill("Keep this message after failure");
 			await press(page.locator("#send"));
@@ -319,9 +321,11 @@ for (const viewport of [
 				_tag: "CreateSession",
 			});
 
-			rpc.setResponse("CreateSession", {
-				projectSlug: slug,
-				sessionId: "created-session",
+			rpc.setStubs({
+				CreateSession: () => ({
+					projectSlug: slug,
+					sessionId: "created-session",
+				}),
 			});
 			await press(page.locator("#send"));
 			await expect

@@ -2,12 +2,8 @@ import { getBrowserClientId } from "../../stores/client-identity.js";
 import { isSessionSnoozed } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
-import {
-	setSessionPinnedRpc,
-	setSessionSettledRpc,
-	snoozeSessionRpc,
-	unsnoozeSessionRpc,
-} from "../../transport/ws-rpc-client.js";
+import { toastFailure } from "../../transport/rpc-errors.js";
+import { rpc } from "../../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../types.js";
 import { formatSnoozeTime } from "../../utils/format.js";
 
@@ -32,8 +28,8 @@ export async function runBulkChange(
 	const results = await Promise.allSettled(
 		input.map((session) =>
 			kind === "settle"
-				? setSessionSettledRpc({ ...session, settled: true })
-				: setSessionPinnedRpc({ ...session, pinned }),
+				? rpc("SetSessionSettled", { ...session, settled: true })
+				: rpc("SetSessionPinned", { ...session, pinned }),
 		),
 	);
 	const changed = input.filter(
@@ -62,13 +58,15 @@ export async function runBulkChange(
 							void Promise.allSettled(
 								changed.map((session) =>
 									kind === "settle"
-										? setSessionSettledRpc({ ...session, settled: false })
-										: setSessionPinnedRpc({ ...session, pinned: !pinned }),
+										? rpc("SetSessionSettled", { ...session, settled: false })
+										: rpc("SetSessionPinned", { ...session, pinned: !pinned }),
 								),
 							).then((undoResults) => {
 								void refreshListedSessions();
-								if (undoResults.some((result) => result.status === "rejected"))
-									showToast("Couldn't undo", { variant: "error" });
+								const failed = undoResults.find(
+									(result) => result.status === "rejected",
+								);
+								if (failed) toastFailure("Couldn't undo")(failed.reason);
 							});
 						},
 					},
@@ -92,7 +90,7 @@ export async function runBulkSnooze(
 	}));
 	const results = await Promise.allSettled(
 		input.map((session) =>
-			snoozeSessionRpc({
+			rpc("SnoozeSession", {
 				projectSlug: session.projectSlug,
 				sessionId: session.sessionId,
 				originId: session.originId,
@@ -131,13 +129,13 @@ export async function runBulkSnooze(
 							void Promise.allSettled(
 								changed.map((session) =>
 									session.wasSnoozed
-										? snoozeSessionRpc({
+										? rpc("SnoozeSession", {
 												projectSlug: session.projectSlug,
 												sessionId: session.sessionId,
 												originId: session.originId,
 												until: session.previousUntil,
 											})
-										: unsnoozeSessionRpc({
+										: rpc("UnsnoozeSession", {
 												projectSlug: session.projectSlug,
 												sessionId: session.sessionId,
 												originId: session.originId,
@@ -145,8 +143,10 @@ export async function runBulkSnooze(
 								),
 							).then((undoResults) => {
 								void refreshListedSessions();
-								if (undoResults.some((result) => result.status === "rejected"))
-									showToast("Couldn't undo", { variant: "error" });
+								const failed = undoResults.find(
+									(result) => result.status === "rejected",
+								);
+								if (failed) toastFailure("Couldn't undo")(failed.reason);
 							});
 						},
 					},

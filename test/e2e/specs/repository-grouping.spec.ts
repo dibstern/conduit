@@ -95,7 +95,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 		accountId: null,
 		id: `grouping-${project.slug}`,
 		title: `Review ${project.title}`,
-		status: "idle",
+		status: "idle" as const,
 		projectSlug: project.slug,
 		updatedAt: 100 - index,
 		messageCount: 0,
@@ -103,9 +103,6 @@ async function openProjectList(page: Page, baseUrl: string) {
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			FindFolders: () => ({ home: "/workspace", entries: [] }),
-		},
-		handlers: {
-			GetProjects: () => ({ projects, current: slug }),
 			ListDaemonSessions: ({ scope }) => ({
 				sessions: sessions.filter(
 					(session) => !scope || session.projectSlug === scope,
@@ -114,6 +111,9 @@ async function openProjectList(page: Page, baseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: slug }),
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
 			SaveProject: ({ slug: savedSlug, groupingMode }) => {

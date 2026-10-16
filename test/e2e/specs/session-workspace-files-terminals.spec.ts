@@ -21,14 +21,14 @@ test("files, mentions and new terminals follow a session move and navigation", a
 			accountId: null,
 			id: "workspace-session",
 			title: "Workspace session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 		},
 		{
 			accountId: null,
 			id: "main-session",
 			title: "Main session",
-			status: "idle",
+			status: "idle" as const,
 			projectSlug,
 		},
 	];
@@ -71,6 +71,12 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				path,
 				content: `${folder(sessionId) === worktree ? "worktree" : "main"} content`,
 			}),
+			ListDaemonSessions: () => ({
+				sessions,
+				availability: [],
+				hasMore: false,
+				nextCursor: null,
+			}),
 		},
 		handlers: {
 			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
@@ -83,12 +89,6 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				agents: [],
 				providerScope: { id: "claude", name: "Claude" },
 				instanceId: "claude",
-			}),
-			ListDaemonSessions: () => ({
-				sessions,
-				availability: [],
-				hasMore: false,
-				nextCursor: null,
 			}),
 			CreatePty: ({ sessionId }) => {
 				const id = `pty-${++terminalCount}`;

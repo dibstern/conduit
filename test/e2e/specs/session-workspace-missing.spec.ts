@@ -58,12 +58,12 @@ async function openMissingSession(
 		accountId: null,
 		id: "missing-session",
 		title: "Missing worktree",
-		status: "idle",
+		status: "idle" as const,
 		projectSlug,
 		provider: "claude",
 		workspace: {
-			cause: "launch",
-			origin: "conduit",
+			cause: "launch" as const,
+			origin: "conduit" as const,
 			worktrees: { [main]: worktree, ...extraWorktrees },
 		},
 		workspaceMissing,
@@ -72,16 +72,16 @@ async function openMissingSession(
 		stubs: {
 			RecreateSessionWorktree: () => ({ directory: worktree }),
 			ContinueSessionInMainFolder: () => ({ directory: main }),
-		},
-		handlers: {
-			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
-			GetProjects: () => ({ projects, current: projectSlug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
+		},
+		handlers: {
+			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
+			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});
 	rpc.setShellRows([session]);

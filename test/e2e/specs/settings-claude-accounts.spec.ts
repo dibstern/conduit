@@ -344,8 +344,27 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		return { instances };
 	};
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ResolveSession: () => ({ projectSlug: "myapp" }),
+			CreateSession: (payload) => {
+				const id = payload["instanceId"];
+				if (typeof id !== "string") throw new Error("Missing account id");
+				const account = Either.getOrThrowWith(
+					resolveAccount(state, { _tag: "Id", id }),
+					(error) => error,
+				);
+				rpc.upsertShellRow({
+					id: "sess-restored",
+					accountId: account.id,
+					title: "Restored draft",
+					status: "idle",
+					projectSlug: "myapp",
+					updatedAt: Date.now(),
+				});
+				return { projectSlug: "myapp", sessionId: "sess-restored" };
+			},
+		},
+		handlers: {
 			GetProjects: () => ({ projects: [project], current: "myapp" }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
 			GetModels: (payload) => {
@@ -402,23 +421,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				const name = payload["name"];
 				if (typeof name !== "string") throw new Error("Missing account name");
 				return refreshAccounts({ _tag: "Add", name, driver: "claude" });
-			},
-			CreateSession: (payload) => {
-				const id = payload["instanceId"];
-				if (typeof id !== "string") throw new Error("Missing account id");
-				const account = Either.getOrThrowWith(
-					resolveAccount(state, { _tag: "Id", id }),
-					(error) => error,
-				);
-				rpc.upsertShellRow({
-					id: "sess-restored",
-					accountId: account.id,
-					title: "Restored draft",
-					status: "idle",
-					projectSlug: "myapp",
-					updatedAt: Date.now(),
-				});
-				return { projectSlug: "myapp", sessionId: "sess-restored" };
 			},
 		},
 	});

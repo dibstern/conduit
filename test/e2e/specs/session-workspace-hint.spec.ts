@@ -26,7 +26,7 @@ async function openHint(page: Page, relayBaseUrl: string) {
 		accountId: null,
 		id: "hint-session",
 		title: "Workspace hint",
-		status: "idle",
+		status: "idle" as const,
 		projectSlug,
 		provider: "claude",
 		git: { branch: "main" },
@@ -39,16 +39,16 @@ async function openHint(page: Page, relayBaseUrl: string) {
 				directory: String(path),
 			}),
 			DismissWorkspaceHint: () => ({ ok: true }),
-		},
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: projectSlug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
+		},
+		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
+			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});
 	rpc.setShellRows([session]);

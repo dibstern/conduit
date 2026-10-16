@@ -42,11 +42,16 @@ const setDefaultModelRpcSpy = vi.hoisted(() =>
 		variants: [],
 	})),
 );
-const reloadProviderSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { projectSlug: string; sessionId: string }) => ({
-		projectSlug: input.projectSlug,
-		sessionId: input.sessionId,
-	})),
+const reloadSessionSpy = vi.hoisted(() =>
+	vi.fn(
+		async (
+			_tag: string,
+			input: { projectSlug: string; sessionId: string },
+		) => ({
+			projectSlug: input.projectSlug,
+			sessionId: input.sessionId,
+		}),
+	),
 );
 const showToastSpy = vi.hoisted(() => vi.fn());
 const emptyComponent = vi.hoisted(
@@ -70,11 +75,7 @@ vi.mock(
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getAgentsRpc: (input: unknown) => getAgentsRpcSpy(input),
-	reloadProviderSessionRpc: (input: {
-		projectSlug: string;
-		sessionId: string;
-		commandId: string;
-	}) => reloadProviderSessionRpcSpy(input),
+	rpc: reloadSessionSpy,
 	setDefaultModelRpc: (input: { model: string; provider: string }) =>
 		setDefaultModelRpcSpy(input),
 	switchModelRpc: (input: { modelId: string; providerId: string }) =>
@@ -109,7 +110,7 @@ describe("InstanceModelPicker", () => {
 		getAgentsRpcSpy.mockClear();
 		switchModelRpcSpy.mockClear();
 		setDefaultModelRpcSpy.mockClear();
-		reloadProviderSessionRpcSpy.mockClear();
+		reloadSessionSpy.mockClear();
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
@@ -389,7 +390,7 @@ describe("InstanceModelPicker", () => {
 		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
 
 		await waitFor(() => {
-			expect(reloadProviderSessionRpcSpy).toHaveBeenCalledWith({
+			expect(reloadSessionSpy).toHaveBeenCalledWith("ReloadProviderSession", {
 				projectSlug: "project-a",
 				sessionId: "session-1",
 				commandId: expect.any(String),

@@ -24,12 +24,6 @@ async function setup(page: import("@playwright/test").Page) {
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			"input.submit": () => ({ ok: true, sessionId: materialized }),
-		},
-		handlers: {
-			AttachProject: ({ sessionId }) => ({
-				projectSlug,
-				sessionSlug: sessionId ? projectSlug : null,
-			}),
 			ResolveSession: () => ({ projectSlug }),
 			ViewSession: ({ sessionId }) => ({
 				ok: true,
@@ -43,6 +37,12 @@ async function setup(page: import("@playwright/test").Page) {
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
+			}),
+		},
+		handlers: {
+			AttachProject: ({ sessionId }) => ({
+				projectSlug,
+				sessionSlug: sessionId ? projectSlug : null,
 			}),
 		},
 	});

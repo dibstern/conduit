@@ -15,8 +15,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const viewSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (_input: unknown) => ({ ok: true as const })),
+const rpcSpy = vi.hoisted(() =>
+	vi.fn(async (_tag: string, _input: unknown) => ({ ok: true as const })),
 );
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
@@ -28,7 +28,7 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getModelsRpc: vi.fn(async () => {
 		throw new Error("models unavailable in test");
 	}),
-	viewSessionRpc: (input: unknown) => viewSessionRpcSpy(input),
+	rpc: rpcSpy,
 	switchPermissionModeRpc: vi.fn(async () => ({
 		projectSlug: "project-a",
 		mode: "ask",
@@ -291,7 +291,7 @@ describe("AttentionBanner merge logic", () => {
 		const sessionButton = screen.getByText(/Clickable session/);
 		await fireEvent.click(sessionButton);
 
-		expect(viewSessionRpcSpy).toHaveBeenCalledWith({
+		expect(rpcSpy).toHaveBeenCalledWith("ViewSession", {
 			projectSlug: "project-a",
 			sessionId: "ses_other1",
 			originId: expect.any(String),

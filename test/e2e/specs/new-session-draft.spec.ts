@@ -150,14 +150,16 @@ test.describe("New session draft", () => {
 				},
 			];
 			await mockWsRpc(page, {
-				handlers: {
-					GetProjects: () => ({ projects, current: "e2e-replay" }),
+				stubs: {
 					ListDaemonSessions: () => ({
 						sessions: [],
 						availability: [],
 						hasMore: false,
 						nextCursor: null,
 					}),
+				},
+				handlers: {
+					GetProjects: () => ({ projects, current: "e2e-replay" }),
 				},
 			});
 			await mockRelayWebSocket(page, {

@@ -92,16 +92,16 @@ async function openSession(
 				rpc.upsertShellRow(session);
 				return { ok: true };
 			},
-		},
-		handlers: {
-			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
-			GetProjects: () => ({ projects, current: projectSlug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],
 				availability: [],
 				hasMore: false,
 				nextCursor: null,
 			}),
+		},
+		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
+			GetProjects: () => ({ projects, current: projectSlug }),
 		},
 	});
 	rpc.setShellRows([session]);

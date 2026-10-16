@@ -21,7 +21,7 @@ for (const multiple of [true, false]) {
 				accountId: null,
 				id: "folders-session",
 				title: "Folders session",
-				status: "idle",
+				status: "idle" as const,
 				projectSlug,
 			};
 			let moved = false;
@@ -68,6 +68,12 @@ for (const multiple of [true, false]) {
 									: "secondary content"
 								: "primary content",
 					}),
+					ListDaemonSessions: () => ({
+						sessions: [session],
+						availability: [],
+						hasMore: false,
+						nextCursor: null,
+					}),
 				},
 				handlers: {
 					GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
@@ -77,12 +83,6 @@ for (const multiple of [true, false]) {
 						agents: [],
 						providerScope: { id: "claude", name: "Claude" },
 						instanceId: "claude",
-					}),
-					ListDaemonSessions: () => ({
-						sessions: [session],
-						availability: [],
-						hasMore: false,
-						nextCursor: null,
 					}),
 				},
 			});

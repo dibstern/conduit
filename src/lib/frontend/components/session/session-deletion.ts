@@ -1,6 +1,5 @@
 import { confirm, uiState } from "../../stores/ui.svelte.js";
 import {
-	type DeleteSessionRpcInput,
 	getWorktreeCleanupSettingRpc,
 	rpc,
 } from "../../transport/ws-rpc-client.js";
@@ -9,10 +8,12 @@ let pending = false;
 
 /** Single and bulk deletion use the same inspection and worktree choice. */
 export async function confirmSessionDeletion(
-	targets: readonly DeleteSessionRpcInput[],
+	targets: readonly Omit<Parameters<typeof rpc<"DeleteSession">>[1], "_tag">[],
 	text: string,
 	returnFocus?: () => HTMLElement | null,
-): Promise<readonly DeleteSessionRpcInput[] | null> {
+): Promise<
+	readonly Omit<Parameters<typeof rpc<"DeleteSession">>[1], "_tag">[] | null
+> {
 	if (pending) return null;
 	pending = true;
 	try {
