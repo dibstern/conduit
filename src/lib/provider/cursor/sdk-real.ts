@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { CursorSdkFailure } from "./sdk-error.js";
+import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
@@ -13,19 +13,18 @@ import type {
 
 export function createRealCursorSdkPort(): CursorSdkPort {
 	let sdk: Promise<typeof import("@cursor/sdk")> | undefined;
-	let loaded: typeof import("@cursor/sdk") | undefined;
 	let pendingLogin: Promise<void> | undefined;
-	const load = () =>
-		(sdk ??= import("@cursor/sdk").then((module) => (loaded = module)));
-	const failure = (operation: string, reason: string, cause: unknown) =>
-		new CursorSdkFailure({
-			operation,
-			reason,
-			...((cause instanceof CursorSdkFailure && cause.authRequired) ||
-			(loaded && cause instanceof loaded.AuthenticationError)
-				? { authRequired: true }
-				: {}),
-		});
+	const load = () => (sdk ??= import("@cursor/sdk"));
+	const call = async <A>(
+		operation: string,
+		run: () => Promise<A>,
+	): Promise<A> => {
+		try {
+			return await run();
+		} catch (cause) {
+			throw cursorSdkFailure(operation, cause);
+		}
+	};
 	const stores = new WeakMap<
 		CursorStore,
 		import("@cursor/sdk").LocalAgentStore
@@ -67,7 +66,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 					}),
 				),
 				subagentInherit: options.subagentInherit,
-				enableAgentRetries: false,
+				enableAgentRetries: true,
 			},
 		};
 	};
@@ -76,8 +75,8 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		return {
 			id: agent.agentId,
 			async send(prompt, options, onDelta) {
-				const run = await agent
-					.send(prompt, {
+				const run = await call("agent.send", () =>
+					agent.send(prompt, {
 						model: {
 							id: options.model.id,
 							...(options.model.params
@@ -85,31 +84,30 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 								: {}),
 						},
 						mode: options.mode,
+						...(options.local ? { local: options.local } : {}),
 						onDelta: ({ update }) => onDelta(update),
-					})
-					.catch((cause: unknown) => {
-						throw failure("agent.send", "Cursor send failed", cause);
-					});
+					}),
+				);
 				let endStream: () => void = () => {};
 				const streamEnded = new Promise<void>((resolve) => {
 					endStream = resolve;
 				});
 				let waiting: Promise<unknown> | undefined;
+				let streamFailure: CursorSdkFailure | undefined;
 				return {
 					id: run.id,
 					stream: (async function* () {
 						try {
 							yield* run.stream();
 						} catch (cause) {
-							throw failure("run.stream", "Cursor stream failed", cause);
+							streamFailure = cursorSdkFailure("run.stream", cause);
+							throw streamFailure;
 						} finally {
 							endStream();
 						}
 					})(),
 					wait() {
-						const terminal = (waiting ??= run.wait().catch((cause: unknown) => {
-							throw failure("run.wait", "Cursor wait failed", cause);
-						}));
+						const terminal = (waiting ??= call("run.wait", () => run.wait()));
 						return Promise.race([
 							terminal,
 							streamEnded.then(async () => {
@@ -119,18 +117,22 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 									run.status !== "cancelled" &&
 									run.status !== "error"
 								) {
-									throw new CursorSdkFailure({
-										operation: "run.wait",
-										reason: "Cursor stream ended without a terminal status",
-									});
+									throw (
+										streamFailure ??
+										new CursorSdkFailure({
+											operation: "run.wait",
+											reason: "Cursor stream ended without a terminal status",
+										})
+									);
 								}
 								return terminal;
 							}),
 						]);
 					},
-					cancel: () => run.cancel(),
+					cancel: () => call("run.cancel", () => run.cancel()),
 				};
 			},
+			getUsage: () => call("agent.getUsage", () => agent.getUsage()),
 			close() {
 				return (closed ??= (async () => {
 					// close() releases its lease without awaiting it in 1.0.37.
@@ -230,7 +232,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 				// The SDK persists the key. Never return it beyond this adapter.
 				await operation;
 			} catch (cause) {
-				throw failure("auth.login", "Cursor login failed", cause);
+				throw cursorSdkFailure("auth.login", cause);
 			} finally {
 				pendingLogin = undefined;
 			}
@@ -239,7 +241,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 			try {
 				return await (await load()).Cursor.auth.status();
 			} catch (cause) {
-				throw failure("auth.status", "Cursor auth status failed", cause);
+				throw cursorSdkFailure("auth.status", cause);
 			}
 		},
 		async authLogout() {
@@ -248,27 +250,30 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 				await pendingLogin?.catch(() => {});
 				await (await load()).Cursor.auth.logout();
 			} catch (cause) {
-				throw failure("auth.logout", "Cursor logout failed", cause);
+				throw cursorSdkFailure("auth.logout", cause);
 			}
 		},
 		async storedCredential() {
 			try {
 				const { FileCredentialStore } = await load();
 				return await new FileCredentialStore().load();
-			} catch {
-				throw new CursorSdkFailure({
-					operation: "credential.store",
-					reason: "Cursor credential store could not be read",
-				});
+			} catch (cause) {
+				throw cursorSdkFailure("credential.store", cause);
 			}
 		},
 		async modelsList(credential) {
 			try {
-				return await (await load()).Cursor.models.list({
+				const models = await (await load()).Cursor.models.list({
 					apiKey: credential.apiKey,
 				});
+				return models.map(({ id, displayName, parameters, variants }) => ({
+					id,
+					displayName,
+					...(parameters ? { parameters } : {}),
+					...(variants ? { variants } : {}),
+				}));
 			} catch (cause) {
-				throw failure("models.list", "Cursor model list failed", cause);
+				throw cursorSdkFailure("models.list", cause);
 			}
 		},
 		async openStore(path, cwd) {
@@ -296,11 +301,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 					store,
 				),
 			).catch((cause: unknown) => {
-				throw failure(
-					"sandbox.prime",
-					"Cursor sandbox initialization failed",
-					cause,
-				);
+				throw cursorSdkFailure("sandbox.prime", cause);
 			});
 			try {
 				// 1.0.37 initializes executors lazily. Its checked internal method
@@ -315,11 +316,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 					});
 				}
 				await agent.getExecutor().catch((cause: unknown) => {
-					throw failure(
-						"sandbox.prime",
-						"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.",
-						cause,
-					);
+					throw cursorSdkFailure("sandbox.prime", cause);
 				});
 			} finally {
 				await wrapAgent(agent).close();
@@ -327,21 +324,21 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		},
 		async createAgent(options, credential, store, customTools) {
 			return wrapAgent(
-				await (await load()).Agent.create(
-					agentOptions(options, credential, store, customTools),
-				).catch((cause: unknown) => {
-					throw failure("agent.create", "Cursor agent creation failed", cause);
-				}),
+				await call("agent.create", async () =>
+					(await load()).Agent.create(
+						agentOptions(options, credential, store, customTools),
+					),
+				),
 			);
 		},
 		async resumeAgent(id, options, credential, store, customTools) {
 			return wrapAgent(
-				await (await load()).Agent.resume(
-					id,
-					agentOptions(options, credential, store, customTools),
-				).catch((cause: unknown) => {
-					throw failure("agent.resume", "Cursor agent resume failed", cause);
-				}),
+				await call("agent.resume", async () =>
+					(await load()).Agent.resume(
+						id,
+						agentOptions(options, credential, store, customTools),
+					),
+				),
 			);
 		},
 	};

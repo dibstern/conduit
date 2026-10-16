@@ -71,6 +71,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			loginDelayMs?: number;
 			loginUrlDelayMs?: number;
 			loginTimeoutMs?: number;
+			catalogTtlMs?: number;
 			environmentKey?: boolean;
 			initialCredential?: boolean;
 		} = {},
@@ -122,6 +123,11 @@ describe("Cursor authentication through the built daemon and detached runners", 
 				CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS: String(
 					options.loginTimeoutMs ?? TIMEOUT,
 				),
+				...(options.catalogTtlMs === undefined
+					? {}
+					: {
+							CONDUIT_TEST_CURSOR_CATALOG_TTL_MS: String(options.catalogTtlMs),
+						}),
 				...(options.environmentKey
 					? { CURSOR_API_KEY: "[REDACTED:environment]" }
 					: {}),
@@ -549,6 +555,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 	it("offers login when a stored credential is rejected by a turn or discovery", async () => {
 		const fixture = await start("rejected-credential", {
 			initialCredential: true,
+			catalogTtlMs: 1,
 		});
 		const added = await fixture.requestRpc(
 			new AddInstance({ name: "Cursor rejected credential", driver: "cursor" }),

@@ -33,6 +33,7 @@
 	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import { partStyle } from "./activity-style.js";
+	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
 
@@ -94,6 +95,7 @@
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
+	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
 	<div
@@ -143,6 +145,7 @@
 				<span class="{launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1'} truncate font-mono {running ? 'text-text-secondary' : 'text-text-muted'}">
 					{subject}
 				</span>
+				{#if typeof part.metadata?.['cursorToolType'] === "string" && part.metadata['truncated'] === true}<span class="shrink-0 text-text-muted">Truncated</span>{/if}
 				{#if launch}
 					<!-- One line per task: what it is doing now, how long, and what it
 					     used. The outcome's colour carries failed vs stopped too. -->
@@ -185,7 +188,7 @@
 		</div>
 		{#if !launch && expanded && isSkill}
 			<div class="ml-7 mr-1 my-1"><SkillDoc name={subject} /></div>
-		{:else if !launch && expanded && (part.result || command)}
+		{:else if !launch && expanded && (part.result || command || cursorDetail)}
 			<ToolFullDetail message={part} class="ml-7 mr-1 mb-1">
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}

@@ -45,6 +45,7 @@
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
 	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
+	import { approvals } from "../../stores/composer-settings.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -91,7 +92,7 @@
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingImage } from "../../types.js";
+	import type { PendingImage, SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
@@ -214,6 +215,8 @@
 			// Projected rows report every ordinary tool as completed, so the
 			// missing result is what marks the tool still in flight.
 			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
+				const progress = part.metadata?.["progress"];
+				if (typeof part.metadata?.["cursorToolType"] === "string" && typeof progress === "string" && progress) return progress;
 				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
 				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
 			}
@@ -264,6 +267,8 @@
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
+	const composerNotices: Partial<Record<SessionPermissionMode, string>> | undefined = $derived(composerPresentation?.composerNotice);
+	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -1103,10 +1108,11 @@
 			inputText = command;
 			newCursorPos = command.length;
 		}
-		// Move cursor to end of inserted command and focus the textarea
+		// Move cursor to end of inserted command and focus the textarea. tick, not a
+		// frame: keys typed before the next frame would land before the moved caret.
 		if (textareaEl) {
 			textareaEl.focus();
-			requestAnimationFrame(() => {
+			void tick().then(() => {
 				if (textareaEl) {
 					textareaEl.selectionStart = newCursorPos;
 					textareaEl.selectionEnd = newCursorPos;
@@ -1680,8 +1686,8 @@
 				{/if}
 			</div>
 		{/if}
-		{#if composerPresentation?.composerNotice}
-			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation.composerNotice}</p>
+		{#if composerNotice}
+			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
 			<!-- One pulse per live background task; the header row lists them. -->
