@@ -292,7 +292,6 @@ describe("AttentionBanner merge logic", () => {
 		await fireEvent.click(sessionButton);
 
 		expect(viewSessionRpcSpy).toHaveBeenCalledWith({
-			projectSlug: "project-a",
 			sessionId: "ses_other1",
 			originId: expect.any(String),
 		});

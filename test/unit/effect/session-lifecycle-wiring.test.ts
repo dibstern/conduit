@@ -18,10 +18,13 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -151,7 +154,7 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	const baseLayer = Layer.mergeAll(
 		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		Layer.succeed(ConfigTag, makeMockConfig()),
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeOverridesStateLive(),
 		RelayStatusSnapshotLive,
 		Layer.succeed(OpenCodeInstancesTag, instances),

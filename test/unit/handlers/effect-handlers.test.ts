@@ -3,6 +3,10 @@ import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceTag,
@@ -51,7 +55,6 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -2913,7 +2916,7 @@ describe("sendMessageToSession", () => {
 						loggerLayer,
 						configLayer,
 						Layer.succeed(WebSocketHandlerTag, ws),
-						Layer.succeed(BackgroundLivenessTag, () => undefined),
+Layer.effect(SessionActivityTag, makeSessionActivity),
 						RelayStatusSnapshotLive,
 						makeOverridesStateLive(),
 						Layer.succeed(

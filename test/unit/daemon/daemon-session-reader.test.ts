@@ -5,13 +5,17 @@ import { basename, dirname, join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
 import { afterEach, describe, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -153,6 +157,7 @@ describe("listDaemonSessions", () => {
 				}),
 			).pipe(
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{ slug: "project", title: "Project", folders },
@@ -203,6 +208,7 @@ describe("listDaemonSessions", () => {
 			).not.toHaveProperty("git");
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -262,6 +268,7 @@ describe("listDaemonSessions", () => {
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -328,6 +335,7 @@ describe("listDaemonSessions", () => {
 			});
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -383,6 +391,7 @@ describe("listDaemonSessions", () => {
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -448,6 +457,7 @@ describe("listDaemonSessions", () => {
 			expect(rootC).toMatchObject({ id: "root-c", processing: true });
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -524,6 +534,7 @@ describe("listDaemonSessions", () => {
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -628,6 +639,7 @@ describe("listDaemonSessions", () => {
 				expect(result.nextCursor).toEqual({ updatedAt: 200, id: "b-mid" });
 			}).pipe(
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{
@@ -762,6 +774,7 @@ describe("listDaemonSessions", () => {
 			expect(pastEnd.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -816,6 +829,7 @@ describe("listDaemonSessions", () => {
 			expect(final.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -891,6 +905,7 @@ describe("listDaemonSessions", () => {
 			expect(paged).toEqual(expected);
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -958,6 +973,7 @@ describe("listDaemonSessions", () => {
 			]);
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -988,6 +1004,7 @@ describe("listDaemonSessions", () => {
 			]);
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -1049,6 +1066,7 @@ describe("listDaemonSessions", () => {
 				);
 			}).pipe(
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{
@@ -1074,51 +1092,50 @@ describe("listDaemonSessions", () => {
 });
 
 describe("ResolveSession", () => {
-	it.scoped(
-		"finds sessions in cold project stores and returns null for unknown IDs",
-		() => {
-			const root = makeTemporaryRoot();
-			const projects = ["project-a", "project-b"].map((slug) => ({
-				slug,
-				title: slug,
-				folders: [join(root, slug)] as const,
-			}));
-			for (const project of projects) {
-				makeProjectStore(project.folders[0], [
-					{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
-				]);
-			}
-			return Effect.gen(function* () {
-				const handlers = yield* DaemonWsRpcHandlersTag;
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(
-							() => Effect.die("Must not resolve a relay"),
-							handlers,
-						),
-					),
-				);
-				for (const project of projects) {
-					expect(
-						yield* client.ResolveSession({
-							sessionId: `${project.slug}-session`,
-						}),
-					).toEqual({ projectSlug: project.slug });
-				}
-				expect(
-					yield* client.ResolveSession({
-						projectSlug: "nonexistent",
-						sessionId: "project-b-session",
-					}),
-				).toEqual({ projectSlug: "project-b" });
-				expect(yield* client.ResolveSession({ sessionId: "unknown" })).toEqual({
-					projectSlug: null,
-				});
-			}).pipe(
+	it.scoped("finds indexed sessions and rejects unknown IDs", () => {
+		const root = makeTemporaryRoot();
+		const projects = ["project-a", "project-b"].map((slug) => ({
+			slug,
+			title: slug,
+			folders: [join(root, slug)] as const,
+		}));
+		for (const project of projects) {
+			makeProjectStore(project.folders[0], [
+				{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
+			]);
+		}
+		return Effect.gen(function* () {
+			const handlers = yield* DaemonWsRpcHandlersTag;
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 				Effect.provide(
-					makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+					makeRoutedWsRpcServerLayer(
+						() => Effect.die("Must not resolve a relay"),
+						handlers,
+					),
 				),
 			);
-		},
-	);
+			for (const project of projects) {
+				expect(
+					yield* client.ResolveSession({
+						sessionId: `${project.slug}-session`,
+					}),
+				).toEqual({ projectSlug: project.slug });
+			}
+			expect(
+				yield* client.ResolveSession({
+					sessionId: "project-b-session",
+				}),
+			).toEqual({ projectSlug: "project-b" });
+			expect(
+				yield* Effect.either(client.ResolveSession({ sessionId: "unknown" })),
+			).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },
+			});
+		}).pipe(
+			Effect.provide(
+				makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+			),
+		);
+	});
 });

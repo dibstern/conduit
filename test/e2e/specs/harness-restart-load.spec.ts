@@ -405,7 +405,6 @@ test("opens the heavy session after a restart under load", async ({
 		const sessionId = await driver.createSession(`Stream ${index}`);
 		await Effect.runPromise(
 			driver.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: driver.originId,
 				inputId: randomUUID(),
@@ -610,7 +609,6 @@ test("opens the heavy session after a restart under load", async ({
 	);
 	await Effect.runPromise(
 		toolDriver.rpc.input.submit({
-			projectSlug: "process-test",
 			sessionId: toolSession,
 			originId: toolDriver.originId,
 			inputId: randomUUID(),

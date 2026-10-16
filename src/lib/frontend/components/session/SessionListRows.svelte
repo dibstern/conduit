@@ -53,7 +53,7 @@
 		touch(session, "sidebar-pick");
 		const projectSlug = session.projectSlug;
 		if (projectSlug && isSessionWoken(session, sessionState.now)) {
-			unsnoozeSessionRpc({ projectSlug, sessionId: session.id, originId: getBrowserClientId() })
+			unsnoozeSessionRpc({ sessionId: session.id, originId: getBrowserClientId() })
 				.catch(() => showToast("Couldn't clear the wake", { variant: "error" }));
 		}
 		if (session.id !== sessionState.currentId) switchToSession(session.id, session.projectSlug);

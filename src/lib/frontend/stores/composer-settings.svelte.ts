@@ -84,7 +84,7 @@ function switchSetting(
 function approvalOptions(
 	order: readonly SessionPermissionMode[],
 ): readonly ApprovalOption[] {
-	const claude = discoveryState.currentProviderId === "claude";
+	const traits = discoveryState.currentTraits;
 	// OpenCode enforces Plan only on Side Threads, through session rules.
 	const sideThread =
 		findSession(sessionState.currentId ?? "")?.sideThread === true;
@@ -92,8 +92,8 @@ function approvalOptions(
 		PERMISSION_MODES.filter(
 			(option) =>
 				option.mode === mode &&
-				(claude ||
-					(!option.claudeOnly && !option.sessionOnly) ||
+				((traits?.permissionModes.includes(option.mode) ??
+					(!option.claudeOnly && !option.sessionOnly)) ||
 					(sideThread && option.mode === "plan")),
 		),
 	);
@@ -124,7 +124,7 @@ export const effort: ComposerSetting<string> = {
 			"effort",
 			undo,
 			() =>
-				switchVariantRpc({ projectSlug, sessionId, variant }).then((response) =>
+				switchVariantRpc({ sessionId, variant }).then((response) =>
 					apply({
 						variant: response.variant,
 						variants: [...response.variants],
@@ -166,7 +166,7 @@ export const approvals: ComposerSetting<ApprovalOption> = {
 		switchSetting(
 			"approvals",
 			undo,
-			() => switchPermissionModeRpc({ projectSlug, sessionId, mode }),
+			() => switchPermissionModeRpc({ sessionId, mode }),
 			`Couldn't switch approval mode to "${value.label}"`,
 		);
 	},
@@ -207,7 +207,6 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 				undo,
 				() =>
 					switchContextWindowRpc({
-						projectSlug,
 						sessionId,
 						contextWindow: contextWindowValue,
 					}).then((response) =>
@@ -268,36 +267,34 @@ export const model: ComposerSetting<ComposerModel> = {
 			"model",
 			undo,
 			() =>
-				switchModelRpc({ projectSlug, sessionId, ...value }).then(
-					(response) => {
-						apply({
-							modelId: response.model,
-							providerId: response.provider,
-							variant: response.variant,
-							variants: [...response.variants],
-							...(response.contextWindow
-								? {
-										contextWindow: response.contextWindow.contextWindow,
-										contextWindowOptions: response.contextWindow.options.map(
-											(option) => ({
-												...option,
-											}),
-										),
-									}
-								: {}),
-						});
-						void getAgentsRpc({ projectSlug, sessionId })
-							.then((response) => {
-								// Agents are shared composer state, unlike the per-session pick.
-								if (
-									sessionState.currentId === sessionId &&
-									getCurrentSlug() === projectSlug
-								)
-									applyGetAgentsResponse(response, sessionId);
-							})
-							.catch(() => undefined);
-					},
-				),
+				switchModelRpc({ sessionId, ...value }).then((response) => {
+					apply({
+						modelId: response.model,
+						providerId: response.provider,
+						variant: response.variant,
+						variants: [...response.variants],
+						...(response.contextWindow
+							? {
+									contextWindow: response.contextWindow.contextWindow,
+									contextWindowOptions: response.contextWindow.options.map(
+										(option) => ({
+											...option,
+										}),
+									),
+								}
+							: {}),
+					});
+					void getAgentsRpc({ sessionId })
+						.then((response) => {
+							// Agents are shared composer state, unlike the per-session pick.
+							if (
+								sessionState.currentId === sessionId &&
+								getCurrentSlug() === projectSlug
+							)
+								applyGetAgentsResponse(response, sessionId);
+						})
+						.catch(() => undefined);
+				}),
 			`Couldn't switch model to "${value.modelId}"`,
 		);
 	},

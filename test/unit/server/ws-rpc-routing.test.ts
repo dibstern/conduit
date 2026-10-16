@@ -1,7 +1,7 @@
 import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import {
-	type Context,
+	Context,
 	Effect,
 	Exit,
 	Layer,
@@ -17,11 +17,16 @@ import {
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
 import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -41,6 +46,11 @@ import {
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
+const sessionDirectory = makeSessionDirectoryLive("/unused", []).pipe(
+	Layer.tap((context) =>
+		Context.get(context, SessionDirectory).record("project-a", ["session-a"]),
+	),
+);
 describe("routed RPC server", () => {
 	it.scoped(
 		"rejects session creation without a project even with a relay default",
@@ -55,7 +65,9 @@ describe("routed RPC server", () => {
 					"CreateSession",
 				).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, "conduit"),
+						makeRoutedWsRpcServerLayer(resolve, undefined, "conduit").pipe(
+							Layer.provide(sessionDirectory),
+						),
 					),
 				);
 				const malformed = new CreateSession(
@@ -89,7 +101,7 @@ describe("routed RPC server", () => {
 							undefined,
 							bus,
 						),
-						Layer.succeed(BackgroundLivenessTag, () => undefined),
+						Layer.effect(SessionActivityTag, makeSessionActivity),
 						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
 						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					),
@@ -122,7 +134,7 @@ describe("routed RPC server", () => {
 							: Effect.fail(
 									new WsRpcError({ message: `Unknown project ${slug}` }),
 								);
-					}),
+					}).pipe(Layer.provide(sessionDirectory)),
 				),
 			);
 			for (const slug of ["project-a", "project-b"]) {
@@ -154,7 +166,7 @@ describe("routed RPC server", () => {
 								undefined,
 								bus,
 							),
-							Layer.succeed(BackgroundLivenessTag, () => undefined),
+							Layer.effect(SessionActivityTag, makeSessionActivity),
 						),
 					);
 					contexts.set(slug, context as Context.Context<unknown>);
@@ -221,7 +233,7 @@ describe("routed RPC server", () => {
 								: Effect.fail(
 										new WsRpcError({ message: `Unknown project ${slug}` }),
 									);
-						}),
+						}).pipe(Layer.provide(sessionDirectory)),
 					),
 				);
 				const envelopes = yield* client
@@ -268,7 +280,7 @@ describe("routed RPC server", () => {
 							undefined,
 							undefined,
 							attachProject,
-						),
+						).pipe(Layer.provide(sessionDirectory)),
 					),
 				);
 				expect(
@@ -300,7 +312,9 @@ describe("routed RPC server", () => {
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, "initial"),
+						makeRoutedWsRpcServerLayer(resolve, undefined, "initial").pipe(
+							Layer.provide(sessionDirectory),
+						),
 					),
 				);
 				expect(
@@ -319,12 +333,15 @@ describe("routed RPC server", () => {
 			);
 			const resolve = vi.fn(() => Effect.succeed(context));
 			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-				Effect.provide(makeRoutedWsRpcServerLayer(resolve)),
+				Effect.provide(
+					makeRoutedWsRpcServerLayer(resolve).pipe(
+						Layer.provide(sessionDirectory),
+					),
+				),
 			);
 
 			expect(
 				yield* client.ViewSession({
-					projectSlug: "project-a",
 					sessionId: "session-a",
 					originId: "relay-client",
 				}),
@@ -345,7 +362,9 @@ describe("routed RPC server", () => {
 				const resolve = vi.fn(() => Effect.succeed(context));
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer(resolve, undefined, "initial"),
+						makeRoutedWsRpcServerLayer(resolve, undefined, "initial").pipe(
+							Layer.provide(sessionDirectory),
+						),
 					),
 				);
 				expect(yield* client.GetProjects({})).toMatchObject({
@@ -410,7 +429,11 @@ describe("routed RPC server", () => {
 							);
 				});
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(makeRoutedWsRpcServerLayer(resolve)),
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(resolve).pipe(
+							Layer.provide(sessionDirectory),
+						),
+					),
 				);
 				const results = yield* Effect.all(
 					[
@@ -454,7 +477,7 @@ describe("routed RPC server", () => {
 			const scope = yield* Scope.make();
 			yield* makeRoutedWsRpcWebSocketHandler(() =>
 				Effect.fail(new WsRpcError({ message: "unused" })),
-			).pipe(Scope.extend(scope));
+			).pipe(Effect.provide(sessionDirectory), Scope.extend(scope));
 			expect(close).not.toHaveBeenCalled();
 			yield* Scope.close(scope, Exit.void);
 			expect(close).toHaveBeenCalledTimes(1);

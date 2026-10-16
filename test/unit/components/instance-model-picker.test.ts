@@ -43,8 +43,8 @@ const setDefaultModelRpcSpy = vi.hoisted(() =>
 	})),
 );
 const reloadProviderSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { projectSlug: string; sessionId: string }) => ({
-		projectSlug: input.projectSlug,
+	vi.fn(async (input: { sessionId: string }) => ({
+		projectSlug: "project-a",
 		sessionId: input.sessionId,
 	})),
 );
@@ -70,11 +70,8 @@ vi.mock(
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	getAgentsRpc: (input: unknown) => getAgentsRpcSpy(input),
-	reloadProviderSessionRpc: (input: {
-		projectSlug: string;
-		sessionId: string;
-		commandId: string;
-	}) => reloadProviderSessionRpcSpy(input),
+	reloadProviderSessionRpc: (input: { sessionId: string; commandId: string }) =>
+		reloadProviderSessionRpcSpy(input),
 	setDefaultModelRpc: (input: { model: string; provider: string }) =>
 		setDefaultModelRpcSpy(input),
 	switchModelRpc: (input: { modelId: string; providerId: string }) =>
@@ -304,14 +301,12 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				modelId: "claude-opus-4-7",
 				providerId: "claude",
 			});
 		});
 		expect(getAgentsRpcSpy).toHaveBeenCalledWith({
-			projectSlug: "project-a",
 			sessionId: "session-1",
 		});
 		expect(discoveryState.currentVariant).toBe("fast");
@@ -332,7 +327,6 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				modelId: "claude-opus-4-7",
 				providerId: "claude",
@@ -340,7 +334,6 @@ describe("InstanceModelPicker", () => {
 		});
 		await waitFor(() => {
 			expect(getAgentsRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 		});
@@ -390,7 +383,6 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(reloadProviderSessionRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				commandId: expect.any(String),
 			});

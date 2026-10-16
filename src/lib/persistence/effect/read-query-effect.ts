@@ -140,7 +140,7 @@ export const sessionRowsToSessionInfoList = (
 		readonly unreadSessionIds?: ReadonlySet<string>;
 		readonly pendingQuestionCounts?: ReadonlyMap<string, number>;
 		readonly pendingPermissionCounts?: ReadonlyMap<string, number>;
-		readonly hintDismissals?: ReadonlyMap<string, number>;
+		readonly hintDismissals?: ReadonlyMap<string, number> | undefined;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -500,6 +500,7 @@ export interface ReadQueryEffect {
 		before?: { updatedAt: number; id: string };
 		statuses?: Readonly<Record<string, { type: string }>>;
 		backgroundOf?: (sessionId: string) => SessionBackground | undefined;
+		hintDismissals?: ReadonlyMap<string, number>;
 	}) => Effect.Effect<
 		readonly (SessionProjection & { readonly updatedAt: number })[],
 		ReadQueryEffectError | SqlError
@@ -604,6 +605,7 @@ export interface ReadQueryEffect {
 		readonly familyOf?: string;
 		/** Bound a family base to this member's view; ignored for windows. */
 		readonly viewed?: string;
+		readonly hintDismissals?: ReadonlyMap<string, number>;
 		/** In-memory liveness the row cannot carry; see announceBackgroundWork. */
 		readonly backgroundOf?: (
 			sessionId: string,
@@ -1320,7 +1322,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
-				...(hintDismissals && { hintDismissals }),
+				hintDismissals: opts?.hintDismissals ?? hintDismissals,
 				...(opts?.backgroundOf && {
 					backgroundOf: opts.backgroundOf,
 				}),
@@ -1733,6 +1735,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		readonly through?: number;
 		readonly familyOf?: string;
 		readonly viewed?: string;
+		readonly hintDismissals?: ReadonlyMap<string, number>;
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
@@ -1827,8 +1830,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										item: {
 											...sidebarItem(sidebar, range?.backgroundOf, busyMembers),
 											workspaceHint:
-												hintDismissals?.get(sidebar.session.id) ===
-												workspace_hint_sequence
+												(range?.hintDismissals ?? hintDismissals)?.get(
+													sidebar.session.id,
+												) === workspace_hint_sequence
 													? undefined
 													: sidebar.session.workspaceHint,
 										},
@@ -1958,7 +1962,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
-						...(hintDismissals && { hintDismissals }),
+						hintDismissals: range?.hintDismissals ?? hintDismissals,
 						...(range?.backgroundOf && {
 							backgroundOf: range.backgroundOf,
 						}),

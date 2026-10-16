@@ -28,9 +28,7 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-// The replay harness hosts one project; the daemon /rpc routes by slug.
-const projectSlug = "e2e-replay";
-
+// Session ownership determines the relay on the daemon /rpc endpoint.
 async function callRpc<A>(
 	relayUrl: string,
 	call: (
@@ -96,7 +94,7 @@ async function setupForkSession(
 	// Fork: whole-session fork (no messageId)
 	const forkedSessionId = await callRpc(relayUrl, (client) =>
 		client
-			.ForkSession({ projectSlug, sessionId, originId: crypto.randomUUID() })
+			.ForkSession({ sessionId, originId: crypto.randomUUID() })
 			.pipe(Effect.map((result) => result.sessionId)),
 	);
 	await page.evaluate((sessionId) => {
@@ -233,7 +231,6 @@ test.describe("Fork Session Rendering", () => {
 		);
 		await callRpc(relayUrl, (client) =>
 			client.DeleteSession({
-				projectSlug,
 				sessionId: sourceId,
 				originId: crypto.randomUUID(),
 			}),

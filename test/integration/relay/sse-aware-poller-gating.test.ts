@@ -435,7 +435,6 @@ async function waitForIdle(
 			const snapshot = await client.rpcCall((rpc) =>
 				rpc
 					.SubscribeSessionFamily({
-						projectSlug: `test-sse-gating-${harness.relayPort}`,
 						sessionId,
 					})
 					.pipe(

@@ -9,7 +9,7 @@ This plan installs the portable UBM acceptance-test pipeline
 a Gherkin feature file into JSON IR, generates a thin executable test
 entrypoint, runs it, and mutates example values to measure test strength.
 
-The **gym app** (`/Users/dstern/src/personal/gym/app`) is the concrete
+The **gym app** (`~/src/personal/gym/app`) is the concrete
 TypeScript blueprint. gym drives **Maestro against an iOS simulator**; conduit
 swaps the driver to **the Playwright `chromium` library against the built
 conduit web app**. Everything else — parser tools, JSON IR, generator, runtime,

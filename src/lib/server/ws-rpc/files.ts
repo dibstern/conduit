@@ -69,77 +69,86 @@ export const filesHandlers = {
 			),
 		),
 	GetFileTree: (request) =>
-		resolveSessionRequestFolders(request.sessionId).pipe(
-			Effect.flatMap(({ workspaceRoot, effectiveFolders }) =>
-				Effect.gen(function* () {
-					const entries = yield* getFileTreeEntries(workspaceRoot);
-					const roots = labelProjectFolders(
-						effectiveFolders.map(({ root }) => root),
-					).map((folder, index) => ({
-						...folder,
-						...(effectiveFolders[index]?.shared ? { shared: true } : {}),
-					}));
-					return {
-						projectSlug: request.projectSlug,
-						entries,
-						...(roots.length > 1 || roots.some((folder) => folder.shared)
-							? { roots }
-							: {}),
-					};
-				}),
-			),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `GetFileTree failed: ${String(error)}`,
+		Effect.flatMap(ConfigTag, (config) =>
+			resolveSessionRequestFolders(
+				"sessionId" in request ? request.sessionId : undefined,
+			).pipe(
+				Effect.flatMap(({ workspaceRoot, effectiveFolders }) =>
+					Effect.gen(function* () {
+						const entries = yield* getFileTreeEntries(workspaceRoot);
+						const roots = labelProjectFolders(
+							effectiveFolders.map(({ root }) => root),
+						).map((folder, index) => ({
+							...folder,
+							...(effectiveFolders[index]?.shared ? { shared: true } : {}),
+						}));
+						return {
+							projectSlug: config.slug,
+							entries,
+							...(roots.length > 1 || roots.some((folder) => folder.shared)
+								? { roots }
+								: {}),
+						};
 					}),
+				),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `GetFileTree failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
 	GetFileList: (request) =>
-		resolveFileDirectory(request).pipe(
-			Effect.flatMap((directory) =>
-				getFileListResponse(request.path ?? ".", directory),
-			),
-			Effect.map((result) => ({
-				projectSlug: request.projectSlug,
-				...(request.root !== undefined ? { root: request.root } : {}),
-				path: result.path,
-				entries: result.entries,
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `GetFileList failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			resolveFileDirectory(request).pipe(
+				Effect.flatMap((directory) =>
+					getFileListResponse(request.path ?? ".", directory),
+				),
+				Effect.map((result) => ({
+					projectSlug: config.slug,
+					...(request.root !== undefined ? { root: request.root } : {}),
+					path: result.path,
+					entries: result.entries,
+				})),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `GetFileList failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
 	GetFileContent: (request) =>
-		resolveFileDirectory(request).pipe(
-			Effect.flatMap((directory) =>
-				getFileContentResponse(request.path, directory),
-			),
-			Effect.map((result) => ({
-				projectSlug: request.projectSlug,
-				...(request.root !== undefined ? { root: request.root } : {}),
-				path: result.path,
-				content: result.content,
-				...(result.binary != null ? { binary: result.binary } : {}),
-			})),
-			Effect.catchAll((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `GetFileContent failed: ${String(error)}`,
-					}),
+		Effect.flatMap(ConfigTag, (config) =>
+			resolveFileDirectory(request).pipe(
+				Effect.flatMap((directory) =>
+					getFileContentResponse(request.path, directory),
+				),
+				Effect.map((result) => ({
+					projectSlug: config.slug,
+					...(request.root !== undefined ? { root: request.root } : {}),
+					path: result.path,
+					content: result.content,
+					...(result.binary != null ? { binary: result.binary } : {}),
+				})),
+				Effect.catchAll((error) =>
+					Effect.fail(
+						new WsRpcError({
+							message: `GetFileContent failed: ${String(error)}`,
+						}),
+					),
 				),
 			),
 		),
 	GetToolDetails: (request) =>
 		Effect.gen(function* () {
+			const config = yield* ConfigTag;
 			const toolContent = yield* ToolContentServiceTag;
 			return {
-				projectSlug: request.projectSlug,
+				projectSlug: config.slug,
 				tools: yield* toolContent.details(request.sessionId, request.toolIds),
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("GetToolDetails"))),
@@ -147,20 +156,18 @@ export const filesHandlers = {
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
 			const primaryFolder = config.projectDir;
-			const directory = request.sessionId
-				? yield* (yield* SessionWorkspaceTag).get(request.sessionId)
-				: primaryFolder;
-			const result = yield* getSkillContentValue(
-				request.name,
-				config.slug === request.projectSlug ? directory : undefined,
-			);
+			const directory =
+				"sessionId" in request
+					? yield* (yield* SessionWorkspaceTag).get(request.sessionId)
+					: primaryFolder;
+			const result = yield* getSkillContentValue(request.name, directory);
 			if (result === undefined) {
 				return yield* Effect.fail(
 					new WsRpcError({ message: "Skill content not available" }),
 				);
 			}
 			return {
-				projectSlug: request.projectSlug,
+				projectSlug: config.slug,
 				name: request.name,
 				...result,
 			};

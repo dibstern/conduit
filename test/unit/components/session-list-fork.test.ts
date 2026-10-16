@@ -87,7 +87,6 @@ describe("SessionList fork", () => {
 		expect(routerState.path).toContain("/s/fork");
 		expect(viewSessionRpc).toHaveBeenCalledWith(
 			expect.objectContaining({
-				projectSlug: "current-project",
 				sessionId: "fork",
 			}),
 		);

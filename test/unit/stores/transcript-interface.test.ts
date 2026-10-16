@@ -1,17 +1,13 @@
 // @vitest-environment jsdom
-import { RpcClient, type RpcMessage } from "@effect/rpc";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ResumePoint,
 	type SessionDetailEnvelope,
+	type WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { SavedTranscript } from "../../../src/lib/frontend/stores/saved-transcripts.js";
-import {
-	makeWsRpcClientsLayer,
-	type WsRpcConnect,
-} from "../../../src/lib/frontend/transport/shared-client.js";
-import { WsRpcGroup } from "../../../src/lib/frontend/transport/ws-rpc.js";
+import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 
 const runtimeMock = vi.hoisted(() => ({
@@ -46,6 +42,8 @@ import {
 	viewTranscript,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
+import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
+import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 
 interface Request {
 	id: string;
@@ -54,73 +52,55 @@ interface Request {
 }
 
 function adapter() {
-	const requests: Request[] = [];
-	const interrupted: string[] = [];
-	let deliver:
-		| ((frame: RpcMessage.FromServerEncoded) => Effect.Effect<void>)
-		| undefined;
-	const connect: WsRpcConnect = ({ trafficClass }) =>
-		Effect.gen(function* () {
-			const protocol = RpcClient.Protocol.make((write) =>
-				Effect.sync(() => {
-					if (trafficClass === "stream") deliver = write;
-					return {
-						send: (frame: RpcMessage.FromClientEncoded) =>
-							Effect.sync(() => {
-								if (frame._tag === "Request")
-									requests.push({
-										id: frame.id,
-										tag: frame.tag,
-										payload: frame.payload,
-									});
-								if (frame._tag === "Interrupt")
-									interrupted.push(frame.requestId);
-							}),
-						supportsAck: false,
-						supportsTransferables: false,
-					};
-				}),
-			);
-			return yield* Layer.build(
-				Layer.effect(RpcClient.Protocol, protocol),
-			).pipe(
-				Effect.flatMap((context) =>
-					Effect.provide(
-						RpcClient.make(WsRpcGroup, { flatten: true }),
-						context,
-					),
+	const feeds = new Map<
+		string,
+		Effect.Effect.Success<
+			ReturnType<typeof makeRpcStream<SessionDetailEnvelope, WsRpcError>>
+		>[]
+	>();
+	const table: StubTable = {
+		SubscribeSessionDetail: ({ sessionId }) =>
+			Stream.unwrap(
+				makeRpcStream<SessionDetailEnvelope, WsRpcError>().pipe(
+					Effect.map((feed) => {
+						const subscriptions = feeds.get(sessionId) ?? [];
+						subscriptions.push(feed);
+						feeds.set(sessionId, subscriptions);
+						return feed.stream;
+					}),
 				),
-			);
+			),
+	};
+	const wire = makeRpcWire(table);
+	const feedFor = (request: Request) =>
+		vi.waitFor(() => {
+			const payload = request.payload;
+			if (
+				typeof payload !== "object" ||
+				payload === null ||
+				!("sessionId" in payload)
+			)
+				throw new Error("missing session payload");
+			const index = wire.requests
+				.filter((candidate) => {
+					const other = candidate.payload;
+					return (
+						candidate.tag === "SubscribeSessionDetail" &&
+						typeof other === "object" &&
+						other !== null &&
+						"sessionId" in other &&
+						other.sessionId === payload.sessionId
+					);
+				})
+				.findIndex((candidate) => candidate.id === request.id);
+			const feed = feeds.get(String(payload.sessionId))?.[index];
+			if (!feed) throw new Error("subscription not ready");
+			return feed;
 		});
 	return {
-		requests,
-		interrupted,
-		connect,
+		...wire,
 		async emit(request: Request, envelope: SessionDetailEnvelope) {
-			if (!deliver) throw new Error("stream socket has not opened");
-			await Effect.runPromise(
-				deliver({
-					_tag: "Chunk",
-					requestId: request.id,
-					values: [envelope],
-				}),
-			);
-		},
-		async fail(request: Request) {
-			if (!deliver) throw new Error("stream socket has not opened");
-			await Effect.runPromise(
-				deliver({
-					_tag: "Exit",
-					requestId: request.id,
-					exit: {
-						_tag: "Failure",
-						cause: {
-							_tag: "Fail",
-							error: { _tag: "WsRpcError", message: "closed" },
-						},
-					},
-				}),
-			);
+			await Effect.runPromise((await feedFor(request)).emit(envelope));
 		},
 	};
 }
@@ -389,7 +369,6 @@ describe("transcript feed interface", () => {
 		const two = loadOlderTranscript("A");
 		expect(two).toBe(one);
 		expect(pageMock.loadMoreHistoryRpc).toHaveBeenCalledExactlyOnceWith({
-			projectSlug: "project",
 			sessionId: "A",
 			before: "u2",
 		});

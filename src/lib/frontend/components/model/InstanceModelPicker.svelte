@@ -48,8 +48,9 @@
 	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { getClaudeAccounts, type AccountAvailability } from "../../stores/claude-accounts.svelte.js";
-	import { instanceStatusColor } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import { usageResetTime } from "../../utils/continuation.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -109,8 +110,11 @@
 	const selectedDriver = $derived(
 		// A session shows only its own stored harness: never the draft default, and nothing until its pick loads.
 		sessionState.currentId ? (sessionLoading ? undefined : getSessionDriver(sessionState.currentId)) :
-			selectedInstance?.driver ?? ((discoveryState.currentProviderId || discoveryState.defaultProviderId) === "claude" ? "claude" : discoveryState.currentProviderId || discoveryState.defaultProviderId ? "opencode" : ""),
+			selectedInstance?.driver ?? discoveryState.currentDriver,
 	);
+	const selectedTraits = $derived(getDriverTraits(selectedDriver));
+	const hasAccountUsage = $derived(selectedTraits?.usageHarness === "claude");
+	const accountLabel = $derived(selectedTraits?.accountKind === "config-directory" ? "Account" : "Instance");
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
 	);
@@ -123,14 +127,14 @@
 		})),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
-	const needsClaudeAccount = $derived(selectedDriver === "claude" && driverInstances.length === 0);
+	const needsAccount = $derived(selectedTraits?.accountKind === "config-directory" && driverInstances.length === 0);
 	const accountProjectSlug = $derived(
 		sessionState.currentId
 			? findSession(sessionState.currentId)?.projectSlug ?? ""
 			: getDraftProject() ?? "",
 	);
 	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
-	const switchingTo = $derived(selectedDriver === "claude" && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
+	const switchingTo = $derived(hasAccountUsage && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
 	const wordAccountName = $derived(selectedInstance ? accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedInstance.label) : selectedLabel);
 	let presentedRequest = $state<number | undefined>();
 	const handoff = $derived(accounts.pendingHandoff?.requestId === presentedRequest ? accounts.pendingHandoff : undefined);
@@ -139,7 +143,7 @@
 		| { kind: "status"; status: InstanceStatus }
 	);
 	const accountCards = $derived.by<AccountCard[]>(() => {
-		if (selectedDriver === "claude") {
+		if (hasAccountUsage) {
 			return [...accounts.accounts].sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true)).map((account) => {
 				// Cards show every account's own usage; only the lock depends on the open session.
 				const availability = accounts.availabilityOf(account.id, "");
@@ -161,7 +165,7 @@
 			status: instance.status ?? "healthy",
 		}));
 	});
-	const hasAccountWord = $derived(sessionViewState.composerTier === "wide" && (selectedDriver === "claude" ? accounts.accounts.length >= 2 : driverInstances.length >= 2));
+	const hasAccountWord = $derived(sessionViewState.composerTier === "wide" && (hasAccountUsage ? accounts.accounts.length >= 2 : driverInstances.length >= 2));
 
 	const scopedGroups = $derived(getProviderGroupsForInstance(selectedId));
 	const filteredGroups = $derived.by(() => {
@@ -212,7 +216,7 @@
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
 		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ projectSlug, sessionId })
+		void getModelsRpc({ sessionId })
 			.then((response) => {
 				if (sessionState.currentId === sessionId) {
 					applyModels(response);
@@ -250,11 +254,11 @@
 		return last.length <= 4 ? last : last.slice(0, 3);
 	});
 
-	const visibleAgents = $derived(needsClaudeAccount ? [] : getVisibleAgents());
-	const activeAgent = $derived(needsClaudeAccount ? undefined : getActiveAgent() ?? visibleAgents[0]);
+	const visibleAgents = $derived(needsAccount ? [] : getVisibleAgents());
+	const activeAgent = $derived(needsAccount ? undefined : getActiveAgent() ?? visibleAgents[0]);
 	// Regular OpenCode Plan sessions lock the agent; Side Threads use session rules.
 	const planLocked = $derived(
-		selectedDriver === "opencode" &&
+		selectedTraits?.composerModeControl === "agent" &&
 			!!sessionState.currentId &&
 			!findSession(sessionState.currentId)?.sideThread &&
 			discoveryState.permissionMode === "plan",
@@ -273,15 +277,13 @@
 		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
-			void switchAgentRpc({ projectSlug, sessionId, agentId: agent.id }).catch(undoAgent);
+			void switchAgentRpc({ sessionId, agentId: agent.id }).catch(undoAgent);
 		}
 	}
 
 	function driverLabel(id: ProviderDriverKind | undefined): string {
 		if (!id) return "Loading…";
-		if (id === "claude") return "Claude";
-		if (id === "opencode") return "OpenCode";
-		return id.charAt(0).toUpperCase() + id.slice(1);
+		return getProviderPresentation(id)?.label ?? id.charAt(0).toUpperCase() + id.slice(1);
 	}
 
 	function instanceForDriver(driver: ProviderDriverKind): InstanceOption | undefined {
@@ -404,7 +406,7 @@
 		const card = accountCards.find((card) => card.value === id);
 		if (!card || card.locked) return;
 		if (locked) {
-			if (selectedDriver === "claude" && sessionState.currentId) {
+			if (hasAccountUsage && sessionState.currentId) {
 				closePicker();
 				void accounts.beginSwitch(sessionState.currentId, id, selectedLogoInstanceId);
 				presentedRequest = accounts.handoff.kind === "previewing" ? accounts.handoff.requestId : undefined;
@@ -458,7 +460,7 @@
 		const request = composerPickerState.request;
 		if (!request) return;
 		untrack(() => {
-			if (!locked && selectedDriver === "opencode")
+			if (!locked && selectedTraits?.catalogSource === "server")
 				viewDraftModels(getDraftProject(), selectedId, true);
 			void accounts.refreshQuotas();
 			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
@@ -577,17 +579,17 @@
 					</section>
 				{/if}
 				{#if accountCards.length > 1}
-					<section data-testid="picker-account-section" tabindex="-1" aria-label={selectedDriver === "claude" ? "Account" : "Instance"} class="pb-[4px] outline-none">
+					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[4px] outline-none">
 						<div class="mt-[9px] mb-[5px] flex justify-between text-[10px] uppercase tracking-[0.07em] text-text-dimmer">
-							<span>{selectedDriver === "claude" ? "Account" : "Instance"}</span>
-							<span data-testid="picker-account-section-caption">{selectedDriver === "claude" ? "5-hour use" : "status"}</span>
+							<span>{accountLabel}</span>
+							<span data-testid="picker-account-section-caption">{hasAccountUsage ? "5-hour use" : "status"}</span>
 						</div>
 						<OptionRow
 							options={accountCards}
 							value={selectedLogoInstanceId ?? ""}
 							onChange={handleAccountSelect}
-							label={selectedDriver === "claude" ? "Account" : "Instance"}
-							lockedReason={selectedDriver === "claude" ? "" : "Harness is fixed for this session"}
+							label={accountLabel}
+							lockedReason={hasAccountUsage ? "" : "Harness is fixed for this session"}
 							itemWidth={108}
 							testId="picker-account-options"
 							itemTestId={(id) => `picker-account-${id}`}
@@ -631,14 +633,14 @@
 								{/if}
 							{/snippet}
 						</OptionRow>
-						{#if locked && selectedDriver === "claude"}
+						{#if locked && hasAccountUsage}
 							<div data-testid="picker-account-note" class="mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
 						{/if}
 					</section>
 				{/if}
-				{#if needsClaudeAccount}
+				{#if needsAccount}
 					<div class="flex items-center justify-between gap-2 border-b border-border-subtle py-2 text-xs text-text-muted">
-						<span>No Claude accounts yet.</span>
+						<span>No {driverLabel(selectedDriver)} accounts yet.</span>
 						<Button variant="ghost-accent" size="content" data-testid="picker-add-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}>Add account</Button>
 					</div>
 				{/if}
@@ -872,7 +874,7 @@
 	class="relative inline-flex min-w-0 items-center {variant === 'words' ? 'gap-[5px]' : phone ? 'gap-[8px]' : 'shrink-0 gap-[2px]'}"
 	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
 >
-	{#if needsClaudeAccount}
+	{#if needsAccount}
 		<Button variant="ghost-accent" size="content" class="shrink-0 gap-1 px-1.5 py-1 text-[11.5px]" data-testid="add-claude-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}><Icon name="plus" size={12} />Add account</Button>
 	{/if}
 	{#if variant === "words"}
@@ -1074,7 +1076,7 @@
 	{:else}
 		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} />
 	{/if}
-	{#if variant === "words" && selectedDriver === "opencode"}
+	{#if variant === "words" && selectedTraits?.composerModeControl === "agent"}
 		<span aria-hidden="true" class="text-border-chip">·</span>
 		<Button
 			variant="ghost"

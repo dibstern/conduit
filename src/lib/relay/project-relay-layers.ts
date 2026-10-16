@@ -43,6 +43,14 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../domain/daemon/Services/session-activity.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../domain/daemon/Services/session-directory.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -99,7 +107,10 @@ import {
 	SessionRetriesTag,
 	type WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { SessionEventBusLive } from "../domain/relay/Services/session-event-bus.js";
+import {
+	SessionEventBusLive,
+	SessionEventBusTag,
+} from "../domain/relay/Services/session-event-bus.js";
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
@@ -110,7 +121,7 @@ import {
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
-import { SessionWorkspaceHintStateLive } from "../domain/relay/Services/session-workspace-hint-state.js";
+import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
 	LocalPtyServiceLive,
@@ -137,9 +148,6 @@ import {
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
-import type { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
-import { makeSessionCompactions } from "../session/session-compactions.js";
-import { makeSessionRetries } from "../session/session-retries.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { createTranslator } from "./event-translator.js";
 import { createMonitoringWiringState } from "./monitoring-wiring.js";
@@ -199,7 +207,9 @@ const relayOpenCodeInstances = (
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
+	| SessionDirectory
 	| AccountDirectory
+	| SessionActivityTag
 	| ConfigTag
 	| LoggerTag
 	| OpenCodeAPITag
@@ -235,7 +245,7 @@ export interface ProjectRelayLayerInputs {
 	config: ProjectRelayConfig;
 	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
-	backgroundLiveness: ReturnType<typeof makeSessionBackgroundLiveness>;
+	onBackgroundWorkChanged: (sessionId: string) => void;
 	getWsHandler: () => WebSocketHandlerShape;
 	defaultCommandQueueLayer: Layer.Layer<
 		never,
@@ -255,7 +265,7 @@ export function createProjectRelayLayers({
 	config,
 	claudeRunnerFactory,
 	testSendLimit,
-	backgroundLiveness,
+	onBackgroundWorkChanged,
 	getWsHandler,
 	defaultCommandQueueLayer,
 }: ProjectRelayLayerInputs) {
@@ -265,23 +275,6 @@ export function createProjectRelayLayers({
 		titleQuery: sdkQuery,
 		fork: defaultClaudeSessionForkSdk,
 	};
-	const compactions = makeSessionCompactions();
-	const retries = makeSessionRetries();
-	// Orchestration runtime layer (provider instance routing)
-	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
-		...(config.shellEnv && { shellEnv: config.shellEnv }),
-		...(config.prepareShellEnv && { prepareShellEnv: config.prepareShellEnv }),
-		onBackgroundTask: backgroundLiveness.record,
-		claudeQueryFactory: claudeSdk.query,
-		claudeSessionForkSdk: claudeSdk.fork,
-		...(config.claudeSdk?.subagentSdk && {
-			claudeSubagentSdk: config.claudeSdk.subagentSdk,
-		}),
-		...(claudeRunnerFactory && { claudeRunnerFactory }),
-		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
-		extraFolders: config.extraFolders ?? [],
-		...(config.configDir != null ? { configDir: config.configDir } : {}),
-	});
 
 	// Effect ManagedRuntime (Layer-based composition)
 	// RelayStateLive provides all self-constructing Effect-native state Layers.
@@ -349,6 +342,69 @@ export function createProjectRelayLayers({
 					);
 				}),
 			);
+	const activityLayer = Layer.effect(
+		SessionActivityTag,
+		Effect.gen(function* () {
+			const shared = yield* Effect.serviceOption(SessionActivityTag);
+			return Option.isSome(shared) ? shared.value : yield* makeSessionActivity;
+		}),
+	).pipe(Layer.provide(daemonConfigLayer));
+	const activityReaders = Layer.mergeAll(
+		Layer.effect(
+			BackgroundLivenessTag,
+			Effect.map(
+				SessionActivityTag,
+				(activity) => activity.background.backgroundOf,
+			),
+		),
+		Layer.effect(
+			LiveTaskListTag,
+			Effect.map(
+				SessionActivityTag,
+				(activity) => activity.background.liveListOf,
+			),
+		),
+		Layer.effect(
+			SessionCompactionsTag,
+			Effect.map(
+				SessionActivityTag,
+				(activity) => activity.compactions.compactingOf,
+			),
+		),
+		Layer.effect(
+			SessionRetriesTag,
+			Effect.map(SessionActivityTag, (activity) => activity.retries.retryingOf),
+		),
+		Layer.effect(
+			SessionWorkspaceHintStateTag,
+			Effect.map(SessionActivityTag, (activity) => activity.hintDismissals),
+		),
+	).pipe(Layer.provideMerge(activityLayer));
+	// Orchestration runtime layer (provider instance routing)
+	const orchestrationRuntimeLayer = Layer.unwrapEffect(
+		Effect.map(SessionActivityTag, (activity) =>
+			makeOrchestrationRuntimeLayer({
+				...(config.shellEnv && { shellEnv: config.shellEnv }),
+				...(config.prepareShellEnv && {
+					prepareShellEnv: config.prepareShellEnv,
+				}),
+				onBackgroundTask: (transition) => {
+					if (activity.background.record(transition))
+						onBackgroundWorkChanged(transition.sessionId);
+				},
+				claudeQueryFactory: claudeSdk.query,
+				claudeSessionForkSdk: claudeSdk.fork,
+				...(config.claudeSdk?.subagentSdk && {
+					claudeSubagentSdk: config.claudeSdk.subagentSdk,
+				}),
+				...(claudeRunnerFactory && { claudeRunnerFactory }),
+				...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+				extraFolders: config.extraFolders ?? [],
+				...(config.configDir != null ? { configDir: config.configDir } : {}),
+			}),
+		),
+	).pipe(Layer.provide(activityLayer));
+
 	const sharedUsage = config.usage;
 	const usageLayer = sharedUsage
 		? Layer.sync(Usage, () => sharedUsage)
@@ -386,12 +442,26 @@ export function createProjectRelayLayers({
 	// One shared layer reference (Effect memoizes it), so orchestration wiring,
 	// the session manager, startup and the SSE adapter see one relay view.
 	const sharedInstances = config.openCodeInstances;
+	const sharedDirectory = config.daemonConfigContext
+		? Context.getOption(config.daemonConfigContext, SessionDirectory)
+		: Option.none();
+	const sessionDirectoryLayer = Option.isSome(sharedDirectory)
+		? Layer.succeedContext(
+				Context.make(SessionDirectory, sharedDirectory.value),
+			)
+		: makeSessionDirectoryLive(config.configDir ?? getConfigDir(), [
+				{
+					slug: config.slug,
+					folders: [config.projectDir, ...(config.extraFolders ?? [])],
+				},
+			]);
 	const persistenceEffectLayer = makePersistenceEffectLayer(
 		config.persistenceDbPath,
 		config.slug,
 		undefined,
 		SessionEventBusLive,
-	).pipe(Layer.provideMerge(SessionWorkspaceHintStateLive));
+		sessionDirectoryLayer,
+	).pipe(Layer.provideMerge(activityReaders));
 	const openCodeInstancesLayer = Layer.effect(
 		OpenCodeInstancesTag,
 		Effect.gen(function* () {
@@ -529,8 +599,8 @@ export function createProjectRelayLayers({
 							Effect.provideService(AlertsTag, alerts),
 						),
 				},
-				compactions,
-				retries,
+				compactions: (yield* SessionActivityTag).compactions,
+				retries: (yield* SessionActivityTag).retries,
 			});
 		}),
 	).pipe(
@@ -658,6 +728,7 @@ export function createProjectRelayLayers({
 	}));
 
 	const coreBridgeLayers = Layer.mergeAll(
+		sessionDirectoryLayer,
 		daemonConfigLayer,
 		config.worktreeContext
 			? Layer.succeedContext(config.worktreeContext)
@@ -680,10 +751,7 @@ export function createProjectRelayLayers({
 		toolContentServiceLayer,
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
-		Layer.sync(BackgroundLivenessTag, () => backgroundLiveness.backgroundOf),
-		Layer.sync(LiveTaskListTag, () => backgroundLiveness.liveListOf),
-		Layer.sync(SessionCompactionsTag, () => compactions.compactingOf),
-		Layer.sync(SessionRetriesTag, () => retries.retryingOf),
+		activityReaders,
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,
@@ -769,6 +837,32 @@ export function createProjectRelayLayers({
 					wiringLayers,
 					inboxLayer,
 					SessionWorkspaceHintReactorLive,
+					// Post-commit row changes include status and attention stamps.
+					// Transcript-only deltas stay quiet; a dropped advance recovers conservatively.
+					Layer.scopedDiscard(
+						Effect.gen(function* () {
+							const activity = yield* SessionActivityTag;
+							const advances =
+								yield* (yield* SessionEventBusTag).subscribeAdvances();
+							yield* advances.pipe(
+								Stream.filter(
+									(advance) =>
+										advance.dropped === true ||
+										advance.collections.includes("sidebar"),
+								),
+								Stream.runForEach((advance) =>
+									Effect.sync(() => {
+										for (const id of [
+											...advance.sessionIds,
+											...advance.removedSessionIds,
+										])
+											activity.changed(id);
+									}),
+								),
+								Effect.forkScoped,
+							);
+						}),
+					),
 				),
 				fullBaseLayers,
 			),

@@ -947,7 +947,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				await Effect.runPromise(
 					browser.rpc
 						.CancelSession({
-							projectSlug: "process-test",
 							sessionId,
 							commandId: randomUUID(),
 						})
@@ -1067,7 +1066,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				await Effect.runPromise(
 					browser.rpc
 						.CancelSession({
-							projectSlug: "process-test",
 							sessionId,
 							commandId: randomUUID(),
 						})
@@ -1103,7 +1101,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			if (lifecycleAction === "cancel") {
 				await Effect.runPromise(
 					browser.rpc.SwitchModel({
-						projectSlug: "process-test",
 						sessionId,
 						originId: browser.originId,
 						providerId: "claude",
@@ -1112,7 +1109,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				);
 				await Effect.runPromise(
 					browser.rpc.SwitchContextWindow({
-						projectSlug: "process-test",
 						sessionId,
 						originId: browser.originId,
 						contextWindow: "200k",
@@ -1202,7 +1198,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const loadCatalog = () =>
 			Effect.runPromise(
 				browser.rpc.GetModels({
-					projectSlug: "process-test",
 					sessionId: sendSessionId,
 					instanceId: "claude",
 				}),
@@ -1244,7 +1239,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				await Effect.runPromise(
 					browser.rpc
 						.CancelSession({
-							projectSlug: "process-test",
 							sessionId: warmSessionId,
 							commandId: randomUUID(),
 						})
@@ -1321,7 +1315,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			]);
 			const catalog = await Effect.runPromise(
 				browser.rpc.GetModels({
-					projectSlug: "process-test",
 					sessionId: sendSessionId,
 					instanceId: "claude",
 				}),
@@ -1433,7 +1426,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		).toHaveLength(0);
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -1659,7 +1651,6 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			const cursor = browser.frames.length;
 			await Effect.runPromise(
 				browser.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: browser.originId,
 					inputId: randomUUID(),

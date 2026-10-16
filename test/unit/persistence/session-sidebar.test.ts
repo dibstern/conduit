@@ -78,8 +78,8 @@ import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import {
 	announceBackgroundWork,
@@ -227,7 +227,7 @@ const scenario = (store: Store) => {
 		readonly sessions: ReadonlySet<string>;
 	}[] = [];
 
-	const event = <T extends CanonicalEventType>(
+	const event = <T extends LiveEventType>(
 		type: T,
 		sessionId: string,
 		data: EventPayloadMap[T],
@@ -1142,7 +1142,7 @@ describe("sidebar upkeep in a large family", () => {
 
 	it("reads the family once per commit, however many events it holds", async () => {
 		const store = openStore(":memory:");
-		const event = <T extends CanonicalEventType>(
+		const event = <T extends LiveEventType>(
 			type: T,
 			sessionId: string,
 			data: EventPayloadMap[T],

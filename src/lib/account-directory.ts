@@ -12,10 +12,12 @@ import { AccountUnroutable } from "./contracts/limit-recovery.js";
 import {
 	type AccountId,
 	AccountIdSchema,
+	getProviderDriver,
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
 	KnownProviderDriverKindSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
 } from "./contracts/provider-instance.js";
 import type { DaemonConfig } from "./daemon/config-persistence.js";
 
@@ -95,7 +97,7 @@ export function accountsStateFromInstances(
 ): AccountsState {
 	const accounts = instances.map((instance): Account => {
 		const id = AccountIdSchema.make(instance.id);
-		if (instance.driver === "opencode")
+		if (getProviderDriver(instance.driver)?.accountKind === "server")
 			return {
 				driver: "opencode",
 				id,
@@ -152,19 +154,27 @@ function materializeClaudeDefault(
 	usageOrder: ReadonlyArray<string>,
 ): Option.Option<AccountId> {
 	const stored = accounts.find(
-		(account) => account.id === storedId && account.driver === "claude",
+		(account) =>
+			account.id === storedId &&
+			getProviderDriver(account.driver)?.defaultAccountSource === "selection",
 	);
 	if (stored !== undefined) return Option.some(AccountIdSchema.make(stored.id));
 	for (const id of usageOrder) {
 		const account = accounts.find(
-			(account) => account.id === id && account.driver === "claude",
+			(account) =>
+				account.id === id &&
+				getProviderDriver(account.driver)?.defaultAccountSource === "selection",
 		);
 		if (account !== undefined)
 			return Option.some(AccountIdSchema.make(account.id));
 	}
 	return Option.map(
 		Option.fromNullable(
-			accounts.find((account) => account.driver === "claude"),
+			accounts.find(
+				(account) =>
+					getProviderDriver(account.driver)?.defaultAccountSource ===
+					"selection",
+			),
 		),
 		(account) => AccountIdSchema.make(account.id),
 	);
@@ -237,7 +247,8 @@ export function apply(
 					id: allocated,
 					managed:
 						input.managed ??
-						(input.driver === "opencode" && input.url === undefined),
+						(PROVIDER_DRIVERS[input.driver].runsOpenCodeServer &&
+							input.url === undefined),
 				},
 			],
 			state.launchLogin,
@@ -247,7 +258,8 @@ export function apply(
 			...state,
 			accounts: [...state.accounts, account],
 			defaults:
-				account.driver === "claude" && Option.isNone(state.defaults.claude)
+				PROVIDER_DRIVERS[account.driver].defaultAccountSource === "selection" &&
+				Option.isNone(state.defaults.claude)
 					? { claude: Option.some(account.id) }
 					: state.defaults,
 		});
@@ -255,10 +267,10 @@ export function apply(
 	const current = state.accounts.find((account) => account.id === change.id);
 	if (current === undefined) return reject(`Instance "${change.id}" not found`);
 	const isDefaultClaude =
-		current.driver === "claude" &&
+		PROVIDER_DRIVERS[current.driver].defaultAccountSource === "selection" &&
 		Option.contains(state.defaults.claude, current.id);
 	if (change._tag === "SetDefault") {
-		if (current.driver !== "claude")
+		if (PROVIDER_DRIVERS[current.driver].defaultAccountSource !== "selection")
 			return reject("Only Claude accounts can be made default");
 		return Either.right({
 			...state,
@@ -308,7 +320,7 @@ export function apply(
 					? {}
 					: { configDir: configuredFolder }),
 				...(env === undefined ? {} : { env }),
-				...(driver === "opencode"
+				...(PROVIDER_DRIVERS[driver].runsOpenCodeServer
 					? {
 							port:
 								updates.port ??
@@ -434,7 +446,7 @@ export function defaultFor(
 	driver: KnownProviderDriverKind,
 ): Option.Option<Account> {
 	const id =
-		driver === "claude"
+		getProviderDriver(driver)?.defaultAccountSource === "selection"
 			? state.defaults.claude
 			: Option.some(MANAGED_OPENCODE_ACCOUNT_ID);
 	return Option.flatMap(id, (accountId) =>

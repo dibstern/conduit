@@ -205,7 +205,6 @@ test("creates reach every sidebar under streaming write load", async ({
 			const sessionId = await driver.createSession(`Latency stream ${index}`);
 			await Effect.runPromise(
 				driver.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -593,7 +592,6 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			const sessionId = await driver.createSession(`Overflow stream ${index}`);
 			await Effect.runPromise(
 				driver.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -663,7 +661,6 @@ test("overflow catches up every sidebar through create and delete bursts", async
 					Effect.runPromise(
 						driver.rpc
 							.DeleteSession({
-								projectSlug: "process-test",
 								sessionId: id,
 								originId: driver.originId,
 							})
