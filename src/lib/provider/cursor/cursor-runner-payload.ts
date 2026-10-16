@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
+import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
@@ -130,6 +131,24 @@ export class CursorRunnerPayload implements RunnerPayload {
 				createEventId(),
 				sink,
 				session.cwd,
+				{
+					instanceId: input.instanceId,
+					ensure: (child) => {
+						const sinkId = this.sinks.sinkId(sink);
+						return sinkId
+							? this.emit({
+									type: "ensure-subagent-session",
+									sinkId,
+									input: child,
+								}).pipe(
+									Effect.asVoid,
+									Effect.mapError(
+										(cause) => new EventSinkIngestionError({ cause }),
+									),
+								)
+							: Effect.void;
+					},
+				},
 			);
 			const finish = (
 				status: "completed" | "interrupted" | "error",
@@ -384,6 +403,14 @@ export class CursorRunnerPayload implements RunnerPayload {
 						// Cleanup and admission readiness precede the terminal publication.
 						// Otherwise an inbox input can be removed while this payload is busy.
 						const durationMs = Date.now() - started;
+						yield* events.finishChildren(
+							result.status === "completed"
+								? "completed"
+								: result.status === "interrupted"
+									? "interrupted"
+									: "error",
+							false,
+						);
 						yield* events.endThinking();
 						if (result.status === "completed")
 							yield* events.push("turn.completed", {

@@ -125,8 +125,8 @@ to prevent independent replay turns from sharing a projected tool part.
   stdout/stderr's JSON `content` field. The final result remains the real
   captured shell result.
 - `tool-task` adds a declared `SDKTaskMessage` (`type`, `agent_id`, `run_id`,
-  `status`, `text`) to pin stream progress. It renders as the generic
-  `cursor.task` row; the subagent ticket (.10) owns child-session materialization.
+  `status`, `text`) to pin stream progress. Ticket .10 maps it to the canonical
+  Task card and materializes its child through the runner's existing seam.
 - `tool-nested-computerUse` wraps the declared computer-use started/completed
   deltas in the declared `tool-call-delta.taskUpdate` wrapper beneath the task,
   plus a nested text delta. Actions, error/success values and screenshot paths
@@ -164,3 +164,58 @@ edit's `diffString`, `linesAdded` and `linesRemoved`; write's canonical input
 content and `linesCreated`; delete's path and returned `fileSize`. Write and
 delete have no before-content in the SDK result, so no diff or removed-line
 count is reconstructed, cached or read from the filesystem.
+
+
+## Subagent replay cases (conduit-test-xqsg.10)
+
+`subagent-foreground-default-fixed.jsonl` is the unmodified, redacted real
+foreground capture. Its nested `taskUpdate` deltas stream child text, thinking
+and seven public tool calls. Its completion snapshot repeats that content and
+also contains three `getMcpToolsToolCall` steps absent from the public live
+updates. Those three steps stay generic; they are not claimed as public tool
+union members. Child identity uses the parent Conduit ID and Task call ID,
+never the SDK child agent ID or a custom-tool context's parent session ID.
+
+The following are replay derivatives, not new live observations. Each uses the
+foreground capture's complete rows and envelopes except for these edits:
+
+- `subagent-reconcile.jsonl` removes the first whole live child assistant text
+  span, leaving its completion snapshot unchanged, and repeats the Task's
+  completed delta once. It removes
+  `args.model` from the initial partial Task, then sets the started/completed
+  Task's model to `composer-2.5-fast`, a value observed in the spike's excluded
+  `subagent-background-default.jsonl`. This pins a later SDK-reported model
+  replacing the initial inherited parent pick, plus idempotent reconciliation.
+- `subagent-reconcile-partial.jsonl` drops only the first child text delta,
+  `Executing`, and repeats the completed Task delta. Its untouched snapshot
+  pins repairing a missing prefix within a live part without duplicating the
+  remaining text. Canonical snapshot replacement also restores part order and
+  preserves the mapped live tools' timings, status and media.
+- `subagent-background-follow-up.jsonl` sets the completed Task's declared
+  `isBackground` field to true, including its duplicate stream envelope, and
+  copies the capture's existing `turn-ended` delta immediately after the Task
+  completion. The subsequent, unchanged parent thinking and `done` text thus
+  arrive as a follow-up turn on that same run. After that text, three copied
+  child taskUpdates (thinking, thinking-completed, and text `Executing`) pin
+  live child continuation after the background Task returned. The first child
+  text delta `Executing` is omitted, and the identical completed background
+  Task delta is repeated after the late child updates. Together these edits
+  pin missing-prefix repair plus later continuation and duplicate completion,
+  while preserving the original receipt-time text offsets. This is a scheduling
+  example derived from foreground data. The spike did not observe successful background
+  follow-up ordering, terminal status or final usage ordering. The mapper keeps
+  the child busy until authoritative `Run.wait()` resolution.
+- `subagent-interrupt.jsonl` retains foreground rows through the first child
+  text span, then substitutes its original wait result's status with
+  `cancelled` and removes the finished response text. The captured `stream.end`
+  follows it. Playback gates that wait on the host's cancel call. This pins
+  cancelling all locally materialized children when the run is interrupted,
+  without claiming a newly observed live background cancellation timeline.
+
+The process test inserts the same inert credential-store and captured model
+catalog rows as `.5`. `CONDUIT_TEST_CURSOR_DELTA_DELAY_MS` slows replay callbacks
+and `CONDUIT_TEST_CURSOR_WAIT_DELAY_MS` delays only the replay wait result;
+these are test-only scheduling controls, never SDK wire fields. They make live
+child visibility and the gap before `Run.wait()` deterministic. The test writes
+child events, no-duplicate assertions, child/account/model identity, terminal
+states and owned process cleanup to `test-results/conduit-test-xqsg.10.json`.

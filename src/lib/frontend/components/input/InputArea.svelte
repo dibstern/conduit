@@ -11,7 +11,7 @@
 	import { Schema } from "effect";
 	import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 	import { WorktreeCreationError } from "../../../contracts/worktree.js";
-	import { AccountIdSchema } from "../../../contracts/provider-instance.js";
+	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
@@ -223,7 +223,7 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(sessionState.currentId);
+		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
 		return () => requestSessionPreWarm(null);
 	});
 	function draftSessionPayload(projectSlug: string | null) {
@@ -266,6 +266,12 @@
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
+	const readOnlySubagent = $derived(
+		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
+		!currentSession?.sideThread && !currentSession?.forkMessageId &&
+		!currentSession?.forkPointTimestamp && !sessionState.currentFork?.forkMessageId &&
+		!sessionState.currentFork?.forkPointTimestamp,
+	);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -532,7 +538,7 @@
 	);
 	// A session drawn from its saved page takes sends once the server places it.
 	const unplaced = $derived(placedSessionId() !== sessionState.currentId);
-	const canSend = $derived(!unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(!readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -778,7 +784,7 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (unsupportedDraftFolders || unplaced) return false;
+		if (readOnlySubagent || unsupportedDraftFolders || unplaced) return false;
 		if (!sessionState.currentId && getEffectiveInstanceId() && !getDraftPick()) return false;
 		let text = textOverride ?? inputText.trim();
 		if (!text) return false;
@@ -1282,6 +1288,9 @@
 	<div id="input-wrapper" bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
+		{#if readOnlySubagent}
+			<p data-testid="subagent-readonly-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation?.subagentNotice}</p>
+		{:else}
 
 		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
@@ -1695,6 +1704,7 @@
 		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
+		{/if}
 		{/if}
 	</div>
 </div>

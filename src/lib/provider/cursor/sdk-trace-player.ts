@@ -25,6 +25,8 @@ export function createTraceCursorSdkPort(
 	playback: {
 		readonly closeDelayMs?: number;
 		readonly disposeDelayMs?: number;
+		readonly deltaDelayMs?: number;
+		readonly waitDelayMs?: number;
 	} = {},
 ): CursorSdkPort {
 	let contents: string | undefined;
@@ -147,7 +149,11 @@ export function createTraceCursorSdkPort(
 						try {
 							for (const row of turn) {
 								if (needsCancel && row.kind === "wait.result") await cancelled;
-								if (row.kind === "delta") onDelta(row.data);
+								if (row.kind === "delta") {
+									if (playback.deltaDelayMs)
+										await setTimeout(playback.deltaDelayMs);
+									onDelta(row.data);
+								}
 								if (row.kind === "stream") yield row.data;
 								if (row.kind === "stream.error") {
 									throw new CursorSdkFailure({
@@ -164,6 +170,7 @@ export function createTraceCursorSdkPort(
 					async wait() {
 						await streamed;
 						if (needsCancel) await cancelled;
+						if (playback.waitDelayMs) await setTimeout(playback.waitDelayMs);
 						if (
 							turn.some(
 								(row) =>
