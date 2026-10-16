@@ -69,7 +69,8 @@ it.each([
 	wire.stub({ ListWorktrees: () => value });
 	await expect(rpc("ListWorktrees", payload)).resolves.toEqual(value);
 	const request = await wire.request("ListWorktrees");
-	expect(request.payload).toEqual(payload);
+	// The wire always carries the paired form's tag so it decodes as one request.
+	expect(request.payload).toEqual({ ...payload, _tag: "ListWorktrees" });
 });
 
 it.each([
