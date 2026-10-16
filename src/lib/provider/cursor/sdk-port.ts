@@ -60,6 +60,7 @@ export interface CursorSendOptions {
 		}[];
 	};
 	readonly mode: "agent" | "plan";
+	readonly local?: { readonly force: true };
 }
 
 export interface CursorCustomTool {
@@ -87,6 +88,7 @@ export interface CursorAgent {
 		options: CursorSendOptions,
 		onDelta: (update: unknown) => void,
 	): Promise<CursorRun>;
+	getUsage(): Promise<unknown>;
 	close(): Promise<void>;
 }
 
