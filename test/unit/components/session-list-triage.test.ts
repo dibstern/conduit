@@ -315,7 +315,7 @@ describe("session triage list", () => {
 	it.each([
 		"settle",
 		"pin",
-	] as const)("calls %s with the row project and offers Undo", async (command) => {
+	] as const)("calls %s with the row session and offers Undo", async (command) => {
 		render(SessionList);
 		render(Toast);
 		const row = screen.getByText("Idle work").closest("a");
@@ -328,7 +328,6 @@ describe("session triage list", () => {
 			expect(callRpc).toHaveBeenCalledWith(
 				tag,
 				expect.objectContaining({
-					projectSlug: "current-project",
 					sessionId: "idle",
 					[key]: true,
 				}),
@@ -429,7 +428,7 @@ describe("session triage list", () => {
 		expect(uiState.toasts).toEqual([]);
 	});
 
-	it("keeps Undo addressed to the original project after navigation", async () => {
+	it("keeps Undo addressed to the original session after navigation", async () => {
 		seedRootSessions([
 			{ id: "empty-title", title: "", projectSlug: "current-project" },
 		]);
@@ -451,7 +450,6 @@ describe("session triage list", () => {
 		expect(callRpc).toHaveBeenLastCalledWith(
 			"SetSessionSettled",
 			expect.objectContaining({
-				projectSlug: "current-project",
 				sessionId: "empty-title",
 				settled: false,
 			}),
@@ -461,7 +459,7 @@ describe("session triage list", () => {
 		);
 	});
 
-	it("acts on another project's row in that project", async () => {
+	it("addresses another project's row by its session", async () => {
 		seedDaemonSessions([
 			{
 				id: "foreign",
@@ -478,14 +476,13 @@ describe("session triage list", () => {
 		expect(callRpc).toHaveBeenCalledWith(
 			"SetSessionPinned",
 			expect.objectContaining({
-				projectSlug: "other-project",
 				sessionId: "foreign",
 				pinned: false,
 			}),
 		);
 	});
 
-	it("snoozes through the sheet and Undo unsnoozes the same project", async () => {
+	it("snoozes through the sheet and Undo unsnoozes the same session", async () => {
 		const now = new Date(2026, 9, 5, 9).getTime();
 		vi.spyOn(Date, "now").mockReturnValue(now);
 		render(SessionList);
@@ -504,7 +501,6 @@ describe("session triage list", () => {
 			expect(callRpc).toHaveBeenCalledWith(
 				"SnoozeSession",
 				expect.objectContaining({
-					projectSlug: "current-project",
 					sessionId: "idle",
 					until: now + 3_600_000,
 				}),
@@ -519,7 +515,6 @@ describe("session triage list", () => {
 			expect(callRpc).toHaveBeenCalledWith(
 				"UnsnoozeSession",
 				expect.objectContaining({
-					projectSlug: "current-project",
 					sessionId: "idle",
 				}),
 			),
@@ -656,7 +651,6 @@ describe("sidebar pick", () => {
 		render(SessionList);
 		await pick("unread");
 		expect(callRpc).toHaveBeenCalledExactlyOnceWith("MarkSessionSeen", {
-			projectSlug: "current-project",
 			sessionId: "unread",
 			upTo: 7,
 			originId: expect.any(String),

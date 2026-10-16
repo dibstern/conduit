@@ -92,11 +92,10 @@ export async function serveModelCatalog(
 	const previous = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
 	rpc.setStubs({
 		GetModels: async (payload) => {
-			const binding = payload["sessionId"]
-				? await previous(payload)
-				: undefined;
+			const binding =
+				"sessionId" in payload ? await previous(payload) : undefined;
 			const instanceId =
-				!payload["sessionId"] && typeof payload["instanceId"] === "string"
+				!("sessionId" in payload) && typeof payload["instanceId"] === "string"
 					? payload["instanceId"]
 					: undefined;
 			const claude = mockInstances

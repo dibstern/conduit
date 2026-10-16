@@ -60,7 +60,7 @@ import {
 	isPermissionDenied,
 } from "../../../project-folders.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
+import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
@@ -72,6 +72,7 @@ import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
 import { RelayCacheTag } from "./relay-cache.js";
+import { indexProjectSessions, SessionDirectory } from "./session-directory.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
@@ -232,8 +233,12 @@ export const resolveSessionMode = (slug: string) =>
 				source: "file",
 				...warning,
 			} satisfies ResolveSessionModeResponse;
+		const settings = loadRelaySettings(configDir);
 		return {
-			mode: loadRelaySettings(configDir).defaultSessionMode ?? "local",
+			mode:
+				settings.defaultSessionMode === "last"
+					? (settings.lastSessionMode ?? "local")
+					: (settings.defaultSessionMode ?? "local"),
 			source: "global",
 			...warning,
 		} satisfies ResolveSessionModeResponse;
@@ -417,6 +422,20 @@ export const addWithoutRelay = (
 		if (alreadyExists) {
 			return yield* new ProjectAlreadyExists({ slug: project.slug });
 		}
+		const directory = yield* Effect.serviceOption(SessionDirectory);
+		const daemonState = yield* Effect.serviceOption(DaemonStateTag);
+		if (Option.isSome(directory) && Option.isSome(daemonState)) {
+			const { configDir } = yield* Ref.get(daemonState.value);
+			yield* indexProjectSessions(configDir, project).pipe(
+				Effect.provideService(SessionDirectory, directory.value),
+				Effect.catchAll((cause) =>
+					Effect.logWarning(
+						"Session directory could not read registered project",
+						{ projectSlug: project.slug, cause },
+					),
+				),
+			);
+		}
 
 		if (!options?.silent) {
 			yield* PubSub.publish(
@@ -543,7 +562,7 @@ export const remove = (slug: string) =>
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
 					const state = yield* Ref.get(yield* DaemonStateTag);
-					yield* stopRegisteredClaudeRunners(
+					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
 						state.configDir,
 					);
@@ -560,6 +579,9 @@ export const remove = (slug: string) =>
 						).pipe(Effect.andThen(requestConfigSave)),
 					),
 				);
+				const directory = yield* Effect.serviceOption(SessionDirectory);
+				if (Option.isSome(directory))
+					yield* directory.value.removeProject(slug);
 
 				yield* PubSub.publish(
 					bus,
@@ -724,6 +746,9 @@ export const removeAll = Effect.gen(function* () {
 		(slug) =>
 			Effect.gen(function* () {
 				yield* relayCache.invalidate(slug);
+				const directory = yield* Effect.serviceOption(SessionDirectory);
+				if (Option.isSome(directory))
+					yield* directory.value.removeProject(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -1168,10 +1193,7 @@ export const saveProject = (input: SaveProjectInput) =>
 				) {
 					yield* replaceRelay(slug);
 					if (mainChanged) {
-						yield* stopRegisteredClaudeRunners(
-							existing.folders[0],
-							configDir,
-						).pipe(
+						yield* stopRegisteredRunners(existing.folders[0], configDir).pipe(
 							Effect.catchAllCause((cause) =>
 								Effect.logWarning(
 									`Failed to stop old project runners after saving ${slug}: ${formatRelayFailure(cause)}`,

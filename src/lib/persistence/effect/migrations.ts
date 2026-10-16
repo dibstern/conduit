@@ -6,6 +6,7 @@ import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
+	DAEMON_STORE_IMPORTS_MIGRATION,
 	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
@@ -37,6 +38,7 @@ import {
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_PICK_BACKFILL_MIGRATION,
+	SESSION_PROJECT_SCOPE_MIGRATION,
 	SESSION_SIDEBAR_MIGRATION,
 	SESSION_SIDEBAR_TOMBSTONES_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
@@ -482,6 +484,7 @@ const appendedSessionColumns = [
 	"workspace_hint",
 	"workspace_hint_sequence",
 	"pending_rewind_message_id",
+	"project_id",
 ] as const;
 
 function sameStrings(
@@ -1083,6 +1086,10 @@ export const effectMigrationEntries = {
 		yield* executeSqlStatements(
 			readMigrationSql(SESSION_SIDEBAR_TOMBSTONES_MIGRATION),
 		);
+		// A repaired ledger can replay this migration over newer session rows.
+		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
+		if (columns.some((column) => column.name === "project_id"))
+			yield* sql`ALTER TABLE session_sidebar ADD COLUMN project_id TEXT`;
 		const roots = yield* sql<{ id: string }>`
 			SELECT id FROM sessions WHERE parent_id IS NULL
 			UNION SELECT session_id FROM session_sidebar`;
@@ -1171,6 +1178,21 @@ export const effectMigrationEntries = {
 	),
 	"0058_compact_redundant_events": executeSqlStatements(
 		readMigrationSql(COMPACT_REDUNDANT_EVENTS_MIGRATION),
+	),
+	"0059_session_project_scope": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(SESSION_PROJECT_SCOPE_MIGRATION),
+		);
+		for (const [index, table] of ["sessions", "session_sidebar"].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(table, "project_id", statement);
+		}
+		for (const statement of statements.slice(2))
+			yield* executeSqlStatements(statement);
+	}),
+	"0060_daemon_store_imports": executeSqlStatements(
+		readMigrationSql(DAEMON_STORE_IMPORTS_MIGRATION),
 	),
 } satisfies Record<
 	string,

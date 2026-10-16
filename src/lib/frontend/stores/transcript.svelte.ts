@@ -1032,7 +1032,6 @@ export function loadOlderTranscript(sessionId: string): Promise<void> {
 	slot.messages.historyLoading = true;
 	if (sessionState.currentId === sessionId) historyState.loading = true;
 	const request = rpc("LoadMoreHistory", {
-		projectSlug: entry.project,
 		sessionId,
 		before: entry.rows[0].id,
 	})

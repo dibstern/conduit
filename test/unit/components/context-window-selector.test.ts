@@ -15,7 +15,7 @@ type SwitchContextWindowInput = Parameters<
 
 const switchContextWindowRpcSpy = vi.hoisted(() =>
 	vi.fn(async (input: SwitchContextWindowInput) => ({
-		projectSlug: input.projectSlug,
+		projectSlug: "project-a",
 		contextWindow: input.contextWindow,
 		options: [
 			{ value: "200k", label: "200K", isDefault: true },
@@ -83,7 +83,6 @@ describe("InstanceModelPicker context window", () => {
 
 		await waitFor(() => {
 			expect(switchContextWindowRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				contextWindow: "1m",
 			});

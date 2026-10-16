@@ -390,7 +390,7 @@
 		const sessionId = activeSession?.id;
 		const projectSlug = activeSession?.projectSlug;
 		if (!sessionId || !projectSlug) return;
-		rpc("DismissCutOff", { projectSlug, sessionId, originId: getBrowserClientId() })
+		rpc("DismissCutOff", { sessionId, originId: getBrowserClientId() })
 			.catch(toastFailure("Couldn't dismiss the cut-off"));
 	}
 	const forkSplit = $derived(
@@ -588,7 +588,7 @@
 	{#snippet resumed(key: string)}
 		{#each resumeDividers.get(key) ?? [] as resume, i (i)}
 			{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
-				<ContinuationDivider {resume} sessionId={activeSession.id} projectSlug={activeSession.projectSlug} />
+				<ContinuationDivider {resume} sessionId={activeSession.id} />
 			{:else}
 				<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
 					↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}

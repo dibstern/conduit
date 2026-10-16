@@ -4,7 +4,6 @@ import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js"
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
-	mockInstances,
 	openModelPicker,
 	requireRelayControl,
 	requireRpcControl,
@@ -142,7 +141,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			if (match[4]) {
 				rpc.setStubs({
 					GetAgents: (payload) => {
-						if (payload["sessionId"] === sessionId) {
+						if ("sessionId" in payload && payload.sessionId === sessionId) {
 							rejected = true;
 							throw new WsRpcError({
 								message: "OpenCode agent discovery is unavailable",

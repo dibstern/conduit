@@ -48,10 +48,10 @@ import {
 	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
-	type CanonicalEventType,
 	type CanonicalToolInput,
 	canonicalEvent,
 	type EventPayloadMap,
+	type LiveEventType,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
 import {
@@ -65,7 +65,7 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
-const stored = <K extends CanonicalEventType>(
+const stored = <K extends LiveEventType>(
 	type: K,
 	data: EventPayloadMap[K],
 	sequence: number,
@@ -769,14 +769,14 @@ describe("workspace hint resolution against real worktrees", () => {
 					expect(yield* read.getSession(sessionId)).toMatchObject({
 						workspace_hint: folders.b,
 					});
-					const shellRow = (yield* read.listSessionInfos()).find(
-						(row) => row.id === sessionId,
-					);
+					const shellRow = (yield* read.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find((row) => row.id === sessionId);
 					expect(shellRow).toBeDefined();
 					expect(shellRow?.workspaceHint).toBeUndefined();
-					const familyRow = (yield* read.readSessionList()).rows.find(
-						(row) => row.item.id === sessionId,
-					);
+					const familyRow = (yield* read.readSessionList({
+						projectIds: ["test-project"],
+					})).rows.find((row) => row.item.id === sessionId);
 					expect(familyRow).toBeDefined();
 					expect(familyRow?.item.workspaceHint).toBeUndefined();
 				}),
@@ -805,8 +805,9 @@ describe("workspace hint resolution against real worktrees", () => {
 					]);
 					yield* dismissWorkspaceHint(sessionId, folders.b);
 					expect(
-						(yield* read.listSessionInfos()).find((row) => row.id === sessionId)
-							?.workspaceHint,
+						(yield* read.listSessionInfos({
+							projectIds: ["test-project"],
+						})).find((row) => row.id === sessionId)?.workspaceHint,
 					).toBeUndefined();
 					yield* sql`CREATE TABLE hint_guard_parent (id INTEGER PRIMARY KEY)`;
 					yield* sql`CREATE TABLE hint_guard_child (
@@ -887,14 +888,14 @@ describe("workspace hint resolution against real worktrees", () => {
 							yield* sql<{ count: number }>`
 								SELECT COUNT(*) AS count FROM hint_guard_child`,
 						).toEqual([{ count: 0 }]);
-						const shellRow = (yield* read.listSessionInfos()).find(
-							(row) => row.id === sessionId,
-						);
+						const shellRow = (yield* read.listSessionInfos({
+							projectIds: ["test-project"],
+						})).find((row) => row.id === sessionId);
 						expect(shellRow).toBeDefined();
 						expect(shellRow?.workspaceHint).toBeUndefined();
-						const familyRow = (yield* read.readSessionList()).rows.find(
-							(row) => row.item.id === sessionId,
-						);
+						const familyRow = (yield* read.readSessionList({
+							projectIds: ["test-project"],
+						})).rows.find((row) => row.item.id === sessionId);
 						expect(familyRow).toBeDefined();
 						expect(familyRow?.item.workspaceHint).toBeUndefined();
 					}).pipe(

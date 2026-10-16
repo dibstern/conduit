@@ -140,7 +140,6 @@ describe("RewindBanner", () => {
 
 		await waitFor(() => {
 			expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				messageId: "provider-1",
 			});
@@ -164,7 +163,6 @@ describe("RewindBanner", () => {
 		const { getByRole } = render(RewindBanner, { onRewind });
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
-			projectSlug: "project-a",
 			sessionId: "session-1",
 			messageId: "provider-assistant-1",
 		});

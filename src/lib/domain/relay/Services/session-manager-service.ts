@@ -62,6 +62,8 @@ import {
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
+import { SessionDirectory } from "../../daemon/Services/session-directory.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
@@ -311,18 +313,21 @@ export const deleteSession = (sessionId: string) =>
 			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const projectId = (yield* EventStoreEffectTag).projectId;
 
 		const sessions =
 			readQueryOption._tag === "Some"
-				? (yield* readQueryOption.value.getSessionLineage().pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "deleteSession.snapshot",
-									cause,
-								}),
-						),
-					)).rows
+				? (yield* readQueryOption.value
+						.getSessionLineage({ projectIds: [projectId] })
+						.pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionManagerError({
+										operation: "deleteSession.snapshot",
+										cause,
+									}),
+							),
+						)).rows
 				: [];
 		// The provider that owns the session is row-only state, never on the wire.
 		const row =
@@ -816,6 +821,16 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
 		const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
+		const directory = yield* Effect.serviceOption(SessionDirectory);
+		const ownershipContext = Context.make(PersistenceProjectTag, {
+			projectId: config.slug,
+		}).pipe(
+			Context.merge(
+				Option.isSome(directory)
+					? Context.make(SessionDirectory, directory.value)
+					: Context.empty(),
+			),
+		);
 		const inFlightDeletes = new Map<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
@@ -843,6 +858,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				// through the handle it hands us is what makes the announcement
 				// unskippable.
 				const commitAndSignal = yield* makeCommitAndSignal.pipe(
+					Effect.provide(ownershipContext),
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(EventStoreEffectTag, eventStore),
 					Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
@@ -855,9 +871,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.gen(function* () {
 							yield* sql`
 					INSERT OR IGNORE INTO sessions (
-						id, provider, provider_sid, title, status, created_at, updated_at
+						id, project_id, provider, provider_sid, title, status, created_at, updated_at
 					) VALUES (
-						${session.id}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
+						${session.id}, ${eventStore.projectId}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
 					)
 					`.pipe(
 								Effect.mapError(
@@ -963,6 +979,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			options?: CreateSessionOptions,
 		) => {
 			const create = serviceCreateSession(title, options).pipe(
+				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
@@ -993,6 +1010,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
+				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -1083,6 +1101,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
 							yield* deleteSession(sessionId).pipe(
+								Effect.provide(ownershipContext),
 								Effect.provideService(AccountDirectory, accounts),
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),

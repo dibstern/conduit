@@ -369,7 +369,6 @@ describe("transcript feed interface", () => {
 		const two = loadOlderTranscript("A");
 		expect(two).toBe(one);
 		expect(pageMock.rpc).toHaveBeenCalledExactlyOnceWith("LoadMoreHistory", {
-			projectSlug: "project",
 			sessionId: "A",
 			before: "u2",
 		});

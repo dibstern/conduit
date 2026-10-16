@@ -102,9 +102,9 @@ for (const scenario of [
 					hasMore: false,
 					nextCursor: null,
 				}),
-				GetModels: ({ projectSlug }) => ({
+				GetModels: (input) => ({
 					defaultOpenCodeInstanceId: "opencode",
-					projectSlug,
+					projectSlug: "projectSlug" in input ? input.projectSlug : slug,
 					providers: [],
 				}),
 				GetAgents: () => ({

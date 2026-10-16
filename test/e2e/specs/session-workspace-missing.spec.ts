@@ -78,9 +78,9 @@ async function openMissingSession(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			GetModels: ({ projectSlug }) => ({
+			GetModels: (input) => ({
 				defaultOpenCodeInstanceId: "opencode",
-				projectSlug,
+				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
 		},

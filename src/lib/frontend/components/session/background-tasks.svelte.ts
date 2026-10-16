@@ -143,10 +143,9 @@ export function taskStopIds(
 /** Request one live subtree or all live tasks, children first, awaiting SDK row updates. */
 export async function stopBackgroundTasks(
 	sessionId: string | null,
-	projectSlug: string | null,
 	taskId?: string,
 ): Promise<void> {
-	if (!sessionId || !projectSlug) return;
+	if (!sessionId) return;
 	const ids = taskStopIds(
 		findSession(sessionId)?.backgroundTasks ?? [],
 		taskId,
@@ -155,7 +154,7 @@ export async function stopBackgroundTasks(
 	let failure: unknown;
 	for (const id of ids) {
 		try {
-			await rpc("StopBackgroundTask", { projectSlug, sessionId, taskId: id });
+			await rpc("StopBackgroundTask", { sessionId, taskId: id });
 		} catch (error) {
 			failed = true;
 			failure = error;

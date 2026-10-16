@@ -108,9 +108,9 @@ async function setup(
 				rpc.setShellRows(options.foreign ? [] : sessions);
 				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
-			GetModels: ({ projectSlug }) => ({
+			GetModels: (input) => ({
 				defaultOpenCodeInstanceId: "opencode",
-				projectSlug,
+				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
 		},

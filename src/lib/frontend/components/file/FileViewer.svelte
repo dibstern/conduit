@@ -95,7 +95,7 @@
 		truncated = false;
 		loadError = null;
 		loading = true;
-		void rpc("GetFileContent", { projectSlug: slug, path, ...(root !== null ? { root } : {}), ...(sessionId ? { sessionId } : {}) })
+		void rpc("GetFileContent", { ...(sessionId ? { sessionId } : { projectSlug: slug }), path, ...(root !== null ? { root } : {}) })
 			.then((response) => {
 				if (requestId === fileContentRequestId && fileTreeState.scope === scope) applyGetFileContentResponse(response);
 			})

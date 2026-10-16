@@ -233,6 +233,7 @@ export function makeToolDetails(
 
 export const toolDetails = makeToolDetails(
 	async (session, toolIds) =>
-		(await rpc("GetToolDetails", { ...session, toolIds })).tools,
+		(await rpc("GetToolDetails", { sessionId: session.sessionId, toolIds }))
+			.tools,
 	({ projectSlug, sessionId }) => sessionViewLoaded(projectSlug, sessionId),
 );

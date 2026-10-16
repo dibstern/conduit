@@ -33,7 +33,7 @@
 		"check:frontend": "tsgo --noEmit --project src/lib/frontend/tsconfig.json",
 		"check:svelte": "svelte-check --tsconfig ./src/lib/frontend/tsconfig.json --output human --fail-on-warnings",
 		"lint": "biome check . && pnpm lint:rules",
-		"lint:rules": "node scripts/check-design-tokens.mjs && node scripts/check-component-ownership.mjs && node scripts/check-class-token-drop.mjs && node scripts/check-dismissal-models.mjs && node scripts/check-svelte-imports.mjs && node scripts/check-account-boundaries.mjs",
+		"lint:rules": "node scripts/check-design-tokens.mjs && node scripts/check-component-ownership.mjs && node scripts/check-class-token-drop.mjs && node scripts/check-dismissal-models.mjs && node scripts/check-svelte-imports.mjs && node scripts/check-account-boundaries.mjs && node scripts/check-driver-dispatch.mjs",
 		"verify": "node scripts/verify.mjs",
 		"format": "biome check --write .",
 		"test": "vitest run",
@@ -78,7 +78,7 @@
 		"check:storybook": "pnpm test:storybook && pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --project=desktop --grep 'Built Storybook render health'",
 		"test:all": "bash scripts/test-all.sh",
 		"test:e2e:expensive-real-prompts": "RUN_EXPENSIVE_E2E=1 vitest run --config vitest.e2e.config.ts",
-		"test:e2e:ios": "pnpm build:frontend && RUN_IOS_E2E=1 vitest run --config vitest.e2e.config.ts test/e2e/ios",
+		"test:e2e:ios": "pnpm build:frontend && RUN_IOS_E2E=1 vitest run --config vitest.e2e.config.ts --no-file-parallelism test/e2e/ios",
 		"test:coverage": "vitest run --coverage",
 		"prepublishOnly": "pnpm test:all",
 		"preversion": "pnpm check && pnpm lint && pnpm test:unit",
@@ -136,8 +136,9 @@
 		"@types/pngjs": "^6.0.5",
 		"@types/ws": "^8.5.0",
 		"@typescript/native-preview": "7.0.0-dev.20260317.1",
-		"@vitest/browser": "3.2.4",
-		"@vitest/coverage-v8": "^3.2.4",
+		"@vitest/browser": "^4.1.11",
+		"@vitest/browser-playwright": "^4.1.11",
+		"@vitest/coverage-v8": "^4.1.11",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/xterm": "^6.0.0",
 		"fast-check": "^4.0.0",
@@ -155,7 +156,7 @@
 		"tsx": "^4.19.0",
 		"typescript": "^5.8.2",
 		"vite": "^6.0.0",
-		"vitest": "^3.0.0"
+		"vitest": "^4.1.11"
 	},
 	"engines": {
 		"node": ">=26.10.0 <27"

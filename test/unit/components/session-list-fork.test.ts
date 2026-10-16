@@ -87,7 +87,6 @@ describe("SessionList fork", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"ViewSession",
 			expect.objectContaining({
-				projectSlug: "current-project",
 				sessionId: "fork",
 			}),
 		);

@@ -9,7 +9,6 @@
 	import type { SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { PendingInput } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -47,11 +46,10 @@
 		tag: "input.cancel" | "input.sendNow",
 		input: PendingInput,
 	): Promise<boolean> {
-		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (!projectSlug || !sessionId) return false;
+		if (!sessionId) return false;
 		try {
-			const payload = { projectSlug, sessionId, inputId: input.inputId };
+			const payload = { sessionId, inputId: input.inputId };
 			const response = await (tag === "input.cancel"
 				? rpc("input.cancel", payload)
 				: rpc("input.sendNow", payload));

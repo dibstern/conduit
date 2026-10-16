@@ -133,7 +133,10 @@ async function setup(
 				providers: [],
 				variant: { variant: "", variants: [] },
 				contextWindow: { contextWindow: "", options: [] },
-				permissionMode: serverModes.get(String(params["sessionId"])) ?? "ask",
+				permissionMode:
+					serverModes.get(
+						String("sessionId" in params ? params.sessionId : undefined),
+					) ?? "ask",
 			}),
 		},
 		handlers: {

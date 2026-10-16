@@ -350,9 +350,8 @@
 			if (!projectSlug) return;
 			const sourceSessionId = sessionId ?? sessionState.currentId;
 			void rpc("ForkSession", {
-				projectSlug,
+				...(sourceSessionId ? { sessionId: sourceSessionId } : { projectSlug }),
 				originId: getBrowserClientId(),
-				...(sourceSessionId ? { sessionId: sourceSessionId } : {}),
 				messageId: forkMessageId,
 			}).then(followFork)
 				.catch(toastFailure("Failed to fork session"));

@@ -36,6 +36,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	() => {
 		it(
 			"captures a forked Side Thread's first turn in Ask mode",
+			{ timeout: 300_000 },
 			async () => {
 				const fixturePath = join(
 					import.meta.dirname,
@@ -74,8 +75,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 						() =>
 							Effect.runPromise(
 								browser.rpc.StartSideThread({
-									projectSlug: "process-test",
-									parentSessionId: parentId,
+									sessionId: parentId,
 									title: QUESTION,
 									inputId,
 									text: QUESTION,
@@ -159,7 +159,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					}
 				}
 			},
-			{ timeout: 300_000 },
 		);
 	},
 );

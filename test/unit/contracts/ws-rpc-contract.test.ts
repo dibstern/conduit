@@ -22,9 +22,10 @@ describe("browser WebSocket RPC contract", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const wire = makeRpcWire({
-						ResolveClaudeSettings: async ({ projectSlug, instanceId }) => ({
-							projectSlug,
-							instanceId,
+						ResolveClaudeSettings: async (request) => ({
+							projectSlug:
+								"projectSlug" in request ? request.projectSlug : "demo",
+							instanceId: request.instanceId,
 							resolved: await Effect.runPromise(
 								resolveClaudeSettingsFromDisk(
 									{

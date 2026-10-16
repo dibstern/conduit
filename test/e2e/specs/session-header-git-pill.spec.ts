@@ -90,9 +90,11 @@ async function openCheckout(
 	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
-			ListWorktrees: ({ sessionId }) => ({
+			ListWorktrees: (scope) => ({
 				worktrees: options.worktrees ?? [],
-				...(options.canonicalDirectory && sessionId === "header-session"
+				...(options.canonicalDirectory &&
+				"sessionId" in scope &&
+				scope.sessionId === "header-session"
 					? { directory: options.canonicalDirectory }
 					: {}),
 			}),

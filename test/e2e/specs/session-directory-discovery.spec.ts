@@ -77,7 +77,8 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				providerScope: { id: "claude", name: "Claude" },
 				instanceId: "claude",
 			}),
-			GetCommands: async ({ sessionId }) => {
+			GetCommands: async (input) => {
+				const sessionId = "sessionId" in input ? input.sessionId : undefined;
 				const directory = recordDirectory("GetCommands", sessionId);
 				if (holdMainCommands && directory === main)
 					await new Promise<void>((resolve) => pendingCommands.push(resolve));
@@ -100,7 +101,9 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					},
 				],
 			}),
-			GetSkillContent: ({ sessionId, name }) => {
+			GetSkillContent: (input) => {
+				const { name } = input;
+				const sessionId = "sessionId" in input ? input.sessionId : undefined;
 				const directory = recordDirectory("GetSkillContent", sessionId);
 				return {
 					projectSlug: "e2e-replay",

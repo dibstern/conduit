@@ -199,6 +199,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	() => {
 		it(
 			"captures concurrent background agents and shells, wake-ups and a Claude process restart",
+			{ timeout: 900_000 },
 			async () => {
 				const captureDir = mkdtempSync(
 					join(tmpdir(), "conduit-background-capture-"),
@@ -223,7 +224,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					evidence["sessionId"] = sessionId;
 					await Effect.runPromise(
 						browser.rpc.SwitchPermissionMode({
-							projectSlug: "process-test",
 							sessionId,
 							mode: "full",
 						}),
@@ -348,11 +348,11 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					}
 				}
 			},
-			{ timeout: 900_000 },
 		);
 
 		it(
 			"captures a foreground agent moved to the background mid-run",
+			{ timeout: 400_000 },
 			async () => {
 				const workspace = mkdtempSync(join(tmpdir(), "conduit-fg-capture-"));
 				const evidence: Record<string, unknown> = {
@@ -453,7 +453,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					writeEvidence("foreground-agent-backgrounded", evidence);
 				}
 			},
-			{ timeout: 400_000 },
 		);
 	},
 );

@@ -2,6 +2,7 @@ import { SqlClient } from "@effect/sql";
 import { Effect, Option, Schema } from "effect";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
@@ -195,7 +196,10 @@ export const snoozeSession = (sessionId: string, until: number | null) =>
 			return yield* Effect.fail(new Error("Un-settle the session first"));
 		}
 		const readQuery = yield* ReadQueryEffectTag;
-		const pending = yield* readQuery.countPendingApprovalsBySession();
+		const eventStore = yield* EventStoreEffectTag;
+		const pending = yield* readQuery.countPendingApprovalsBySession({
+			projectIds: [eventStore.projectId],
+		});
 		if (pending.some((approval) => approval.session_id === sessionId)) {
 			return yield* Effect.fail(new Error("Session is waiting on you"));
 		}

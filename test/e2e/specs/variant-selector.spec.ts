@@ -37,7 +37,7 @@ async function setupWithVariants(
 			SwitchVariant: (params) => {
 				rpcCalls.push({ ...params });
 				return {
-					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					projectSlug: "myapp",
 					variant: String(params["variant"] ?? ""),
 					variants: ["low", "medium", "high", "max"],
 				};
@@ -69,7 +69,7 @@ async function setupWithoutVariants(
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			SwitchVariant: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
+				projectSlug: "myapp",
 				variant: String(params["variant"] ?? ""),
 				variants: [],
 			}),

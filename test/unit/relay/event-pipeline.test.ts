@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	applyPipelineResult,
@@ -141,8 +141,12 @@ describe("processEvent (composed pipeline)", () => {
 
 function makeDeps(): PipelineDeps & {
 	processingTimeouts: {
-		clearProcessingTimeout: ReturnType<typeof vi.fn>;
-		resetProcessingTimeout: ReturnType<typeof vi.fn>;
+		clearProcessingTimeout: Mock<
+			PipelineDeps["processingTimeouts"]["clearProcessingTimeout"]
+		>;
+		resetProcessingTimeout: Mock<
+			PipelineDeps["processingTimeouts"]["resetProcessingTimeout"]
+		>;
 	};
 	log: ReturnType<typeof createSilentLogger> & {
 		info: ReturnType<typeof vi.fn>;

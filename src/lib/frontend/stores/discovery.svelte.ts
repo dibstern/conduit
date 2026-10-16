@@ -4,12 +4,12 @@ import { Effect, Either, Fiber, Stream } from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
-import type { SessionMode } from "../../contracts/project-file.js";
+import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import {
 	type BrowserDriverTraits,
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
-	KnownProviderDriverKindSchema,
+	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
 	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
@@ -53,7 +53,6 @@ import {
 	getInstanceTraits,
 	instanceState,
 } from "./instance.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 import { accountSnapshotChangedListeners } from "./ws-listeners.js";
@@ -151,6 +150,8 @@ export interface InstanceOption {
 	readonly isNew?: boolean;
 	/** Live status from the configured-instance source, when known. */
 	readonly status?: InstanceStatus;
+	readonly available?: boolean | undefined;
+	readonly unavailableReason?: string | undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
@@ -162,7 +163,7 @@ export interface InstanceOption {
 
 const missingHarnessDefaults = () =>
 	Object.fromEntries(
-		KnownProviderDriverKindSchema.literals.map((driver) => [
+		Object.keys(PROVIDER_DRIVERS).map((driver) => [
 			driver,
 			{ status: "missing" },
 		]),
@@ -194,7 +195,7 @@ const serverDiscovery = $state({
 	modelExecution: null as GetModelsResponse["modelExecution"] | null,
 	permissionMode: "ask" as SessionPermissionMode,
 	defaultPermissionMode: "ask" as SessionPermissionMode,
-	defaultSessionMode: "local" as SessionMode,
+	defaultSessionMode: "local" as DefaultSessionMode,
 	/** Global hide-list keys: model `<providerId>/<modelId>`. */
 	hiddenModels: [] as string[],
 	/** Global hide-list keys: agent `<scopeId>/<agentId>`. */
@@ -499,9 +500,9 @@ export function followSessionPickChange(
 	};
 }
 
-function refreshSessionPick(projectSlug: string, sessionId: string): void {
+function refreshSessionPick(sessionId: string): void {
 	const apply = followModelsRead(sessionId);
-	void rpc("GetModels", { projectSlug, sessionId })
+	void rpc("GetModels", { sessionId })
 		.then(apply)
 		.catch(() => undefined);
 }
@@ -512,7 +513,6 @@ function chooseSessionPick(
 ): UndoChoice {
 	const state = sessionPicks[sessionId];
 	if (!state?.pick) return () => {};
-	const projectSlug = getCurrentSlug();
 	const clickId = Symbol();
 	const fields = Object.keys(patch) as (keyof SessionPick)[];
 	for (const field of fields) {
@@ -527,7 +527,7 @@ function chooseSessionPick(
 				if (state.choice[field]?.clickId === clickId)
 					delete state.choice[field];
 			}
-			if (projectSlug) refreshSessionPick(projectSlug, sessionId);
+			refreshSessionPick(sessionId);
 		},
 		{ clickId },
 	);
@@ -648,7 +648,7 @@ export const discoveryState = {
 			choice.defaultPermissionMode ?? serverDiscovery.defaultPermissionMode
 		);
 	},
-	get defaultSessionMode(): SessionMode {
+	get defaultSessionMode(): DefaultSessionMode {
 		return serverDiscovery.defaultSessionMode;
 	},
 	get hiddenModels(): readonly string[] {
@@ -757,6 +757,8 @@ export function getAvailableInstances(): InstanceOption[] {
 			isDefault: inst.isDefault ?? false,
 			isCustom: !inst.isDefault,
 			status: inst.status,
+			available: inst.available,
+			unavailableReason: inst.unavailableReason,
 			capabilities:
 				inst.capabilities ??
 				instanceState.providerCapabilities[driver] ??
@@ -1335,7 +1337,10 @@ export function handleHarnessDefaults(
 	setting: Extract<ProjectSetting, { _tag: "harnessDefaults" }>,
 ): void {
 	const { _tag, ...defaults } = setting;
-	serverDiscovery.harnessDefaults = defaults;
+	serverDiscovery.harnessDefaults = {
+		...missingHarnessDefaults(),
+		...defaults,
+	};
 	fillDraftDefault();
 }
 
@@ -1398,10 +1403,9 @@ export function followSessionModelSettings(
 		row.resumes?.at(-1)?.instanceId === previous.resumes?.at(-1)?.instanceId
 	)
 		return;
-	const projectSlug = getCurrentSlug();
 	const sessionId = sessionState.currentId;
-	if (!projectSlug || !sessionId) return;
-	refreshSessionPick(projectSlug, sessionId);
+	if (!sessionId) return;
+	refreshSessionPick(sessionId);
 }
 
 export function handlePermissionModeInfo(msg: {
@@ -1609,7 +1613,7 @@ export function applyDefaultPermissionMode(mode: SessionPermissionMode): void {
 	if (!draft.model && !draftPermissionChosen) draft.permissionMode = mode;
 }
 
-export function applyDefaultSessionMode(mode: SessionMode): void {
+export function applyDefaultSessionMode(mode: DefaultSessionMode): void {
 	serverDiscovery.defaultSessionMode = mode;
 }
 

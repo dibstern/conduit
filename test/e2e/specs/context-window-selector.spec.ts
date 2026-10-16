@@ -35,7 +35,7 @@ async function setup(
 				const contextWindow = String(params["contextWindow"] ?? "");
 				if (contextInfo) contextInfo["contextWindow"] = contextWindow;
 				return {
-					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					projectSlug: "myapp",
 					contextWindow,
 					options: Schema.decodeUnknownSync(
 						Schema.Array(ContextWindowOptionSchema),

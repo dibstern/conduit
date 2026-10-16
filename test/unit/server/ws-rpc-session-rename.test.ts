@@ -19,7 +19,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 
 			const result = yield* client.RenameSession({
-				projectSlug: "project-a",
 				sessionId: "root-1",
 				title: "Renamed Root",
 				originId: "browser-1",
@@ -48,7 +47,6 @@ describe("WsRpcServerLayer RenameSession", () => {
 		return Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const result = yield* client.MarkSessionUnread({
-				projectSlug: "project-a",
 				sessionId: "root-1",
 				originId: "browser-1",
 			});

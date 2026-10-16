@@ -21,7 +21,6 @@ export async function runBulkChange(
 	const pinned = !unpinSelected;
 	const skipped = selectedCount - eligible.length;
 	const input = eligible.map((session) => ({
-		projectSlug: session.projectSlug,
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 	}));
@@ -91,7 +90,6 @@ export async function runBulkSnooze(
 	const results = await Promise.allSettled(
 		input.map((session) =>
 			rpc("SnoozeSession", {
-				projectSlug: session.projectSlug,
 				sessionId: session.sessionId,
 				originId: session.originId,
 				until,
@@ -130,13 +128,11 @@ export async function runBulkSnooze(
 								changed.map((session) =>
 									session.wasSnoozed
 										? rpc("SnoozeSession", {
-												projectSlug: session.projectSlug,
 												sessionId: session.sessionId,
 												originId: session.originId,
 												until: session.previousUntil,
 											})
 										: rpc("UnsnoozeSession", {
-												projectSlug: session.projectSlug,
 												sessionId: session.sessionId,
 												originId: session.originId,
 											}),

@@ -164,6 +164,7 @@ function makeReadQueryEffect(
 	pendingApprovalCounts: readonly PendingApprovalCountRow[] = [],
 ): ReadQueryEffect {
 	return {
+		listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 		readToolDetails: vi.fn(() => Effect.succeed([])),
 		getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 		getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -179,7 +180,7 @@ function makeReadQueryEffect(
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
-		listSessionInfos: vi.fn((options) => {
+		listSessionInfos: vi.fn((_scope, options) => {
 			const pending = pendingApprovalCountsByType(pendingApprovalCounts);
 			const selected = options?.roots
 				? rows.filter((row) => row.parent_id === null)
@@ -2204,7 +2205,7 @@ describe("SessionManagerService", () => {
 				const dispatchEffect = vi.fn(() => neverSettles);
 				const engine = withDispatchEffect({ dispatchEffect });
 				engine.bindSession(sessionId, "work-oc");
-				const bindSession = vi.spyOn(engine, "bindSession");
+				const bindSession = vi.spyOn(engine, "bindSession").mockClear();
 				const api = makeMockOpenCodeAPI();
 				const use = vi.fn(() => neverSettles);
 				const instanceClients = {
@@ -2589,8 +2590,8 @@ describe("SessionManagerService", () => {
 			yield* projectionRunner.markRecovered();
 			yield* sql`
 					INSERT INTO sessions
-					(id, provider, title, status, created_at, updated_at)
-					VALUES ('session-1', 'opencode', 'Warm session', 'idle', 1, 1)`;
+					(id, project_id, provider, title, status, created_at, updated_at)
+					VALUES ('session-1', 'test-project', 'opencode', 'Warm session', 'idle', 1, 1)`;
 
 			const questionAsked = yield* store.append(
 				canonicalEvent(
@@ -2932,11 +2933,14 @@ describe("SessionManagerService", () => {
 				["child-1", "root-1"],
 			]);
 			const activity = yield* SessionActivityTag;
-			expect(readQuery.listSessionInfos).toHaveBeenCalledWith({
-				roots: true,
-				backgroundOf: activity.background.backgroundOf,
-				hintDismissals: activity.hintDismissals,
-			});
+			expect(readQuery.listSessionInfos).toHaveBeenCalledWith(
+				{ projectIds: [makeMockConfig().slug] },
+				{
+					roots: true,
+					backgroundOf: activity.background.backgroundOf,
+					hintDismissals: activity.hintDismissals,
+				},
+			);
 			expect(api.session.list).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(layer), Effect.provide(requiredSessionServices));
 	});
@@ -3109,7 +3113,7 @@ describe("snooze session commands", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const service = yield* SessionManagerServiceTag;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 				if (reason === "pinned")
 					yield* sql`UPDATE sessions SET pinned_at = 2 WHERE id = 's1'`;
 				if (reason === "settled")
@@ -3141,7 +3145,7 @@ describe("snooze session commands", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const store = yield* EventStoreEffectTag;
 			const service = yield* SessionManagerServiceTag;
-			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+			yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			const firstUntil = Date.now() + 60_000;
 			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(true);
 			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(false);
@@ -3165,7 +3169,7 @@ describe("snooze session commands", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const service = yield* SessionManagerServiceTag;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s1', 'opencode', 'Session', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 				yield* service.snoozeSession("s1", null);
 				if (action === "settle")
 					yield* service.setSessionSettled("s1", { settled: true });

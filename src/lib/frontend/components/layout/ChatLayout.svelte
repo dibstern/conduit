@@ -8,6 +8,7 @@
 	import { getScopeGroupKey } from "../../../session-scope.js";
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
+	import { WsRpcError } from "../../transport/ws-rpc.js";
 	import { rpc, attachProjectRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
@@ -169,7 +170,7 @@
 		if (!projectSlug) return;
 		let active = true;
 		const instanceId = sessionId ? undefined : getEffectiveInstanceId();
-		void rpc("GetCommands", { projectSlug, ...(sessionId ? { sessionId } : {}), ...(instanceId ? { instanceId } : {}) }).then((response) => {
+		void rpc("GetCommands", { ...(sessionId ? { sessionId } : { projectSlug }), ...(instanceId ? { instanceId } : {}) }).then((response) => {
 			if (active && (sessionId || instanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 		}).catch(() => undefined);
 		return () => { active = false; };
@@ -491,8 +492,7 @@
 					? getEffectiveInstanceId()
 					: undefined;
 			void rpc("GetAgents", {
-				projectSlug: slug,
-				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
@@ -505,8 +505,7 @@
 				.catch(() => undefined);
 			const applyModels = followModelsRead(routeSessionId ?? undefined);
 			void rpc("GetModels", {
-				projectSlug: slug,
-				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
@@ -514,8 +513,7 @@
 				})
 				.catch(() => undefined);
 			void rpc("GetCommands", {
-				projectSlug: slug,
-				...(routeSessionId != null ? { sessionId: routeSessionId } : {}),
+				...(routeSessionId != null ? { sessionId: routeSessionId } : { projectSlug: slug }),
 				...(draftInstanceId != null ? { instanceId: draftInstanceId } : {}),
 			})
 				.then((response) => {
@@ -569,7 +567,7 @@
 			}
 			requestFileTree();
 		});
-		void rpc("GetFileTree", { projectSlug: slug, ...(sessionId ? { sessionId } : {}) })
+		void rpc("GetFileTree", { ...(sessionId ? { sessionId } : { projectSlug: slug }) })
 			.then((response) => {
 				if (!cancelled) applyGetFileTreeResponse(response);
 			})
@@ -649,13 +647,14 @@
 		untrack(() => {
 			const placeSession = (sessionId: string, projectSlug: string | null) => {
 				if (cancelled) return;
-				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
-				placeSavedDraw(sessionId, projectSlug);
 				if (projectSlug === null) {
+					placeSavedDraw(sessionId, null);
 					routerState.sessionNotFound = true;
 					replaceRoute("/");
 					return;
 				}
+				if (sessionState.currentId === sessionId && savedDraw.sessionId !== sessionId) return;
+				placeSavedDraw(sessionId, projectSlug);
 				switchToSession(sessionId, projectSlug);
 			};
 			// The server picks the project on a cold load (the session's, the hint,
@@ -664,8 +663,7 @@
 				requestedProject = projectHint ?? null;
 				void attachProjectRpc({
 					originId: getBrowserClientId(),
-					...(projectHint ? { projectSlug: projectHint } : {}),
-					...(route.sessionId ? { sessionId: route.sessionId } : {}),
+					...(route.sessionId ? { sessionId: route.sessionId } : projectHint ? { projectSlug: projectHint } : {}),
 				})
 					.then(({ projectSlug, sessionSlug }) => {
 						if (cancelled) return;
@@ -676,7 +674,13 @@
 						}
 						if (route.sessionId) placeSession(route.sessionId, sessionSlug);
 					})
-					.catch(() => { if (!cancelled) showToast("Failed to switch projects", { variant: "error" }); });
+					.catch((error) => {
+						if (cancelled) return;
+						requestedProject = null;
+						if (error instanceof WsRpcError && error.code === "unknown-session" && route.sessionId)
+							placeSession(route.sessionId, null);
+						else showToast("Failed to switch projects", { variant: "error" });
+					});
 				if (route.sessionId) return;
 			}
 			if (!route.sessionId) {
@@ -709,9 +713,13 @@
 			if (!attachedSlug) return;
 			if (route.sessionId === sessionState.currentId && savedDraw.sessionId !== route.sessionId) return;
 			const sessionId = route.sessionId;
-			void rpc("ResolveSession", { sessionId, projectSlug: attachedSlug }).then(({ projectSlug }) => {
+			void rpc("ResolveSession", { sessionId }).then(({ projectSlug }) => {
 				placeSession(sessionId, projectSlug);
-			}).catch((error) => { if (!cancelled) toastFailure("Failed to open session")(error); });
+			}).catch((error) => {
+				if (cancelled) return;
+				if (error instanceof WsRpcError && error.code === "unknown-session") placeSession(sessionId, null);
+				else toastFailure("Failed to open session")(error);
+			});
 		});
 		return () => { cancelled = true; };
 	});
@@ -836,9 +844,13 @@
 <div id="layout" class={layoutClass}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
-		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 0).
+		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 4).
 		Both phone top bars are static, so this strip stands in for them. Same colour
 		as the bars, so it is invisible; compact-only, styled in style.css.
+		It must paint over #app: WebKit skips boxes with no fixed or sticky element
+		in or around them, so #app is harmless until it holds one (the sticky
+		scroll-to-bottom button), and then it hides the strip. Guarded by
+		test/e2e/specs/phone-top-edge.spec.ts and test/e2e/ios/top-scroll-pocket.test.ts.
 	-->
 	<div id="compact-top-edge" aria-hidden="true"></div>
 

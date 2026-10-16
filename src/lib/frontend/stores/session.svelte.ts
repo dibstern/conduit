@@ -1045,7 +1045,6 @@ export function switchToSession(
 	}
 	if (slug) {
 		const input = {
-			projectSlug: slug,
 			sessionId,
 			originId: getBrowserClientId(),
 		};
@@ -1066,7 +1065,7 @@ export function switchToSession(
 	}
 	if (slug) {
 		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-		void rpc("GetAgents", { projectSlug: slug, sessionId })
+		void rpc("GetAgents", { sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1076,7 +1075,7 @@ export function switchToSession(
 					applyGetAgentsResponse(response, sessionId);
 			})
 			.catch(() => undefined);
-		void rpc("GetCommands", { projectSlug: slug, sessionId })
+		void rpc("GetCommands", { sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1091,7 +1090,7 @@ export function switchToSession(
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
 		const applyModels = followModelsRead(sessionId);
-		void rpc("GetModels", { projectSlug: slug, sessionId })
+		void rpc("GetModels", { sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1113,15 +1112,14 @@ export async function reloadProviderSession(
 	sessionId: string,
 ): Promise<void> {
 	await rpc("ReloadProviderSession", {
-		projectSlug,
 		sessionId,
 		commandId: crypto.randomUUID(),
 	});
 	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
 	const applyModels = followModelsRead(sessionId);
 	const [commands, models] = await Promise.all([
-		rpc("GetCommands", { projectSlug, sessionId }),
-		rpc("GetModels", { projectSlug, sessionId }),
+		rpc("GetCommands", { sessionId }),
+		rpc("GetModels", { sessionId }),
 	]);
 	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
 		return;

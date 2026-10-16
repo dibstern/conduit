@@ -337,7 +337,9 @@ export const mockAppHandlers: StepHandler[] = [
 					const response = await getModels(payload);
 					return {
 						...response,
-						...(payload["sessionId"] === sessionId ? { instanceId } : {}),
+						...("sessionId" in payload && payload.sessionId === sessionId
+							? { instanceId }
+							: {}),
 					};
 				},
 			});
@@ -390,7 +392,7 @@ export const mockAppHandlers: StepHandler[] = [
 			const previous = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
 			rpc.setStubs({
 				GetModels: (payload) =>
-					payload["sessionId"] !== sessionId
+					!("sessionId" in payload) || payload.sessionId !== sessionId
 						? previous(payload)
 						: {
 								defaultOpenCodeInstanceId: "opencode",
@@ -588,14 +590,11 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
-			const sessionInstance = (payload: {
-				readonly sessionId?: string | undefined;
-			}) => {
+			const sessionInstance = (sessionId: string | undefined) => {
 				const row = rpcControls
 					.get(page)
 					?.shellRows?.find(
-						(candidate) =>
-							(candidate as { id?: string }).id === payload["sessionId"],
+						(candidate) => (candidate as { id?: string }).id === sessionId,
 					) as
 					| {
 							accountId?: string | null;
@@ -605,7 +604,7 @@ export const mockAppHandlers: StepHandler[] = [
 				return (
 					row?.accountId ??
 					row?.resumes?.at(-1)?.instanceId ??
-					(payload["sessionId"] === "sess-first-send"
+					(sessionId === "sess-first-send"
 						? createdSessionInstance
 						: [
 									"sess-bound-claude",
@@ -614,13 +613,13 @@ export const mockAppHandlers: StepHandler[] = [
 									"sess-side-reply",
 									"sess-side-unread",
 									"sess-side-idle",
-								].includes(String(payload["sessionId"]))
+								].includes(String(sessionId))
 							? "claude"
-							: payload["sessionId"] === "sess-bound-opencode" ||
-									payload["sessionId"] === "sess-mockup-001" ||
-									payload["sessionId"] === "sess-subagent"
+							: sessionId === "sess-bound-opencode" ||
+									sessionId === "sess-mockup-001" ||
+									sessionId === "sess-subagent"
 								? "opencode"
-								: modelExecutionMockup && payload["sessionId"]
+								: modelExecutionMockup && sessionId
 									? "claude"
 									: undefined)
 				);
@@ -633,8 +632,28 @@ export const mockAppHandlers: StepHandler[] = [
 					],
 				},
 				stubs: {
-					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-						projectSlug,
+					ResolveSession: async () => ({ projectSlug: "myapp" }),
+					ViewSession: async () => ({ ok: true }),
+					CreateSession: async (payload) => {
+						await new Promise((resolve) =>
+							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
+						);
+						createdSessionInstance =
+							typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: undefined;
+						rpcControl.upsertShellRow({
+							id: "sess-first-send",
+							accountId: createdSessionInstance ?? null,
+							title: "New session",
+							status: "idle",
+							projectSlug: "myapp",
+							updatedAt: PINNED_CLOCK_MS,
+						});
+						return { projectSlug: "myapp", sessionId: "sess-first-send" };
+					},
+					LoadMoreHistory: ({ sessionId, before }) => ({
+						projectSlug: "myapp",
 						sessionId,
 						...mockDetailPage(page, sessionId, before),
 					}),
@@ -655,7 +674,8 @@ export const mockAppHandlers: StepHandler[] = [
 						loads: mockSessionSkills.get(page) ?? [],
 					}),
 					GetSkillContent: async (payload) => ({
-						projectSlug: String(payload["projectSlug"] ?? "myapp"),
+						projectSlug:
+							"projectSlug" in payload ? payload.projectSlug : "myapp",
 						name: String(payload["name"] ?? ""),
 						path: ".agents/skills/paged-skill/SKILL.md",
 						content:
@@ -682,9 +702,11 @@ export const mockAppHandlers: StepHandler[] = [
 						};
 					},
 					GetModels: async (payload) => {
-						if (payload["sessionId"]) await heldModelLookups.get(page)?.promise;
-						const instanceId = payload["sessionId"]
-							? sessionInstance(payload)
+						const sessionId =
+							"sessionId" in payload ? payload.sessionId : undefined;
+						if (sessionId) await heldModelLookups.get(page)?.promise;
+						const instanceId = sessionId
+							? sessionInstance(sessionId)
 							: typeof payload["instanceId"] === "string"
 								? payload["instanceId"]
 								: undefined;
@@ -700,11 +722,11 @@ export const mockAppHandlers: StepHandler[] = [
 							projectSlug: "myapp",
 							...(instanceId ? { instanceId } : {}),
 							providers:
-								!payload["sessionId"] && payload["instanceId"] && claude
+								!sessionId && payload["instanceId"] && claude
 									? []
 									: providers.filter((provider) => provider.id !== "claude"),
 							active:
-								modelRequired && !payload["sessionId"]
+								modelRequired && !sessionId
 									? undefined
 									: modelExecutionMockup
 										? { model: "opus[1m]", provider: "claude" }
@@ -715,8 +737,7 @@ export const mockAppHandlers: StepHandler[] = [
 								? { modelExecution: modelExecutionMockup.modelExecution }
 								: {}),
 							variant: {
-								variant:
-									sessionVariants.get(String(payload["sessionId"])) ?? "",
+								variant: sessionVariants.get(String(sessionId)) ?? "",
 								variants: effortOptions.get(page) ?? [],
 							},
 							contextWindow: {
@@ -730,7 +751,9 @@ export const mockAppHandlers: StepHandler[] = [
 						const instanceId =
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]
-								: sessionInstance(payload);
+								: sessionInstance(
+										"sessionId" in payload ? payload.sessionId : undefined,
+									);
 						const claude = (mockInstances.get(page) ?? []).some(
 							(instance) =>
 								instance["id"] === instanceId &&
@@ -748,7 +771,6 @@ export const mockAppHandlers: StepHandler[] = [
 				},
 				handlers: {
 					CreatePty: async () => ({ ok: true }),
-					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					// A real daemon always lists its projects; a draft prefills from them.
 					GetProjects: async () => ({
 						projects: [
@@ -760,7 +782,6 @@ export const mockAppHandlers: StepHandler[] = [
 						],
 						current: "myapp",
 					}),
-					ViewSession: async () => ({ ok: true }),
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
@@ -877,24 +898,6 @@ export const mockAppHandlers: StepHandler[] = [
 						);
 						mockInstances.set(page, next);
 						return { projectSlug: "myapp", instances: next };
-					},
-					CreateSession: async (payload) => {
-						await new Promise((resolve) =>
-							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
-						);
-						createdSessionInstance =
-							typeof payload["instanceId"] === "string"
-								? payload["instanceId"]
-								: undefined;
-						rpcControl.upsertShellRow({
-							id: "sess-first-send",
-							accountId: createdSessionInstance ?? null,
-							title: "New session",
-							status: "idle",
-							projectSlug: "myapp",
-							updatedAt: PINNED_CLOCK_MS,
-						});
-						return { projectSlug: "myapp", sessionId: "sess-first-send" };
 					},
 				},
 			});

@@ -4,10 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	GetCommands,
+	GetCommandsForSession,
 	GetSessionSkills,
 	GetSkillContent,
+	GetSkillContentForSession,
 	MoveSessionWorkspace,
 	ResolveClaudeSettings,
+	ResolveClaudeSettingsForSession,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
@@ -176,21 +179,32 @@ describe("Session directory discovery through the built daemon", () => {
 		});
 
 		async function readView(sessionId?: string) {
-			const context = {
-				projectSlug: "process-test",
-				...(sessionId ? { sessionId } : {}),
-			};
 			const { commands } = await sendRpcRequest(
 				socket,
-				new GetCommands(context),
+				sessionId
+					? new GetCommandsForSession({ sessionId })
+					: new GetCommands({ projectSlug: "process-test" }),
 			);
 			const { resolved } = await sendRpcRequest(
 				socket,
-				new ResolveClaudeSettings({ ...context, instanceId: "claude" }),
+				sessionId
+					? new ResolveClaudeSettingsForSession({
+							sessionId,
+							instanceId: "claude",
+						})
+					: new ResolveClaudeSettings({
+							projectSlug: "process-test",
+							instanceId: "claude",
+						}),
 			);
 			const skill = await sendRpcRequest(
 				socket,
-				new GetSkillContent({ ...context, name: "release-notes" }),
+				sessionId
+					? new GetSkillContentForSession({ sessionId, name: "release-notes" })
+					: new GetSkillContent({
+							projectSlug: "process-test",
+							name: "release-notes",
+						}),
 			);
 			return {
 				commands: [...commands].sort((a, b) => a.name.localeCompare(b.name)),
@@ -206,7 +220,6 @@ describe("Session directory discovery through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: moved,
 				path: worktree,
 			}),
@@ -250,12 +263,12 @@ describe("Session directory discovery through the built daemon", () => {
 				`Use the ${label} skill instructions.`,
 			);
 		}
-		const unmovedContext = { projectSlug: "process-test", sessionId: unmoved };
-		const movedContext = { projectSlug: "process-test", sessionId: moved };
+		const unmovedContext = { sessionId: unmoved };
+		const movedContext = { sessionId: moved };
 		await expect(
 			sendRpcRequest(
 				socket,
-				new GetSkillContent({
+				new GetSkillContentForSession({
 					...unmovedContext,
 					name: "changelog-style",
 				}),
@@ -264,7 +277,7 @@ describe("Session directory discovery through the built daemon", () => {
 		await expect(
 			sendRpcRequest(
 				socket,
-				new GetSkillContent({
+				new GetSkillContentForSession({
 					...movedContext,
 					name: "main-only",
 				}),
@@ -282,7 +295,7 @@ describe("Session directory discovery through the built daemon", () => {
 		expect(used).toEqual({ cwd: worktree, alwaysThinkingEnabled: true });
 		const { loads } = await sendRpcRequest(
 			socket,
-			new GetSessionSkills({ projectSlug: "process-test", sessionId: moved }),
+			new GetSessionSkills({ sessionId: moved }),
 		);
 		evidence["loads"] = loads
 			.map(({ name, invokedBy, turnOrdinal, running }) => ({
@@ -314,7 +327,6 @@ describe("Session directory discovery through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: moved,
 				path: fixture.projectDir,
 			}),
@@ -323,16 +335,15 @@ describe("Session directory discovery through the built daemon", () => {
 		evidence["returned"] = returned;
 		expect(returned).toEqual(views.unmoved);
 		const missingContext = {
-			projectSlug: "process-test",
 			sessionId: "missing-session",
 		};
 		for (const request of [
-			new GetCommands(missingContext),
-			new GetSkillContent({
+			new GetCommandsForSession(missingContext),
+			new GetSkillContentForSession({
 				...missingContext,
 				name: "release-notes",
 			}),
-			new ResolveClaudeSettings({
+			new ResolveClaudeSettingsForSession({
 				...missingContext,
 				instanceId: "claude",
 			}),
@@ -350,7 +361,6 @@ describe("Session directory discovery through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: moved,
 				path: worktree,
 			}),

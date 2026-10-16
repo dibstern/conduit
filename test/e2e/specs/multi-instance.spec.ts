@@ -97,7 +97,7 @@ function defaultAccountDaemon() {
 					const id =
 						typeof payload["instanceId"] === "string"
 							? payload["instanceId"]
-							: payload["sessionId"]
+							: "sessionId" in payload && payload.sessionId
 								? (sessionAccount ?? defaultId())
 								: defaultId();
 					publishModels(id);

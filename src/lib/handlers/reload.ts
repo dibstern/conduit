@@ -10,6 +10,7 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
+import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { formatErrorDetail } from "../errors.js";
 
 export interface ReloadProviderSessionInput {
@@ -48,13 +49,61 @@ export const reloadProviderSessionForClient = (
 					// Refresh is an explicit user action; its subsequent catalog reads are passive.
 					yield* (yield* OpenCodeInstancesTag).use(account.id);
 				}
-				yield* engine.dispatchEffect({
-					type: "end_session",
-					commandId: input.commandId,
-					sessionId: input.sessionId,
-					...(instanceId === undefined ? {} : { targetProviderId: instanceId }),
-					...(account === undefined ? {} : { account }),
-				});
+				const endSessionResult = yield* Effect.either(
+					engine.dispatchEffect({
+						type: "end_session",
+						commandId: input.commandId,
+						sessionId: input.sessionId,
+						...(instanceId === undefined
+							? {}
+							: { targetProviderId: instanceId }),
+						...(account === undefined ? {} : { account }),
+					}),
+				);
+				if (endSessionResult._tag === "Left") {
+					log.warn(
+						`endSession failed: ${formatErrorDetail(endSessionResult.left)}`,
+					);
+				}
+				if (
+					account !== undefined &&
+					PROVIDER_DRIVERS[account.driver].catalogSource === "discovery"
+				) {
+					const warnRefresh = (error: unknown) =>
+						Effect.sync(() =>
+							log.warn(
+								`Provider catalog refresh failed: ${formatErrorDetail(error)}`,
+							),
+						);
+					yield* Effect.gen(function* () {
+						const workspaceRoot = yield* (yield* SessionWorkspaceTag).get(
+							input.sessionId,
+						);
+						// Commands use the session workspace; models/agents use the project root, and the client refetches as soon as this returns.
+						yield* Effect.forEach(
+							[
+								{
+									type: "discover" as const,
+									providerId: account.id,
+									account,
+									workspaceRoot,
+									refresh: true,
+								},
+								{
+									type: "discover" as const,
+									providerId: account.id,
+									account,
+									refresh: true,
+								},
+							],
+							(command) =>
+								engine
+									.dispatchEffect(command)
+									.pipe(Effect.catchAll(warnRefresh)),
+							{ concurrency: 2, discard: true },
+						);
+					}).pipe(Effect.catchAll(warnRefresh));
+				}
 			}).pipe(Effect.scoped),
 		);
 		if (engineResult._tag === "Left") {

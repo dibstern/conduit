@@ -1,5 +1,4 @@
 import { Context, Data, Effect, Layer } from "effect";
-import { ConfigTag } from "./services.js";
 
 export interface ScanResult {
 	readonly discovered: number[];
@@ -29,26 +28,12 @@ export class ScanServiceTag extends Context.Tag("ScanService")<
 	ScanService
 >() {}
 
-export const ScanServiceLive: Layer.Layer<ScanServiceTag, never, ConfigTag> =
-	Layer.effect(
-		ScanServiceTag,
-		Effect.gen(function* () {
-			const config = yield* ConfigTag;
-
-			return {
-				scanNow: () =>
-					Effect.gen(function* () {
-						const triggerScan = config.triggerScan;
-						if (triggerScan == null) {
-							return yield* new ScanServiceNotAvailable({
-								message: "Port scanning not available",
-							});
-						}
-						return yield* Effect.tryPromise({
-							try: () => triggerScan(),
-							catch: (cause) => new ScanServiceError({ cause }),
-						});
-					}),
-			};
-		}),
-	);
+export const ScanServiceLive: Layer.Layer<ScanServiceTag> = Layer.succeed(
+	ScanServiceTag,
+	{
+		scanNow: () =>
+			Effect.fail(
+				new ScanServiceNotAvailable({ message: "Port scanning not available" }),
+			),
+	},
+);

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
-import { expect, vi } from "vitest";
+import { expect, type Mock, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
@@ -69,8 +69,8 @@ const makeLayer = (
 	options?: {
 		auth?: AuthManager;
 		relay?: WebSocketRelay;
-		ensureRelayStarted?: ReturnType<typeof vi.fn>;
-		touchLastUsed?: ReturnType<typeof vi.fn>;
+		ensureRelayStarted?: Mock<(slug: string) => void>;
+		touchLastUsed?: Mock<(slug: string) => void>;
 		waitForRelay?: (
 			slug: string,
 			timeoutMs: number,
@@ -236,7 +236,7 @@ describe("WebSocketRoutingLive", () => {
 			sessionId: "missing",
 			projects: true,
 			fails: false,
-			expected: "older",
+			expected: null,
 		},
 		{ hint: "older", projects: false, fails: false, expected: null },
 		{ hint: "older", projects: true, fails: true, expected: null },
@@ -281,11 +281,22 @@ describe("WebSocketRoutingLive", () => {
 				const result = yield* Effect.either(
 					attachProject({
 						originId: "unregistered",
-						...(scenario.hint ? { projectSlug: scenario.hint } : {}),
-						...(scenario.sessionId ? { sessionId: scenario.sessionId } : {}),
+						...(scenario.sessionId
+							? { sessionId: scenario.sessionId }
+							: scenario.hint
+								? { projectSlug: scenario.hint }
+								: {}),
 					}),
 				);
-				if (scenario.fails) {
+				if (scenario.sessionId) {
+					expect(result).toMatchObject({
+						_tag: "Left",
+						left: {
+							_tag: "WsRpcError",
+							message: expect.stringContaining("Unknown session: missing"),
+						},
+					});
+				} else if (scenario.fails) {
 					expect(result._tag).toBe("Left");
 					if (result._tag === "Left") {
 						expect(result.left).toBeInstanceOf(WsRpcError);

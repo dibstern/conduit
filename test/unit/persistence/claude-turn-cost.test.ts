@@ -504,6 +504,8 @@ describe("Claude turn economics through SQLite persistence", () => {
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
+					[59, "session_project_scope"],
+					[60, "daemon_store_imports"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),

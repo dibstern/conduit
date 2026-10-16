@@ -97,17 +97,18 @@ async function openDraft(
 			}),
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
-			GetModels: ({ projectSlug, instanceId }) => ({
+			GetModels: (input) => ({
 				defaultOpenCodeInstanceId: "opencode",
-				projectSlug,
+				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
 				providers: modelProviders.filter(
-					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
+					({ id }) =>
+						id === (input.instanceId === "claude" ? "claude" : "anthropic"),
 				),
 			}),
-			GetAgents: ({ projectSlug, instanceId }) => ({
-				projectSlug,
-				instanceId,
-				providerScope: { id: instanceId ?? "claude", name: "Provider" },
+			GetAgents: (input) => ({
+				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
+				instanceId: input.instanceId,
+				providerScope: { id: input.instanceId ?? "claude", name: "Provider" },
 				agents: [],
 			}),
 			ResolveSessionMode: ({ projectSlug }) =>

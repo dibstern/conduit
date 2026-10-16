@@ -110,8 +110,8 @@ export const claudeSettingsHandlers: StepHandler[] = [
 				opencode: { status: "missing" },
 			});
 			requireRpcControl(world.page).setStubs({
-				SwitchModel: ({ projectSlug, providerId, modelId }) => ({
-					projectSlug,
+				SwitchModel: ({ providerId, modelId }) => ({
+					projectSlug: "myapp",
 					provider: providerId,
 					model: modelId,
 					variant: "",

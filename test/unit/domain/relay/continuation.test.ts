@@ -119,7 +119,10 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 						),
 					);
 			expect(yield* limits()).toHaveLength(1);
-			expect((yield* read.listSessionInfos())[0]?.limitRecovery).toEqual({
+			expect(
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+					?.limitRecovery,
+			).toEqual({
 				...signal,
 				rearms: 0,
 				continued: false,
@@ -127,7 +130,10 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 			yield* continuation.dismissCutOff("s1");
 			yield* continuation.dismissCutOff("s1");
 			yield* continuation.dismissCutOff("missing");
-			expect((yield* read.listSessionInfos())[0]?.limitRecovery).toEqual({
+			expect(
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+					?.limitRecovery,
+			).toEqual({
 				instanceId: "account-1",
 				rateLimitType: "seven_day",
 				resetsAt: 1791234000,
@@ -166,7 +172,8 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 			);
 			expect(yield* limits()).toHaveLength(2);
 			expect(
-				(yield* read.listSessionInfos())[0]?.limitRecovery?.cutOffMessageId,
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+					?.limitRecovery?.cutOffMessageId,
 			).toBe("u1");
 			yield* commit([
 				canonicalEvent("message.created", "s1", {
@@ -175,7 +182,10 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 					role: "assistant",
 				}),
 			]);
-			expect((yield* read.listSessionInfos())[0]?.limitRecovery).toBeNull();
+			expect(
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+					?.limitRecovery,
+			).toBeNull();
 			// A dismissed cut-off still leaves the strip until the session replies.
 			yield* commit([
 				canonicalEvent("message.created", "s1", {
@@ -200,7 +210,10 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 					role: "assistant",
 				}),
 			]);
-			expect((yield* read.listSessionInfos())[0]?.limitRecovery).toBeNull();
+			expect(
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+					?.limitRecovery,
+			).toBeNull();
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),
@@ -405,6 +418,7 @@ for (const scenario of [
 					interruptTurn: () => Effect.void,
 				}),
 				Effect.provideService(SessionInboxTag, {
+					steerDeclined: () => Effect.void,
 					withSession: (sessionId, effect) =>
 						admission.withPermits(1)(
 							Effect.sync(() => admittedSessions.push(sessionId)).pipe(

@@ -93,8 +93,13 @@ export const StatusPollerLive: Layer.Layer<
 			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
 		);
 		const reconciliationDeps: ReconciliationDeps = {
-			getProjectedSessions: () => readQuery.getSessionsForReconciliation([]),
-			getStrandedChildren: () => readQuery.getStrandedChildren(),
+			getProjectedSessions: () =>
+				readQuery.getSessionsForReconciliation(
+					{ projectIds: [eventStore.projectId] },
+					[],
+				),
+			getStrandedChildren: () =>
+				readQuery.getStrandedChildren({ projectIds: [eventStore.projectId] }),
 			liveListOf: (sessionId) =>
 				Option.isSome(liveTaskList) ? liveTaskList.value(sessionId) : undefined,
 			getSessionsAwaitingUser: () =>
@@ -133,7 +138,9 @@ export const StatusPollerLive: Layer.Layer<
 			unknown
 		> =>
 			Effect.gen(function* () {
-				const rows = yield* readQuery.getAllSessionStatusesWithProviders();
+				const rows = yield* readQuery.getAllSessionStatusesWithProviders({
+					projectIds: [eventStore.projectId],
+				});
 				yield* Ref.set(
 					sessionProviders,
 					new Map(rows.map((row) => [row.id, row.provider])),
@@ -185,9 +192,7 @@ export const StatusPollerLive: Layer.Layer<
 		const refreshGit = (
 			Option.isSome(sessionGit)
 				? sessionGit.value.refresh({ staleOnly: true })
-				: config.refreshSessionGit
-					? Effect.tryPromise(config.refreshSessionGit)
-					: Effect.void
+				: Effect.void
 		).pipe(
 			Effect.catchAllCause((cause) =>
 				reportFailure("Git state refresh failed", cause),

@@ -1,9 +1,13 @@
 import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
-import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import {
+	PROVIDER_DRIVERS,
+	type ProviderDriverTraits,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
@@ -11,10 +15,7 @@ import {
 	type PendingQuestion,
 } from "./pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
-import {
-	CLAUDE_PROVIDER_ID,
-	isProviderTurnInterruptProvider,
-} from "./provider-turn-dispatch.js";
+import { CLAUDE_PROVIDER_ID } from "./provider-turn-dispatch.js";
 import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
@@ -181,7 +182,13 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 			_tag: "Id",
 			id: providerId,
 		});
-		const traits = PROVIDER_DRIVERS[account.driver];
+		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
+		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+		if (
+			traits.unavailableReason &&
+			(registry._tag === "None" || !registry.value.hasInstance(account.driver))
+		)
+			return input.sessionId;
 		if (
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
@@ -235,7 +242,7 @@ export const interruptTurn = (input: ProviderTurnServiceInterruptInput) =>
 			yield* interruptLegacyTurn(input);
 			return;
 		}
-		if (!isProviderTurnInterruptProvider(account.driver)) return;
+		if (!PROVIDER_DRIVERS[account.driver].interruptViaEngine) return;
 
 		const interruptResult = yield* Effect.either(
 			engine.dispatchEffect({

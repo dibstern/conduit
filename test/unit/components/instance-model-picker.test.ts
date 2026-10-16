@@ -43,15 +43,10 @@ const setDefaultModelRpcSpy = vi.hoisted(() =>
 	})),
 );
 const reloadSessionSpy = vi.hoisted(() =>
-	vi.fn(
-		async (
-			_tag: string,
-			input: { projectSlug: string; sessionId: string },
-		) => ({
-			projectSlug: input.projectSlug,
-			sessionId: input.sessionId,
-		}),
-	),
+	vi.fn(async (_tag: string, input: { sessionId: string }) => ({
+		projectSlug: "project-a",
+		sessionId: input.sessionId,
+	})),
 );
 const showToastSpy = vi.hoisted(() => vi.fn());
 const emptyComponent = vi.hoisted(
@@ -314,14 +309,12 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				modelId: "claude-opus-4-7",
 				providerId: "claude",
 			});
 		});
 		expect(getAgentsRpcSpy).toHaveBeenCalledWith({
-			projectSlug: "project-a",
 			sessionId: "session-1",
 		});
 		expect(discoveryState.currentVariant).toBe("fast");
@@ -342,7 +335,6 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(switchModelRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				modelId: "claude-opus-4-7",
 				providerId: "claude",
@@ -350,7 +342,6 @@ describe("InstanceModelPicker", () => {
 		});
 		await waitFor(() => {
 			expect(getAgentsRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 		});
@@ -400,7 +391,6 @@ describe("InstanceModelPicker", () => {
 
 		await waitFor(() => {
 			expect(reloadSessionSpy).toHaveBeenCalledWith("ReloadProviderSession", {
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				commandId: expect.any(String),
 			});

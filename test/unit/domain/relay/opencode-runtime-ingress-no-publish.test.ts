@@ -8,7 +8,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from "vitest";
 import {
 	type EffectOpenCodeRuntimeIngress,
 	makeEffectOpenCodeRuntimeIngress,
@@ -55,8 +63,8 @@ function makeTestRuntime(
 describe("OpenCode runtime ingress does not publish to relay/browser", () => {
 	let dir: string;
 	let runtime: ReturnType<typeof makeTestRuntime> | undefined;
-	let publishToBus: ReturnType<typeof vi.fn>;
-	let publishToRelay: ReturnType<typeof vi.fn>;
+	let publishToBus: Mock<SessionEventBus["publish"]>;
+	let publishToRelay: Mock<ProviderRuntimeRelayPublisher["publish"]>;
 	let hook: EffectOpenCodeRuntimeIngress;
 
 	beforeEach(async () => {

@@ -35,12 +35,11 @@ describe("WsRpcServerLayer GetAgents", () => {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 
 			const result = yield* client.GetAgents({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				providerScope: { id: "opencode", name: "OpenCode" },
 				agents: [
 					{ id: "build", name: "build", description: "Build things" },
@@ -134,7 +133,7 @@ describe("WsRpcServerLayer GetAgents", () => {
 				});
 
 				expect(claudeResult).toEqual({
-					projectSlug: "project-a",
+					projectSlug: "test-project",
 					instanceId: "claude-work",
 					providerScope: { id: "claude", name: "Claude" },
 					agents: [
@@ -143,7 +142,7 @@ describe("WsRpcServerLayer GetAgents", () => {
 					hiddenAgents: [],
 				});
 				expect(openCodeResult).toEqual({
-					projectSlug: "project-a",
+					projectSlug: "test-project",
 					instanceId: "opencode-work",
 					providerScope: { id: "opencode", name: "OpenCode" },
 					agents: [{ id: "build", name: "build" }],

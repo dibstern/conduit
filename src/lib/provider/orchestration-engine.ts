@@ -10,6 +10,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
 
 import type { Account } from "../contracts/account.js";
+import type { SessionScope } from "../contracts/session-scope.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
@@ -112,6 +113,7 @@ export interface DiscoverCommand {
 	readonly providerId: string;
 	readonly account?: Account;
 	readonly workspaceRoot?: string;
+	readonly refresh?: boolean;
 }
 
 export interface EndSessionCommand {
@@ -743,17 +745,20 @@ export class OrchestrationEngine {
 				command.providerId,
 				command.account,
 			);
-			return yield* instance
-				.discoverEffect(command.workspaceRoot, command.account)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`discover failed: provider=${command.providerId}: ${error.message}`,
-							),
+			const discovery = command.refresh
+				? instance.discoverEffect(command.workspaceRoot, command.account, {
+						refresh: true,
+					})
+				: instance.discoverEffect(command.workspaceRoot, command.account);
+			return yield* discovery.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`discover failed: provider=${command.providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 
@@ -833,8 +838,10 @@ export class OrchestrationEngine {
 	}
 
 	/** List all bound sessions with their provider IDs. */
-	listBoundSessionsEffect(): Effect.Effect<SessionBinding[]> {
-		return this.sessionBindingReadModel.listBoundSessions();
+	listBoundSessionsEffect(
+		scope: SessionScope,
+	): Effect.Effect<SessionBinding[]> {
+		return this.sessionBindingReadModel.listBoundSessions(scope);
 	}
 
 	/**

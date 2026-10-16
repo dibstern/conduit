@@ -73,7 +73,11 @@ async function setupWithProjectManagement(
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			GetFileTree: (params) => ({
-				projectSlug: String(params["projectSlug"]),
+				projectSlug:
+					"projectSlug" in params
+						? params.projectSlug
+						: (sessions.find((session) => session.id === params.sessionId)
+								?.projectSlug ?? "myapp"),
 				entries: ["README.md"],
 			}),
 			FindFolders: (params) => ({

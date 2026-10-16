@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
+import { Cause, Data, Effect, Either, Exit, Layer, Option } from "effect";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
@@ -10,6 +10,7 @@ import {
 import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import { computeProjectGroups } from "../../../project-grouping.js";
@@ -24,12 +25,17 @@ import type {
 	SessionInfo,
 } from "../../../shared-types.js";
 import type { StoredProject } from "../../../types.js";
+import {
+	makePersistenceServiceLive,
+	PersistenceProjectTag,
+} from "../../persistence/Services/persistence-service.js";
 import type { AccountDirectory } from "./account-directory.js";
 import {
 	allProjects,
 	type ProjectRegistryTag,
 } from "./project-registry-service.js";
 import type { SessionActivityTag } from "./session-activity.js";
+import { SessionDirectory } from "./session-directory.js";
 import { makeSessionRows } from "./session-rows.js";
 
 class DaemonSessionReadError extends Data.TaggedError(
@@ -96,13 +102,19 @@ const readProjectSessions = (
 
 		const sqliteLayer = SqliteNode.layer({
 			filename: databasePath,
-			readonly: true,
 			disableWAL: true,
 		}).pipe(Layer.provide(Reactivity.layer));
+		const persistenceLayer = Layer.provideMerge(
+			Layer.fresh(makePersistenceServiceLive),
+			Layer.merge(
+				sqliteLayer,
+				Layer.succeed(PersistenceProjectTag, { projectId: projectSlug }),
+			),
+		);
 		const readQueryLayer = Layer.effect(
 			ReadQueryEffectTag,
 			makeReadQueryEffect,
-		).pipe(Layer.provide(sqliteLayer));
+		).pipe(Layer.provide(persistenceLayer));
 
 		const sessions = yield* Effect.gen(function* () {
 			const rows = yield* makeSessionRows({
@@ -335,40 +347,17 @@ export const listDaemonSessions = (
 		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
 
-export const resolveDaemonSession = (configDir: string, sessionId: string) =>
+export const resolveDaemonSession = (sessionId: string) =>
 	Effect.gen(function* () {
-		for (const project of yield* allProjects) {
-			const databasePath = projectEventsDbPath({ configDir, ...project });
-			const result = yield* Effect.exit(
-				Effect.gen(function* () {
-					yield* Effect.try(() => statSync(databasePath));
-					return yield* Effect.gen(function* () {
-						const readQuery = yield* ReadQueryEffectTag;
-						return yield* readQuery.getSession(sessionId);
-					}).pipe(
-						Effect.provide(
-							Layer.effect(ReadQueryEffectTag, makeReadQueryEffect).pipe(
-								Layer.provide(
-									SqliteNode.layer({
-										filename: databasePath,
-										readonly: true,
-										disableWAL: true,
-									}).pipe(Layer.provide(Reactivity.layer)),
-								),
-							),
-						),
-					);
-				}),
-			);
-			if (Exit.isSuccess(result) && result.value !== undefined) {
-				return project.slug;
-			}
-		}
-		return null;
+		const directory = yield* SessionDirectory;
+		return yield* directory
+			.projectOf(sessionId)
+			.pipe(Effect.map(Option.getOrNull));
 	}).pipe(Effect.withSpan("daemonSessions.resolve"));
 
 /** Active bindings take precedence after provider switches; legacy rows use the session id. */
 export const findOpenCodeSession = (
+	scope: SessionScope,
 	instanceId: string,
 	providerSessionId: string,
 ) =>
@@ -381,7 +370,8 @@ export const findOpenCodeSession = (
 				SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
 				ORDER BY activated_at DESC, id DESC LIMIT 1
 			)
-			WHERE COALESCE(binding.provider, session.provider) = ${instanceId}
+			WHERE session.project_id IN ${sql.in(scope.projectIds)}
+			AND COALESCE(binding.provider, session.provider) = ${instanceId}
 			AND COALESCE(binding.provider_sid, session.provider_sid, session.id) = ${providerSessionId}
 			LIMIT 2`;
 		if (rows.length > 1)
@@ -418,12 +408,19 @@ export const resolveDaemonOpenCodeSession = (
 			);
 			if (exists === null) continue;
 			const sessionId = yield* findOpenCodeSession(
+				{ projectIds: [project.slug] },
 				instanceId,
 				providerSessionId,
 			).pipe(
 				Effect.provide(
-					SqliteNode.layer({ filename, readonly: true, disableWAL: true }).pipe(
-						Layer.provide(Reactivity.layer),
+					Layer.provideMerge(
+						Layer.fresh(makePersistenceServiceLive),
+						Layer.merge(
+							SqliteNode.layer({ filename, disableWAL: true }).pipe(
+								Layer.provide(Reactivity.layer),
+							),
+							Layer.succeed(PersistenceProjectTag, { projectId: project.slug }),
+						),
 					),
 				),
 			);

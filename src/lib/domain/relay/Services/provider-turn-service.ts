@@ -1,8 +1,12 @@
 import type { SqlClient } from "@effect/sql";
+import type { SqlError } from "@effect/sql/SqlError";
 import { Context, Deferred, Effect, FiberMap, Layer, type Scope } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
-import type { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import type {
+	ClaudeEventPersistEffectTag,
+	ClaudeEventPersistFailure,
+} from "../../../persistence/effect/claude-event-persist-effect.js";
 import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
@@ -39,8 +43,6 @@ import {
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
 
-export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
-
 export interface ProviderTurnServiceSendInput {
 	/** Continuation admission may already have resolved this immutable snapshot. */
 	readonly account?: Account;
@@ -62,6 +64,11 @@ export interface ProviderTurnServiceSendInput {
 	readonly steer?: boolean;
 	/** Committed with the handoff's outbox row, in one transaction. */
 	readonly events?: readonly CanonicalEvent[];
+	/** Return an undelivered steer to the inbox. */
+	readonly onSteerDeclined?: Effect.Effect<
+		void,
+		SqlError | ClaudeEventPersistFailure
+	>;
 }
 
 export interface ProviderTurnServicePrepareInput {

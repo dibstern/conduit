@@ -218,11 +218,12 @@ async function openDraft(
 			},
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
-			GetModels: ({ projectSlug, instanceId }) => ({
+			GetModels: (input) => ({
 				defaultOpenCodeInstanceId: "opencode",
-				projectSlug,
+				projectSlug: "projectSlug" in input ? input.projectSlug : "e2e-replay",
 				providers: modelProviders.filter(
-					({ id }) => id === (instanceId === "claude" ? "claude" : "anthropic"),
+					({ id }) =>
+						id === (input.instanceId === "claude" ? "claude" : "anthropic"),
 				),
 			}),
 			GetAgents: ({ instanceId }) => ({

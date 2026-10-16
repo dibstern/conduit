@@ -18,6 +18,7 @@ import {
 	Stream,
 } from "effect";
 import type { Account } from "../../../contracts/account.js";
+import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
 	type InputAdmittedPayload,
 	type InputCancelledPayload,
@@ -32,6 +33,8 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import {
 	type ProviderRegistry,
@@ -344,6 +347,11 @@ export interface SessionInbox {
 	readonly sendNow: (
 		target: SessionInboxTarget,
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
+	/** The provider has declined this input and can no longer deliver it. */
+	readonly steerDeclined: (
+		sessionId: string,
+		inputId: string,
+	) => Effect.Effect<void, SqlError | ClaudeEventPersistFailure>;
 	/** Start draining once the relay's providers are registered and recovered. */
 	readonly start: Effect.Effect<void>;
 }
@@ -365,6 +373,7 @@ export const SessionInboxLive = Layer.scoped(
 	Effect.gen(function* () {
 		const accounts = yield* AccountDirectory;
 		const sql = yield* SqlClient.SqlClient;
+		const eventStore = yield* EventStoreEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		const overrides = yield* OverridesStateTag;
@@ -429,7 +438,7 @@ export const SessionInboxLive = Layer.scoped(
 						WHERE session_id = ${sessionId} AND status = 'pending') AS open_prompts,
 					(SELECT state FROM turns WHERE session_id = ${sessionId}
 						ORDER BY requested_at DESC, rowid DESC LIMIT 1) AS last_turn,
-					EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
+					(EXISTS (SELECT 1 FROM turns WHERE session_id = ${sessionId}
 						AND state IN ('interrupted', 'error')
 						AND completed_at >= COALESCE(
 							(SELECT MAX(requested_at) FROM provider_command_outbox
@@ -444,7 +453,20 @@ export const SessionInboxLive = Layer.scoped(
 							AND released.sequence > admitted.sequence
 							AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
 								WHERE session_id = ${sessionId}
-								AND type IN ('turn.interrupted', 'turn.error')), 0)) AS stopped,
+								AND type IN ('turn.interrupted', 'turn.error')), 0))
+						OR EXISTS (SELECT 1 FROM events requeued
+						WHERE session_id = ${sessionId} AND type = 'input.requeued'
+							AND json_extract(data, '$.reason') = 'failed'
+							AND sequence = (SELECT MIN(first.sequence) FROM events first
+								WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
+								AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
+							AND json_extract(data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
+								WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
+								AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
+							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId} AND (type = 'input.sent'
+									OR (type = 'session.resume_cancelled'
+										AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0))) AS stopped,
 					(SELECT pending.input_id FROM pending_inputs pending
 						WHERE pending.session_id = ${sessionId} AND pending.state = 'queued'
 						AND EXISTS (SELECT 1 FROM events
@@ -526,6 +548,35 @@ export const SessionInboxLive = Layer.scoped(
 				} satisfies InboxView;
 			});
 
+		const steerDeclined = (
+			sessionId: string,
+			inputId: string,
+			sentEventId?: string,
+		) =>
+			serialised(sessionId)(
+				Effect.gen(function* () {
+					const [pending] = yield* sql<{
+						sent_sequence: number;
+					}>`SELECT (SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId}
+						AND type = 'input.sent' AND json_extract(data, '$.inputId') = ${inputId}) AS sent_sequence FROM pending_inputs
+						WHERE session_id = ${sessionId} AND input_id = ${inputId} AND state = 'steering'
+						AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = ${inputId})
+						AND (${sentEventId ?? null} IS NULL OR (SELECT event_id FROM events
+							WHERE session_id = ${sessionId} AND type = 'input.sent'
+							AND json_extract(data, '$.inputId') = ${inputId}
+							ORDER BY sequence DESC LIMIT 1) = ${sentEventId ?? null})`;
+					if (!pending) return;
+					yield* persist.persistEvent(
+						canonicalEvent("input.requeued", sessionId, {
+							sessionId,
+							inputId,
+							sentSequence: pending.sent_sequence,
+							reason: "declined",
+						}),
+					);
+				}),
+			);
+
 		const commit = (
 			sessionId: string,
 			decision: InboxDecision,
@@ -566,6 +617,11 @@ export const SessionInboxLive = Layer.scoped(
 							? { contextWindow: request.contextWindow }
 							: {}),
 						...(decision.steer ? { steer: true } : {}),
+						onSteerDeclined: steerDeclined(
+							sessionId,
+							handoff.inputId,
+							events.find((event) => event.type === "input.sent")?.eventId,
+						),
 						events,
 					})
 					.pipe(Effect.provideService(OverridesStateTag, overrides));
@@ -700,7 +756,9 @@ export const SessionInboxLive = Layer.scoped(
 		const drainSessions = (sessionIds?: readonly string[]) =>
 			Effect.gen(function* () {
 				const rows = yield* sql<{ session_id: string }>`
-					SELECT DISTINCT session_id FROM pending_inputs WHERE state = 'queued'`;
+					SELECT DISTINCT pending.session_id FROM pending_inputs pending
+					JOIN sessions ON sessions.id = pending.session_id
+					WHERE pending.state = 'queued' AND sessions.project_id = ${eventStore.projectId}`;
 				const wanted = sessionIds && new Set(sessionIds);
 				yield* Effect.forEach(
 					rows.filter((row) => !wanted || wanted.has(row.session_id)),
@@ -721,12 +779,21 @@ export const SessionInboxLive = Layer.scoped(
 		const ready = yield* Deferred.make<void>();
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
+				Effect.zipRight(
+					requeueFailedSteers(sql, persist).pipe(
+						Effect.catchAllCause((cause) =>
+							Effect.sync(() => log.warn(`inbox recovery failed: ${cause}`)),
+						),
+					),
+				),
 				Effect.zipRight(drainSessions()),
 				Effect.zipRight(
 					Stream.runForEach(advances, (advance) =>
 						advance.dropped
 							? drainSessions()
-							: advance.sessionIds.length > 0
+							: advanceTouchesScope(advance, {
+										projectIds: [eventStore.projectId],
+									}) && advance.sessionIds.length > 0
 								? drainSessions(advance.sessionIds)
 								: Effect.void,
 					),
@@ -739,6 +806,7 @@ export const SessionInboxLive = Layer.scoped(
 			start: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
 			cancel: act("Cancel"),
 			sendNow: act("SendNow"),
+			steerDeclined,
 			submit: (input) =>
 				serialised(input.sessionId)(
 					Effect.gen(function* () {

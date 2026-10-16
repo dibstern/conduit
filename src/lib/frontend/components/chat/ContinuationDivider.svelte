@@ -13,11 +13,11 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
 
-	let { resume, sessionId, projectSlug }: { resume: SessionResume; sessionId: string; projectSlug: string } = $props();
+	let { resume, sessionId }: { resume: SessionResume; sessionId: string } = $props();
 </script>
 
 {#snippet link()}
-	<TextButton tone="secondary" underline="always" data-testid="transcript-divider-handoff" onclick={() => void reviewHandoff(projectSlug, sessionId, resume)}>What carried over?</TextButton>
+	<TextButton tone="secondary" underline="always" data-testid="transcript-divider-handoff" onclick={() => void reviewHandoff(sessionId, resume)}>What carried over?</TextButton>
 {/snippet}
 
 <TranscriptDivider data-testid="transcript-divider" data-switch="true" class="max-w-[760px] mx-auto px-5">

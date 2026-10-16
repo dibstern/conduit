@@ -428,7 +428,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		expect(attachSessionList).toHaveBeenCalledExactlyOnceWith("test-project");
 	});
 
-	it("resolves a session within the attached project", async () => {
+	it("resolves a session owned by the attached project", async () => {
 		render(ChatLayout);
 		attach("test-project");
 		await tick();
@@ -437,7 +437,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		await tick();
 		expect(resolveSession).toHaveBeenCalledExactlyOnceWith({
 			sessionId: "ses_abc123",
-			projectSlug: "test-project",
 		});
 		expect(switchToSession).toHaveBeenCalledExactlyOnceWith(
 			"ses_abc123",

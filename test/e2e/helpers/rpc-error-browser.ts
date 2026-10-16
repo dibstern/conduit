@@ -12,7 +12,6 @@ async function showRpcFailure(nullCopy = false) {
 	if (nullCopy) Object.assign(copy, { WorkspaceMoveError: null });
 	try {
 		await rpc("MoveSessionWorkspace", {
-			projectSlug: "workspace",
 			sessionId: "session",
 			path: "/gone",
 		}).catch(toastFailure("Could not move session"));

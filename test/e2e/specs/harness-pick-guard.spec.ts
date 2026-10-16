@@ -802,7 +802,7 @@ async function createGuardSession(
 	const url = `${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(draft.slug)}`;
 	await new AppPage(page).goto(url);
 	const reported = await Effect.runPromise(
-		draft.browser.rpc.GetModels({ projectSlug: draft.slug, sessionId }),
+		draft.browser.rpc.GetModels({ sessionId }),
 	);
 	await expectShown(draft.picker, shownFromGetModels(reported, driver));
 	return { ...draft, sessionId, url, reported };
@@ -872,7 +872,7 @@ test.describe("session composer owns its stored pick", () => {
 					reply?.frame.exit?.value,
 				);
 				reported = await Effect.runPromise(
-					browser.rpc.GetModels({ projectSlug: slug, sessionId }),
+					browser.rpc.GetModels({ sessionId }),
 				);
 				await expectShown(picker, shownFromGetModels(delivered, driver));
 				await expect(picker).toHaveAttribute(
@@ -924,13 +924,12 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
-					projectSlug: slug,
 					sessionId,
 					variant: "high",
 				}),
 			);
 			const reported = await Effect.runPromise(
-				browser.rpc.GetModels({ projectSlug: slug, sessionId }),
+				browser.rpc.GetModels({ sessionId }),
 			);
 			const intercepted: {
 				request: RpcFrame;
@@ -1214,7 +1213,6 @@ test.describe("session composer owns its stored pick", () => {
 		} = await createGuardSession(page, harness, "claude", caseId);
 		await Effect.runPromise(
 			browser.rpc.SwitchPermissionMode({
-				projectSlug: slug,
 				sessionId: sessionA,
 				mode: "ask",
 			}),
@@ -1235,13 +1233,12 @@ test.describe("session composer owns its stored pick", () => {
 		);
 		await Effect.runPromise(
 			browser.rpc.SwitchPermissionMode({
-				projectSlug: slug,
 				sessionId: sessionB,
 				mode: "full",
 			}),
 		);
 		const reportedB = await Effect.runPromise(
-			browser.rpc.GetModels({ projectSlug: slug, sessionId: sessionB }),
+			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
 			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
@@ -1255,7 +1252,6 @@ test.describe("session composer owns its stored pick", () => {
 		try {
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
-					projectSlug: slug,
 					sessionId: sessionA,
 					variant: "high",
 				}),
@@ -1333,7 +1329,6 @@ test.describe("session composer owns its stored pick", () => {
 		try {
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
-					projectSlug: slug,
 					sessionId,
 					variant: "high",
 				}),
@@ -1348,7 +1343,6 @@ test.describe("session composer owns its stored pick", () => {
 			newer = observed.hold("GetModels", sessionId, { once: true });
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
-					projectSlug: slug,
 					sessionId,
 					variant: "low",
 				}),
@@ -1440,7 +1434,6 @@ test.describe("session composer owns its stored pick", () => {
 		try {
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
-					projectSlug: slug,
 					sessionId,
 					variant: "high",
 				}),
@@ -1572,7 +1565,7 @@ test.describe("session composer owns its stored pick", () => {
 			expect(modelReply.frames[0]?.exit?._tag).toBe("Success");
 			successfulModel = readStoredState(harness, slug, sessionId);
 			reportedAfterModel = await Effect.runPromise(
-				browser.rpc.GetModels({ projectSlug: slug, sessionId }),
+				browser.rpc.GetModels({ sessionId }),
 			);
 			expect(reported.variant?.variant).toBe("low");
 			expect(reportedAfterModel.variant?.variant).toBe("");
@@ -1677,7 +1670,7 @@ test.describe("session composer owns its stored pick", () => {
 			}),
 		);
 		const openCodePick = await Effect.runPromise(
-			browser.rpc.GetModels({ projectSlug: slug, sessionId: openCodeId }),
+			browser.rpc.GetModels({ sessionId: openCodeId }),
 		);
 		const snapshots: { step: string; shown: Pick }[] = [];
 		let deliveredRequestIds: string[] = [];
@@ -1784,7 +1777,7 @@ test.describe("session composer owns its stored pick", () => {
 				}),
 			);
 			const reported = await Effect.runPromise(
-				browser.rpc.GetAgents({ projectSlug: slug, sessionId }),
+				browser.rpc.GetAgents({ sessionId }),
 			);
 			const projectDefault = await Effect.runPromise(
 				browser.rpc.GetAgents({ projectSlug: slug }),
@@ -2000,7 +1993,7 @@ async function assertDraftReceipt(
 		new URL(page.url()).pathname.match(/\/s\/([^/]+)/)?.[1] ?? "",
 	);
 	const reported = await Effect.runPromise(
-		setup.browser.rpc.GetModels({ projectSlug: setup.slug, sessionId }),
+		setup.browser.rpc.GetModels({ sessionId }),
 	);
 	const receipt = readDraftReceipt(harness, setup.slug, sessionId);
 	const sentPick: DraftPick = {
@@ -2433,7 +2426,6 @@ test.describe("draft owns one complete pick", () => {
 		const viewedA = await readShown(draft.picker);
 		const aCatalog = await Effect.runPromise(
 			draft.browser.rpc.GetModels({
-				projectSlug: draft.slug,
 				sessionId: sessionA,
 			}),
 		);
@@ -3002,7 +2994,6 @@ test("switch-model-keeps-context: sonnet 1m switched to opus still sends 1m", as
 	const before = readStoredState(harness, slug, sessionId);
 	await Effect.runPromise(
 		browser.rpc.SwitchModel({
-			projectSlug: slug,
 			sessionId,
 			modelId: "opus",
 			providerId: "claude",
@@ -3010,7 +3001,7 @@ test("switch-model-keeps-context: sonnet 1m switched to opus still sends 1m", as
 	);
 	const after = readStoredState(harness, slug, sessionId);
 	const reported = await Effect.runPromise(
-		browser.rpc.GetModels({ projectSlug: slug, sessionId }),
+		browser.rpc.GetModels({ sessionId }),
 	);
 	let sent: Pick | undefined;
 	const prompt = `${caseId}-next`;
@@ -3255,7 +3246,7 @@ test("legacy-pick-backfill: last turn restores once and survives a second restar
 				slug,
 			);
 			const models = await Effect.runPromise(
-				restoredBrowser.rpc.GetModels({ projectSlug: slug, sessionId }),
+				restoredBrowser.rpc.GetModels({ sessionId }),
 			);
 			restorations.push(readStoredState(harness, slug, sessionId));
 			reported.push({
@@ -3435,7 +3426,7 @@ test("legacy-opencode-pick-backfill: message input receipt restores once across 
 				slug,
 			);
 			const models = await Effect.runPromise(
-				restoredBrowser.rpc.GetModels({ projectSlug: slug, sessionId }),
+				restoredBrowser.rpc.GetModels({ sessionId }),
 			);
 			restorations.push(readStoredState(harness, slug, sessionId));
 			reported.push({
@@ -3536,7 +3527,6 @@ test("legacy-partial-pick-backfill: fills NULL effort and context while preservi
 		const prompt = `${caseId}-empty-${empty}`;
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: slug,
 				sessionId: created.sessionId,
 				inputId: prompt,
 				originId: caseId,
@@ -3731,7 +3721,6 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	try {
 		await Effect.runPromise(
 			restoredBrowser.rpc.input.submit({
-				projectSlug: slug,
 				sessionId,
 				inputId: `${caseId}-rejected`,
 				originId: caseId,
@@ -4430,7 +4419,6 @@ test.describe("OpenCode draft inventory borrows", () => {
 					const beforePrompts = openCodePrompts(harness).length;
 					await Effect.runPromise(
 						browser.rpc.input.submit({
-							projectSlug: setup.slug,
 							sessionId,
 							originId: caseId,
 							inputId: `${caseId}-rejected`,
@@ -4462,7 +4450,6 @@ test.describe("OpenCode draft inventory borrows", () => {
 					);
 					await Effect.runPromise(
 						browser.rpc.SwitchModel({
-							projectSlug: setup.slug,
 							sessionId,
 							providerId: "fake",
 							modelId: offered,
@@ -4470,7 +4457,6 @@ test.describe("OpenCode draft inventory borrows", () => {
 					);
 					await Effect.runPromise(
 						browser.rpc.input.submit({
-							projectSlug: setup.slug,
 							sessionId,
 							originId: caseId,
 							inputId: `${caseId}-offered`,
@@ -4560,7 +4546,6 @@ test.describe("OpenCode draft inventory borrows", () => {
 			expect((await instance(browser))?.status).toBe("stopped");
 			evidence["model"] = await Effect.runPromise(
 				browser.rpc.SwitchModel({
-					projectSlug: setup.slug,
 					sessionId,
 					providerId: "fake",
 					modelId: "named-next",
@@ -4568,14 +4553,12 @@ test.describe("OpenCode draft inventory borrows", () => {
 			);
 			evidence["effort"] = await Effect.runPromise(
 				browser.rpc.SwitchVariant({
-					projectSlug: setup.slug,
 					sessionId,
 					variant: "high",
 				}),
 			);
 			evidence["context"] = await Effect.runPromise(
 				browser.rpc.SwitchContextWindow({
-					projectSlug: setup.slug,
 					sessionId,
 					contextWindow: "1m",
 				}),
@@ -4592,7 +4575,6 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const promptCount = openCodePrompts(harness).length;
 			await Effect.runPromise(
 				browser.rpc.input.submit({
-					projectSlug: setup.slug,
 					sessionId,
 					originId: "9cn3-review-bound-switches",
 					inputId: "9cn3-review-bound-switches",
@@ -5170,7 +5152,6 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				const prompt = `${caseId}-${parentId ? "child" : "external"}`;
 				await Effect.runPromise(
 					browser.rpc.input.submit({
-						projectSlug: slug,
 						sessionId: native.id,
 						inputId: prompt,
 						originId: caseId,
@@ -5404,7 +5385,6 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				// Relays start lazily. A store-only read mounts this project without discovery.
 				await Effect.runPromise(
 					restartedBrowser.rpc.LoadMoreHistory({
-						projectSlug: slug,
 						sessionId: firstSample.sessionId,
 					}),
 				);
@@ -5493,9 +5473,7 @@ for (const rejection of [
 			harness,
 			caseId,
 		);
-		await Effect.runPromise(
-			browser.rpc.GetModels({ projectSlug: slug, sessionId }),
-		);
+		await Effect.runPromise(browser.rpc.GetModels({ sessionId }));
 		const before = readStoredState(harness, slug, sessionId);
 		const receiptsBefore = enqueues(harness, true).length;
 		const db = new Database(harness.projectStorePath(slug));
@@ -5527,7 +5505,6 @@ for (const rejection of [
 		}
 		const submit = await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: slug,
 				sessionId,
 				inputId: caseId,
 				originId: "pick-guard",
@@ -5572,7 +5549,6 @@ for (const rejection of [
 			) {
 				const selected = await Effect.runPromise(
 					browser.rpc.SwitchModel({
-						projectSlug: slug,
 						sessionId,
 						modelId: "sonnet",
 						providerId: "claude",
@@ -5638,8 +5614,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 	const source = readStoredState(harness, slug, sessionId);
 	const firstPrompt = "merge-side-first: Prove the source pick is inherited";
 	const sideRequest = {
-		projectSlug: slug,
-		parentSessionId: sessionId,
+		sessionId: sessionId,
 		title: "Prove the source pick is inherited",
 		inputId: crypto.randomUUID(),
 		text: firstPrompt,
@@ -5671,7 +5646,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 	const created = readStoredState(harness, slug, side.sessionId);
 	expect(created.sessionCount).toBe(source.sessionCount + 1);
 	const models = await Effect.runPromise(
-		browser.rpc.GetModels({ projectSlug: slug, sessionId: side.sessionId }),
+		browser.rpc.GetModels({ sessionId: side.sessionId }),
 	);
 	const reported = {
 		model: models.active?.model ?? "",

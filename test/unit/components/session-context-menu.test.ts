@@ -132,7 +132,6 @@ describe("session triage menu", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				settled: true,
 			}),
@@ -149,7 +148,6 @@ describe("session triage menu", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionAutoSettle",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				disabled: true,
 			}),
@@ -164,7 +162,6 @@ describe("session triage menu", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionAutoSettle",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				disabled: false,
 			}),
@@ -216,7 +213,7 @@ describe("session triage menu", () => {
 		await fireEvent.click(await screen.findByTestId("session-ctx-unsnooze"));
 		expect(rpc).toHaveBeenCalledWith(
 			"UnsnoozeSession",
-			expect.objectContaining({ projectSlug: "test", sessionId: "a" }),
+			expect.objectContaining({ sessionId: "a" }),
 		);
 	});
 
@@ -226,7 +223,6 @@ describe("session triage menu", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionSettled",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				settled: false,
 			}),
@@ -239,7 +235,6 @@ describe("session triage menu", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionPinned",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				pinned: true,
 			}),
@@ -264,7 +259,6 @@ describe("session triage menu", () => {
 		expect(rpc).toHaveBeenCalledWith(
 			"SetSessionPinned",
 			expect.objectContaining({
-				projectSlug: "test",
 				sessionId: "a",
 				pinned: false,
 			}),

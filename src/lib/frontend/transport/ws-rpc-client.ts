@@ -33,6 +33,10 @@ import type {
 	SetHiddenEntriesResponse,
 } from "./ws-rpc.js";
 
+type RpcScope =
+	| { readonly projectSlug: string; readonly sessionId?: never }
+	| { readonly sessionId: string; readonly projectSlug?: never };
+
 type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
 type UnaryTag = {
 	[T in Rpcs["_tag"]]: [Rpc.IsStream<Rpcs, T>] extends [never] ? T : never;
@@ -136,13 +140,11 @@ export interface PtyInputRpcInput {
 	readonly data: string;
 }
 
-export interface CreatePtyRpcInput {
-	readonly projectSlug: string;
+export type CreatePtyRpcInput = RpcScope & {
 	readonly originId: string;
-	readonly sessionId?: string;
 	readonly accountId?: string;
 	readonly root?: string;
-}
+};
 
 export interface ResizePtyRpcInput {
 	readonly projectSlug: string;
@@ -157,11 +159,10 @@ export interface ClosePtyRpcInput {
 	readonly ptyId: string;
 }
 
-export interface AttachProjectRpcInput {
-	readonly projectSlug?: string;
-	readonly sessionId?: string;
-	readonly originId: string;
-}
+export type AttachProjectRpcInput = (
+	| { readonly projectSlug?: string; readonly sessionId?: never }
+	| { readonly sessionId: string; readonly projectSlug?: never }
+) & { readonly originId: string };
 
 export interface SetHiddenEntriesRpcInput {
 	readonly projectSlug: string;
@@ -180,11 +181,9 @@ export interface SetClaudeSettingsRpcInput {
 	readonly originId?: string;
 }
 
-export interface ResolveClaudeSettingsRpcInput {
-	readonly projectSlug: string;
+export type ResolveClaudeSettingsRpcInput = RpcScope & {
 	readonly instanceId: string;
-	readonly sessionId?: string;
-}
+};
 
 export const LOG_LEVELS = RpcLogLevelSchema.literals;
 
@@ -460,11 +459,16 @@ export async function closePtyRpc(input: ClosePtyRpcInput): Promise<void> {
 	await runTransportEffect(callClosePty(input));
 }
 
-export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
+export async function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
 	readonly projectSlug: string | null;
 	readonly sessionSlug: string | null;
 }> {
-	return runTransportEffect(callAttachProject(input));
+	// Reject with the WsRpcError itself so callers can read its code.
+	const result = await runTransportEffect(
+		Effect.either(callAttachProject(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function getDefaultGroupingModeRpc(): Promise<GroupingMode> {

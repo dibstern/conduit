@@ -116,12 +116,11 @@ export const effort: ComposerSetting<string> = {
 			"effort",
 			undo,
 			() =>
-				rpc("SwitchVariant", { projectSlug, sessionId, variant }).then(
-					(response) =>
-						apply({
-							variant: response.variant,
-							variants: [...response.variants],
-						}),
+				rpc("SwitchVariant", { sessionId, variant }).then((response) =>
+					apply({
+						variant: response.variant,
+						variants: [...response.variants],
+					}),
 				),
 			`Couldn't switch thinking level to "${variant || "default"}"`,
 		);
@@ -159,7 +158,7 @@ export const approvals: ComposerSetting<ApprovalOption> = {
 		switchSetting(
 			"approvals",
 			undo,
-			() => rpc("SwitchPermissionMode", { projectSlug, sessionId, mode }),
+			() => rpc("SwitchPermissionMode", { sessionId, mode }),
 			`Couldn't switch approval mode to "${value.label}"`,
 		);
 	},
@@ -200,7 +199,6 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 				undo,
 				() =>
 					rpc("SwitchContextWindow", {
-						projectSlug,
 						sessionId,
 						contextWindow: contextWindowValue,
 					}).then((response) =>
@@ -261,36 +259,34 @@ export const model: ComposerSetting<ComposerModel> = {
 			"model",
 			undo,
 			() =>
-				rpc("SwitchModel", { projectSlug, sessionId, ...value }).then(
-					(response) => {
-						apply({
-							modelId: response.model,
-							providerId: response.provider,
-							variant: response.variant,
-							variants: [...response.variants],
-							...(response.contextWindow
-								? {
-										contextWindow: response.contextWindow.contextWindow,
-										contextWindowOptions: response.contextWindow.options.map(
-											(option) => ({
-												...option,
-											}),
-										),
-									}
-								: {}),
-						});
-						void rpc("GetAgents", { projectSlug, sessionId })
-							.then((response) => {
-								// Agents are shared composer state, unlike the per-session pick.
-								if (
-									sessionState.currentId === sessionId &&
-									getCurrentSlug() === projectSlug
-								)
-									applyGetAgentsResponse(response, sessionId);
-							})
-							.catch(() => undefined);
-					},
-				),
+				rpc("SwitchModel", { sessionId, ...value }).then((response) => {
+					apply({
+						modelId: response.model,
+						providerId: response.provider,
+						variant: response.variant,
+						variants: [...response.variants],
+						...(response.contextWindow
+							? {
+									contextWindow: response.contextWindow.contextWindow,
+									contextWindowOptions: response.contextWindow.options.map(
+										(option) => ({
+											...option,
+										}),
+									),
+								}
+							: {}),
+					});
+					void rpc("GetAgents", { sessionId })
+						.then((response) => {
+							// Agents are shared composer state, unlike the per-session pick.
+							if (
+								sessionState.currentId === sessionId &&
+								getCurrentSlug() === projectSlug
+							)
+								applyGetAgentsResponse(response, sessionId);
+						})
+						.catch(() => undefined);
+				}),
 			`Couldn't switch model to "${value.modelId}"`,
 		);
 	},

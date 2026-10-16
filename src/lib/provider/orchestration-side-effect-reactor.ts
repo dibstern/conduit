@@ -6,7 +6,11 @@ import type { AccountDirectory } from "../domain/daemon/Services/account-directo
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
+import {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectTag,
+} from "../persistence/effect/claude-event-persist-effect.js";
+import { requeueFailedSteers } from "../persistence/effect/input-requeue-effect.js";
 import {
 	makeProviderStateEffect,
 	ProviderStateEffectTag,
@@ -187,7 +191,19 @@ export class ProviderSideEffectReactor {
 			if (!row) return 0;
 			// Recovery / background path: no waiter, so the row outcome is recorded
 			// durably and swallowed here.
-			yield* Effect.either(this.executeRow(row));
+			const result = yield* Effect.either(this.executeRow(row));
+			if (result._tag === "Right" && result.right.status === "steer-declined") {
+				const persist = yield* Effect.serviceOption(
+					ClaudeEventPersistEffectTag,
+				);
+				if (persist._tag === "Some")
+					yield* requeueFailedSteers(
+						this.options.sql,
+						persist.value,
+						row.session_id,
+						row.command_id,
+					).pipe(Effect.mapError(storeFailure("requeueDeclinedSteer")));
+			}
 			return 1;
 		});
 	}
@@ -245,6 +261,16 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.left);
 			}
 			const turn = result.right;
+			if (turn.status === "steer-declined") {
+				// The inbox owns rescheduling. This delivery must never retry.
+				yield* this.writeFailure(
+					row,
+					false,
+					"steer-declined",
+					yield* this.currentTimeMillis(),
+				);
+				return turn;
+			}
 			// A joined input was delivered and answered by another input's turn.
 			if (turn.status !== "completed" && turn.status !== "joined") {
 				// Provider-declared failure delivered on the success channel (e.g.
@@ -295,6 +321,8 @@ export class ProviderSideEffectReactor {
 					return REACTOR_COMPLETED_RESULT;
 				}
 				if (receipt.status === "side_effect_failed") {
+					if (receipt.error_code === "steer-declined")
+						return { ...REACTOR_COMPLETED_RESULT, status: "steer-declined" };
 					return yield* this.commandNotExecutable(
 						commandId,
 						receipt.error_code,

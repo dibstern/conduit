@@ -37,10 +37,11 @@ test("files, mentions and new terminals follow a session move and navigation", a
 		moved && sessionId === "workspace-session" ? worktree : main;
 	rpc = await mockWsRpc(page, {
 		stubs: {
-			GetFileTree: ({ sessionId }) => ({
+			GetFileTree: (scope) => ({
 				projectSlug,
 				entries: [
-					folder(sessionId) === worktree
+					folder("sessionId" in scope ? scope.sessionId : undefined) ===
+					worktree
 						? "worktree-only.txt"
 						: "main-only.txt",
 					"shared.txt",
@@ -48,7 +49,7 @@ test("files, mentions and new terminals follow a session move and navigation", a
 					"nested/child.txt",
 				],
 			}),
-			GetFileList: ({ sessionId, path = "." }) => ({
+			GetFileList: ({ path = ".", ...scope }) => ({
 				projectSlug,
 				path,
 				entries:
@@ -57,7 +58,9 @@ test("files, mentions and new terminals follow a session move and navigation", a
 						: [
 								{
 									name:
-										folder(sessionId) === worktree
+										folder(
+											"sessionId" in scope ? scope.sessionId : undefined,
+										) === worktree
 											? "worktree-only.txt"
 											: "main-only.txt",
 									type: "file",
@@ -66,10 +69,10 @@ test("files, mentions and new terminals follow a session move and navigation", a
 								{ name: "nested", type: "directory" },
 							],
 			}),
-			GetFileContent: ({ sessionId, path }) => ({
+			GetFileContent: ({ path, ...scope }) => ({
 				projectSlug,
 				path,
-				content: `${folder(sessionId) === worktree ? "worktree" : "main"} content`,
+				content: `${folder("sessionId" in scope ? scope.sessionId : undefined) === worktree ? "worktree" : "main"} content`,
 			}),
 			ListDaemonSessions: () => ({
 				sessions,
@@ -77,9 +80,9 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				hasMore: false,
 				nextCursor: null,
 			}),
-			GetModels: ({ projectSlug }) => ({
+			GetModels: (input) => ({
 				defaultOpenCodeInstanceId: "opencode",
-				projectSlug,
+				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
 			GetAgents: () => ({

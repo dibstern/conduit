@@ -173,6 +173,7 @@ class ClaudeAccounts {
 			if (
 				reading.accountId === currentId ||
 				!instance ||
+				// driver-dispatch-ok: narrows the usage reading's harness, not a driver.
 				quota?.harness !== "claude" ||
 				quota.status !== "available" ||
 				quotaBlocksSwitch(quota)
@@ -241,7 +242,6 @@ class ClaudeAccounts {
 		this.handoff = { kind: "previewing", ...context };
 		try {
 			const summary = await rpc("PreviewContinuation", {
-				projectSlug: this.projectSlug,
 				sessionId,
 				instanceId: targetId,
 				originId: getBrowserClientId(),
@@ -276,7 +276,6 @@ class ClaudeAccounts {
 		this.inFlightTarget = handoff.to;
 		try {
 			await switchSessionAccount({
-				projectSlug: this.projectSlug,
 				sessionId: handoff.sessionId,
 				instanceId: handoff.to,
 				expectedInstanceId: handoff.from,

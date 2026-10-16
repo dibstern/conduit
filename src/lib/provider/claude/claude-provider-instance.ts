@@ -34,8 +34,9 @@ export class ClaudeProviderInstance implements ProviderInstance {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return this.runtime.discoverEffect(workspaceRoot, account);
+		return this.runtime.discoverEffect(workspaceRoot, account, options);
 	}
 
 	sendTurnEffect(

@@ -195,7 +195,7 @@ export class RpcMockControl {
 		Pick<StubTable, "GetModels" | "GetCommands" | "GetAgents">
 	> {
 		return {
-			GetModels: ({ sessionId }) => {
+			GetModels: (payload) => {
 				const {
 					providers,
 					agents: _agents,
@@ -209,7 +209,9 @@ export class RpcMockControl {
 					defaultOpenCodeInstanceId: "opencode",
 					providers: providers ?? [],
 					...modelState,
-					...(sessionId && modelState.instanceId === undefined
+					...("sessionId" in payload &&
+					payload.sessionId &&
+					modelState.instanceId === undefined
 						? {
 								instanceId:
 									(modelState.active as { provider?: string } | undefined)
@@ -1008,14 +1010,14 @@ export async function ensureMockTranscriptRpc(
 	if (control) return control;
 	return mockWsRpc(page, {
 		stubs: {
-			LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-				projectSlug,
+			LoadMoreHistory: ({ sessionId, before }) => ({
+				projectSlug: "e2e-replay",
 				sessionId,
 				...mockDetailPage(page, sessionId, before),
 			}),
 			ViewSession: () => ({ ok: true }),
-			ResolveSession: ({ projectSlug }) => ({
-				projectSlug: String(projectSlug ?? "e2e-replay"),
+			ResolveSession: () => ({
+				projectSlug: "e2e-replay",
 			}),
 			ListDaemonSessions: () => ({
 				sessions: [],

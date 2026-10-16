@@ -13,7 +13,7 @@ type SwitchVariantInput = Parameters<typeof rpc<"SwitchVariant">>[1];
 
 const switchVariantRpcSpy = vi.hoisted(() =>
 	vi.fn(async (input: SwitchVariantInput) => ({
-		projectSlug: input.projectSlug,
+		projectSlug: "project-a",
 		variant: input.variant,
 		variants: ["low", "medium", "high", "max"],
 	})),
@@ -62,7 +62,6 @@ describe("ModelVariant", () => {
 
 		await waitFor(() => {
 			expect(switchVariantRpcSpy).toHaveBeenCalledWith({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				variant: "high",
 			});

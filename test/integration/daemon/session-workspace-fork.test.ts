@@ -7,7 +7,7 @@ import { Either, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AnswerQuestion,
-	ForkSession,
+	ForkSessionForSession,
 	ListDaemonSessions,
 	MoveSessionWorkspace,
 	OpenCodeUseWorktree,
@@ -191,7 +191,6 @@ describe("Forked session workspaces through the built daemon", () => {
 			socket,
 			provider === "claude"
 				? new MoveSessionWorkspace({
-						projectSlug: "process-test",
 						sessionId: parentId,
 						path: worktree,
 					})
@@ -217,14 +216,12 @@ describe("Forked session workspaces through the built daemon", () => {
 			socket,
 			sideThread
 				? new StartSideThread({
-						projectSlug: "process-test",
-						parentSessionId: parentId,
+						sessionId: parentId,
 						title: "Explain this code",
 						inputId: sideInputId,
 						text: "Reply with pong.",
 					})
-				: new ForkSession({
-						projectSlug: "process-test",
+				: new ForkSessionForSession({
 						originId: browser.originId,
 						sessionId: parentId,
 					}),
@@ -295,7 +292,6 @@ describe("Forked session workspaces through the built daemon", () => {
 				await sendRpcRequest(
 					socket,
 					new SubmitInput({
-						projectSlug: "process-test",
 						sessionId: forkId,
 						inputId: randomUUID(),
 						text: "Reply with pong.",
@@ -685,8 +681,7 @@ describe("Forked session workspaces through the built daemon", () => {
 		// decides the messages a Claude fork keeps.
 		await fixture.restart({ startupTimeoutMs: 60_000 });
 		const request = new StartSideThread({
-			projectSlug: "process-test",
-			parentSessionId: parentId,
+			sessionId: parentId,
 			title: "What does this do?",
 			inputId: randomUUID(),
 			text: "What does this do?",
@@ -809,7 +804,6 @@ describe("Forked session workspaces through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: parentId,
 				path: extraWorktree,
 			}),
@@ -825,7 +819,6 @@ describe("Forked session workspaces through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: parentId,
 				path: worktree,
 			}),
@@ -834,8 +827,7 @@ describe("Forked session workspaces through the built daemon", () => {
 			git(fixture.projectDir, "worktree", "remove", "--force", worktree);
 		const fork = await sendRpcRequest(
 			socket,
-			new ForkSession({
-				projectSlug: "process-test",
+			new ForkSessionForSession({
 				originId: browser.originId,
 				sessionId: parentId,
 			}),
