@@ -7,7 +7,11 @@
 // Components that need data while disconnected (SettingsPanel, ConnectOverlay)
 // should use `getCachedInstances()` or `getCachedInstanceById()`.
 
-import type { ProviderSessionCapabilities } from "../../contracts/provider-instance.js";
+import {
+	type BrowserDriverTraits,
+	getProviderDriver,
+	type ProviderSessionCapabilities,
+} from "../../contracts/provider-instance.js";
 import type {
 	DetectProxyResponse,
 	InstanceListResponse,
@@ -22,6 +26,7 @@ import { accountSnapshotChangedListeners } from "./ws-listeners.js";
 export const instanceState = $state({
 	instances: [] as OpenCodeInstance[],
 	loaded: false,
+	providerTraits: {} as Record<string, BrowserDriverTraits | undefined>,
 	providerCapabilities: {} as Record<
 		string,
 		ProviderSessionCapabilities | undefined
@@ -106,7 +111,10 @@ export function applyScanNowResponse(response: ScanNowResponse): void {
 
 /** Apply a full instance list: the subscription's, or a mutation's reply. */
 export function applyInstanceListResponse(
-	response: Pick<InstanceListResponse, "instances" | "providerCapabilities">,
+	response: Pick<
+		InstanceListResponse,
+		"instances" | "providerCapabilities" | "providerTraits"
+	>,
 ): void {
 	const instances: OpenCodeInstance[] = response.instances.map((instance) => ({
 		id: instance.id,
@@ -143,6 +151,8 @@ export function applyInstanceListResponse(
 		list.map((i) => `${i.id}:${i.driver}:${i.isDefault}`).join("|");
 	const accountsChanged = routingKey(instances) !== routingKey(cachedInstances);
 	instanceState.instances = instances;
+	if (response.providerTraits || !instanceState.loaded)
+		instanceState.providerTraits = { ...response.providerTraits };
 	instanceState.loaded = true;
 	if (response.providerCapabilities) {
 		instanceState.providerCapabilities = { ...response.providerCapabilities };
@@ -151,6 +161,24 @@ export function applyInstanceListResponse(
 	cachedInstances = [...instances];
 	if (accountsChanged)
 		for (const listener of accountSnapshotChangedListeners) listener();
+}
+
+/** Older servers omit traits; their known drivers use the shared contract defaults. */
+export function getDriverTraits(
+	driver: string | undefined,
+): BrowserDriverTraits | undefined {
+	return driver
+		? (instanceState.providerTraits[driver] ?? getProviderDriver(driver))
+		: undefined;
+}
+
+export function getInstanceTraits(
+	instanceId: string | null | undefined,
+): BrowserDriverTraits | undefined {
+	const instance =
+		getInstanceById(instanceId ?? "") ??
+		getCachedInstanceById(instanceId ?? "");
+	return instance ? getDriverTraits(instance.driver ?? "opencode") : undefined;
 }
 
 export function getInstanceById(id: string): OpenCodeInstance | undefined {

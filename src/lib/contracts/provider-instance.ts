@@ -34,6 +34,21 @@ export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
 
 export interface ProviderDriverTraits {
+	/** composer-controls-words.feature pins the compact composer's behaviour control. */
+	readonly composerModeControl: "agent" | "permission-mode";
+	/** permission-modes.test.ts pins the modes each provider can enforce. */
+	readonly permissionModes: readonly (
+		| "ask"
+		| "acceptEdits"
+		| "full"
+		| "plan"
+		| "auto"
+		| "dontAsk"
+	)[];
+	/** question-card.test.ts pins whether a provider accepts skipped questions. */
+	readonly supportsQuestionSkip: boolean;
+	/** rewind-banner.test.ts pins whether conversation rewind can also restore files. */
+	readonly supportsFileRewind: boolean;
 	/** Provider captures pin multi-folder, worktree and task-stop session contracts. */
 	readonly sessionCapabilities: ProviderSessionCapabilities;
 	/** OpenCode's SDK/API and SSE lifecycle pin server-owned operations. */
@@ -71,6 +86,10 @@ export const PROVIDER_DRIVERS = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
 	claude: {
+		composerModeControl: "permission-mode",
+		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"],
+		supportsQuestionSkip: false,
+		supportsFileRewind: false,
 		sessionCapabilities: {
 			supportsMultiFolder: true,
 			supportsWorktree: true,
@@ -96,6 +115,10 @@ export const PROVIDER_DRIVERS = {
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
 	// Native moves reject destinations belonging to another OpenCode project.
 	opencode: {
+		composerModeControl: "agent",
+		permissionModes: ["ask", "acceptEdits", "full"],
+		supportsQuestionSkip: true,
+		supportsFileRewind: true,
 		sessionCapabilities: {
 			supportsMultiFolder: true,
 			supportsWorktree: false,
@@ -118,6 +141,23 @@ export const PROVIDER_DRIVERS = {
 		emitsMessageParentIds: true,
 	},
 } as const satisfies Record<KnownProviderDriverKind, ProviderDriverTraits>;
+
+export const BrowserDriverTraitsSchema = Schema.Struct({
+	sessionCapabilities: ProviderSessionCapabilitiesSchema,
+	runsOpenCodeServer: Schema.Boolean,
+	usageHarness: Schema.optional(Schema.Literal("claude")),
+	composerModeControl: Schema.Literal("agent", "permission-mode"),
+	accountKind: Schema.Literal("config-directory", "server"),
+	catalogSource: Schema.Literal("discovery", "server"),
+	modelIdFormat: Schema.Literal("context-window-suffix", "provider-qualified"),
+	supportsGoalState: Schema.Boolean,
+	permissionModes: Schema.Array(
+		Schema.Literal("ask", "acceptEdits", "full", "plan", "auto", "dontAsk"),
+	),
+	supportsQuestionSkip: Schema.Boolean,
+	supportsFileRewind: Schema.Boolean,
+});
+export type BrowserDriverTraits = typeof BrowserDriverTraitsSchema.Type;
 
 export function getProviderDriver(
 	driver: ProviderDriverKind | undefined,

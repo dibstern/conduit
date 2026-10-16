@@ -45,6 +45,7 @@ import {
 import { type SessionMode, SessionModeSchema } from "./project-file.js";
 import {
 	AccountIdSchema,
+	BrowserDriverTraitsSchema,
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
@@ -789,10 +790,16 @@ const ProviderCapabilityMapSchema = Schema.Record({
 	value: Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 });
 
+const ProviderTraitsMapSchema = Schema.Record({
+	key: Schema.String,
+	value: Schema.suspend(() => BrowserDriverTraitsSchema),
+});
+
 export const InstanceListResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	instances: Schema.Array(OpenCodeInstanceSchema),
 	providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+	providerTraits: Schema.optional(ProviderTraitsMapSchema),
 	addedInstanceId: Schema.optional(Schema.String),
 });
 
@@ -2881,6 +2888,7 @@ export const SubscribeInstances = Rpc.make("SubscribeInstances", {
 	success: Schema.Struct({
 		instances: Schema.Array(OpenCodeInstanceSchema),
 		providerCapabilities: Schema.optional(ProviderCapabilityMapSchema),
+		providerTraits: Schema.optional(ProviderTraitsMapSchema),
 	}),
 	error: WsRpcError,
 	stream: true,
