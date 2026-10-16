@@ -2,9 +2,11 @@ import { existsSync } from "node:fs";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { Context, Data, Effect, HashMap, Layer, Option, Ref } from "effect";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import type { StoredProject } from "../../../types.js";
+import { ProjectRegistryTag } from "./project-registry-service.js";
 
 export class AmbiguousSession extends Data.TaggedError("AmbiguousSession")<{
 	readonly sessionId: string;
@@ -15,13 +17,27 @@ export class AmbiguousSession extends Data.TaggedError("AmbiguousSession")<{
 	}
 }
 
+export class SessionDirectoryReadError extends Data.TaggedError(
+	"SessionDirectoryReadError",
+)<{
+	readonly sessionId: string;
+	readonly cause: unknown;
+}> {
+	get message(): string {
+		return `Could not read session owner: ${this.sessionId}`;
+	}
+}
+
 /** Resolve stored session ids, including OpenCode ids adopted by multiple projects. */
 export class SessionDirectory extends Context.Tag("SessionDirectory")<
 	SessionDirectory,
 	{
 		readonly projectOf: (
 			sessionId: string,
-		) => Effect.Effect<Option.Option<string>, AmbiguousSession>;
+		) => Effect.Effect<
+			Option.Option<string>,
+			AmbiguousSession | SessionDirectoryReadError
+		>;
 		readonly record: (
 			projectSlug: string,
 			sessionIds: readonly string[],
@@ -45,6 +61,7 @@ export const indexProjectSessions = (
 ) =>
 	Effect.gen(function* () {
 		const directory = yield* SessionDirectory;
+		if (Option.isSome(yield* Effect.serviceOption(PersistenceStore))) return;
 		const filename = projectEventsDbPath({ configDir, ...project });
 		if (!existsSync(filename)) return;
 		const sessions = yield* Effect.gen(function* () {
@@ -62,6 +79,35 @@ export const indexProjectSessions = (
 			sessions.map(({ id }) => id),
 		);
 	});
+
+/** Adapter 2 reads ownership at lookup time; current registration controls visibility. */
+export const makeSharedSessionDirectoryLive = Layer.effect(
+	SessionDirectory,
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const registry = yield* ProjectRegistryTag;
+		return {
+			projectOf: (sessionId: string) =>
+				Effect.gen(function* () {
+					const rows = yield* sql<{ project_id: string | null }>`
+						SELECT project_id FROM sessions WHERE id = ${sessionId}`.pipe(
+						Effect.mapError(
+							(cause) => new SessionDirectoryReadError({ sessionId, cause }),
+						),
+					);
+					const owner = rows[0]?.project_id;
+					const projects = yield* Ref.get(registry);
+					return owner && HashMap.has(projects, owner)
+						? Option.some(owner)
+						: Option.none();
+				}),
+			record: () => Effect.void,
+			replaceProject: () => Effect.void,
+			remove: () => Effect.void,
+			removeProject: () => Effect.void,
+		};
+	}),
+);
 
 export const makeSessionDirectoryLive = (
 	configDir: string,

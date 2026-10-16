@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, Data, Effect, Layer, Schema } from "effect";
+import { Cause, type ConfigError, Data, Effect, Layer, Schema } from "effect";
 import type { DaemonConfig } from "../../daemon/config-persistence.js";
 import { deserializeRecent } from "../../daemon/recent-projects.js";
 import { refreshSidebar, rerootSession } from "../effect/sidebar-projection.js";
@@ -42,7 +42,11 @@ const Sidecar = Schema.Record({
  * the first project would delete the remaining projects' only copy of lineage.
  * Unresolved entries are retried from the archive at startup; partial imports are idempotent.
  */
-export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
+export const migrateForkLineage = (
+	configDir: string,
+	config: DaemonConfig,
+	sharedSql?: SqlClient.SqlClient,
+) =>
 	Effect.gen(function* () {
 		const source = yield* Effect.try({
 			try: () => {
@@ -120,12 +124,22 @@ export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
 				),
 			),
 		]);
-		for (const project of projects.values()) {
-			const filename = projectEventsDbPath({ configDir, ...project });
-			if (!existsSync(filename)) continue;
-			const sqliteLayer = SqliteNode.layer({ filename }).pipe(
-				Layer.provide(Reactivity.layer),
-			);
+		// Shared mode resolves each child's stored owner after import. The legacy
+		// branch retains its per-file discovery, including recent projects.
+		const stores: Layer.Layer<SqlClient.SqlClient, ConfigError.ConfigError>[] =
+			sharedSql
+				? [Layer.succeed(SqlClient.SqlClient, sharedSql)]
+				: [...projects.values()].flatMap((project) => {
+						const filename = projectEventsDbPath({ configDir, ...project });
+						return existsSync(filename)
+							? [
+									SqliteNode.layer({ filename }).pipe(
+										Layer.provide(Reactivity.layer),
+									),
+								]
+							: [];
+					});
+		for (const sqliteLayer of stores) {
 			const imported = yield* Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const columns = yield* sql<{
@@ -241,6 +255,18 @@ export const migrateForkLineage = (configDir: string, config: DaemonConfig) =>
 				);
 			}).pipe(Effect.provide(sqliteLayer));
 			for (const id of imported) remaining.delete(id);
+		}
+		if (sharedSql) {
+			// The per-file adapter closes/checkpoints before retiring the sidecar.
+			// The daemon connection stays open, so checkpoint it explicitly first.
+			const [checkpoint] = yield* sharedSql<{
+				busy: number;
+			}>`PRAGMA wal_checkpoint(FULL)`;
+			if (checkpoint?.busy !== 0)
+				return yield* new ForkLineageImportError({
+					message:
+						"Fork lineage checkpoint is busy; retaining source for retry",
+				});
 		}
 		const warning = yield* Effect.try({
 			try: () => {

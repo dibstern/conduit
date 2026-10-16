@@ -27,7 +27,9 @@ import {
 	ProjectSaveRejected,
 	type SaveProjectInput,
 } from "../../../contracts/ws-rpc.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
+	daemonStorePath,
 	projectEventsDbPath,
 	projectStorageDir,
 	writeProjectStorageOwner,
@@ -67,6 +69,7 @@ import {
 	updateInstance as updateEffectInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
 	projectInfos as getEffectProjectInfos,
@@ -188,6 +191,8 @@ export const RelayFactoryLive = (
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
+			const storeContext = yield* optionalPersistenceStoreContext;
+			const sharedStore = Context.getOption(storeContext, PersistenceStore);
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -205,7 +210,7 @@ export const RelayFactoryLive = (
 			const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 			const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
 			const tracer = yield* Effect.tracer;
-			const daemonContext = yield* Effect.context<
+			const baseDaemonContext = yield* Effect.context<
 				| AccountDirectory
 				| ProjectRegistryTag
 				| InstanceManagerStateTag
@@ -215,6 +220,7 @@ export const RelayFactoryLive = (
 				| SessionActivityTag
 				| ConfigPersistenceTag
 			>();
+			const daemonContext = Context.merge(baseDaemonContext, storeContext);
 
 			const scanAdapter = Context.make(ScanServiceTag, {
 				scanNow: () => portScanner.scanNow(),
@@ -412,13 +418,15 @@ export const RelayFactoryLive = (
 							});
 						}
 
-						// Create persistence DB directory and open SQLite
+						// Keep storage ownership metadata independently of event-store ownership.
 						if (!existsSync(project.folders[0])) {
 							return yield* new RelayFactoryError({
 								reason: `Project directory does not exist: ${project.folders[0]}`,
 							});
 						}
-						const dbPath = projectEventsDbPath({ configDir, ...project });
+						const dbPath = Option.isSome(sharedStore)
+							? daemonStorePath(configDir)
+							: projectEventsDbPath({ configDir, ...project });
 						const storageDir = projectStorageDir(configDir, project.slug);
 						yield* Effect.try({
 							try: () => {
@@ -436,6 +444,7 @@ export const RelayFactoryLive = (
 								}),
 						}).pipe(
 							Effect.catchAll((error) =>
+								Option.isSome(sharedStore) ||
 								dbPath === join(storageDir, "events.db")
 									? Effect.fail(error)
 									: Effect.logWarning(
@@ -487,6 +496,7 @@ export const RelayFactoryLive = (
 										Context.add(DaemonEventBusTag, eventBus),
 										Context.add(ProjectRegistryTag, projectRegistry),
 										Context.add(PortScannerTag, portScanner),
+										Context.merge(storeContext),
 										Context.merge(daemonServices),
 										Context.merge(
 											Option.isSome(sessionDirectory)

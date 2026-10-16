@@ -1,11 +1,9 @@
-import { existsSync, statSync } from "node:fs";
-import { Reactivity } from "@effect/experimental";
+import { existsSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
-import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Option } from "effect";
 import type { WorktreeCleanup } from "../../../contracts/worktree.js";
-import { projectEventsDbPath } from "../../../persistence/project-storage.js";
 import type { StoredProject } from "../../../types.js";
+import { projectReadDatabase } from "./project-read-database.js";
 
 export const isWorktreeCleanupEnabled = (setting: WorktreeCleanup): boolean =>
 	setting.onSettle !== "off" ||
@@ -23,24 +21,8 @@ export const readColdWorktreeCleanupCandidates = (
 ) =>
 	Effect.gen(function* () {
 		if (!isWorktreeCleanupEnabled(setting)) return [];
-		const filename = projectEventsDbPath({ configDir, ...project });
-		const databaseStat = yield* Effect.either(
-			Effect.try({
-				try: () => statSync(filename),
-				catch: (cause) => cause,
-			}),
-		);
-		if (Either.isLeft(databaseStat)) {
-			const cause = databaseStat.left;
-			if (
-				typeof cause === "object" &&
-				cause !== null &&
-				"code" in cause &&
-				cause.code === "ENOENT"
-			)
-				return [];
-			return yield* Effect.fail(cause);
-		}
+		const database = yield* projectReadDatabase(project, configDir);
+		if (Option.isNone(database)) return [];
 		const paths = yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			return yield* sql<{ session_id: string; path: string }>`
@@ -48,6 +30,8 @@ export const readColdWorktreeCleanupCandidates = (
 				SELECT session_id, requested_at, started_at, completed_at,
 					ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY requested_at DESC, rowid DESC) AS rank
 				FROM turns
+				-- A shared store holds every project's turns; rank only this project's.
+				WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ${project.slug})
 			)
 			SELECT DISTINCT events.session_id, mapping.value AS path
 			FROM events, json_each(events.data, '$.worktrees') AS mapping
@@ -73,12 +57,6 @@ export const readColdWorktreeCleanupCandidates = (
 						) < ${now - (setting.afterInactiveDays ?? 0) * 86_400_000})
 					))
 				)`;
-		}).pipe(
-			Effect.provide(
-				SqliteNode.layer({ filename, readonly: true, disableWAL: true }).pipe(
-					Layer.provide(Reactivity.layer),
-				),
-			),
-		);
+		}).pipe(Effect.provide(database.value));
 		return paths.filter(({ path }) => existsSync(path));
 	});
