@@ -220,7 +220,6 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 interface TestHarness {
 	relay: ProjectRelay;
 	mock: MockOpenCode;
-	refreshSessionGit: ReturnType<typeof vi.fn<() => Promise<void>>>;
 	relayPort: number;
 	connectClient(opts?: { session?: string }): Promise<TestWsClient>;
 	stop(): Promise<void>;
@@ -228,7 +227,6 @@ interface TestHarness {
 
 async function createTestHarness(): Promise<TestHarness> {
 	const mock = await createMockOpenCode();
-	const refreshSessionGit = vi.fn(async () => undefined);
 
 	const relayServer = createServer();
 	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
@@ -251,7 +249,9 @@ async function createTestHarness(): Promise<TestHarness> {
 					),
 				);
 			}
-		}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, "test-project"))),
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(dbPath, "test-status-poller")),
+		),
 	);
 
 	const relay = await createProjectRelay({
@@ -270,7 +270,6 @@ async function createTestHarness(): Promise<TestHarness> {
 			sseGracePeriodMs: 300,
 			sseActiveThresholdMs: 500,
 		},
-		refreshSessionGit,
 	});
 
 	relayServer.on("upgrade", (req, socket, head) => {
@@ -294,7 +293,6 @@ async function createTestHarness(): Promise<TestHarness> {
 	return {
 		relay,
 		mock,
-		refreshSessionGit,
 		relayPort,
 		async connectClient(opts?: { session?: string }) {
 			let url = `ws://127.0.0.1:${relayPort}/rpc?p=test-status-poller`;

@@ -34,7 +34,6 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 	if (!projectSlug) return;
 	const foreign = projectSlug !== getCurrentSlug();
 	const input = {
-		projectSlug,
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 	};

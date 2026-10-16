@@ -36,7 +36,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	CreateSession,
 	DeleteSession,
-	ForkSession,
+	ForkSessionForSession,
 	InspectSessionWorktrees,
 	ListDaemonSessions,
 	MoveSessionWorkspace,
@@ -231,11 +231,11 @@ process.exit(result.status ?? 1);
 				session,
 			};
 		};
-		const inspect = async (id: string, projectSlug = "process-test") => {
+		const inspect = async (id: string) => {
 			const refs = folders.map((folder) => git(folder, "show-ref"));
 			const result = await sendRpcRequest(
 				socket,
-				new InspectSessionWorktrees({ projectSlug, sessionId: id }),
+				new InspectSessionWorktrees({ sessionId: id }),
 			);
 			expect(folders.map((folder) => git(folder, "show-ref"))).toEqual(refs);
 			evidence["inspection"] = result;
@@ -508,8 +508,7 @@ process.exit(result.status ?? 1);
 		await browser.send(parent.id, "Reply with pong.");
 		const fork = await sendRpcRequest(
 			socket,
-			new ForkSession({
-				projectSlug: "process-test",
+			new ForkSessionForSession({
 				sessionId: parent.id,
 				originId: browser.originId,
 			}),
@@ -547,7 +546,6 @@ process.exit(result.status ?? 1);
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: project.savedSlug,
 				sessionId: other.id,
 				path: session.path,
 			}),
@@ -570,7 +568,6 @@ process.exit(result.status ?? 1);
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: session.id,
 				path: realpathSync(existing),
 			}),
@@ -658,7 +655,6 @@ process.exit(result.status ?? 1);
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: session.id,
 				path: fixture.projectDir,
 			}),

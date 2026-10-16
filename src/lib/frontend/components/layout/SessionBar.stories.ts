@@ -386,7 +386,6 @@ async function assertGoalDetails(
 		"true",
 	);
 	await expect(getGoalDetails).toHaveBeenCalledWith({
-		projectSlug: "conduit",
 		sessionId: mockSession.id,
 	});
 	const panel = within(details);

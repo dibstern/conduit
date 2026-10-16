@@ -1,12 +1,13 @@
 import { Either, Option, Schema } from "effect";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	type CanonicalEvent,
-	type CanonicalEventType,
 	type CanonicalToolInput,
 	canonicalEvent,
 	type EventId,
 	type EventMetadata,
+	type LiveEventType,
 	type MessageRole,
 	type MessageSnapshotPayload,
 	PermissionAskedDetailsSchema,
@@ -115,10 +116,10 @@ export function translateProviderRuntimeEventToDomain(
 		case "message.created": {
 			const messageId = messageIdFromData(event, data);
 			const role = messageRole(data["role"]);
-			const parentID =
-				event.providerId === "opencode"
-					? stringField(data["parentID"])
-					: undefined;
+			const parentID = getProviderDriver(event.providerId)
+				?.emitsMessageParentIds
+				? stringField(data["parentID"])
+				: undefined;
 			const inputId = stringField(data["inputId"]);
 			const nextState =
 				role === "assistant"
@@ -541,25 +542,6 @@ export function translateProviderRuntimeEventToDomain(
 			});
 		}
 
-		case "tool.input_updated": {
-			const partId = partIdFromData(event, data);
-			return {
-				events: [
-					canonicalEvent(
-						"tool.input_updated",
-						event.sessionId,
-						{
-							messageId: messageIdForPart(event, data, state, partId),
-							partId,
-							...data,
-						},
-						eventOptions(event),
-					),
-				],
-				state,
-			};
-		}
-
 		default: {
 			const _exhaustive: never = event;
 			return { events: [], state };
@@ -603,7 +585,7 @@ function cardDetails<A, I>(
 	return Option.getOrElse(Schema.decodeUnknownOption(schema)(data), () => ({}));
 }
 
-function singleEvent<K extends CanonicalEventType>(
+function singleEvent<K extends LiveEventType>(
 	event: ProviderRuntimeEvent,
 	state: ProviderRuntimeDomainMapperState,
 	type: K,

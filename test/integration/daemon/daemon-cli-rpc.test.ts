@@ -28,6 +28,7 @@ import {
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { makeDaemonRpcSocketLayer } from "../../../src/lib/daemon/daemon-rpc-server.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { makeSessionDirectoryLive } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { subscribeProjectSettings } from "../../../src/lib/domain/relay/Services/project-settings.js";
 import { getDefaultModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { loadRelaySettings } from "../../../src/lib/relay/relay-settings.js";
@@ -105,7 +106,10 @@ describe("CLI and browser daemon RPC parity", () => {
 						makeTestHandlerLayer({
 							api,
 							config: makeMockConfig({ configDir: root }),
-						}).pipe(Layer.provideMerge(RpcSubscriptionScopeLive)),
+						}).pipe(
+							Layer.provideMerge(RpcSubscriptionScopeLive),
+							Layer.provideMerge(makeSessionDirectoryLive(root, [])),
+						),
 					),
 				),
 			);

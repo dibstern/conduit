@@ -7,11 +7,16 @@ import { describe, it } from "@effect/vitest";
 import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
 import { expect } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
 	deriveSessionSnooze,
@@ -26,6 +31,8 @@ import {
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
+
+const scope = { projectIds: ["test-project"] } as const;
 
 const testLayer = EffectSqliteClient.layer({ filename: ":memory:" });
 
@@ -125,8 +132,8 @@ describe("typed session row derivations", () => {
 				};
 				const readQuery = yield* makeReadQueryEffect;
 				const lists = [
-					yield* readQuery.listSessionInfos(options),
-					(yield* readQuery.readSessionList(options)).rows.map(
+					yield* readQuery.listSessionInfos(scope, options),
+					(yield* readQuery.readSessionList(scope, options)).rows.map(
 						(row) => row.item,
 					),
 				];
@@ -185,11 +192,11 @@ describe("typed session row derivations", () => {
 					yield* sql`UPDATE sessions SET status = ${siblingStatus} WHERE id = 'foreground'`;
 					yield* projectSidebar();
 					const lists = [
-						yield* readQuery.listSessionInfos(options),
-						(yield* readQuery.readSessionList(options)).rows.map(
+						yield* readQuery.listSessionInfos(scope, options),
+						(yield* readQuery.readSessionList(scope, options)).rows.map(
 							(row) => row.item,
 						),
-						(yield* readQuery.readSessionList({
+						(yield* readQuery.readSessionList(scope, {
 							...options,
 							familyOf: "monitor",
 						})).rows.map((row) => row.item),
@@ -417,7 +424,8 @@ describe("typed session row derivations", () => {
 				const readQuery = yield* makeReadQueryEffect;
 				yield* sql`UPDATE sessions SET status = 'busy', last_turn_end_version = 1 WHERE id = 'side'`;
 				expect(
-					(yield* readQuery.listSessionInfos({ roots: true }))[0]?.attention,
+					(yield* readQuery.listSessionInfos(scope, { roots: true }))[0]
+						?.attention,
 				).toBe("idle");
 			}).pipe(Effect.provide(testLayer)),
 	);
@@ -578,7 +586,7 @@ describe("ReadQueryEffect snapshot consistency", () => {
 						const readQuery = yield* makeReadQueryEffect;
 						const snapshot =
 							source === "session list"
-								? readQuery.readSessionList().pipe(
+								? readQuery.readSessionList(scope).pipe(
 										Effect.map(({ rows, version }) => ({
 											ids: rows.map(({ item }) => item.id),
 											version,
@@ -620,9 +628,10 @@ function seedSession(
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`
 			INSERT INTO sessions
-			(id, provider, title, status, parent_id, created_at, updated_at)
+			(id, project_id, provider, title, status, parent_id, created_at, updated_at)
 			VALUES (
 				${sessionId},
+				'test-project',
 				'claude',
 				${options.title ?? "Test"},
 				${options.status ?? "idle"},
@@ -637,6 +646,7 @@ function seedSession(
 function projectSidebar(version = 0) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		yield* sql`UPDATE sessions SET project_id = 'test-project' WHERE project_id IS NULL`;
 		// Roots first, so each child finds its parent's root.
 		const rows = yield* sql<{ id: string }>`
 			SELECT id FROM sessions ORDER BY parent_id IS NOT NULL`;
@@ -659,21 +669,17 @@ describe("ReadQueryEffect.listSessions", () => {
 			yield* seedSession("w", { updatedAt: 100 });
 			const readQuery = yield* makeReadQueryEffect;
 
-			expect((yield* readQuery.listSessions()).map((row) => row.id)).toEqual([
-				"z",
-				"y",
-				"x",
-				"a",
-				"w",
-			]);
 			expect(
-				(yield* readQuery.listSessions({
+				(yield* readQuery.listSessions(scope)).map((row) => row.id),
+			).toEqual(["z", "y", "x", "a", "w"]);
+			expect(
+				(yield* readQuery.listSessions(scope, {
 					roots: true,
 					limit: 2,
 				})).map((row) => row.id),
 			).toEqual(["z", "y"]);
 			expect(
-				(yield* readQuery.listSessions({
+				(yield* readQuery.listSessions(scope, {
 					before: { updatedAt: 200, id: "y" },
 					limit: 2,
 				})).map((row) => row.id),
@@ -701,14 +707,14 @@ describe("ReadQueryEffect.listSessions", () => {
 				const readQuery = yield* makeReadQueryEffect;
 
 				expect(
-					(yield* readQuery.listSessions({ titleQuery: "ALPHA" })).map(
+					(yield* readQuery.listSessions(scope, { titleQuery: "ALPHA" })).map(
 						(row) => row.id,
 					),
 				).toEqual(["literal", "case-match", "wildcard-decoy"]);
 				expect(
-					(yield* readQuery.listSessions({ titleQuery: "%_done\\" })).map(
-						(row) => row.id,
-					),
+					(yield* readQuery.listSessions(scope, {
+						titleQuery: "%_done\\",
+					})).map((row) => row.id),
 				).toEqual(["literal"]);
 			}).pipe(Effect.provide(testLayer)),
 	);
@@ -758,6 +764,14 @@ describe("ReadQueryEffect session lookups", () => {
 				});
 				yield* restoreClaudeQuestionsFromStore.pipe(
 					Effect.provideService(ReadQueryEffectTag, readQuery),
+					Effect.provideService(
+						EventStoreEffectTag,
+						yield* makeEventStoreEffect.pipe(
+							Effect.provideService(PersistenceProjectTag, {
+								projectId: "test-project",
+							}),
+						),
+					),
 				);
 				const pending = yield* PendingInteractionServiceTag;
 				expect(yield* pending.listPendingQuestions()).toMatchObject([
@@ -787,7 +801,7 @@ describe("ReadQueryEffect session lookups", () => {
 
 			expect(yield* readQuery.getSessionStatus("s2")).toBe("busy");
 			expect(yield* readQuery.getSessionStatus("nonexistent")).toBeUndefined();
-			expect(yield* readQuery.getAllSessionStatuses()).toEqual({
+			expect(yield* readQuery.getAllSessionStatuses(scope)).toEqual({
 				s1: "idle",
 				s2: "busy",
 			});
@@ -804,13 +818,16 @@ describe("ReadQueryEffect session lookups", () => {
 				VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
 					('claude-1', 'claude', 'Claude', 'busy', 2, 2),
 					('unknown-1', 'unknown', 'Unknown', 'idle', 3, 3)`;
+				yield* sql`UPDATE sessions SET project_id = 'test-project' WHERE project_id IS NULL`;
 				const readQuery = yield* makeReadQueryEffect;
-				expect(yield* readQuery.getAllSessionStatusesWithProviders()).toEqual([
+				expect(
+					yield* readQuery.getAllSessionStatusesWithProviders(scope),
+				).toEqual([
 					{ id: "opencode-1", status: "busy", provider: "opencode" },
 					{ id: "claude-1", status: "busy", provider: "claude" },
 					{ id: "unknown-1", status: "idle", provider: "unknown" },
 				]);
-				expect(yield* readQuery.getAllSessionStatuses()).toEqual({
+				expect(yield* readQuery.getAllSessionStatuses(scope)).toEqual({
 					"opencode-1": "busy",
 					"claude-1": "busy",
 					"unknown-1": "idle",
@@ -822,7 +839,7 @@ describe("ReadQueryEffect session lookups", () => {
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			const readQuery = yield* makeReadQueryEffect;
-			expect(yield* readQuery.listSessions()).toEqual([]);
+			expect(yield* readQuery.listSessions(scope)).toEqual([]);
 		}).pipe(Effect.provide(testLayer)),
 	);
 });
@@ -842,12 +859,12 @@ describe("ReadQueryEffect session families", () => {
 				const expected = ["root", "child", "grandchild", "sibling"];
 				const familyIds = (familyOf: string) =>
 					readQuery
-						.readSessionList({ familyOf })
+						.readSessionList(scope, { familyOf })
 						.pipe(Effect.map(({ rows }) => rows.map((row) => row.item.id)));
 				expect(yield* familyIds("grandchild")).toEqual(expected);
 				expect(yield* familyIds("root")).toEqual(expected);
 				expect(yield* familyIds("missing")).toEqual([]);
-				const lineage = yield* readQuery.getSessionLineage();
+				const lineage = yield* readQuery.getSessionLineage(scope);
 				expect(lineage.count).toBe(5);
 				expect(lineage.rows).toHaveLength(5);
 				expect(lineage.rows).toEqual(
@@ -890,7 +907,7 @@ describe("ReadQueryEffect session families", () => {
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			const readQuery = yield* makeReadQueryEffect;
-			expect(yield* readQuery.getSessionLineage()).toEqual({
+			expect(yield* readQuery.getSessionLineage(scope)).toEqual({
 				rows: [],
 				count: 0,
 			});
@@ -956,7 +973,7 @@ describe("ReadQueryEffect.getStrandedChildren", () => {
 				yield* link("root", "claude-subagent-done", "t-done");
 
 				const readQuery = yield* makeReadQueryEffect;
-				const rows = yield* readQuery.getStrandedChildren();
+				const rows = yield* readQuery.getStrandedChildren(scope);
 				expect([...rows].sort((a, b) => a.id.localeCompare(b.id))).toEqual([
 					{ id: "claude-subagent-bg", task_id: "t-bg", owner_id: "root" },
 					{
@@ -988,7 +1005,7 @@ describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 
 			const readQuery = yield* makeReadQueryEffect;
 			const counts = [
-				...(yield* readQuery.countPendingApprovalsBySession()),
+				...(yield* readQuery.countPendingApprovalsBySession(scope)),
 			].sort((a, b) =>
 				`${a.session_id}:${a.type}`.localeCompare(`${b.session_id}:${b.type}`),
 			);
@@ -1461,7 +1478,7 @@ describe("ReadQueryEffect session list reads", () => {
 
 			// One row per top-level session, carrying its family's roll-up.
 			expect(
-				(yield* readQuery.readSessionList()).rows.map(({ item }) => item),
+				(yield* readQuery.readSessionList(scope)).rows.map(({ item }) => item),
 			).toEqual([
 				{
 					id: "root",
@@ -1507,7 +1524,7 @@ describe("ReadQueryEffect session list reads", () => {
 				// Counts come off the same rows the approval projector writes — the
 				// server decides what a badge means, once, and the browser is told.
 				expect(
-					(yield* readQuery.readSessionList()).rows.find(
+					(yield* readQuery.readSessionList(scope)).rows.find(
 						({ item }) => item.id === "noisy",
 					)?.item,
 				).toEqual({
@@ -1526,7 +1543,7 @@ describe("ReadQueryEffect session list reads", () => {
 				});
 				// Never seen, and a turn has ended: something is unread.
 				expect(
-					(yield* readQuery.readSessionList()).rows.find(
+					(yield* readQuery.readSessionList(scope)).rows.find(
 						({ item }) => item.id === "quiet",
 					)?.item,
 				).toEqual({
@@ -1552,7 +1569,7 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* projectSidebar();
 			const readQuery = yield* makeReadQueryEffect;
 
-			const entry = (yield* readQuery.readSessionList()).rows.find(
+			const entry = (yield* readQuery.readSessionList(scope)).rows.find(
 				({ item }) => item.id === "fresh",
 			)?.item;
 			expect(entry?.unread).toBeUndefined();
@@ -1575,7 +1592,7 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* refreshSidebar(["child"], 7);
 			const readQuery = yield* makeReadQueryEffect;
 
-			const base = yield* readQuery.readSessionList();
+			const base = yield* readQuery.readSessionList(scope);
 			expect(base.version).toBe(7);
 			expect(base.rows.map(({ item }) => item.id)).toEqual(["root", "other"]);
 			// Each row carries the version it moved at, not the counter, so a
@@ -1585,7 +1602,7 @@ describe("ReadQueryEffect session list reads", () => {
 			// The live window is the same query bounded at both ends: the row that
 			// moved comes back identical to the base's, the one that did not is
 			// absent.
-			const moved = yield* readQuery.readSessionList({ after: 6 });
+			const moved = yield* readQuery.readSessionList(scope, { after: 6 });
 			// Tombstones are kept from the migration on, so every cursor is covered.
 			expect(moved).toEqual({
 				rows: [base.rows[0]],
@@ -1595,12 +1612,14 @@ describe("ReadQueryEffect session list reads", () => {
 			});
 
 			// A subscriber current through the counter is caught up.
-			expect((yield* readQuery.readSessionList({ after: 7 })).rows).toEqual([]);
+			expect(
+				(yield* readQuery.readSessionList(scope, { after: 7 })).rows,
+			).toEqual([]);
 
 			// `through` is the half that keeps a slow read honest: bounded below
 			// the commit that moved "root", it reports nothing even though the
 			// counter it returns is already past it.
-			const bounded = yield* readQuery.readSessionList({
+			const bounded = yield* readQuery.readSessionList(scope, {
 				after: 6,
 				through: 6,
 			});
@@ -1619,8 +1638,8 @@ describe("ReadQueryEffect session list reads", () => {
 			yield* seedForkedSession;
 			yield* projectSidebar();
 			const readQuery = yield* makeReadQueryEffect;
-			const snapshot = yield* readQuery.readSessionList();
-			const queried = yield* readQuery.readSessionList({ after: -1 });
+			const snapshot = yield* readQuery.readSessionList(scope);
+			const queried = yield* readQuery.readSessionList(scope, { after: -1 });
 			expect(queried.rows).toEqual(snapshot.rows);
 			expect(
 				queried.rows.find(({ item }) => item.id === "gone"),

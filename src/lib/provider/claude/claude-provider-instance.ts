@@ -10,6 +10,6 @@ export type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 
 export const ClaudeDriver: ProviderDriver<ClaudeProviderInstanceDeps> = {
 	providerId: "claude",
-	capabilities: PROVIDER_DRIVERS.claude.capabilities,
+	capabilities: PROVIDER_DRIVERS.claude.sessionCapabilities,
 	create: makeClaudeProviderRuntime,
 };

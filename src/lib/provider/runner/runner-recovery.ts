@@ -1,6 +1,8 @@
 import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
+import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { TurnResult } from "../types.js";
 import { runnerSinkId } from "./runner-protocol.js";
@@ -199,19 +201,20 @@ export const settleRunnerCommand = (
 				}>`SELECT project_key, attempt_count FROM provider_command_outbox WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
 				const row = rows[0];
 				if (!row) return;
-				// The steer-requeue ticket defines durable decline handling; until
-				// then, recovery uses the existing non-completed outcome here.
 				const succeeded = !failure && result?.status === "completed";
 				const retryable =
-					failure?.retryable === true || result?.error?.retryable === true;
+					result?.status !== "steer-declined" &&
+					(failure?.retryable === true || result?.error?.retryable === true);
 				const errorCode = succeeded
 					? null
-					: String(
-							failure?.code ??
-								result?.error?.code ??
-								result?.status ??
-								"provider_failure",
-						);
+					: result?.status === "steer-declined"
+						? result.status
+						: String(
+								failure?.code ??
+									result?.error?.code ??
+									result?.status ??
+									"provider_failure",
+							);
 				const now = Date.now();
 				const retryAt = retryable
 					? now + Math.min(1000 * 2 ** row.attempt_count, 30_000)
@@ -235,4 +238,20 @@ export const settleRunnerCommand = (
 				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE command_id = ${commandId}`;
 			}),
 		)
-		.pipe(Effect.asVoid);
+		.pipe(
+			Effect.asVoid,
+			Effect.tap(() =>
+				Effect.gen(function* () {
+					const persist = yield* Effect.serviceOption(
+						ClaudeEventPersistEffectTag,
+					);
+					if (persist._tag === "Some")
+						yield* requeueFailedSteers(
+							sql,
+							persist.value,
+							sessionId,
+							commandId,
+						);
+				}),
+			),
+		);

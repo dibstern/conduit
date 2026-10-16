@@ -184,6 +184,16 @@ describe("Integration: account catalogues", () => {
 		await client.waitFor("shell", {
 			predicate: (message) => message["_tag"] === "synchronized",
 		});
+		// A draft has no session yet; its picked account still owns the catalogue.
+		const draft = await client.rpcCall((rpc) =>
+			rpc.GetCommands({
+				projectSlug: "integration-test",
+				instanceId: "personal-account",
+			}),
+		);
+		expect(draft.commands.map((command) => command.name)).toContain(
+			"account-skill",
+		);
 		const created = await client.createSession("Personal commands", {
 			instanceId: "personal-account",
 			model: {
@@ -196,13 +206,11 @@ describe("Integration: account catalogues", () => {
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
 			throw new Error("CreateSession returned no id");
-		const agents = await client.rpcCall((rpc) =>
-			rpc.GetAgents({ projectSlug: "integration-test", sessionId }),
-		);
+		const agents = await client.rpcCall((rpc) => rpc.GetAgents({ sessionId }));
 		expect(agents.providerScope.id).toBe("claude");
 		expect(agents.instanceId).toBe("personal-account");
 		const commands = await client.rpcCall((rpc) =>
-			rpc.GetCommands({ projectSlug: "integration-test", sessionId }),
+			rpc.GetCommands({ sessionId }),
 		);
 		expect(commands.commands.map((command) => command.name)).toContain(
 			"account-command",

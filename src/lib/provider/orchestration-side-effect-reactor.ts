@@ -1,11 +1,16 @@
 import { SqlClient } from "@effect/sql";
 import { Clock, Data, Duration, Effect, Option, Schema } from "effect";
 import { AccountSchema } from "../contracts/account.js";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
+import {
+	type ClaudeEventPersistEffect,
+	ClaudeEventPersistEffectTag,
+} from "../persistence/effect/claude-event-persist-effect.js";
+import { requeueFailedSteers } from "../persistence/effect/input-requeue-effect.js";
 import {
 	makeProviderStateEffect,
 	ProviderStateEffectTag,
@@ -186,7 +191,19 @@ export class ProviderSideEffectReactor {
 			if (!row) return 0;
 			// Recovery / background path: no waiter, so the row outcome is recorded
 			// durably and swallowed here.
-			yield* Effect.either(this.executeRow(row));
+			const result = yield* Effect.either(this.executeRow(row));
+			if (result._tag === "Right" && result.right.status === "steer-declined") {
+				const persist = yield* Effect.serviceOption(
+					ClaudeEventPersistEffectTag,
+				);
+				if (persist._tag === "Some")
+					yield* requeueFailedSteers(
+						this.options.sql,
+						persist.value,
+						row.session_id,
+						row.command_id,
+					).pipe(Effect.mapError(storeFailure("requeueDeclinedSteer")));
+			}
 			return 1;
 		});
 	}
@@ -244,8 +261,16 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.left);
 			}
 			const turn = result.right;
-			// The steer-requeue ticket defines durable handling for declined inputs.
-			if (turn.status === "steer-declined") return turn;
+			if (turn.status === "steer-declined") {
+				// The inbox owns rescheduling. This delivery must never retry.
+				yield* this.writeFailure(
+					row,
+					false,
+					"steer-declined",
+					yield* this.currentTimeMillis(),
+				);
+				return turn;
+			}
 			// A joined input was delivered and answered by another input's turn.
 			if (turn.status !== "completed" && turn.status !== "joined") {
 				// Provider-declared failure delivered on the success channel (e.g.
@@ -296,6 +321,8 @@ export class ProviderSideEffectReactor {
 					return REACTOR_COMPLETED_RESULT;
 				}
 				if (receipt.status === "side_effect_failed") {
+					if (receipt.error_code === "steer-declined")
+						return { ...REACTOR_COMPLETED_RESULT, status: "steer-declined" };
 					return yield* this.commandNotExecutable(
 						commandId,
 						receipt.error_code,
@@ -416,7 +443,7 @@ export class ProviderSideEffectReactor {
 									: account),
 							instanceId,
 							history: payload.history ?? [],
-							...(driver === "claude"
+							...(getProviderDriver(driver)?.supportsNativeResume
 								? {
 										commandAttempt,
 										prompt: prepared?.prompt ?? payload.prompt,
@@ -435,93 +462,92 @@ export class ProviderSideEffectReactor {
 							abortSignal: new AbortController().signal,
 						});
 					});
-				const result =
-					driver === "claude"
-						? yield* Effect.gen(this, function* () {
-								const state = yield* makeProviderStateEffect.pipe(
-									Effect.provideService(PersistenceProjectTag, {
-										projectId: row.project_key,
-									}),
-								);
-								const read = yield* makeReadQueryEffect;
-								let legacyDefault: ClaudeLaunchConfig | undefined;
+				const result = getProviderDriver(driver)?.supportsNativeResume
+					? yield* Effect.gen(this, function* () {
+							const state = yield* makeProviderStateEffect.pipe(
+								Effect.provideService(PersistenceProjectTag, {
+									projectId: row.project_key,
+								}),
+							);
+							const read = yield* makeReadQueryEffect;
+							let legacyDefault: ClaudeLaunchConfig | undefined;
+							if (
+								!payload.account &&
+								payload.configDir === undefined &&
+								this.options.accountDirectory
+							) {
+								const defaultAccount =
+									yield* this.options.accountDirectory.defaultFor("claude");
 								if (
-									!payload.account &&
-									payload.configDir === undefined &&
-									this.options.accountDirectory
-								) {
-									const defaultAccount =
-										yield* this.options.accountDirectory.defaultFor("claude");
-									if (
-										Option.isNone(defaultAccount) ||
-										defaultAccount.value.driver !== "claude"
-									)
-										return yield* Effect.fail(
-											storeFailure("decodeClaudeLaunch")(
-												"Claude replay requires a Claude default account",
-											),
-										);
-									legacyDefault = {
-										configDir: defaultAccount.value.folder,
-										folderSource: "legacyDefault",
-									};
-								}
-								const launch = yield* Effect.try({
-									try: () =>
-										normalizeClaudeLaunchInput(
-											payload.account?.driver === "claude"
-												? {
-														...payload,
-														configDir: payload.account.folder,
-														folderSource: "account",
-													}
-												: payload,
-											() => {
-												if (legacyDefault) return legacyDefault;
-												if (this.options.defaultClaudeLaunchConfig)
-													return this.options.defaultClaudeLaunchConfig();
-												throw storeFailure("decodeClaudeLaunch")(
-													"Claude replay requires a resolved default account or explicit config directory",
-												);
-											},
+									Option.isNone(defaultAccount) ||
+									!("folder" in defaultAccount.value)
+								)
+									return yield* Effect.fail(
+										storeFailure("decodeClaudeLaunch")(
+											"Claude replay requires a Claude default account",
 										),
-									catch: storeFailure("decodeClaudeLaunch"),
-								});
-								return yield* sendPreparedClaudeTurn({
-									sessionId: payload.sessionId,
-									instanceId,
-									commandId: row.command_id,
-									userText: payload.prompt,
-									options: {
-										liveSession: yield* instance.getNativeSessionEffect?.(
-											payload.sessionId,
-										) ?? Effect.succeed(undefined),
-										...launch,
-										agent: payload.agent,
-										userMessageId:
-											payload.continuation?.cutOffMessageId ?? payload.inputId,
-										continuation: payload.continuation !== undefined,
-										nativeResumeFallback: payload.nativeResumeFallback,
-										rewind: payload.rewind,
-										sessionForkSdk: this.options.claudeSessionForkSdk,
-										workspaceRoot: payload.workspaceRoot,
-										modelContextWindow:
-											payload.contextWindow === "1m" ? 1000000 : undefined,
-									},
-									send,
-								}).pipe(
-									Effect.provideService(ProviderStateEffectTag, state),
-									Effect.provideService(ReadQueryEffectTag, read),
-								);
+									);
+								legacyDefault = {
+									configDir: defaultAccount.value.folder,
+									folderSource: "legacyDefault",
+								};
+							}
+							const launch = yield* Effect.try({
+								try: () =>
+									normalizeClaudeLaunchInput(
+										payload.account?.driver === "claude"
+											? {
+													...payload,
+													configDir: payload.account.folder,
+													folderSource: "account",
+												}
+											: payload,
+										() => {
+											if (legacyDefault) return legacyDefault;
+											if (this.options.defaultClaudeLaunchConfig)
+												return this.options.defaultClaudeLaunchConfig();
+											throw storeFailure("decodeClaudeLaunch")(
+												"Claude replay requires a resolved default account or explicit config directory",
+											);
+										},
+									),
+								catch: storeFailure("decodeClaudeLaunch"),
+							});
+							return yield* sendPreparedClaudeTurn({
+								sessionId: payload.sessionId,
+								instanceId,
+								commandId: row.command_id,
+								userText: payload.prompt,
+								options: {
+									liveSession: yield* instance.getNativeSessionEffect?.(
+										payload.sessionId,
+									) ?? Effect.succeed(undefined),
+									...launch,
+									agent: payload.agent,
+									userMessageId:
+										payload.continuation?.cutOffMessageId ?? payload.inputId,
+									continuation: payload.continuation !== undefined,
+									nativeResumeFallback: payload.nativeResumeFallback,
+									rewind: payload.rewind,
+									sessionForkSdk: this.options.claudeSessionForkSdk,
+									workspaceRoot: payload.workspaceRoot,
+									modelContextWindow:
+										payload.contextWindow === "1m" ? 1000000 : undefined,
+								},
+								send,
 							}).pipe(
-								Effect.provideService(SqlClient.SqlClient, this.options.sql),
-								Effect.mapError((cause) =>
-									cause instanceof ProviderInstanceFailure
-										? cause
-										: storeFailure("prepareTurn")(cause),
-								),
-							)
-						: yield* send(undefined, false);
+								Effect.provideService(ProviderStateEffectTag, state),
+								Effect.provideService(ReadQueryEffectTag, read),
+							);
+						}).pipe(
+							Effect.provideService(SqlClient.SqlClient, this.options.sql),
+							Effect.mapError((cause) =>
+								cause instanceof ProviderInstanceFailure
+									? cause
+									: storeFailure("prepareTurn")(cause),
+							),
+						)
+					: yield* send(undefined, false);
 				if (
 					result.status === "completed" &&
 					result.handoff &&
@@ -539,7 +565,7 @@ export class ProviderSideEffectReactor {
 						.pipe(Effect.mapError(storeFailure("handoffDelivered")));
 				}
 				if (
-					driver === "claude" &&
+					getProviderDriver(driver)?.supportsNativeResume &&
 					result.status === "completed" &&
 					result.providerStateUpdates?.length
 				) {

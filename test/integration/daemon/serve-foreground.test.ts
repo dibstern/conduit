@@ -574,7 +574,6 @@ describe("foreground conduit serve", () => {
 			const attempt = sendRpcRequest(
 				join(harness.configDir, "relay.sock"),
 				new ViewSession({
-					projectSlug: failed.projectSlug,
 					sessionId: failed.sessionId,
 					originId: "failed-lazy-adoption",
 				}),

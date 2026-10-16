@@ -1,8 +1,10 @@
 import { Effect, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ServerStatus } from "../../../src/lib/contracts/ws-rpc.js";
 import type {
-	WsRpcClient,
+	RestartWithConfig,
+	ServerStatus,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import type {
 	WsRpcClients,
 	WsRpcSockets,
 } from "../../../src/lib/frontend/transport/shared-client.js";
@@ -17,9 +19,7 @@ const mocks = vi.hoisted(() => ({
 	showToast: vi.fn(),
 	restartWithConfig:
 		vi.fn<
-			(
-				input: Parameters<WsRpcClient["RestartWithConfig"]>[0],
-			) => Effect.Effect<{
+			(input: Omit<RestartWithConfig, "_tag">) => Effect.Effect<{
 				readonly ok: true;
 			}>
 		>(),
@@ -62,9 +62,12 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", async () => {
 				Effect.provideService(effect, WsRpcClients, {
 					wake: Effect.void,
 					forProject: () => {
-						const control: Pick<WsRpcClient, "RestartWithConfig"> = {
-							RestartWithConfig:
-								mocks.restartWithConfig as WsRpcClient["RestartWithConfig"],
+						const control = (
+							tag: string,
+							input: Omit<RestartWithConfig, "_tag">,
+						) => {
+							expect(tag).toBe("RestartWithConfig");
+							return mocks.restartWithConfig(input);
 						};
 						return Effect.succeed({ control } as WsRpcSockets);
 					},

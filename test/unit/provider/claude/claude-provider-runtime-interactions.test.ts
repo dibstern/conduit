@@ -374,13 +374,15 @@ describe("Claude runner interaction transport", () => {
 const awaitPendingApproval = (
 	readQuery: Context.Tag.Service<typeof ReadQueryEffectTag>,
 ) =>
-	readQuery.countPendingApprovalsBySession().pipe(
-		Effect.repeat({
-			until: (rows) => rows.length > 0,
-			schedule: Schedule.spaced("10 millis"),
-		}),
-		Effect.timeout("5 seconds"),
-	);
+	readQuery
+		.countPendingApprovalsBySession({ projectIds: ["test-project"] })
+		.pipe(
+			Effect.repeat({
+				until: (rows) => rows.length > 0,
+				schedule: Schedule.spaced("10 millis"),
+			}),
+			Effect.timeout("5 seconds"),
+		);
 
 describe("Claude durable interaction resolution", () => {
 	const interactions = [
@@ -422,7 +424,11 @@ describe("Claude durable interaction resolution", () => {
 						),
 					);
 					yield* awaitPendingApproval(f.readQuery);
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual([
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([
 						{ session_id: "session-1", type: kind, pending_count: 1 },
 					]);
 					const requests = yield* kind === "permission"
@@ -445,9 +451,11 @@ describe("Claude durable interaction resolution", () => {
 								? { id: requestId, decision: "reject" }
 								: { id: requestId, answers: {} },
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 					expect(yield* f.pending.listPendingPermissions("session-1")).toEqual(
 						[],
 					);
@@ -540,7 +548,9 @@ describe("Claude durable interaction resolution", () => {
 		).toEqual([`${kind}.asked`]);
 		expect(
 			await f.persistence.runPromise(
-				f.readQuery.countPendingApprovalsBySession(),
+				f.readQuery.countPendingApprovalsBySession({
+					projectIds: ["test-project"],
+				}),
 			),
 		).toEqual([{ session_id: "session-1", type: kind, pending_count: 1 }]);
 	});
@@ -632,9 +642,11 @@ describe("Claude durable interaction resolution", () => {
 								? { id: "request-1", decision: "always" }
 								: { id: "request-1", answers },
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 					if (kind === "permission") {
 						expect(
 							yield* f.sql<{
@@ -692,9 +704,11 @@ describe("Claude durable interaction resolution", () => {
 								? { id: "request-1", decision: "reject" }
 								: { id: "request-1", answers: {} },
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 				}),
 			),
 		);
@@ -724,9 +738,11 @@ describe("Claude durable interaction resolution", () => {
 						type: "permission.resolved",
 						data: { id: "request-1", decision: "reject" },
 					});
-					expect(yield* f.readQuery.countPendingApprovalsBySession()).toEqual(
-						[],
-					);
+					expect(
+						yield* f.readQuery.countPendingApprovalsBySession({
+							projectIds: ["test-project"],
+						}),
+					).toEqual([]);
 				}),
 			),
 		);

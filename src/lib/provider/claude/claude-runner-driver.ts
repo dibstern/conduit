@@ -1,5 +1,6 @@
 import { Effect, Fiber, Option } from "effect";
 import type { Account } from "../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import {
 	loadDaemonConfigResult,
 	resolveClaudeLaunchConfig,
@@ -44,13 +45,17 @@ export const makeClaudeRunnerDriver = (
 	};
 	return {
 		driverKind: "claude",
+		steering: true,
 		discoverEffect,
 		nativeSession: true,
 		stopTask: true,
 		prepareTurnEffect: (input) =>
 			Effect.gen(function* () {
 				const account = input.account;
-				if (account && account.driver !== "claude")
+				if (
+					account &&
+					PROVIDER_DRIVERS[account.driver].accountKind !== "config-directory"
+				)
 					return yield* Effect.fail(
 						new ProviderInstanceFailure({
 							providerId: "claude",
@@ -58,7 +63,9 @@ export const makeClaudeRunnerDriver = (
 							cause: new Error("Claude turn requires a Claude account"),
 						}),
 					);
-				const folder = account?.folder ?? input.configDir;
+				const folder =
+					(account?.driver === "claude" ? account.folder : undefined) ??
+					input.configDir;
 				if (folder === undefined)
 					return yield* Effect.fail(
 						new ProviderInstanceFailure({
@@ -89,7 +96,10 @@ export const makeClaudeRunnerDriver = (
 		preparePreWarmEffect: (input, scope) => {
 			return Effect.gen(function* () {
 				const account = input.account;
-				if (account && account.driver !== "claude")
+				if (
+					account &&
+					PROVIDER_DRIVERS[account.driver].accountKind !== "config-directory"
+				)
 					return yield* Effect.fail(
 						new ProviderInstanceFailure({
 							providerId: "claude",
@@ -97,7 +107,9 @@ export const makeClaudeRunnerDriver = (
 							cause: new Error("Claude warm-up requires a Claude account"),
 						}),
 					);
-				const folder = account?.folder ?? input.configDir;
+				const folder =
+					(account?.driver === "claude" ? account.folder : undefined) ??
+					input.configDir;
 				if (folder === undefined)
 					return yield* Effect.fail(
 						new ProviderInstanceFailure({

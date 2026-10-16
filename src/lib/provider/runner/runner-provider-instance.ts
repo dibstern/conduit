@@ -15,10 +15,7 @@ import {
 	resolve as resolveAccount,
 } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
-import {
-	type KnownProviderDriverKind,
-	PROVIDER_DRIVERS,
-} from "../../contracts/provider-instance.js";
+import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
 import {
 	bindTurnTimelineSink,
@@ -81,6 +78,7 @@ type PreparedTurn = Omit<
 /** Provider policy only; sink, interaction and runner lifetime belong to the instance. */
 export interface RunnerDriverPieces {
 	readonly driverKind: KnownProviderDriverKind;
+	readonly steering: boolean;
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
@@ -270,7 +268,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
 	) {
 		this.providerId = driver.driverKind;
-		this.steering = PROVIDER_DRIVERS[driver.driverKind].steering;
+		this.steering = driver.steering;
 	}
 
 	recoverEffect() {

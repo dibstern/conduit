@@ -9,7 +9,7 @@
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, replaceRoute } from "../../stores/router.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { listBranchesRpc, listWorktreesRpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
+	import { listBranchesRpc, rpc, type resolveSessionModeRpc } from "../../transport/ws-rpc-client.js";
 	import { projectAccent } from "../session/session-list-project.js";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
 	import Button from "../ui/Button.svelte";
@@ -21,12 +21,13 @@
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 
-	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, loadWorktrees = listWorktreesRpc, loadBranches = listBranchesRpc }: {
+	let { worktree = $bindable<WorktreeInfo | null>(null), newWorktree = $bindable(false), worktreeBase = $bindable<string | null>(null), modeChosen = $bindable(false), sessionModeDefault, focusComposer, loadWorktrees = (projectSlug: string) => rpc("ListWorktrees", { projectSlug }), loadBranches = listBranchesRpc }: {
 		worktree?: WorktreeInfo | null;
 		newWorktree?: boolean;
 		worktreeBase?: string | null;
 		modeChosen?: boolean;
 		sessionModeDefault?: Awaited<ReturnType<typeof resolveSessionModeRpc>> | undefined;
+		focusComposer?: (() => void) | undefined;
 		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
 		loadBranches?: typeof listBranchesRpc;
 	} = $props();
@@ -84,8 +85,21 @@
 	const chipClass =
 		"min-w-0 gap-1 rounded-full border border-border-chip bg-bg-alt px-[8px] py-[5px] md:px-[7px] md:py-[4px] text-[11.5px] md:text-[11px] leading-none font-medium font-brand";
 	const rowClass = "min-h-[44px] md:min-h-0";
+	let picked = false;
+
+	// A pick hands focus to the composer, where the prompt goes next. Left on the
+	// chip, the prompt's first space reopened the menu and its letters picked
+	// again by typeahead. Escape still returns focus to the chip.
+	function focusComposerAfterPick(event: Event) {
+		const handOff = picked ? focusComposer : undefined;
+		picked = false;
+		if (!handOff) return;
+		event.preventDefault();
+		handOff();
+	}
 
 	function chooseProject(next: string) {
+		picked = true;
 		worktree = null;
 		newWorktree = false;
 		worktreeBase = null;
@@ -128,7 +142,7 @@
 </script>
 
 <div class="flex min-w-0 items-center gap-1.5 px-1" data-testid="new-session-context">
-	<Menu ariaLabel="Start in project" {presentation}>
+	<Menu ariaLabel="Start in project" {presentation} onCloseAutoFocus={focusComposerAfterPick}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Project" data-testid="draft-project-chip">
 				{#if slug}<ProjectSquare label={title} accent={projectAccent(slug)} />{/if}
@@ -159,7 +173,7 @@
 		{/if}
 	</Menu>
 
-	<Menu ariaLabel="Where the session starts" {presentation} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
+	<Menu ariaLabel="Where the session starts" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (!open) showWorktrees = false; }}>
 		{#snippet trigger({ props })}
 			<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Where it starts" data-testid="draft-start-chip" aria-describedby={startDescription}>
 				<Icon name={worktree || newWorktree ? "worktree" : branch ? "git-branch" : "folder"} size={12} />
@@ -169,7 +183,7 @@
 		{/snippet}
 		<MenuGroup label="Workspace">
 			<MenuRadioGroup value={worktree || newWorktree ? "" : "current"}>
-				<MenuRadioItem value="current" onselect={() => { modeChosen = true; worktree = null; newWorktree = false; worktreeBase = null; }} class={rowClass}>Current checkout</MenuRadioItem>
+				<MenuRadioItem value="current" onselect={() => { picked = true; modeChosen = true; worktree = null; newWorktree = false; worktreeBase = null; }} class={rowClass}>Current checkout</MenuRadioItem>
 			</MenuRadioGroup>
 			<MenuItem disabled={!slug || !supportsWorktree} closeOnSelect={false} onselect={() => void openWorktrees()} class={rowClass}>Existing worktree {#if !supportsWorktree}<span class="ml-auto text-text-dimmer">Not supported by {providerName}</span>{/if}</MenuItem>
 			{#if showWorktrees}
@@ -179,7 +193,7 @@
 					{:else if worktrees.length === 0}
 						<MenuItem disabled class={rowClass}>No worktrees available</MenuItem>
 					{:else}
-						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { modeChosen = true; newWorktree = false; worktreeBase = null; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
+						<MenuRadioGroup value={worktree?.path ?? ""} onvaluechange={(path) => { picked = true; modeChosen = true; newWorktree = false; worktreeBase = null; worktree = worktrees?.find((entry) => entry.path === path) ?? null; }}>
 							{#each worktrees as entry (entry.path)}
 								<MenuRadioItem value={entry.path} class={rowClass}>
 									<span class="flex min-w-0 flex-1 flex-col">
@@ -192,7 +206,7 @@
 					{/if}
 				</MenuGroup>
 			{/if}
-			<MenuItem disabled={!canCreateWorktree} onselect={() => { modeChosen = true; worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
+			<MenuItem disabled={!canCreateWorktree} onselect={() => { picked = true; modeChosen = true; worktree = null; newWorktree = true; }} class={rowClass}>New worktree {#if !canCreateWorktree}<span class="ml-auto text-text-dimmer">{!supportsNewWorktree ? `Not supported by ${providerName}` : !slug ? "Choose a project" : !hasGitFolder ? "Requires a Git folder" : "Choose a provider"}</span>{/if}</MenuItem>
 		</MenuGroup>
 		{#if branch}
 			<MenuSeparator />
@@ -206,7 +220,7 @@
 	</Menu>
 
 	{#if newWorktree}
-		<Menu ariaLabel="Base branch" {presentation} onopenchange={(open) => { if (open) void openBranches(); }}>
+		<Menu ariaLabel="Base branch" {presentation} onCloseAutoFocus={focusComposerAfterPick} onopenchange={(open) => { if (open) void openBranches(); }}>
 			{#snippet trigger({ props })}
 				<Button {...props} variant="ghost" size="content" tone="default" touchTarget class={chipClass} title="Base branch" data-testid="draft-base-branch-chip">
 					<Icon name="git-branch" size={12} />
@@ -220,7 +234,7 @@
 				{:else if branchList.branches.length === 0}
 					<MenuItem disabled class={rowClass}>No local branches available</MenuItem>
 				{:else}
-					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { modeChosen = true; worktreeBase = value === currentBranch ? null : value; }}>
+					<MenuRadioGroup value={baseBranch ?? ""} onvaluechange={(value) => { picked = true; modeChosen = true; worktreeBase = value === currentBranch ? null : value; }}>
 						{#each branchList.branches as name (name)}
 							<MenuRadioItem value={name} class={rowClass}>{name}</MenuRadioItem>
 						{/each}

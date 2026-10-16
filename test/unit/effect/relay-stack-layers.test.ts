@@ -3,10 +3,13 @@ import { Effect, HashMap, Layer, Ref } from "effect";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStateLive } from "../../../src/lib/domain/relay/Layers/relay-layer.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -38,7 +41,7 @@ const relayStateTestLayer = RelayStateLive.pipe(
 			Layer.succeed(OpenCodeAPITag, openCodeApi),
 			configLayer,
 			loggerLayer,
-			Layer.succeed(BackgroundLivenessTag, () => undefined),
+			Layer.effect(SessionActivityTag, makeSessionActivity),
 			Layer.succeed(
 				OpenCodeInstancesTag,
 				makeOpenCodeInstancesStub({ opencode: openCodeApi }),

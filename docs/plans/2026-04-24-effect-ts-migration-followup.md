@@ -10,7 +10,7 @@
 
 **Design doc:** `docs/plans/2026-04-24-effect-ts-migration-followup-design.md`
 
-**Working directory:** `/Users/dstern/src/personal/conduit/.worktrees/effect-ts-migration`
+**Working directory:** `~/src/personal/conduit/.worktrees/effect-ts-migration`
 
 ---
 

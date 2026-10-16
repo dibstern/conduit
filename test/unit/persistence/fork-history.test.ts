@@ -94,12 +94,6 @@ const history = [
 		{ createdAt: 109 },
 	),
 	canonicalEvent(
-		"tool.input_updated",
-		"parent",
-		{ messageId: "msg_assistant_1", partId: "prt_tool", input: "updated" },
-		{ createdAt: 109.5 },
-	),
-	canonicalEvent(
 		"tool.completed",
 		"parent",
 		{
@@ -195,7 +189,6 @@ describe("readForkSource", () => {
 					"thinking.end",
 					"tool.started",
 					"tool.running",
-					"tool.input_updated",
 					"tool.completed",
 					"text.delta",
 					"turn.completed",
@@ -745,12 +738,12 @@ describe("Side Thread boundary reads", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* seed([
-					...history.slice(0, 15),
+					...history.slice(0, 14),
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "idle",
 					}),
-					...history.slice(15),
+					...history.slice(14),
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "busy",
@@ -785,12 +778,12 @@ describe("Side Thread boundary reads", () => {
 		() =>
 			Effect.gen(function* () {
 				yield* seed([
-					...history.slice(0, 15),
+					...history.slice(0, 14),
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "idle",
 					}),
-					history[15],
+					history[14],
 				]);
 				const queued = yield* readForkSource("parent", { sideThread: true });
 				expect(queued.historyMessageId).toBe("msg_assistant_1");
@@ -800,8 +793,8 @@ describe("Side Thread boundary reads", () => {
 						sessionId: "parent",
 						status: "busy",
 					}),
-					history[16],
-					history[18],
+					history[15],
+					history[17],
 				]);
 				expect(yield* readSideThreadForkBoundary("parent")).toBe(
 					"msg_assistant_1",
@@ -817,7 +810,7 @@ describe("Side Thread boundary reads", () => {
 					history[0],
 					history[2],
 					history[4],
-					history[13],
+					history[12],
 					canonicalEvent("session.status", "parent", {
 						sessionId: "parent",
 						status: "busy",

@@ -231,7 +231,6 @@ describe("Task drawer transcript", () => {
 
 		expect(await within(pane).findByText("Earlier child work")).toBeTruthy();
 		expect(rpc.loadMoreHistoryRpc).toHaveBeenCalledExactlyOnceWith({
-			projectSlug: "conduit",
 			sessionId: childId,
 			before: `${childId}-reply`,
 		});

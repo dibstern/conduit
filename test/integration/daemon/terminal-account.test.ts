@@ -10,6 +10,7 @@ import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import {
 	ContinueSession,
 	CreatePty,
+	CreatePtyForSession,
 	RemoveInstance,
 	SetDefault,
 	UpdateInstance,
@@ -122,12 +123,17 @@ describe("Terminal account login through the daemon and PTY host", () => {
 			const cursor = browser.frames.length;
 			await sendRpcRequest(
 				socket,
-				new CreatePty({
-					projectSlug: "process-test",
-					originId: browser.originId,
-					...(accountId === undefined ? {} : { accountId }),
-					...(sessionId === undefined ? {} : { sessionId }),
-				}),
+				sessionId === undefined
+					? new CreatePty({
+							projectSlug: "process-test",
+							originId: browser.originId,
+							...(accountId === undefined ? {} : { accountId }),
+						})
+					: new CreatePtyForSession({
+							sessionId,
+							originId: browser.originId,
+							...(accountId === undefined ? {} : { accountId }),
+						}),
 			);
 			const frame = await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -165,7 +171,6 @@ describe("Terminal account login through the daemon and PTY host", () => {
 		await sendRpcRequest(
 			socket,
 			new ContinueSession({
-				projectSlug: "process-test",
 				sessionId,
 				instanceId: "personal",
 				expectedInstanceId: "work",

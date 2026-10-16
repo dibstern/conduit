@@ -236,7 +236,7 @@ describe("WebSocketRoutingLive", () => {
 			sessionId: "missing",
 			projects: true,
 			fails: false,
-			expected: "older",
+			expected: null,
 		},
 		{ hint: "older", projects: false, fails: false, expected: null },
 		{ hint: "older", projects: true, fails: true, expected: null },
@@ -281,11 +281,22 @@ describe("WebSocketRoutingLive", () => {
 				const result = yield* Effect.either(
 					attachProject({
 						originId: "unregistered",
-						...(scenario.hint ? { projectSlug: scenario.hint } : {}),
-						...(scenario.sessionId ? { sessionId: scenario.sessionId } : {}),
+						...(scenario.sessionId
+							? { sessionId: scenario.sessionId }
+							: scenario.hint
+								? { projectSlug: scenario.hint }
+								: {}),
 					}),
 				);
-				if (scenario.fails) {
+				if (scenario.sessionId) {
+					expect(result).toMatchObject({
+						_tag: "Left",
+						left: {
+							_tag: "WsRpcError",
+							message: expect.stringContaining("Unknown session: missing"),
+						},
+					});
+				} else if (scenario.fails) {
 					expect(result._tag).toBe("Left");
 					if (result._tag === "Left") {
 						expect(result.left).toBeInstanceOf(WsRpcError);

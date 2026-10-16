@@ -165,7 +165,7 @@ describe("createRelayEventSink — persistence", () => {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/relay-event-sink.test.ts`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/relay-event-sink.test.ts`
 Expected: FAIL — `persist` property does not exist on `RelayEventSinkDeps`
 
 **Step 3: Add persist deps to RelayEventSinkDeps interface**
@@ -244,18 +244,18 @@ Replace the `push` method body (lines 57-69) with:
 
 **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/relay-event-sink.test.ts`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/relay-event-sink.test.ts`
 Expected: ALL PASS (existing tests unchanged + 3 new tests pass)
 
 **Step 6: Type-check**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm check`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
 Expected: PASS
 
 **Step 7: Commit**
 
 ```bash
-cd /Users/dstern/src/personal/opencode-relay/conduit
+cd ~/src/personal/opencode-relay/conduit
 git add src/lib/provider/relay-event-sink.ts test/unit/provider/relay-event-sink.test.ts
 git commit -m "feat: add optional persistence to RelayEventSink push()"
 ```
@@ -319,13 +319,13 @@ In the `handlerDeps` object (after line 172 — the closing `}),` of the orchest
 
 **Step 4: Type-check**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm check`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /Users/dstern/src/personal/opencode-relay/conduit
+cd ~/src/personal/opencode-relay/conduit
 git add src/lib/handlers/types.ts src/lib/relay/handler-deps-wiring.ts
 git commit -m "feat: thread claudeEventPersist through HandlerDeps"
 ```
@@ -395,13 +395,13 @@ In the `wireHandlerDeps({...})` call, after line 362 (`orchestrationLayer: orche
 
 **Step 5: Type-check**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm check`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
 Expected: PASS
 
 **Step 6: Commit**
 
 ```bash
-cd /Users/dstern/src/personal/opencode-relay/conduit
+cd ~/src/personal/opencode-relay/conduit
 git add src/lib/relay/relay-stack.ts
 git commit -m "feat: wire Claude event persistence and projector recovery from relay-stack"
 ```
@@ -448,13 +448,13 @@ With:
 
 **Step 2: Type-check**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm check`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
 Expected: PASS
 
 **Step 3: Commit**
 
 ```bash
-cd /Users/dstern/src/personal/opencode-relay/conduit
+cd ~/src/personal/opencode-relay/conduit
 git add src/lib/handlers/prompt.ts
 git commit -m "feat: pass persistence to RelayEventSink for Claude sessions"
 ```
@@ -566,13 +566,13 @@ describe("RelayEventSink persistence integration", () => {
 
 **Step 2: Run test to verify it passes**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/relay-event-sink-persistence.test.ts`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm vitest run test/unit/provider/relay-event-sink-persistence.test.ts`
 Expected: ALL PASS
 
 **Step 3: Commit**
 
 ```bash
-cd /Users/dstern/src/personal/opencode-relay/conduit
+cd ~/src/personal/opencode-relay/conduit
 git add test/unit/provider/relay-event-sink-persistence.test.ts
 git commit -m "test: integration test for Claude event persistence chain"
 ```
@@ -583,27 +583,27 @@ git commit -m "test: integration test for Claude event persistence chain"
 
 **Step 1: Run all tests**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm test`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm test`
 Expected: ALL PASS — no regressions
 
 **Step 2: Type-check**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm check`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm check`
 Expected: PASS
 
 **Step 3: Lint**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm lint`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm lint`
 Expected: PASS (or only pre-existing warnings)
 
 **Step 4: Fix any lint issues**
 
-Run: `cd /Users/dstern/src/personal/opencode-relay/conduit && pnpm lint:fix`
+Run: `cd ~/src/personal/opencode-relay/conduit && pnpm lint:fix`
 
 **Step 5: Final commit if lint:fix changed anything**
 
 ```bash
-cd /Users/dstern/src/personal/opencode-relay/conduit
+cd ~/src/personal/opencode-relay/conduit
 git add -A
 git commit -m "style: auto-fix lint/format issues"
 ```

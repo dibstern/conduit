@@ -10,7 +10,11 @@ import {
 	usageDisplay,
 } from "../utils/continuation.js";
 import { getEffectiveInstanceId } from "./discovery.svelte.js";
-import { getInstanceById, instanceState } from "./instance.svelte.js";
+import {
+	getDriverTraits,
+	getInstanceById,
+	instanceState,
+} from "./instance.svelte.js";
 import { sessionState } from "./session.svelte.js";
 
 export const usageState = $state<{
@@ -37,7 +41,7 @@ export function composerAccountId(
 			: getEffectiveInstanceId();
 }
 
-/** Include eligible Claude accounts even before their first usage reading. */
+/** Include eligible accounts even before their first usage reading. */
 export function orderedSettingsUsageAccounts(): UsageReading[] {
 	const order = usageState.limits.order;
 	const rank = (id: string) => {
@@ -45,23 +49,24 @@ export function orderedSettingsUsageAccounts(): UsageReading[] {
 		return index === -1 ? order.length : index;
 	};
 	return instanceState.instances
-		.filter(
-			(instance) => instance.driver === "claude" && instance.usageEligible,
-		)
+		.filter((instance) => instance.usageEligible)
 		.sort((a, b) => rank(a.id) - rank(b.id))
-		.map(
-			(instance) =>
+		.flatMap((instance): UsageReading[] => {
+			const harness = getDriverTraits(instance.driver)?.usageHarness;
+			if (!harness) return [];
+			return [
 				usageState.readings.find(
 					(reading) => reading.accountId === instance.id,
 				) ?? {
 					accountId: instance.id,
-					harness: "claude",
+					harness,
 					status: "unknown",
 					windows: [],
 					readAt: 0,
 					stale: false,
 				},
-		);
+			];
+		});
 }
 
 /** The Usage rail dot and headline share the same ordered warning. */
@@ -99,7 +104,10 @@ export function orderedUsageAccounts(): UsageReading[] {
 		.filter((reading) => {
 			const instance = getInstanceById(reading.accountId);
 			if (!instance) return false;
-			return reading.harness !== "claude" || instance.usageEligible === true;
+			return (
+				reading.harness !== getDriverTraits(instance.driver)?.usageHarness ||
+				instance.usageEligible === true
+			);
 		})
 		.sort(
 			(a, b) =>

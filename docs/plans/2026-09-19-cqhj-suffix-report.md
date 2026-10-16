@@ -1,6 +1,6 @@
 # cqhj suffix delivery report
 
-Worktree: `/Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj`. Branch: `feat/ni8-cqhj-suffix`. Base: `1383e48bbfac00ac00cf3739be80e3eb0dc1bc8b`.
+Worktree: `~/src/personal/conduit/.worktrees/ni8-cqhj`. Branch: `feat/ni8-cqhj-suffix`. Base: `1383e48bbfac00ac00cf3739be80e3eb0dc1bc8b`.
 
 Implemented the 2026-09-19 amendment. Live detail advances now carry append-only text suffixes, while the server still re-queries authoritative current rows. There is no timer or new coalescing algorithm. The review follow-up below updates request fixtures to opt in explicitly; all existing behavioral assertions remain. Changes remain uncommitted; no index-writing git command or pnpm command was run.
 
@@ -66,7 +66,7 @@ Exit code: 1.
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
 stdout | test/unit/relay/session-detail-wire.test.ts > session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes
 wire bytes [{"writes":32,"finalBytes":3072,"deliveredBytes":108959},{"writes":64,"finalBytes":6144,"deliveredBytes":414376},{"writes":128,"finalBytes":12288,"deliveredBytes":1615463},{"writes":256,"finalBytes":24576,"deliveredBytes":6376680}]
@@ -107,7 +107,7 @@ Exit code: 0.
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/relay/read-model-subscription.test.ts (16 tests) 79ms
  ✓ |unit| test/unit/relay/session-detail-subscription.test.ts (15 tests) 420ms
@@ -139,7 +139,7 @@ Exit code: 1.
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
 stdout | test/unit/relay/session-detail-wire.test.ts > session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes
 wire bytes [{"writes":32,"finalBytes":3072,"deliveredBytes":16371},{"writes":64,"finalBytes":6144,"deliveredBytes":32764},{"writes":128,"finalBytes":12288,"deliveredBytes":66106},{"writes":256,"finalBytes":24576,"deliveredBytes":132601}]
@@ -185,7 +185,7 @@ Exit code: 0.
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/frontend/transport/resume.test.ts (16 tests) 325ms
  ✓ |unit| test/unit/contracts/ws-rpc-stream.test.ts (8 tests) 165ms
@@ -222,8 +222,8 @@ src/lib/frontend/transport/session-detail-wire.ts(34,58): error TS4111: Property
 src/lib/frontend/transport/session-detail-wire.ts(37,56): error TS4111: Property 'text' comes from an index signature, so it must be accessed with ['text'].
 src/lib/frontend/transport/session-detail-wire.ts(42,44): error TS2339: Property 'text' does not exist on type '{ id: string; role: "assistant" | "user"; parts?: readonly ({ readonly id: string; readonly type: string; readonly text?: string | undefined; readonly renderedHtml?: string | undefined; readonly state?: { ...; } | undefined; readonly callID?: string | undefined; readonly tool?: string | undefined; readonly time?: un...'.
 src/lib/frontend/transport/session-detail-wire.ts(43,36): error TS2542: Index signature in type 'readonly ({ readonly id: string; readonly type: string; readonly text?: string | undefined; readonly renderedHtml?: string | undefined; readonly state?: { readonly [x: string]: unknown; } | undefined; readonly callID?: string | undefined; readonly tool?: string | undefined; readonly time?: unknown; } & { ...; })[]' only permits reading.
-test/unit/relay/session-detail-wire.test.ts(41,24): error TS2345: Argument of type '(resumeFromSequence: number | undefined) => import("/Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string;...' is not assignable to parameter of type '(resumeFromSequence: number | undefined) => import("/Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string;...'.
-  Type 'import("/Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string; readonly role: "assistant" | "user"; readon...' is not assignable to type 'import("/Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string; readonly role: "assistant" | "user"; readon...'. Two different types with this name exist, but they are unrelated.
+test/unit/relay/session-detail-wire.test.ts(41,24): error TS2345: Argument of type '(resumeFromSequence: number | undefined) => import("~/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string;...' is not assignable to parameter of type '(resumeFromSequence: number | undefined) => import("~/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string;...'.
+  Type 'import("~/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string; readonly role: "assistant" | "user"; readon...' is not assignable to type 'import("~/src/personal/conduit/.worktrees/ni8-cqhj/node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/dts/Stream").Stream<{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string; readonly role: "assistant" | "user"; readon...'. Two different types with this name exist, but they are unrelated.
     Type 'ReadQueryEffectTag | SessionEventBusTag' is not assignable to type 'never'.
       Type 'ReadQueryEffectTag' is not assignable to type 'never'.
 test/unit/relay/session-detail-wire.test.ts(55,64): error TS2345: Argument of type 'object' is not assignable to parameter of type '{ readonly _tag: "snapshot"; readonly rows: readonly ({ readonly _tag: "transcriptMessage"; readonly message: { readonly id: string; readonly role: "assistant" | "user"; readonly parts?: readonly ({ readonly id: string; readonly type: string; ... 5 more ...; readonly time?: unknown; } & { ...; })[] | undefined; read...'.
@@ -382,7 +382,7 @@ Exit code: 0.
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/effect/runtime-boundary-grep.test.ts (105 tests) 233ms
  ✓ |unit| test/unit/relay/read-model-subscription.test.ts (16 tests) 105ms
@@ -413,7 +413,7 @@ Exit code: 0.
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/contracts/providers/sdk-version-lock.test.ts (3 tests) 2ms
  ✓ |unit| test/unit/contracts/contracts-boundary.test.ts (3 tests) 3ms
@@ -512,7 +512,7 @@ RED, exit 1:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
 stdout | test/unit/relay/session-detail-wire.test.ts > session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes
 wire bytes [{"writes":32,"finalBytes":3072,"deliveredBytes":16371},{"writes":64,"finalBytes":6144,"deliveredBytes":32764},{"writes":128,"finalBytes":12288,"deliveredBytes":66106},{"writes":256,"finalBytes":24576,"deliveredBytes":132601}]
@@ -568,7 +568,7 @@ GREEN, exit 0:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
 stdout | test/unit/relay/session-detail-wire.test.ts > session detail wire > delivers linear UTF-8 bytes across N persisted streaming part writes
 wire bytes [{"writes":32,"finalBytes":3072,"deliveredBytes":16371},{"writes":64,"finalBytes":6144,"deliveredBytes":32764},{"writes":128,"finalBytes":12288,"deliveredBytes":66106},{"writes":256,"finalBytes":24576,"deliveredBytes":132601}]
@@ -591,7 +591,7 @@ RED, exit 1:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ❯ |unit| test/unit/server/ws-rpc-subscriptions.test.ts (7 tests | 2 failed) 311ms
    × subscription RPC handlers > negotiates suffixes only for capability undefined 84ms
@@ -648,7 +648,7 @@ GREEN, exit 0:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/server/ws-rpc-subscriptions.test.ts (7 tests) 300ms
 
@@ -667,7 +667,7 @@ RED, exit 1:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ❯ |unit| test/unit/frontend/transport/resume.test.ts (16 tests | 1 failed) 320ms
    × client-side resume at the shared client > re-issues from the last sequence proven complete 24ms
@@ -724,7 +724,7 @@ GREEN, exit 0:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/frontend/transport/resume.test.ts (16 tests) 319ms
 
@@ -857,7 +857,7 @@ Additional focused verification, exit 0:
 
 ```text
 
- RUN  v3.2.4 /Users/dstern/src/personal/conduit/.worktrees/ni8-cqhj
+ RUN  v3.2.4 ~/src/personal/conduit/.worktrees/ni8-cqhj
 
  ✓ |unit| test/unit/effect/runtime-boundary-grep.test.ts (105 tests) 255ms
  ✓ |unit| test/unit/contracts/ws-rpc-stream.test.ts (8 tests) 401ms

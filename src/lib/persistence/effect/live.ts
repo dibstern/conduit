@@ -2,6 +2,7 @@ import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { type ConfigError, Effect, Layer, type ManagedRuntime } from "effect";
+import type { SessionDirectory } from "../../domain/daemon/Services/session-directory.js";
 import {
 	makePersistenceServiceLive,
 	PersistenceError,
@@ -69,7 +70,8 @@ export function makePersistenceEffectLayer(
 	// silent (serviceOption resolves None). Must be the shared instance so all
 	// publishers and subscribers meet on one PubSub under Effect memoization.
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>,
-) {
+	sessionDirectoryLayer?: Layer.Layer<SessionDirectory>,
+): Layer.Layer<PersistenceEffectContext, PersistenceEffectError> {
 	if (!projectId || projectId.trim().length === 0)
 		throw new PersistenceError({
 			operation: "bindProject",
@@ -128,7 +130,9 @@ export function makePersistenceEffectLayer(
 		),
 	).pipe(Layer.provideMerge(preparedSqliteLayer));
 
-	const persistenceServiceLayer = makePersistenceServiceLive.pipe(
+	// Each bound store must migrate and stamp its own connection, even when
+	// several stores are composed in the same Layer graph.
+	const persistenceServiceLayer = Layer.fresh(makePersistenceServiceLive).pipe(
 		Layer.provide(Layer.merge(sqliteLayer, projectLayer)),
 	);
 
@@ -136,6 +140,7 @@ export function makePersistenceEffectLayer(
 		sqliteLayer,
 		projectLayer,
 		persistenceServiceLayer,
+		sessionDirectoryLayer ?? Layer.empty,
 	);
 
 	const eventStoreLayer = Layer.effect(

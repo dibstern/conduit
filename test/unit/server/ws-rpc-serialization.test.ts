@@ -301,7 +301,7 @@ const handlers = group.toLayer({
 	RewindSession: (payload) => {
 		expect(payload).toEqual({
 			_tag: "RewindSession",
-			projectSlug: "project",
+
 			sessionId: "session-1",
 			messageId: "provider-message-1",
 		});
@@ -346,7 +346,6 @@ const handlers = group.toLayer({
 	},
 	SubscribeSessionDetail: (payload) => {
 		expect(payload).toEqual({
-			projectSlug: "project",
 			sessionId: "session-1",
 			resumeFromSequence: 39,
 		});
@@ -354,7 +353,6 @@ const handlers = group.toLayer({
 	},
 	SubscribeSessionTodos: (payload) => {
 		expect(payload).toEqual({
-			projectSlug: "project",
 			sessionId: "session-1",
 			resumeFromSequence: 7,
 		});
@@ -444,7 +442,6 @@ it("SubscribeSessionDetail preserves message and part rows, model identity and p
 				const { client, serverFrames } = yield* connect;
 				const result = yield* Stream.runCollect(
 					client.SubscribeSessionDetail({
-						projectSlug: "project",
 						sessionId: "session-1",
 						resumeFromSequence: 39,
 					}),
@@ -551,14 +548,12 @@ it("ResolveClaudeSettings preserves display values and provenance", async () => 
 			accountRef: { _tag: "Id", id: "claude-1" },
 		}),
 		new Contracts.ContinueSession({
-			projectSlug: "project",
 			sessionId: "session-1",
 			instanceId: "stale-account",
 			expectedInstanceId: "source-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
 		}),
 		new Contracts.PreviewContinuation({
-			projectSlug: "project",
 			sessionId: "session-1",
 			instanceId: "stale-account",
 			accountRef: { _tag: "Id", id: "claude-1" },
@@ -614,7 +609,6 @@ it("RewindSession preserves the changed response target identifiers", async () =
 				const { client } = yield* connect;
 				expect(
 					yield* client.RewindSession({
-						projectSlug: "project",
 						sessionId: "session-1",
 						messageId: "provider-message-1",
 					}),
@@ -635,7 +629,6 @@ it("SubscribeSessionTodos preserves the session id and todo items through JSON",
 				const { client, clientFrames } = yield* connect;
 				const result = yield* Stream.runCollect(
 					client.SubscribeSessionTodos({
-						projectSlug: "project",
 						sessionId: "session-1",
 						resumeFromSequence: 7,
 					}),
@@ -646,7 +639,6 @@ it("SubscribeSessionTodos preserves the session id and todo items through JSON",
 						_tag: "Request",
 						tag: "SubscribeSessionTodos",
 						payload: {
-							projectSlug: "project",
 							sessionId: "session-1",
 							resumeFromSequence: 7,
 						},

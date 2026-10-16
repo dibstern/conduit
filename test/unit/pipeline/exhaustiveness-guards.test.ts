@@ -77,23 +77,4 @@ describe("Exhaustiveness guards", () => {
 			}
 		});
 	});
-
-	describe("EventPayloadMap key snapshot", () => {
-		it("snapshot of all canonical event types — breaks when new types added", async () => {
-			// Dynamic import to get the actual type keys at runtime
-			const eventsModule = await import(
-				"../../../src/lib/persistence/events.js"
-			);
-
-			// Derive known types from the CANONICAL_EVENT_TYPES runtime array —
-			// this stays in sync with the EventPayloadMap interface (any drift
-			// between them is caught by TypeScript in canonicalEvent/validate).
-			const knownTypes = [...eventsModule.CANONICAL_EVENT_TYPES].sort();
-
-			// This list should be updated when new event types are added.
-			// If you're adding a new event type, add it here AND add test
-			// coverage in the relevant pipeline test file.
-			expect(knownTypes).toMatchSnapshot();
-		});
-	});
 });

@@ -27,7 +27,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	AddInstance,
-	ForkSession,
+	ForkSessionForSession,
 	UpdateInstance,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -174,8 +174,7 @@ describe("Account folder changes without daemon restart", () => {
 			new UpdateInstance({ instanceId: accountId, configDir: edited }),
 		);
 		const fork = await daemon.requestRpc(
-			new ForkSession({
-				projectSlug: "process-test",
+			new ForkSessionForSession({
 				originId: browser.originId,
 				sessionId: parentId,
 				messageId: boundary.id,
@@ -446,7 +445,6 @@ describe("Account folder changes without daemon restart", () => {
 			const steerText = "correction-after-folder-edit";
 			const submitted = await Effect.runPromise(
 				browser.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					inputId,
 					originId: browser.originId,
@@ -528,7 +526,6 @@ describe("Account folder changes without daemon restart", () => {
 				(
 					await Effect.runPromise(
 						browser.rpc.input.submit({
-							projectSlug: "process-test",
 							sessionId,
 							inputId: randomUUID(),
 							originId: browser.originId,
@@ -697,7 +694,6 @@ describe("Account folder changes without daemon restart", () => {
 		const switchTo = (instanceId: string, expectedInstanceId: string) =>
 			Effect.runPromise(
 				browser.rpc.ContinueSession({
-					projectSlug: "process-test",
 					sessionId,
 					instanceId,
 					expectedInstanceId,

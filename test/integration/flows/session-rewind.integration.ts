@@ -206,7 +206,6 @@ describe("OpenCode pending rewind through the relay", () => {
 				if (!messageId) throw new Error("Missing large transcript cut");
 				await client.rpcCall((rpc) =>
 					rpc.RewindSession({
-						projectSlug: "integration-test",
 						sessionId,
 						messageId,
 					}),
@@ -227,9 +226,7 @@ describe("OpenCode pending rewind through the relay", () => {
 					messageIds.slice(cut - visible.messages.length, cut),
 				);
 			}
-			await client.rpcCall((rpc) =>
-				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-			);
+			await client.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
 			const undone = writes();
 			evidence["undo"] = undone;
 			expect.soft(undone.messages).toBeLessThanOrEqual(70);
@@ -372,7 +369,6 @@ describe("OpenCode pending rewind through the relay", () => {
 		const rewind = () =>
 			client.rpcCall((rpc) =>
 				rpc.RewindSession({
-					projectSlug: "integration-test",
 					sessionId,
 					messageId: target,
 				}),
@@ -420,9 +416,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			pending: target,
 		});
 
-		await second.rpcCall((rpc) =>
-			rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-		);
+		await second.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
 		expect(
 			harness.mock.diagnostics.filter((entry) =>
 				entry.detail?.startsWith(`POST /session/${sessionId}/unrevert`),
@@ -497,9 +491,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		for (const id of hiddenIds)
 			expect(history.messages.map((message) => message.id)).not.toContain(id);
 		await expect(
-			reopened.rpcCall((rpc) =>
-				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-			),
+			reopened.rpcCall((rpc) => rpc.UndoRewind({ sessionId })),
 		).rejects.toThrow();
 		evidence["committed"] = committed;
 		evidence["reload"] = history;
@@ -515,7 +507,6 @@ describe("OpenCode pending rewind through the relay", () => {
 		const rewind = () =>
 			client.rpcCall((rpc) =>
 				rpc.RewindSession({
-					projectSlug: "integration-test",
 					sessionId,
 					messageId: target,
 				}),
@@ -543,9 +534,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			},
 		);
 		await expect(
-			client.rpcCall((rpc) =>
-				rpc.UndoRewind({ projectSlug: "integration-test", sessionId }),
-			),
+			client.rpcCall((rpc) => rpc.UndoRewind({ sessionId })),
 		).rejects.toThrow();
 		expect(persistedRewinds(harness, sessionId)).toEqual(pending);
 		const reloaded = await harness.connectWsClient();

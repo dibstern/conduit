@@ -8,6 +8,9 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
+	import { isKnownDriverKind } from "../../../contracts/provider-instance.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
+	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
 	import { applyGetAgentsResponse, followModelsRead, applyHarnessDefaultSet, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -63,11 +66,9 @@
 		});
 	});
 
-	let saving = $state({ claude: false, opencode: false });
-	const defaultRows = $derived(([
-		{ harness: "claude", label: "Claude" },
-		{ harness: "opencode", label: "OpenCode" },
-	] as const).map((row) => {
+	let saving = $state<Partial<Record<Harness, boolean>>>({});
+	const defaultRows = $derived(Object.keys(PROVIDER_PRESENTATION).filter(isKnownDriverKind).map((harness) => {
+		const row = { harness, label: PROVIDER_PRESENTATION[harness].label };
 		const state = discoveryState.harnessDefaults[row.harness];
 		const providers = modelProviders.filter((provider) => harnessForModelProvider(provider.id) === row.harness);
 		const catalog = catalogFromProviderList(providers);
@@ -75,9 +76,9 @@
 		return { ...row, state, providers, model, options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
 	}));
 
-	function defaultProblem(state: HarnessDefaultState, label: string): string {
+	function defaultProblem(state: HarnessDefaultState, harness: Harness, label: string): string {
 		if (state.status === "missing") return `No default. New chats on ${label} start with no model.`;
-		if (state.status === "unverified") return label === "OpenCode" ? "Start OpenCode to check this default." : "Connect Claude to check this default.";
+		if (state.status === "unverified") return getDriverTraits(harness)?.runsOpenCodeServer ? `Start ${label} to check this default.` : `Connect ${label} to check this default.`;
 		if (state.problem?.startsWith("EffortNotOffered")) return `Effort "${state.pick?.effort}" is no longer available for ${state.pick?.modelId}.`;
 		if (state.problem?.startsWith("ContextWindowNotOffered")) return `Context window "${state.pick?.contextWindow}" is no longer available for ${state.pick?.modelId}.`;
 		return `${state.pick?.modelId ?? "This model"} is no longer available.`;
@@ -120,7 +121,7 @@
 			// project default.
 			const sessionId = sessionState.currentId;
 			const applyModels = followModelsRead(sessionId ?? undefined);
-			void getModelsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+			void getModelsRpc({ ...(sessionId ? { sessionId } : { projectSlug }) })
 				.then((response) => {
 					if (sessionState.currentId === sessionId) applyModels(response);
 				})
@@ -128,7 +129,7 @@
 				.finally(() => {
 					modelsFetchPending = false;
 				});
-			void getAgentsRpc({ projectSlug, ...(sessionId ? { sessionId } : {}) })
+			void getAgentsRpc({ ...(sessionId ? { sessionId } : { projectSlug }) })
 				.then((response) => {
 					if (sessionState.currentId === sessionId) applyGetAgentsResponse(response, sessionId ?? undefined);
 				})
@@ -250,7 +251,7 @@
 			{/snippet}
 			<SettingsRow label={row.label} labelFor="settings-harness-default-{row.harness}-model" control={controls} class="p-0" />
 			{#if row.state.status !== "ok"}
-				<p class="mt-1 text-[11px] text-text-muted" data-testid="settings-harness-default-{row.harness}-status" data-status={row.state.status}>{defaultProblem(row.state, row.label)}</p>
+				<p class="mt-1 text-[11px] text-text-muted" data-testid="settings-harness-default-{row.harness}-status" data-status={row.state.status}>{defaultProblem(row.state, row.harness, row.label)}</p>
 			{/if}
 		</div>
 	{/each}

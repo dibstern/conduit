@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Effect, Either } from "effect";
 import type { Account } from "../../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -238,7 +239,8 @@ export const backfillSessionPicks = () =>
 			const modelId =
 				row.model_id ??
 				(turn?.model_id ||
-					(driver === "opencode" && separator > 0
+					(PROVIDER_DRIVERS[driver].modelIdFormat === "provider-qualified" &&
+					separator > 0
 						? historicalModel?.slice(separator + 1)
 						: historicalModel));
 			let pick: TurnPick | undefined;
@@ -247,8 +249,8 @@ export const backfillSessionPicks = () =>
 				const providerId =
 					row.model_provider ??
 					(turn?.model_provider ||
-						(driver === "claude"
-							? "claude"
+						(PROVIDER_DRIVERS[driver].modelIdFormat === "context-window-suffix"
+							? driver
 							: separator > 0
 								? historicalModel?.slice(0, separator)
 								: undefined));

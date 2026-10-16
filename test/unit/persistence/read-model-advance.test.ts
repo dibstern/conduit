@@ -113,6 +113,7 @@ it("a committed session write announces the session and stamps its row", async (
 			expect(advances).toEqual([
 				{
 					version: 1,
+					projectIds: ["test-project"],
 					sessionIds: ["s1"],
 					removedSessionIds: [],
 					collections: ["sessions", "sidebar"],
@@ -153,6 +154,7 @@ it("a changed workspace hint must stamp and announce its session row", async () 
 			expect(advances).toEqual([
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: ["s1"],
 					removedSessionIds: [],
 					collections: ["sessions", "sidebar"],
@@ -171,12 +173,14 @@ it("a changed workspace hint must stamp and announce its session row", async () 
 			expect(advances).toEqual([
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: ["s1"],
 					removedSessionIds: [],
 					collections: ["sessions", "sidebar"],
 				},
 				{
 					version: 3,
+					projectIds: ["test-project"],
 					sessionIds: ["s1"],
 					removedSessionIds: [],
 					collections: ["sessions", "sidebar"],
@@ -347,6 +351,7 @@ it("applySessionCommand announces through the projection path, not its own", asy
 			expect(advances).toEqual([
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: ["s1"],
 					removedSessionIds: [],
 					collections: ["sessions", "sidebar"],
@@ -399,10 +404,18 @@ it("a subagent message announces the session that owns the row, not the event's"
 			expect(
 				advances.map((advance) => ({
 					version: advance.version,
+					projectIds: ["test-project"],
 					sessionIds: [...advance.sessionIds].sort(),
 					removedSessionIds: [...advance.removedSessionIds],
 				})),
-			).toEqual([{ version: 3, sessionIds: ["sub"], removedSessionIds: [] }]);
+			).toEqual([
+				{
+					version: 3,
+					projectIds: ["test-project"],
+					sessionIds: ["sub"],
+					removedSessionIds: [],
+				},
+			]);
 		}),
 	);
 });
@@ -726,11 +739,17 @@ it("a delete announces the session it removed and the subagents it took with it"
 			expect(
 				advances.map((advance) => ({
 					version: advance.version,
+					projectIds: ["test-project"],
 					sessionIds: [...advance.sessionIds].sort(),
 					removedSessionIds: [...advance.removedSessionIds].sort(),
 				})),
 			).toEqual([
-				{ version: 4, sessionIds: [], removedSessionIds: ["parent", "sub"] },
+				{
+					version: 4,
+					projectIds: ["test-project"],
+					sessionIds: [],
+					removedSessionIds: ["parent", "sub"],
+				},
 			]);
 		}),
 	);
@@ -800,6 +819,7 @@ it("a delete followed by a re-create in one commit announces the row that surviv
 			expect(advances).toEqual([
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: ["s1"],
 					removedSessionIds: [],
 					collections: [
@@ -827,6 +847,7 @@ it("a re-create followed by a delete in one commit announces only the removal", 
 			expect(advances).toEqual([
 				{
 					version: 1,
+					projectIds: ["test-project"],
 					sessionIds: [],
 					removedSessionIds: ["s2"],
 					collections: [
@@ -870,6 +891,7 @@ it("a body that projects twice is judged by its last projection, not the union",
 			expect(advances).toEqual([
 				{
 					version: 3,
+					projectIds: ["test-project"],
 					sessionIds: ["s3"],
 					removedSessionIds: [],
 					collections: [

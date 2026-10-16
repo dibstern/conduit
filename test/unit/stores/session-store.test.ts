@@ -477,7 +477,7 @@ describe("switchToSession", () => {
 			vi.unstubAllGlobals();
 		}
 	});
-	it("builds the session route and RPC from the attached project", () => {
+	it("builds the session route and addresses the RPC by session", () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		try {
 			const viewSession = vi.fn().mockResolvedValue({ ok: true });
@@ -486,7 +486,6 @@ describe("switchToSession", () => {
 			switchToSession("new-session", undefined, viewSession);
 			expect(routerState.path).toBe("/s/new-session");
 			expect(viewSession).toHaveBeenCalledWith({
-				projectSlug: "attached-project",
 				sessionId: "new-session",
 				originId: expect.any(String),
 			});
@@ -495,13 +494,12 @@ describe("switchToSession", () => {
 		}
 	});
 
-	it("views a foreign row through its explicit project", () => {
+	it("views a foreign row by its session id", () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		try {
 			const viewSession = vi.fn().mockResolvedValue({ ok: true });
 			switchToSession("foreign", "project-b", viewSession);
 			expect(viewSession).toHaveBeenCalledWith({
-				projectSlug: "project-b",
 				sessionId: "foreign",
 				originId: expect.any(String),
 			});
@@ -518,7 +516,6 @@ describe("switchToSession", () => {
 		switchToSession("new-session", "project-a", viewSession);
 
 		expect(viewSession).toHaveBeenCalledWith({
-			projectSlug: "project-a",
 			sessionId: "new-session",
 			originId: expect.any(String),
 		});

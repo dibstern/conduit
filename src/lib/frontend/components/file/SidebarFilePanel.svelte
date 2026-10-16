@@ -52,7 +52,7 @@
 		if (!slug) return;
 		loading = true;
 		fileTreeState.browserPath = path;
-		void getFileListRpc({ projectSlug: slug, path, ...(sessionId ? { sessionId } : {}) })
+		void getFileListRpc({ ...(sessionId ? { sessionId } : { projectSlug: slug }), path })
 			.then((response) => {
 				if (fileTreeState.scope === scope) applyGetFileListResponse(response);
 			})
@@ -115,7 +115,7 @@
 		const sessionId = getCurrentSessionId();
 		const scope = fileTreeState.scope;
 		if (slug && !fileTreeState.browserChildren.has(fileBrowserKey(fullPath, root))) {
-			void getFileListRpc({ projectSlug: slug, path: fullPath, ...(root !== undefined ? { root } : {}), ...(sessionId ? { sessionId } : {}) }).then(
+			void getFileListRpc({ ...(sessionId ? { sessionId } : { projectSlug: slug }), path: fullPath, ...(root !== undefined ? { root } : {}) }).then(
 				(response) => { if (fileTreeState.scope === scope) applyGetFileListResponse(response); },
 			).catch(() => undefined);
 		}
