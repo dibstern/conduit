@@ -29,6 +29,7 @@ import {
 	allProjects,
 	type ProjectRegistryTag,
 } from "./project-registry-service.js";
+import type { SessionActivityTag } from "./session-activity.js";
 import { makeSessionRows } from "./session-rows.js";
 
 class DaemonSessionReadError extends Data.TaggedError(
@@ -244,7 +245,7 @@ export const listDaemonSessions = (
 ): Effect.Effect<
 	DaemonSessionQueryResult,
 	never,
-	ProjectRegistryTag | AccountDirectory
+	ProjectRegistryTag | AccountDirectory | SessionActivityTag
 > =>
 	Effect.gen(function* () {
 		const registered = yield* allProjects;

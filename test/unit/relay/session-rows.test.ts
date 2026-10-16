@@ -14,18 +14,12 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import type { Envelope } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import { makeRelayStatusSnapshot } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
-import {
-	BackgroundLivenessTag,
-	ConfigTag,
-	SessionCompactionsTag,
-	SessionRetriesTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { makeSessionListOperations } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
 import { emptySessionManagerState } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
-import { SessionWorkspaceHintStateTag } from "../../../src/lib/domain/relay/Services/session-workspace-hint-state.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -83,22 +77,7 @@ describe("Session Rows read paths", () => {
 						),
 					);
 					const activity = yield* makeSessionActivity;
-					const activityLayer = Layer.mergeAll(
-						Layer.succeed(SessionActivityTag, activity),
-						Layer.succeed(
-							BackgroundLivenessTag,
-							activity.background.backgroundOf,
-						),
-						Layer.succeed(
-							SessionCompactionsTag,
-							activity.compactions.compactingOf,
-						),
-						Layer.succeed(SessionRetriesTag, activity.retries.retryingOf),
-						Layer.succeed(
-							SessionWorkspaceHintStateTag,
-							activity.hintDismissals,
-						),
-					);
+					const activityLayer = Layer.succeed(SessionActivityTag, activity);
 					const persistence = makePersistenceEffectLayer(
 						join(storageDir, "events.db"),
 						slug,
@@ -162,7 +141,6 @@ describe("Session Rows read paths", () => {
 							sql,
 							accounts,
 							statusPollerOption: Option.none(),
-							backgroundOf: activity.background.backgroundOf,
 							activity,
 							snapshot: makeRelayStatusSnapshot(),
 							projectFolders: folders,

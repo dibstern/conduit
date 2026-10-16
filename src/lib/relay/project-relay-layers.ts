@@ -384,14 +384,7 @@ export function createProjectRelayLayers({
 					prepareShellEnv: config.prepareShellEnv,
 				}),
 				onBackgroundTask: (transition) => {
-					const before = activity.background.backgroundOf(
-						transition.sessionId,
-					)?.tasks;
-					activity.background.record(transition);
-					if (
-						before !==
-						activity.background.backgroundOf(transition.sessionId)?.tasks
-					)
+					if (activity.background.record(transition))
 						onBackgroundWorkChanged(transition.sessionId);
 				},
 				claudeQueryFactory: claudeSdk.query,

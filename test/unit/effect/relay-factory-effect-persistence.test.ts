@@ -24,6 +24,10 @@ import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Ser
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import { RelayCacheTag } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
@@ -78,6 +82,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 						ConfigPersistenceNoopLive,
 						DaemonEventBusLive,
+						Layer.effect(SessionActivityTag, makeSessionActivity),
 						makeProjectRegistryLive(),
 						makeInstanceManagerStateLive(undefined, [], {
 							launchLogin: sdkDefaultClaudeConfigDir(
@@ -148,6 +153,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 						ConfigPersistenceNoopLive,
 						DaemonEventBusLive,
+						Layer.effect(SessionActivityTag, makeSessionActivity),
 						makeProjectRegistryLive([
 							{
 								slug: "effect-project",
@@ -288,6 +294,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,
+					Layer.effect(SessionActivityTag, makeSessionActivity),
 					makeProjectRegistryLive([
 						{
 							slug: "effect-project",
@@ -421,6 +428,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,
+					Layer.effect(SessionActivityTag, makeSessionActivity),
 					makeProjectRegistryLive([
 						{
 							slug: "effect-project",
@@ -518,6 +526,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,
 					DaemonEventBusLive,
+					Layer.effect(SessionActivityTag, makeSessionActivity),
 					makeProjectRegistryLive([
 						{
 							slug: "effect-project",
@@ -590,6 +599,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				makeDaemonStateLive({ configDir: join(dir, "config") }),
 				ConfigPersistenceNoopLive,
 				DaemonEventBusLive,
+				Layer.effect(SessionActivityTag, makeSessionActivity),
 				makeProjectRegistryLive([
 					{
 						slug: "effect-project",

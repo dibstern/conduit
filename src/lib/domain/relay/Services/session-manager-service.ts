@@ -46,7 +46,6 @@ import {
 	PickRequired,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
-import type { SessionBackground } from "../../../session/background-liveness.js";
 import type {
 	HistoryMessage,
 	SessionPermissionMode,
@@ -66,7 +65,6 @@ import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
@@ -164,7 +162,6 @@ export type ListSessionsOptions = {
 	limit?: number;
 	roots?: boolean;
 	statuses?: Record<string, SessionStatus> | undefined;
-	backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 };
 
 export interface CreateSessionOptions {
@@ -786,7 +783,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| ConfigTag
 	| RelayStatusSnapshotTag
 	| OpenCodeInstancesTag
-	| BackgroundLivenessTag
+	| SessionActivityTag
 	| OverridesStateTag
 	| DaemonEventBusTag
 	| OrchestrationEngineTag
@@ -809,10 +806,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const sql = yield* SqlClient.SqlClient;
 		// The relay constructs the session manager before its status-poller layer.
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
-		const backgroundOf = yield* BackgroundLivenessTag;
-		const activity = Option.getOrUndefined(
-			yield* Effect.serviceOption(SessionActivityTag),
-		);
+		const activity = yield* SessionActivityTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const accounts = yield* AccountDirectory;
@@ -834,8 +828,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				sql,
 				accounts,
 				statusPollerOption,
-				backgroundOf,
-				...(activity === undefined ? {} : { activity }),
+				activity,
 				snapshot,
 				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
 				projectSlug: config.slug,

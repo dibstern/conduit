@@ -25,9 +25,10 @@ import { Effect, Stream } from "effect";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import type { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { makeSessionRows } from "../../daemon/Services/session-rows.js";
 import { type Envelope, stream } from "./read-model-subscription.js";
-import { type BackgroundLivenessTag, ConfigTag } from "./services.js";
+import { ConfigTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import type { ShellSubscriptionError } from "./shell-subscription.js";
 
@@ -39,7 +40,7 @@ export const subscribeSessionFamily = (options: {
 	ShellSubscriptionError,
 	| ReadQueryEffectTag
 	| SessionEventBusTag
-	| BackgroundLivenessTag
+	| SessionActivityTag
 	| ConfigTag
 	| AccountDirectory
 	| SqlClient.SqlClient

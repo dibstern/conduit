@@ -40,6 +40,10 @@ import {
 	type RelayFactory,
 } from "../../src/lib/domain/daemon/Services/relay-cache.js";
 import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../src/lib/domain/daemon/Services/session-activity.js";
+import {
 	makeUsage,
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
@@ -76,6 +80,7 @@ export const makeDaemonRpcTestLayer = (
 	} = {},
 ) => {
 	const base = Layer.mergeAll(
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeProjectRegistryLive(projects),
 		makeRelayCacheLive(factory),
 		DaemonEventBusLive,

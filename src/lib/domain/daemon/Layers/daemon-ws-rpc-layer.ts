@@ -123,10 +123,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| KeepAwakeTag
 			| TailscaleCliTag
 		>();
-		const activity = yield* Effect.serviceOption(SessionActivityTag);
-		const context = Option.isSome(activity)
-			? Context.add(baseContext, SessionActivityTag, activity.value)
-			: baseContext;
+		const activity = yield* SessionActivityTag;
+		const context = Context.add(baseContext, SessionActivityTag, activity);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -191,6 +189,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
+				| SessionActivityTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
 				| AccountDirectory
@@ -225,6 +224,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| PollerFibersTag
 				| ConfigPersistenceTag
 				| DaemonEventBusTag
+				| SessionActivityTag
 			>,
 		) =>
 			effect.pipe(

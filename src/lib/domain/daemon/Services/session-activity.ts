@@ -28,12 +28,11 @@ export class SessionActivityTag extends Context.Tag("SessionActivity")<
 >() {}
 
 /** Daemon-owned transient state; project relays only borrow its readers and writers. */
-export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.sync(
-	() => {
-		const subscribers = new Set<Queue.Queue<string>>();
+export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
+	function* () {
+		const changes = yield* PubSub.unbounded<string>();
 		const changed = (sessionId: string): void => {
-			for (const subscriber of subscribers)
-				Queue.unsafeOffer(subscriber, sessionId);
+			changes.unsafeOffer(sessionId);
 		};
 		const compactions = makeSessionCompactions();
 		const retries = makeSessionRetries();
@@ -79,24 +78,9 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.sync(
 			},
 			hintDismissals,
 			changed,
-			subscribe: Effect.acquireRelease(
-				Effect.gen(function* () {
-					const subscriber = yield* Queue.unbounded<string>();
-					subscribers.add(subscriber);
-					return subscriber;
-				}),
-				(subscriber) =>
-					Effect.sync(() => subscribers.delete(subscriber)).pipe(
-						Effect.zipRight(Queue.shutdown(subscriber)),
-					),
-			).pipe(Effect.map(Stream.fromQueue)),
+			subscribe: Stream.fromPubSub(changes, { scoped: true }),
 		} satisfies SessionActivity;
 	},
-);
-
-export const SessionActivityLive = Layer.effect(
-	SessionActivityTag,
-	makeSessionActivity,
 );
 
 /** Wake on changes, coalescing a burst into one leading and one trailing refresh. */

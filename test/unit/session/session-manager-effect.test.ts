@@ -13,10 +13,13 @@ import {
 } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -118,7 +121,7 @@ describe("SessionManager Effect", () => {
 			configLayer,
 			loggerLayer,
 			Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-			Layer.succeed(BackgroundLivenessTag, () => undefined),
+			Layer.effect(SessionActivityTag, makeSessionActivity),
 			RelayStatusSnapshotLive,
 			makeOverridesStateLive(),
 			Layer.succeed(
@@ -901,12 +904,18 @@ describe("SessionManager Effect", () => {
 						id, provider, title, status, created_at, updated_at
 					) VALUES ('ses-doomed', 'claude', 'Doomed', 'idle', 1000, 1000)`;
 
-				const before = yield* listSessions("test-project");
+				const before = yield* listSessions("test-project", undefined, {
+					slug: "test-project",
+					folders: [tmpdir()],
+				});
 				expect(before.map((s) => s.id)).toContain("ses-doomed");
 
 				yield* deleteSession("ses-doomed");
 
-				const after = yield* listSessions("test-project");
+				const after = yield* listSessions("test-project", undefined, {
+					slug: "test-project",
+					folders: [tmpdir()],
+				});
 				expect(after.map((s) => s.id)).not.toContain("ses-doomed");
 			}).pipe(
 				Effect.provide(makeLiveServiceLayer(mockApi, filename)),
@@ -937,7 +946,10 @@ describe("SessionManager Effect", () => {
 
 				yield* deleteSession("ses-parent");
 
-				const after = yield* listSessions("test-project");
+				const after = yield* listSessions("test-project", undefined, {
+					slug: "test-project",
+					folders: [tmpdir()],
+				});
 				const ids = after.map((s) => s.id);
 				expect(ids).not.toContain("ses-parent");
 				expect(ids).not.toContain("ses-child");

@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Effect, HashMap, Option, Ref } from "effect";
+import { Effect, HashMap, type Option, Ref } from "effect";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import type {
 	SessionDetail,
@@ -10,7 +10,6 @@ import {
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import type { SessionBackground } from "../../../session/background-liveness.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	type SessionActivity,
@@ -25,7 +24,7 @@ import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
 } from "./relay-status-snapshot.js";
-import { ConfigTag, type StatusPollerShape } from "./services.js";
+import type { StatusPollerShape } from "./services.js";
 import { SessionManagerError } from "./session-manager-error.js";
 import type {
 	ListSessionsOptions,
@@ -89,21 +88,13 @@ export const incrementLastKnownSessionCount = () =>
  */
 export const listSessions = (
 	projectSlug: string,
-	options?: ListSessionsOptions,
-	scope?: SessionRowsScope,
+	options: ListSessionsOptions | undefined,
+	scope: SessionRowsScope,
 ) =>
 	Effect.gen(function* () {
 		const stateRef = yield* SessionManagerStateTag;
 		const readQuery = yield* ReadQueryEffectTag;
-		const config = Option.getOrUndefined(
-			yield* Effect.serviceOption(ConfigTag),
-		);
-		const rows = yield* makeSessionRows(
-			scope ?? {
-				slug: projectSlug,
-				folders: [config?.projectDir ?? ".", ...(config?.extraFolders ?? [])],
-			},
-		);
+		const rows = yield* makeSessionRows(scope);
 		const [sessions, lineage] = yield* Effect.all([
 			rows.list({
 				...(options?.roots !== undefined ? { roots: options.roots } : {}),
@@ -111,9 +102,6 @@ export const listSessions = (
 				...(options?.statuses !== undefined
 					? { statuses: options.statuses }
 					: {}),
-				...(options?.backgroundOf && {
-					backgroundOf: options.backgroundOf,
-				}),
 			}),
 			readQuery.getSessionLineage(),
 		]).pipe(
@@ -133,7 +121,7 @@ export const listSessions = (
 		yield* updateRelaySessionCountSnapshot(lineage.count);
 		return sessions;
 	}).pipe(
-		Effect.annotateLogs("operation", "listSessions"),
+		Effect.annotateLogs({ operation: "listSessions", projectSlug }),
 		Effect.withSpan("session.listSessions"),
 	);
 
@@ -162,7 +150,6 @@ export const makeSessionListOperations = ({
 	sql,
 	accounts,
 	statusPollerOption,
-	backgroundOf,
 	activity,
 	snapshot,
 	projectFolders,
@@ -174,10 +161,7 @@ export const makeSessionListOperations = ({
 	sql: SqlClient.SqlClient;
 	accounts: AccountDirectory["Type"];
 	statusPollerOption: Option.Option<StatusPollerShape>;
-	backgroundOf:
-		| ((sessionId: string) => SessionBackground | undefined)
-		| undefined;
-	activity?: SessionActivity;
+	activity: SessionActivity;
 	snapshot: RelayStatusSnapshotService;
 	projectFolders: readonly [string, ...string[]];
 	projectSlug: string;
@@ -198,7 +182,6 @@ export const makeSessionListOperations = ({
 				{
 					...options,
 					statuses,
-					...(backgroundOf && { backgroundOf }),
 				},
 				{ slug: projectSlug, folders: projectFolders },
 			).pipe(
@@ -210,13 +193,10 @@ export const makeSessionListOperations = ({
 			const withEffectRead = base.pipe(
 				Effect.provideService(ReadQueryEffectTag, readQuery),
 			);
-			return yield* (
-				activity === undefined
-					? withEffectRead
-					: withEffectRead.pipe(
-							Effect.provideService(SessionActivityTag, activity),
-						)
-			).pipe(Effect.provideService(RelayStatusSnapshotTag, snapshot));
+			return yield* withEffectRead.pipe(
+				Effect.provideService(SessionActivityTag, activity),
+				Effect.provideService(RelayStatusSnapshotTag, snapshot),
+			);
 		});
 	const refreshSessionLineage: SessionManagerService["refreshSessionLineage"] =
 		() =>

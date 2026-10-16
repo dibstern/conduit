@@ -54,13 +54,13 @@ export function makeSessionBackgroundLiveness(
 	// runners replay only non-empty lists after a reconnect.
 	const listSince = new Map<string, number>();
 	return {
-		record(input: BackgroundTaskTransition): void {
+		record(input: BackgroundTaskTransition): boolean {
 			if (input.kind === "session-ended" || input.tasks.length === 0) {
 				const emptied = live.delete(input.sessionId);
 				if (emptied || !listSince.has(input.sessionId))
 					listSince.set(input.sessionId, now());
 				if (emptied) onChange?.(input.sessionId);
-				return;
+				return emptied;
 			}
 			const previous = live.get(input.sessionId) ?? [];
 			const previousById = new Map(previous.map((task) => [task.id, task]));
@@ -90,10 +90,11 @@ export function makeSessionBackgroundLiveness(
 					);
 				})
 			)
-				return;
+				return false;
 			live.set(input.sessionId, tasks);
 			listSince.set(input.sessionId, now());
 			onChange?.(input.sessionId);
+			return true;
 		},
 		backgroundOf(sessionId: string): SessionBackground | undefined {
 			const tasks = live.get(sessionId);

@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Array as Arr, Effect, Option } from "effect";
+import { Array as Arr, Effect } from "effect";
 import {
 	type createSessionGitCache,
 	withCachedSessionGit,
@@ -14,13 +14,7 @@ import {
 	effectiveWorkingDirectory,
 } from "../../../session/session-workspace.js";
 import type { SessionInfo } from "../../../shared-types.js";
-import {
-	BackgroundLivenessTag,
-	SessionCompactionsTag,
-	SessionRetriesTag,
-} from "../../relay/Services/services.js";
 import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
-import { SessionWorkspaceHintStateTag } from "../../relay/Services/session-workspace-hint-state.js";
 import { AccountDirectory } from "./account-directory.js";
 import { resolveSessionAccountIds } from "./session-accounts.js";
 import { SessionActivityTag } from "./session-activity.js";
@@ -38,27 +32,10 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 		const readQuery = yield* ReadQueryEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		const accounts = yield* AccountDirectory;
-		const activity = Option.getOrUndefined(
-			yield* Effect.serviceOption(SessionActivityTag),
-		);
-		// Legacy read-only hosts can still supply the existing overlay tags.
-		const backgroundOf =
-			activity?.background.backgroundOf ??
-			Option.getOrUndefined(yield* Effect.serviceOption(BackgroundLivenessTag));
-		const compactingOf =
-			activity?.compactions.compactingOf ??
-			Option.getOrUndefined(yield* Effect.serviceOption(SessionCompactionsTag));
-		const retryingOf =
-			activity?.retries.retryingOf ??
-			Option.getOrUndefined(yield* Effect.serviceOption(SessionRetriesTag));
-		const hintDismissals =
-			activity?.hintDismissals ??
-			Option.getOrUndefined(
-				yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
-			);
+		const activity = yield* SessionActivityTag;
 		const overlay = {
-			...(backgroundOf === undefined ? {} : { backgroundOf }),
-			...(hintDismissals === undefined ? {} : { hintDismissals }),
+			backgroundOf: activity.background.backgroundOf,
+			hintDismissals: activity.hintDismissals,
 		};
 		const decorate = <T extends Omit<SessionInfo, "projectSlug" | "accountId">>(
 			sessions: readonly T[],
@@ -97,8 +74,8 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 				);
 				return yield* Effect.forEach(sessions, (session) =>
 					Effect.gen(function* () {
-						const compacting = compactingOf?.(session.id);
-						const retrying = retryingOf?.(session.id);
+						const compacting = activity.compactions.compactingOf(session.id);
+						const retrying = activity.retries.retryingOf(session.id);
 						const enriched = yield* withSessionWorktreeStatus(
 							withCachedSessionGit(
 								{
@@ -126,12 +103,22 @@ export const makeSessionRows = (scope: SessionRowsScope) =>
 			});
 
 		return {
-			list: (options?: Parameters<ReadQueryEffect["listSessionInfos"]>[0]) =>
+			list: (
+				options?: Omit<
+					NonNullable<Parameters<ReadQueryEffect["listSessionInfos"]>[0]>,
+					"backgroundOf" | "hintDismissals"
+				>,
+			) =>
 				readQuery
-					.listSessionInfos({ ...overlay, ...options })
+					.listSessionInfos({ ...options, ...overlay })
 					.pipe(Effect.flatMap(decorate)),
-			read: (range?: Parameters<ReadQueryEffect["readSessionList"]>[0]) =>
-				readQuery.readSessionList({ ...overlay, ...range }).pipe(
+			read: (
+				range?: Omit<
+					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[0]>,
+					"backgroundOf" | "hintDismissals"
+				>,
+			) =>
+				readQuery.readSessionList({ ...range, ...overlay }).pipe(
 					Effect.flatMap((list) =>
 						decorate(list.rows.map(({ item }) => item)).pipe(
 							Effect.map((items) => ({
