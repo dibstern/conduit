@@ -1,9 +1,15 @@
-import { Effect, Fiber, ManagedRuntime, Schema, Stream } from "effect";
+import type { Rpc } from "@effect/rpc";
+import { Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+	SubscribeShell,
+	WsRpcError,
+} from "../../../../src/lib/contracts/ws-rpc.js";
 import {
 	WsRpcClients,
 	WsRpcClientsLayer,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
+import { makeRpcStream, serveRpc } from "../../../helpers/rpc-wire.js";
 
 const Request = Schema.Struct({
 	_tag: Schema.Literal("Request"),
@@ -22,6 +28,18 @@ const sockets: FakeWebSocket[] = [];
 class FakeWebSocket extends EventTarget {
 	readyState = 0;
 	readonly requests: (typeof Request.Type)[] = [];
+	readonly runtime = ManagedRuntime.make(Layer.scope);
+	readonly feed = Effect.runSync(
+		makeRpcStream<Rpc.SuccessChunk<typeof SubscribeShell>, WsRpcError>(),
+	);
+	readonly server = this.runtime.runPromise(
+		serveRpc({ SubscribeShell: () => this.feed.stream }, (json) =>
+			Effect.sync(() => {
+				if (this.readyState === 1)
+					this.dispatchEvent(new MessageEvent("message", { data: json }));
+			}),
+		),
+	);
 
 	constructor(readonly url: string) {
 		super();
@@ -39,16 +57,15 @@ class FakeWebSocket extends EventTarget {
 			throw new Error("invalid RPC frame");
 		if (frame._tag === "Request") {
 			this.requests.push(Schema.decodeUnknownSync(Request)(frame));
-		} else if (frame._tag === "Ping") {
-			this.receive({ _tag: "Pong" });
 		}
+		void this.server.then((receive) => this.runtime.runPromise(receive(data)));
 	}
 
-	receive(frame: object): void {
-		if (this.readyState !== 1) throw new Error("socket is not open");
-		this.dispatchEvent(
-			new MessageEvent("message", { data: JSON.stringify(frame) }),
-		);
+	emit(...values: readonly Rpc.SuccessChunk<typeof SubscribeShell>[]) {
+		return this.runtime.runPromise(this.feed.emit(...values));
+	}
+	end() {
+		return this.runtime.runPromise(this.feed.end);
 	}
 
 	close(): void {
@@ -89,7 +106,10 @@ beforeEach(() => {
 	vi.stubGlobal("WebSocket", FakeWebSocket);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(async () => {
+	await Promise.all(sockets.map((socket) => socket.runtime.dispose()));
+	vi.unstubAllGlobals();
+});
 
 describe("shared client resume over WebSockets", () => {
 	it.each([
@@ -124,20 +144,12 @@ describe("shared client resume over WebSockets", () => {
 				projectSlug: "alpha",
 				...options,
 			});
-			resumed.socket.receive({
-				_tag: "Chunk",
-				requestId: resumed.request.id,
-				values: [
-					{ _tag: "snapshot", rows: [], sequence: 11 },
-					{ _tag: "synchronized" },
-				],
-			});
+			await resumed.socket.emit(
+				{ _tag: "snapshot", rows: [], sequence: 11 },
+				{ _tag: "synchronized" },
+			);
 			await vi.waitFor(() => expect(observed).toHaveLength(2));
-			resumed.socket.receive({
-				_tag: "Exit",
-				requestId: resumed.request.id,
-				exit: { _tag: "Success" },
-			});
+			await resumed.socket.end();
 			await runtime.runPromise(Fiber.join(consumer));
 			expect(observed).toEqual([
 				{ _tag: "snapshot", rows: [], sequence: 11 },
@@ -165,16 +177,12 @@ describe("shared client resume over WebSockets", () => {
 			);
 			const first = await nextSubscription();
 			expect(first.request.payload).toEqual({ projectSlug: "alpha" });
-			first.socket.receive({
-				_tag: "Chunk",
-				requestId: first.request.id,
-				values: [
-					{ _tag: "snapshot", rows: [], sequence: 11 },
-					{ _tag: "synchronized" },
-					{ _tag: "remove", id: "a", sequence: 12 },
-					{ _tag: "remove", id: "b", sequence: 13 },
-				],
-			});
+			await first.socket.emit(
+				{ _tag: "snapshot", rows: [], sequence: 11 },
+				{ _tag: "synchronized" },
+				{ _tag: "remove", id: "a", sequence: 12 },
+				{ _tag: "remove", id: "b", sequence: 13 },
+			);
 			await vi.waitFor(() => expect(observed).toHaveLength(4));
 			first.socket.drop();
 
@@ -191,24 +199,16 @@ describe("shared client resume over WebSockets", () => {
 				{ _tag: "remove", id: "b", sequence: 13 },
 				{ _tag: "remove", id: "c", sequence: 13 },
 				{ _tag: "remove", id: "d", sequence: 14 },
-			];
-			resumed.socket.receive({
-				_tag: "Chunk",
-				requestId: resumed.request.id,
-				values: [
-					...history.filter(
-						(item) =>
-							item.sequence > (resumed.request.payload.resumeFromSequence ?? 0),
-					),
-					{ _tag: "synchronized" },
-				],
-			});
+			] as const;
+			await resumed.socket.emit(
+				...history.filter(
+					(item) =>
+						item.sequence > (resumed.request.payload.resumeFromSequence ?? 0),
+				),
+				{ _tag: "synchronized" },
+			);
 			await vi.waitFor(() => expect(observed).toHaveLength(7));
-			resumed.socket.receive({
-				_tag: "Exit",
-				requestId: resumed.request.id,
-				exit: { _tag: "Success" },
-			});
+			await resumed.socket.end();
 			await runtime.runPromise(Fiber.join(consumer));
 			expect(observed).toEqual([
 				{ _tag: "snapshot", rows: [], sequence: 11 },

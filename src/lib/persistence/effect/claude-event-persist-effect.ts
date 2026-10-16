@@ -372,10 +372,7 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 
 	const ensureClaudeSubagentSession: ClaudeEventPersistEffect["ensureClaudeSubagentSession"] =
 		(input) =>
-			// Through the seam rather than the runner: this append is an idempotent
-			// INSERT OR IGNORE, not an appendBatch, and it is reached directly from
-			// claude-provider-runtime — so without this it would project a new
-			// subagent session that nobody was told about.
+			// Keep session seeding, append and projection in the seam's transaction.
 			commitAndSignal
 				.write((project) =>
 					Effect.gen(function* () {
@@ -445,42 +442,11 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 								provider: "claude",
 							},
 						);
-						const dataJson = JSON.stringify(event.data);
-						const metadataJson = JSON.stringify(event.metadata);
-
-						const rows = yield* sql<{
-							sequence: number;
-							stream_version: number;
-						}>`
-					INSERT OR IGNORE INTO events (
-						project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at
-					)
-					SELECT
-						${eventStore.projectId},
-						${event.eventId},
-						${event.sessionId},
-						COALESCE(MAX(stream_version) + 1, 0),
-						${event.type},
-						${dataJson},
-						${metadataJson},
-						${event.provider},
-						${event.createdAt}
-					FROM events
-					WHERE session_id = ${event.sessionId}
-					RETURNING sequence, stream_version`;
-
-						const row = rows[0];
-						if (row) {
-							const stored: StoredEvent = {
-								...event,
-								projectId: eventStore.projectId,
-								sequence: row.sequence,
-								streamVersion: row.stream_version,
-							};
-							yield* project([stored]);
-						}
-						if (pickEvents.length > 0)
-							yield* project(yield* appendEvents(pickEvents));
+						const stored = yield* eventStore.appendBatch([
+							event,
+							...pickEvents,
+						]);
+						yield* project(stored);
 					}),
 				)
 				.pipe(

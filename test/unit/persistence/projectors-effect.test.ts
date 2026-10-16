@@ -18,6 +18,7 @@ import {
 	LoggerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -621,6 +622,37 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
+	it("append rejects a missing required tool input through the full schema", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const event = {
+					...makeSessionCreated("s-missing-tool-input"),
+					type: "tool.started" as const,
+					data: {
+						messageId: "m1",
+						partId: "p1",
+						toolName: "Bash",
+						callId: "call1",
+					},
+				};
+
+				// @ts-expect-error Deliberately omit input to exercise append's schema check.
+				const result = yield* Effect.either(store.append(event));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					expect(result.left).toBeInstanceOf(EventStoreError);
+					if (result.left instanceof EventStoreError) {
+						expect(result.left.operation).toBe("validateCanonicalEvent");
+						expect(String(result.left.cause)).toContain('["input"]');
+					}
+				}
+				expect(yield* store.readBySession(event.sessionId)).toEqual([]);
+				expect(yield* store.getNextStreamVersion(event.sessionId)).toBe(0);
+			}),
+		));
+
 	it("append preserves extra payload and metadata fields while validating required shape", () =>
 		runTest(
 			Effect.gen(function* () {
@@ -841,6 +873,88 @@ describe("EventStoreEffect", () => {
 				expect(results.length).toBe(2);
 				expect(results[0]?.sequence).toBe(1);
 				expect(results[1]?.sequence).toBe(2);
+			}),
+		));
+
+	it("appendBatch skips retried Claude child seeds and still appends picked events", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				yield* seedSession("parent");
+				yield* seedSession("child");
+				const seed = canonicalEvent(
+					"session.created",
+					"child",
+					{
+						sessionId: "child",
+						title: "Explore Agent",
+						provider: "claude",
+						parentId: "parent",
+					},
+					{ provider: "claude" },
+				);
+				const inserted = yield* store.appendBatch([seed, seed]);
+				expect(inserted).toHaveLength(1);
+				yield* runner.projectBatch(inserted);
+				const picks = sessionPickEvents("child", {
+					harness: "claude",
+					model: { providerId: "claude", modelId: "sonnet" },
+					effort: "high",
+					contextWindow: "1m",
+				});
+				const retried = yield* store.appendBatch([seed, ...picks]);
+				expect(retried.map((event) => event.type)).toEqual([
+					"session.model_changed",
+					"session.variant_changed",
+					"session.context_window_changed",
+				]);
+				expect(retried.map((event) => event.streamVersion)).toEqual([1, 2, 3]);
+				yield* runner.projectBatch(retried);
+				expect(yield* store.readBySession("child")).toHaveLength(4);
+				expect(yield* store.appendBatch([seed])).toEqual([]);
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT model_id, variant, context_window FROM sessions WHERE id = 'child'`,
+				).toEqual([
+					{ model_id: "sonnet", variant: "high", context_window: "1m" },
+				]);
+			}),
+		));
+
+	it("retried OpenCode seeds return the stored row for projection recovery", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				yield* seedSession("opencode-parent");
+				yield* seedSession("opencode-child");
+				const seed = canonicalEvent(
+					"session.created",
+					"opencode-child",
+					{
+						sessionId: "opencode-child",
+						title: "Recovered child",
+						provider: "opencode",
+						parentId: "opencode-parent",
+					},
+					{
+						eventId: "evt_opencode_session_created_opencode-child" as EventId,
+						provider: "opencode",
+					},
+				);
+				const stored = yield* store.append(seed);
+				const retried = yield* store.appendBatch([seed]);
+				expect(retried).toEqual([stored]);
+				expect(yield* store.append(seed)).toEqual(stored);
+				yield* runner.projectBatch(retried);
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* sql`SELECT title, parent_id FROM sessions WHERE id = 'opencode-child'`,
+				).toEqual([{ title: "Recovered child", parent_id: "opencode-parent" }]);
+				expect(yield* store.readBySession("opencode-child")).toEqual([stored]);
 			}),
 		));
 
