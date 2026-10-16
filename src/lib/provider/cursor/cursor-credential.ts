@@ -22,7 +22,15 @@ export async function resolveCursorCredential(
 	if (!apiKey) return undefined;
 	const credential = {
 		source: environmentKey ? "environment" : "sdk-login",
-		fingerprint: createHash("sha256").update(apiKey).digest("hex"),
+		fingerprint: createHash("sha256")
+			.update(
+				JSON.stringify([
+					environmentKey ? "environment" : "sdk-login",
+					stored?.backendUrl ?? "",
+					apiKey,
+				]),
+			)
+			.digest("hex"),
 		...(!environmentKey && stored ? { backendUrl: stored.backendUrl } : {}),
 	} as CursorCredential;
 	// Accidental JSON/log serialization must not expose the credential.

@@ -34,7 +34,7 @@ export const DEFAULT_OC_PORT = 4096;
 export const DEFAULT_TRACE_MAX_BYTES = 10_485_760;
 export const DEFAULT_TRACE_MAX_FILES = 10;
 export const DEFAULT_TRACE_BATCH_WINDOW_MS = 200;
-export const DEFAULT_TRACE_SQL_MIN_MS = 5;
+export const DEFAULT_TRACE_MIN_MS = 5;
 
 export interface TraceEnvConfig {
 	readonly enabled: boolean;
@@ -42,7 +42,8 @@ export interface TraceEnvConfig {
 	readonly maxBytes: number;
 	readonly maxFiles: number;
 	readonly batchWindowMs: number;
-	readonly sqlMinMs?: number | undefined;
+	readonly minMs?: number | undefined;
+	readonly sessionId?: string | undefined;
 }
 
 const parseBoundedInteger = (
@@ -91,12 +92,13 @@ export const resolveTraceConfig = (
 			10,
 			60_000,
 		),
-		sqlMinMs: parseBoundedInteger(
-			env["CONDUIT_TRACE_SQL_MIN_MS"],
-			DEFAULT_TRACE_SQL_MIN_MS,
+		minMs: parseBoundedInteger(
+			env["CONDUIT_TRACE_MIN_MS"] ?? env["CONDUIT_TRACE_SQL_MIN_MS"],
+			DEFAULT_TRACE_MIN_MS,
 			0,
 			2_147_483_647,
 		),
+		sessionId: env["CONDUIT_TRACE_SESSION"] || undefined,
 	};
 };
 

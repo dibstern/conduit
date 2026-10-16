@@ -125,6 +125,12 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "auth_required"
+	| "agent_busy"
+	| "rate_limited"
+	| "model_unavailable"
+	| "network_error"
+	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
 	| "interrupted"
@@ -135,6 +141,8 @@ export interface TurnError {
 	readonly code: TurnErrorCode;
 	readonly message: string;
 	readonly retryable?: boolean;
+	/** The provider has already applied its automatic retry policy. */
+	readonly retryHandled?: boolean;
 }
 
 export interface ProviderStateUpdate {

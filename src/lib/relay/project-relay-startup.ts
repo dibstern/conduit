@@ -44,8 +44,8 @@ import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
+import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
 import { wireMonitoringEffect } from "./monitoring-wiring.js";
@@ -111,9 +111,12 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
 		const orchestration = yield* getOrchestrationLayer;
-		const instance = yield* orchestration.registry.getInstanceEffect("claude");
-		if (instance instanceof ClaudeProviderInstance)
-			yield* instance.recoverEffect();
+		for (const providerId of orchestration.registry.listProviders()) {
+			const instance =
+				yield* orchestration.registry.getInstanceEffect(providerId);
+			if (instance instanceof RunnerProviderInstance)
+				yield* instance.recoverEffect();
+		}
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();

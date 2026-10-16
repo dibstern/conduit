@@ -32,6 +32,8 @@ describe("Schema Migration", () => {
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
+					[61, "sessions_lineage"],
+					[62, "legacy_forks"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -274,6 +276,7 @@ describe("Schema Migration", () => {
 					table: "session_sidebar",
 					unique: false,
 				},
+				{ name: "idx_sessions_forked_from", table: "sessions", unique: false },
 				{ name: "idx_sessions_parent", table: "sessions", unique: false },
 				{
 					name: "idx_sessions_project_status",

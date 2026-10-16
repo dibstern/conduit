@@ -86,23 +86,25 @@ export const harnessHandlers: StepHandler[] = [
 					},
 				],
 			});
-			const getModels = rpc.getResponseHandler("GetModels");
-			rpc.setHandler("GetModels", (payload, request) =>
-				payload["instanceId"] === "cursor-work"
-					? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
-					: getModels?.(payload, request),
-			);
-			const getAgents = rpc.getResponseHandler("GetAgents");
-			rpc.setHandler("GetAgents", (payload, request) =>
-				payload["instanceId"] === "cursor-work"
-					? {
-							projectSlug: "myapp",
-							instanceId: "cursor-work",
-							providerScope: { id: "cursor", name: "Cursor" },
-							agents: [],
-						}
-					: getAgents?.(payload, request),
-			);
+			// Other instances keep the default catalogue: an undefined reply fails
+			// the contract decode and the mock's Defect fails every pending RPC.
+			const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			const getAgents = rpc.stubs.GetAgents ?? rpc.catalogStubs().GetAgents;
+			rpc.setStubs({
+				GetModels: (payload) =>
+					payload.instanceId === "cursor-work"
+						? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
+						: getModels(payload),
+				GetAgents: (payload) =>
+					payload.instanceId === "cursor-work"
+						? {
+								projectSlug: "myapp",
+								instanceId: "cursor-work",
+								providerScope: { id: "cursor", name: "Cursor" },
+								agents: [],
+							}
+						: getAgents(payload),
+			});
 		},
 	},
 	{

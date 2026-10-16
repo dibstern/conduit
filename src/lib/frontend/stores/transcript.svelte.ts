@@ -519,7 +519,8 @@ const ledgers = new WeakMap<SessionMessages, ResumeLedger>();
 // Projected UUIDs contain "/"; local generateUuid() values never do.
 const uuidFor = (messageId: string, partId: string): string =>
 	`${messageId}/${partId}`;
-const toolRank = { pending: 0, running: 1, completed: 2, error: 2 };
+// History reports a running tool as completed, so a later failure must outrank it.
+const toolRank = { pending: 0, running: 1, completed: 2, error: 3 };
 const reuseIfEqual = (
 	next: ChatMessage,
 	previous: ChatMessage | undefined,
