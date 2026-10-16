@@ -63,7 +63,7 @@ const decodeEventStoreRow = (
 			new EventStoreError({ operation: "decodeStoredEventRow", cause }),
 	);
 
-const validateCanonicalEvent = (
+export const validateCanonicalEvent = (
 	event: CanonicalEvent,
 ): Effect.Effect<void, EventStoreError> =>
 	Schema.decodeUnknown(CanonicalEventSchema)(event).pipe(

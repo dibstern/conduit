@@ -621,6 +621,37 @@ describe("EventStoreEffect", () => {
 			}),
 		));
 
+	it("append rejects a missing required tool input through the full schema", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const event = {
+					...makeSessionCreated("s-missing-tool-input"),
+					type: "tool.started" as const,
+					data: {
+						messageId: "m1",
+						partId: "p1",
+						toolName: "Bash",
+						callId: "call1",
+					},
+				};
+
+				// @ts-expect-error Deliberately omit input to exercise append's schema check.
+				const result = yield* Effect.either(store.append(event));
+
+				expect(result._tag).toBe("Left");
+				if (result._tag === "Left") {
+					expect(result.left).toBeInstanceOf(EventStoreError);
+					if (result.left instanceof EventStoreError) {
+						expect(result.left.operation).toBe("validateCanonicalEvent");
+						expect(String(result.left.cause)).toContain('["input"]');
+					}
+				}
+				expect(yield* store.readBySession(event.sessionId)).toEqual([]);
+				expect(yield* store.getNextStreamVersion(event.sessionId)).toBe(0);
+			}),
+		));
+
 	it("append preserves extra payload and metadata fields while validating required shape", () =>
 		runTest(
 			Effect.gen(function* () {
