@@ -9,6 +9,7 @@ import {
 	Ref,
 	Schema,
 } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -263,7 +264,8 @@ export const makeProviderRuntimeIngestionLive = (
 								if (options.usage)
 									for (const event of events) {
 										if (
-											event.providerId !== "claude" ||
+											getProviderDriver(event.providerId)?.usageHarness ===
+												undefined ||
 											(event.type !== "turn.completed" &&
 												event.type !== "turn.error" &&
 												event.type !== "turn.interrupted")

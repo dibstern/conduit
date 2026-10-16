@@ -1,3 +1,4 @@
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 // src/lib/provider/orchestration-engine.ts
 // Central command processor for the provider instance layer (CQRS core loop).
@@ -561,7 +562,7 @@ export class OrchestrationEngine {
 				try: () =>
 					JSON.stringify({
 						...payload,
-						...(driver === "claude" && pendingRewind
+						...(getProviderDriver(driver)?.supportsNativeResume && pendingRewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
 						dispatchId,

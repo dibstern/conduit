@@ -20,6 +20,7 @@ import {
 	Ref,
 	Stream,
 } from "effect";
+import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import type {
 	GlobalProjectSetting,
 	GlobalSettingTag,
@@ -193,7 +194,10 @@ const readHarnessDefaults = Effect.gen(function* () {
 			effort: candidate.effort,
 			contextWindow: candidate.contextWindow,
 		};
-		const catalog = harness === "claude" ? claudeCatalog : openCodeCatalog;
+		const catalog =
+			PROVIDER_DRIVERS[harness].catalogSource === "discovery"
+				? claudeCatalog
+				: openCodeCatalog;
 		if (
 			catalog === undefined &&
 			harnessForModelProvider(pick.providerId) === harness

@@ -11,7 +11,10 @@ import {
 	Stream,
 } from "effect";
 import { accountsStateFromConfig } from "../account-directory.js";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
+import {
+	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
+} from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
@@ -359,7 +362,7 @@ export function createProjectRelayLayers({
 									? [
 											{
 												id: account.id,
-												harness: "claude" as const,
+												harness: PROVIDER_DRIVERS[account.driver].usageHarness,
 												folder: account.folder,
 												...(account.env ? { env: account.env } : {}),
 											},

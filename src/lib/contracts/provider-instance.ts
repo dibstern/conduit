@@ -33,25 +33,102 @@ export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
 
-/** Session contracts pinned by provider captures, independent of model discovery. */
-export const PROVIDER_SESSION_CAPABILITIES = {
+export interface ProviderDriverTraits {
+	/** Provider captures pin multi-folder, worktree and task-stop session contracts. */
+	readonly sessionCapabilities: ProviderSessionCapabilities;
+	/** OpenCode's SDK/API and SSE lifecycle pin server-owned operations. */
+	readonly runsOpenCodeServer: boolean;
+	/** account-usage.integration.ts pins the account sampler's usage harness. */
+	readonly usageHarness: "claude" | undefined;
+	/** permissions-processing-timeout-effect.test.ts pins service-owned approvals/questions. */
+	readonly interactionSink: "permission-asking" | "auto-approving";
+	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
+	readonly supportsNativeResume: boolean;
+	/** provider-turn-service.test.ts pins cumulative tokens from stored history metadata. */
+	readonly needsPriorHistoryMetadata: boolean;
+	/** AccountSchema pins config-directory logins versus server connection accounts. */
+	readonly accountKind: "config-directory" | "server";
+	/** orchestration-wiring.test.ts pins discovery versus server provider catalogs. */
+	readonly catalogSource: "discovery" | "server";
+	/** turn-settings.test.ts pins context-window suffixes versus provider-qualified ids. */
+	readonly modelIdFormat: "context-window-suffix" | "provider-qualified";
+	/** monitoring-wiring.test.ts pins provider-owned turn-end events. */
+	readonly streamsSessionLifecycle: boolean;
+	/** session-manager-service.test.ts pins local session creation before a native turn. */
+	readonly usesLocalSessions: boolean;
+	/** provider-turn-service.test.ts pins durable interrupts versus server aborts. */
+	readonly interruptViaEngine: boolean;
+	/** provider-turn-service.test.ts pins goal state passed to the native runner. */
+	readonly supportsGoalState: boolean;
+	/** enter-worktree-turn / exit-worktree-keep-turn pin tool-directed workspace moves. */
+	readonly worktreeMoves: "tool-directive" | "server-declaration";
+	/** OpenCode message snapshots pin native parentID lineage. */
+	readonly emitsMessageParentIds: boolean;
+}
+
+/** Driver contracts pinned by provider captures, independent of implementations. */
+export const PROVIDER_DRIVERS = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
 	claude: {
-		supportsMultiFolder: true,
-		supportsWorktree: true,
-		supportsNewWorktree: true,
-		supportsTaskStop: true,
+		sessionCapabilities: {
+			supportsMultiFolder: true,
+			supportsWorktree: true,
+			supportsNewWorktree: true,
+			supportsTaskStop: true,
+		},
+		runsOpenCodeServer: false,
+		usageHarness: "claude",
+		interactionSink: "permission-asking",
+		supportsNativeResume: true,
+		needsPriorHistoryMetadata: true,
+		accountKind: "config-directory",
+		catalogSource: "discovery",
+		modelIdFormat: "context-window-suffix",
+		streamsSessionLifecycle: true,
+		usesLocalSessions: true,
+		interruptViaEngine: true,
+		supportsGoalState: true,
+		worktreeMoves: "tool-directive",
+		emitsMessageParentIds: false,
 	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
 	// Native moves reject destinations belonging to another OpenCode project.
 	opencode: {
-		supportsMultiFolder: true,
-		supportsWorktree: false,
-		supportsNewWorktree: true,
-		supportsTaskStop: false,
+		sessionCapabilities: {
+			supportsMultiFolder: true,
+			supportsWorktree: false,
+			supportsNewWorktree: true,
+			supportsTaskStop: false,
+		},
+		runsOpenCodeServer: true,
+		usageHarness: undefined,
+		interactionSink: "auto-approving",
+		supportsNativeResume: false,
+		needsPriorHistoryMetadata: false,
+		accountKind: "server",
+		catalogSource: "server",
+		modelIdFormat: "provider-qualified",
+		streamsSessionLifecycle: false,
+		usesLocalSessions: false,
+		interruptViaEngine: false,
+		supportsGoalState: false,
+		worktreeMoves: "server-declaration",
+		emitsMessageParentIds: true,
 	},
+} as const satisfies Record<KnownProviderDriverKind, ProviderDriverTraits>;
+
+export function getProviderDriver(
+	driver: ProviderDriverKind | undefined,
+): ProviderDriverTraits | undefined {
+	return isKnownDriverKind(driver) ? PROVIDER_DRIVERS[driver] : undefined;
+}
+
+/** Capability-only compatibility view for callers outside the driver migration. */
+export const PROVIDER_SESSION_CAPABILITIES = {
+	claude: PROVIDER_DRIVERS.claude.sessionCapabilities,
+	opencode: PROVIDER_DRIVERS.opencode.sessionCapabilities,
 } as const satisfies Record<
 	KnownProviderDriverKind,
 	ProviderSessionCapabilities
@@ -76,7 +153,7 @@ export function migrateLegacyDefaultOpencodeInstanceId<
 	const legacy = instances.find(
 		(instance) =>
 			instance.id === legacyId &&
-			(instance.driver ?? "opencode") === "opencode",
+			getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer,
 	);
 	if (
 		legacy === undefined ||
