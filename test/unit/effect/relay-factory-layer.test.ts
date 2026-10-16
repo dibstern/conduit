@@ -34,6 +34,10 @@ import {
 	projectInfos,
 } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import {
 	makeSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
@@ -99,6 +103,7 @@ describe("RelayFactoryTag", () => {
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 		ConfigPersistenceNoopLive,
 		DaemonEventBusLive,
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		makeProjectRegistryLive(),
 		makeInstanceManagerStateLive(undefined, [], {
 			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),

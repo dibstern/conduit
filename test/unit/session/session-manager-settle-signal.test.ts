@@ -1,4 +1,8 @@
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 // Auto-settle runs from the daemon's sweep fiber, which does not carry the
 // project's SessionEventBus. A settle committed there must still reach the
@@ -18,7 +22,6 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -111,7 +114,7 @@ describe("SessionManagerService settle signal", () => {
 					loggerLayer,
 					configLayer,
 					Layer.succeed(WebSocketHandlerTag, makeMockWebSocketHandler()),
-					Layer.succeed(BackgroundLivenessTag, () => undefined),
+					Layer.effect(SessionActivityTag, makeSessionActivity),
 					RelayStatusSnapshotLive,
 					makeOverridesStateLive(),
 					Layer.succeed(

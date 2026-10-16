@@ -101,6 +101,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
+import { SessionActivityDaemonLive } from "../Services/session-activity.js";
 import {
 	makeSessionDirectoryLive,
 	SessionDirectory,
@@ -676,7 +677,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 						),
 					),
 				),
-		DaemonEventBusLive,
+		SessionActivityDaemonLive.pipe(Layer.provideMerge(DaemonEventBusLive)),
 		BrowserRpcConnectionsLive,
 		PinoLoggerLive,
 		makeDaemonTracingLive(resolveTraceConfig(configDir)),

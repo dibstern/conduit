@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
@@ -76,10 +77,12 @@ export const conversationHandlers = {
 				);
 				if (
 					session?.side_thread === 1 &&
-					(yield* (yield* AccountDirectory).resolve({
-						_tag: "Id",
-						id: session.provider,
-					})).driver === "opencode"
+					PROVIDER_DRIVERS[
+						(yield* (yield* AccountDirectory).resolve({
+							_tag: "Id",
+							id: session.provider,
+						})).driver
+					].runsOpenCodeServer
 				) {
 					const opencode = registry.getInstance("opencode");
 					if (opencode?.setPermissionModeEffect) {

@@ -18,14 +18,15 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import {
 	makeSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
-import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -100,7 +101,7 @@ describe("routed RPC server", () => {
 							undefined,
 							bus,
 						),
-						Layer.succeed(BackgroundLivenessTag, () => undefined),
+						Layer.effect(SessionActivityTag, makeSessionActivity),
 						Layer.succeed(ConfigTag, makeMockConfig({ slug })),
 						Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 					),
@@ -165,7 +166,7 @@ describe("routed RPC server", () => {
 								undefined,
 								bus,
 							),
-							Layer.succeed(BackgroundLivenessTag, () => undefined),
+							Layer.effect(SessionActivityTag, makeSessionActivity),
 						),
 					);
 					contexts.set(slug, context as Context.Context<unknown>);

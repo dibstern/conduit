@@ -869,7 +869,7 @@ Expected stdout includes:
 Conduit (foreground)
   OpenCode: http://localhost:4096
   Relay:    https://0.0.0.0:2633
-  Project:  /Users/dstern/src/personal/conduit
+  Project:  ~/src/personal/conduit
   Ready.
 ```
 
