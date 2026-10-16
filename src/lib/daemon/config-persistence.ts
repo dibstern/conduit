@@ -1,7 +1,6 @@
-// Handles persistent daemon config at ~/.conduit/daemon.json,
-// recent projects at ~/.conduit/recent.json, and crash info at
-// ~/.conduit/crash.json. Uses atomic writes (tmp + rename) for
-// daemon.json to prevent corruption.
+// Handles daemon.json, recent.json, and crash.json in the config dir
+// (DEFAULT_CONFIG_DIR). Uses atomic writes (tmp + rename) for daemon.json
+// to prevent corruption.
 
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, rename, writeFile } from "node:fs/promises";
@@ -386,7 +385,7 @@ function safeUnlink(filePath: string): void {
 	}
 }
 
-/** Return the default config directory (~/.conduit) */
+/** Return the config dir (DEFAULT_CONFIG_DIR). */
 export function getConfigDir(): string {
 	return DEFAULT_CONFIG_DIR;
 }
