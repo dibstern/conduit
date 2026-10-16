@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { refreshServerStatus, serverStatus } from "../../stores/server-status.svelte.js";
-	import { setKeepAwakeCommandRpc, setKeepAwakeRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
@@ -30,15 +31,15 @@
 		saving = true;
 		error = null;
 		try {
-			await setKeepAwakeRpc({ enabled: !status.keepAwake });
+			await rpc("SetKeepAwake", { enabled: !status.keepAwake });
 			await refreshServerStatus();
 			if (serverStatus.error) {
 				error = "Could not change keep-awake setting. Try again.";
 				return;
 			}
 			if (!serverStatus.status?.keepAwake && openForm === "keep-awake-command") onToggleForm("keep-awake-command");
-		} catch {
-			error = "Could not change keep-awake setting. Try again.";
+		} catch (cause) {
+			error = failureLine(cause, "Could not change keep-awake setting. Try again.");
 		} finally {
 			saving = false;
 		}
@@ -54,15 +55,15 @@
 		}
 		saving = true;
 		try {
-			await setKeepAwakeCommandRpc({ command: executable, args: splitArgv(args) });
+			await rpc("SetKeepAwakeCommand", { command: executable, args: splitArgv(args) });
 			await refreshServerStatus();
 			if (serverStatus.error) {
 				if (openForm === "keep-awake-command") error = "Could not save command. Try again.";
 				return;
 			}
 			if (openForm === "keep-awake-command") onToggleForm("keep-awake-command");
-		} catch {
-			if (openForm === "keep-awake-command") error = "Could not save command. Try again.";
+		} catch (cause) {
+			if (openForm === "keep-awake-command") error = failureLine(cause, "Could not save command. Try again.");
 		} finally {
 			saving = false;
 		}

@@ -71,7 +71,7 @@
 	});
 	const configDirectoryDrivers = $derived(DRIVER_OPTIONS.filter((driver) => {
 		const traits = getDriverTraits(driver);
-		return traits?.accountKind === "config-directory" && (!traits.unavailableReason || (instancesByDriver[driver]?.length ?? 0) > 0);
+		return traits?.accountKind === "config-directory";
 	}));
 	const serverInstances = $derived(instances.filter((inst) => getProviderPresentation(inst.driver ?? "opencode") && getInstanceTraits(inst.id)?.runsOpenCodeServer));
 	const unknownInstances = $derived(instances.filter((inst) => !getProviderPresentation(inst.driver ?? "opencode")));

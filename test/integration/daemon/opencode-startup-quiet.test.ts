@@ -442,7 +442,7 @@ describe("Managed OpenCode starts on first use", () => {
 					delivery: "queue",
 				}),
 			);
-			expect(accepted).toEqual({ ok: true, sessionId });
+			expect(accepted).toEqual({ ok: true, sessionId, handedOff: true });
 			const busy = await browser.waitFor(
 				(message) =>
 					message["type"] === "session_row" &&

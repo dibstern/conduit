@@ -34,6 +34,7 @@ import {
 } from "../../../contracts/account.js";
 import {
 	getProviderDriver,
+	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../contracts/provider-instance.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
@@ -56,6 +57,7 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { discoverCursorEffect } from "../../../provider/cursor/cursor-runner-driver.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
 import {
@@ -559,15 +561,16 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const traits = getProviderDriver(driver);
 	return {
 		...instance,
-		...(traits?.unavailableReason === undefined
-			? {}
-			: { available: false, unavailableReason: traits.unavailableReason }),
 		capabilities: traits?.sessionCapabilities ?? {
 			supportsMultiFolder: false,
 			supportsWorktree: false,
 		},
 	};
 }
+
+const instanceDiscovery: Partial<
+	Record<KnownProviderDriverKind, typeof discoverCursorEffect>
+> = { cursor: discoverCursorEffect };
 
 /** Publish account metadata together with its OpenCode runtime status. */
 export const getInstances = Effect.gen(function* () {
@@ -624,6 +627,36 @@ export const getInstances = Effect.gen(function* () {
 				(runtimeOrder.get(right.id) ?? runtimeOrder.size),
 		);
 }).pipe(Effect.withSpan("instance.getAll"));
+
+/** External inventory probes must not delay other providers' runtime operations. */
+export const discoverInstances = Effect.gen(function* () {
+	const instances = yield* getInstances;
+	const availability = new Map<
+		string,
+		{ available: boolean; unavailableReason?: string }
+	>();
+	for (const [driver, discover] of Object.entries(instanceDiscovery)) {
+		if (!discover || !instances.some((instance) => instance.driver === driver))
+			continue;
+		const result = yield* Effect.either(discover());
+		availability.set(
+			driver,
+			result._tag === "Right"
+				? { available: true }
+				: {
+						available: false,
+						unavailableReason:
+							result.left.cause instanceof Error
+								? result.left.cause.message
+								: "Provider discovery failed",
+					},
+		);
+	}
+	return instances.map((instance) => ({
+		...instance,
+		...availability.get(instance.driver ?? "opencode"),
+	}));
+}).pipe(Effect.withSpan("instance.discover"));
 
 /** Get a live account's read model; status reads never apply routing fallbacks. */
 export const getInstance = (instanceId: string) =>

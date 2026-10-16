@@ -216,6 +216,25 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(jsdom@28.1.0(supports-color@7.2.0))(vite@6.4.1(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0))
+    optionalDependencies:
+      '@cursor/sdk':
+        specifier: 1.0.37
+        version: 1.0.37
+      '@cursor/sdk-darwin-arm64':
+        specifier: 1.0.37
+        version: 1.0.37
+      '@cursor/sdk-darwin-x64':
+        specifier: 1.0.37
+        version: 1.0.37
+      '@cursor/sdk-linux-arm64':
+        specifier: 1.0.37
+        version: 1.0.37
+      '@cursor/sdk-linux-x64':
+        specifier: 1.0.37
+        version: 1.0.37
+      '@cursor/sdk-win32-x64':
+        specifier: 1.0.37
+        version: 1.0.37
 
 packages:
 
@@ -306,10 +325,6 @@ packages:
     resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
     engines: {node: '>=6.9.0'}
 
-  '@babel/helper-validator-identifier@7.28.5':
-    resolution: {integrity: sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q==}
-    engines: {node: '>=6.9.0'}
-
   '@babel/helper-validator-identifier@7.29.7':
     resolution: {integrity: sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg==}
     engines: {node: '>=6.9.0'}
@@ -398,6 +413,9 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
+  '@bufbuild/protobuf@1.10.0':
+    resolution: {integrity: sha512-QDdVFLoN93Zjg36NoQPZfsVH9tZew7wKDKyV5qRdj8ntT4wQCOradQjRaTdwMhWUYsgKsvCINKKm87FdEk96Ag==}
+
   '@castlenine/svelte-qrcode@2.3.0':
     resolution: {integrity: sha512-1YO6tL63gjbCuBkhd/PyMMFbjFD6gO6TJjvq5Ucfs5+0s13oDfiUyxO15kjR11enG7O/A2R0WBuc4bfdMqjTJQ==}
     peerDependencies:
@@ -417,6 +435,17 @@ packages:
 
   '@chevrotain/utils@11.1.1':
     resolution: {integrity: sha512-71eTYMzYXYSFPrbg/ZwftSaSDld7UYlS8OQa3lNnn9jzNtpFbaReRRyghzqS7rI3CDaorqpPJJcXGHK+FE1TVQ==}
+
+  '@connectrpc/connect-web@1.7.0':
+    resolution: {integrity: sha512-qyP0YOnUPRWwCc/VfsoydMJvkb7EyUPr2q9sHgBuJzbADjiqck1gKH5V5ZPzPhTLBvmz5UvG+wiZ5sMRQHU1MQ==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^1.10.0
+      '@connectrpc/connect': 1.7.0
+
+  '@connectrpc/connect@1.7.0':
+    resolution: {integrity: sha512-iNKdJRi69YP3mq6AePRT8F/HrxWCewrhxnLMNm0vpqXAR8biwzRtO6Hjx80C6UvtKJ5sFmffQT7I4Baecz389w==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^1.10.0
 
   '@csstools/color-helpers@6.0.2':
     resolution: {integrity: sha512-LMGQLS9EuADloEFkcTBR3BwV/CGHV7zyDxVRtVDTwdI2Ca4it0CCVTT9wCkxSgokjE5Ho41hEPgb8OEUwoXr6Q==}
@@ -448,6 +477,40 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
+
+  '@cursor/sdk-darwin-arm64@1.0.37':
+    resolution: {integrity: sha512-VlIlLlt23bPmagSaetELwDho3E0GGwSMPEtaUqzweG14XVypHEWCBTaMOVxU2MV/vmgp0EpyA/T4WXIfSGpp9g==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
+  '@cursor/sdk-darwin-x64@1.0.37':
+    resolution: {integrity: sha512-yK8UoU2HJ1Q8gQyoluffwpcRjaFoK61MkpwyAHaBhWPp0vHKFVeUawdp1R81HrHvwwUqYvXIPaKXa+XG3CDVcQ==}
+    cpu: [x64]
+    os: [darwin]
+    hasBin: true
+
+  '@cursor/sdk-linux-arm64@1.0.37':
+    resolution: {integrity: sha512-rQzazu/FYibgMFtPp/oUyTYgKiTj43Moo0/dRs7wDn6qC8dUHzjuuyU/v/zUatllgOxgD+1hUjh3+VHdxeslKg==}
+    cpu: [arm64]
+    os: [linux]
+    hasBin: true
+
+  '@cursor/sdk-linux-x64@1.0.37':
+    resolution: {integrity: sha512-aSPPiD1Dh0ijSEJao+6lXIvuHC/asFSKQUSqKigcy2cXJLVDpHDAvbCfK3FS/OFlEFXBw5H6mxpe8G/GUj/0Ow==}
+    cpu: [x64]
+    os: [linux]
+    hasBin: true
+
+  '@cursor/sdk-win32-x64@1.0.37':
+    resolution: {integrity: sha512-94EKqfisz9mBWMdF1b9S6qu1NcTd0UYO4DdlhL4sPAU1QoIGLP7K7Fp5VI1MEKniYynu5JMZ7oBZFNq1p50oCg==}
+    cpu: [x64]
+    os: [win32]
+    hasBin: true
+
+  '@cursor/sdk@1.0.37':
+    resolution: {integrity: sha512-MWKMeqtkCOHOOi8uZqI7CYeUtOwwdWke1B4GEllERIGMsoKuxbk++tP/KzOXXxtOD9EUD1z3AQL6os6m3M1gIw==}
+    engines: {node: '>=22.13'}
 
   '@effect/cluster@0.58.2':
     resolution: {integrity: sha512-oxQ3zUhXq0mJA7Y4TliALMP39Bx0LtAIxcqOW1Bdjh6uk+nG7kul/Puw80SwlcYGv3ul50SG+gvSRUTXB8d3JQ==}
@@ -1473,6 +1536,12 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@statsig/client-core@3.31.0':
+    resolution: {integrity: sha512-SuxQD6TmVszPG7FoMKwTk/uyBuVFk7XnxI3T/E0uyb7PL7GNjONtfsoh+NqBBVUJVse0CUeSFfgJPoZy1ZOslQ==}
+
+  '@statsig/js-client@3.31.0':
+    resolution: {integrity: sha512-LFa5E0LjT6sTfZv3sNGoyRLSZ1078+agdgOA+Vm1ecjG+KbSOfBLTW7hMwimrJ29slRwbYDzbtKaPJo/R37N2g==}
 
   '@storybook/addon-a11y@10.2.13':
     resolution: {integrity: sha512-zuR1n1xgWoieEnr6E5xdTR40BI61IBQahgmsRpTvqRffL3mxAs5aFoORDmA5pZWI2LE9URdMkY85h218ijuLiw==}
@@ -3826,6 +3895,9 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
@@ -3907,13 +3979,11 @@ snapshots:
 
   '@babel/code-frame@7.29.0':
     dependencies:
-      '@babel/helper-validator-identifier': 7.28.5
+      '@babel/helper-validator-identifier': 7.29.7
       js-tokens: 4.0.0
       picocolors: 1.1.1
 
   '@babel/helper-string-parser@7.29.7': {}
-
-  '@babel/helper-validator-identifier@7.28.5': {}
 
   '@babel/helper-validator-identifier@7.29.7': {}
 
@@ -3973,6 +4043,9 @@ snapshots:
     dependencies:
       css-tree: 3.1.0
 
+  '@bufbuild/protobuf@1.10.0':
+    optional: true
+
   '@castlenine/svelte-qrcode@2.3.0(svelte@5.53.3)':
     dependencies:
       svelte: 5.53.3
@@ -3993,6 +4066,17 @@ snapshots:
   '@chevrotain/types@11.1.1': {}
 
   '@chevrotain/utils@11.1.1': {}
+
+  '@connectrpc/connect-web@1.7.0(@bufbuild/protobuf@1.10.0)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.0))':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.0
+      '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.0)
+    optional: true
+
+  '@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.0)':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.0
+    optional: true
 
   '@csstools/color-helpers@6.0.2': {}
 
@@ -4015,6 +4099,36 @@ snapshots:
   '@csstools/css-syntax-patches-for-csstree@1.0.28': {}
 
   '@csstools/css-tokenizer@4.0.0': {}
+
+  '@cursor/sdk-darwin-arm64@1.0.37':
+    optional: true
+
+  '@cursor/sdk-darwin-x64@1.0.37':
+    optional: true
+
+  '@cursor/sdk-linux-arm64@1.0.37':
+    optional: true
+
+  '@cursor/sdk-linux-x64@1.0.37':
+    optional: true
+
+  '@cursor/sdk-win32-x64@1.0.37':
+    optional: true
+
+  '@cursor/sdk@1.0.37':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.0
+      '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.0)
+      '@connectrpc/connect-web': 1.7.0(@bufbuild/protobuf@1.10.0)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.0))
+      '@statsig/js-client': 3.31.0
+      zod: 3.25.76
+    optionalDependencies:
+      '@cursor/sdk-darwin-arm64': 1.0.37
+      '@cursor/sdk-darwin-x64': 1.0.37
+      '@cursor/sdk-linux-arm64': 1.0.37
+      '@cursor/sdk-linux-x64': 1.0.37
+      '@cursor/sdk-win32-x64': 1.0.37
+    optional: true
 
   '@effect/cluster@0.58.2(@effect/platform@0.96.1(effect@3.21.2))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/sql@0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/workflow@0.18.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(effect@3.21.2))(effect@3.21.2)':
     dependencies:
@@ -4730,6 +4844,14 @@ snapshots:
   '@stablelib/base64@1.0.1': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@statsig/client-core@3.31.0':
+    optional: true
+
+  '@statsig/js-client@3.31.0':
+    dependencies:
+      '@statsig/client-core': 3.31.0
+    optional: true
 
   '@storybook/addon-a11y@10.2.13(storybook@10.2.13(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))':
     dependencies:
@@ -7212,5 +7334,8 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.3.6):
     dependencies:
       zod: 4.3.6
+
+  zod@3.25.76:
+    optional: true
 
   zod@4.3.6: {}

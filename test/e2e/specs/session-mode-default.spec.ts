@@ -79,6 +79,7 @@ async function openDraft(
 	};
 	const rpc = await mockWsRpc(page, {
 		stubs: {
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			FindFolders: ({ query }) => ({
 				home: "/workspace",
 				entries: query
@@ -147,7 +148,6 @@ async function openDraft(
 		},
 		handlers: {
 			GetInstances: () => instances,
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 		},
 	});
 	await mockRelayWebSocket(page, {

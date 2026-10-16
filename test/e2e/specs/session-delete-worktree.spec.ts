@@ -120,8 +120,6 @@ async function setup(
 				providers: [],
 			}),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
-		},
-		handlers: {
 			GetWorktreeCleanupSetting: () => {
 				if (options.failCleanupSetting)
 					throw new WsRpcError({ message: "Could not read cleanup setting" });

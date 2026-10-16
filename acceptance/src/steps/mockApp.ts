@@ -661,7 +661,11 @@ export const mockAppHandlers: StepHandler[] = [
 						sessionId,
 						...mockDetailPage(page, sessionId, before),
 					}),
-					"input.submit": async ({ sessionId }) => ({ ok: true, sessionId }),
+					"input.submit": async ({ sessionId }) => ({
+						ok: true,
+						sessionId,
+						handedOff: true,
+					}),
 					SyncInputDraft: async () => ({ ok: true }),
 					SetDefaultPermissionMode: async (payload) => ({
 						projectSlug: "myapp",
@@ -863,32 +867,18 @@ export const mockAppHandlers: StepHandler[] = [
 							instances: next,
 						});
 					},
-				},
-				handlers: {
-					GetClaudeSettings: async () => ({
+					GetClaudeSettings: () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
 					}),
-					SetClaudeSettings: async (payload) => {
-						const overrides =
-							typeof payload["overrides"] === "object" &&
-							payload["overrides"] !== null
-								? (payload["overrides"] as ClaudeSettingsOverrides)
-								: {};
+					SetClaudeSettings: ({ overrides }) => {
 						mockClaudeSettings.set(page, overrides);
 						rpcControl.setProjectSetting({ _tag: "claudeSettings", overrides });
 						return { projectSlug: "myapp", overrides };
 					},
-					ReloadProviderSession: async (payload) => ({
+					ResolveClaudeSettings: (payload) => ({
 						projectSlug: "myapp",
-						sessionId: payload["sessionId"],
-					}),
-					ResolveClaudeSettings: async (payload) => ({
-						projectSlug: "myapp",
-						instanceId:
-							typeof payload["instanceId"] === "string"
-								? payload["instanceId"]
-								: "claude",
+						instanceId: payload.instanceId,
 						resolved: {
 							alwaysThinkingEnabled: {},
 							attribution: {
@@ -913,6 +903,12 @@ export const mockAppHandlers: StepHandler[] = [
 								path: "/profiles/work/settings.json",
 							},
 						},
+					}),
+				},
+				handlers: {
+					ReloadProviderSession: async (payload) => ({
+						projectSlug: "myapp",
+						sessionId: payload["sessionId"],
 					}),
 				},
 			});

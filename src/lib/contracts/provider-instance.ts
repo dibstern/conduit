@@ -41,8 +41,6 @@ export interface ProviderDriverTraits {
 	readonly runsOpenCodeServer: boolean;
 	/** account-usage.integration.ts pins the account sampler's usage harness. */
 	readonly usageHarness: "claude" | "cursor" | undefined;
-	/** Drivers without an installed runtime remain visible without accepting turns. */
-	readonly unavailableReason?: string;
 	/** permissions-processing-timeout-effect.test.ts pins service-owned approvals/questions. */
 	readonly interactionSink: "permission-asking" | "auto-approving";
 	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
@@ -69,6 +67,10 @@ export interface ProviderDriverTraits {
 	readonly worktreeMoves: "tool-directive" | "server-declaration";
 	/** OpenCode message snapshots pin native parentID lineage. */
 	readonly emitsMessageParentIds: boolean;
+	/** steer-during-tool-folds.jsonl pins native delivery; otherwise inputs stay queued. */
+	readonly steering: "native" | "queue";
+	/** provider-instance.test.ts pins false until restart-safe prompt replies are captured. */
+	readonly promptsSurviveRestart: boolean;
 }
 
 /** Driver contracts pinned by provider captures, independent of implementations. */
@@ -101,6 +103,10 @@ export const PROVIDER_DRIVERS = {
 		supportsGoalState: true,
 		worktreeMoves: "tool-directive",
 		emitsMessageParentIds: false,
+		// steer-during-tool-folds.jsonl and claude-steer-recovery.test.ts pin native delivery and requeue.
+		steering: "native",
+		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
+		promptsSurviveRestart: false,
 	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
@@ -131,6 +137,12 @@ export const PROVIDER_DRIVERS = {
 		supportsGoalState: false,
 		worktreeMoves: "server-declaration",
 		emitsMessageParentIds: true,
+		// Classic prompt_async injects a busy prompt at the next model step
+		// (test/fixtures/opencode-wire-traces/classic-prompt-during-tool.json).
+		// Flip to native only after approval, image and subagent captures on OpenCode 1.19.1.
+		steering: "queue",
+		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
+		promptsSurviveRestart: false,
 	},
 	cursor: {
 		composerModeControl: "permission-mode", // A runner must ask before acting.
@@ -145,7 +157,6 @@ export const PROVIDER_DRIVERS = {
 		},
 		runsOpenCodeServer: false, // Cursor must never start or borrow OpenCode.
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
-		unavailableReason: "Cursor runtime not installed", // Discovery explains the missing runtime.
 		interactionSink: "permission-asking", // Never fall through to auto-approval.
 		supportsNativeResume: false, // Resume needs a captured Cursor thread contract.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
@@ -159,6 +170,11 @@ export const PROVIDER_DRIVERS = {
 		supportsGoalState: false, // Goals need a captured Cursor runtime contract.
 		worktreeMoves: "tool-directive", // Never declare workspace moves through OpenCode.
 		emitsMessageParentIds: false, // No native message-lineage contract is established.
+		// test/fixtures/cursor-sdk-traces/steer.jsonl (xqsg.22) pins text on a live local run only.
+		// Cloud runs, handles reacquired after restart and images get revert_to_followup and requeue (xqsg.20).
+		steering: "native",
+		// provider-instance.test.ts pins false; no restart-safe approval/question reply capture yet.
+		promptsSurviveRestart: false,
 	},
 } as const satisfies { readonly [driver: string]: ProviderDriverTraits };
 
@@ -178,7 +194,6 @@ export const BrowserDriverTraitsSchema = Schema.Struct({
 	sessionCapabilities: ProviderSessionCapabilitiesSchema,
 	runsOpenCodeServer: Schema.Boolean,
 	usageHarness: Schema.optional(Schema.Literal("claude", "cursor")),
-	unavailableReason: Schema.optional(Schema.String),
 	composerModeControl: Schema.Literal("agent", "permission-mode"),
 	accountKind: Schema.Literal("config-directory", "server"),
 	catalogSource: Schema.Literal("discovery", "server"),

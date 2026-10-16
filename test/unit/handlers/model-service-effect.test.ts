@@ -286,7 +286,9 @@ describe("model handlers with Effect-native model service", () => {
 				else yield* Deferred.succeed(pending, capabilities);
 				yield* Effect.forEach(fibers, Fiber.join);
 				const firstUpdates = Array.from(yield* Queue.takeAll(updates));
-				expect(firstUpdates.filter(({ item }) => item._tag === "providerModels")).toHaveLength(fails ? 0 : 1);
+				const firstModels = firstUpdates.filter(({ item }) => item._tag === "providerModels");
+				expect(firstModels).toHaveLength(1);
+				if (fails) expect(firstModels[0]?.item).toMatchObject({ providers: [] });
 				pending = yield* Deferred.make<ProviderCapabilities, Error>();
 				yield* getModelsResponse().pipe(Effect.supervised(supervisor));
 				expect(discoveries).toBe(2);

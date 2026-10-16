@@ -4,6 +4,10 @@
 overrides:
   '@anthropic-ai/sdk': 0.135.0
 
+# The SDK searches ancestors of the runner entry, not its own import location.
+publicHoistPattern:
+  - '@cursor/sdk-*'
+
 peerDependencyRules:
   allowedVersions:
     # @effect/vitest 0.29 works with Vitest 4 despite declaring a Vitest 3 peer.

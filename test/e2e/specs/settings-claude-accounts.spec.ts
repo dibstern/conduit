@@ -85,7 +85,11 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
-			"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+			"input.submit": ({ sessionId }) => ({
+				ok: true,
+				sessionId,
+				handedOff: true,
+			}),
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects: [] }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
@@ -348,6 +352,14 @@ test("deleting Claude defaults follows usage order and adding an account restore
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			ResolveSession: () => ({ projectSlug: "myapp" }),
+			GetUsageLimitsSetting: () => ({
+				usageLimits: {
+					autoResume: false,
+					autoSwitch: false,
+					warnAt: 80,
+					order: usageOrder,
+				},
+			}),
 			CreateSession: (payload) => {
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");
@@ -420,16 +432,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				if (typeof name !== "string") throw new Error("Missing account name");
 				return refreshAccounts({ _tag: "Add", name, driver: "claude" });
 			},
-		},
-		handlers: {
-			GetUsageLimitsSetting: () => ({
-				usageLimits: {
-					autoResume: false,
-					autoSwitch: false,
-					warnAt: 80,
-					order: usageOrder,
-				},
-			}),
 		},
 	});
 	const publishCatalogue = (id: string) => {

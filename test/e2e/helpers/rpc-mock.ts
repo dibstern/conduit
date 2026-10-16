@@ -728,24 +728,9 @@ function checkedReply(
 }
 
 function defaultHandler(tag: string): RpcHandler | undefined {
-	return (
-		(tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
-		(tag === "GetDefaultGroupingMode"
-			? () => ({ mode: "repository" })
-			: undefined) ??
-		(tag === "GetWorktreeCleanupSetting"
-			? () => ({ worktreeCleanup: DEFAULT_WORKTREE_CLEANUP })
-			: tag === "SetWorktreeCleanupSetting"
-				? ({ worktreeCleanup }) => ({ worktreeCleanup })
-				: undefined) ??
-		(tag === "GetUsageLimitsSetting"
-			? () => ({
-					usageLimits: { autoResume: false, autoSwitch: false, order: [] },
-				})
-			: tag === "InspectSessionWorktrees"
-				? () => ({ worktrees: [], removeWorktrees: false })
-				: undefined)
-	);
+	return tag === "InspectSessionWorktrees"
+		? () => ({ worktrees: [], removeWorktrees: false })
+		: undefined;
 }
 
 function initialStream(
@@ -916,7 +901,11 @@ export async function mockWsRpc(
 	controls.set(page, control);
 	control.initialHandlers = options.handlers ?? {};
 	control.stubs = {
-		"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
 		GetProjects: (payload) =>
 			control.projectsHandler()?.(payload) ?? new Promise<never>(() => {}),
 		AttachProject: (payload) => ({
@@ -930,6 +919,20 @@ export async function mockWsRpc(
 		ViewSession: () => ({ ok: true }),
 		...control.catalogStubs(),
 		ResolveSessionMode: () => ({ mode: "local", source: "global" }),
+		GetStatus: () => MOCK_SERVER_STATUS,
+		GetDefaultGroupingMode: () => ({ mode: "repository" }),
+		GetWorktreeCleanupSetting: () => ({
+			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
+		}),
+		SetWorktreeCleanupSetting: ({ worktreeCleanup }) => ({ worktreeCleanup }),
+		GetUsageLimitsSetting: () => ({
+			usageLimits: {
+				autoResume: false,
+				autoSwitch: false,
+				warnAt: 80,
+				order: [],
+			},
+		}),
 		...options.stubs,
 	};
 	control.projectSlug = pendingProjectSlugs.get(page) ?? control.projectSlug;
