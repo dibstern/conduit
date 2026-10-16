@@ -1,7 +1,26 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { SqlClient } from "@effect/sql";
 import Database from "better-sqlite3";
+import { Effect, ManagedRuntime } from "effect";
+import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
+import { ProjectionRunnerEffectTag } from "../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ProviderStateEffectTag } from "../../src/lib/persistence/effect/provider-state-effect.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+} from "../../src/lib/persistence/events.js";
+import { makeClaudeRunnerReceiptStore } from "../../src/lib/provider/claude/claude-runner-receipts.js";
+import { DurableCommandCommitRepository } from "../../src/lib/provider/orchestration-command-commit.js";
 
 type Row = Record<string, unknown>;
 type NumberDomain = "event" | "outbox" | "version";
@@ -116,6 +135,8 @@ function artifactHash(
 		)
 			return "time";
 		if (typeof value === "string") {
+			if (key === "source_fingerprint") return "source-fingerprint";
+			if (/(?:_at|At)$/.test(key)) return "time";
 			if (value.startsWith("/") || value.startsWith("path:")) return "path";
 			if (key === "fingerprint_hash" || key === "fingerprintHash")
 				return "command-fingerprint";
@@ -575,4 +596,477 @@ export function storeTableCounts(filename: string): Record<string, number> {
 export function writeImportArtifact(filename: string, evidence: unknown): void {
 	mkdirSync(dirname(filename), { recursive: true });
 	writeFileSync(filename, `${JSON.stringify(sorted(evidence), null, 2)}\n`);
+}
+
+/** Full logical state, including markers and allocation clocks, for rollback proof. */
+export function daemonStoreManifest(filename: string): {
+	tables: Readonly<Record<string, readonly Row[]>>;
+	hash: string;
+} {
+	const db = new Database(filename, { readonly: true, fileMustExist: true });
+	try {
+		const names = db
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_stat%' ORDER BY name",
+			)
+			.all() as { name: string }[];
+		const tables = Object.fromEntries(
+			names.map(({ name }) => [
+				name,
+				db
+					.prepare(
+						`SELECT * FROM "${name.replaceAll('"', '""')}" ORDER BY rowid`,
+					)
+					.all() as Row[],
+			]),
+		);
+		const logical = Object.fromEntries(
+			Object.entries(tables).map(([table, rows]) => [
+				table,
+				rows.map((row) =>
+					Object.fromEntries(
+						Object.entries(row).map(([key, value]) => [
+							key,
+							table === "store_identity" && key === "value"
+								? "store-identity"
+								: key === "source_fingerprint"
+									? "source-fingerprint"
+									: parsed(value),
+						]),
+					),
+				),
+			]),
+		);
+		return { tables, hash: artifactHash(logical) };
+	} finally {
+		db.close();
+	}
+}
+
+export type ProjectStoreFixture = { projectId: string; sourcePath: string };
+
+export async function createProjectStoreFixture(
+	root: string,
+	projectId: string,
+	options: {
+		sessionId?: string;
+		large?: boolean;
+		synthetic?: boolean;
+		unprojected?: boolean;
+		eventSequenceStart?: number;
+		outboxSequence?: number;
+	} = {},
+): Promise<ProjectStoreFixture> {
+	const folder = join(root, projectId);
+	mkdirSync(folder, { recursive: true });
+	const sourcePath = join(folder, "events.db");
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(sourcePath, projectId),
+	);
+	const id = options.sessionId ?? `ses_${projectId}`;
+	const user = `${id}_user`;
+	const assistant = `${id}_assistant`;
+	const time = { provider: "claude", createdAt: 1000 };
+	const events: CanonicalEvent[] = [
+		canonicalEvent(
+			"session.created",
+			id,
+			{ sessionId: id, title: "Imported history", provider: "claude" },
+			time,
+		),
+		canonicalEvent(
+			"message.created",
+			id,
+			{ sessionId: id, messageId: user, role: "user" },
+			time,
+		),
+		canonicalEvent(
+			"message.created",
+			id,
+			{ sessionId: id, messageId: assistant, role: "assistant" },
+			time,
+		),
+		canonicalEvent(
+			"text.delta",
+			id,
+			{
+				messageId: assistant,
+				partId: `${id}_text`,
+				text: options.large
+					? "long transcript ".repeat(40_000)
+					: "Complete transcript",
+			},
+			time,
+		),
+		canonicalEvent(
+			"thinking.start",
+			id,
+			{ messageId: assistant, partId: `${id}_thinking` },
+			time,
+		),
+		canonicalEvent(
+			"thinking.delta",
+			id,
+			{ messageId: assistant, partId: `${id}_thinking`, text: "Thinking" },
+			time,
+		),
+		canonicalEvent(
+			"thinking.end",
+			id,
+			{ messageId: assistant, partId: `${id}_thinking` },
+			time,
+		),
+		canonicalEvent(
+			"tool.started",
+			id,
+			{
+				messageId: assistant,
+				partId: `${id}_tool`,
+				callId: `${id}_call`,
+				toolName: "Bash",
+				input: { tool: "Bash", command: "pwd" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"tool.completed",
+			id,
+			{
+				messageId: assistant,
+				partId: `${id}_tool`,
+				result: "fixture",
+				duration: 10,
+				metadata: {},
+			},
+			time,
+		),
+		canonicalEvent(
+			"turn.completed",
+			id,
+			{
+				messageId: assistant,
+				userMessageId: user,
+				cost: 0.03,
+				duration: 20,
+				tokens: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1 },
+			},
+			time,
+		),
+		canonicalEvent(
+			"session.created",
+			`${id}_fork`,
+			{ sessionId: `${id}_fork`, title: "Fork", provider: "claude" },
+			time,
+		),
+		canonicalEvent(
+			"session.forked",
+			`${id}_fork`,
+			{ sessionId: `${id}_fork`, parentId: id, forkPointEvent: assistant },
+			time,
+		),
+		canonicalEvent(
+			"session.created",
+			`${id}_child`,
+			{
+				sessionId: `${id}_child`,
+				title: "Subagent",
+				provider: "claude",
+				parentId: id,
+			},
+			time,
+		),
+		canonicalEvent(
+			"tool.started",
+			id,
+			{
+				messageId: assistant,
+				partId: `${id}_task`,
+				callId: `${id}_task_call`,
+				toolName: "Task",
+				input: { tool: "Task", description: "Child", prompt: "Continue" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"tool.running",
+			id,
+			{
+				messageId: assistant,
+				partId: `${id}_task`,
+				metadata: {
+					childSessionId: `${id}_child`,
+					providerTaskId: `${id}_provider_task`,
+				},
+			},
+			time,
+		),
+		canonicalEvent(
+			"permission.asked",
+			id,
+			{
+				id: `${id}_pending`,
+				sessionId: id,
+				toolName: "Bash",
+				input: { command: "pwd" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"permission.asked",
+			id,
+			{
+				id: `${id}_resolved`,
+				sessionId: id,
+				toolName: "Bash",
+				input: { command: "ls" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"permission.resolved",
+			id,
+			{ id: `${id}_resolved`, decision: "once" },
+			time,
+		),
+		canonicalEvent(
+			"session.provider_changed",
+			id,
+			{ sessionId: id, oldProvider: "claude", newProvider: "opencode" },
+			time,
+		),
+		canonicalEvent(
+			"input.admitted",
+			id,
+			{
+				sessionId: id,
+				inputId: `${id}_queue_1`,
+				delivery: "queue",
+				request: { text: "queued first" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"input.admitted",
+			id,
+			{
+				sessionId: id,
+				inputId: `${id}_queue_2`,
+				delivery: "queue",
+				request: { text: "queued second" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"input.admitted",
+			id,
+			{
+				sessionId: id,
+				inputId: `${id}_removed`,
+				delivery: "steer",
+				request: { text: "cancelled" },
+			},
+			time,
+		),
+		canonicalEvent(
+			"input.cancelled",
+			id,
+			{ sessionId: id, inputId: `${id}_removed` },
+			time,
+		),
+		canonicalEvent(
+			"message.created",
+			id,
+			{ sessionId: id, messageId: `${id}_gone`, role: "assistant" },
+			time,
+		),
+		canonicalEvent(
+			"text.delta",
+			id,
+			{ messageId: `${id}_gone`, partId: `${id}_gone_part`, text: "remove me" },
+			time,
+		),
+		canonicalEvent(
+			"message.part.removed",
+			id,
+			{ messageId: `${id}_gone`, partId: `${id}_gone_part` },
+			time,
+		),
+		canonicalEvent("message.removed", id, { messageId: `${id}_gone` }, time),
+		canonicalEvent(
+			"message.created",
+			id,
+			{ sessionId: id, messageId: `${id}_user_second`, role: "user" },
+			time,
+		),
+		canonicalEvent(
+			"text.delta",
+			id,
+			{
+				messageId: `${id}_user_second`,
+				partId: `${id}_user_second_text`,
+				text: "Second turn",
+			},
+			time,
+		),
+		canonicalEvent(
+			"session.created",
+			`${id}_deleted`,
+			{ sessionId: `${id}_deleted`, title: "Deleted", provider: "claude" },
+			time,
+		),
+		canonicalEvent(
+			"session.deleted",
+			`${id}_deleted`,
+			{ sessionId: `${id}_deleted` },
+			time,
+		),
+		canonicalEvent(
+			"session.workspace_changed",
+			id,
+			{
+				sessionId: id,
+				worktrees: {},
+				path: "/fixture/worktree",
+				cause: "user",
+				origin: "existing",
+			},
+			time,
+		),
+		canonicalEvent(
+			"session.workspace_hint_changed",
+			id,
+			{ path: "/fixture/other" },
+			time,
+		),
+	];
+	if (options.synthetic)
+		events.push(
+			canonicalEvent(
+				"session.compaction",
+				id,
+				{ sessionId: id, state: "completed", detail: "Compacted" },
+				time,
+			),
+			canonicalEvent(
+				"turn.error",
+				id,
+				{
+					messageId: `${id}_failed`,
+					userMessageId: user,
+					error: "Fixture error",
+					code: "FIXTURE",
+				},
+				time,
+			),
+		);
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const runner = yield* ProjectionRunnerEffectTag;
+				yield* runner.recover();
+				const sql = yield* SqlClient.SqlClient;
+				if (options.eventSequenceStart !== undefined)
+					yield* sql`INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ${options.eventSequenceStart})`;
+				const write = yield* makeCommitAndSignal;
+				// Equal timestamps exercise turns' and pending_inputs' rowid tie-breaks.
+				for (const event of events) yield* write([event]);
+				const [move] = yield* sql<{
+					sequence: number;
+				}>`SELECT sequence FROM events WHERE session_id = ${id} AND type = 'session.workspace_changed'`;
+				if (!move)
+					return yield* Effect.die(new Error("Missing fixture workspace move"));
+				yield* write([
+					canonicalEvent(
+						"input.sent",
+						id,
+						{
+							sessionId: id,
+							inputId: `${id}_queue_1`,
+							workspaceMoveSequence: move.sequence,
+						},
+						time,
+					),
+				]);
+				const state = yield* ProviderStateEffectTag;
+				yield* state.saveUpdates(id, [
+					{
+						key: "nativeThread:opencode",
+						value: JSON.stringify({
+							resumeSessionId: `${id}_native`,
+							firstSequence: 0,
+							deliveredThrough: 0,
+						}),
+					},
+					{ key: "turnCount", value: "2" },
+				]);
+				const thread = (yield* state.getState(id))["nativeThread:opencode"];
+				const repository = new DurableCommandCommitRepository(sql, projectId);
+				const requestSequence = options.outboxSequence ?? 7;
+				yield* repository.commit({
+					events: [],
+					readModelRows: [],
+					receipt: {
+						commandId: `${id}_command`,
+						commandType: "send_turn",
+						sessionId: id,
+						status: "side_effect_requested",
+						fingerprintHash: "fixture-hash",
+						fingerprintVersion: 2,
+						acceptedSequence: requestSequence,
+						sideEffectSequence: requestSequence,
+						createdAt: 1000,
+						updatedAt: 1000,
+					},
+					outboxRequests: [
+						{
+							requestSequence,
+							commandId: `${id}_command`,
+							sessionId: id,
+							providerId: "opencode",
+							effectType: "send_turn",
+							payloadJson: JSON.stringify({
+								providerState: { "nativeThread:opencode": thread },
+								prompt: "fixture",
+							}),
+						},
+					],
+				});
+				const receipts = yield* makeClaudeRunnerReceiptStore(sql);
+				yield* receipts.attach(`${projectId}_runner`, "fixture-attachment");
+				yield* receipts.acknowledge(
+					`${projectId}_runner`,
+					1,
+					{},
+					"fixture-attachment",
+				);
+				yield* sql`INSERT INTO claude_runner_permission_replies VALUES (${id}, ${`${id}_resolved`}, '{"decision":"allow"}')`;
+				// These primary/legacy records have no current canonical event producer.
+				yield* sql`INSERT INTO tool_content VALUES (${`${id}_blob`}, ${id}, 'saved tool result', 1000)`;
+				yield* sql`INSERT INTO sent_alerts VALUES (${id}, 'turn-finished', ${assistant}, 1000, 'delivered', 'fixture-claim')`;
+				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
+				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
+				yield* sql`INSERT INTO session_goal_checks VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;
+				yield* sql`INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, 'opencode', 'opencode', 'idle', 1000, 1000)`;
+				yield* sql`INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${user}, ${`${id}_command`}, 'completed', 1000, 1000)`;
+				yield* sql`INSERT INTO provider_command_interactions (project_key, session_id, interaction_id, kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${`${id}_legacy_permission`}, 'permission', 'resolved', 1000, 1000)`;
+				yield* sql`INSERT INTO provider_command_tombstones (project_key, scope_kind, scope_id, session_id, event_sequence, reason_code, tombstoned_at) VALUES (${projectId}, 'turn', ${`${id}_old_turn`}, ${id}, ${move.sequence}, 'deleted', 1000)`;
+				yield* sql`UPDATE provider_command_meta SET last_applied_sequence = ${move.sequence} WHERE project_key = ${projectId}`;
+				yield* sql`INSERT INTO projection_failures (projector_name, event_sequence, event_type, session_id, error, failed_at) VALUES ('fixture-diagnostic', ${move.sequence}, 'session.workspace_changed', ${id}, 'historical diagnostic', 1000)`;
+				if (options.unprojected) {
+					const store = yield* EventStoreEffectTag;
+					yield* store.append(
+						canonicalEvent(
+							"session.renamed",
+							id,
+							{ sessionId: id, title: "Unprojected tail" },
+							time,
+						),
+					);
+				}
+			}),
+		);
+	} finally {
+		await runtime.dispose();
+	}
+	return { projectId, sourcePath: realpathSync(sourcePath) };
 }

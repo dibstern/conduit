@@ -11,11 +11,13 @@ import {
 	statSync,
 	unlinkSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { Data, Effect } from "effect";
+import { makePersistenceEffectLayer } from "../effect/live.js";
 import { effectMigrationEntries } from "../effect/migrations.js";
+import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
 import { daemonStorePath } from "../project-storage.js";
 
@@ -30,6 +32,8 @@ export class DaemonStoreImportError extends Data.TaggedError(
 	readonly projectId: string;
 	readonly kind:
 		| "collision"
+		| "corrupt"
+		| "newer-schema"
 		| "unsupported-source"
 		| "unprojected-tail"
 		| "source-changed"
@@ -42,11 +46,14 @@ export class DaemonStoreImportError extends Data.TaggedError(
 export interface ProjectStoreImportResult {
 	readonly projectId: string;
 	readonly outcome:
+		| "absent"
 		| "seeded"
 		| "imported"
 		| "skipped"
 		| "source-changed"
 		| "failed";
+	readonly importedEvents?: number;
+	readonly sharedSessions?: readonly string[];
 	readonly error?: DaemonStoreImportError;
 }
 
@@ -274,8 +281,6 @@ function verifySource(
 	translating: boolean,
 ): string[] {
 	const names = verifyStore(db, schema, project);
-	if (number(db, `SELECT 1 AS value FROM ${schema}.events LIMIT 1`) === 0)
-		reject(project, "unsupported-source", "Source has no events");
 	if (
 		number(
 			db,
@@ -412,81 +417,133 @@ function counts(db: DatabaseSync): string {
 
 function seed(
 	configDir: string,
-	sourceProject: ProjectStoreSource,
+	project: ProjectStoreSource,
+	temporary: string,
+	before: string,
 ): ProjectStoreImportResult {
-	const project = {
-		...sourceProject,
-		sourcePath: realpathSync(sourceProject.sourcePath),
-	};
 	const filename = verifySourcePath(configDir, project);
 	if (existsSync(filename))
 		reject(project, "collision", "Daemon store already exists");
-	mkdirSync(dirname(filename), { recursive: true });
-	const temporary = `${filename}.${randomUUID()}.tmp`;
+	const copy = new DatabaseSync(temporary);
+	let importedEvents: number;
 	try {
-		const before = fingerprint(project.sourcePath, project);
-		let sourceCounts: string;
-		const source = new DatabaseSync(sourceUri(project.sourcePath), {
-			readOnly: true,
-		});
-		try {
-			verifySource(source, "main", project, false);
-			sourceCounts = counts(source);
-			source.prepare("VACUUM INTO ?").run(temporary);
-		} finally {
-			source.close();
-		}
-		const copy = new DatabaseSync(temporary);
-		try {
-			if (
-				JSON.stringify(copy.prepare("PRAGMA quick_check").all()) !==
-					'[{"quick_check":"ok"}]' ||
-				counts(copy) !== sourceCounts
-			)
-				reject(
-					project,
-					"unsupported-source",
-					"Seed failed quick_check or per-table count comparison",
-				);
-			if (fingerprint(project.sourcePath, project) !== before)
-				reject(project, "source-changed", "Source changed during seed");
-			// Only the copy changes journal mode; source main and WAL stay untouched.
-			copy.exec("PRAGMA journal_mode = DELETE");
-			transaction(copy, () => {
-				for (const table of copiedTables) {
-					for (const { name } of columns(copy, "main", table)) {
-						if (name === "project_id" || name === "project_key")
-							copy
-								.prepare(
-									`UPDATE ${quote(table)} SET ${quote(name)} = ? WHERE ${quote(name)} IS NULL`,
-								)
-								.run(project.projectId);
-					}
+		verifySource(copy, "main", project, false);
+		importedEvents = number(copy, "SELECT COUNT(*) AS value FROM events");
+		copy.exec("PRAGMA journal_mode = DELETE");
+		transaction(copy, () => {
+			// Preserve .4's NULL stamp for every copied ownership column.
+			for (const table of copiedTables) {
+				for (const { name } of columns(copy, "main", table)) {
+					if (name === "project_id" || name === "project_key")
+						copy
+							.prepare(
+								`UPDATE ${quote(table)} SET ${quote(name)} = ? WHERE ${quote(name)} IS NULL`,
+							)
+							.run(project.projectId);
 				}
-				writeMarker(copy, project, "seeded", before, {
-					event: 0,
-					outbox: 0,
-					version: 0,
-					rowid: {},
-				});
+			}
+			writeMarker(copy, project, "seeded", before, {
+				event: 0,
+				outbox: 0,
+				version: 0,
+				rowid: {},
 			});
-		} finally {
-			copy.close();
-		}
-		const fd = openSync(temporary, "r+");
-		try {
-			fsyncSync(fd);
-		} finally {
-			closeSync(fd);
-		}
-		if (existsSync(filename))
-			reject(project, "collision", "Daemon store appeared during seed");
-		renameSync(temporary, filename);
-		return { projectId: project.projectId, outcome: "seeded" };
+		});
 	} finally {
-		for (const suffix of ["", "-wal", "-shm", "-journal"])
-			if (existsSync(`${temporary}${suffix}`))
-				unlinkSync(`${temporary}${suffix}`);
+		copy.close();
+	}
+	const fd = openSync(temporary, "r+");
+	try {
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	if (existsSync(filename))
+		reject(project, "collision", "Daemon store appeared during seed");
+	renameSync(temporary, filename);
+	return {
+		projectId: project.projectId,
+		outcome: "seeded",
+		importedEvents,
+		sharedSessions: [],
+	};
+}
+
+// Session identities can outlive sessions in events, tombstones and command state.
+function sessionIds(db: DatabaseSync, schema: string): string {
+	return tables(db, schema)
+		.filter(
+			(table) =>
+				copiedTables.some((name) => name === table) ||
+				Object.hasOwn(runnerTables, table),
+		)
+		.flatMap((table) =>
+			columns(db, schema, table)
+				.filter(
+					({ name }) =>
+						name === "session_id" || (table === "sessions" && name === "id"),
+				)
+				.map(
+					({ name }) =>
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
+				),
+		)
+		.join(" UNION ");
+}
+
+function excludeSharedSessions(
+	copyPath: string,
+	destination: string,
+): readonly string[] {
+	const db = new DatabaseSync(copyPath);
+	try {
+		db.exec("PRAGMA foreign_keys = OFF");
+		db.prepare("ATTACH DATABASE ? AS daemon").run(sourceUri(destination));
+		const shared = rows<{ id: string }>(
+			db,
+			`SELECT s.id FROM (${sessionIds(db, "main")}) s JOIN (${sessionIds(db, "daemon")}) d ON s.id = d.id ORDER BY s.id`,
+		).map(({ id }) => id);
+		if (shared.length === 0) return shared;
+		db.exec("CREATE TEMP TABLE shared_sessions (id TEXT PRIMARY KEY)");
+		const insert = db.prepare("INSERT INTO shared_sessions VALUES (?)");
+		for (const id of shared) insert.run(id);
+		// Capture references before deleting their owners. Parent/fork links are
+		// deliberately absent: a non-shared child must resolve to the first owner.
+		db.exec(`
+			CREATE TEMP TABLE shared_events AS SELECT sequence AS id FROM events WHERE session_id IN shared_sessions;
+			CREATE TEMP TABLE shared_turns AS SELECT id FROM turns WHERE session_id IN shared_sessions;
+			CREATE TEMP TABLE shared_messages AS SELECT id FROM messages WHERE session_id IN shared_sessions OR turn_id IN shared_turns;
+			CREATE TEMP TABLE shared_parts AS SELECT id FROM message_parts WHERE message_id IN shared_messages;
+			CREATE TEMP TABLE shared_calls AS SELECT call_id AS id FROM message_parts WHERE message_id IN shared_messages;
+			CREATE TEMP TABLE shared_commands AS
+				SELECT command_id AS id FROM command_receipts WHERE session_id IN shared_sessions
+				UNION SELECT command_id FROM provider_command_outbox WHERE session_id IN shared_sessions
+				UNION SELECT command_id FROM provider_command_turns WHERE session_id IN shared_sessions;
+		`);
+		const references: Readonly<Record<string, string>> = {
+			session_id: "shared_sessions",
+			message_id: "shared_messages",
+			turn_id: "shared_turns",
+			command_id: "shared_commands",
+			causation_command_id: "shared_commands",
+			event_sequence: "shared_events",
+			part_id: "shared_parts",
+			tool_id: "shared_calls",
+		};
+		for (const table of tables(db, "main")) {
+			const conditions = columns(db, "main", table).flatMap(({ name }) => {
+				const ids =
+					table === "sessions" && name === "id"
+						? "shared_sessions"
+						: references[name];
+				return ids ? [`${quote(name)} IN (SELECT id FROM ${ids})`] : [];
+			});
+			if (conditions.length > 0)
+				db.exec(`DELETE FROM ${quote(table)} WHERE ${conditions.join(" OR ")}`);
+		}
+		return shared;
+	} finally {
+		db.close();
 	}
 }
 
@@ -529,27 +586,11 @@ function collisions(
 	}
 	// Session identities also survive in command state with project-qualified
 	// keys and no FK into sessions. Include every persisted session_id column.
-	const sessionIds = (schema: string) =>
-		tables(db, schema)
-			.filter(
-				(table) => all.includes(table) || Object.hasOwn(runnerTables, table),
-			)
-			.flatMap((table) =>
-				columns(db, schema, table)
-					.filter(
-						({ name }) =>
-							name === "session_id" || (table === "sessions" && name === "id"),
-					)
-					.map(
-						({ name }) =>
-							`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
-					),
-			)
-			.join(" UNION ");
+
 	if (
 		rows(
 			db,
-			`SELECT 1 FROM (${sessionIds("source")}) s JOIN (${sessionIds("main")}) d ON s.id = d.id LIMIT 1`,
+			`SELECT 1 FROM (${sessionIds(db, "source")}) s JOIN (${sessionIds(db, "main")}) d ON s.id = d.id LIMIT 1`,
 		).length
 	)
 		reject(
@@ -725,12 +766,10 @@ function copyProject(
 
 function importOne(
 	configDir: string,
-	sourceProject: ProjectStoreSource,
+	project: ProjectStoreSource,
+	copyPath: string,
+	before: string,
 ): ProjectStoreImportResult {
-	const project = {
-		...sourceProject,
-		sourcePath: realpathSync(sourceProject.sourcePath),
-	};
 	const filename = verifySourcePath(configDir, project);
 	if (!existsSync(filename))
 		reject(
@@ -740,13 +779,9 @@ function importOne(
 		);
 	const db = new DatabaseSync(filename);
 	try {
-		const marked = markerStatus(db, project);
-		if (marked) return marked;
-		const before = fingerprint(project.sourcePath, project);
+		const sharedSessions = excludeSharedSessions(copyPath, filename);
 		// Unlike better-sqlite3's default build, node:sqlite enables URI filenames.
-		db.prepare("ATTACH DATABASE ? AS source").run(
-			sourceUri(project.sourcePath),
-		);
+		db.prepare("ATTACH DATABASE ? AS source").run(sourceUri(copyPath));
 		return transaction(db, () => {
 			verifyStore(db, "main", project);
 			const names = verifySource(db, "source", project, true);
@@ -863,39 +898,210 @@ function importOne(
 			if (fingerprint(project.sourcePath, project) !== before)
 				reject(project, "source-changed", "Source changed during import");
 			writeMarker(db, project, "imported", before, offsets);
-			return { projectId: project.projectId, outcome: "imported" };
+			return {
+				projectId: project.projectId,
+				outcome: "imported",
+				importedEvents: number(
+					db,
+					"SELECT COUNT(*) AS value FROM source.events",
+				),
+				sharedSessions,
+			};
 		});
 	} finally {
 		db.close();
 	}
 }
 
-const attempt = (
+function importError(
 	project: ProjectStoreSource,
-	body: () => ProjectStoreImportResult,
-) =>
-	Effect.try({
-		try: body,
-		catch: (cause) =>
-			cause instanceof DaemonStoreImportError
-				? cause
-				: new DaemonStoreImportError({
-						projectId: project.projectId,
-						kind: "io",
-						message: "Project store import failed",
-						cause,
-					}),
+	cause: unknown,
+): DaemonStoreImportError {
+	if (cause instanceof DaemonStoreImportError) return cause;
+	const corrupt = (error: unknown): boolean => {
+		if (typeof error !== "object" || error === null) return false;
+		if (
+			"code" in error &&
+			(error.code === "SQLITE_NOTADB" || error.code === "SQLITE_CORRUPT")
+		)
+			return true;
+		if (
+			"errcode" in error &&
+			typeof error.errcode === "number" &&
+			[11, 26].includes(error.errcode & 255)
+		)
+			return true;
+		return "cause" in error && error.cause !== error && corrupt(error.cause);
+	};
+	return new DaemonStoreImportError({
+		projectId: project.projectId,
+		kind: corrupt(cause) ? "corrupt" : "io",
+		message: "Project store import failed",
+		cause,
 	});
+}
+const attempt = <A>(project: ProjectStoreSource, body: () => A) =>
+	Effect.try({ try: body, catch: (cause) => importError(project, cause) });
+
+function withNormalisedSource(
+	configDir: string,
+	project: ProjectStoreSource,
+	use: (
+		copyPath: string,
+		sourceFingerprint: string,
+	) => ProjectStoreImportResult,
+): Effect.Effect<ProjectStoreImportResult, DaemonStoreImportError> {
+	return Effect.acquireUseRelease(
+		attempt(project, () => {
+			const folder = join(configDir, "daemon-store-import");
+			mkdirSync(folder, { recursive: true });
+			return join(folder, `${randomUUID()}.db`);
+		}),
+		(copyPath) =>
+			Effect.gen(function* () {
+				const before = yield* attempt(project, () => {
+					const journal = `${project.sourcePath}-journal`;
+					if (existsSync(journal) && statSync(journal).size > 0)
+						reject(
+							project,
+							"unsupported-source",
+							"Source has a hot rollback journal",
+						);
+					const before = fingerprint(project.sourcePath, project);
+					const source = new DatabaseSync(sourceUri(project.sourcePath), {
+						readOnly: true,
+					});
+					let sourceCounts: string;
+					try {
+						sourceCounts = counts(source);
+						source.prepare("VACUUM INTO ?").run(copyPath);
+					} finally {
+						source.close();
+					}
+					const copy = new DatabaseSync(copyPath);
+					try {
+						if (
+							JSON.stringify(copy.prepare("PRAGMA quick_check").all()) !==
+								'[{"quick_check":"ok"}]' ||
+							counts(copy) !== sourceCounts
+						)
+							reject(
+								project,
+								"corrupt",
+								"Copy failed quick_check or per-table count comparison",
+							);
+						if (tables(copy, "main").includes("effect_sql_migrations")) {
+							for (const entry of rows<{ migration_id: number; name: string }>(
+								copy,
+								"SELECT migration_id, name FROM effect_sql_migrations",
+							)) {
+								if (
+									!Object.keys(effectMigrationEntries).some(
+										(key) =>
+											Number.parseInt(key, 10) === entry.migration_id &&
+											key.slice(key.indexOf("_") + 1) === entry.name,
+									)
+								)
+									reject(
+										project,
+										"newer-schema",
+										`Unknown migration ${entry.migration_id}_${entry.name}`,
+									);
+							}
+						}
+					} finally {
+						copy.close();
+					}
+					return before;
+				});
+				yield* Effect.gen(function* () {
+					const runner = yield* ProjectionRunnerEffectTag;
+					if (!(yield* runner.isRecovered())) yield* runner.recover();
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(copyPath, project.projectId),
+					),
+					Effect.scoped,
+					Effect.mapError((cause) => importError(project, cause)),
+				);
+				return yield* attempt(project, () => {
+					if (fingerprint(project.sourcePath, project) !== before)
+						reject(
+							project,
+							"source-changed",
+							"Source changed during normalisation",
+						);
+					const copy = new DatabaseSync(copyPath, { readOnly: true });
+					try {
+						verifySource(copy, "main", project, false);
+					} finally {
+						copy.close();
+					}
+					return use(copyPath, before);
+				});
+			}),
+		(copyPath) =>
+			Effect.sync(() => {
+				for (const suffix of ["", "-wal", "-shm", "-journal"])
+					if (existsSync(`${copyPath}${suffix}`))
+						unlinkSync(`${copyPath}${suffix}`);
+			}),
+	);
+}
 
 /** Offline only: callers must stop all destination and source writers first. */
 export const seedDaemonStore = (
 	configDir: string,
-	project: ProjectStoreSource,
-) => attempt(project, () => seed(configDir, project));
+	source: ProjectStoreSource,
+) =>
+	Effect.gen(function* () {
+		const project = yield* attempt(source, () =>
+			existsSync(source.sourcePath)
+				? { ...source, sourcePath: realpathSync(source.sourcePath) }
+				: undefined,
+		);
+		if (!project)
+			return { projectId: source.projectId, outcome: "absent" as const };
+		yield* attempt(project, () => {
+			if (existsSync(verifySourcePath(configDir, project)))
+				reject(project, "collision", "Daemon store already exists");
+		});
+		return yield* withNormalisedSource(configDir, project, (copy, before) =>
+			seed(configDir, project, copy, before),
+		);
+	});
 export const importProjectStore = (
 	configDir: string,
-	project: ProjectStoreSource,
-) => attempt(project, () => importOne(configDir, project));
+	source: ProjectStoreSource,
+) =>
+	Effect.gen(function* () {
+		const project = yield* attempt(source, () =>
+			existsSync(source.sourcePath)
+				? { ...source, sourcePath: realpathSync(source.sourcePath) }
+				: undefined,
+		);
+		if (!project)
+			return { projectId: source.projectId, outcome: "absent" as const };
+		const marked = yield* attempt(project, () => {
+			const filename = verifySourcePath(configDir, project);
+			if (!existsSync(filename))
+				reject(
+					project,
+					"unsupported-source",
+					"Seed the daemon store before importing",
+				);
+			const db = new DatabaseSync(filename);
+			try {
+				return markerStatus(db, project);
+			} finally {
+				db.close();
+			}
+		});
+		if (marked) return marked;
+		return yield* withNormalisedSource(configDir, project, (copy, before) =>
+			importOne(configDir, project, copy, before),
+		);
+	});
 
 /** Only the supplied registered sources participate; failed projects stay isolated. */
 export const importRegisteredProjectStores = (
@@ -924,7 +1130,8 @@ export const importRegisteredProjectStores = (
 				);
 				if (result._tag === "Right") {
 					results.set(project.projectId, result.right);
-					break;
+					if (result.right.outcome === "seeded") break;
+					continue;
 				}
 				results.set(project.projectId, {
 					projectId: project.projectId,
