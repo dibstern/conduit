@@ -32,6 +32,7 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   Then the Cursor edit row shows old value replaced by new value with 1 added and 1 removed
   And the Cursor write row shows its content and 2 added lines without a removed count
   And the Cursor delete row shows its path and 23 bytes without invented lines
+  And the messages region visually matches cursor-tools-file-changes at <threshold> percent
   When the Cursor relay publishes exploration tools
   Then all Cursor exploration tools have compact rows
   When the Cursor relay publishes MCP, todos and a plan
@@ -43,6 +44,7 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   And the Cursor computer screenshot is attached
   And the Cursor generated image is attached to its generic row
   And the Cursor recording is attached to its generic row
+  And the messages region visually matches cursor-tools-media at <threshold> percent
   When the Cursor relay publishes unknown and truncated tools
   Then the unknown Cursor tool shows its arguments and result
   And the truncated Cursor output is marked as truncated
@@ -55,9 +57,9 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   And the Cursor read row is completed
 
 Examples:
-  | tier  |
-  | wide  |
-  | phone |
+  | tier  | threshold |
+  | wide  | 98        |
+  | phone | 98        |
 
 Scenario Outline: an expanded shell keeps streaming after its full command loads
   Given the conduit app is served with the connected mockup
