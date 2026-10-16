@@ -6,7 +6,7 @@
  * for capturing a second account. Review the fixture before committing.
  */
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Schema } from "effect";
@@ -32,7 +32,7 @@ describe.skipIf(process.env["RUN_EXPENSIVE_E2E"] !== "1")(
 			const configuredDir = process.env["CONDUIT_TEST_REAL_CLAUDE_CONFIG_DIR"];
 			const configDir =
 				configuredDir === undefined
-					? sdkDefaultClaudeConfigDir(join(homedir(), ".claude"))
+					? sdkDefaultClaudeConfigDir(join(userInfo().homedir, ".claude"))
 					: configuredClaudeConfigDir(configuredDir);
 			try {
 				const response = await Effect.runPromise(
@@ -72,7 +72,7 @@ describe.skipIf(process.env["RUN_EXPENSIVE_E2E"] !== "1")(
 						process.env["USAGE_CAPTURE_FIXTURE"] ??
 							"usage-control-response.json",
 					),
-					`${JSON.stringify(response, null, "\t")}\n`,
+					`${JSON.stringify(response, null, "\t").replaceAll(userInfo().homedir, "/home/test")}\n`,
 				);
 			} finally {
 				rmSync(projectDir, { recursive: true, force: true });
