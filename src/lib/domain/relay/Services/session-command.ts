@@ -14,7 +14,7 @@ import { SqlClient } from "@effect/sql";
 import { type Cause, Data, Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import {
-	getProviderDriver,
+	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import {
@@ -45,6 +45,7 @@ import {
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
 import { forkClaudeTranscript } from "../../../provider/claude/claude-session-fork.js";
+import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
 	PickRequired,
@@ -109,14 +110,14 @@ export type SessionCommand = {
 
 /**
  * Upstream sync varies for a real reason: OpenCode keeps its own session
- * registry that has to be told about mutations, and the Claude Agent SDK has no
- * such registry. Two adapters, so the seam is real rather than hypothetical.
+ * registry that has to be told about mutations, Cursor stores local agents,
+ * and the Claude Agent SDK has no such registry.
  *
  * Sync is best-effort by contract — the local write is authoritative, so a
  * failure here is logged, never propagated.
  */
 export interface SessionUpstreamAdapter {
-	readonly provider: "opencode" | "claude";
+	readonly provider: KnownProviderDriverKind;
 	readonly sync: (
 		command: SessionCommand,
 	) => Effect.Effect<void, Cause.UnknownException>;
@@ -185,6 +186,30 @@ export const claudeUpstreamAdapter: SessionUpstreamAdapter = {
 	// The Claude Agent SDK has no server-side session registry to keep in step.
 	sync: () => Effect.void,
 };
+
+export const sessionUpstreamAdapter = (
+	provider: KnownProviderDriverKind,
+	api: OpenCodeAPI,
+): Effect.Effect<SessionUpstreamAdapter> =>
+	Effect.gen(function* () {
+		switch (provider) {
+			case "opencode":
+				return openCodeUpstreamAdapter(api);
+			case "claude":
+				return claudeUpstreamAdapter;
+			case "cursor": {
+				const config = yield* Effect.serviceOption(ConfigTag);
+				return cursorUpstreamAdapter(
+					config._tag === "Some" && config.value.configDir !== undefined
+						? {
+								workspaceRoot: config.value.projectDir,
+								configDir: config.value.configDir,
+							}
+						: undefined,
+				);
+			}
+		}
+	});
 
 /**
  * Apply a session mutation: append, project, sync.
@@ -303,10 +328,7 @@ export const applySessionCommand = (
 					? options.upstreamAdapter
 					: command.type === "session.renamed" ||
 							command.type === "session.deleted"
-						? getProviderDriver(account?.driver ?? "opencode")
-								?.runsOpenCodeServer
-							? openCodeUpstreamAdapter(api)
-							: claudeUpstreamAdapter
+						? yield* sessionUpstreamAdapter(account?.driver ?? "opencode", api)
 						: null;
 
 			if (adapter !== null) {

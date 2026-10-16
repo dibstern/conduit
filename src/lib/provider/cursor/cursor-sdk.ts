@@ -17,6 +17,15 @@ export function createCursorSdkPort(): CursorSdkPort {
 								disposeDelayMs: Number(
 									process.env["CONDUIT_TEST_CURSOR_DISPOSE_DELAY_MS"] ?? 0,
 								),
+								...(process.env["CONDUIT_TEST_CURSOR_SEND_GATE"]
+									? { sendGate: process.env["CONDUIT_TEST_CURSOR_SEND_GATE"] }
+									: {}),
+								...(process.env["CONDUIT_TEST_CURSOR_STREAM_GATE"]
+									? {
+											streamGate:
+												process.env["CONDUIT_TEST_CURSOR_STREAM_GATE"],
+										}
+									: {}),
 							}
 						: {},
 				)

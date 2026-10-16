@@ -60,6 +60,20 @@ export interface CursorSendOptions {
 		}[];
 	};
 	readonly mode: "agent" | "plan";
+	readonly local?: { readonly force: boolean };
+}
+
+export interface CursorPersistedRun {
+	readonly runId: string;
+	readonly status:
+		| "queued"
+		| "running"
+		| "finished"
+		| "error"
+		| "cancelled"
+		| "expired";
+	readonly requestId?: string | null;
+	readonly startedAt?: number | null;
 }
 
 export interface CursorCustomTool {
@@ -99,6 +113,11 @@ export interface CursorSdkPort {
 	storedCredential(): Promise<CursorStoredCredential | undefined>;
 	modelsList(credential: CursorCredential): Promise<readonly CursorModel[]>;
 	openStore(path: string, cwd: string): Promise<CursorStore>;
+	getActiveRun(
+		agentId: string,
+		store: CursorStore,
+	): Promise<CursorPersistedRun | undefined>;
+	deleteAgent(agentId: string, cwd: string, store: CursorStore): Promise<void>;
 	primeSandbox(
 		options: CursorAgentOptions,
 		credential: CursorCredential,

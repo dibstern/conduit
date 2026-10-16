@@ -436,6 +436,7 @@ export class ProviderSideEffectReactor {
 						mark(turnKey, "history-ready");
 						return instance.sendTurnEffect({
 							...payload,
+							commandAttempt,
 							account:
 								payload.account ??
 								(account?.driver === "claude" && prepared
@@ -445,7 +446,6 @@ export class ProviderSideEffectReactor {
 							history: payload.history ?? [],
 							...(getProviderDriver(driver)?.supportsNativeResume
 								? {
-										commandAttempt,
 										prompt: prepared?.prompt ?? payload.prompt,
 										text: payload.prompt,
 										configDir: prepared?.configDir,

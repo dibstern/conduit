@@ -1,9 +1,9 @@
-import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
+import { runnerPidAlive } from "../runner/runner-registry.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import type {
 	SessionFailure,
@@ -15,6 +15,11 @@ import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
+import {
+	cursorSessionStorePath,
+	readCursorSessionIdentity,
+	writeCursorSessionIdentity,
+} from "./cursor-session-recovery.js";
 import { CursorTurnEvents } from "./cursor-turn-events.js";
 import { CursorSdkFailure } from "./sdk-error.js";
 import type {
@@ -35,6 +40,7 @@ export interface CursorRunnerDeps {
 interface CursorSession {
 	readonly cwd: string;
 	agentId?: string | undefined;
+	controllerPid?: number | undefined;
 	open?:
 		| {
 				readonly agent: CursorAgent;
@@ -106,22 +112,41 @@ export class CursorRunnerPayload implements RunnerPayload {
 		sink: EventSink,
 		signal: AbortSignal,
 	): Effect.Effect<TurnResult, SessionFailure> {
-		return Effect.suspend(() => {
+		return Effect.gen(this, function* () {
 			let state = this.sessions.get(input.sessionId);
 			if (!state) {
+				const identity = yield* Effect.try({
+					try: () =>
+						readCursorSessionIdentity(
+							this.deps.daemonConfigDir,
+							input.sessionId,
+						),
+					catch: (): SessionFailure => ({
+						operation: "session identity",
+						message: "Could not read Cursor session identity",
+					}),
+				});
 				const storedCwd = input.providerState["cursor.cwd"];
 				const storedId = input.providerState["cursor.agentId"];
 				state = {
-					cwd: typeof storedCwd === "string" ? storedCwd : input.workspaceRoot,
+					cwd:
+						identity?.cwd ??
+						(typeof storedCwd === "string" ? storedCwd : input.workspaceRoot),
 					busy: false,
 					cancelRequested: false,
-					...(typeof storedId === "string" ? { agentId: storedId } : {}),
+					...(identity
+						? {
+								agentId: identity.agentId,
+								controllerPid: identity.controllerPid,
+							}
+						: typeof storedId === "string"
+							? { agentId: storedId }
+							: {}),
 				};
 				this.sessions.set(input.sessionId, state);
 			}
 			const session = state;
-			if (session.busy)
-				return Effect.succeed(this.result(session, "steer-declined", 0));
+			if (session.busy) return this.result(session, "steer-declined", 0);
 			session.busy = true;
 			session.cancelRequested = false;
 			const started = Date.now();
@@ -139,7 +164,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					this.result(session, status, Date.now() - started, code, message),
 				);
 
-			return Effect.scoped(
+			return yield* Effect.scoped(
 				Effect.gen(this, function* () {
 					// The daemon places only sends that reach an idle session, so a send
 					// that starts here just after a turn ends places its own message
@@ -191,10 +216,8 @@ export class CursorRunnerPayload implements RunnerPayload {
 						);
 					const config = cursorSessionConfig({
 						cwd: session.cwd,
-						storePath: join(
+						storePath: cursorSessionStorePath(
 							this.deps.daemonConfigDir,
-							"cursor",
-							"stores",
 							input.sessionId,
 						),
 						workspaceRoot: input.workspaceRoot,
@@ -268,13 +291,52 @@ export class CursorRunnerPayload implements RunnerPayload {
 						session.agentId = agent.id;
 						session.open = { agent, store, options: config.agent };
 					}
+					const open = session.open;
 					events.refs.providerSessionId = session.agentId;
-					const queue = yield* Queue.unbounded<Update>();
-					const agent = session.open.agent;
-					const run = yield* sdkCall("send", () =>
-						agent.send(input.prompt, config.send, (value) => {
-							Queue.unsafeOffer(queue, { channel: "delta", value });
+					const activeRun = yield* sdkCall("active run lookup", () =>
+						this.sdk.getActiveRun(open.agent.id, open.store),
+					);
+					// Public listRuns calls a never-sent queued run "running". Only the
+					// persisted document distinguishes it from an orphaned controller.
+					const force = activeRun?.status === "running";
+					if (
+						force &&
+						(session.controllerPid === undefined ||
+							session.controllerPid === process.pid ||
+							runnerPidAlive(session.controllerPid))
+					)
+						return yield* finish(
+							"error",
+							"provider_error",
+							"Cursor's previous controller is not confirmed dead; refusing to force its active run",
+						);
+					yield* Effect.try({
+						try: () =>
+							writeCursorSessionIdentity(
+								this.deps.daemonConfigDir,
+								input.sessionId,
+								{
+									agentId: open.agent.id,
+									cwd: session.cwd,
+									controllerPid: process.pid,
+								},
+							),
+						catch: (): SessionFailure => ({
+							operation: "session identity",
+							message: "Could not persist Cursor session identity before send",
 						}),
+					});
+					session.controllerPid = process.pid;
+					const queue = yield* Queue.unbounded<Update>();
+					const agent = open.agent;
+					const run = yield* sdkCall("send", () =>
+						agent.send(
+							input.prompt,
+							{ ...config.send, ...(force ? { local: { force: true } } : {}) },
+							(value) => {
+								Queue.unsafeOffer(queue, { channel: "delta", value });
+							},
+						),
 					);
 					session.run = run;
 					if (session.cancelRequested) yield* this.interrupt(input.sessionId);
