@@ -48,10 +48,10 @@ import {
 	sessionRowsToSessionInfoList,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import {
-	type CanonicalEventType,
 	type CanonicalToolInput,
 	canonicalEvent,
 	type EventPayloadMap,
+	type LiveEventType,
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
 import {
@@ -65,7 +65,7 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
-const stored = <K extends CanonicalEventType>(
+const stored = <K extends LiveEventType>(
 	type: K,
 	data: EventPayloadMap[K],
 	sequence: number,

@@ -1494,9 +1494,7 @@ describe("ClaudeEventTranslator", () => {
 		expect(sink.events.filter((e) => e.type === "tool.running")).toHaveLength(
 			0,
 		);
-		expect(
-			sink.events.filter((e) => e.type === "tool.input_updated"),
-		).toHaveLength(0);
+		expect(sink.events.map((e) => e.type)).not.toContain("tool.input_updated");
 
 		// Stop the block — should emit tool.started with buffered input
 		await runTranslate(

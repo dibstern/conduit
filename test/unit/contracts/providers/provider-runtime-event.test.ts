@@ -5,8 +5,7 @@ import { Either, Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
-	ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES,
-	HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES,
+	PROVIDER_RUNTIME_EVENT_TYPES,
 	type ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventSchema,
 	type ProviderRuntimeEventType,
@@ -156,6 +155,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"session.context_window_changed",
 			"session.read",
 			"session.unread",
+			"tool.input_updated",
 			"session.settled",
 			"session.unsettled",
 			"session.pinned",
@@ -179,9 +179,7 @@ describe("ProviderRuntimeEvent contracts", () => {
 
 		expect(missingRuntimeTypes).toEqual([]);
 		// Goal facts originate at the provider, so they must stay in the runtime union.
-		expect(ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES).toContain(
-			"session.goal_changed",
-		);
+		expect(PROVIDER_RUNTIME_EVENT_TYPES).toContain("session.goal_changed");
 	});
 
 	it("decodes turn.model_resolved evidence without changing its ids", () => {
@@ -258,20 +256,17 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(event.rawSource).not.toHaveProperty("raw");
 	});
 
-	it("marks tool.input_updated as historical compatibility", () => {
+	it("rejects the retired tool.input_updated runtime event", () => {
 		expect(
-			Either.isRight(
+			Either.isLeft(
 				Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(
 					"tool.input_updated",
 				),
 			),
 		).toBe(true);
-		expect(HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES).toEqual([
-			"tool.input_updated",
-		]);
-		expect(ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES).not.toContain(
-			"tool.input_updated",
-		);
+		expect(
+			Either.isLeft(decodeEither({ ...baseEvent, type: "tool.input_updated" })),
+		).toBe(true);
 	});
 
 	it("rejects unknown runtime event type", () => {

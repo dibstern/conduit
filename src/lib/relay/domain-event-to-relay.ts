@@ -1,4 +1,7 @@
-import type { CanonicalEvent } from "../persistence/events.js";
+import type {
+	CanonicalEvent,
+	CanonicalEventType,
+} from "../persistence/events.js";
 import type { UntaggedRelayMessage } from "../shared-types.js";
 import type { RelayMessage } from "../types.js";
 
@@ -10,7 +13,7 @@ export type DomainEventRelayTranslation =
 	| { kind: "silent"; reason: string };
 
 export function translateDomainEventToRelay(
-	event: CanonicalEvent,
+	event: CanonicalEvent<CanonicalEventType>,
 ): DomainEventRelayTranslation {
 	switch (event.type) {
 		case "message.snapshot":

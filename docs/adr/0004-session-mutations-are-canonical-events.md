@@ -100,6 +100,14 @@ session starts one short of it. Then it drops `read_at` and `marked_unread_at`.
 A session copied in from a provider (a Claude fork) starts seen up to its last
 imported turn end. `SessionAttention` writes that after the import commits.
 
+`CanonicalEvents` marks `session.read`, `session.unread` and
+`tool.input_updated` as retired. Their schemas remain available to decode old
+stores, but the canonical-event constructor and append accept only live events.
+Fork history omits retired rows because no projector reads them, so the fork's
+read model is unchanged. The historical provider-runtime `tool.input_updated`
+type and its canonical translation are removed too: neither provider emits it,
+and provider-runtime events are never stored.
+
 What this gives up is a history of when things were read. Nothing consumes one.
 If something ever needs it, `SessionAttention` is the single place to add it.
 

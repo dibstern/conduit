@@ -26,8 +26,8 @@ import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -52,7 +52,7 @@ const prose = (label: string, bytes: number) =>
 
 const event =
 	(sessionId: string, createdAt: number) =>
-	<T extends CanonicalEventType>(type: T, data: EventPayloadMap[T]) =>
+	<T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 		canonicalEvent(type, sessionId, data, { provider: "claude", createdAt });
 
 const userId = (sessionId: string, turn: number) => `${sessionId}-u${turn}`;

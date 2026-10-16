@@ -2,11 +2,11 @@ import { Either, Option, Schema } from "effect";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
 	type CanonicalEvent,
-	type CanonicalEventType,
 	type CanonicalToolInput,
 	canonicalEvent,
 	type EventId,
 	type EventMetadata,
+	type LiveEventType,
 	type MessageRole,
 	type MessageSnapshotPayload,
 	PermissionAskedDetailsSchema,
@@ -541,25 +541,6 @@ export function translateProviderRuntimeEventToDomain(
 			});
 		}
 
-		case "tool.input_updated": {
-			const partId = partIdFromData(event, data);
-			return {
-				events: [
-					canonicalEvent(
-						"tool.input_updated",
-						event.sessionId,
-						{
-							messageId: messageIdForPart(event, data, state, partId),
-							partId,
-							...data,
-						},
-						eventOptions(event),
-					),
-				],
-				state,
-			};
-		}
-
 		default: {
 			const _exhaustive: never = event;
 			return { events: [], state };
@@ -603,7 +584,7 @@ function cardDetails<A, I>(
 	return Option.getOrElse(Schema.decodeUnknownOption(schema)(data), () => ({}));
 }
 
-function singleEvent<K extends CanonicalEventType>(
+function singleEvent<K extends LiveEventType>(
 	event: ProviderRuntimeEvent,
 	state: ProviderRuntimeDomainMapperState,
 	type: K,

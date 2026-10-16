@@ -1310,14 +1310,9 @@ describe("subscribeShell", () => {
 				const { q } = yield* openShell();
 				yield* takeN(q, 2);
 
-				yield* commitThroughSeam([
-					canonicalEvent(
-						"session.read",
-						"no-such-session",
-						{ sessionId: "no-such-session" },
-						{ provider: "claude", createdAt: 9_999_999 },
-					),
-				]);
+				expect(
+					yield* markSeen("no-such-session", Number.MAX_SAFE_INTEGER),
+				).toBe(false);
 				yield* Effect.yieldNow();
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer())),
