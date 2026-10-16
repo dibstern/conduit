@@ -71,7 +71,6 @@ export const makeCursorRunnerDriver = (
 	port?: CursorSdkPort,
 ): RunnerDriverPieces => ({
 	driverKind: "cursor",
-	steering: true,
 	discoverEffect: () => discoverCursorEffect(port),
 	prepareTurnEffect: () =>
 		Effect.fail(
