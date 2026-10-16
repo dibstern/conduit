@@ -115,12 +115,10 @@ async function setup(page: Page) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
-			AttachProject: ({ projectSlug, sessionId }) => ({
+			AttachProject: (payload) => ({
 				projectSlug:
-					typeof projectSlug === "string" ? projectSlug : "e2e-replay",
-				sessionSlug: sessionId ? "e2e-replay" : null,
+					("projectSlug" in payload && payload.projectSlug) || "e2e-replay",
+				sessionSlug: "sessionId" in payload ? "e2e-replay" : null,
 			}),
 		},
 		streams: {
