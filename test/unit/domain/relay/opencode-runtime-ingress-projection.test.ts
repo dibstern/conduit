@@ -6,7 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqlClient } from "@effect/sql";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mocked,
+	vi,
+} from "vitest";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
@@ -43,12 +51,7 @@ import { makeSSEEvent } from "../../../helpers/sse-factories.js";
 
 const SESSION_ID = "sess-proj-001";
 
-function makeLogger(): OpenCodeRuntimeIngressLog & {
-	warn: ReturnType<typeof vi.fn>;
-	debug: ReturnType<typeof vi.fn>;
-	info: ReturnType<typeof vi.fn>;
-	verbose: ReturnType<typeof vi.fn>;
-} {
+function makeLogger(): Mocked<OpenCodeRuntimeIngressLog> {
 	return {
 		warn: vi.fn(),
 		debug: vi.fn(),

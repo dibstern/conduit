@@ -3,19 +3,26 @@ import {
 	closeSync,
 	existsSync,
 	fsyncSync,
+	linkSync,
+	lstatSync,
 	mkdirSync,
 	openSync,
+	readdirSync,
 	readSync,
 	realpathSync,
 	renameSync,
+	rmSync,
 	statSync,
 	unlinkSync,
+	writeFileSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { Data, Effect } from "effect";
+import { makePersistenceEffectLayer } from "../effect/live.js";
 import { effectMigrationEntries } from "../effect/migrations.js";
+import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
 import { daemonStorePath } from "../project-storage.js";
 
@@ -24,12 +31,30 @@ export interface ProjectStoreSource {
 	readonly sourcePath: string;
 }
 
+export type DaemonStoreImportCheckpoint =
+	| "normalised"
+	| "seed-marked"
+	| "seed-promoted"
+	| "import-copied"
+	| "import-committed"
+	| "backup-sidecars";
+
+export interface DaemonStoreImportOptions {
+	readonly now?: () => number;
+	readonly checkpoint?: (
+		name: DaemonStoreImportCheckpoint,
+		projectId: string,
+	) => void;
+}
+
 export class DaemonStoreImportError extends Data.TaggedError(
 	"DaemonStoreImportError",
 )<{
 	readonly projectId: string;
 	readonly kind:
 		| "collision"
+		| "corrupt"
+		| "newer-schema"
 		| "unsupported-source"
 		| "unprojected-tail"
 		| "source-changed"
@@ -42,12 +67,17 @@ export class DaemonStoreImportError extends Data.TaggedError(
 export interface ProjectStoreImportResult {
 	readonly projectId: string;
 	readonly outcome:
+		| "absent"
 		| "seeded"
 		| "imported"
 		| "skipped"
 		| "source-changed"
 		| "failed";
+	readonly importedEvents?: number;
+	readonly sharedSessions?: readonly string[];
 	readonly error?: DaemonStoreImportError;
+	readonly backup?: string;
+	readonly backupError?: DaemonStoreImportError;
 }
 
 const copiedTables = [
@@ -144,9 +174,13 @@ function reject(
 	});
 }
 
-function fingerprint(filename: string, project: ProjectStoreSource): string {
+function fingerprint(
+	filename: string,
+	project: ProjectStoreSource,
+	suffixes: readonly string[] = ["", "-wal"],
+): string {
 	return JSON.stringify(
-		["", "-wal"].map((suffix) => {
+		suffixes.map((suffix) => {
 			const path = `${filename}${suffix}`;
 			if (!existsSync(path)) return null;
 			const before = statSync(path);
@@ -176,13 +210,14 @@ function fingerprint(filename: string, project: ProjectStoreSource): string {
 	);
 }
 
-function sourceUri(filename: string): string {
+function sourceUri(filename: string, offline = true): string {
 	const uri = pathToFileURL(resolve(filename));
 	uri.searchParams.set("mode", "ro");
 	// SQLite otherwise creates an empty WAL for a checkpointed WAL-mode source.
 	// Offline sources without a WAL can be read immutably; existing WALs must
 	// still be read through ordinary read-only locking to include their frames.
-	if (!existsSync(`${filename}-wal`)) uri.searchParams.set("immutable", "1");
+	if (offline && !existsSync(`${filename}-wal`))
+		uri.searchParams.set("immutable", "1");
 	return uri.href;
 }
 
@@ -274,8 +309,6 @@ function verifySource(
 	translating: boolean,
 ): string[] {
 	const names = verifyStore(db, schema, project);
-	if (number(db, `SELECT 1 AS value FROM ${schema}.events LIMIT 1`) === 0)
-		reject(project, "unsupported-source", "Source has no events");
 	if (
 		number(
 			db,
@@ -347,21 +380,36 @@ function verifySourcePath(
 	return filename;
 }
 
+function readMarker(db: DatabaseSync, projectId: string) {
+	return rows<{
+		source_path: string;
+		source_fingerprint: string;
+		completed_at: number;
+	}>(
+		db,
+		"SELECT source_path, source_fingerprint, completed_at FROM daemon_store_imports WHERE project_id = ?",
+		projectId,
+	)[0];
+}
+
+function sourceFingerprintOf(markerFingerprint: string): string {
+	return JSON.stringify(
+		(JSON.parse(markerFingerprint) as readonly unknown[]).slice(0, 2),
+	);
+}
+
 function markerStatus(
 	db: DatabaseSync,
 	project: ProjectStoreSource,
 ): ProjectStoreImportResult | undefined {
-	const marker = rows<{ source_path: string; source_fingerprint: string }>(
-		db,
-		"SELECT source_path, source_fingerprint FROM daemon_store_imports WHERE project_id = ?",
-		project.projectId,
-	)[0];
+	const marker = readMarker(db, project.projectId);
 	if (!marker) return undefined;
 	return {
 		projectId: project.projectId,
 		outcome:
 			marker.source_path === project.sourcePath &&
-			marker.source_fingerprint === fingerprint(project.sourcePath, project)
+			sourceFingerprintOf(marker.source_fingerprint) ===
+				fingerprint(project.sourcePath, project)
 				? "skipped"
 				: "source-changed",
 	};
@@ -373,6 +421,7 @@ function writeMarker(
 	method: "seeded" | "imported",
 	sourceFingerprint: string,
 	offsets: Offsets,
+	completedAt: number,
 ): void {
 	db.prepare(`INSERT INTO daemon_store_imports
 		(project_id, method, source_path, source_fingerprint, event_offset, outbox_offset, version_offset, rowid_offsets, completed_at)
@@ -380,12 +429,17 @@ function writeMarker(
 		project.projectId,
 		method,
 		project.sourcePath,
-		sourceFingerprint,
+		JSON.stringify([
+			...(JSON.parse(sourceFingerprint) as readonly unknown[]),
+			...(JSON.parse(
+				fingerprint(project.sourcePath, project, ["-shm", "-journal"]),
+			) as readonly unknown[]),
+		]),
 		offsets.event,
 		offsets.outbox,
 		offsets.version,
 		JSON.stringify(offsets.rowid),
-		Date.now(),
+		completedAt,
 	);
 }
 
@@ -412,81 +466,175 @@ function counts(db: DatabaseSync): string {
 
 function seed(
 	configDir: string,
-	sourceProject: ProjectStoreSource,
+	project: ProjectStoreSource,
+	temporary: string,
+	before: string,
+	options: DaemonStoreImportOptions,
 ): ProjectStoreImportResult {
-	const project = {
-		...sourceProject,
-		sourcePath: realpathSync(sourceProject.sourcePath),
-	};
 	const filename = verifySourcePath(configDir, project);
 	if (existsSync(filename))
 		reject(project, "collision", "Daemon store already exists");
-	mkdirSync(dirname(filename), { recursive: true });
-	const temporary = `${filename}.${randomUUID()}.tmp`;
+	const copy = new DatabaseSync(temporary);
+	let importedEvents: number;
 	try {
-		const before = fingerprint(project.sourcePath, project);
-		let sourceCounts: string;
-		const source = new DatabaseSync(sourceUri(project.sourcePath), {
-			readOnly: true,
-		});
-		try {
-			verifySource(source, "main", project, false);
-			sourceCounts = counts(source);
-			source.prepare("VACUUM INTO ?").run(temporary);
-		} finally {
-			source.close();
-		}
-		const copy = new DatabaseSync(temporary);
-		try {
-			if (
-				JSON.stringify(copy.prepare("PRAGMA quick_check").all()) !==
-					'[{"quick_check":"ok"}]' ||
-				counts(copy) !== sourceCounts
-			)
-				reject(
-					project,
-					"unsupported-source",
-					"Seed failed quick_check or per-table count comparison",
-				);
-			if (fingerprint(project.sourcePath, project) !== before)
-				reject(project, "source-changed", "Source changed during seed");
-			// Only the copy changes journal mode; source main and WAL stay untouched.
-			copy.exec("PRAGMA journal_mode = DELETE");
-			transaction(copy, () => {
-				for (const table of copiedTables) {
-					for (const { name } of columns(copy, "main", table)) {
-						if (name === "project_id" || name === "project_key")
-							copy
-								.prepare(
-									`UPDATE ${quote(table)} SET ${quote(name)} = ? WHERE ${quote(name)} IS NULL`,
-								)
-								.run(project.projectId);
-					}
+		verifySource(copy, "main", project, false);
+		importedEvents = number(copy, "SELECT COUNT(*) AS value FROM events");
+		copy.exec("PRAGMA journal_mode = DELETE");
+		transaction(copy, () => {
+			// Preserve .4's NULL stamp for every copied ownership column.
+			for (const table of copiedTables) {
+				for (const { name } of columns(copy, "main", table)) {
+					if (name === "project_id" || name === "project_key")
+						copy
+							.prepare(
+								`UPDATE ${quote(table)} SET ${quote(name)} = ? WHERE ${quote(name)} IS NULL`,
+							)
+							.run(project.projectId);
 				}
-				writeMarker(copy, project, "seeded", before, {
+			}
+			writeMarker(
+				copy,
+				project,
+				"seeded",
+				before,
+				{
 					event: 0,
 					outbox: 0,
 					version: 0,
 					rowid: {},
-				});
-			});
-		} finally {
-			copy.close();
-		}
-		const fd = openSync(temporary, "r+");
-		try {
-			fsyncSync(fd);
-		} finally {
-			closeSync(fd);
-		}
-		if (existsSync(filename))
-			reject(project, "collision", "Daemon store appeared during seed");
-		renameSync(temporary, filename);
-		return { projectId: project.projectId, outcome: "seeded" };
+				},
+				(options.now ?? Date.now)(),
+			);
+		});
 	} finally {
-		for (const suffix of ["", "-wal", "-shm", "-journal"])
-			if (existsSync(`${temporary}${suffix}`))
-				unlinkSync(`${temporary}${suffix}`);
+		copy.close();
+	}
+	options.checkpoint?.("seed-marked", project.projectId);
+	const fd = openSync(temporary, "r+");
+	try {
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	if (existsSync(filename))
+		reject(project, "collision", "Daemon store appeared during seed");
+	renameSync(temporary, filename);
+	options.checkpoint?.("seed-promoted", project.projectId);
+	return {
+		projectId: project.projectId,
+		outcome: "seeded",
+		importedEvents,
+		sharedSessions: [],
+	};
+}
+
+// Session identities can outlive sessions in events, tombstones and command state.
+function sessionIds(db: DatabaseSync, schema: string): string {
+	return tables(db, schema)
+		.filter(
+			(table) =>
+				copiedTables.some((name) => name === table) ||
+				Object.hasOwn(runnerTables, table),
+		)
+		.flatMap((table) =>
+			columns(db, schema, table)
+				.filter(
+					({ name }) =>
+						name === "session_id" || (table === "sessions" && name === "id"),
+				)
+				.map(
+					({ name }) =>
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
+				),
+		)
+		.join(" UNION ");
+}
+
+function excludeSharedSessions(
+	copyPath: string,
+	destination: string,
+): readonly string[] {
+	const db = new DatabaseSync(copyPath);
+	try {
+		db.exec("PRAGMA foreign_keys = OFF");
+		db.prepare("ATTACH DATABASE ? AS daemon").run(
+			sourceUri(destination, false),
+		);
+		const shared = rows<{ id: string }>(
+			db,
+			`SELECT s.id FROM (${sessionIds(db, "main")}) s JOIN (${sessionIds(db, "daemon")}) d ON s.id = d.id ORDER BY s.id`,
+		).map(({ id }) => id);
+		if (shared.length === 0) return shared;
+		db.exec("CREATE TEMP TABLE shared_sessions (id TEXT PRIMARY KEY)");
+		const insert = db.prepare("INSERT INTO shared_sessions VALUES (?)");
+		for (const id of shared) insert.run(id);
+		// Capture references before deleting their owners. Parent/fork links are
+		// deliberately absent: a non-shared child must resolve to the first owner.
+		db.exec(`
+			CREATE TEMP TABLE shared_events AS SELECT sequence AS id FROM events WHERE session_id IN shared_sessions;
+			CREATE TEMP TABLE shared_turns AS SELECT id FROM turns WHERE session_id IN shared_sessions;
+			CREATE TEMP TABLE shared_messages AS SELECT id FROM messages WHERE session_id IN shared_sessions OR turn_id IN shared_turns;
+			CREATE TEMP TABLE shared_parts AS SELECT id FROM message_parts WHERE message_id IN shared_messages;
+			CREATE TEMP TABLE shared_calls AS SELECT call_id AS id FROM message_parts WHERE message_id IN shared_messages;
+			CREATE TEMP TABLE shared_commands AS
+				SELECT command_id AS id FROM command_receipts WHERE session_id IN shared_sessions
+				UNION SELECT command_id FROM provider_command_outbox WHERE session_id IN shared_sessions
+				UNION SELECT command_id FROM provider_command_turns WHERE session_id IN shared_sessions;
+		`);
+		const references: Readonly<Record<string, string>> = {
+			session_id: "shared_sessions",
+			message_id: "shared_messages",
+			turn_id: "shared_turns",
+			command_id: "shared_commands",
+			causation_command_id: "shared_commands",
+			event_sequence: "shared_events",
+			part_id: "shared_parts",
+			tool_id: "shared_calls",
+		};
+		for (const table of tables(db, "main")) {
+			const conditions = columns(db, "main", table).flatMap(({ name }) => {
+				const ids =
+					table === "sessions" && name === "id"
+						? "shared_sessions"
+						: references[name];
+				return ids ? [`${quote(name)} IN (SELECT id FROM ${ids})`] : [];
+			});
+			if (conditions.length > 0)
+				db.exec(`DELETE FROM ${quote(table)} WHERE ${conditions.join(" OR ")}`);
+		}
+		// A literal copy can also repeat store-independent cache/runner rows.
+		// Only exact duplicates from an entirely shared history are explained by
+		// that copy; conflicting values still reach collisions().
+		if (
+			!rows(
+				db,
+				`SELECT 1 FROM (${sessionIds(db, "main")}) WHERE id IS NOT NULL LIMIT 1`,
+			).length
+		) {
+			for (const table of ["session_git_published", "claude_runner_cursors"]) {
+				if (
+					!tables(db, "main").includes(table) ||
+					!tables(db, "daemon").includes(table)
+				)
+					continue;
+				const fields = columns(db, "main", table).filter(
+					({ hidden }) => hidden === 0,
+				);
+				if (
+					JSON.stringify(fields) !==
+					JSON.stringify(
+						columns(db, "daemon", table).filter(({ hidden }) => hidden === 0),
+					)
+				)
+					continue;
+				db.exec(
+					`DELETE FROM main.${table} AS s WHERE EXISTS (SELECT 1 FROM daemon.${table} d WHERE ${fields.map(({ name }) => `s.${quote(name)} IS d.${quote(name)}`).join(" AND ")})`,
+				);
+			}
+		}
+		return shared;
+	} finally {
+		db.close();
 	}
 }
 
@@ -529,27 +677,11 @@ function collisions(
 	}
 	// Session identities also survive in command state with project-qualified
 	// keys and no FK into sessions. Include every persisted session_id column.
-	const sessionIds = (schema: string) =>
-		tables(db, schema)
-			.filter(
-				(table) => all.includes(table) || Object.hasOwn(runnerTables, table),
-			)
-			.flatMap((table) =>
-				columns(db, schema, table)
-					.filter(
-						({ name }) =>
-							name === "session_id" || (table === "sessions" && name === "id"),
-					)
-					.map(
-						({ name }) =>
-							`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}`,
-					),
-			)
-			.join(" UNION ");
+
 	if (
 		rows(
 			db,
-			`SELECT 1 FROM (${sessionIds("source")}) s JOIN (${sessionIds("main")}) d ON s.id = d.id LIMIT 1`,
+			`SELECT 1 FROM (${sessionIds(db, "source")}) s JOIN (${sessionIds(db, "main")}) d ON s.id = d.id LIMIT 1`,
 		).length
 	)
 		reject(
@@ -725,12 +857,11 @@ function copyProject(
 
 function importOne(
 	configDir: string,
-	sourceProject: ProjectStoreSource,
+	project: ProjectStoreSource,
+	copyPath: string,
+	before: string,
+	options: DaemonStoreImportOptions,
 ): ProjectStoreImportResult {
-	const project = {
-		...sourceProject,
-		sourcePath: realpathSync(sourceProject.sourcePath),
-	};
 	const filename = verifySourcePath(configDir, project);
 	if (!existsSync(filename))
 		reject(
@@ -740,14 +871,10 @@ function importOne(
 		);
 	const db = new DatabaseSync(filename);
 	try {
-		const marked = markerStatus(db, project);
-		if (marked) return marked;
-		const before = fingerprint(project.sourcePath, project);
+		const sharedSessions = excludeSharedSessions(copyPath, filename);
 		// Unlike better-sqlite3's default build, node:sqlite enables URI filenames.
-		db.prepare("ATTACH DATABASE ? AS source").run(
-			sourceUri(project.sourcePath),
-		);
-		return transaction(db, () => {
+		db.prepare("ATTACH DATABASE ? AS source").run(sourceUri(copyPath));
+		const result = transaction(db, () => {
 			verifyStore(db, "main", project);
 			const names = verifySource(db, "source", project, true);
 			for (const [table, ddl] of Object.entries(runnerTables)) {
@@ -820,6 +947,7 @@ function importOne(
 					"Translated counters exceed the safe integer range",
 				);
 			copyProject(db, project, names, offsets);
+			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =
 					table === "events"
@@ -862,48 +990,497 @@ function importOne(
 				);
 			if (fingerprint(project.sourcePath, project) !== before)
 				reject(project, "source-changed", "Source changed during import");
-			writeMarker(db, project, "imported", before, offsets);
-			return { projectId: project.projectId, outcome: "imported" };
+			writeMarker(
+				db,
+				project,
+				"imported",
+				before,
+				offsets,
+				(options.now ?? Date.now)(),
+			);
+			return {
+				projectId: project.projectId,
+				outcome: "imported" as const,
+				importedEvents: number(
+					db,
+					"SELECT COUNT(*) AS value FROM source.events",
+				),
+				sharedSessions,
+			};
 		});
+		options.checkpoint?.("import-committed", project.projectId);
+		return result;
 	} finally {
 		db.close();
 	}
 }
 
-const attempt = (
+function importError(
 	project: ProjectStoreSource,
-	body: () => ProjectStoreImportResult,
-) =>
-	Effect.try({
-		try: body,
-		catch: (cause) =>
-			cause instanceof DaemonStoreImportError
-				? cause
-				: new DaemonStoreImportError({
-						projectId: project.projectId,
-						kind: "io",
-						message: "Project store import failed",
-						cause,
-					}),
+	cause: unknown,
+): DaemonStoreImportError {
+	if (cause instanceof DaemonStoreImportError) return cause;
+	const corrupt = (error: unknown): boolean => {
+		if (typeof error !== "object" || error === null) return false;
+		if (
+			"code" in error &&
+			(error.code === "SQLITE_NOTADB" || error.code === "SQLITE_CORRUPT")
+		)
+			return true;
+		if (
+			"errcode" in error &&
+			typeof error.errcode === "number" &&
+			[11, 26].includes(error.errcode & 255)
+		)
+			return true;
+		return "cause" in error && error.cause !== error && corrupt(error.cause);
+	};
+	return new DaemonStoreImportError({
+		projectId: project.projectId,
+		kind: corrupt(cause) ? "corrupt" : "io",
+		message: "Project store import failed",
+		cause,
 	});
+}
+const attempt = <A>(project: ProjectStoreSource, body: () => A) =>
+	Effect.try({ try: body, catch: (cause) => importError(project, cause) });
+
+function withNormalisedSource(
+	configDir: string,
+	project: ProjectStoreSource,
+	options: DaemonStoreImportOptions,
+	use: (
+		copyPath: string,
+		sourceFingerprint: string,
+	) => ProjectStoreImportResult,
+): Effect.Effect<ProjectStoreImportResult, DaemonStoreImportError> {
+	return Effect.acquireUseRelease(
+		attempt(project, () => {
+			const folder = join(configDir, "daemon-store-import");
+			mkdirSync(folder, { recursive: true });
+			return join(folder, `${randomUUID()}.db`);
+		}),
+		(copyPath) =>
+			Effect.gen(function* () {
+				const before = yield* attempt(project, () => {
+					const journal = `${project.sourcePath}-journal`;
+					if (existsSync(journal) && statSync(journal).size > 0)
+						reject(
+							project,
+							"unsupported-source",
+							"Source has a hot rollback journal",
+						);
+					const before = fingerprint(project.sourcePath, project);
+					const source = new DatabaseSync(sourceUri(project.sourcePath), {
+						readOnly: true,
+					});
+					let sourceCounts: string;
+					try {
+						sourceCounts = counts(source);
+						source.prepare("VACUUM INTO ?").run(copyPath);
+					} finally {
+						source.close();
+					}
+					const copy = new DatabaseSync(copyPath);
+					try {
+						if (
+							JSON.stringify(copy.prepare("PRAGMA quick_check").all()) !==
+								'[{"quick_check":"ok"}]' ||
+							counts(copy) !== sourceCounts
+						)
+							reject(
+								project,
+								"corrupt",
+								"Copy failed quick_check or per-table count comparison",
+							);
+						if (tables(copy, "main").includes("effect_sql_migrations")) {
+							for (const entry of rows<{ migration_id: number; name: string }>(
+								copy,
+								"SELECT migration_id, name FROM effect_sql_migrations",
+							)) {
+								if (
+									!Object.keys(effectMigrationEntries).some(
+										(key) =>
+											Number.parseInt(key, 10) === entry.migration_id &&
+											key.slice(key.indexOf("_") + 1) === entry.name,
+									)
+								)
+									reject(
+										project,
+										"newer-schema",
+										`Unknown migration ${entry.migration_id}_${entry.name}`,
+									);
+							}
+						}
+					} finally {
+						copy.close();
+					}
+					return before;
+				});
+				yield* Effect.gen(function* () {
+					const runner = yield* ProjectionRunnerEffectTag;
+					if (!(yield* runner.isRecovered())) yield* runner.recover();
+				}).pipe(
+					Effect.provide(
+						makePersistenceEffectLayer(copyPath, project.projectId),
+					),
+					Effect.scoped,
+					Effect.mapError((cause) => importError(project, cause)),
+				);
+				return yield* attempt(project, () => {
+					options.checkpoint?.("normalised", project.projectId);
+					if (fingerprint(project.sourcePath, project) !== before)
+						reject(
+							project,
+							"source-changed",
+							"Source changed during normalisation",
+						);
+					const copy = new DatabaseSync(copyPath, { readOnly: true });
+					try {
+						verifyStore(copy, "main", project);
+					} finally {
+						copy.close();
+					}
+					return use(copyPath, before);
+				});
+			}),
+		(copyPath) =>
+			Effect.sync(() => {
+				for (const suffix of ["", "-wal", "-shm", "-journal"])
+					if (existsSync(`${copyPath}${suffix}`))
+						unlinkSync(`${copyPath}${suffix}`);
+			}),
+	);
+}
 
 /** Offline only: callers must stop all destination and source writers first. */
 export const seedDaemonStore = (
 	configDir: string,
-	project: ProjectStoreSource,
-) => attempt(project, () => seed(configDir, project));
+	source: ProjectStoreSource,
+	options: DaemonStoreImportOptions = {},
+) =>
+	Effect.gen(function* () {
+		const project = yield* attempt(source, () =>
+			existsSync(source.sourcePath)
+				? { ...source, sourcePath: realpathSync(source.sourcePath) }
+				: undefined,
+		);
+		if (!project)
+			return { projectId: source.projectId, outcome: "absent" as const };
+		yield* attempt(project, () => {
+			if (existsSync(verifySourcePath(configDir, project)))
+				reject(project, "collision", "Daemon store already exists");
+		});
+		return yield* withNormalisedSource(
+			configDir,
+			project,
+			options,
+			(copy, before) => seed(configDir, project, copy, before, options),
+		);
+	});
 export const importProjectStore = (
 	configDir: string,
+	source: ProjectStoreSource,
+	options: DaemonStoreImportOptions = {},
+) =>
+	Effect.gen(function* () {
+		const project = yield* attempt(source, () =>
+			existsSync(source.sourcePath)
+				? { ...source, sourcePath: realpathSync(source.sourcePath) }
+				: undefined,
+		);
+		if (!project)
+			return { projectId: source.projectId, outcome: "absent" as const };
+		const marked = yield* attempt(project, () => {
+			const filename = verifySourcePath(configDir, project);
+			if (!existsSync(filename))
+				reject(
+					project,
+					"unsupported-source",
+					"Seed the daemon store before importing",
+				);
+			const db = new DatabaseSync(filename);
+			try {
+				return markerStatus(db, project);
+			} finally {
+				db.close();
+			}
+		});
+		if (marked) return marked;
+		return yield* withNormalisedSource(
+			configDir,
+			project,
+			options,
+			(copy, before) => importOne(configDir, project, copy, before, options),
+		);
+	});
+
+const backupSuffixes = ["-wal", "-shm", "-journal", ""] as const;
+
+function sameFile(a: string, b: string): boolean {
+	if (!existsSync(a) || !existsSync(b)) return false;
+	const left = lstatSync(a);
+	const right = lstatSync(b);
+	return left.dev === right.dev && left.ino === right.ino;
+}
+
+function backupSource(
 	project: ProjectStoreSource,
-) => attempt(project, () => importOne(configDir, project));
+	completedAt: number,
+	options: DaemonStoreImportOptions,
+	partial = false,
+): Pick<ProjectStoreImportResult, "backup" | "backupError"> {
+	const backup = `${project.sourcePath}.imported-${completedAt}`;
+	try {
+		// Check every destination before moving the first sidecar. lstat also
+		// catches dangling symlinks, which linkSync would refuse to overwrite.
+		for (const suffix of backupSuffixes) {
+			const source = `${project.sourcePath}${suffix}`;
+			const target = `${backup}${suffix}`;
+			if (!lstatSync(target, { throwIfNoEntry: false })) continue;
+			if (sameFile(source, target)) continue;
+			if (partial && suffix !== "" && !existsSync(source)) continue;
+			throw new DaemonStoreImportError({
+				projectId: project.projectId,
+				kind: "io",
+				message: `Backup target already exists: ${target}`,
+			});
+		}
+		for (const suffix of backupSuffixes) {
+			if (suffix === "")
+				options.checkpoint?.("backup-sidecars", project.projectId);
+			const source = `${project.sourcePath}${suffix}`;
+			if (!existsSync(source)) continue;
+			const target = `${backup}${suffix}`;
+			if (!sameFile(source, target)) linkSync(source, target);
+			unlinkSync(source);
+		}
+		return { backup };
+	} catch (cause) {
+		return {
+			backupError: new DaemonStoreImportError({
+				projectId: project.projectId,
+				kind: "io",
+				message: cause instanceof Error ? cause.message : String(cause),
+				cause,
+			}),
+		};
+	}
+}
+
+function finishBackup(
+	configDir: string,
+	source: ProjectStoreSource,
+	options: DaemonStoreImportOptions,
+	result?: ProjectStoreImportResult,
+): ProjectStoreImportResult | undefined {
+	const filename = daemonStorePath(configDir);
+	if (!existsSync(filename)) return result;
+	const db = new DatabaseSync(filename);
+	let marker: ReturnType<typeof readMarker>;
+	try {
+		marker = readMarker(db, source.projectId);
+	} finally {
+		db.close();
+	}
+	if (!marker) return result;
+	const skipped: ProjectStoreImportResult = result ?? {
+		projectId: source.projectId,
+		outcome: "skipped",
+	};
+	if (!existsSync(source.sourcePath)) return skipped;
+	const project = { ...source, sourcePath: realpathSync(source.sourcePath) };
+	if (result)
+		return {
+			...result,
+			...backupSource(project, marker.completed_at, options),
+		};
+	const backup = `${marker.source_path}.imported-${marker.completed_at}`;
+	const partial =
+		(!existsSync(backup) &&
+			backupSuffixes.some(
+				(suffix) => suffix !== "" && existsSync(`${backup}${suffix}`),
+			)) ||
+		sameFile(project.sourcePath, backup);
+	if (partial) {
+		// Check moved backup files, never the partially moved source. Original
+		// SHM/journal evidence is appended to the .4 main/WAL fingerprint.
+		const expected = JSON.parse(
+			marker.source_fingerprint,
+		) as readonly unknown[];
+		const moved = ["-wal", "-shm", "-journal"];
+		const actual = JSON.parse(
+			fingerprint(backup, project, moved),
+		) as readonly unknown[];
+		for (const [index, suffix] of moved.entries()) {
+			if (
+				existsSync(`${backup}${suffix}`) &&
+				!existsSync(`${project.sourcePath}${suffix}`) &&
+				JSON.stringify(expected[index + 1]) !== JSON.stringify(actual[index])
+			)
+				return {
+					...skipped,
+					backupError: new DaemonStoreImportError({
+						projectId: project.projectId,
+						kind: "io",
+						message: `Backup sidecar does not match the imported source: ${backup}${suffix}`,
+					}),
+				};
+		}
+	}
+
+	if (
+		project.sourcePath === marker.source_path &&
+		(partial ||
+			fingerprint(project.sourcePath, project) ===
+				sourceFingerprintOf(marker.source_fingerprint))
+	)
+		return {
+			...skipped,
+			...backupSource(project, marker.completed_at, options, partial),
+		};
+	return { projectId: project.projectId, outcome: "source-changed" };
+}
+
+function clearImportScratch(
+	configDir: string,
+	projects: readonly ProjectStoreSource[],
+): void {
+	mkdirSync(configDir, { recursive: true });
+	const directory = realpathSync(configDir);
+	// Registered names and their resolved aliases take precedence over scratch
+	// patterns. Preserve their sidecars and completed backups on later runs too.
+	const sources = projects.flatMap(({ sourcePath }) => [
+		resolve(sourcePath),
+		...(existsSync(sourcePath) ? [realpathSync(sourcePath)] : []),
+	]);
+	const filename = daemonStorePath(directory);
+	if (existsSync(filename)) {
+		const db = new DatabaseSync(filename);
+		try {
+			for (const { source_path } of rows<{ source_path: string }>(
+				db,
+				"SELECT source_path FROM daemon_store_imports",
+			))
+				sources.push(source_path);
+		} finally {
+			db.close();
+		}
+	}
+	const remove = (filename: string): void => {
+		const path = resolve(filename);
+		if (
+			sources.some(
+				(source) =>
+					path === source ||
+					backupSuffixes.some((suffix) => path === `${source}${suffix}`) ||
+					(path.startsWith(`${source}.imported-`) &&
+						/^\d+(?:-(?:wal|shm|journal))?$/.test(
+							path.slice(`${source}.imported-`.length),
+						)),
+			)
+		)
+			return;
+		if (sources.some((source) => source.startsWith(`${path}${sep}`))) {
+			if (lstatSync(filename).isDirectory())
+				for (const name of readdirSync(filename)) remove(join(filename, name));
+			return;
+		}
+		rmSync(filename, { recursive: true, force: true });
+	};
+	const folder = join(directory, "daemon-store-import");
+	if (existsSync(folder)) remove(folder);
+	if (!existsSync(folder)) mkdirSync(folder);
+	const prefix = `${basename(daemonStorePath(directory))}.`;
+	const temporary =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp(?:-(?:wal|shm|journal))?$/i;
+	for (const name of readdirSync(directory)) {
+		const filename = join(directory, name);
+		if (
+			name.startsWith(prefix) &&
+			temporary.test(name.slice(prefix.length)) &&
+			!lstatSync(filename).isDirectory()
+		)
+			remove(filename);
+	}
+}
+
+export function formatDaemonStoreImportReport(
+	results: readonly ProjectStoreImportResult[],
+	timestamp: number,
+): string {
+	return `${[
+		`Daemon store import ${new Date(timestamp).toISOString()}`,
+		...results.map(
+			(result) =>
+				`${result.projectId}: ${result.outcome}` +
+				(result.importedEvents === undefined
+					? ""
+					: `, ${result.importedEvents} events`) +
+				(result.sharedSessions?.length
+					? `, shared sessions left out: ${result.sharedSessions.join(",")}`
+					: "") +
+				(result.error
+					? `, error ${result.error.kind}: ${result.error.message}`
+					: "") +
+				(result.backup ? `, backup ${result.backup}` : "") +
+				(result.backupError
+					? `, backup failed: ${result.backupError.message}`
+					: ""),
+		),
+	].join("\n")}\n`;
+}
+
+function writeReport(
+	configDir: string,
+	results: readonly ProjectStoreImportResult[],
+	options: DaemonStoreImportOptions,
+): void {
+	if (
+		!results.some(
+			(result) =>
+				!["skipped", "absent"].includes(result.outcome) ||
+				result.backup ||
+				result.backupError,
+		)
+	)
+		return;
+	const filename = join(configDir, "daemon-store-import-report.txt");
+	const temporary = `${filename}.${randomUUID()}.tmp`;
+	try {
+		const fd = openSync(temporary, "wx", 0o600);
+		try {
+			writeFileSync(
+				fd,
+				formatDaemonStoreImportReport(results, (options.now ?? Date.now)()),
+			);
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+		renameSync(temporary, filename);
+	} finally {
+		if (existsSync(temporary)) unlinkSync(temporary);
+	}
+}
 
 /** Only the supplied registered sources participate; failed projects stay isolated. */
 export const importRegisteredProjectStores = (
 	configDir: string,
 	projects: readonly ProjectStoreSource[],
+	options: DaemonStoreImportOptions = {},
 ): Effect.Effect<readonly ProjectStoreImportResult[]> =>
 	Effect.gen(function* () {
+		yield* Effect.sync(() => clearImportScratch(configDir, projects));
 		const results = new Map<string, ProjectStoreImportResult>();
+		const failed = (
+			project: ProjectStoreSource,
+			error: DaemonStoreImportError,
+		): ProjectStoreImportResult => ({
+			projectId: project.projectId,
+			outcome: error.kind === "source-changed" ? "source-changed" : "failed",
+			error,
+		});
 		if (!existsSync(daemonStorePath(configDir))) {
 			const sized = projects
 				.map((project) => {
@@ -919,38 +1496,59 @@ export const importRegisteredProjectStores = (
 						a.project.projectId.localeCompare(b.project.projectId),
 				);
 			for (const { project } of sized) {
-				const result = yield* seedDaemonStore(configDir, project).pipe(
+				const result = yield* seedDaemonStore(configDir, project, options).pipe(
 					Effect.either,
 				);
 				if (result._tag === "Right") {
-					results.set(project.projectId, result.right);
-					break;
-				}
-				results.set(project.projectId, {
-					projectId: project.projectId,
-					outcome: "failed",
-					error: result.left,
-				});
+					const completed = yield* attempt(project, () =>
+						finishBackup(configDir, project, options, result.right),
+					).pipe(Effect.either);
+					results.set(
+						project.projectId,
+						completed._tag === "Right"
+							? (completed.right ?? result.right)
+							: failed(project, completed.left),
+					);
+					if (result.right.outcome === "seeded") break;
+				} else results.set(project.projectId, failed(project, result.left));
 			}
 		}
 		for (const project of projects) {
 			if (results.has(project.projectId)) continue;
-			const result = yield* importProjectStore(configDir, project).pipe(
-				Effect.either,
-			);
+			const marked = yield* attempt(project, () =>
+				finishBackup(configDir, project, options),
+			).pipe(Effect.either);
+			if (marked._tag === "Left") {
+				results.set(project.projectId, failed(project, marked.left));
+				continue;
+			}
+			if (marked.right) {
+				results.set(project.projectId, marked.right);
+				continue;
+			}
+			const result = yield* importProjectStore(
+				configDir,
+				project,
+				options,
+			).pipe(Effect.either);
+			if (result._tag === "Left") {
+				results.set(project.projectId, failed(project, result.left));
+				continue;
+			}
+			const completed = yield* attempt(project, () =>
+				finishBackup(configDir, project, options, result.right),
+			).pipe(Effect.either);
 			results.set(
 				project.projectId,
-				result._tag === "Right"
-					? result.right
-					: {
-							projectId: project.projectId,
-							outcome: "failed",
-							error: result.left,
-						},
+				completed._tag === "Right"
+					? (completed.right ?? result.right)
+					: failed(project, completed.left),
 			);
 		}
-		return projects.flatMap((project) => {
+		const ordered = projects.flatMap((project) => {
 			const result = results.get(project.projectId);
 			return result ? [result] : [];
 		});
+		yield* Effect.sync(() => writeReport(configDir, ordered, options));
+		return ordered;
 	});
