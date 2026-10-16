@@ -334,10 +334,6 @@ export const subscribeSessionDetail = (options: {
 							return {
 								rows,
 								version: window.version,
-								// Recreating a message clears its tombstone after its old
-								// parts cascaded away. Without those part removals, bounded
-								// windows cannot prove coverage for an overflow cursor.
-								...(resuming ? {} : { removedSince: window.version }),
 								removed: [
 									...(window.removed ?? []),
 									...(window.removedParts ?? []).map(
