@@ -1,4 +1,5 @@
 import {
+	applyFamilyFeedChange,
 	applySessionChange,
 	applySessionRemoved,
 	applySessionSnapshot,
@@ -85,7 +86,7 @@ describe("the server half holds only rows the server sent", () => {
 		expect(getFilteredSessions()).toEqual([]);
 	});
 
-	it("keeps a listed row unchanged while exposing announced parent lineage", () => {
+	it("keeps a listed row unchanged while announcing fork lineage without containment", () => {
 		applySessionSnapshot(
 			[
 				{
@@ -102,7 +103,7 @@ describe("the server half holds only rows the server sent", () => {
 		followFork({
 			projectSlug: "p",
 			sessionId: "ses_child",
-			parentId: "ses_parent",
+			forkedFrom: "ses_parent",
 		});
 
 		expect(sessionState.sessions.get("ses_child")).toEqual({
@@ -112,7 +113,40 @@ describe("the server half holds only rows the server sent", () => {
 			title: "Child",
 			status: "idle",
 		});
-		expect(sessionState.currentParentId).toBe("ses_parent");
+		expect(sessionState.currentParentId).toBeNull();
+		expect(sessionState.currentFork?.forkedFrom).toBe("ses_parent");
+	});
+
+	it("reads fork lineage from the family row when the shell still has a stale root row", () => {
+		applySessionSnapshot(
+			[
+				{
+					projectSlug: "p",
+					accountId: null,
+					id: "fork",
+					title: "Fork",
+					status: "idle",
+				},
+			],
+			"complete",
+		);
+		sessionState.currentId = "fork";
+		applyFamilyFeedChange({
+			_tag: "snapshot",
+			rows: [
+				{
+					id: "fork",
+					title: "Fork",
+					forkedFrom: "source",
+					forkMessageId: "boundary",
+				},
+			],
+		});
+		expect(sessionState.currentFork).toMatchObject({
+			forkedFrom: "source",
+			forkMessageId: "boundary",
+		});
+		expect(sessionState.currentParentId).toBeNull();
 	});
 });
 

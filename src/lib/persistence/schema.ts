@@ -87,6 +87,7 @@ export const DROP_ACTIVITIES_MIGRATION = "0055_drop_activities.sql";
 export const SESSION_PICK_BACKFILL_MIGRATION = "0056_session_pick_backfill.sql";
 export const COMPACT_REDUNDANT_EVENTS_MIGRATION =
 	"0057_compact_redundant_events.sql";
+export const SESSIONS_LINEAGE_MIGRATION = "0058_sessions_lineage.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

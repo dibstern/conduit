@@ -18,6 +18,24 @@ import {
 } from "../../../src/lib/persistence/events.js";
 
 describe("Canonical Event Types", () => {
+	it.each([
+		{},
+		{ parentId: "owner" },
+		{ parentId: "source", sideThread: true, forkPointEvent: "boundary" },
+		{ forkedFrom: "source" },
+	])("round-trips flat session.created placement %j", (placement) => {
+		const event = canonicalEvent("session.created", "session", {
+			sessionId: "session",
+			title: "Session",
+			provider: "claude",
+			...placement,
+		});
+		const encoded = Schema.encodeSync(CanonicalEventSchema)(event);
+		expect(Schema.decodeUnknownSync(CanonicalEventSchema)(encoded)).toEqual(
+			event,
+		);
+	});
+
 	it("exports all 62 canonical event types", () => {
 		expect(CANONICAL_EVENT_TYPES).toHaveLength(62);
 		expect(CANONICAL_EVENT_TYPES).toContain("message.created");

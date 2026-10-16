@@ -390,7 +390,7 @@ const provideRpc = <A, E>(effect: Effect.Effect<A, E, WsRpcTestEnv>) =>
 					Effect.succeed({
 						projectSlug: request.projectSlug,
 						sessionId: "session-forked",
-						parentId: "session-parent",
+						forkedFrom: "session-parent",
 					}),
 				StartSideThread: () =>
 					Effect.succeed({ sessionId: "session-side-thread" }),
@@ -1377,7 +1377,7 @@ describe("browser WebSocket RPC contract", () => {
 				expect(forked).toEqual({
 					projectSlug: "demo",
 					sessionId: "session-forked",
-					parentId: "session-parent",
+					forkedFrom: "session-parent",
 				});
 
 				expect(

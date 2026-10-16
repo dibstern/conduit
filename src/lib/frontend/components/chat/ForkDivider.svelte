@@ -1,20 +1,20 @@
 <!-- Fork Divider -->
 <!-- Horizontal rule with centered label showing the fork origin. -->
-<!-- Clicking the parent title navigates to the parent session. -->
+<!-- Clicking the Source title navigates to the Source session. -->
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
 	import { switchToSession } from "../../stores/session.svelte.js";
 
 	interface Props {
-		parentTitle: string;
-		parentId: string;
+		sourceTitle: string;
+		sourceId: string;
 	}
 
-	let { parentTitle, parentId }: Props = $props();
+	let { sourceTitle, sourceId }: Props = $props();
 
-	function navigateToParent() {
-		switchToSession(parentId);
+	function navigateToSource() {
+		switchToSession(sourceId);
 	}
 </script>
 
@@ -30,10 +30,10 @@
 			hoverFill="none"
 			type="button"
 			class="underline decoration-dotted p-0 font-mono text-[11px]"
-			onclick={navigateToParent}
-			title="Go to parent session"
+			onclick={navigateToSource}
+			title="Go to source session"
 		>
-			{parentTitle}
+			{sourceTitle}
 		</Button>
 	</span>
 	<div class="flex-1 h-px bg-border"></div>

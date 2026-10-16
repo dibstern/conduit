@@ -1570,7 +1570,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 						sessionId: "child",
 						title: "Fork",
 						provider: "claude",
-						parentId: "parent",
+						forkedFrom: "parent",
 						forkPointEvent: "boundary",
 					}),
 				])

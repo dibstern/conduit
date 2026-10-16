@@ -13,6 +13,7 @@ export interface SessionRow {
 	status: string;
 	history_complete?: number;
 	parent_id: string | null;
+	forked_from?: string | null;
 	side_thread?: number;
 	fork_point_event: string | null;
 	fork_point_timestamp?: number | null;

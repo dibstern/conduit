@@ -46,6 +46,7 @@ import {
 	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
+	SESSIONS_LINEAGE_MIGRATION,
 	SESSIONS_MARKED_UNREAD_MIGRATION,
 	SESSIONS_MODEL_SETTINGS_MIGRATION,
 	SESSIONS_PENDING_REWIND_MIGRATION,
@@ -332,6 +333,7 @@ const expectedTableColumns = {
 		"last_turn_end_version",
 		"seen_version",
 		"pending_rewind_message_id",
+		"forked_from",
 	],
 	tool_content: ["tool_id", "session_id", "content", "created_at"],
 	turns: [
@@ -482,6 +484,7 @@ const appendedSessionColumns = [
 	"workspace_hint",
 	"workspace_hint_sequence",
 	"pending_rewind_message_id",
+	"forked_from",
 ] as const;
 
 function sameStrings(
@@ -1006,6 +1009,11 @@ export const effectMigrationEntries = {
 		const sql = yield* SqlClient.SqlClient;
 		const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 		if (!columns.some((column) => column.name === "forked_from")) return;
+		// Ledger repair can replay this after 0059. Its index distinguishes the
+		// new lineage column from the retired, unindexed local-build column.
+		const indexes = yield* sql<{ name: string }>`PRAGMA index_list(sessions)`;
+		if (indexes.some((index) => index.name === "idx_sessions_forked_from"))
+			return;
 		yield* executeSqlStatements(
 			readMigrationSql(SESSIONS_FORKED_FROM_MIGRATION),
 		);
@@ -1171,6 +1179,11 @@ export const effectMigrationEntries = {
 	),
 	"0058_compact_redundant_events": executeSqlStatements(
 		readMigrationSql(COMPACT_REDUNDANT_EVENTS_MIGRATION),
+	),
+	"0059_sessions_lineage": runAddColumnMigrationIfMissing(
+		"sessions",
+		"forked_from",
+		readMigrationSql(SESSIONS_LINEAGE_MIGRATION),
 	),
 } satisfies Record<
 	string,

@@ -59,13 +59,19 @@ import { SessionWorkspaceTag } from "./session-workspace.js";
 
 export const SIDE_THREAD_TITLE_MAX_LENGTH = 120;
 
+export type SessionPlacement =
+	| { parentId?: never; forkedFrom?: never; sideThread?: false }
+	| { parentId: string; forkedFrom?: never; sideThread?: false }
+	| { parentId?: never; forkedFrom: string; sideThread?: false }
+	| { parentId: string; forkedFrom: string; sideThread: true };
+
 export const forkPlacement = (
 	sourceId: string,
 	sideThread: boolean,
-): { readonly parentId: string; readonly sideThread?: true } => ({
-	parentId: sourceId,
-	...(sideThread ? { sideThread: true } : {}),
-});
+): Extract<SessionPlacement, { forkedFrom: string }> =>
+	sideThread
+		? { parentId: sourceId, forkedFrom: sourceId, sideThread: true }
+		: { forkedFrom: sourceId };
 
 const sideThreadTitle = (question: string) =>
 	normalizeSessionTitle(question)
@@ -107,7 +113,9 @@ type SessionCommandType =
 export type SessionCommand = {
 	[K in SessionCommandType]: {
 		readonly type: K;
-		readonly data: EventPayloadMap[K];
+		readonly data: K extends "session.created"
+			? Omit<EventPayloadMap[K], keyof SessionPlacement> & SessionPlacement
+			: EventPayloadMap[K];
 	};
 }[SessionCommandType];
 
@@ -852,7 +860,10 @@ const forkSessionInWorkspace = (
 							forkPointEvent,
 							forkPointTimestamp: source.boundary.createdAt,
 							forkPointMessageId: source.boundary.messageId,
-						},
+						} satisfies Extract<
+							SessionCommand,
+							{ type: "session.created" }
+						>["data"],
 						{
 							provider,
 							createdAt: Date.now(),

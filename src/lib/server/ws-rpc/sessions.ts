@@ -638,7 +638,7 @@ export const sessionsHandlers = {
 					: Effect.succeed({
 							projectSlug: request.projectSlug,
 							sessionId: session.id,
-							parentId: session.parentId,
+							forkedFrom: session.forkedFrom,
 							...(session.forkMessageId && {
 								forkMessageId: session.forkMessageId,
 							}),

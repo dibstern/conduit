@@ -18,6 +18,7 @@
 // are attached to a later REST queue entry. We don't wait for the full
 // response to complete — we wait for the fork UI elements instead.
 
+import { writeFileSync } from "node:fs";
 import { Socket } from "@effect/platform";
 import { RpcClient, RpcSerialization } from "@effect/rpc";
 import { Effect } from "effect";
@@ -181,6 +182,39 @@ test.describe("Fork Session Rendering", () => {
 		const inheritedMsgs = contextMessages.locator(".msg-user, .msg-assistant");
 		const count = await inheritedMsgs.count();
 		expect(count).toBeGreaterThanOrEqual(1);
+	});
+
+	test("fork is listed in the sidebar", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const app = new AppPage(page);
+		const chat = new ChatPage(page);
+
+		await setupForkSession(page, app, chat, relayUrl);
+
+		const forkId = decodeURIComponent(
+			new URL(page.url()).pathname.split("/").at(-1) ?? "",
+		);
+		try {
+			await expect(
+				page.locator(`#session-list [data-session-id="${forkId}"]`),
+			).toBeVisible({ timeout: 10_000 });
+		} finally {
+			// Record what the sidebar listed whether or not the fork made it.
+			const sidebarIds = await page
+				.locator("#session-list [data-session-id]")
+				.evaluateAll((rows) =>
+					rows.map((row) => row.getAttribute("data-session-id")),
+				);
+			await page.screenshot({
+				path: testInfo.outputPath("fork-in-sidebar.png"),
+			});
+			writeFileSync(
+				testInfo.outputPath("fork-in-sidebar.json"),
+				JSON.stringify({ forkId, sidebarIds }, null, 2),
+			);
+		}
 	});
 
 	test("SubagentBackBar hidden for user forks", async ({ page, relayUrl }) => {

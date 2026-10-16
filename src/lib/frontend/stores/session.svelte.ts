@@ -97,9 +97,7 @@ export function parentOf(id: string): string | null {
 	return (
 		serverSessions.get(id)?.parentID ??
 		familySessions.find((row) => row.id === id)?.parentID ??
-		(clientSession.announcedParent?.sessionId === id
-			? clientSession.announcedParent.parentId
-			: null)
+		null
 	);
 }
 
@@ -150,9 +148,9 @@ export function setAttachedProject(slug: string): void {
 
 const clientSession = $state({
 	currentId: null as string | null,
-	announcedParent: null as {
+	announcedFork: null as {
 		sessionId: string;
-		parentId: string;
+		forkedFrom: string;
 		forkMessageId?: string;
 		forkPointTimestamp?: number;
 	} | null,
@@ -237,11 +235,14 @@ export const sessionState = {
 	},
 	get currentFork() {
 		const id = clientSession.currentId;
-		if (clientSession.announcedParent?.sessionId === id)
-			return clientSession.announcedParent;
-		// An OpenCode fork is projected before its parent is recorded, and the
-		// shell keeps that stale root row; the family row carries the lineage.
-		return familySessions.find((row) => row.id === id && row.parentID) ?? null;
+		if (clientSession.announcedFork?.sessionId === id)
+			return clientSession.announcedFork;
+		// OpenCode creation can reach the shell before lineage is recorded.
+		// Prefer the family row so a stale shell row cannot hide the divider.
+		const row =
+			familySessions.find((row) => row.id === id) ??
+			serverSessions.get(id ?? "");
+		return row?.forkedFrom ? row : null;
 	},
 	set currentId(id: string | null) {
 		clientSession.currentId = id;
@@ -818,16 +819,16 @@ export function applySearchResultsResponse(
  * arrives. Only the forking tab announces it.
  */
 export function followFork(response: ForkSessionResponse): void {
-	clientSession.announcedParent = {
+	clientSession.announcedFork = {
 		sessionId: response.sessionId,
-		parentId: response.parentId,
+		forkedFrom: response.forkedFrom,
 		...(response.forkMessageId && { forkMessageId: response.forkMessageId }),
 		...(response.forkPointTimestamp != null && {
 			forkPointTimestamp: response.forkPointTimestamp,
 		}),
 	};
 	showToast(
-		`Forked from "${findSession(response.parentId)?.title || "session"}"`,
+		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
 	if (clientSession.currentId !== response.sessionId)
 		switchToSession(response.sessionId, response.projectSlug);
@@ -1022,8 +1023,8 @@ export function switchToSession(
 
 	clientSession.currentId = sessionId;
 	clearDraftSelection();
-	if (clientSession.announcedParent?.sessionId !== sessionId)
-		clientSession.announcedParent = null;
+	if (clientSession.announcedFork?.sessionId !== sessionId)
+		clientSession.announcedFork = null;
 	activateSessionChatState(sessionId);
 	if (previousId !== sessionId) {
 		updateContextPercent(0);
@@ -1135,7 +1136,7 @@ export function clearSessionState(): void {
 		clearSessionChatState(id);
 	}
 	clientSession.currentId = null;
-	clientSession.announcedParent = null;
+	clientSession.announcedFork = null;
 	setSearchQuery("");
 	resetSessionFamily();
 	readMarks.clear();

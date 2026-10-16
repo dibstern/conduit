@@ -401,10 +401,8 @@
 				)
 			: null,
 	);
-	const parentSession = $derived.by(() => {
-		const id = primary ? sessionState.currentParentId : activeSession?.parentID;
-		return id ? findSession(id) : null;
-	});
+	const forkedFrom = $derived(activeSession?.forkedFrom ?? (primary ? sessionState.currentFork?.forkedFrom : undefined));
+	const sourceSession = $derived(forkedFrom ? findSession(forkedFrom) : null);
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
 		projectInheritedTurns(forkSplit?.inherited ?? [], false),
@@ -619,8 +617,8 @@
 		</ForkContextBlock>
 
 		<ForkDivider
-			parentTitle={parentSession?.title ?? "parent session"}
-			parentId={activeSession?.parentID ?? ""}
+			sourceTitle={sourceSession?.title ?? "parent session"}
+			sourceId={forkedFrom ?? ""}
 		/>
 
 		{#each currentTurns as turn (turn.id)}

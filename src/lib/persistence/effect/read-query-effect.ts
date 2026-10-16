@@ -280,6 +280,7 @@ export const sessionRowsToSessionInfoList = (
 				? { contextWindow: row.context_window }
 				: {}),
 			...(parentID ? { parentID } : {}),
+			...(row.forked_from != null ? { forkedFrom: row.forked_from } : {}),
 			...(row.side_thread === 1 ? { sideThread: true } : {}),
 			...(row.fork_point_event ? { forkMessageId: row.fork_point_event } : {}),
 			...(row.fork_point_timestamp != null

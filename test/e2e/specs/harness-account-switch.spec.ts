@@ -2903,7 +2903,7 @@ for (const behavior of [
 						originId: browser.originId,
 					}),
 				);
-				expect(fork.parentId).toBe(sessionId);
+				expect(fork.forkedFrom).toBe(sessionId);
 				expect(fork.forkMessageId).toBe(point.id);
 				const expectedAccount = behavior === "fork-before" ? source : target;
 				expect(

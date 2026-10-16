@@ -141,7 +141,7 @@ type Command =
 			readonly side: boolean;
 			readonly fork: boolean;
 	  }
-	| { readonly kind: "fork"; readonly id: string; readonly parent: string }
+	| { readonly kind: "reparent"; readonly id: string; readonly parent: string }
 	/** Re-parent under a session that does not exist. */
 	| { readonly kind: "orphan"; readonly id: string; readonly parent: string }
 	| { readonly kind: "delete"; readonly id: string }
@@ -305,16 +305,17 @@ const scenario = (store: Store) => {
 					]),
 				);
 			}
-			case "fork": {
+			case "reparent": {
 				const { id, parent } = command;
 				if (!exists || !parents.has(parent)) return undefined;
 				parents.set(id, parent);
 				return run(
 					commit([
-						event("session.forked", id, {
+						event("session.created", id, {
 							sessionId: id,
+							title: `Session ${id}`,
+							provider: "claude",
 							parentId: parent,
-							forkPointEvent: `${id}-fork`,
 						}),
 					]),
 				);
@@ -690,7 +691,7 @@ const command: fc.Arbitrary<Command> = fc.oneof(
 			fork: fc.boolean(),
 		}),
 	},
-	fc.record({ kind: fc.constant("fork" as const), id, parent: id }),
+	fc.record({ kind: fc.constant("reparent" as const), id, parent: id }),
 	fc.record({ kind: fc.constant("orphan" as const), id, parent: id }),
 	fc.record({ kind: fc.constant("delete" as const), id }),
 	{
@@ -847,7 +848,7 @@ describe("sidebar table against the full computation", () => {
 				child("c", "b"),
 				{ kind: "status", id: "c", status: "busy" },
 				// b and c close a cycle and leave a's family.
-				{ kind: "fork", id: "b", parent: "c" },
+				{ kind: "reparent", id: "b", parent: "c" },
 				child("d", "a"),
 				{ kind: "orphan", id: "d", parent: "e" },
 				{ kind: "ask", id: "d", question: true },
@@ -873,8 +874,8 @@ describe("sidebar table against the full computation", () => {
 			root("b"),
 			child("c", "a"),
 			{ kind: "status", id: "c", status: "busy" },
-			{ kind: "fork", id: "c", parent: "b" },
-			{ kind: "fork", id: "b", parent: "a" },
+			{ kind: "reparent", id: "c", parent: "b" },
+			{ kind: "reparent", id: "b", parent: "a" },
 		]);
 		expect([...shown.keys()]).toEqual(["a"]);
 		expect(shown.get("a")?.item.processing).toBe(true);
@@ -989,7 +990,7 @@ describe("sidebar table against the full computation", () => {
 			root("c"),
 			child("d", "a"),
 			{ kind: "delete", id: "a" },
-			{ kind: "fork", id: "c", parent: "b" },
+			{ kind: "reparent", id: "c", parent: "b" },
 			{ kind: "orphan", id: "b", parent: "e" },
 			root("a"),
 			child("d", "a"),

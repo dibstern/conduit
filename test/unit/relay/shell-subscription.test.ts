@@ -357,15 +357,13 @@ describe("subscribeShell", () => {
 						parentID: "parent",
 						forkMessageId: "fork-point",
 					});
-					// The child leaves the sidebar as it joins its parent's family,
-					// and is not deleted: a device viewing it stays there.
-					const [removal, upsert] = yield* takeN(q, 2);
-					expect(removal).toMatchObject({ _tag: "remove", id: "child" });
-					expect(removal).not.toHaveProperty("deleted");
+					// Recording lineage keeps the Fork in the shell as its own root.
+					const upsert = yield* Queue.take(q);
 					expect(upsert).toMatchObject({
 						_tag: "upsert",
-						item: { id: "parent" },
+						item: { id: "child", forkedFrom: "parent" },
 					});
+					expect(upsert).not.toHaveProperty("item.parentID");
 				}).pipe(
 					Effect.provide(
 						Layer.merge(makeShellTestLayer(), makeSessionManagerStateLive()),
@@ -375,7 +373,7 @@ describe("subscribeShell", () => {
 	}
 	for (const entry of ["command", "handler"] as const) {
 		it.scoped(
-			`a new Claude fork through the ${entry} publishes both lineage fields and resumes the SDK child`,
+			`a new Claude fork through the ${entry} publishes lineage without containment and resumes the SDK child`,
 			() => {
 				const api = makeMockOpenCodeAPI();
 				return Effect.gen(function* () {
@@ -417,12 +415,13 @@ describe("subscribeShell", () => {
 					const read = yield* ReadQueryEffectTag;
 					expect(yield* read.getSession(child.id)).toMatchObject({
 						provider: "claude",
-						parent_id: "claude-parent",
+						parent_id: null,
+						forked_from: "claude-parent",
 						fork_point_event: "ui-boundary",
 					});
 					expect(yield* Queue.take(q)).toMatchObject({
 						_tag: "upsert",
-						item: { id: "claude-parent" },
+						item: { id: child.id, forkedFrom: "claude-parent" },
 					});
 					expect(sdkForkSession).toHaveBeenCalledWith(
 						"sdk-parent",
@@ -502,7 +501,8 @@ describe("subscribeShell", () => {
 				const child = yield* forkSession("claude-parent");
 				const read = yield* ReadQueryEffectTag;
 				expect(yield* read.getSession(child.id)).toMatchObject({
-					parent_id: "claude-parent",
+					parent_id: null,
+					forked_from: "claude-parent",
 					fork_point_event: "ui-tip",
 					fork_point_timestamp: 1000,
 					fork_point_message_id: "ui-tip",
@@ -684,7 +684,7 @@ describe("subscribeShell", () => {
 	for (const messageId of ["fork-message", undefined]) {
 		// OpenCode keeps message identity across a fork.
 		it.scoped(
-			`a new OpenCode fork exposes its parent and fork point ${messageId ?? "at tip"} without a metadata cache`,
+			`a new OpenCode fork exposes its Source and fork point ${messageId ?? "at tip"} without a metadata cache`,
 			() => {
 				const api = makeMockOpenCodeAPI();
 				vi.mocked(api.provider.list).mockResolvedValue({
@@ -734,7 +734,7 @@ describe("subscribeShell", () => {
 					const envelope = yield* Queue.take(q);
 					expect(envelope).toMatchObject({
 						_tag: "upsert",
-						item: { id: "parent" },
+						item: { id: "new-fork", forkedFrom: "parent" },
 					});
 				}).pipe(
 					Effect.provide(

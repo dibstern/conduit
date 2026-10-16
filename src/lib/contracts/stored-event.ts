@@ -343,6 +343,7 @@ export interface SessionCreatedPayload {
 	readonly title: string;
 	readonly provider: string;
 	readonly parentId?: string;
+	readonly forkedFrom?: string;
 	readonly forkPointEvent?: string;
 	readonly forkPointTimestamp?: number;
 	readonly forkPointMessageId?: string;
@@ -1032,6 +1033,7 @@ const SessionCreatedPayloadSchema = Schema.Struct({
 	title: Schema.String,
 	provider: Schema.String,
 	parentId: Schema.optionalWith(Schema.String, { exact: true }),
+	forkedFrom: Schema.optionalWith(Schema.String, { exact: true }),
 	forkPointEvent: Schema.optionalWith(Schema.String, { exact: true }),
 	forkPointTimestamp: Schema.optionalWith(Schema.Number, { exact: true }),
 	forkPointMessageId: Schema.optionalWith(Schema.String, { exact: true }),

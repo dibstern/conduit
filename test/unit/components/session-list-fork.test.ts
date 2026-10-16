@@ -71,7 +71,7 @@ describe("SessionList fork", () => {
 		vi.mocked(forkSessionRpc).mockResolvedValue({
 			projectSlug: "current-project",
 			sessionId: "fork",
-			parentId: "other",
+			forkedFrom: "other",
 		});
 		render(SessionList);
 		const row = screen.getByText("Other work").closest("a");

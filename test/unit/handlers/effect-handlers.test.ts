@@ -1508,7 +1508,7 @@ describe("handleForkSession", () => {
 						title: "Forked Session",
 						status: "idle" as const,
 						updatedAt: 201,
-						parentID: "ses-parent",
+						forkedFrom: "ses-parent",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
 					},
@@ -1546,7 +1546,7 @@ describe("handleForkSession", () => {
 					expect(legacyListSessions).not.toHaveBeenCalled();
 					expect(fork).toEqual({
 						id: "ses-child",
-						parentId: "ses-parent",
+						forkedFrom: "ses-parent",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
 					});
