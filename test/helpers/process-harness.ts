@@ -626,6 +626,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TEST_CURSOR_SEND_GATE"
 					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
 					| "CONDUIT_CONTENTION_METRICS"
+					| "CONDUIT_SHARED_STORE"
 					| "XPC_SERVICE_NAME"
 				>
 			>;
