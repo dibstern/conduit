@@ -3,10 +3,12 @@
 	import Icon from "../ui/Icon.svelte";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId } from "../../stores/usage.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 
 	let { driver, instanceId, size, surface }: {
 		driver: ProviderDriverKind;
@@ -22,15 +24,17 @@
 	);
 	const accounts = $derived(getClaudeAccounts(projectSlug));
 	const instances = $derived(getAvailableInstances());
+	const traits = $derived(getDriverTraits(driver));
+	const presentation = $derived(getProviderPresentation(driver));
 	const badged = $derived(
-		instanceId !== undefined && (driver === "claude" ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2),
+		instanceId !== undefined && (traits?.usageHarness === "claude" ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2),
 	);
 	const letter = $derived(accounts.nameOf(
 		instanceId,
-		driver === "claude" ? "Claude" : instances.find((instance) => instance.id === instanceId)?.label ?? driver,
+		traits?.accountKind === "config-directory" ? presentation?.label ?? driver : instances.find((instance) => instance.id === instanceId)?.label ?? driver,
 	).charAt(0).toUpperCase());
 	const spinning = $derived(
-		driver === "claude" && accounts.switchingTo !== null &&
+		traits?.usageHarness === "claude" && accounts.switchingTo !== null &&
 		accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId &&
 		(instanceId === accounts.switchingTo || instanceId === composerAccountId(session)),
 	);
@@ -46,8 +50,8 @@
 	class:badged
 	style="--s:{size}px"
 >
-	{#if driver === "claude" || driver === "opencode"}
-		<Icon name={driver} {size} />
+	{#if presentation}
+		<Icon name={presentation.logo} {size} />
 	{:else}
 		<Icon name="bot" {size} class="text-text-secondary" />
 	{/if}

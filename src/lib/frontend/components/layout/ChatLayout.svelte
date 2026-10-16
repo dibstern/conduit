@@ -53,7 +53,7 @@
 	import { openSavedTranscript } from "../../stores/saved-transcripts.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
 	import { applyGetAgentsResponse, applyGetCommandsResponse, followModelsRead, clearDiscoveryState, discoveryState, getEffectiveInstanceId, viewDraftModels } from "../../stores/discovery.svelte.js";
-	import { instanceState } from "../../stores/instance.svelte.js";
+	import { getInstanceTraits, instanceState } from "../../stores/instance.svelte.js";
 	import { todoState, clearTodoState, viewTodos } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { viewAlerts } from "../../stores/alerts.js";
@@ -106,14 +106,14 @@
 
 	const draftSlug = $derived(getDraftProject());
 	const draftAccountId = $derived(sessionState.currentId || getCurrentSessionId() ? undefined : getEffectiveInstanceId());
-	const draftIsClaude = $derived(instanceState.instances.some((account) => account.id === draftAccountId && account.driver === "claude"));
+	const draftNeedsDiscovery = $derived(getInstanceTraits(draftAccountId)?.catalogSource === "discovery");
 	$effect(() => {
 		const projectSlug = draftSlug;
 		const instanceId = draftAccountId;
 		if (!projectSlug || !instanceId || !getIsConnected()) return;
 		let active = true;
 		// OpenCode draft models arrive through viewDraftModels; agents have no subscription.
-		if (draftIsClaude) {
+		if (draftNeedsDiscovery) {
 			const applyModels = followModelsRead();
 			void getModelsRpc({ projectSlug, instanceId })
 				.then((response) => { if (active) applyModels(response); })

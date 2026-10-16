@@ -10,6 +10,7 @@
 	import TextInput from "../ui/TextInput.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import {
 		answerQuestionRpc,
 		rejectQuestionRpc,
@@ -53,7 +54,9 @@
 	let singleSelected = $state(new Map<number, string>());
 
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
-	const canSkip = $derived(request.providerId !== "claude");
+	const canSkip = $derived(
+		getDriverTraits(request.providerId)?.supportsQuestionSkip ?? true,
+	);
 
 	function rebuildSelections() {
 		const next = new Map<number, string>();

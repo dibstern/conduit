@@ -12,6 +12,7 @@ import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
 import {
 	getProviderDriver,
+	PROVIDER_DRIVERS,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
@@ -295,6 +296,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					Effect.map(getInstances, (instances) => ({
 						instances: Array.from(instances),
 						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+						providerTraits: PROVIDER_DRIVERS,
 					})),
 				),
 			SubscribeUsage: () =>
@@ -502,6 +504,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.map((instances) => ({
 							instances: Array.from(instances),
 							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+							providerTraits: PROVIDER_DRIVERS,
 						})),
 					),
 				),
