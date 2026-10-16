@@ -355,7 +355,11 @@ export const makeProviderRuntimeIngestionLive = (
 														message_id: string;
 													}>`SELECT message_id
 														FROM message_tombstones WHERE session_id = ${event.sessionId}
-														AND message_id = ${event.data.messageId}`;
+														AND message_id = ${event.data.messageId}
+														AND NOT EXISTS (
+															SELECT 1 FROM messages
+															WHERE id = message_tombstones.message_id
+																AND version > message_tombstones.version)`;
 													if (removed) continue;
 												}
 												if (
