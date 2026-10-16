@@ -546,8 +546,8 @@ function readSessionProjectionSnapshot(sessionId: string) {
 function seedSession(sessionId: string, createdAt: number = FIXED_TS) {
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-			VALUES (${sessionId}, 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
+		yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+			VALUES (${sessionId}, 'test-project', 'opencode', 'Test Session', 'idle', ${createdAt}, ${createdAt})`;
 	});
 }
 
@@ -1775,6 +1775,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 				yield* sql`
 					INSERT INTO sessions (
 						id,
+						project_id,
 						provider,
 						title,
 						status,
@@ -1783,6 +1784,7 @@ describe("Effect Session Projector (via ProjectionRunner)", () => {
 					)
 					VALUES (
 						${"s-named"},
+						${"test-project"},
 						${"work-oc"},
 						${"Untitled"},
 						${"idle"},

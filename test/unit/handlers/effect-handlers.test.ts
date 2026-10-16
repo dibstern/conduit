@@ -205,9 +205,9 @@ const seedSessionPick = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const provider = modelProvider === "claude" ? "claude" : "opencode";
-		yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at,
+		yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at,
 			model_id, model_provider, variant, context_window)
-			VALUES (${sessionId}, ${provider}, 'Session', 'idle', 0, 0, ${modelId}, ${modelProvider}, '', ${contextWindow})
+			VALUES (${sessionId}, 'test-project', ${provider}, 'Session', 'idle', 0, 0, ${modelId}, ${modelProvider}, '', ${contextWindow})
 			ON CONFLICT(id) DO UPDATE SET provider = ${provider}, model_id = ${modelId},
 			model_provider = ${modelProvider}, variant = '', context_window = ${contextWindow}`;
 	});
@@ -3877,8 +3877,8 @@ describe("handleMessage", () => {
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`INSERT INTO sessions
-					(id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
-					VALUES ('session-rejected', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
+					(id, project_id, provider, title, status, created_at, updated_at, model_id, model_provider, variant, context_window)
+					VALUES ('session-rejected', 'test-project', 'claude', 'Rejected session', 'idle', 0, 0, 'sonnet', 'claude', '', '')`;
 				yield* sendMessageToSession({
 					clientId: "client-1",
 					sessionId: "session-rejected",

@@ -215,9 +215,7 @@ describe("daemon automatic settlement layer", () => {
 						),
 					])
 						yield* runner.projectEvent(yield* store.append(event));
-				}).pipe(
-					Effect.provide(makePersistenceEffectLayer(dbPath, "test-project")),
-				);
+				}).pipe(Effect.provide(makePersistenceEffectLayer(dbPath, "cold")));
 				const sweep = vi.fn(() => Effect.succeed(1));
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
 				const layer = AutoSettleLive(dir).pipe(

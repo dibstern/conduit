@@ -179,7 +179,8 @@ export const SSEStreamLive: Layer.Layer<
 						if (fiber) return;
 						if (sql._tag === "Some") {
 							const rows = yield* sql.value<{ workspace: string }>`
-								SELECT workspace FROM sessions WHERE workspace IS NOT NULL`.pipe(
+								SELECT workspace FROM sessions
+								WHERE project_id = ${config.slug} AND workspace IS NOT NULL`.pipe(
 								Effect.catchAll((error) => {
 									log?.warn(
 										"Failed to read OpenCode workspace directories",

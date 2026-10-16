@@ -619,7 +619,7 @@ export const makeContinuation = Effect.gen(function* () {
 			const rows = yield* sql<{
 				id: string;
 				limit_recovery: string;
-			}>`SELECT id, limit_recovery FROM sessions WHERE json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} ORDER BY id`;
+			}>`SELECT id, limit_recovery FROM sessions WHERE project_id = ${store.projectId} AND json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} ORDER BY id`;
 			for (const row of rows) {
 				const recovery = decodeRecovery(row.limit_recovery);
 				const cancel = () => cancelContinuation(row.id, recovery);

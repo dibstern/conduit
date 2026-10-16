@@ -14,29 +14,32 @@ export const runningRunnerCommands = (
 	driverForAccount: (accountId: string) => string | undefined,
 	sessionId?: string,
 ) =>
-	sql<{
-		project_key: string;
-		session_id: string;
-		provider_id: string;
-		command_id: string;
-		payload_json: string;
-		user_message_id: string | null;
-		attempt_count: number;
-		assistant_message_id: string | null;
-		state: string | null;
-	}>`SELECT outbox.project_key, outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
+	Effect.gen(function* () {
+		const { projectId } = yield* PersistenceProjectTag;
+		const rows = yield* sql<{
+			project_key: string;
+			session_id: string;
+			provider_id: string;
+			command_id: string;
+			payload_json: string;
+			user_message_id: string | null;
+			attempt_count: number;
+			assistant_message_id: string | null;
+			state: string | null;
+		}>`SELECT outbox.project_key, outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
 		COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 		outbox.attempt_count, turns.assistant_message_id, turns.state
 		FROM provider_command_outbox outbox
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-		WHERE outbox.status = 'running' AND outbox.effect_type = 'send_turn'
+		WHERE outbox.project_key = ${projectId}
+			AND outbox.status = 'running' AND outbox.effect_type = 'send_turn'
 			AND (${sessionId ?? null} IS NULL OR outbox.session_id = ${sessionId ?? null})
-		ORDER BY outbox.request_sequence`.pipe(
-		Effect.map((rows) =>
-			rows.filter((row) => driverForAccount(row.provider_id) === driverKind),
-		),
-	);
+		ORDER BY outbox.request_sequence`;
+		return rows.filter(
+			(row) => driverForAccount(row.provider_id) === driverKind,
+		);
+	});
 
 type RunningCommand = Effect.Effect.Success<
 	ReturnType<typeof runningRunnerCommands>
@@ -73,6 +76,7 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 	},
 ) =>
 	Effect.gen(function* () {
+		const { projectId } = yield* PersistenceProjectTag;
 		const rows = yield* runningRunnerCommands(
 			sql,
 			driverKind,
@@ -102,6 +106,7 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 						yield* options.failTurn(sinkId, execution.left);
 						return yield* settleRunnerCommand(
 							sql,
+							projectId,
 							sessionId,
 							row.command_id,
 							row.attempt_count,
@@ -114,6 +119,7 @@ export const recoverRunnerCommands = <T extends SessionTurn, E = never>(
 						yield* options.onCompleted(row, input, result);
 					yield* settleRunnerCommand(
 						sql,
+						projectId,
 						sessionId,
 						row.command_id,
 						row.attempt_count,
@@ -142,6 +148,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 	) => Effect.Effect<void, E>,
 ) =>
 	Effect.gen(function* () {
+		const { projectId } = yield* PersistenceProjectTag;
 		for (const row of yield* runningRunnerCommands(
 			sql,
 			driverKind,
@@ -175,6 +182,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 			);
 			yield* settleRunnerCommand(
 				sql,
+				projectId,
 				row.session_id,
 				row.command_id,
 				row.attempt_count,
@@ -186,6 +194,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 
 export const settleRunnerCommand = (
 	sql: SqlClient.SqlClient,
+	projectId: string,
 	sessionId: string,
 	commandId: string,
 	attempt: number,
@@ -198,7 +207,7 @@ export const settleRunnerCommand = (
 				const rows = yield* sql<{
 					project_key: string;
 					attempt_count: number;
-				}>`SELECT project_key, attempt_count FROM provider_command_outbox WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
+				}>`SELECT project_key, attempt_count FROM provider_command_outbox WHERE project_key = ${projectId} AND command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
 				const row = rows[0];
 				if (!row) return;
 				const succeeded = !failure && result?.status === "completed";
@@ -225,7 +234,7 @@ export const settleRunnerCommand = (
 					const providerState = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 						Effect.provideService(PersistenceProjectTag, {
-							projectId: row.project_key,
+							projectId,
 						}),
 					);
 					yield* providerState.saveUpdates(
@@ -236,8 +245,8 @@ export const settleRunnerCommand = (
 						})),
 					);
 				}
-				yield* sql`UPDATE provider_command_outbox SET status = ${succeeded ? "completed" : retryable ? "retryable_failed" : "failed"}, error_code = ${errorCode}, next_attempt_at = ${retryAt}, updated_at = ${now} WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
-				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE command_id = ${commandId}`;
+				yield* sql`UPDATE provider_command_outbox SET status = ${succeeded ? "completed" : retryable ? "retryable_failed" : "failed"}, error_code = ${errorCode}, next_attempt_at = ${retryAt}, updated_at = ${now} WHERE project_key = ${projectId} AND command_id = ${commandId} AND session_id = ${sessionId} AND status = 'running' AND attempt_count = ${attempt}`;
+				yield* sql`UPDATE command_receipts SET status = ${succeeded ? "side_effect_completed" : "side_effect_failed"}, error_code = ${errorCode}, updated_at = ${now} WHERE project_key = ${projectId} AND command_id = ${commandId}`;
 			}),
 		)
 		.pipe(

@@ -37,6 +37,7 @@ import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persisten
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	ProjectManagementNotSupported,
@@ -551,7 +552,13 @@ export async function createProjectRelay(
 				},
 				idleWindowMs,
 				now,
-			).pipe(Effect.provideService(SqlClient.SqlClient, startup.sql)),
+			).pipe(
+				Effect.provideService(SqlClient.SqlClient, startup.sql),
+				Effect.provideService(
+					PersistenceProjectTag,
+					startup.persistenceProject,
+				),
+			),
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
