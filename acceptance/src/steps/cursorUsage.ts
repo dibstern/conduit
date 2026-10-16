@@ -103,7 +103,12 @@ export const cursorUsageHandlers: StepHandler[] = [
 			);
 			await expect(value).toBeVisible();
 			await expect(value).toHaveText(`${match[1]}%`);
-			await expect(value.locator("..").locator("..")).toContainText("Month");
+			await expect(
+				// Wide labels the Month column; the phone dock labels its single line.
+				world.page.getByTestId(
+					/^usage-(footer-column-cursor|phone-column)-month$/,
+				),
+			).toHaveText(/^month$/i);
 			const bar = world.page.getByTestId(`usage-footer-bar-${accountId}-month`);
 			const fill = await bar.evaluate((element) => ({
 				track: element.getBoundingClientRect().width,
