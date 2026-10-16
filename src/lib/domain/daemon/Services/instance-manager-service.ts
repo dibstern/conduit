@@ -33,9 +33,8 @@ import {
 	AccountChangeRejected,
 } from "../../../contracts/account.js";
 import {
-	isKnownDriverKind,
+	getProviderDriver,
 	MANAGED_OPENCODE_ACCOUNT_ID,
-	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
@@ -163,9 +162,14 @@ const buildInstanceManagerState = (
 	return {
 		instances: HashMap.fromIterable(
 			initialInstances
-				.filter((instance) => (instance.driver ?? "opencode") === "opencode")
+				.filter(
+					(instance) =>
+						getProviderDriver(instance.driver ?? "opencode")
+							?.runsOpenCodeServer,
+				)
 				.map((instance) => {
 					const driver = instance.driver ?? "opencode";
+					const traits = getProviderDriver(driver);
 					const opencodeInstance: OpenCodeInstance = {
 						id: instance.id,
 						name: instance.name,
@@ -179,12 +183,12 @@ const buildInstanceManagerState = (
 						...(instance.env !== undefined
 							? {
 									env:
-										driver === "opencode" && instance.managed
+										traits?.runsOpenCodeServer && instance.managed
 											? publicManagedOpenCodeEnv(instance.env)
 											: instance.env,
 								}
 							: {}),
-						...(driver === "opencode" &&
+						...(traits?.runsOpenCodeServer &&
 						instance.managed &&
 						instance.pid !== undefined
 							? { pid: instance.pid, version: instance.version }
@@ -192,7 +196,7 @@ const buildInstanceManagerState = (
 						...(instance.configDir !== undefined
 							? { configDir: instance.configDir }
 							: {}),
-						...(driver === "opencode" && instance.url !== undefined
+						...(traits?.runsOpenCodeServer && instance.url !== undefined
 							? { url: instance.url }
 							: {}),
 					};
@@ -202,7 +206,7 @@ const buildInstanceManagerState = (
 		externalUrls: HashMap.fromIterable(
 			initialInstances.flatMap((instance) =>
 				instance.url === undefined ||
-				(instance.driver ?? "opencode") !== "opencode"
+				!getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer
 					? []
 					: ([[instance.id, instance.url]] as const),
 			),
@@ -212,7 +216,12 @@ const buildInstanceManagerState = (
 		stopManagedProcesses: false,
 		managedProcesses: HashMap.fromIterable(
 			initialInstances
-				.filter((instance) => instance.managed && instance.driver !== "claude")
+				.filter(
+					(instance) =>
+						instance.managed &&
+						getProviderDriver(instance.driver ?? "opencode")
+							?.runsOpenCodeServer,
+				)
 				.map(
 					(instance) =>
 						[
@@ -254,7 +263,8 @@ const buildInitialInstanceManagerState = (
 			: [defaultInstanceForUrl(defaultUrl), ...initialInstances],
 	);
 	return smartDefaultUrl !== undefined &&
-		(existingDefault?.driver ?? "opencode") === "opencode" &&
+		getProviderDriver(existingDefault?.driver ?? "opencode")
+			?.runsOpenCodeServer &&
 		HashMap.has(state.instances, MANAGED_OPENCODE_ACCOUNT_ID)
 		? { ...state, smartDefaultUrl }
 		: state;
@@ -308,7 +318,8 @@ export function makeInstanceManagerStateLive(
 					seeded
 						.filter(
 							(instance) =>
-								(instance.driver ?? "opencode") === "opencode" &&
+								getProviderDriver(instance.driver ?? "opencode")
+									?.runsOpenCodeServer &&
 								!accountsState.accounts.some(
 									(account) => account.id === instance.id,
 								) &&
@@ -391,7 +402,10 @@ export const applyAccountChange = (change: AccountChange) =>
 					before.managedProcesses ?? HashMap.empty(),
 					id,
 				);
-				if (account?.driver !== "opencode") {
+				if (
+					account === undefined ||
+					!getProviderDriver(account.driver)?.runsOpenCodeServer
+				) {
 					if (Option.isSome(record))
 						yield* stopRecordedManagedOpenCode(record.value);
 					yield* Ref.update(ref, (state) => ({
@@ -406,7 +420,7 @@ export const applyAccountChange = (change: AccountChange) =>
 					}));
 					yield* FiberMap.remove(fibers, pollerKey(id));
 					yield* FiberMap.remove(fibers, restartKey(id));
-				} else {
+				} else if (account.driver === "opencode") {
 					const now = yield* Clock.currentTimeMillis;
 					const prior = Option.getOrUndefined(previous);
 					const {
@@ -544,9 +558,10 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const driver = instance.driver ?? "opencode";
 	return {
 		...instance,
-		capabilities: isKnownDriverKind(driver)
-			? PROVIDER_SESSION_CAPABILITIES[driver]
-			: { supportsMultiFolder: false, supportsWorktree: false },
+		capabilities: getProviderDriver(driver)?.sessionCapabilities ?? {
+			supportsMultiFolder: false,
+			supportsWorktree: false,
+		},
 	};
 }
 
@@ -707,7 +722,7 @@ export const checkInstanceHealth = (instanceId: string) =>
 		if (Option.isNone(instanceOpt)) return;
 		const instance = instanceOpt.value;
 		if (
-			instance.driver === "claude" ||
+			!getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer ||
 			(instance.managed &&
 				(instance.status === "stopped" || instance.status === "unhealthy"))
 		) {
@@ -765,7 +780,12 @@ export const startHealthPoller = (instanceId: string) =>
 		const fibers = yield* PollerFibersTag;
 		const { instances, config } = yield* Ref.get(stateRef);
 		const instance = HashMap.get(instances, instanceId);
-		if (Option.isNone(instance) || instance.value.driver === "claude") return;
+		if (
+			Option.isNone(instance) ||
+			!getProviderDriver(instance.value.driver ?? "opencode")
+				?.runsOpenCodeServer
+		)
+			return;
 
 		yield* FiberMap.run(
 			fibers,
@@ -1118,7 +1138,8 @@ const startManagedOpenCodeServer = (
 					!state.stopManagedProcesses &&
 					Option.isSome(registered) &&
 					registered.value.managed &&
-					registered.value.driver !== "claude" &&
+					getProviderDriver(registered.value.driver ?? "opencode")
+						?.runsOpenCodeServer &&
 					sameGeneration
 				)
 					return;
@@ -1199,7 +1220,8 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 			yield* Effect.forEach(
 				HashMap.values(state.instances),
 				(instance) =>
-					instance.managed && instance.driver !== "claude"
+					instance.managed &&
+					getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer
 						? semaphore.withPermits(1)(start(instance, true))
 						: Effect.void,
 				{ concurrency: 1, discard: true },
@@ -1229,7 +1251,11 @@ export const scheduleRestart = (instanceId: string) =>
 		// Check restart rate limit
 		const state = yield* Ref.get(stateRef);
 		const instance = HashMap.get(state.instances, instanceId);
-		if (Option.isNone(instance) || instance.value.driver === "claude") {
+		if (
+			Option.isNone(instance) ||
+			!getProviderDriver(instance.value.driver ?? "opencode")
+				?.runsOpenCodeServer
+		) {
 			return undefined;
 		}
 		const timestamps = Option.getOrElse(
@@ -1305,7 +1331,10 @@ export const restartInstance = (instanceId: string) =>
 		const state = yield* Ref.get(stateRef);
 		const instOpt = HashMap.get(state.instances, instanceId);
 		if (Option.isNone(instOpt)) return;
-		if (instOpt.value.driver === "claude") return;
+		if (
+			!getProviderDriver(instOpt.value.driver ?? "opencode")?.runsOpenCodeServer
+		)
+			return;
 
 		yield* Ref.update(stateRef, (s) => ({
 			...s,
@@ -1339,7 +1368,12 @@ export const startInstance = (instanceId: string) =>
 		const stateRef = yield* InstanceManagerStateTag;
 		let state = yield* Ref.get(stateRef);
 		let instance = HashMap.get(state.instances, instanceId);
-		if (Option.isSome(instance) && instance.value.driver === "claude") return;
+		if (
+			Option.isSome(instance) &&
+			!getProviderDriver(instance.value.driver ?? "opencode")
+				?.runsOpenCodeServer
+		)
+			return;
 		const lifecycle = yield* Effect.serviceOption(ManagedOpenCodeLifecycleTag);
 		if (
 			Option.isSome(instance) &&
@@ -1430,7 +1464,11 @@ export const stopInstance = (instanceId: string) =>
 		const stateRef = yield* InstanceManagerStateTag;
 		const state = yield* Ref.get(stateRef);
 		const instance = HashMap.get(state.instances, instanceId);
-		if (Option.isSome(instance) && instance.value.driver === "claude")
+		if (
+			Option.isSome(instance) &&
+			!getProviderDriver(instance.value.driver ?? "opencode")
+				?.runsOpenCodeServer
+		)
 			return false;
 		yield* cancelInstanceFibers(instanceId);
 		const record = HashMap.get(
@@ -1502,7 +1540,9 @@ export const persistConfig = Effect.gen(function* () {
 export const getExternalUrl = (instanceId: string, daemonHost: string) =>
 	getInstance(instanceId).pipe(
 		Effect.map((inst) =>
-			inst.driver === "claude" ? null : `http://${daemonHost}:${inst.port}`,
+			getProviderDriver(inst.driver ?? "opencode")?.runsOpenCodeServer
+				? `http://${daemonHost}:${inst.port}`
+				: null,
 		),
 		Effect.catchTag("InstanceNotFound", () => Effect.succeed(null)),
 	);
@@ -1519,7 +1559,8 @@ export const getInstanceUrl = (instanceId: string) =>
 		if (Option.isNone(inst)) {
 			return yield* instanceNotFound(instanceId);
 		}
-		if (inst.value.driver === "claude") return null;
+		if (!getProviderDriver(inst.value.driver ?? "opencode")?.runsOpenCodeServer)
+			return null;
 		const externalUrl = HashMap.get(state.externalUrls, instanceId);
 		if (Option.isSome(externalUrl)) {
 			return externalUrl.value;

@@ -48,6 +48,8 @@ export interface ProviderDriverTraits {
 	readonly needsPriorHistoryMetadata: boolean;
 	/** AccountSchema pins config-directory logins versus server connection accounts. */
 	readonly accountKind: "config-directory" | "server";
+	/** account-directory.test.ts pins selected defaults versus the fixed managed account. */
+	readonly defaultAccountSource: "selection" | "managed";
 	/** orchestration-wiring.test.ts pins discovery versus server provider catalogs. */
 	readonly catalogSource: "discovery" | "server";
 	/** turn-settings.test.ts pins context-window suffixes versus provider-qualified ids. */
@@ -83,6 +85,7 @@ export const PROVIDER_DRIVERS = {
 		supportsNativeResume: true,
 		needsPriorHistoryMetadata: true,
 		accountKind: "config-directory",
+		defaultAccountSource: "selection",
 		catalogSource: "discovery",
 		modelIdFormat: "context-window-suffix",
 		streamsSessionLifecycle: true,
@@ -108,6 +111,7 @@ export const PROVIDER_DRIVERS = {
 		supportsNativeResume: false,
 		needsPriorHistoryMetadata: false,
 		accountKind: "server",
+		defaultAccountSource: "managed",
 		catalogSource: "server",
 		modelIdFormat: "provider-qualified",
 		streamsSessionLifecycle: false,

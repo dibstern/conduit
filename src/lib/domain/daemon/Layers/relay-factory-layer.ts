@@ -26,6 +26,7 @@ import {
 	Ref,
 	Runtime,
 } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	projectEventsDbPath,
 	projectStorageDir,
@@ -257,14 +258,15 @@ export const RelayFactoryLive = (
 			const removeInstance = (id: string) =>
 				runCallback(provideInstanceDeps(removeEffectInstance(id)));
 
-			// Claude instances have no process to start.
+			// Only server-backed instances have an OpenCode process to start.
 			const startInstance = (id: string) =>
 				runCallback(
 					provideInstanceDeps(getEffectInstance(id)).pipe(
 						Effect.flatMap((instance) =>
-							instance.driver === "claude"
-								? Effect.void
-								: Effect.asVoid(Effect.scoped(openCodeInstances.use(id))),
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+								? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
+								: Effect.void,
 						),
 					),
 				);
