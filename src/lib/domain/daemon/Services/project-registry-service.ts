@@ -49,12 +49,7 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
-import { PersistenceStore } from "../../../persistence/effect/live.js";
-import {
-	chooseProjectSlug,
-	projectEventsDbPath,
-	projectStorageDir,
-} from "../../../persistence/project-storage.js";
+import { chooseProjectSlug } from "../../../persistence/project-storage.js";
 import {
 	checkFolders,
 	type FolderIssue,
@@ -1036,22 +1031,8 @@ export const saveProject = (input: SaveProjectInput) =>
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
-					const store = yield* Effect.serviceOption(PersistenceStore);
-					if (
-						Option.isNone(store) &&
-						projectEventsDbPath({ configDir, ...existing }) !==
-							resolve(projectStorageDir(configDir, existing.slug), "events.db")
-					) {
-						return yield* new WsRpcError({
-							message:
-								"Project history migration must complete before changing the main folder",
-						});
-					}
 					// A send admitted between this check and the relay swap is not blocked.
-					const count = yield* countRunningProjectSessions(
-						existing,
-						configDir,
-					).pipe(
+					const count = yield* countRunningProjectSessions(existing).pipe(
 						Effect.mapError(
 							(cause) =>
 								new WsRpcError({

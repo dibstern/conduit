@@ -20,7 +20,7 @@ import {
 } from "../../helpers/process-harness.js";
 
 function persisted(fixture: ProcessHarness, sessionId: string) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db
@@ -183,10 +183,7 @@ describe("Cursor without an installed runtime through the built daemon", () => {
 				yield* projector.projectBatch(events);
 			}).pipe(
 				Effect.provide(
-					makePersistenceEffectLayer(
-						fixture.projectStorePath(),
-						"process-test",
-					),
+					makePersistenceEffectLayer(fixture.daemonStorePath(), "process-test"),
 				),
 			),
 		);

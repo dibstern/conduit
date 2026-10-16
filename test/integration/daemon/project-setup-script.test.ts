@@ -75,7 +75,7 @@ function processExists(pid: number): boolean {
 }
 
 function setupEvents(fixture: ProcessHarness, sessionId: string): SetupEvent[] {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		const rows = db
 			.prepare(
@@ -190,7 +190,7 @@ describe("Project setup scripts through the built daemon", () => {
 		if (task.result?.errors?.length)
 			evidence["diagnosticLogs"] = fixture.logTail.slice(-4_000);
 		try {
-			if (existsSync(fixture.projectStorePath()))
+			if (existsSync(fixture.daemonStorePath()))
 				evidence["sessions"] = [...sessions]
 					.sort(([, a], [, b]) => a.title.localeCompare(b.title))
 					.map(([id, { title, path }]) => {
@@ -292,7 +292,7 @@ describe("Project setup scripts through the built daemon", () => {
 			});
 		// Handle teardown rejection if an assertion fails before the turn is awaited.
 		void firstTurn.catch(() => undefined);
-		const admissionDb = new Database(fixture.projectStorePath(), {
+		const admissionDb = new Database(fixture.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
@@ -363,7 +363,7 @@ describe("Project setup scripts through the built daemon", () => {
 		});
 		expect(succeededParts[0]?.text).toContain("setup stdout");
 		expect(succeededParts[0]?.text).toContain("setup stderr");
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const events = db
 				.prepare(

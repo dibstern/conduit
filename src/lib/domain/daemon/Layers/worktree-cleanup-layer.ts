@@ -21,7 +21,7 @@ import { realWorkspacePath } from "../../../git/worktrees.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -33,14 +33,14 @@ import {
 } from "../Services/worktree-cleanup-reader.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 
-export const WorktreeCleanupLive = (configDir: string) =>
+export const WorktreeCleanupLive = () =>
 	Layer.scopedDiscard(
 		Effect.gen(function* () {
 			const configRef = yield* DaemonConfigRefTag;
 			const registry = yield* ProjectRegistryTag;
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
-			const storeContext = yield* optionalPersistenceStoreContext;
+			const storeContext = yield* persistenceStoreContext;
 			const requests = yield* WorktreeCleanupQueueTag;
 			const getSetting = Ref.get(configRef).pipe(
 				Effect.map(
@@ -86,7 +86,6 @@ export const WorktreeCleanupLive = (configDir: string) =>
 							if (relay === undefined) {
 								const paths = yield* readColdWorktreeCleanupCandidates(
 									project,
-									configDir,
 									yield* getSetting,
 									now,
 								).pipe(Effect.provide(storeContext));

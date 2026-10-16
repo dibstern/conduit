@@ -455,13 +455,13 @@ process.exit(result.status ?? 1);
 			true,
 		);
 		const before = (await sessions()).map(({ id }) => id);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const createdCount = () =>
 				(
 					db
 						.prepare(
-							"SELECT count(*) AS count FROM events WHERE type = 'session.created'",
+							"SELECT count(*) AS count FROM events WHERE project_id = 'process-test' AND type = 'session.created'",
 						)
 						.get() as { count: number }
 				).count;

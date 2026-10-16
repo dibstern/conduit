@@ -7,6 +7,7 @@ import type {
 } from "../../../contracts/ws-rpc.js";
 import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js";
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import type { FolderIssue } from "../../../project-folders.js";
 import type { RunnerProcessError } from "../../../provider/runner/process-session-runner.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
@@ -87,6 +88,7 @@ export const DaemonHandleLive: Layer.Layer<
 	| AccountDirectory
 	| DaemonStateTag
 	| KeepAwakeTag
+	| PersistenceStore
 > = Layer.effect(
 	DaemonHandleTag,
 	Effect.gen(function* () {
@@ -101,6 +103,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const accounts = yield* AccountDirectory;
 		const daemonState = yield* DaemonStateTag;
 		const keepAwake = yield* KeepAwakeTag;
+		const store = yield* PersistenceStore;
 
 		const port = Ref.get(configRef).pipe(Effect.map((config) => config.port));
 		const onboardingPort = Effect.sync(() =>
@@ -113,6 +116,7 @@ export const DaemonHandleLive: Layer.Layer<
 		const saveProject = (input: SaveProjectInput) =>
 			Effect.gen(function* () {
 				const result = yield* saveProjectToRegistry(input).pipe(
+					Effect.provideService(PersistenceStore, store),
 					Effect.provideService(ProjectRegistryTag, projectRef),
 					Effect.provideService(DaemonEventBusTag, bus),
 					Effect.provideService(ConfigPersistenceTag, persistence),

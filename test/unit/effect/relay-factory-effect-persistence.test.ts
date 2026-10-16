@@ -35,6 +35,7 @@ import { ScanServiceTag } from "../../../src/lib/domain/relay/Services/scan-serv
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 const createProjectRelayMock = vi.hoisted(() =>
@@ -46,6 +47,7 @@ vi.mock("../../../src/lib/relay/relay-stack.js", () => ({
 }));
 
 const NoopAuxiliaryDaemonServices = Layer.mergeAll(
+	makeDaemonStoreTestLayer(),
 	Layer.succeed(OpenCodeInstancesTag, makeOpenCodeInstancesStub()),
 	InstanceHealthCheckLive,
 	Layer.succeed(PortScannerTag, {
@@ -113,13 +115,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				const config = createProjectRelayMock.mock.calls[0]?.[0];
 				expect(config).toEqual(
 					expect.objectContaining({
-						persistenceDbPath: join(
-							dir,
-							"config",
-							"projects",
-							"effect-project",
-							"events.db",
-						),
+						persistenceDbPath: join(dir, "config", "events.db"),
 					}),
 				);
 				expect(config).not.toHaveProperty("persistence");
@@ -423,6 +419,7 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 		const layer = RelayFactoryLive(join(dir, "config")).pipe(
 			Layer.provide(
 				Layer.mergeAll(
+					makeDaemonStoreTestLayer(),
 					InstanceHealthCheckLive,
 					DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
 					ConfigPersistenceNoopLive,

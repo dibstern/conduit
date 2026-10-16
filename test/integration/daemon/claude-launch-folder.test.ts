@@ -91,7 +91,7 @@ it.each([
 	);
 	await running.kill();
 	await pending;
-	const db = new Database(running.projectStorePath());
+	const db = new Database(running.daemonStorePath());
 	try {
 		const stored = db
 			.prepare<[string], { payload_json: string }>(
@@ -160,7 +160,7 @@ it.each([
 	await after.view(sessionId);
 	await vi.waitFor(
 		() => {
-			const store = new Database(running.projectStorePath(), {
+			const store = new Database(running.daemonStorePath(), {
 				readonly: true,
 			});
 			try {
@@ -199,7 +199,7 @@ it.each([
 		} else expect(query.env["CLAUDE_CONFIG_DIR"]).toBe(expectedFolder);
 	}
 	if (!invalid) {
-		const store = new Database(running.projectStorePath(), { readonly: true });
+		const store = new Database(running.daemonStorePath(), { readonly: true });
 		try {
 			const receipt = store
 				.prepare<[string], { value: string }>(
@@ -329,7 +329,7 @@ it.skipIf(!process.env["CONDUIT_LEGACY_DIST"]).each([
 		await running.kill();
 		await first;
 		if (phase === "replay") {
-			const store = new Database(running.projectStorePath());
+			const store = new Database(running.daemonStorePath());
 			try {
 				const row = store
 					.prepare<[string], { payload_json: string }>(
@@ -363,7 +363,7 @@ it.skipIf(!process.env["CONDUIT_LEGACY_DIST"]).each([
 				? after.send(sessionId, "continue-legacy-folder")
 				: undefined;
 		await vi.waitFor(() => {
-			const store = new Database(running.projectStorePath(), {
+			const store = new Database(running.daemonStorePath(), {
 				readonly: true,
 			});
 			try {

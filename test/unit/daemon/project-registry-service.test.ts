@@ -32,6 +32,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
 const testProject: StoredProject = {
 	slug: "test-project",
@@ -66,6 +67,7 @@ const makeStubRelayCache = (): RelayCache => ({
 
 /** Compose a test layer with ProjectRegistry, DaemonEventBus, and a stub RelayCache. */
 const testLayer = Layer.mergeAll(
+	makeDaemonStoreTestLayer(),
 	makeProjectRegistryLive(),
 	DaemonEventBusLive,
 	makeDaemonStateLive({ configDir }),

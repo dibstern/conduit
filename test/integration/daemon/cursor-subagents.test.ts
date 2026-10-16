@@ -34,7 +34,7 @@ function rows(path: string): TraceRow[] {
 		.map((line) => JSON.parse(line) as TraceRow);
 }
 function snapshot(harness: ProcessHarness) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db
@@ -42,7 +42,7 @@ function snapshot(harness: ProcessHarness) {
 					[],
 					{ sequence: number; type: string; session_id: string; data: string }
 				>(
-					"SELECT sequence, type, session_id, data FROM events ORDER BY sequence",
+					"SELECT sequence, type, session_id, data FROM events WHERE project_id = 'process-test' ORDER BY sequence",
 				)
 				.all()
 				.map<StoredEvent>((row) => ({
@@ -63,12 +63,12 @@ function snapshot(harness: ProcessHarness) {
 						status: string;
 					}
 				>(
-					"SELECT id, parent_id, provider, provider_sid, model_id, status FROM sessions",
+					"SELECT id, parent_id, provider, provider_sid, model_id, status FROM sessions WHERE project_id = 'process-test'",
 				)
 				.all(),
 			turns: db
 				.prepare<[], { session_id: string; state: string }>(
-					"SELECT session_id, state FROM turns",
+					"SELECT session_id, state FROM turns WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test')",
 				)
 				.all(),
 		};
@@ -195,7 +195,7 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 	afterEach(async ({ task }) => {
 		if (!harness) return;
 		const fixture = harness;
-		const state = existsSync(fixture.projectStorePath())
+		const state = existsSync(fixture.daemonStorePath())
 			? snapshot(fixture)
 			: undefined;
 		const captured = rows(capturePath);

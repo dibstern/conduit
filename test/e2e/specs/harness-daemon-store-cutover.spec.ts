@@ -1,8 +1,7 @@
-// Run outside the socket-restricted sandbox. Every history is written by the
-// daemon, and both imports run through the daemon's real startup graph.
+// Run outside the socket-restricted sandbox. Legacy history is seeded before
+// the first daemon start; imports run through the real startup graph.
 import {
 	existsSync,
-	mkdirSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
@@ -12,8 +11,10 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Effect } from "effect";
+import { isProcessAlive } from "../../../src/lib/instance/managed-opencode-process.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import {
+	createLegacyDaemonFixture,
 	daemonStoreManifest,
 	writeImportArtifact,
 } from "../../helpers/daemon-store-import-manifest.js";
@@ -33,12 +34,16 @@ const initial = {
 		secondUserMessage: false,
 	},
 	// Live hashes carry run-specific payloads, so only their equality is stable.
+	coldStartImportedLegacySources: false,
+	removedRelayDisposed: false,
+	removedHistoryRetained: false,
+	postRestartSessionOwnedByB: false,
 	storeUnchangedByRestart: false,
 	projectEventStoreFiles: [] as string[],
 	passed: false,
 };
 
-test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
+test.use({ startHarness: false });
 test.beforeEach(({ isMobile }) => {
 	test.skip(isMobile, "The daemon store cutover is checked on desktop");
 });
@@ -59,13 +64,19 @@ test("the daemon imports project histories and keeps using its shared store acro
 	};
 	const foundSources = new Set<string>();
 	const sourceWatchers: ReturnType<typeof watch>[] = [];
-	const sharedEnvironment = { CONDUIT_SHARED_STORE: "1" };
+	const legacySources = new Set<string>();
 	const destination = daemonStorePath(harness.configDir);
 	const sources = () => {
 		const projects = join(harness.configDir, "projects");
-		return readdirSync(projects, { withFileTypes: true })
-			.filter((entry) => entry.isDirectory())
-			.map((entry) => join(projects, entry.name, "events.db"))
+		return [
+			...readdirSync(projects, { withFileTypes: true })
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => harness.legacyProjectStorePath(entry.name)),
+			...legacySources,
+		]
+			.flatMap((path) =>
+				["", "-wal", "-shm"].map((suffix) => `${path}${suffix}`),
+			)
 			.filter(existsSync)
 			.map((path) => relative(harness.configDir, path))
 			.sort();
@@ -83,39 +94,37 @@ test("the daemon imports project histories and keeps using its shared store acro
 		}
 	};
 	try {
-		const control = await harness.connect();
-		const { savedSlug: slugA } = await Effect.runPromise(
-			control.rpc.SaveProject({
-				slug: "process-test",
-				title: "Project A",
-				folders: [harness.projectDir],
-			}),
-		);
+		const slugA = "process-test";
+		const slugB = "project-b";
+		const sessionA = "ses_shared_store_a";
+		const sessionB = "ses_shared_store_b";
 		const folderB = join(harness.root, "project-b");
-		mkdirSync(folderB);
-		const { savedSlug: slugB } = await Effect.runPromise(
-			control.rpc.SaveProject({ title: "Project B", folders: [folderB] }),
-		);
-		if (!slugA || !slugB) throw new Error("SaveProject omitted a project slug");
-		const driverA = await harness.connect(undefined, undefined, slugA);
-		const driverB = await harness.connect(undefined, undefined, slugB);
-		const sessionA = await driverA.createSession("Shared-store project A");
-		await driverB.startInstance("opencode");
-		const sessionB = await driverB.createSession(
-			"Shared-store project B",
-			"opencode",
-			"opencode",
-			{ modelProviderId: "opencode", modelId: "nemotron-3-super-free" },
-		);
+		legacySources.add(join(harness.projectDir, ".conduit", "events.db"));
+		legacySources.add(join(folderB, ".conduit", "events.db"));
 		const promptA = "shared-store-history-a";
 		const promptB = "Hello, reply with just the word pong";
-		expect((await driverA.send(sessionA, promptA)).done["status"]).toBe("idle");
-		expect((await driverB.send(sessionB, promptB)).done["status"]).toBe("idle");
+		await createLegacyDaemonFixture(harness.configDir, [
+			{
+				projectId: slugA,
+				folder: harness.projectDir,
+				sessionId: sessionA,
+				prompt: promptA,
+				reply: `done(${promptA})`,
+			},
+			{
+				projectId: slugB,
+				folder: folderB,
+				sessionId: sessionB,
+				prompt: promptB,
+				reply: "pong",
+				legacy: true,
+			},
+		]);
 		expect(existsSync(destination)).toBe(false);
-		for (const slug of [slugA, slugB])
-			expect(existsSync(harness.projectStorePath(slug))).toBe(true);
-		await harness.terminate();
-		await harness.restart({ serviceEnvironment: sharedEnvironment });
+		expect(existsSync(harness.legacyProjectStorePath(slugA))).toBe(true);
+		expect(existsSync(join(folderB, ".conduit", "events.db"))).toBe(true);
+		await harness.restart();
+		evidence.coldStartImportedLegacySources = true;
 		expect(existsSync(destination)).toBe(true);
 		assertNoSources();
 
@@ -147,7 +156,7 @@ test("the daemon imports project histories and keeps using its shared store acro
 				.find((item) => item.startsWith(`${slug}: `));
 			const outcome = line?.slice(slug.length + 2).split(",")[0];
 			expect(outcome).toMatch(/^(seeded|imported)$/);
-			const source = harness.projectStorePath(slug);
+			const source = harness.legacyProjectStorePath(slug);
 			const backups = readdirSync(dirname(source)).filter((name) =>
 				/^events\.db\.imported-\d+$/.test(name),
 			);
@@ -167,11 +176,30 @@ test("the daemon imports project histories and keeps using its shared store acro
 			// reads, prompt, shutdown and restart to catch even transient recreation.
 			sourceWatchers.push(
 				watch(dirname(source), (_event, filename) => {
-					if (String(filename) === "events.db")
-						foundSources.add(relative(harness.configDir, source));
+					if (/^events\.db(?:-wal|-shm)?$/.test(String(filename)))
+						foundSources.add(
+							relative(
+								harness.configDir,
+								join(dirname(source), String(filename)),
+							),
+						);
 				}),
 			);
 		}
+		for (const source of [...legacySources].filter((source) =>
+			existsSync(dirname(source)),
+		))
+			sourceWatchers.push(
+				watch(dirname(source), (_event, filename) => {
+					if (/^events\.db(?:-wal|-shm)?$/.test(String(filename)))
+						foundSources.add(
+							relative(
+								harness.configDir,
+								join(dirname(source), String(filename)),
+							),
+						);
+				}),
+			);
 		expect(evidence.projects.map(({ outcome }) => outcome).sort()).toEqual([
 			"imported",
 			"seeded",
@@ -220,8 +248,6 @@ test("the daemon imports project histories and keeps using its shared store acro
 			),
 		);
 		const resumedB = await harness.connect(undefined, undefined, slugB);
-		// The HTTP recording contains five prompt segments. The harness retains
-		// its mock across daemon restarts, so this replays segment 2 on session B.
 		const secondPrompt = "Reply with just the word 'pong'. Nothing else.";
 		const response = await resumedB.send(sessionB, secondPrompt);
 		expect(response.done["status"]).toBe("idle");
@@ -259,11 +285,80 @@ test("the daemon imports project histories and keeps using its shared store acro
 		});
 		assertNoSources();
 
+		await harness.terminate();
+		await harness.restart();
+		assertNoSources();
+		const afterRestartB = await harness.connect(undefined, undefined, slugB);
+		const createdAfterRestart = await afterRestartB.createSession(
+			"Created after restart",
+		);
+		readStore((db) => {
+			expect(
+				db
+					.prepare("SELECT project_id FROM sessions WHERE id = ?")
+					.get(createdAfterRestart)?.["project_id"],
+			).toBe(slugB);
+		});
+		evidence.postRestartSessionOwnedByB = true;
+		const removedA = await harness.connect(undefined, undefined, slugA);
+		expect(
+			(await removedA.send(sessionA, "remove-project-relay-proof")).done[
+				"status"
+			],
+		).toBe("idle");
+		const aRunnerPids = harness
+			.claudeOptions()
+			.filter(
+				({ pid, options }) =>
+					harness.runnerPids().includes(pid) &&
+					options["cwd"] === harness.projectDir &&
+					options["maxTurns"] !== 0,
+			)
+			.map(({ pid }) => pid);
+		expect(aRunnerPids.length).toBeGreaterThan(0);
+		await Effect.runPromise(afterRestartB.rpc.RemoveProject({ slug: slugA }));
+		await expect.poll(() => aRunnerPids.some(isProcessAlive)).toBe(false);
+		await expect.poll(() => removedA.connected).toBe(false);
+		await expect(
+			harness.connect(undefined, undefined, slugA),
+		).rejects.toThrow();
+		evidence.removedRelayDisposed = true;
+		readStore((db) => {
+			expect(
+				db
+					.prepare("SELECT project_id FROM sessions WHERE id = ?")
+					.get(sessionA)?.["project_id"],
+			).toBe(slugA);
+			expect(
+				Number(
+					db
+						.prepare(
+							"SELECT count(*) AS count FROM messages WHERE session_id = ?",
+						)
+						.get(sessionA)?.["count"],
+				),
+			).toBeGreaterThan(0);
+		});
+		evidence.removedHistoryRetained = true;
+		// Removing A must not close the store borrowed by B.
+		const afterRemoval = await afterRestartB.createSession(
+			"Store survives relay disposal",
+		);
+		readStore((db) =>
+			expect(
+				db
+					.prepare("SELECT project_id FROM sessions WHERE id = ?")
+					.get(afterRemoval)?.["project_id"],
+			).toBe(slugB),
+		);
+		assertNoSources();
+
 		// Compare quiescent stores, with every SQLite reader closed before startup.
 		await harness.terminate();
 		assertNoSources();
 		const before = daemonStoreManifest(destination);
-		await harness.restart({ serviceEnvironment: sharedEnvironment });
+		// A was removed; the default browser probe would attach to its old slug.
+		await harness.restart({ skipBrowserProbe: true });
 		assertNoSources();
 		await harness.terminate();
 		assertNoSources();
@@ -323,7 +418,6 @@ test("a failed import blocks its project until restart and retained history reap
 		passed: false,
 	};
 	writeImportArtifact(unavailableArtifact, evidence);
-	const sharedEnvironment = { CONDUIT_SHARED_STORE: "1" };
 	const destination = daemonStorePath(harness.configDir);
 	const readStore = <A>(filename: string, read: (db: DatabaseSync) => A): A => {
 		const db = new DatabaseSync(filename, { readOnly: true });
@@ -345,48 +439,44 @@ test("a failed import blocks its project until restart and retained history reap
 		}
 	};
 	try {
-		const control = await harness.connect();
-		const { savedSlug: slugA } = await Effect.runPromise(
-			control.rpc.SaveProject({
-				slug: "process-test",
-				title: "Project A",
-				folders: [harness.projectDir],
-			}),
-		);
+		const slugA = "process-test";
+		const slugB = "project-b";
+		const slugC = "project-c";
+		const sessionA = "ses_available_a";
+		const sessionB = "ses_repaired_b";
+		const sessionC = "ses_retained_c";
 		const folderB = join(harness.root, "project-b");
 		const folderC = join(harness.root, "project-c");
-		mkdirSync(folderB);
-		mkdirSync(folderC);
-		const { savedSlug: slugB } = await Effect.runPromise(
-			control.rpc.SaveProject({ title: "Project B", folders: [folderB] }),
-		);
-		const { savedSlug: slugC } = await Effect.runPromise(
-			control.rpc.SaveProject({ title: "Project C", folders: [folderC] }),
-		);
-		if (!slugA || !slugB || !slugC)
-			throw new Error("SaveProject omitted a project slug");
-		const driverA = await harness.connect(undefined, undefined, slugA);
-		const driverB = await harness.connect(undefined, undefined, slugB);
-		const driverC = await harness.connect(undefined, undefined, slugC);
-		const sessionA = await driverA.createSession("Available project A");
-		const sessionB = await driverB.createSession("Repairable project B");
-		const sessionC = await driverC.createSession("Retained project C");
 		const promptA = "shared-store-available-a";
 		const promptB = "shared-store-repaired-b";
 		const promptC = "shared-store-retained-c";
-		for (const [driver, sessionId, prompt] of [
-			[driverA, sessionA, promptA],
-			[driverB, sessionB, promptB],
-			[driverC, sessionC, promptC],
-		] as const)
-			expect((await driver.send(sessionId, prompt)).done["status"]).toBe(
-				"idle",
-			);
+		await createLegacyDaemonFixture(harness.configDir, [
+			{
+				projectId: slugA,
+				folder: harness.projectDir,
+				sessionId: sessionA,
+				prompt: promptA,
+				reply: `done(${promptA})`,
+			},
+			{
+				projectId: slugB,
+				folder: folderB,
+				sessionId: sessionB,
+				prompt: promptB,
+				reply: `done(${promptB})`,
+			},
+			{
+				projectId: slugC,
+				folder: folderC,
+				sessionId: sessionC,
+				prompt: promptC,
+				reply: `done(${promptC})`,
+				retained: true,
+			},
+		]);
 		expect(existsSync(destination)).toBe(false);
-		await Effect.runPromise(control.rpc.RemoveProject({ slug: slugC }));
-		await harness.terminate();
 
-		const sourceB = harness.projectStorePath(slugB);
+		const sourceB = harness.legacyProjectStorePath(slugB);
 		const originalB = readFileSync(sourceB);
 		evidence.repaired.userMessagesBefore = readStore(sourceB, (db) =>
 			Number(
@@ -399,7 +489,7 @@ test("a failed import blocks its project until restart and retained history reap
 		);
 		expect(evidence.repaired.userMessagesBefore).toBe(1);
 		writeFileSync(sourceB, "not a SQLite database\n");
-		await harness.restart({ serviceEnvironment: sharedEnvironment });
+		await harness.restart();
 
 		const reader = await harness.connect(undefined, undefined, slugA);
 		const projects = await Effect.runPromise(reader.rpc.GetProjects({}));
@@ -510,7 +600,7 @@ test("a failed import blocks its project until restart and retained history reap
 
 		await harness.terminate();
 		writeFileSync(sourceB, originalB);
-		await harness.restart({ serviceEnvironment: sharedEnvironment });
+		await harness.restart();
 		const repairedReader = await harness.connect(undefined, undefined, slugA);
 		const repairedProjects = await Effect.runPromise(
 			repairedReader.rpc.GetProjects({}),

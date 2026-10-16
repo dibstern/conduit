@@ -50,6 +50,7 @@ import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	makeMockAccountDirectory,
 	makeOpenCodeInstancesStub,
@@ -102,6 +103,7 @@ describe("HttpServerRefTag", () => {
 
 describe("RelayFactoryTag", () => {
 	const configLayer = Layer.mergeAll(
+		makeDaemonStoreTestLayer(),
 		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		InstanceHealthCheckLive,
 		DaemonConfigRefLive(makeDaemonConfigFromOptions({})),
