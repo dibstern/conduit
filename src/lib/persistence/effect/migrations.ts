@@ -6,6 +6,7 @@ import {
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
+	DAEMON_STORE_IMPORTS_MIGRATION,
 	DROP_ACTIVITIES_MIGRATION,
 	DROP_EVENTS_SESSION_FK_MIGRATION,
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
@@ -1190,6 +1191,9 @@ export const effectMigrationEntries = {
 		for (const statement of statements.slice(2))
 			yield* executeSqlStatements(statement);
 	}),
+	"0060_daemon_store_imports": executeSqlStatements(
+		readMigrationSql(DAEMON_STORE_IMPORTS_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
