@@ -6,6 +6,9 @@ import { generateSlug } from "../utils.js";
 export const projectStorageDir = (configDir: string, slug: string): string =>
 	resolve(configDir, "projects", slug);
 
+export const daemonStorePath = (configDir: string): string =>
+	resolve(configDir, "events.db");
+
 export const readProjectStorageOwner = (
 	configDir: string,
 	slug: string,
