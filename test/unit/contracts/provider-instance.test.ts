@@ -2,10 +2,20 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	isKnownDriverKind,
+	PROVIDER_DRIVERS,
 	ProviderInstanceSchema,
 } from "../../../src/lib/contracts/provider-instance.js";
 
 describe("provider-instance contracts", () => {
+	it.each([
+		["claude", "native", false],
+		["opencode", "queue", false],
+		["cursor", "native", true],
+	] as const)("%s pins steering and prompt durability", (driver, steering, durable) => {
+		expect(PROVIDER_DRIVERS[driver].steering).toBe(steering);
+		expect(PROVIDER_DRIVERS[driver].promptsSurviveRestart).toBe(durable);
+	});
+
 	it("isKnownDriverKind distinguishes the closed known set from unknown strings", () => {
 		expect(isKnownDriverKind("claude")).toBe(true);
 		expect(isKnownDriverKind("opencode")).toBe(true);

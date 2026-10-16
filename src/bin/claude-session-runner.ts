@@ -2,10 +2,14 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 import { makeClaudeRunnerLaunch } from "../lib/provider/claude/claude-runner-launch.js";
+import { makeCursorRunnerLaunch } from "../lib/provider/cursor/cursor-runner-launch.js";
 import { runSessionRunner } from "../lib/provider/runner/runner-host.js";
 
 /** The payload each runner-backed driver launches. */
-const launches = new Map([["claude", makeClaudeRunnerLaunch]]);
+const launches = new Map<string, typeof makeClaudeRunnerLaunch>([
+	["claude", makeClaudeRunnerLaunch],
+	["cursor", makeCursorRunnerLaunch],
+]);
 
 const main = Effect.gen(function* () {
 	const driverKind = process.argv[6] ?? "claude";

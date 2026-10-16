@@ -22,7 +22,7 @@
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { discoveryState } from "../../stores/discovery.svelte.js";
+	import { discoveryState, getSessionDriver } from "../../stores/discovery.svelte.js";
 	import { sessionGoals } from "../../stores/goal.svelte.js";
 	import { splitAtForkPoint } from "../../utils/fork-split.js";
 	import ForkContextBlock from "./ForkContextBlock.svelte";
@@ -402,10 +402,14 @@
 				)
 			: null,
 	);
-	const parentSession = $derived.by(() => {
-		const id = primary ? sessionState.currentParentId : activeSession?.parentID;
-		return id ? findSession(id) : null;
-	});
+	// The fork point and lineage arrive together, so a row with a fork point
+	// and no lineage outlived its Source; until then the announcement stands in.
+	const forkedFrom = $derived(
+		activeSession?.forkPointMessageId || activeSession?.forkMessageId || activeSession?.forkPointTimestamp
+			? activeSession?.forkedFrom
+			: primary ? sessionState.currentFork?.forkedFrom : undefined,
+	);
+	const sourceSession = $derived(forkedFrom ? findSession(forkedFrom) : null);
 	// A fork renders two transcripts; only the current half can be live.
 	const inheritedTurns = $derived(
 		projectInheritedTurns(forkSplit?.inherited ?? [], false),
@@ -548,7 +552,7 @@
 			{#if final}
 				{#each turn.notices as notice (notice.uuid)}
 					<div class="msg-container">
-						<SystemMessage message={notice} />
+						<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} />
 					</div>
 				{/each}
 			{/if}
@@ -623,8 +627,8 @@
 		</ForkContextBlock>
 
 		<ForkDivider
-			parentTitle={parentSession?.title ?? "parent session"}
-			parentId={activeSession?.parentID ?? ""}
+			sourceTitle={sourceSession?.title ?? "parent session"}
+			sourceId={forkedFrom}
 		/>
 
 		{#each currentTurns as turn (turn.id)}

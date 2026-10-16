@@ -1,5 +1,6 @@
-import { chmodSync } from "node:fs";
+import { appendFileSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
+import { dirname } from "node:path";
 import { Cause, Deferred, Effect, FiberSet, Scope } from "effect";
 import { createLogger } from "../../logger.js";
 import type { TurnResult } from "../types.js";
@@ -15,6 +16,7 @@ import {
 	runnerIdleFailure,
 } from "./runner-protocol.js";
 import { registerRunner, removeRunner } from "./runner-registry.js";
+import { RunnerSendJournal } from "./runner-send-journal.js";
 import { RunnerSpool } from "./runner-spool.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
@@ -29,12 +31,19 @@ export interface RunnerLaunchCallbacks {
 	readonly sessionId: string;
 	readonly runFork: (effect: Effect.Effect<void>) => unknown;
 	readonly stateChanged: () => void;
+	/** Fence admission before a payload publishes its final turn outcome. */
+	readonly retireAfterCommand?: (inputId: string) => void;
 	readonly isCandidate: () => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
 	readonly readThread: RunnerSocket["threadReadEffect"];
 }
 
 export interface RunnerLaunch {
+	/** Retire a poisoned payload after delivering its command result. */
+	readonly shouldExitAfterCommand?: (
+		command: SessionCommand,
+		result: TurnResult | undefined,
+	) => boolean;
 	readonly wire?: RunnerWireCodec;
 	readonly capabilities?: Pick<RunnerHello, "stopsTasks" | "taggedConfigDir">;
 	readonly makeRunner: (
@@ -74,6 +83,7 @@ export const runSessionRunner = (
 		let attached = false;
 		let exiting = false;
 		let retiring = false;
+		let retirementInputId: string | undefined;
 		let role: "candidate" | "retiring" | undefined =
 			process.argv[5] === "upgrade" ? "candidate" : undefined;
 		const register = () =>
@@ -115,6 +125,7 @@ export const runSessionRunner = (
 			);
 		}
 		let runner: SessionRunner | undefined;
+		let sendJournal: RunnerSendJournal | undefined;
 		let initializing = false;
 		const spool = new RunnerSpool(`${socketPath}.spool`);
 		let backgroundSnapshot:
@@ -129,6 +140,7 @@ export const runSessionRunner = (
 		let reportedConfiguration: RunnerUpgradeState["liveConfiguration"];
 		const quiescent = () =>
 			!exiting &&
+			retirementInputId === undefined &&
 			!retiring &&
 			activeCommands === 0 &&
 			activeOutputs === 0 &&
@@ -173,6 +185,9 @@ export const runSessionRunner = (
 			sessionId,
 			runFork,
 			stateChanged: reportUpgradeState,
+			retireAfterCommand: (inputId) => {
+				retirementInputId = inputId;
+			},
 			isCandidate: () => role === "candidate",
 			turnStateChanged: (inFlight) => {
 				idle?.setTurnInFlight(inFlight);
@@ -185,7 +200,13 @@ export const runSessionRunner = (
 		});
 		const bindings = new Map<
 			string,
-			{ sessionId: string; commandId?: string }
+			{
+				sessionId: string;
+				commandId?: string;
+				attempt?: number;
+				fallback?: boolean;
+				providerRunId?: string;
+			}
 		>();
 		const commands = new Map<
 			string,
@@ -229,6 +250,15 @@ export const runSessionRunner = (
 						runFork(
 							Effect.gen(function* () {
 								if (!runner) {
+									sendJournal = yield* Effect.try({
+										try: () =>
+											new RunnerSendJournal(
+												dirname(socketPath),
+												sessionId,
+												driverKind,
+											),
+										catch: (cause) => runnerFailure("open runner sends", cause),
+									});
 									runner = yield* launch
 										.makeRunner(config, (output) => {
 											if (output.type === "background-task") {
@@ -241,7 +271,36 @@ export const runSessionRunner = (
 											idle?.activity(output);
 											activeOutputs++;
 											reportUpgradeState();
-											return spool.emit(output).pipe(
+											const binding =
+												"sinkId" in output
+													? bindings.get(output.sinkId)
+													: undefined;
+											const runId =
+												output.type === "event"
+													? output.event.providerRefs.providerTurnId
+													: undefined;
+											const recordRun =
+												runId &&
+												binding?.commandId &&
+												sendJournal &&
+												binding.providerRunId !== runId
+													? sendJournal
+															.reportProviderRun(
+																binding.commandId,
+																binding.attempt ?? 0,
+																binding.fallback === true,
+																runId,
+															)
+															.pipe(
+																Effect.tap(() =>
+																	Effect.sync(() => {
+																		binding.providerRunId = runId;
+																	}),
+																),
+															)
+													: Effect.void;
+											return recordRun.pipe(
+												Effect.andThen(spool.emit(output)),
 												Effect.ensuring(
 													Effect.sync(() => {
 														activeOutputs--;
@@ -305,15 +364,26 @@ export const runSessionRunner = (
 									pid: process.pid,
 									bindings: [...bindings].map(([sinkId, binding]) => ({
 										sinkId,
-										...binding,
+										sessionId: binding.sessionId,
+										...(binding.commandId
+											? { commandId: binding.commandId }
+											: {}),
 									})),
 									pendingOutputs: spool.pendingOutputs,
 									completedCommands: [...completedCommands.values()],
+									sendCommands: sendJournal?.commands ?? [],
 									upgradeState: upgradeState(),
 									...launch.capabilities,
 								});
 								initializing = false;
-							}),
+							}).pipe(
+								Effect.catchAll((failure) =>
+									Effect.sync(() => {
+										initializing = false;
+										peer.refuse(failure);
+									}),
+								),
+							),
 						);
 					} else if (message.type === "replay") {
 						if (
@@ -348,6 +418,37 @@ export const runSessionRunner = (
 					} else if (message.type === "output-reply") {
 						spool.reply(message);
 						reportUpgradeState();
+					} else if (
+						message.type === "settled-commands" &&
+						greeted &&
+						sendJournal
+					) {
+						const journal = sendJournal;
+						runFork(
+							Effect.try({
+								try: () => {
+									const records = journal.acknowledge(message.commands);
+									const proof =
+										process.env["NODE_ENV"] === "test"
+											? process.env["CONDUIT_TEST_PROCESS_PROOF"]
+											: undefined;
+									if (proof && records.length)
+										appendFileSync(
+											proof,
+											`${JSON.stringify({ kind: "runner-send-pruned", sessionId, records })}\n`,
+										);
+									peer.write({
+										type: "settled-commands-ack",
+										commands: message.commands,
+									});
+								},
+								catch: (cause) => runnerFailure("prune runner sends", cause),
+							}).pipe(
+								Effect.catchAll((failure) =>
+									Effect.logWarning(failure.message),
+								),
+							),
+						);
 					} else if (message.type === "upgrade-retire") {
 						const ready =
 							greeted &&
@@ -374,7 +475,7 @@ export const runSessionRunner = (
 						register();
 					} else if (message.type === "command" && runner) {
 						const command = message.command;
-						if (exiting) {
+						if (exiting || retirementInputId !== undefined) {
 							peer.write({
 								type: "command-reply",
 								commandId: message.commandId,
@@ -402,10 +503,19 @@ export const runSessionRunner = (
 						const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}${command.type === "send-turn" && command.input.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
 						launch.acceptCommand(command);
 						if (command.type === "send-turn") {
-							bindings.set(command.sinkId, {
-								sessionId: command.input.sessionId,
-								commandId: message.commandId,
-							});
+							const binding = bindings.get(command.sinkId);
+							if (
+								binding?.commandId !== message.commandId ||
+								binding.attempt !== (message.attempt ?? 0) ||
+								binding.fallback !==
+									(command.input.nativeResumeFallback === true)
+							)
+								bindings.set(command.sinkId, {
+									sessionId: command.input.sessionId,
+									commandId: message.commandId,
+									attempt: message.attempt ?? 0,
+									fallback: command.input.nativeResumeFallback === true,
+								});
 						}
 						reportUpgradeState();
 						if (process.env["NODE_ENV"] === "test" && process.connected)
@@ -426,8 +536,16 @@ export const runSessionRunner = (
 								commands.set(deduplicationKey, result);
 								if (!runner)
 									return yield* Effect.die("Runner is not initialized");
+								const execution = launch.executeEffect(runner, command);
 								const exit = yield* Effect.exit(
-									launch.executeEffect(runner, command),
+									command.type === "send-turn" && sendJournal
+										? sendJournal.execute(
+												message.commandId,
+												message.attempt ?? 0,
+												command.input.nativeResumeFallback === true,
+												execution,
+											)
+										: execution,
 								);
 								yield* Deferred.done(result, exit);
 								return yield* Deferred.await(result);
@@ -457,6 +575,11 @@ export const runSessionRunner = (
 													Cause.squash(cause),
 												),
 											});
+											if (
+												command.type === "send-turn" &&
+												command.input.inputId === retirementInputId
+											)
+												beginExit();
 										}),
 									onSuccess: (result) =>
 										Effect.gen(function* () {
@@ -474,6 +597,12 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												...(result ? { result } : {}),
 											});
+											if (
+												(command.type === "send-turn" &&
+													command.input.inputId === retirementInputId) ||
+												launch.shouldExitAfterCommand?.(command, result)
+											)
+												beginExit();
 											if (command.type === "shutdown")
 												runFork(
 													Deferred.succeed(stopped, undefined).pipe(

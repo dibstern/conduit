@@ -1,8 +1,8 @@
-Feature: Cursor is listed safely before its runtime is installed
+Feature: Cursor discovery explains why it is unavailable
 
 Scenario Outline: the provider rail shows Cursor unavailable with its reason
   Given the conduit app is served with the connected mockup
-  And a Cursor account is registered without a runtime
+  And a Cursor account is unavailable with reason <reason>
   And the harness logo is viewed in the <tier> tier
   When I start a new session
   And I open the model picker
@@ -11,6 +11,6 @@ Scenario Outline: the provider rail shows Cursor unavailable with its reason
   And the model-picker region visually matches cursor-unavailable-rail at <threshold> percent
 
 Examples:
-  | tier  | reason                       | threshold |
-  | wide  | Cursor runtime not installed | 98        |
-  | phone | Cursor runtime not installed | 98        |
+  | tier  | reason                    | threshold |
+  | wide  | Cursor SDK could not load | 98        |
+  | phone | Cursor SDK could not load | 98        |

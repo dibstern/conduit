@@ -111,6 +111,8 @@ describe("Bound project provenance", () => {
 			"0058_compact_redundant_events",
 			"0059_session_project_scope",
 			"0060_daemon_store_imports",
+			"0061_sessions_lineage",
+			"0062_legacy_forks",
 		]);
 	});
 

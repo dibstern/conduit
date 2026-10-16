@@ -1,0 +1,102 @@
+{"scenario":"preToolUse-deny","model":{"id":"composer-2.5","params":[{"id":"fast","value":"false"}]},"sdkVersion":"1.0.37","recordedAt":"2026-10-16T05:17:12.811Z"}
+{"kind":"hooks.config","at":"2026-10-16T05:17:12.812Z","elapsedMs":0,"data":{"source":"project","path":"/home/test/src/personal/cursor-spike/ws/.cursor/hooks.json","hooks":{"preToolUse":[{"command":"/home/test/.local/share/mise/installs/node/26.10.0/bin/node /home/test/src/personal/cursor-spike/scripts/hook.mjs preToolUse-deny preToolUse-0 deny 0 0","timeout":20,"failClosed":true}]}}}
+{"kind":"hooks.config","at":"2026-10-16T05:17:12.813Z","elapsedMs":1,"data":{"source":"user","path":"/home/test/src/personal/cursor-spike/runtime-home/.cursor/hooks.json","hooks":{}}}
+{"kind":"create.options","at":"2026-10-16T05:17:12.818Z","elapsedMs":6,"data":{"model":{"id":"composer-2.5","params":[{"id":"fast","value":"false"}]},"tools":["shell"],"local":{"cwd":"/home/test/src/personal/cursor-spike/ws","store":{"stateRoot":"/home/test/src/personal/cursor-spike/stores/preToolUse-deny","workspaceRef":"/home/test/src/personal/cursor-spike/ws"},"settingSources":["project"],"enableAgentRetries":false}}}
+{"kind":"created","at":"2026-10-16T05:17:15.531Z","elapsedMs":2719,"data":{"agentId":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80"}}
+{"kind":"send.options","at":"2026-10-16T05:17:15.532Z","elapsedMs":2721,"data":{"turn":9,"prompt":"Run `echo hi` exactly once. If blocked, quote the reason. Do not retry.","options":{"model":{"id":"composer-2.5","params":[{"id":"fast","value":"false"}]},"onDelta":"[capture every update]","onStep":"[capture every step]"}}}
+{"kind":"run.handle","at":"2026-10-16T05:17:18.983Z","elapsedMs":6172,"data":{"id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","agentId":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","status":"running","steer":"function"}}
+{"kind":"stream","at":"2026-10-16T05:17:18.984Z","elapsedMs":6173,"data":{"type":"status","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","status":"RUNNING"}}
+{"kind":"delta","at":"2026-10-16T05:17:21.490Z","elapsedMs":8678,"data":{"type":"thinking-delta","text":"Running `echo hi` exactly"}}
+{"kind":"stream","at":"2026-10-16T05:17:21.490Z","elapsedMs":8678,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":"Running `echo hi` exactly"}}
+{"kind":"delta","at":"2026-10-16T05:17:21.490Z","elapsedMs":8678,"data":{"type":"token-delta","tokens":6}}
+{"kind":"delta","at":"2026-10-16T05:17:21.490Z","elapsedMs":8678,"data":{"type":"thinking-delta","text":" once."}}
+{"kind":"stream","at":"2026-10-16T05:17:21.490Z","elapsedMs":8678,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":" once."}}
+{"kind":"delta","at":"2026-10-16T05:17:21.490Z","elapsedMs":8679,"data":{"type":"token-delta","tokens":1}}
+{"kind":"step","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"thinkingMessage","message":{"text":"Running `echo hi` exactly once.","thinkingDurationMs":1}}}
+{"kind":"delta","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"thinking-completed","thinkingDurationMs":1}}
+{"kind":"stream","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":"","thinking_duration_ms":1}}
+{"kind":"delta","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"token-delta","tokens":4}}
+{"kind":"delta","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"token-delta","tokens":2}}
+{"kind":"delta","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"token-delta","tokens":4}}
+{"kind":"delta","at":"2026-10-16T05:17:21.491Z","elapsedMs":8679,"data":{"type":"token-delta","tokens":5}}
+{"kind":"delta","at":"2026-10-16T05:17:21.491Z","elapsedMs":8680,"data":{"type":"tool-call-started","callId":"tool_9fb2bc5f-8133-41d9-b966-fa45bff7853","toolCall":{"type":"shell","args":{"command":"echo hi","timeout":30000}},"modelCallId":"d389e83f-eaf9-4d3d-9fd9-e5841c82dca3-0-eoh2"}}
+{"kind":"stream","at":"2026-10-16T05:17:21.492Z","elapsedMs":8680,"data":{"type":"tool_call","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","call_id":"tool_9fb2bc5f-8133-41d9-b966-fa45bff7853","name":"shell","status":"running","args":{"command":"echo hi","timeout":30000}}}
+{"kind":"delta","at":"2026-10-16T05:17:21.492Z","elapsedMs":8681,"data":{"type":"tool-requests-listed","callCount":1}}
+{"kind":"hook.start","at":"2026-10-16T05:17:21.589Z","data":{"pid":29887,"label":"preToolUse-0","mode":"deny","input":{"conversation_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","generation_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","model":"unknown","tool_name":"Shell","tool_input":{"command":"echo hi","cwd":"","timeout":30000},"tool_use_id":"d0e90117-b495-45ec-bed7-1c09b2fdfb02","cwd":"","session_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","hook_event_name":"preToolUse","cursor_version":"1.0.0","workspace_roots":["/home/test/src/personal/cursor-spike/ws"],"user_email":null,"transcript_path":null}}}
+{"kind":"hook.finish","at":"2026-10-16T05:17:21.590Z","data":{"pid":29887,"label":"preToolUse-0","output":{"permission":"deny","user_message":"USER_preToolUse-0_deny","agent_message":"BRIDGE_REASON_preToolUse-0_deny_7931"},"exitCode":0}}
+{"kind":"step","at":"2026-10-16T05:17:21.843Z","elapsedMs":9031,"data":{"type":"toolCall","message":{"type":"shell","args":{"command":"echo hi","timeout":30000},"result":{"status":"error","error":{"message":"USER_preToolUse-0_deny\n\nAgent note: Do not suggest workarounds to the blocked tool.","command":"echo hi","workingDirectory":""}}}}}
+{"kind":"delta","at":"2026-10-16T05:17:21.843Z","elapsedMs":9031,"data":{"type":"tool-call-completed","callId":"tool_9fb2bc5f-8133-41d9-b966-fa45bff7853","toolCall":{"type":"shell","args":{"command":"echo hi","timeout":30000},"result":{"status":"error","error":{"message":"USER_preToolUse-0_deny\n\nAgent note: Do not suggest workarounds to the blocked tool.","command":"echo hi","workingDirectory":""}}},"modelCallId":"d389e83f-eaf9-4d3d-9fd9-e5841c82dca3-0-eoh2"}}
+{"kind":"stream","at":"2026-10-16T05:17:21.843Z","elapsedMs":9031,"data":{"type":"tool_call","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","call_id":"tool_9fb2bc5f-8133-41d9-b966-fa45bff7853","name":"shell","status":"completed","args":{"command":"echo hi","timeout":30000},"result":{"status":"error","error":{"message":"USER_preToolUse-0_deny\n\nAgent note: Do not suggest workarounds to the blocked tool.","command":"echo hi","workingDirectory":""}}}}
+{"kind":"delta","at":"2026-10-16T05:17:21.843Z","elapsedMs":9031,"data":{"type":"token-delta","tokens":23}}
+{"kind":"delta","at":"2026-10-16T05:17:22.849Z","elapsedMs":10037,"data":{"type":"thinking-delta","text":"The command was blocked"}}
+{"kind":"stream","at":"2026-10-16T05:17:22.849Z","elapsedMs":10037,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":"The command was blocked"}}
+{"kind":"delta","at":"2026-10-16T05:17:22.940Z","elapsedMs":10128,"data":{"type":"token-delta","tokens":5}}
+{"kind":"delta","at":"2026-10-16T05:17:22.988Z","elapsedMs":10176,"data":{"type":"thinking-delta","text":" by a tool-use restriction."}}
+{"kind":"stream","at":"2026-10-16T05:17:22.996Z","elapsedMs":10184,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":" by a tool-use restriction."}}
+{"kind":"delta","at":"2026-10-16T05:17:23.052Z","elapsedMs":10240,"data":{"type":"token-delta","tokens":7}}
+{"kind":"delta","at":"2026-10-16T05:17:23.204Z","elapsedMs":10392,"data":{"type":"thinking-delta","text":"\n\nThe exact reason is"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.340Z","elapsedMs":10528,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":"\n\nThe exact reason is"}}
+{"kind":"delta","at":"2026-10-16T05:17:23.735Z","elapsedMs":10923,"data":{"type":"token-delta","tokens":5}}
+{"kind":"delta","at":"2026-10-16T05:17:23.738Z","elapsedMs":10927,"data":{"type":"thinking-delta","text":" \"USER_preToolUse-0_deny\"."}}
+{"kind":"stream","at":"2026-10-16T05:17:23.743Z","elapsedMs":10931,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":" \"USER_preToolUse-0_deny\"."}}
+{"kind":"delta","at":"2026-10-16T05:17:23.761Z","elapsedMs":10949,"data":{"type":"token-delta","tokens":7}}
+{"kind":"step","at":"2026-10-16T05:17:23.761Z","elapsedMs":10949,"data":{"type":"thinkingMessage","message":{"text":"The command was blocked by a tool-use restriction.\n\nThe exact reason is \"USER_preToolUse-0_deny\".","thinkingDurationMs":1}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.767Z","elapsedMs":10956,"data":{"type":"thinking-completed","thinkingDurationMs":1}}
+{"kind":"stream","at":"2026-10-16T05:17:23.770Z","elapsedMs":10958,"data":{"type":"thinking","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","text":"","thinking_duration_ms":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.771Z","elapsedMs":10960,"data":{"type":"text-delta","text":"The"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.773Z","elapsedMs":10961,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"The"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.782Z","elapsedMs":10970,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.787Z","elapsedMs":10976,"data":{"type":"text-delta","text":" command"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.791Z","elapsedMs":10980,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":" command"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.795Z","elapsedMs":10983,"data":{"type":"token-delta","tokens":2}}
+{"kind":"delta","at":"2026-10-16T05:17:23.800Z","elapsedMs":10989,"data":{"type":"text-delta","text":" was"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.804Z","elapsedMs":10992,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":" was"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.804Z","elapsedMs":10992,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.807Z","elapsedMs":10995,"data":{"type":"text-delta","text":" blocked"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.807Z","elapsedMs":10996,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":" blocked"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.810Z","elapsedMs":10998,"data":{"type":"token-delta","tokens":2}}
+{"kind":"delta","at":"2026-10-16T05:17:23.810Z","elapsedMs":10999,"data":{"type":"text-delta","text":"."}}
+{"kind":"stream","at":"2026-10-16T05:17:23.810Z","elapsedMs":10999,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"."}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.811Z","elapsedMs":10999,"data":{"type":"text-delta","text":" Reason"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.811Z","elapsedMs":10999,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":" Reason"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.811Z","elapsedMs":10999,"data":{"type":"token-delta","tokens":2}}
+{"kind":"delta","at":"2026-10-16T05:17:23.811Z","elapsedMs":10999,"data":{"type":"text-delta","text":":"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.811Z","elapsedMs":11000,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":":"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.812Z","elapsedMs":11000,"data":{"type":"text-delta","text":" **"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.812Z","elapsedMs":11000,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":" **"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.812Z","elapsedMs":11000,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.831Z","elapsedMs":11019,"data":{"type":"text-delta","text":"USER"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.839Z","elapsedMs":11027,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"USER"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.852Z","elapsedMs":11040,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.859Z","elapsedMs":11047,"data":{"type":"text-delta","text":"_pre"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.862Z","elapsedMs":11050,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"_pre"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.862Z","elapsedMs":11051,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.863Z","elapsedMs":11051,"data":{"type":"text-delta","text":"Tool"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.863Z","elapsedMs":11051,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"Tool"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.863Z","elapsedMs":11052,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"text-delta","text":"Use"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"Use"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"text-delta","text":"-"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"-"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"text-delta","text":"0"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.864Z","elapsedMs":11052,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"0"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.864Z","elapsedMs":11053,"data":{"type":"text-delta","text":"_d"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.865Z","elapsedMs":11053,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"_d"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.865Z","elapsedMs":11054,"data":{"type":"text-delta","text":"eny"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.866Z","elapsedMs":11054,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"eny"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.866Z","elapsedMs":11054,"data":{"type":"token-delta","tokens":1}}
+{"kind":"delta","at":"2026-10-16T05:17:23.866Z","elapsedMs":11055,"data":{"type":"text-delta","text":"**"}}
+{"kind":"stream","at":"2026-10-16T05:17:23.867Z","elapsedMs":11055,"data":{"type":"assistant","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","message":{"role":"assistant","content":[{"type":"text","text":"**"}]}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.867Z","elapsedMs":11055,"data":{"type":"token-delta","tokens":1}}
+{"kind":"step","at":"2026-10-16T05:17:23.867Z","elapsedMs":11055,"data":{"type":"assistantMessage","message":{"text":"The command was blocked. Reason: **USER_preToolUse-0_deny**"}}}
+{"kind":"delta","at":"2026-10-16T05:17:23.867Z","elapsedMs":11055,"data":{"type":"step-completed","stepId":4,"stepDurationMs":2603}}
+{"kind":"delta","at":"2026-10-16T05:17:23.869Z","elapsedMs":11057,"data":{"type":"turn-ended","usage":{"inputTokens":8373,"outputTokens":112,"cacheReadTokens":5239,"cacheWriteTokens":0}}}
+{"kind":"stream","at":"2026-10-16T05:17:23.869Z","elapsedMs":11057,"data":{"type":"usage","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","usage":{"inputTokens":8373,"outputTokens":112,"cacheReadTokens":5239,"cacheWriteTokens":0,"totalTokens":13724}}}
+{"kind":"stream","at":"2026-10-16T05:17:24.162Z","elapsedMs":11350,"data":{"type":"status","agent_id":"agent-962d29ce-8e46-41bf-97c8-f69ce5f00c80","run_id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","status":"FINISHED"}}
+{"kind":"status.change","at":"2026-10-16T05:17:24.176Z","elapsedMs":11365,"data":{"status":"finished","usage":{"inputTokens":8373,"outputTokens":112,"cacheReadTokens":5239,"cacheWriteTokens":0,"totalTokens":13724}}}
+{"kind":"wait.result","at":"2026-10-16T05:17:24.184Z","elapsedMs":11372,"data":{"id":"run-bfffcb7e-08d6-4f28-9b56-46734e90fc61","requestId":"d389e83f-eaf9-4d3d-9fd9-e5841c82dca3","status":"finished","result":"The command was blocked. Reason: **USER_preToolUse-0_deny**","model":{"id":"composer-2.5","params":[{"id":"fast","value":"false"}]},"durationMs":8641,"usage":{"inputTokens":8373,"outputTokens":112,"cacheReadTokens":5239,"cacheWriteTokens":0,"totalTokens":13724}}}
+{"kind":"stream.end","at":"2026-10-16T05:17:24.184Z","elapsedMs":11372,"data":{}}
+{"kind":"files","at":"2026-10-16T05:17:24.185Z","elapsedMs":11373,"data":{"a":null,"edit":"before\n","deleted":false}}
+{"kind":"agent.disposed","at":"2026-10-16T05:17:24.435Z","elapsedMs":11623,"data":{}}
+{"kind":"store.disposed.handles","at":"2026-10-16T05:17:24.642Z","elapsedMs":11830,"data":{"pid":25430,"handles":[]}}

@@ -463,7 +463,6 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 		const registry = new ProviderRegistry([
 			{
 				providerId: "claude",
-				steering: false,
 				discoverEffect: () => Effect.die("Prewarm must not discover"),
 				sendTurnEffect: () => Effect.die("Prewarm must not send a turn"),
 				preWarmSessionEffect: (input) =>

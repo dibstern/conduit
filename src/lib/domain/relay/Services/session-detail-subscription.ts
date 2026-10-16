@@ -35,7 +35,6 @@ import {
 	PAGE_FRAME_BUDGET,
 	PAGE_MESSAGES,
 } from "../../../persistence/session-history-adapter.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeHistoryReconcileTag } from "./opencode-runtime-ingress-service.js";
 import { stream } from "./read-model-subscription.js";
@@ -108,7 +107,6 @@ export const subscribeSessionDetail = (options: {
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const registry = yield* Effect.serviceOption(ProviderRegistryTag);
 			const directory = yield* AccountDirectory;
 			const sessionRow = yield* Effect.either(
 				readQuery.getSession(options.sessionId),
@@ -234,7 +232,7 @@ export const subscribeSessionDetail = (options: {
 															inbox: {
 																paused: inbox.paused,
 																// Only the reasons that do not depend on the draft.
-																steer: providerSteers(registry, account)
+																steer: providerSteers(account)
 																	? inbox.promptOpen
 																		? "prompt_open"
 																		: null

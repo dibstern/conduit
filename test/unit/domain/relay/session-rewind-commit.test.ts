@@ -146,7 +146,6 @@ it.scoped(
 			const sentPrompts: string[] = [];
 			const provider: ProviderInstance = {
 				providerId: "opencode",
-				steering: false,
 				discoverEffect: () => Effect.die("This send supplies its model"),
 				sendTurnEffect: (input) =>
 					Effect.gen(function* () {
