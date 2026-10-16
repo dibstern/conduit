@@ -4,9 +4,9 @@ import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-sign
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import {
-	type CanonicalEventType,
 	canonicalEvent,
 	type EventPayloadMap,
+	type LiveEventType,
 } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { SessionPermissionModeSchema } from "../../../shared-types.js";
@@ -26,7 +26,7 @@ import {
 // Child sessions are not shell rows; the same version bump reaches their
 // viewers as a family-feed upsert (ni8.28).
 
-const commitSessionSetting = <T extends CanonicalEventType>(
+const commitSessionSetting = <T extends LiveEventType>(
 	type: T,
 	sessionId: string,
 	data: EventPayloadMap[T],

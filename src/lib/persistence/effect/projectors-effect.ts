@@ -7,11 +7,7 @@ import type { ReadModelCollection } from "../../contracts/read-model-advance.js"
 import { persistedTurnState } from "../../contracts/turn-phase.js";
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
-import type {
-	CanonicalEventType,
-	EventPayloadMap,
-	StoredEvent,
-} from "../events.js";
+import type { LiveEventType, StoredEvent } from "../events.js";
 import {
 	getSessionStatements,
 	isSessionRemoval,
@@ -97,7 +93,7 @@ export const mergeTouches = (
 
 export interface EffectProjector {
 	readonly name: string;
-	readonly handles: readonly CanonicalEventType[];
+	readonly handles: readonly LiveEventType[];
 	/**
 	 * Apply the event, then report what moved and what is gone. The projection
 	 * runner needs nothing from the caller to know either.
@@ -112,10 +108,29 @@ export interface EffectProjector {
 	>;
 }
 
-function isEventType<K extends CanonicalEventType>(
-	event: StoredEvent,
+export function defineProjector<
+	const Types extends readonly [LiveEventType, ...LiveEventType[]],
+>(
+	makeProjector: () => {
+		readonly name: string;
+		readonly handles: Types;
+		readonly project: (
+			event: Extract<StoredEvent, { type: NoInfer<Types[number]> }>,
+			ctx: ProjectionContext,
+		) => ReturnType<EffectProjector["project"]>;
+	},
+): () => Omit<EffectProjector, "handles"> & { readonly handles: Types } {
+	// The runner dispatches only events in handles. Erase the narrowed input at
+	// that boundary while retaining the literal list for the coverage check.
+	return makeProjector as () => Omit<EffectProjector, "handles"> & {
+		readonly handles: Types;
+	};
+}
+
+function isEventType<E extends StoredEvent, K extends E["type"]>(
+	event: E,
 	type: K,
-): event is StoredEvent & { type: K; data: EventPayloadMap[K] } {
+): event is Extract<E, { type: K }> {
 	return event.type === type;
 }
 
@@ -306,10 +321,10 @@ function mergeMetadata(
 	}
 }
 
-export const makeSessionProjector = (): EffectProjector => ({
+export const makeSessionProjector = defineProjector(() => ({
 	name: "session",
 	handles: SESSION_HANDLED_TYPES,
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const written: string[] = [];
@@ -399,9 +414,9 @@ export const makeSessionProjector = (): EffectProjector => ({
 						}),
 			),
 		),
-});
+}));
 
-export const makeMessageProjector = (): EffectProjector => ({
+export const makeMessageProjector = defineProjector(() => ({
 	name: "message",
 	handles: [
 		"session.rewound",
@@ -426,7 +441,7 @@ export const makeMessageProjector = (): EffectProjector => ({
 		"session.setup_output",
 		"session.setup_finished",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			if (isEventType(event, "session.setup_started")) {
@@ -1063,9 +1078,9 @@ export const makeMessageProjector = (): EffectProjector => ({
 					: stampMessage(written, ctx.version),
 			),
 		),
-});
+}));
 
-export const makeTurnProjector = (): EffectProjector => ({
+export const makeTurnProjector = defineProjector(() => ({
 	name: "turn",
 	handles: [
 		"message.created",
@@ -1077,7 +1092,7 @@ export const makeTurnProjector = (): EffectProjector => ({
 		"turn.interrupted",
 		"turn.model_resolved",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			if (
@@ -1441,9 +1456,9 @@ export const makeTurnProjector = (): EffectProjector => ({
 				}),
 			),
 		),
-});
+}));
 
-export const makeApprovalProjector = (): EffectProjector => ({
+export const makeApprovalProjector = defineProjector(() => ({
 	name: "approval",
 	handles: [
 		"permission.asked",
@@ -1451,7 +1466,7 @@ export const makeApprovalProjector = (): EffectProjector => ({
 		"question.asked",
 		"question.resolved",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
@@ -1536,12 +1551,12 @@ export const makeApprovalProjector = (): EffectProjector => ({
 				}),
 			),
 		),
-});
+}));
 
-export const makeProviderProjector = (): EffectProjector => ({
+export const makeProviderProjector = defineProjector(() => ({
 	name: "provider",
 	handles: ["session.created", "session.provider_changed"],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
@@ -1580,12 +1595,12 @@ export const makeProviderProjector = (): EffectProjector => ({
 			),
 			Effect.flatMap((written) => stampSessions(written, ctx.version)),
 		),
-});
+}));
 
 // One row per input conduit is holding. Rows are never deleted: a row that
 // leaves the tray turns `removed` and takes the event's version, so catch-up
 // can report it gone. Its owning session moves with every write.
-export const makeInputProjector = (): EffectProjector => ({
+export const makeInputProjector = defineProjector(() => ({
 	name: "input",
 	handles: [
 		"input.admitted",
@@ -1594,7 +1609,7 @@ export const makeInputProjector = (): EffectProjector => ({
 		"input.interrupt_requested",
 		"message.created",
 	],
-	project: (event: StoredEvent, ctx: ProjectionContext) =>
+	project: (event, ctx) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 
@@ -1670,40 +1685,41 @@ export const makeInputProjector = (): EffectProjector => ({
 						: touch.collections,
 			})),
 		),
-});
+}));
+
+// Session first for foreign keys. Keep factories so callers get fresh projectors.
+const PROJECTORS = [
+	makeSessionProjector,
+	makeMessageProjector,
+	makeTurnProjector,
+	makeProviderProjector,
+	makeApprovalProjector,
+	makeInputProjector,
+] as const;
+
+type HandledBy<P extends EffectProjector> = P["handles"][number];
+type Unhandled = Exclude<
+	LiveEventType,
+	HandledBy<ReturnType<(typeof PROJECTORS)[number]>>
+>;
+
+// Unlike {}, the empty case still rejects stale reason entries.
+export type UnprojectedReasons<T extends LiveEventType> = [T] extends [never]
+	? Readonly<Record<string, never>>
+	: { readonly [K in T]: string };
+
+// Every unhandled live event needs a reason; handled or retired entries are stale.
+export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
+	"session.provider_cleanup_failed":
+		"Audit receipt for failed upstream cleanup; no materialized projection needed",
+	"session.handoff_delivered":
+		"Delivery receipt needs no materialized projection",
+};
 
 /**
- * Canonical event types that deliberately reach no projector.
- *
- * An unclaimed type is indistinguishable from a handled one at runtime: the
- * dispatch map simply finds nothing, and the cursor advances anyway. That is
- * how session.compaction stayed unprojected for three months behind a green
- * suite. Anything absent here and absent from every projector's `handles` is a
- * bug, and projector-coverage.test.ts fails on it.
- */
-export const UNPROJECTED_CANONICAL_EVENT_TYPES: readonly string[] = [
-	// Superseded by tool.started carrying the complete input; kept in the
-	// canonical vocabulary only so historical stores still decode.
-	"tool.input_updated",
-	"session.provider_cleanup_failed",
-	"session.handoff_delivered", // Delivery receipt needs no materialized projection.
-	// Retired read state (hk9m.7): SessionAttention writes seen_version instead.
-	// Kept so historical stores still decode.
-	"session.read",
-	"session.unread",
-];
-
-/**
- * Creates all 7 Effect-based projectors in the correct order.
+ * Creates all Effect-based projectors in the correct order.
  * Order matters for FK compliance: SessionProjector first.
  */
 export function createAllEffectProjectors(): EffectProjector[] {
-	return [
-		makeSessionProjector(),
-		makeMessageProjector(),
-		makeTurnProjector(),
-		makeProviderProjector(),
-		makeApprovalProjector(),
-		makeInputProjector(),
-	];
+	return PROJECTORS.map((makeProjector) => makeProjector());
 }
