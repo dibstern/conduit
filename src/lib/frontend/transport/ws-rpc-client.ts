@@ -1263,11 +1263,16 @@ export async function preWarmDraftRpc(
 	await runTransportEffect(callPreWarmDraft(input));
 }
 
-export function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
+export async function attachProjectRpc(input: AttachProjectRpcInput): Promise<{
 	readonly projectSlug: string | null;
 	readonly sessionSlug: string | null;
 }> {
-	return runTransportEffect(callAttachProject(input));
+	// Reject with the WsRpcError itself so callers can read its code.
+	const result = await runTransportEffect(
+		Effect.either(callAttachProject(input)),
+	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function deleteSessionRpc(input: DeleteSessionRpcInput) {
@@ -1660,9 +1665,13 @@ export interface ResolveSessionRpcInput {
 export async function resolveSessionRpc(
 	input: ResolveSessionRpcInput,
 ): Promise<{ readonly projectSlug: string | null }> {
-	return await runTransportEffect(
-		callControl(undefined, (client) => client("ResolveSession", input)),
+	const result = await runTransportEffect(
+		Effect.either(
+			callControl(undefined, (client) => client("ResolveSession", input)),
+		),
 	);
+	if (Either.isLeft(result)) throw result.left;
+	return result.right;
 }
 
 export async function listDaemonSessionsRpc(
