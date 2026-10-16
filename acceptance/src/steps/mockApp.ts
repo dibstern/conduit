@@ -19,6 +19,7 @@ import { mockRelayWebSocket } from "../../../test/e2e/helpers/ws-mock.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	createSessionDelays,
 	detailFeeds,
 	effortOptions,
 	inheritedClaudeCommitAttribution,
@@ -802,6 +803,9 @@ export const mockAppHandlers: StepHandler[] = [
 						};
 					},
 					CreateSession: async (payload) => {
+						await new Promise((resolve) =>
+							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
+						);
 						createdSessionInstance =
 							typeof payload["instanceId"] === "string"
 								? payload["instanceId"]

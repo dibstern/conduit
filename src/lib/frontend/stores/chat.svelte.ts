@@ -12,6 +12,7 @@ import type {
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
+	UserMessage,
 } from "../types.js";
 import { generateUuid } from "../utils/format.js";
 import { isSubagentToolName } from "../utils/subagent-tools.js";
@@ -418,6 +419,20 @@ export const historyState = $state({
 	/** Whether a history page request is in-flight. */
 	loading: false,
 });
+
+/** A draft's first send, shown from the click until its new session places it.
+ *  No session slot exists before the create lands, and a user message
+ *  otherwise appears only once the server places it. */
+export const draftSend = $state<{
+	message: UserMessage | null;
+	/** The created session; null while the create is in flight. */
+	sessionId: string | null;
+}>({ message: null, sessionId: null });
+
+/** The first send to show in a pane: `null` names the draft itself. */
+export function draftSendIn(sessionId: string | null): UserMessage | null {
+	return draftSend.sessionId === sessionId ? draftSend.message : null;
+}
 
 // Tracks the last input text received from another tab viewing the same session.
 

@@ -41,7 +41,7 @@
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
-	import { currentChat, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
@@ -788,6 +788,7 @@
 			// A second Enter before the create lands would make a second session.
 			if (creatingSession) return false;
 			creatingSession = true;
+			let unsent: { text: string; images: typeof pendingImages } | undefined;
 			try {
 				// Sending before the default arrives must use the same workspace as
 				// the chip. An explicit choice already supplies that workspace.
@@ -813,6 +814,14 @@
 					showToast("Select model", { variant: "error" });
 					return false;
 				}
+				// The message leaves the composer now and shows in the pane until
+				// the new session places it; a failed create puts it back.
+				if (textOverride === undefined) {
+					unsent = { text: inputText, images: pendingImages };
+					clearComposer();
+				}
+				draftSend.message = { type: "user", uuid: crypto.randomUUID(), text: messageText, createdAt: Date.now() };
+				draftSend.sessionId = null;
 				const created = await createSessionRpc({
 					projectSlug,
 					originId: getBrowserClientId(),
@@ -822,6 +831,7 @@
 					...(draftNewWorktree && draftWorktreeBase ? { worktreeBase: draftWorktreeBase } : {}),
 				});
 				sid = created.sessionId;
+				draftSend.sessionId = sid;
 				storeNewSessionDraft("");
 				// Don't yank someone who opened another session while this one was created.
 				if (!sessionState.currentId) switchToSession(sid, projectSlug);
@@ -838,6 +848,12 @@
 					showToast({ title: "Could not start session", variant: "error", body });
 				} else {
 					showToast({ title: "Failed to create session", variant: "error", body: formatErrorDetail(error) });
+				}
+				draftSend.message = null;
+				if (unsent && !sessionState.currentId && !inputText) {
+					inputText = unsent.text;
+					cursorPos = unsent.text.length;
+					pendingImages = unsent.images;
 				}
 				return false;
 			} finally {
@@ -869,6 +885,7 @@
 				originId: getBrowserClientId(),
 			}).then((response) => {
 				if (!response.ok) {
+					if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
 					steerRefusal = { sessionId: sentToSessionId, reason: response.reason };
 					return resolve(false);
 				}
@@ -876,6 +893,7 @@
 					switchToSession(response.sessionId, projectSlug, undefined, { replace: true });
 				resolve(true);
 			}).catch(() => {
+				if (draftSend.sessionId === sentToSessionId) draftSend.message = null;
 				if (startsTurn && !isSessionBusy(sentToSessionId)) followSessionBusy(sentToSessionId, false);
 				showToast("Failed to send message", { variant: "error" });
 				resolve(false);
