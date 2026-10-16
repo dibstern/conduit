@@ -43,7 +43,7 @@
 	import { onProjectAttached } from "../../stores/ws-listeners.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { attachedProjectState, getCurrentRoute, getCurrentSessionId, getCurrentSlug, getCurrentSearchParams, replaceRoute, routerState } from "../../stores/router.svelte.js";
-	import { clearMessages } from "../../stores/chat.svelte.js";
+	import { clearMessages, draftSendIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionState, findSession, sessionState, setAttachedProject, switchToSession } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, drawSavedShell, onShellSynchronized } from "../../stores/session-list.svelte.js";
@@ -132,7 +132,8 @@
 	});
 	$effect(() => {
 		const route = getCurrentRoute();
-		const projectSlug = route.page === "chat" && route.draft && !sessionState.currentId &&
+		// Desktop's "/" shows the same sendable draft composer as "/new".
+		const projectSlug = route.page === "chat" && !route.sessionId && !sessionState.currentId &&
 			(discoveryState.defaultsLoaded || discoveryState.hasInstanceChoice)
 			? getDraftProject() : null;
 		const instanceId = getEffectiveInstanceId();
@@ -891,7 +892,7 @@
 					<!-- Touches here clear the unread dot (conduit-test-hk9m.4). -->
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={phoneView === "files" || mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
 						<MessageList {topClearance} />
-						{#if !sessionState.currentId}
+						{#if !sessionState.currentId && !draftSendIn(null)}
 							<div class="pointer-events-none absolute inset-x-0 top-[28%] flex flex-col items-center gap-2.5 px-6 text-center font-brand" data-testid="draft-empty">
 								{#if draftSlug}<ProjectSquare large label={projectDisplayName(draftSlug)} accent={projectAccent(draftSlug)} />{/if}
 								<b class="text-[16px] font-semibold text-text">What should happen{draftSlug ? ` in ${projectDisplayName(draftSlug)}` : ""}?</b>

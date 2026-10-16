@@ -15,6 +15,7 @@ import {
 	type Runtime,
 	Tracer,
 } from "effect";
+import { DEFAULT_TRACE_SQL_MIN_MS } from "../../../env.js";
 import {
 	attachTurnTimeline,
 	type TurnTimelineRecord,
@@ -93,6 +94,7 @@ export interface TraceSinkOptions {
 	readonly maxFiles: number;
 	readonly bufferSize?: number | undefined;
 	readonly batchWindowMs?: number | undefined;
+	readonly sqlMinMs?: number | undefined;
 }
 
 export interface TraceSink {
@@ -715,6 +717,12 @@ export const makeLocalFileTracer = (
 				end(endTime, exit) {
 					if (status._tag === "Ended") return;
 					status = { _tag: "Ended", startTime, endTime, exit };
+					if (
+						name === "sql.execute" &&
+						Number(endTime - startTime) / 1_000_000 <
+							(options.sqlMinMs ?? DEFAULT_TRACE_SQL_MIN_MS)
+					)
+						return;
 					if (sink !== undefined) {
 						sink.writeSync(spanToTraceRecord(span));
 					}

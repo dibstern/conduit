@@ -6,14 +6,18 @@ import {
 	InMemorySpanExporter,
 	SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { Context, Effect, Option, Tracer } from "effect";
+import { Context, Effect, Exit, Option, Tracer } from "effect";
 import { expect, vi } from "vitest";
 
 import {
 	makeDaemonTracingLive,
 	makeTracingLive,
 } from "../../../src/lib/domain/daemon/Layers/tracing.js";
-import { makeCompositeTracer } from "../../../src/lib/domain/daemon/Services/local-trace-artifact.js";
+import {
+	makeCompositeTracer,
+	makeLocalFileTracer,
+	type TraceRecord,
+} from "../../../src/lib/domain/daemon/Services/local-trace-artifact.js";
 
 const readTraceRecords = (path: string): Array<Record<string, unknown>> =>
 	readFileSync(path, "utf8")
@@ -230,6 +234,52 @@ describe("Tracing Layer", () => {
 			);
 		},
 	);
+
+	it.each([
+		{ sqlMinMs: undefined, retainedMs: [5, 8] },
+		{ sqlMinMs: 5, retainedMs: [5, 8] },
+		{ sqlMinMs: 0, retainedMs: [0, 4.999999, 5, 8] },
+	])("samples only local SQL spans at $sqlMinMs ms", ({
+		sqlMinMs,
+		retainedMs,
+	}) => {
+		const records: TraceRecord[] = [];
+		const local = makeLocalFileTracer({
+			filePath: "unused",
+			maxBytes: 1024,
+			maxFiles: 0,
+			...(sqlMinMs !== undefined && { sqlMinMs }),
+			sink: {
+				write: () => Effect.void,
+				writeSync: (record) => {
+					if (record.type === "effect-span") records.push(record);
+				},
+				flush: () => Effect.void,
+				close: () => Effect.void,
+			},
+		});
+		const upstream = makeRecordingTracer("upstream");
+		const upstreamSpans = vi.spyOn(upstream, "span");
+		const tracer = makeCompositeTracer(local, upstream);
+		for (const durationNs of [0n, 4_999_999n, 5_000_000n, 8_000_000n]) {
+			tracer
+				.span("sql.execute", Option.none(), Context.empty(), [], 0n, "client")
+				.end(durationNs, Exit.void);
+		}
+		tracer
+			.span("other", Option.none(), Context.empty(), [], 0n, "internal")
+			.end(0n, Exit.void);
+		expect(
+			records
+				.filter((record) => record.name === "sql.execute")
+				.map((record) => record.durationMs),
+		).toEqual(retainedMs);
+		expect(records.at(-1)).toMatchObject({ name: "other", durationMs: 0 });
+		expect(upstreamSpans.mock.results).toHaveLength(5);
+		for (const result of upstreamSpans.mock.results) {
+			expect(result.value.status._tag).toBe("Ended");
+		}
+	});
 
 	it("passes the upstream span to composite tracer context", () => {
 		let upstreamContextSpan: Tracer.AnySpan | undefined;

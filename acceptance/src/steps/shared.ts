@@ -10,6 +10,8 @@ export const effortOptions = new WeakMap<Page, string[]>();
 export const pickerFixtureQuotaReads = new WeakMap<Page, number>();
 export const rejectedEffortSwitches = new WeakSet<Page>();
 export const detailFeeds = new WeakMap<Page, RpcMockControl["detailFeed"]>();
+/** How long the mock app takes to answer CreateSession, in ms. */
+export const createSessionDelays = new WeakMap<Page, number>();
 export const inheritedClaudeCommitAttribution = "Inherited commit attribution";
 /** GetSessionSkills loads served by the mock app; empty unless a scenario seeds them. */
 export const mockSessionSkills = new WeakMap<Page, readonly unknown[]>();
