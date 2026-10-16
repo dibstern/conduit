@@ -93,6 +93,9 @@ function seedAccountDirectory(page: Page): void {
 			}),
 		),
 	)(rows);
+	for (const row of instances)
+		if (row.driver === "claude")
+			publishClaudeCatalog(requireRpcControl(page), row.id);
 	const defaultClaudeId = rows.find(
 		(row) => row["driver"] === "claude" && row["isDefault"] === true,
 	)?.["id"];
@@ -146,11 +149,11 @@ function seedAccountDirectory(page: Page): void {
 					stale: false,
 				})),
 		);
+		const added = change._tag === "Add" ? next.accounts.at(-1) : undefined;
+		if (added?.driver === "claude") publishClaudeCatalog(rpc, added.id);
 		return {
 			instances,
-			...(change._tag === "Add"
-				? { addedInstanceId: next.accounts.at(-1)?.id }
-				: {}),
+			...(added ? { addedInstanceId: added.id } : {}),
 		};
 	};
 	for (const tag of ["RemoveInstance", "SetDefault"] as const) {
@@ -197,6 +200,20 @@ function seedAccountDirectory(page: Page): void {
 						: undefined,
 			},
 		});
+	});
+}
+
+/** Like publishClaudeModels, the server publishes each Claude account's own catalog. */
+function publishClaudeCatalog(
+	rpc: ReturnType<typeof requireRpcControl>,
+	accountId: string,
+): void {
+	rpc.setProjectSetting({
+		_tag: "providerModels",
+		accountId,
+		providers: dualDriverProviders.filter(
+			(provider) => provider.id === "claude",
+		),
 	});
 }
 
