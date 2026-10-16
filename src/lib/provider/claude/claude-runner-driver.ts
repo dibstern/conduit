@@ -45,7 +45,6 @@ export const makeClaudeRunnerDriver = (
 	};
 	return {
 		driverKind: "claude",
-		steering: true,
 		discoverEffect,
 		nativeSession: true,
 		stopTask: true,

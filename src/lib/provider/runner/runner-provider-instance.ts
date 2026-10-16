@@ -78,7 +78,6 @@ type PreparedTurn = Omit<
 /** Provider policy only; sink, interaction and runner lifetime belong to the instance. */
 export interface RunnerDriverPieces {
 	readonly driverKind: KnownProviderDriverKind;
-	readonly steering: boolean;
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
@@ -152,7 +151,6 @@ export const makeRunnerProviderInstance = (
 /** Provider API compatibility and event-store interaction routing only. */
 export class RunnerProviderInstance implements ProviderInstance {
 	readonly providerId: KnownProviderDriverKind;
-	readonly steering: boolean;
 	private readonly sinks = new Map<string, EventSink>();
 	/** Sends handed to the runner and not yet finished, per session. */
 	private readonly sendsInFlight = new Map<string, number>();
@@ -268,7 +266,6 @@ export class RunnerProviderInstance implements ProviderInstance {
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
 	) {
 		this.providerId = driver.driverKind;
-		this.steering = driver.steering;
 	}
 
 	recoverEffect() {
