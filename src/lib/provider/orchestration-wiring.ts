@@ -33,6 +33,7 @@ import {
 	ClaudeDriver,
 	type ClaudeProviderInstanceDeps,
 } from "./claude/index.js";
+import { makeCursorProviderRuntime } from "./cursor/cursor-provider-runtime.js";
 import {
 	OpenCodeDriver,
 	OpenCodeProviderInstance,
@@ -260,6 +261,16 @@ const createOrchestrationComponentsEffect = (
 				: {}),
 		});
 		registry.registerInstance(claudeInstance);
+		registry.registerInstance(
+			yield* makeCursorProviderRuntime({
+				workspaceRoot: options.workspaceRoot ?? process.cwd(),
+				accounts: accountDirectory.snapshot,
+				...(options.configDir !== undefined
+					? { daemonConfigDir: options.configDir }
+					: {}),
+				persistUserMessage: persist.persistUserMessage,
+			}),
+		);
 		// Durable command receipts share the persistence SqlClient with the
 		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /

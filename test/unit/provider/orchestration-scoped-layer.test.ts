@@ -11,10 +11,10 @@ import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { ClaudeProviderInstance } from "../../../src/lib/provider/claude/claude-provider-instance.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
+import { RunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
 
 function makeStubClient(): OpenCodeAPI {
@@ -44,8 +44,8 @@ describe("orchestration scoped layer", () => {
 		const opencodeShutdown = vi
 			.spyOn(OpenCodeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
-		const claudeShutdown = vi
-			.spyOn(ClaudeProviderInstance.prototype, "shutdownEffect")
+		const runnerShutdown = vi
+			.spyOn(RunnerProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const openCodeApi = makeStubClient();
@@ -90,6 +90,6 @@ describe("orchestration scoped layer", () => {
 		}
 
 		expect(opencodeShutdown).toHaveBeenCalledTimes(1);
-		expect(claudeShutdown).toHaveBeenCalledTimes(1);
+		expect(runnerShutdown).toHaveBeenCalledTimes(2);
 	});
 });
