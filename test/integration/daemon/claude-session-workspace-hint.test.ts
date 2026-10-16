@@ -202,7 +202,6 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		const dismissedAt = [browser.frames.length, anotherTab.frames.length];
 		await Effect.runPromise(
 			browser.rpc.DismissWorkspaceHint({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -236,7 +235,6 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		);
 		await Effect.runPromise(
 			browser.rpc.DismissWorkspaceHint({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -249,7 +247,6 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		const movedAt = browser.frames.length;
 		await Effect.runPromise(
 			browser.rpc.MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: second,
 			}),
@@ -314,7 +311,6 @@ exec '${realGit}' "$@"
 		const beforeDismiss = browser.frames.length;
 		await Effect.runPromise(
 			browser.rpc.DismissWorkspaceHint({
-				projectSlug: "process-test",
 				sessionId,
 				path: first,
 			}),
@@ -387,7 +383,6 @@ exec '${realGit}' "$@"
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await Effect.runPromise(
 			browser.rpc.MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: second,
 			}),
@@ -465,7 +460,6 @@ exec '${realGit}' "$@"
 		await browser.followFamily(sessionId);
 		await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId,
 				originId: browser.originId,
 				inputId: randomUUID(),
@@ -483,7 +477,6 @@ exec '${realGit}' "$@"
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await Effect.runPromise(
 			browser.rpc.CancelSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),

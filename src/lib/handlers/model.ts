@@ -10,7 +10,11 @@ import {
 } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../account-directory.js";
 import type { AccountUnroutable } from "../contracts/limit-recovery.js";
-import type { KnownProviderDriverKind } from "../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	type KnownProviderDriverKind,
+	PROVIDER_DRIVERS,
+} from "../contracts/provider-instance.js";
 import type { GetModelsResponse } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
@@ -128,7 +132,7 @@ const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
 		if (rowResult._tag === "Left") return true;
 
 		const row = rowResult.right;
-		return !row || row.provider === "opencode";
+		return !row || getProviderDriver(row.provider)?.runsOpenCodeServer === true;
 	});
 
 // OpenCode's amazon-bedrock catalog lists each model once per inference-profile
@@ -269,9 +273,9 @@ export const getModelsResponse = (
 					: yield* directory.resolve({ _tag: "Id", id: activeProviderId });
 		const activeDriver = activeAccount?.driver;
 		const claudeAccount =
-			instanceDriver === "opencode"
+			getProviderDriver(instanceDriver)?.catalogSource === "server"
 				? undefined
-				: account?.driver === "claude"
+				: getProviderDriver(account?.driver)?.catalogSource === "discovery"
 					? account
 					: Option.getOrUndefined(yield* directory.defaultFor("claude"));
 		const { modelDiscovery } = yield* ProjectSettingsTag;
@@ -303,14 +307,15 @@ export const getModelsResponse = (
 						);
 
 		const inventoryInstanceId =
-			(activeDriver === "opencode" ? activeAccount?.id : undefined) ??
-			instanceId;
+			(getProviderDriver(activeDriver)?.catalogSource === "server"
+				? activeAccount?.id
+				: undefined) ?? instanceId;
 		const providers: ProviderInfo[] = [];
 		let nativeDefaultModel: string | undefined;
 		if (
-			instanceDriver === "opencode" ||
+			getProviderDriver(instanceDriver)?.catalogSource === "server" ||
 			(instanceDriver === undefined &&
-				(activeDriver === "opencode" ||
+				(getProviderDriver(activeDriver)?.catalogSource === "server" ||
 					((yield* directory.defaultFor("opencode"))._tag === "Some" &&
 						(account === undefined || account.id === listedId))))
 		) {
@@ -418,7 +423,10 @@ export const getModelsResponse = (
 			? (catalogues[`providerModels:${claudeAccount.id}`] ??
 				catalogues.providerModels)
 			: catalogues.providerModels;
-		if (selectedDriver === "claude" && !claudeCatalog) {
+		if (
+			PROVIDER_DRIVERS[selectedDriver].catalogSource === "discovery" &&
+			!claudeCatalog
+		) {
 			if (modelDiscoveryFiber !== undefined)
 				yield* Fiber.await(modelDiscoveryFiber);
 			catalogues = yield* Ref.get((yield* ProjectSettingsTag).live);
@@ -428,23 +436,19 @@ export const getModelsResponse = (
 				: catalogues.providerModels;
 		}
 		const catalog = catalogFromProviderList(
-			selectedDriver === "claude"
+			PROVIDER_DRIVERS[selectedDriver].catalogSource === "discovery"
 				? (claudeCatalog?.providers ?? [])
 				: providers,
 		);
 		const pick = activeId
-			? storedSessionPick(stored, harnessForModelProvider(selectedDriver))
+			? storedSessionPick(stored, selectedDriver)
 			: harnessDefaultPick(
-					harnessForModelProvider(selectedDriver),
+					selectedDriver,
 					loadRelaySettings(config.configDir),
 					nativeDefaultModel,
 				);
 		const catalogModel = pick
-			? findCatalogModel(
-					harnessForModelProvider(selectedDriver),
-					pick.model,
-					catalog,
-				)
+			? findCatalogModel(selectedDriver, pick.model, catalog)
 			: undefined;
 		const options = catalogModel
 			? offeredOptions(catalogModel)
@@ -452,7 +456,7 @@ export const getModelsResponse = (
 		const sessionCatalog =
 			activeId &&
 			(catalog.length > 0 ||
-				(selectedDriver === "claude"
+				(PROVIDER_DRIVERS[selectedDriver].catalogSource === "discovery"
 					? claudeCatalog !== undefined
 					: (yield* modelService.cachedProviders(inventoryInstanceId))._tag ===
 						"Some"))
@@ -558,11 +562,13 @@ export interface SwitchModelInput {
  */
 export const applyLiveSessionSettings = (sessionId: string) =>
 	Effect.gen(function* () {
-		const registry = yield* ProviderRegistryTag;
-		const instance = registry.getInstance("claude");
-		if (!instance?.applyLiveSettingsEffect) return;
 		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
-		if (!row?.model_id || row.model_provider !== "claude") return;
+		if (!row?.model_id || !row.model_provider) return;
+		const driver = harnessForModelProvider(row.model_provider);
+		if (PROVIDER_DRIVERS[driver].catalogSource !== "discovery") return;
+		const registry = yield* ProviderRegistryTag;
+		const instance = registry.getInstance(driver);
+		if (!instance?.applyLiveSettingsEffect) return;
 
 		const result = yield* Effect.either(
 			instance.applyLiveSettingsEffect(sessionId, {
@@ -634,7 +640,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 		}
 		yield* selectSessionVariant(sessionId, validVariant);
 		const engine = yield* OrchestrationEngineTag;
-		if (account.driver === "claude") {
+		if (PROVIDER_DRIVERS[account.driver].usesLocalSessions) {
 			engine.bindSession(sessionId, account.id);
 		} else if (yield* shouldBindOpenCodeSessionOnModelSwitch(sessionId)) {
 			engine.bindSession(sessionId, account.id);
@@ -706,7 +712,9 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 		// Mirror the default into OpenCode's project config, except Claude-harness
 		// ids: OpenCode can't resolve them, so every prompt sent without a model
 		// would fail with "Model not found".
-		if (harnessForModelProvider(provider) === "opencode") {
+		if (
+			PROVIDER_DRIVERS[harnessForModelProvider(provider)].runsOpenCodeServer
+		) {
 			const updateResult = yield* Effect.either(
 				modelService.persistDefaultModel(provider, model),
 			);
@@ -775,7 +783,7 @@ export interface SwitchVariantInput {
 
 export const switchVariantForSession = (
 	input: SwitchVariantInput,
-	modelCatalog?: readonly ModelInfo[],
+	catalogSource?: readonly ModelInfo[],
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -790,7 +798,7 @@ export const switchVariantForSession = (
 				: undefined;
 		const harness = harnessForModelProvider(activeModel?.providerID ?? "");
 		const catalog =
-			modelCatalog ??
+			catalogSource ??
 			(yield* loadModelCatalog(harness, row?.provider ?? harness));
 		const resolved = resolveTurnSettings(
 			{

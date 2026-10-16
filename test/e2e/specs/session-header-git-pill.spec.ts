@@ -47,7 +47,18 @@ async function openCheckout(
 	});
 	const directory = options.directory ?? "/workspace/conduit";
 	const instances = {
-		instances: [],
+		instances: [
+			{
+				id: options.provider ?? "opencode",
+				name: "Session provider",
+				driver: options.provider === "claude" ? "claude" : "opencode",
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 0,
+			},
+		],
 		providerCapabilities:
 			options.supportsWorktree === undefined
 				? {}
@@ -68,6 +79,7 @@ async function openCheckout(
 	];
 	const sessions = [
 		{
+			accountId: options.provider ?? "opencode",
 			id: "header-session",
 			title: "Session header",
 			status: options.status ?? "idle",
@@ -78,6 +90,7 @@ async function openCheckout(
 	];
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetAgents: () => ({
 				projectSlug: "e2e-replay",

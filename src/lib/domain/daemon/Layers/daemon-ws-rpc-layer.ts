@@ -10,7 +10,11 @@ import {
 } from "effect";
 import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
-import { PROVIDER_SESSION_CAPABILITIES } from "../../../contracts/provider-instance.js";
+import {
+	getProviderDriver,
+	PROVIDER_DRIVERS,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 import {
 	ProjectSaveRejected,
@@ -87,6 +91,8 @@ import {
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
+import { SessionActivityTag } from "../Services/session-activity.js";
+import type { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -105,8 +111,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
-		const context = yield* Effect.context<
+		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
+			| SessionDirectory
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
@@ -122,6 +129,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| KeepAwakeTag
 			| TailscaleCliTag
 		>();
+		const activity = yield* SessionActivityTag;
+		const context = Context.add(baseContext, SessionActivityTag, activity);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -183,9 +192,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				A,
 				E,
 				| ProjectRegistryTag
+				| SessionDirectory
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
+				| SessionActivityTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
 				| AccountDirectory
@@ -220,6 +231,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| PollerFibersTag
 				| ConfigPersistenceTag
 				| DaemonEventBusTag
+				| SessionActivityTag
 			>,
 		) =>
 			effect.pipe(
@@ -263,6 +275,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| AccountDirectory
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
+				| SessionDirectory
 				| DaemonConfigRefTag
 			>,
 		) =>
@@ -287,6 +300,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					Effect.map(getInstances, (instances) => ({
 						instances: Array.from(instances),
 						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+						providerTraits: PROVIDER_DRIVERS,
 					})),
 				),
 			SubscribeUsage: () =>
@@ -494,6 +508,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.map((instances) => ({
 							instances: Array.from(instances),
 							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+							providerTraits: PROVIDER_DRIVERS,
 						})),
 					),
 				),
@@ -583,8 +598,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const instance = yield* getInstance(request.instanceId);
-						// Claude instances have no process to start.
-						if (instance.driver !== "claude")
+						if (
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+						)
 							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
 						return {
 							projectSlug: request.projectSlug,
@@ -596,7 +613,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const instance = yield* getInstance(request.instanceId);
-						if (instance.driver !== "claude")
+						if (
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+						)
 							yield* openCodeInstances.stop(request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
@@ -733,14 +753,34 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ResolveSession: (request) =>
 				run(
-					resolveDaemonSession(configDir, request.sessionId).pipe(
-						Effect.map((projectSlug) => ({ projectSlug })),
+					resolveDaemonSession(request.sessionId).pipe(
+						Effect.mapError(
+							(error) =>
+								new WsRpcError({
+									code: "ambiguous-session",
+									message: error.message,
+								}),
+						),
+						Effect.flatMap((projectSlug) =>
+							projectSlug === null
+								? Effect.fail(
+										new WsRpcError({
+											code: "unknown-session",
+											message: `Unknown session: ${request.sessionId}`,
+										}),
+									)
+								: Effect.succeed({ projectSlug }),
+						),
 					),
 				),
 			OpenCodeUseWorktree: (request) =>
 				Effect.gen(function* () {
 					const instance = yield* getInstance(request.instanceId);
-					if (!instance.managed || instance.driver !== "opencode")
+					if (
+						getProviderDriver(instance.driver)?.worktreeMoves !==
+							"server-declaration" ||
+						!instance.managed
+					)
 						return yield* new WsRpcError({
 							message:
 								"Declared worktree moves require a Conduit-managed OpenCode instance",
@@ -763,6 +803,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					const relayContext = yield* relay.rpcWsHandler.context;
 					return yield* Effect.gen(function* () {
 						const sessionId = yield* findOpenCodeSession(
+							{ projectIds: [target.projectSlug] },
 							request.instanceId,
 							request.providerSessionId,
 						);

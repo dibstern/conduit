@@ -55,6 +55,7 @@ async function openMissingSession(
 		},
 	];
 	const session = {
+		accountId: null,
 		id: "missing-session",
 		title: "Missing worktree",
 		status: "idle",
@@ -69,6 +70,7 @@ async function openMissingSession(
 	};
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects, current: projectSlug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],

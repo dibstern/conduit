@@ -4,14 +4,23 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { RpcTest } from "@effect/rpc";
 import { SqlClient } from "@effect/sql";
+import { SqliteClient } from "@effect/sql-sqlite-node";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Option } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
 import { afterEach, describe, expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { listDaemonSessions } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
+import {
+	findOpenCodeSession,
+	listDaemonSessions,
+	resolveDaemonOpenCodeSession,
+} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -20,6 +29,57 @@ import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
 const temporaryRoots: string[] = [];
+
+describe("project-scoped OpenCode binding lookup", () => {
+	it.effect(
+		"resolves a shared provider session only within the selected project",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`CREATE TABLE sessions (
+				id TEXT PRIMARY KEY, project_id TEXT, provider TEXT, provider_sid TEXT)`;
+				yield* sql`CREATE TABLE session_providers (
+				id TEXT PRIMARY KEY, session_id TEXT, provider TEXT, provider_sid TEXT,
+				status TEXT, activated_at INTEGER)`;
+				yield* sql`INSERT INTO sessions VALUES
+				('session-a', 'project-a', 'opencode', 'shared-provider-session'),
+				('session-b', 'project-b', 'opencode', 'shared-provider-session')`;
+				yield* sql`INSERT INTO session_providers VALUES
+				('binding-a', 'session-a', 'opencode', 'shared-provider-session', 'active', 1),
+				('binding-b', 'session-b', 'opencode', 'shared-provider-session', 'active', 1)`;
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["project-a"] },
+						"opencode",
+						"shared-provider-session",
+					),
+				).toBe("session-a");
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["project-b"] },
+						"opencode",
+						"shared-provider-session",
+					),
+				).toBe("session-b");
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["unrelated"] },
+						"opencode",
+						"shared-provider-session",
+					),
+				).toBeUndefined();
+				expect(
+					yield* findOpenCodeSession(
+						{ projectIds: ["project-a", "project-b"] },
+						"opencode",
+						"shared-provider-session",
+					).pipe(Effect.flip),
+				).toMatchObject({
+					message: "OpenCode session has ambiguous Conduit bindings",
+				});
+			}).pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:" }))),
+	);
+});
 
 const makeTemporaryRoot = (): string => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-daemon-sessions-"));
@@ -97,6 +157,64 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
+	for (const read of ["list", "binding"] as const) {
+		it.effect(
+			`migrates a cold legacy project store before its scoped ${read} read`,
+			() => {
+				const root = makeTemporaryRoot();
+				const folder = join(root, "legacy-project");
+				makeProjectStore(folder, [
+					{ id: "legacy-session", title: "Legacy", updatedAt: 1 },
+				]);
+				const filename = join(
+					projectStorageDir(root, "legacy-project"),
+					"events.db",
+				);
+				Effect.runSync(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`DROP INDEX idx_sessions_project_updated`;
+						yield* sql`DROP INDEX idx_sessions_project_status`;
+						yield* sql`DROP INDEX idx_session_sidebar_project_version`;
+						yield* sql`DROP INDEX idx_session_sidebar_project_activity`;
+						yield* sql`ALTER TABLE sessions DROP COLUMN project_id`;
+						yield* sql`ALTER TABLE session_sidebar DROP COLUMN project_id`;
+						yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 59`;
+					}).pipe(Effect.provide(SqliteClient.layer({ filename }))),
+				);
+				return Effect.gen(function* () {
+					if (read === "list") {
+						const result = yield* listDaemonSessions(root, {});
+						expect(result.sessions.map((session) => session.title)).toEqual([
+							"Legacy",
+						]);
+						expect(result.availability).toEqual([
+							{ projectSlug: "legacy-project", available: true },
+						]);
+					} else {
+						expect(
+							yield* resolveDaemonOpenCodeSession(
+								root,
+								"opencode",
+								"legacy-session",
+							),
+						).toEqual({
+							projectSlug: "legacy-project",
+							sessionId: "legacy-session",
+						});
+					}
+				}).pipe(
+					Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+					Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
+					Effect.provide(
+						makeProjectRegistryLive([
+							{ slug: "legacy-project", title: "Legacy", folders: [folder] },
+						]),
+					),
+				);
+			},
+		);
+	}
 	it.effect(
 		"awaits fresh foreign git with at most four directory reads per project",
 		() => {
@@ -153,6 +271,7 @@ describe("listDaemonSessions", () => {
 				}),
 			).pipe(
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{ slug: "project", title: "Project", folders },
@@ -203,6 +322,7 @@ describe("listDaemonSessions", () => {
 			).not.toHaveProperty("git");
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -262,6 +382,7 @@ describe("listDaemonSessions", () => {
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -328,6 +449,7 @@ describe("listDaemonSessions", () => {
 			});
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -383,6 +505,7 @@ describe("listDaemonSessions", () => {
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -448,6 +571,7 @@ describe("listDaemonSessions", () => {
 			expect(rootC).toMatchObject({ id: "root-c", processing: true });
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -524,6 +648,7 @@ describe("listDaemonSessions", () => {
 			expect(result.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -628,6 +753,7 @@ describe("listDaemonSessions", () => {
 				expect(result.nextCursor).toEqual({ updatedAt: 200, id: "b-mid" });
 			}).pipe(
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{
@@ -762,6 +888,7 @@ describe("listDaemonSessions", () => {
 			expect(pastEnd.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -816,6 +943,7 @@ describe("listDaemonSessions", () => {
 			expect(final.nextCursor).toBeNull();
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -891,6 +1019,7 @@ describe("listDaemonSessions", () => {
 			expect(paged).toEqual(expected);
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -958,6 +1087,7 @@ describe("listDaemonSessions", () => {
 			]);
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(registry),
 		);
 	});
@@ -988,6 +1118,7 @@ describe("listDaemonSessions", () => {
 			]);
 		}).pipe(
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 			Effect.provide(
 				makeProjectRegistryLive([
 					{
@@ -1049,6 +1180,7 @@ describe("listDaemonSessions", () => {
 				);
 			}).pipe(
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
 				Effect.provide(
 					makeProjectRegistryLive([
 						{
@@ -1074,51 +1206,50 @@ describe("listDaemonSessions", () => {
 });
 
 describe("ResolveSession", () => {
-	it.scoped(
-		"finds sessions in cold project stores and returns null for unknown IDs",
-		() => {
-			const root = makeTemporaryRoot();
-			const projects = ["project-a", "project-b"].map((slug) => ({
-				slug,
-				title: slug,
-				folders: [join(root, slug)] as const,
-			}));
-			for (const project of projects) {
-				makeProjectStore(project.folders[0], [
-					{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
-				]);
-			}
-			return Effect.gen(function* () {
-				const handlers = yield* DaemonWsRpcHandlersTag;
-				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
-					Effect.provide(
-						makeRoutedWsRpcServerLayer(
-							() => Effect.die("Must not resolve a relay"),
-							handlers,
-						),
-					),
-				);
-				for (const project of projects) {
-					expect(
-						yield* client.ResolveSession({
-							sessionId: `${project.slug}-session`,
-						}),
-					).toEqual({ projectSlug: project.slug });
-				}
-				expect(
-					yield* client.ResolveSession({
-						projectSlug: "nonexistent",
-						sessionId: "project-b-session",
-					}),
-				).toEqual({ projectSlug: "project-b" });
-				expect(yield* client.ResolveSession({ sessionId: "unknown" })).toEqual({
-					projectSlug: null,
-				});
-			}).pipe(
+	it.scoped("finds indexed sessions and rejects unknown IDs", () => {
+		const root = makeTemporaryRoot();
+		const projects = ["project-a", "project-b"].map((slug) => ({
+			slug,
+			title: slug,
+			folders: [join(root, slug)] as const,
+		}));
+		for (const project of projects) {
+			makeProjectStore(project.folders[0], [
+				{ id: `${project.slug}-session`, title: "Session", updatedAt: 1 },
+			]);
+		}
+		return Effect.gen(function* () {
+			const handlers = yield* DaemonWsRpcHandlersTag;
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 				Effect.provide(
-					makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+					makeRoutedWsRpcServerLayer(
+						() => Effect.die("Must not resolve a relay"),
+						handlers,
+					),
 				),
 			);
-		},
-	);
+			for (const project of projects) {
+				expect(
+					yield* client.ResolveSession({
+						sessionId: `${project.slug}-session`,
+					}),
+				).toEqual({ projectSlug: project.slug });
+			}
+			expect(
+				yield* client.ResolveSession({
+					sessionId: "project-b-session",
+				}),
+			).toEqual({ projectSlug: "project-b" });
+			expect(
+				yield* Effect.either(client.ResolveSession({ sessionId: "unknown" })),
+			).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "WsRpcError", message: "Unknown session: unknown" },
+			});
+		}).pipe(
+			Effect.provide(
+				makeDaemonRpcTestLayer(projects, undefined, { configDir: root }),
+			),
+		);
+	});
 });

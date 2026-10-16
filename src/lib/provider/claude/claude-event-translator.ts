@@ -19,20 +19,18 @@
  *   turn.completed (result)
  *   workspace.changed (startup cwd, declared worktree results)
  *
- * All payloads match the EventPayloadMap interfaces.
+ * All payloads match the ProviderRuntimeEventPayloadMap types.
  */
 import { randomUUID } from "node:crypto";
 import { Clock, Effect } from "effect";
 import type {
 	ProviderRuntimeEvent,
+	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
 import type { SessionGoalChangedPayload } from "../../contracts/stored-event.js";
 import { createLogger, type Logger } from "../../logger.js";
-import type {
-	CanonicalToolInput,
-	EventPayloadMap,
-} from "../../persistence/events.js";
+import type { CanonicalToolInput } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import type { EventSinkError } from "../event-sink-errors.js";
@@ -71,7 +69,7 @@ const THINKING_KEEPALIVE_INTERVAL_MS = 30_000;
 function makeProviderRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: ProviderRuntimeEventPayloadMap[K],
 	metadata?: Readonly<Record<string, unknown>>,
 ) {
 	return {

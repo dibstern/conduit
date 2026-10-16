@@ -413,14 +413,16 @@ it("a due continuation waits for the session admission lock before dispatch", as
 						"s1",
 						Effect.gen(function* () {
 							const fiber = yield* Effect.forkScoped(fixture.sweep);
-							yield* fixture.read.listSessionInfos().pipe(
-								Effect.repeat({
-									until: (sessions) =>
-										sessions[0]?.limitRecovery?.continued === true,
-									schedule: Schedule.spaced("5 millis"),
-								}),
-								Effect.timeout("3 seconds"),
-							);
+							yield* fixture.read
+								.listSessionInfos({ projectIds: ["test-project"] })
+								.pipe(
+									Effect.repeat({
+										until: (sessions) =>
+											sessions[0]?.limitRecovery?.continued === true,
+										schedule: Schedule.spaced("5 millis"),
+									}),
+									Effect.timeout("3 seconds"),
+								);
 							expect(fixture.dispatches).toEqual([]);
 							return fiber;
 						}),
@@ -478,8 +480,9 @@ for (const admission of ["user", "quota-reset"] as const) {
 						).pipe(Effect.either);
 						expect(scheduled).toMatchObject({ _tag: "Right" });
 						expect(
-							(yield* fixture.read.listSessionInfos())[0]?.limitRecovery
-								?.scheduledAt,
+							(yield* fixture.read.listSessionInfos({
+								projectIds: ["test-project"],
+							}))[0]?.limitRecovery?.scheduledAt,
 						).toBe(10);
 						expect(
 							(yield* fixture.read.getSession("s1"))?.pending_rewind_message_id,
@@ -605,8 +608,9 @@ for (const schedule of [
 							),
 						).toHaveLength(1);
 						expect(
-							(yield* fixture.read.listSessionInfos())[0]?.limitRecovery
-								?.scheduledAt,
+							(yield* fixture.read.listSessionInfos({
+								projectIds: ["test-project"],
+							}))[0]?.limitRecovery?.scheduledAt,
 						).toBe(10);
 						expect(
 							yield* fixture.sql<{
@@ -661,7 +665,9 @@ for (const schedule of [
 							yield* fixture.finish("u1");
 						} else
 							expect(
-								(yield* fixture.read.listSessionInfos())[0]?.limitRecovery,
+								(yield* fixture.read.listSessionInfos({
+									projectIds: ["test-project"],
+								}))[0]?.limitRecovery,
 							).toBeNull();
 						expect(yield* fixture.next).toBe("q1");
 						expect(fixture.dispatches).toEqual(
@@ -846,7 +852,9 @@ for (const scenario of [
 					scenario.endsWith("during-probe");
 				expect(probes).toBe(probed ? 1 : 0);
 				expect(dispatches).toBe(resumes ? 1 : 0);
-				const recovery = (yield* read.listSessionInfos())[0]?.limitRecovery;
+				const recovery = (yield* read.listSessionInfos({
+					projectIds: ["test-project"],
+				}))[0]?.limitRecovery;
 				if (scenario === "future" || scenario === "rescheduled-during-probe")
 					expect(recovery?.scheduledAt).toBe(scenario === "future" ? 11 : 20);
 				else expect(recovery?.scheduledAt).toBeUndefined();
@@ -1114,7 +1122,7 @@ for (const scenario of [
 					yield* continuation.queueLimitPolicy("barrier");
 					// The later row's schedule proves the earlier policy has finished,
 					// including paths that intentionally make no switch or dispatch.
-					yield* read.listSessionInfos().pipe(
+					yield* read.listSessionInfos({ projectIds: ["test-project"] }).pipe(
 						Effect.repeat({
 							schedule: Schedule.spaced("5 millis"),
 							until: (rows) =>
@@ -1147,9 +1155,9 @@ for (const scenario of [
 							: ["target"],
 					);
 					expect(dispatched).toEqual(switched ? ["s1"] : []);
-					const session = (yield* read.listSessionInfos()).find(
-						(row) => row.id === "s1",
-					);
+					const session = (yield* read.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find((row) => row.id === "s1");
 					expect((yield* read.getSession("s1"))?.provider).toBe(
 						switched || scenario === "stale-during-probe" ? "target" : "claude",
 					);
@@ -1246,7 +1254,7 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 			yield* continuation.sweepDueContinuations(10);
 			expect(dispatched).toEqual(["s2"]);
 			expect(
-				(yield* read.listSessionInfos()).every(
+				(yield* read.listSessionInfos({ projectIds: ["test-project"] })).every(
 					(session) => session.limitRecovery?.scheduledAt === undefined,
 				),
 			).toBe(true);
@@ -1282,16 +1290,18 @@ for (const freshReset of [42, undefined]) {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const { store, read, continuation } = yield* seed();
-				expect((yield* read.listSessionInfos())[0]?.limitRecovery?.rearms).toBe(
-					0,
-				);
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery?.rearms,
+				).toBe(0);
 				let now = 10;
 				for (let rearms = 1; rearms <= 3; rearms++) {
 					yield* continuation.sweepDueContinuations(now);
 					const scheduledAt =
 						freshReset === undefined ? now + 300 : freshReset * rearms;
 					expect(
-						(yield* read.listSessionInfos())[0]?.limitRecovery,
+						(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+							?.limitRecovery,
 					).toMatchObject({
 						cutOffMessageId: "u1",
 						continued: false,
@@ -1301,7 +1311,9 @@ for (const freshReset of [42, undefined]) {
 					now = scheduledAt;
 				}
 				yield* continuation.sweepDueContinuations(now);
-				const recovery = (yield* read.listSessionInfos())[0]?.limitRecovery;
+				const recovery = (yield* read.listSessionInfos({
+					projectIds: ["test-project"],
+				}))[0]?.limitRecovery;
 				expect(recovery).toMatchObject({
 					cutOffMessageId: "u1",
 					rearms: 3,

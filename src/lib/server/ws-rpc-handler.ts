@@ -20,6 +20,7 @@ import {
 	type OnSuccessfulShutdownResponse,
 	withRpcShutdownResponse,
 } from "../daemon/daemon-rpc-server.js";
+import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import {
 	observeTurnTimelineSocketWrite,
 	turnTimelineAwaitsSocketWrite,
@@ -441,12 +442,13 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			Effect.provide(transportContext),
 		);
 		const scope = yield* Effect.scope;
+		const directory = yield* SessionDirectory;
 		const serverLayer = makeRoutedWsRpcServerLayer(
 			resolveContext,
 			daemonHandlers,
 			defaultProjectSlug,
 			attachProject,
-		);
+		).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory)));
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),
 			runTransportFork: Runtime.runFork(runtime),

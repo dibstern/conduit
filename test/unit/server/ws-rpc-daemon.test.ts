@@ -87,8 +87,11 @@ describe("daemon RPC handlers", () => {
 					(yield* client.RemoveProject({ slug: added.savedSlug })).projects,
 				).toEqual([]);
 				expect((yield* client.ListDaemonSessions({})).sessions).toEqual([]);
-				expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
-					projectSlug: null,
+				expect(
+					yield* Effect.either(client.ResolveSession({ sessionId: "missing" })),
+				).toMatchObject({
+					_tag: "Left",
+					left: { _tag: "WsRpcError", message: "Unknown session: missing" },
 				});
 				expect((yield* client.ScanNow({})).active).toEqual([]);
 				expect(

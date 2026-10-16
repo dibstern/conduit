@@ -247,6 +247,7 @@ export function usageWarning(
 ): { window: PlanUsageWindow; title: string; detail?: string } | undefined {
 	if (
 		!reading ||
+		// driver-dispatch-ok: narrows the usage reading's harness, not a driver.
 		reading.harness !== "claude" ||
 		reading.status !== "available" ||
 		warnAt === "off"

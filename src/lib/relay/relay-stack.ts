@@ -27,6 +27,7 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	Option,
 	Schedule,
 } from "effect";
 import { AuthManager } from "../auth.js";
@@ -34,6 +35,8 @@ import { type GlobalSettingTag, WsRpcError } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
+import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import { ContinuationTag } from "../domain/relay/Services/continuation.js";
 import {
 	ProjectSettingsTag,
@@ -64,7 +67,6 @@ import {
 	type RpcWebSocketHandlerShape,
 } from "../server/ws-rpc-handler.js";
 import { settleIdleSessions } from "../session/auto-settle-sweep.js";
-import { makeSessionBackgroundLiveness } from "../session/background-liveness.js";
 import type { ConnectionHealth, ProjectRelayConfig } from "../types.js";
 import { generateSlug } from "../utils.js";
 
@@ -542,11 +544,8 @@ export async function createProjectRelay(
 		testSendLimit = 10_000;
 	}
 	const log = config.log ?? createLogger("relay");
-	// Background liveness is created before startup supplies its broadcaster.
+	// Only this relay's runtime changes stamp its own store after startup.
 	let announceBackgroundWork: ((sessionId: string) => void) | undefined;
-	const backgroundLiveness = makeSessionBackgroundLiveness((sessionId) =>
-		announceBackgroundWork?.(sessionId),
-	);
 	const sseLog = log.child("sse");
 	const statusLog = log.child("status-poller");
 	const pollerLog = log.child("msg-poller");
@@ -574,7 +573,7 @@ export async function createProjectRelay(
 		config,
 		...(claudeRunnerFactory && { claudeRunnerFactory }),
 		...(testSendLimit !== undefined && { testSendLimit }),
-		backgroundLiveness,
+		onBackgroundWorkChanged: (sessionId) => announceBackgroundWork?.(sessionId),
 		getWsHandler: () => wsHandler,
 		defaultCommandQueueLayer:
 			makeRelayDefaultCommandQueueLive(defaultCommandQueue),
@@ -659,7 +658,7 @@ export async function createProjectRelay(
 				{
 					projectDir: config.projectDir,
 					hasViewer: (id) => wsHandler.getClientsForSession(id).length > 0,
-					hasLiveBackgroundWork: backgroundLiveness.hasLiveWork,
+					hasLiveBackgroundWork: startup.activity.background.hasLiveWork,
 					setSettled: (id, mergedHead) =>
 						startup.sessionManagerService.setSessionSettled(id, {
 							settled: true,
@@ -831,13 +830,23 @@ export async function createRelayStack(
 				dirname(config.persistenceDbPath),
 				`${slug}.events.db`,
 			);
+			const parentContext = (await relay.effectRuntime.runtime.runtime())
+				.context;
+			const sessionDirectory = Context.getOption(
+				parentContext,
+				SessionDirectory,
+			);
+			const daemonContext = Context.pick(
+				DaemonConfigRefTag,
+				ConfigPersistenceTag,
+				AccountDirectory,
+				SessionActivityTag,
+			)(parentContext);
 			const newRelay = await createProjectRelay({
 				httpServer,
-				daemonConfigContext: Context.pick(
-					DaemonConfigRefTag,
-					ConfigPersistenceTag,
-					AccountDirectory,
-				)((await relay.effectRuntime.runtime.runtime()).context),
+				daemonConfigContext: Option.isSome(sessionDirectory)
+					? Context.add(daemonContext, SessionDirectory, sessionDirectory.value)
+					: daemonContext,
 				opencodeUrl: config.opencodeUrl,
 				projectDir: directory,
 				slug,
@@ -942,6 +951,13 @@ export async function createRelayStack(
 					}),
 				undefined,
 				config.slug,
+			).pipe(
+				Effect.provideServiceEffect(
+					SessionDirectory,
+					Effect.map(relay.effectRuntime.runtime.runtimeEffect, (runtime) =>
+						Context.get(runtime.context, SessionDirectory),
+					),
+				),
 			),
 		),
 	);

@@ -19,8 +19,11 @@ import {
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
-import { BackgroundLivenessTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -62,7 +65,7 @@ const makeLayer = () => {
 		makeSessionManagerStateLive(),
 		DaemonEventBusLive,
 		RelayStatusSnapshotLive,
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 	);
 	return WsRpcServerLayer.pipe(
 		Layer.provideMerge(
@@ -200,9 +203,9 @@ describe("subscription RPC handlers", () => {
 				);
 				const readQuery = yield* ReadQueryEffectTag;
 				expect(
-					(yield* readQuery.listSessionInfos()).find(
-						({ id }) => id === "fork-1",
-					),
+					(yield* readQuery.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find(({ id }) => id === "fork-1"),
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const envelopes = yield* Queue.unbounded<unknown>();

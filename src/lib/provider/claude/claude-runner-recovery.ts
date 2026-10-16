@@ -82,6 +82,17 @@ export const recoverClaudeRunnerCommands = (
 			replay: (row, input) => {
 				const instanceId = input.instanceId ?? row.provider_id;
 				return Effect.gen(function* () {
+					// Recovery can race the project's asynchronous environment capture.
+					const prepareShellEnv = deps.prepareShellEnv;
+					if (prepareShellEnv)
+						yield* Effect.tryPromise(() =>
+							prepareShellEnv(input.workspaceRoot),
+						).pipe(
+							Effect.timeoutOption("10 seconds"),
+							Effect.catchAll(() => Effect.void),
+						);
+					// The shared recovery drops a result that arrives while closing.
+					if (closing()) return undefined;
 					const state = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(PersistenceProjectTag, {
 							projectId: row.project_key,

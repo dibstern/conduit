@@ -6,9 +6,13 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	CreatePty,
+	CreatePtyForSession,
 	GetFileContent,
+	GetFileContentForSession,
 	GetFileList,
+	GetFileListForSession,
 	GetFileTree,
+	GetFileTreeForSession,
 	MoveSessionWorkspace,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -129,7 +133,6 @@ describe("Session workspace files and terminals through the built daemon", () =>
 				sendRpcRequest(
 					socket,
 					new MoveSessionWorkspace({
-						projectSlug: "process-test",
 						sessionId: moved,
 						path: worktree,
 					}),
@@ -167,11 +170,12 @@ describe("Session workspace files and terminals through the built daemon", () =>
 			const cursor = browser.frames.length;
 			await sendRpcRequest(
 				join(fixture.configDir, "relay.sock"),
-				new CreatePty({
-					projectSlug: "process-test",
-					originId: browser.originId,
-					...(sessionId ? { sessionId } : {}),
-				}),
+				sessionId
+					? new CreatePtyForSession({ sessionId, originId: browser.originId })
+					: new CreatePty({
+							projectSlug: "process-test",
+							originId: browser.originId,
+						}),
 			);
 			const frame = await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -223,16 +227,27 @@ describe("Session workspace files and terminals through the built daemon", () =>
 			{ name: "sessionless", sessionId: undefined },
 		];
 		for (const { name, sessionId } of scopes) {
-			const scope = {
-				projectSlug: "process-test",
-				...(sessionId ? { sessionId } : {}),
-			};
-			const list = await sendRpcRequest(socket, new GetFileList(scope));
+			const list = await sendRpcRequest(
+				socket,
+				sessionId
+					? new GetFileListForSession({ sessionId })
+					: new GetFileList({ projectSlug: "process-test" }),
+			);
 			// The background tree intentionally does not start a stopped file provider.
-			const tree = await sendRpcRequest(socket, new GetFileTree(scope));
+			const tree = await sendRpcRequest(
+				socket,
+				sessionId
+					? new GetFileTreeForSession({ sessionId })
+					: new GetFileTree({ projectSlug: "process-test" }),
+			);
 			const content = await sendRpcRequest(
 				socket,
-				new GetFileContent({ ...scope, path: "shared.txt" }),
+				sessionId
+					? new GetFileContentForSession({ sessionId, path: "shared.txt" })
+					: new GetFileContent({
+							projectSlug: "process-test",
+							path: "shared.txt",
+						}),
 			);
 			const paths = [...tree.entries].sort();
 			const names = list.entries.map(({ name }) => name).sort();
@@ -254,7 +269,9 @@ describe("Session workspace files and terminals through the built daemon", () =>
 				expect(content.content).toBe("worktree content\n");
 				const nested = await sendRpcRequest(
 					socket,
-					new GetFileList({ ...scope, path: "nested" }),
+					sessionId
+						? new GetFileListForSession({ sessionId, path: "nested" })
+						: new GetFileList({ projectSlug: "process-test", path: "nested" }),
 				);
 				expect(nested.entries.map(({ name }) => name)).toEqual(["child.txt"]);
 			} else {
@@ -309,8 +326,7 @@ describe("Session workspace files and terminals through the built daemon", () =>
 			await expect(
 				sendRpcRequest(
 					join(fixture.configDir, "relay.sock"),
-					new CreatePty({
-						projectSlug: "process-test",
+					new CreatePtyForSession({
 						originId: browser.originId,
 						sessionId: moved,
 					}),

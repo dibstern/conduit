@@ -6,8 +6,8 @@ import { writeFileSync } from "node:fs";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -26,7 +26,7 @@ const seed = (filename: string) =>
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
 			const start = Date.UTC(2026, 9, 1);
-			const event = <T extends CanonicalEventType>(
+			const event = <T extends LiveEventType>(
 				index: number,
 				type: T,
 				data: EventPayloadMap[T],
@@ -69,7 +69,7 @@ const seed = (filename: string) =>
 				{ publish: false },
 			);
 		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(filename, "test-project")),
+			Effect.provide(makePersistenceEffectLayer(filename, "process-test")),
 		),
 	);
 
@@ -170,7 +170,6 @@ test("deep rewind pages every older message once and undo restores the transcrip
 				const pagesFrom = olderPages.length;
 				await Effect.runPromise(
 					control.rpc.RewindSession({
-						projectSlug: "process-test",
 						sessionId: SESSION,
 						messageId: messageId(cut),
 					}),
@@ -205,7 +204,6 @@ test("deep rewind pages every older message once and undo restores the transcrip
 				}
 				await Effect.runPromise(
 					control.rpc.UndoRewind({
-						projectSlug: "process-test",
 						sessionId: SESSION,
 					}),
 				);

@@ -14,7 +14,11 @@ import {
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../account-directory.js";
 import type { Account } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
-import type { AccountId } from "../../../contracts/provider-instance.js";
+import {
+	type AccountId,
+	getProviderDriver,
+	PROVIDER_DRIVERS,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import type {
 	SessionDetail,
@@ -42,7 +46,6 @@ import {
 	PickRequired,
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
-import type { SessionBackground } from "../../../session/background-liveness.js";
 import type {
 	HistoryMessage,
 	SessionPermissionMode,
@@ -58,10 +61,12 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
+import { SessionDirectory } from "../../daemon/Services/session-directory.js";
+import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceTag,
@@ -159,7 +164,6 @@ export type ListSessionsOptions = {
 	limit?: number;
 	roots?: boolean;
 	statuses?: Record<string, SessionStatus> | undefined;
-	backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 };
 
 export interface CreateSessionOptions {
@@ -258,7 +262,7 @@ export const createLocalSessionId = (): string =>
 
 const createLocalSession = (
 	title: string | undefined,
-	account: Extract<Account, { driver: "claude" }>,
+	account: Account,
 	reservedSessionId: string | undefined,
 	pick: TurnSettings,
 	permissionMode: SessionPermissionMode,
@@ -309,18 +313,21 @@ export const deleteSession = (sessionId: string) =>
 			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const projectId = (yield* EventStoreEffectTag).projectId;
 
 		const sessions =
 			readQueryOption._tag === "Some"
-				? (yield* readQueryOption.value.getSessionLineage().pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "deleteSession.snapshot",
-									cause,
-								}),
-						),
-					)).rows
+				? (yield* readQueryOption.value
+						.getSessionLineage({ projectIds: [projectId] })
+						.pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionManagerError({
+										operation: "deleteSession.snapshot",
+										cause,
+									}),
+							),
+						)).rows
 				: [];
 		// The provider that owns the session is row-only state, never on the wire.
 		const row =
@@ -437,7 +444,7 @@ export const deleteSession = (sessionId: string) =>
 					}
 				}
 
-				if (provider === "opencode") {
+				if (getProviderDriver(provider)?.runsOpenCodeServer) {
 					const providerDeleteExit = yield* Effect.exit(
 						Effect.gen(function* () {
 							let deleteApi = api;
@@ -470,7 +477,9 @@ export const deleteSession = (sessionId: string) =>
 			});
 
 		const upstreamAdapter: SessionUpstreamAdapter = {
-			provider: provider === "claude" ? "claude" : "opencode",
+			provider: getProviderDriver(provider)?.usesLocalSessions
+				? "claude"
+				: "opencode",
 			sync: (command) =>
 				Effect.gen(function* () {
 					const cleanupExit = yield* Effect.exit(
@@ -714,7 +723,7 @@ const makeServiceCreateSession = ({
 				options?.permissionMode ?? (yield* getDefaultPermissionMode());
 			const session = yield* Effect.scoped(
 				Effect.gen(function* () {
-					if (account.driver === "claude")
+					if (PROVIDER_DRIVERS[account.driver].usesLocalSessions)
 						return yield* createLocalSession(
 							title,
 							account,
@@ -722,14 +731,20 @@ const makeServiceCreateSession = ({
 							pick,
 							permissionMode,
 						);
-					const instanceApi = yield* instanceClients.use(instanceId);
-					return yield* createOpenCodeSession(
-						title,
-						instanceId,
-						pick,
-						options?.sessionId,
-						permissionMode,
-					).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
+					if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+						const instanceApi = yield* instanceClients.use(instanceId);
+						return yield* createOpenCodeSession(
+							title,
+							instanceId,
+							pick,
+							options?.sessionId,
+							permissionMode,
+						).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
+					}
+					return yield* new SessionManagerError({
+						operation: "createSession",
+						cause: `Driver "${account.driver}" does not support session creation`,
+					});
 				}),
 			).pipe(
 				Effect.provideService(AccountDirectory, accounts),
@@ -773,7 +788,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 	| ConfigTag
 	| RelayStatusSnapshotTag
 	| OpenCodeInstancesTag
-	| BackgroundLivenessTag
+	| SessionActivityTag
 	| OverridesStateTag
 	| DaemonEventBusTag
 	| OrchestrationEngineTag
@@ -796,7 +811,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const sql = yield* SqlClient.SqlClient;
 		// The relay constructs the session manager before its status-poller layer.
 		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
-		const backgroundOf = yield* BackgroundLivenessTag;
+		const activity = yield* SessionActivityTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
 		const accounts = yield* AccountDirectory;
@@ -806,6 +821,16 @@ export const SessionManagerServiceLive: Layer.Layer<
 		// a daemon fiber that lacks the project's bus, and a commit without it
 		// never reaches the sidebar's shell subscription.
 		const sessionEventBus = yield* Effect.serviceOption(SessionEventBusTag);
+		const directory = yield* Effect.serviceOption(SessionDirectory);
+		const ownershipContext = Context.make(PersistenceProjectTag, {
+			projectId: config.slug,
+		}).pipe(
+			Context.merge(
+				Option.isSome(directory)
+					? Context.make(SessionDirectory, directory.value)
+					: Context.empty(),
+			),
+		);
 		const inFlightDeletes = new Map<
 			string,
 			Deferred.Deferred<void, SessionManagerError>
@@ -818,7 +843,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				sql,
 				accounts,
 				statusPollerOption,
-				backgroundOf,
+				activity,
 				snapshot,
 				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],
 				projectSlug: config.slug,
@@ -833,6 +858,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				// through the handle it hands us is what makes the announcement
 				// unskippable.
 				const commitAndSignal = yield* makeCommitAndSignal.pipe(
+					Effect.provide(ownershipContext),
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(EventStoreEffectTag, eventStore),
 					Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
@@ -845,9 +871,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.gen(function* () {
 							yield* sql`
 					INSERT OR IGNORE INTO sessions (
-						id, provider, provider_sid, title, status, created_at, updated_at
+						id, project_id, provider, provider_sid, title, status, created_at, updated_at
 					) VALUES (
-						${session.id}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
+						${session.id}, ${eventStore.projectId}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
 					)
 					`.pipe(
 								Effect.mapError(
@@ -953,6 +979,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			options?: CreateSessionOptions,
 		) => {
 			const create = serviceCreateSession(title, options).pipe(
+				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
@@ -983,6 +1010,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 			>,
 		): Effect.Effect<A, E> => {
 			const provided = effect.pipe(
+				Effect.provide(ownershipContext),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(ReadQueryEffectTag, readQuery),
@@ -1073,6 +1101,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 					const exit = yield* Effect.exit(
 						Effect.gen(function* () {
 							yield* deleteSession(sessionId).pipe(
+								Effect.provide(ownershipContext),
 								Effect.provideService(AccountDirectory, accounts),
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),
@@ -1169,7 +1198,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 									),
 								);
 					const instanceApi =
-						account?.driver === "opencode"
+						account !== undefined &&
+						PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
 							? yield* instanceClients.use(account.id).pipe(
 									Effect.mapError(
 										(cause) =>

@@ -41,6 +41,8 @@ import {
 	activateSessionChatState,
 	clearSessionChatState,
 	followSessionBusy,
+	followSessionCompaction,
+	followSessionRetry,
 	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
@@ -596,11 +598,16 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	if (change._tag === "snapshot") {
 		// A bounded rebase can omit a child that finished while disconnected.
 		for (const row of previousRows.values()) {
-			if (row.parentID !== undefined && !next.rows.has(row.id) && isBusy(row))
-				followSessionBusy(row.id, false);
+			if (row.parentID === undefined || next.rows.has(row.id)) continue;
+			if (isBusy(row)) followSessionBusy(row.id, false);
+			followSessionCompaction(row.id, undefined);
+			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
-			if (row.parentID !== undefined) followSessionBusy(row.id, isBusy(row));
+			if (row.parentID === undefined) continue;
+			followSessionBusy(row.id, isBusy(row));
+			followSessionCompaction(row.id, row.compacting);
+			followSessionRetry(row.id, row.retrying);
 		}
 	}
 	if (change._tag === "upsert" && change.item.parentID !== undefined) {
@@ -611,6 +618,10 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 			(!busy && turnEnded(previousRow, change.item))
 		)
 			followSessionBusy(change.item.id, busy, change.item.lastTurnEndInputId);
+		if (change.item.compacting !== previousRow?.compacting)
+			followSessionCompaction(change.item.id, change.item.compacting);
+		if (change.item.retrying !== previousRow?.retrying)
+			followSessionRetry(change.item.id, change.item.retrying);
 	}
 }
 
@@ -1042,7 +1053,6 @@ export function switchToSession(
 	}
 	if (slug) {
 		const input: ViewSessionRpcInput = {
-			projectSlug: slug,
 			sessionId,
 			originId: getBrowserClientId(),
 		};
@@ -1063,7 +1073,7 @@ export function switchToSession(
 	}
 	if (slug) {
 		const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
-		void getAgentsRpc({ projectSlug: slug, sessionId })
+		void getAgentsRpc({ sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1073,7 +1083,7 @@ export function switchToSession(
 					applyGetAgentsResponse(response, sessionId);
 			})
 			.catch(() => undefined);
-		void getCommandsRpc({ projectSlug: slug, sessionId })
+		void getCommandsRpc({ sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1088,7 +1098,7 @@ export function switchToSession(
 		// Re-syncs per-session overrides (variant, context window, permission
 		// mode) that connect-time hydration cannot see for later switches.
 		const applyModels = followModelsRead(sessionId);
-		void getModelsRpc({ projectSlug: slug, sessionId })
+		void getModelsRpc({ sessionId })
 			.then((response) => {
 				if (
 					generation === selectionGeneration &&
@@ -1110,15 +1120,14 @@ export async function reloadProviderSession(
 	sessionId: string,
 ): Promise<void> {
 	await reloadProviderSessionRpc({
-		projectSlug,
 		sessionId,
 		commandId: crypto.randomUUID(),
 	});
 	const workspace = JSON.stringify(findSession(sessionId)?.workspace ?? null);
 	const applyModels = followModelsRead(sessionId);
 	const [commands, models] = await Promise.all([
-		getCommandsRpc({ projectSlug, sessionId }),
-		getModelsRpc({ projectSlug, sessionId }),
+		getCommandsRpc({ sessionId }),
+		getModelsRpc({ sessionId }),
 	]);
 	if (clientSession.currentId !== sessionId || getCurrentSlug() !== projectSlug)
 		return;

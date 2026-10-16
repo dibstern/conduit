@@ -6,6 +6,7 @@
 // handles (eventSink, AbortSignal, callbacks) are never included.
 
 import { createHash } from "node:crypto";
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import { claudeApiModelId } from "./claude/claude-api-model-id.js";
 import {
 	DURABLE_COMMAND_FINGERPRINT_VERSION,
@@ -57,7 +58,10 @@ function effectiveModel(
 	options: EffectiveDispatchFingerprintOptions,
 ): unknown {
 	const { providerId, input } = command;
-	if ((input.account?.driver ?? providerId) === "claude") {
+	if (
+		getProviderDriver(input.account?.driver ?? providerId)?.modelIdFormat ===
+		"context-window-suffix"
+	) {
 		const modelId = input.model?.modelId ?? options.activeSessionModelId;
 		return claudeApiModelId(modelId, input.contextWindow) ?? null;
 	}
@@ -77,7 +81,9 @@ export function effectiveDispatchFingerprint(
 		rewind: input.rewind,
 		// contextWindow folds into effectiveModel for Claude; keep it as a raw
 		// option for providers that treat it independently.
-		...(driver === "claude" ? {} : { contextWindow: input.contextWindow }),
+		...(getProviderDriver(driver)?.modelIdFormat === "context-window-suffix"
+			? {}
+			: { contextWindow: input.contextWindow }),
 	});
 	const fields: Record<DurableCommandFingerprintField, unknown> = {
 		commandType: "send_turn",
@@ -94,7 +100,12 @@ export function effectiveDispatchFingerprint(
 		materialDefaults: input.account
 			? input.account.driver === "claude"
 				? { configDir: input.account.folder, env: input.account.env ?? null }
-				: { url: input.account.url ?? null }
+				: input.account.driver === "opencode"
+					? { url: input.account.url ?? null }
+					: {
+							configDir: input.account.configuredFolder ?? null,
+							env: input.account.env ?? null,
+						}
 			: null,
 	};
 	return { version: DURABLE_COMMAND_FINGERPRINT_VERSION, fields };

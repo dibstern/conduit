@@ -96,7 +96,6 @@ describe("a stale OpenCode status read", () => {
 		const inputId = randomUUID();
 		const accepted = await Effect.runPromise(
 			browser.rpc.input.submit({
-				projectSlug: "process-test",
 				sessionId: running,
 				text: "after the running turn",
 				inputId,

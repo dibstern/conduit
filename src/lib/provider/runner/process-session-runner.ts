@@ -339,6 +339,7 @@ export const makeProcessSessionRunner = (
 				terminal: boolean;
 				pending: boolean;
 				accepted: boolean;
+				admission?: Deferred.Deferred<void>;
 				releaseRequested: boolean;
 				completed: Deferred.Deferred<void> | undefined;
 			}
@@ -435,6 +436,7 @@ export const makeProcessSessionRunner = (
 			if (entry.stopping || entry.recovering || entry.failure || closing)
 				return;
 			entry.failure = failure;
+			runFork(Deferred.fail(entry.ready, failure));
 			if (entry.candidate) return;
 			const bindings = [...sinks].filter(
 				([, binding]) => binding.sessionId === sessionId,
@@ -672,7 +674,11 @@ export const makeProcessSessionRunner = (
 					}),
 				onCommandAccepted: (sinkId) => {
 					const binding = sinks.get(sinkId);
-					if (binding) binding.accepted = true;
+					if (binding) {
+						binding.accepted = true;
+						if (binding.admission)
+							runFork(Deferred.succeed(binding.admission, undefined));
+					}
 				},
 				onUpgradeState: (state) => {
 					const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
@@ -1140,6 +1146,7 @@ export const makeProcessSessionRunner = (
 							Effect.gen(function* () {
 								yield* ensureRecovering;
 								entry.commandsInFlight += commands.length;
+								const admissions: Deferred.Deferred<void>[] = [];
 								for (const command of commands) {
 									let binding = sinks.get(command.sinkId);
 									// The server can persist admission before the runner sees it.
@@ -1158,6 +1165,11 @@ export const makeProcessSessionRunner = (
 										};
 										sinks.set(command.sinkId, binding);
 									}
+									if (!binding.accepted) {
+										binding.admission ??= yield* Deferred.make<void>();
+										admissions.push(binding.admission);
+									}
+									const admission = binding.admission;
 									runFork(
 										command.wait.pipe(
 											Effect.tap(() => {
@@ -1188,6 +1200,11 @@ export const makeProcessSessionRunner = (
 													? Deferred.succeed(binding.completed, undefined)
 													: Effect.void,
 											),
+											Effect.ensuring(
+												admission
+													? Deferred.succeed(admission, undefined)
+													: Effect.void,
+											),
 											Effect.catchAllCause((cause) =>
 												Effect.logError(
 													"Runner command recovery failed",
@@ -1205,7 +1222,29 @@ export const makeProcessSessionRunner = (
 								}
 								// Waiters own restored turns before commands or close callbacks run.
 								entry.recovering = false;
-								yield* Deferred.succeed(entry.ready, connected.right);
+								if (admissions.length === 0)
+									yield* Deferred.succeed(entry.ready, connected.right);
+								else
+									runFork(
+										Effect.forEach(admissions, Deferred.await, {
+											discard: true,
+										}).pipe(
+											Effect.andThen(ensureRecovering),
+											Effect.flatMap(() =>
+												connected.right.closed
+													? Effect.fail(
+															runnerFailure(
+																"recover runner",
+																"Runner disconnected during recovery",
+															),
+														)
+													: Deferred.succeed(entry.ready, connected.right),
+											),
+											Effect.catchAll((failure) =>
+												Deferred.fail(entry.ready, failure),
+											),
+										),
+									);
 								if (connected.right.closed)
 									failed(
 										registration.sessionId,

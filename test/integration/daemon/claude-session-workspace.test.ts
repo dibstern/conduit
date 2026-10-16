@@ -452,7 +452,6 @@ exec '${realGit}' "$@"
 				? sendRpcRequest(
 						socket,
 						new MoveSessionWorkspace({
-							projectSlug: "process-test",
 							sessionId,
 							path: user,
 						}),
@@ -705,7 +704,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: target,
 			}),
@@ -767,7 +765,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: user,
 			}),
@@ -806,7 +803,6 @@ exec '${realGit}' "$@"
 		const sessionId = await browser.createSession("Wrong Exit result");
 		await browser.send(sessionId, "Enter a worktree.");
 		const request = new MoveSessionWorkspace({
-			projectSlug: "process-test",
 			sessionId,
 			path: user,
 		});
@@ -855,7 +851,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: main,
 			}),
@@ -922,7 +917,6 @@ exec '${realGit}' "$@"
 			await sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path,
 				}),
@@ -976,7 +970,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: user,
 			}),
@@ -989,7 +982,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: main,
 			}),
@@ -1038,7 +1030,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new SubmitInput({
-				projectSlug: "process-test",
 				sessionId,
 				inputId: randomUUID(),
 				delivery: "queue",
@@ -1069,7 +1060,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: user,
 			}),
@@ -1078,7 +1068,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new ContinueSession({
-				projectSlug: "process-test",
 				sessionId,
 				instanceId: addedInstanceId,
 				expectedInstanceId: addedInstanceId,
@@ -1148,7 +1137,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new SubmitInput({
-				projectSlug: "process-test",
 				sessionId,
 				inputId,
 				delivery: "queue",
@@ -1158,7 +1146,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: user,
 			}),
@@ -1217,7 +1204,6 @@ exec '${realGit}' "$@"
 		const sessionId = await browser.createSession("Ignored workspace move");
 		await browser.send(sessionId, "Enter a worktree.");
 		const request = new MoveSessionWorkspace({
-			projectSlug: "process-test",
 			sessionId,
 			path: user,
 		});
@@ -1305,7 +1291,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: user,
 			}),
@@ -1373,7 +1358,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: user,
 			}),
@@ -1409,7 +1393,6 @@ exec '${realGit}' "$@"
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId,
 				path: entered,
 			}),
@@ -1418,7 +1401,6 @@ exec '${realGit}' "$@"
 			await sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path: main,
 				}),
@@ -1467,7 +1449,6 @@ exec '${realGit}' "$@"
 				await sendRpcRequest(
 					socket,
 					new MoveSessionWorkspace({
-						projectSlug: "process-test",
 						sessionId,
 						path: user,
 					}),
@@ -1475,7 +1456,6 @@ exec '${realGit}' "$@"
 			await sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path: requested,
 				}),

@@ -1,20 +1,18 @@
 import type {
 	ProviderRuntimeEvent,
+	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
 	decodeProviderRuntimeEvent,
 	PROVIDER_RUNTIME_EVENT_TYPES,
 } from "../../src/lib/contracts/providers/provider-runtime-event.js";
-import type {
-	CanonicalEvent,
-	EventPayloadMap,
-} from "../../src/lib/persistence/events.js";
+import type { CanonicalEvent } from "../../src/lib/persistence/events.js";
 
 export function providerRuntimeEvent<K extends ProviderRuntimeEventType>(
 	type: K,
 	sessionId: string,
-	data: EventPayloadMap[K],
+	data: ProviderRuntimeEventPayloadMap[K],
 	options: {
 		readonly eventId?: string;
 		readonly providerId?: string;

@@ -136,8 +136,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		});
 
 		// No tool.input_updated events should have been emitted
-		const inputUpdated = events.filter((e) => e.type === "tool.input_updated");
-		expect(inputUpdated).toHaveLength(0);
+		expect(events.map((e) => e.type)).not.toContain("tool.input_updated");
 
 		// tool.running must come AFTER tool.started
 		const toolRunning = events.filter((e) => e.type === "tool.running");

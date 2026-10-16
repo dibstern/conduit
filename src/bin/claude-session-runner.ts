@@ -4,13 +4,17 @@ import { Effect } from "effect";
 import { makeClaudeRunnerLaunch } from "../lib/provider/claude/claude-runner-launch.js";
 import { runSessionRunner } from "../lib/provider/runner/runner-host.js";
 
+/** The payload each runner-backed driver launches. */
+const launches = new Map([["claude", makeClaudeRunnerLaunch]]);
+
 const main = Effect.gen(function* () {
 	const driverKind = process.argv[6] ?? "claude";
-	if (driverKind !== "claude")
+	const launch = launches.get(driverKind);
+	if (!launch)
 		return yield* Effect.fail(
 			new Error(`Unknown runner driver kind: ${driverKind}`),
 		);
-	return yield* runSessionRunner(driverKind, makeClaudeRunnerLaunch);
+	return yield* runSessionRunner(driverKind, launch);
 });
 
 NodeRuntime.runMain(Effect.scoped(main));

@@ -30,6 +30,7 @@ describe("Schema Migration", () => {
 					[56, "drop_activities"],
 					[57, "session_pick_backfill"],
 					[58, "compact_redundant_events"],
+					[59, "session_project_scope"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -227,11 +228,31 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_session_sidebar_project_activity",
+					table: "session_sidebar",
+					unique: false,
+				},
+				{
+					name: "idx_session_sidebar_project_version",
+					table: "session_sidebar",
+					unique: false,
+				},
+				{
 					name: "idx_session_sidebar_version",
 					table: "session_sidebar",
 					unique: false,
 				},
 				{ name: "idx_sessions_parent", table: "sessions", unique: false },
+				{
+					name: "idx_sessions_project_status",
+					table: "sessions",
+					unique: false,
+				},
+				{
+					name: "idx_sessions_project_updated",
+					table: "sessions",
+					unique: false,
+				},
 				{
 					name: "idx_sessions_provider",
 					table: "sessions",

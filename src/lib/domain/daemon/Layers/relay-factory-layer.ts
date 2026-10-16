@@ -26,6 +26,7 @@ import {
 	Ref,
 	Runtime,
 } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	projectEventsDbPath,
 	projectStorageDir,
@@ -39,10 +40,7 @@ import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import {
-	listDaemonSessions as listEffectDaemonSessions,
-	resolveDaemonSession,
-} from "../Services/daemon-session-reader.js";
+import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
 import { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
@@ -61,6 +59,8 @@ import {
 	openCodeInstanceFor,
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
+import { SessionActivityTag } from "../Services/session-activity.js";
+import { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
@@ -149,6 +149,7 @@ export const RelayFactoryLive = (
 	| PollerFibersTag
 	| InstanceHealthCheckTag
 	| DaemonEventBusTag
+	| SessionActivityTag
 	| ConfigPersistenceTag
 	| PortScannerTag
 	| PushManagerTag
@@ -158,6 +159,7 @@ export const RelayFactoryLive = (
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
 			const configRef = yield* DaemonConfigRefTag;
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
@@ -168,6 +170,7 @@ export const RelayFactoryLive = (
 			const pollerFibers = yield* PollerFibersTag;
 			const healthCheck = yield* InstanceHealthCheckTag;
 			const eventBus = yield* DaemonEventBusTag;
+			const activity = yield* SessionActivityTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
 			const portScanner = yield* PortScannerTag;
@@ -205,6 +208,7 @@ export const RelayFactoryLive = (
 					listEffectDaemonSessions(configDir, options).pipe(
 						Effect.provideService(ProjectRegistryTag, projectRegistry),
 						Effect.provideService(AccountDirectory, accounts),
+						Effect.provideService(SessionActivityTag, activity),
 					),
 				);
 			const broadcastSessionListChanged = () =>
@@ -257,14 +261,15 @@ export const RelayFactoryLive = (
 			const removeInstance = (id: string) =>
 				runCallback(provideInstanceDeps(removeEffectInstance(id)));
 
-			// Claude instances have no process to start.
+			// Only server-backed instances have an OpenCode process to start.
 			const startInstance = (id: string) =>
 				runCallback(
 					provideInstanceDeps(getEffectInstance(id)).pipe(
 						Effect.flatMap((instance) =>
-							instance.driver === "claude"
-								? Effect.void
-								: Effect.asVoid(Effect.scoped(openCodeInstances.use(id))),
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+								? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
+								: Effect.void,
 						),
 					),
 				);
@@ -396,6 +401,12 @@ export const RelayFactoryLive = (
 									).pipe(
 										Context.add(ConfigPersistenceTag, configPersistence),
 										Context.add(AccountDirectory, accounts),
+										Context.add(SessionActivityTag, activity),
+										Context.merge(
+											Option.isSome(sessionDirectory)
+												? Context.make(SessionDirectory, sessionDirectory.value)
+												: Context.empty(),
+										),
 									),
 									openCodeInstances,
 									...(Option.isSome(worktreeService)
@@ -427,12 +438,11 @@ export const RelayFactoryLive = (
 									listDaemonSessions,
 									resolveSessionProject: (sessionId) =>
 										runCallback(
-											resolveDaemonSession(configDir, sessionId).pipe(
-												Effect.provideService(
-													ProjectRegistryTag,
-													projectRegistry,
-												),
-											),
+											Option.isSome(sessionDirectory)
+												? sessionDirectory.value
+														.projectOf(sessionId)
+														.pipe(Effect.map(Option.getOrNull))
+												: Effect.succeed(null),
 										),
 									broadcastSessionListChanged,
 									requestWorktreeCleanup: () =>

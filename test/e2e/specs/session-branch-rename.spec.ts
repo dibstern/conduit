@@ -71,6 +71,7 @@ async function openSession(
 	};
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: projectSlug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],

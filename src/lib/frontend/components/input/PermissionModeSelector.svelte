@@ -13,6 +13,7 @@
 	} from "../../stores/composer-settings.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { SessionPermissionMode } from "../../types.js";
 
 	let { variant = "icons" }: { variant?: "icons" | "words" | "row" | undefined } = $props();
@@ -71,7 +72,7 @@
 
 	$effect(() => {
 		const providerId = discoveryState.currentProviderId;
-		if (providerId === "claude") {
+		if (discoveryState.currentTraits?.permissionModes.includes("auto")) {
 			autoNormalizationProvider = null;
 			return;
 		}
@@ -201,8 +202,8 @@
 					</span>
 					<span class="flex items-center gap-1.5 text-[12.5px] font-semibold">
 						{option.label}
-						{#if option.claudeOnly && discoveryState.currentProviderId === "claude"}
-							<Badge variant="neutral" size="xs">Claude</Badge>
+						{#if option.claudeOnly && discoveryState.currentTraits?.permissionModes.includes(option.mode)}
+							<Badge variant="neutral" size="xs">{getProviderPresentation(discoveryState.currentDriver)?.label}</Badge>
 						{/if}
 					</span>
 					<span class="truncate text-[10.5px] leading-[1.3] text-text-muted">{presentation[option.mode].description}</span>
