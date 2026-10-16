@@ -94,6 +94,7 @@ const expectedNames = [
 	"compact_redundant_events",
 	"session_project_scope",
 	"daemon_store_imports",
+	"goal_check_metadata",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -112,6 +113,69 @@ const legacyNames = [
 ];
 
 describe("Effect migration lineage", () => {
+	// Replay can encounter either column alone or both. Guarding only the first
+	// column can skip the second or duplicate it; both migration paths must retain data.
+	for (const migrationPath of ["append", "gap"]) {
+		for (const existingColumns of ["turn_index", "judge_model", "both"]) {
+			it.effect(
+				`replays goal metadata via ${migrationPath} with ${existingColumns} present`,
+				() =>
+					Effect.gen(function* () {
+						const entries = {
+							...effectMigrationEntries,
+							...(migrationPath === "gap"
+								? { "0062_test_marker": Effect.void }
+								: {}),
+						};
+						yield* makeEffectSqlMigrator(entries);
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('goal', 'claude', 1, 1)`;
+						yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at, turn_index, judge_model)
+							VALUES ('check', 'goal', 'Ship it', 1, 1, 'Still failing', 2, 3, 'judge')`;
+						if (existingColumns === "turn_index")
+							yield* sql`ALTER TABLE session_goal_checks DROP COLUMN judge_model`;
+						if (existingColumns === "judge_model")
+							yield* sql`ALTER TABLE session_goal_checks DROP COLUMN turn_index`;
+						yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 61`;
+						expect(yield* makeEffectSqlMigrator(entries)).toEqual([
+							[61, "goal_check_metadata"],
+						]);
+						expect(
+							yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
+						).toEqual([
+							{
+								reason: "Still failing",
+								turn_index: existingColumns === "judge_model" ? null : 3,
+								judge_model: existingColumns === "turn_index" ? null : "judge",
+							},
+						]);
+						expect(yield* makeEffectSqlMigrator(entries)).toEqual([]);
+					}).pipe(Effect.provide(makeFileSqlLayer())),
+			);
+		}
+	}
+
+	// Failure modes: existing check history lost, invented legacy metadata,
+	// migration registered only in the unused legacy path, or rerun failures.
+	it.effect("upgrades existing goal checks through the live migrator", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(60));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('goal', 'claude', 1, 1)`;
+			yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at)
+				VALUES ('check', 'goal', 'Ship it', 1, 1, 'Still failing', 2)`;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[61, "goal_check_metadata"],
+			]);
+			expect(
+				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
+			).toEqual([
+				{ reason: "Still failing", turn_index: null, judge_model: null },
+			]);
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
+
 	it.effect(
 		"defers legacy repair until recovery and preserves the durable completion marker",
 		() =>
@@ -205,6 +269,7 @@ describe("Effect migration lineage", () => {
 					58,
 					59,
 					60,
+					61,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -369,8 +434,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 60", () => {
-		expect(migrationEntries).toHaveLength(60);
+	it("registers the contiguous production chain from 1 through 61", () => {
+		expect(migrationEntries).toHaveLength(61);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -547,6 +612,7 @@ describe("Effect migration lineage", () => {
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
+					[61, "goal_check_metadata"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -628,6 +694,7 @@ describe("Effect migration lineage", () => {
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
+					[61, "goal_check_metadata"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -688,6 +755,7 @@ describe("Effect migration lineage", () => {
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
+					[61, "goal_check_metadata"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1278,6 +1346,7 @@ describe("Effect migration lineage", () => {
 				[58, "compact_redundant_events"],
 				[59, "session_project_scope"],
 				[60, "daemon_store_imports"],
+				[61, "goal_check_metadata"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1375,6 +1444,7 @@ describe("Effect migration lineage", () => {
 					[58, "compact_redundant_events"],
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
+					[61, "goal_check_metadata"],
 				]);
 				const rows = yield* sql<{
 					id: string;

@@ -186,6 +186,10 @@ const SessionGoalSchema = Schema.Struct({
 	setAt: Schema.Number,
 	tokensAtStart: Schema.Number,
 	lastReason: Schema.optional(Schema.String),
+	/** Explicit provider report only; absence means the judge is unknown. */
+	judgeModel: Schema.optional(Schema.NonEmptyTrimmedString),
+	/** Durable turns overlapping this goal's lifetime, frozen on completion. */
+	turnCount: Schema.optional(Schema.NonNegativeInt),
 });
 
 export type SessionGoalChangedPayload = PayloadOf<"session.goal_changed">;

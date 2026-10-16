@@ -2719,9 +2719,18 @@ export class ResolveSession extends Schema.TaggedRequest<ResolveSession>()(
 ) {}
 
 export const GoalDetailsSchema = Schema.Struct({
+	judgeModel: Schema.optional(Schema.NullOr(Schema.NonEmptyTrimmedString)),
+	setAt: Schema.optional(Schema.NullOr(Schema.Number)),
+	metAt: Schema.optional(Schema.NullOr(Schema.Number)),
+	turnCount: Schema.optional(Schema.NullOr(Schema.NonNegativeInt)),
 	checks: Schema.Array(
 		Schema.Struct({
 			iteration: Schema.NonNegativeInt,
+			/** One-based session turn index, independent of the check iteration. */
+			turnIndex: Schema.optional(
+				Schema.NullOr(Schema.Int.pipe(Schema.positive())),
+			),
+			judgeModel: Schema.optional(Schema.NullOr(Schema.NonEmptyTrimmedString)),
 			at: Schema.Number,
 			reason: Schema.NullOr(Schema.String),
 		}),

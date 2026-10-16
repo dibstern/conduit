@@ -13,6 +13,7 @@ import {
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
+	GOAL_CHECK_METADATA_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
@@ -1194,6 +1195,20 @@ export const effectMigrationEntries = {
 	"0060_daemon_store_imports": executeSqlStatements(
 		readMigrationSql(DAEMON_STORE_IMPORTS_MIGRATION),
 	),
+	"0061_goal_check_metadata": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(GOAL_CHECK_METADATA_MIGRATION),
+		);
+		for (const [index, column] of ["turn_index", "judge_model"].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"session_goal_checks",
+					column,
+					statement,
+				);
+		}
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
