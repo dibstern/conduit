@@ -15,24 +15,25 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const viewSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (_input: unknown) => ({ ok: true as const })),
+const rpcSpy = vi.hoisted(() =>
+	vi.fn(async (tag: string, _input: unknown) => {
+		switch (tag) {
+			case "GetAgents":
+				return { projectSlug: "project-a", agents: [] };
+			case "GetCommands":
+				return { projectSlug: "project-a", commands: [] };
+			case "GetModels":
+				throw new Error("models unavailable in test");
+			case "SwitchPermissionMode":
+				return { projectSlug: "project-a", mode: "ask" };
+			default:
+				return { ok: true as const };
+		}
+	}),
 );
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getAgentsRpc: vi.fn(async () => ({ projectSlug: "project-a", agents: [] })),
-	getCommandsRpc: vi.fn(async () => ({
-		projectSlug: "project-a",
-		commands: [],
-	})),
-	getModelsRpc: vi.fn(async () => {
-		throw new Error("models unavailable in test");
-	}),
-	viewSessionRpc: (input: unknown) => viewSessionRpcSpy(input),
-	switchPermissionModeRpc: vi.fn(async () => ({
-		projectSlug: "project-a",
-		mode: "ask",
-	})),
+	rpc: rpcSpy,
 }));
 
 // Imports (after mocks)
@@ -291,7 +292,7 @@ describe("AttentionBanner merge logic", () => {
 		const sessionButton = screen.getByText(/Clickable session/);
 		await fireEvent.click(sessionButton);
 
-		expect(viewSessionRpcSpy).toHaveBeenCalledWith({
+		expect(rpcSpy).toHaveBeenCalledWith("ViewSession", {
 			sessionId: "ses_other1",
 			originId: expect.any(String),
 		});

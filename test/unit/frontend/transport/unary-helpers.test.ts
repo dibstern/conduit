@@ -7,9 +7,9 @@ import type {
 	WsRpcConnect,
 } from "../../../../src/lib/frontend/transport/shared-client.js";
 import {
+	rpc,
 	saveProjectRpc,
 	setLogLevelRpc,
-	syncInputDraftRpc,
 } from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { makeRpcWire } from "../../../helpers/rpc-wire.js";
 
@@ -116,10 +116,13 @@ afterEach(async () => {
 it("shares one control transport across unary helpers and projects", async () => {
 	await Promise.all([
 		setLogLevelRpc({ projectSlug: "alpha", level: "debug" }),
-		syncInputDraftRpc({ sessionId: "s1", text: "draft" }),
+		rpc("SyncInputDraft", {
+			sessionId: "s1",
+			text: "draft",
+		}),
 	]);
 	await setLogLevelRpc({ projectSlug: "alpha", level: "info" });
-	await syncInputDraftRpc({
+	await rpc("SyncInputDraft", {
 		sessionId: "s2",
 		text: "other",
 	});

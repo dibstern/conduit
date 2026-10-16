@@ -18,8 +18,7 @@ vi.mock("../../../src/lib/frontend/stores/client-identity.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	answerQuestionRpc: vi.fn(async () => undefined),
-	rejectQuestionRpc: vi.fn(async () => undefined),
+	rpc: vi.fn(async () => ({ ok: true })),
 }));
 
 function questionRequest(

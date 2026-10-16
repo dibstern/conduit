@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => ({
-	setSessionSettledRpc: vi.fn(async () => {}),
-	setSessionPinnedRpc: vi.fn(async () => {}),
+	rpc: vi.fn(async () => {}),
 }));
 const list = vi.hoisted(() => ({
 	refreshListedSessions: vi.fn(async () => {}),
@@ -62,7 +61,8 @@ describe("a session from another project (all-projects view)", () => {
 
 	it("addresses the change by session, then refreshes the foreign row", async () => {
 		await sessionCommandActions.settle(foreign, true);
-		expect(rpc.setSessionSettledRpc).toHaveBeenCalledWith(
+		expect(rpc.rpc).toHaveBeenCalledWith(
+			"SetSessionSettled",
 			expect.objectContaining({
 				sessionId: foreign.id,
 				settled: true,
@@ -73,7 +73,8 @@ describe("a session from another project (all-projects view)", () => {
 
 	it("does not refresh for a session of the attached project", async () => {
 		await sessionCommandActions.pin({ ...foreign, projectSlug: "home" }, true);
-		expect(rpc.setSessionPinnedRpc).toHaveBeenCalledWith(
+		expect(rpc.rpc).toHaveBeenCalledWith(
+			"SetSessionPinned",
 			expect.objectContaining({ sessionId: foreign.id, pinned: true }),
 		);
 		expect(list.refreshListedSessions).not.toHaveBeenCalled();

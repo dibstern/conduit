@@ -13,10 +13,8 @@ import {
 import { refreshListedSessions } from "../stores/session-list.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
 import { showToast } from "../stores/ui.svelte.js";
-import {
-	markSessionReadRpc,
-	markSessionUnreadRpc,
-} from "../transport/ws-rpc-client.js";
+import { toastFailure } from "../transport/rpc-errors.js";
+import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
 
 export function backToSessions(): void {
@@ -48,7 +46,9 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 	const write = async (unread: boolean) => {
 		const drop = setReadMark(latest(), unread);
 		try {
-			await (unread ? markSessionUnreadRpc(input) : markSessionReadRpc(input));
+			await (unread
+				? rpc("MarkSessionUnread", input)
+				: rpc("MarkSessionRead", input));
 		} catch (error) {
 			drop();
 			throw error;
@@ -72,16 +72,14 @@ export async function toggleSessionRead(session: SessionInfo): Promise<void> {
 				action: {
 					label: "Undo",
 					run: () => {
-						void write(!markUnread).catch(() => {
-							showToast("Couldn't undo", { variant: "error" });
-						});
+						void write(!markUnread).catch(toastFailure("Couldn't undo"));
 					},
 				},
 			},
 		);
-	} catch {
-		showToast(markUnread ? "Couldn't mark unread" : "Couldn't mark read", {
-			variant: "error",
-		});
+	} catch (error) {
+		toastFailure(markUnread ? "Couldn't mark unread" : "Couldn't mark read")(
+			error,
+		);
 	}
 }
