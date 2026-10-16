@@ -375,6 +375,8 @@ export interface RelayStack {
 	readonly effectRuntime: ProjectRelay["effectRuntime"];
 	/** Session selected during relay startup. */
 	readonly initialSessionId: string;
+	/** The initial project's automatic settlement pass; the daemon runs it per minute. */
+	readonly settleIdleSessions: ProjectRelay["settleIdleSessions"];
 
 	/** The port the HTTP server is actually listening on (useful when port=0) */
 	getPort(): number;
@@ -923,6 +925,7 @@ export async function createRelayStack(
 		translator: relay.translator,
 		orchestration: relay.orchestration,
 		initialSessionId: relay.initialSessionId,
+		settleIdleSessions: relay.settleIdleSessions,
 
 		getPort() {
 			const addr = httpServer.address();

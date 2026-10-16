@@ -56,6 +56,12 @@ import {
 /** Days of inactivity before automatic settlement when no value is persisted. */
 export const DEFAULT_AUTO_SETTLE_AFTER_DAYS = 3;
 
+/** How long a session must sit idle before it settles, or null when it never does. */
+export const autoSettleIdleWindowMs = (
+	days: number | null | undefined,
+): number | null =>
+	days === null ? null : (days ?? DEFAULT_AUTO_SETTLE_AFTER_DAYS) * 86_400_000;
+
 export const CURRENT_CONFIG_VERSION = 1;
 
 const ProjectSchema = Schema.Struct({

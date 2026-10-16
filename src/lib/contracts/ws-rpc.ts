@@ -1926,11 +1926,39 @@ export class SetSessionPinned extends Schema.TaggedRequest<SetSessionPinned>()(
 	},
 ) {}
 
+/** What automatic settlement will do with a session. */
+export const AutoSettleOutlookSchema = Schema.Union(
+	Schema.Struct({ kind: Schema.Literal("off", "never", "settled", "due") }),
+	Schema.Struct({
+		kind: Schema.Literal("paused"),
+		reason: Schema.Literal(
+			"pinned",
+			"snoozed",
+			"unread",
+			"working",
+			"awaiting-activity",
+		),
+	}),
+	Schema.Struct({ kind: Schema.Literal("scheduled"), at: Schema.Number }),
+);
+export type AutoSettleOutlook = typeof AutoSettleOutlookSchema.Type;
+
+/** The outlook as once the asking viewer leaves: an open viewer never pauses it. */
+export class GetSessionAutoSettleOutlook extends Schema.TaggedRequest<GetSessionAutoSettleOutlook>()(
+	"GetSessionAutoSettleOutlook",
+	{
+		failure: WsRpcError,
+		success: AutoSettleOutlookSchema,
+		payload: { sessionId: NonEmptyString },
+	},
+) {}
+
+/** Replies with the outlook after the change. */
 export class SetSessionAutoSettle extends Schema.TaggedRequest<SetSessionAutoSettle>()(
 	"SetSessionAutoSettle",
 	{
 		failure: WsRpcError,
-		success: OkResponseSchema,
+		success: AutoSettleOutlookSchema,
 		payload: {
 			sessionId: NonEmptyString,
 			disabled: Schema.Boolean,
@@ -2909,6 +2937,7 @@ const wsRpcRequests = [
 	SetSessionSettled,
 	SetSessionPinned,
 	SetSessionAutoSettle,
+	GetSessionAutoSettleOutlook,
 	SnoozeSession,
 	UnsnoozeSession,
 	DismissCutOff,

@@ -1,5 +1,5 @@
 import { SqlClient } from "@effect/sql";
-import { Effect, Schema } from "effect";
+import { Clock, Effect, Ref, Schema } from "effect";
 import {
 	AccountUnroutable,
 	type ContinuationError,
@@ -17,7 +17,9 @@ import {
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
 import {
@@ -29,7 +31,11 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
-import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
+import {
+	BackgroundLivenessTag,
+	ConfigTag,
+	LoggerTag,
+} from "../../domain/relay/Services/services.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
@@ -81,9 +87,38 @@ import { preWarmSession } from "../../handlers/session-prewarm.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { isPickRejection, PickRequired } from "../../provider/turn-settings.js";
 import { saveRelaySettings } from "../../relay/relay-settings.js";
+import { getAutoSettleOutlook } from "../../session/auto-settle-policy.js";
+import { readPersistedAutoSettleFacts } from "../../session/auto-settle-reader.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const sideThreadStarts = Effect.unsafeMakeSemaphore(1);
+
+/** The outlook the sweep would reach once nobody is viewing the session. */
+const readAutoSettleOutlook = (sessionId: string) =>
+	Effect.gen(function* () {
+		const now = yield* Clock.currentTimeMillis;
+		const { projectDir } = yield* ConfigTag;
+		const facts = (yield* readPersistedAutoSettleFacts(
+			now,
+			sessionId,
+			projectDir,
+		)).get(sessionId);
+		if (facts === undefined)
+			return yield* new WsRpcError({
+				message: `Unknown session: ${sessionId}`,
+				code: "unknown-session",
+			});
+		const backgroundOf = yield* BackgroundLivenessTag;
+		const config = yield* Ref.get(yield* DaemonConfigRefTag);
+		return getAutoSettleOutlook(
+			{
+				...facts,
+				hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+			},
+			now,
+			autoSettleIdleWindowMs(config.autoSettleAfterDays),
+		);
+	});
 
 export const sessionsHandlers = {
 	ListBranches: (_request) =>
@@ -304,13 +339,17 @@ export const sessionsHandlers = {
 					}),
 			),
 		),
+	GetSessionAutoSettleOutlook: (request) =>
+		readAutoSettleOutlook(request.sessionId).pipe(
+			Effect.catchAll(mapRpcFailure("GetSessionAutoSettleOutlook")),
+		),
 	SetSessionAutoSettle: (request) =>
 		setSessionAutoSettleForClient({
 			clientId: request.originId ?? "rpc",
 			sessionId: request.sessionId,
 			disabled: request.disabled,
 		}).pipe(
-			Effect.as({ ok: true as const }),
+			Effect.zipRight(readAutoSettleOutlook(request.sessionId)),
 			Effect.catchAll(mapRpcFailure("SetSessionAutoSettle")),
 		),
 	SnoozeSession: (request) =>
@@ -857,6 +896,7 @@ export const sessionsHandlers = {
 	| "DismissWorkspaceHint"
 	| "SetSessionSettled"
 	| "SetSessionPinned"
+	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
