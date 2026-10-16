@@ -179,6 +179,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		reason:
 			"Relay-owned: the Session Inbox records turn handoff or steering delivery",
 	},
+	"input.requeued": {
+		produced: false,
+		reason: "Inbox recovery after a declined or failed steer",
+	},
 	"input.cancelled": {
 		produced: false,
 		reason:

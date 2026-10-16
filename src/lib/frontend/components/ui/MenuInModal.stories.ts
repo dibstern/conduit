@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import MenuInModalDemo from "./__fixtures__/MenuInModalDemo.svelte";
 
 const meta = {
@@ -27,6 +27,10 @@ export const KeyboardAndPointerSelection: Story = {
 		await expect(panel.top - anchor.bottom).toBeLessThan(20);
 		await expect(panel.left).toBeLessThan(anchor.right);
 		await expect(panel.right).toBeGreaterThan(anchor.left);
+		// Menu focus is assigned on an animation frame, after it becomes visible.
+		await waitFor(() =>
+			expect(menu.contains(menu.ownerDocument.activeElement)).toBe(true),
+		);
 		await userEvent.keyboard("{Home}");
 		await expect(
 			within(dialog).getByRole("menuitem", { name: "Choose by keyboard" }),

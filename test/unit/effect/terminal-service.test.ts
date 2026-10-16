@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Option, TestClock } from "effect";
-import { expect, vi } from "vitest";
+import { expect, type Mock, vi } from "vitest";
 import type { PtyEvent } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	type OpenCodeInstances,
@@ -41,9 +41,9 @@ const closedState = 3;
 const makeUpstream = (
 	readyState = openState,
 ): PtyUpstream & {
-	readonly send: ReturnType<typeof vi.fn>;
-	readonly close: ReturnType<typeof vi.fn>;
-	readonly terminate: ReturnType<typeof vi.fn>;
+	readonly send: Mock<PtyUpstream["send"]>;
+	readonly close: Mock<PtyUpstream["close"]>;
+	readonly terminate: Mock<PtyUpstream["terminate"]>;
 } => ({
 	readyState,
 	send: vi.fn(),

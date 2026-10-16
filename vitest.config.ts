@@ -58,7 +58,10 @@ export default defineConfig({
 					// forks isolates better-sqlite3 native module in separate
 					// processes, preventing SIGSEGV from shared-memory corruption.
 					pool: "forks",
-					poolOptions: { forks: { singleFork: true } },
+					maxWorkers: 1,
+					isolate: false,
+					// Vitest 4 requires a separate group for a different worker limit.
+					sequence: { groupOrder: 1 },
 					testTimeout: 10_000,
 					hookTimeout: 10_000,
 				},

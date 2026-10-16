@@ -1115,16 +1115,24 @@ export const makeProcessSessionRunner = (
 										(sinkId, failure) => {
 											const binding = sinks.get(sinkId);
 											if (!binding?.pending) return Effect.void;
-											return entry.outputs.withPermits(1)(
-												failRunnerTurn(
-													(output) => emit(output, registration.sessionId),
-													sinkId,
-													binding,
-													failure,
-													driver.driverKind,
-												).pipe(
-													Effect.ensuring(
-														Effect.sync(() => sinks.delete(sinkId)),
+											return (
+												entry.failure
+													? Deferred.await(entry.stopped)
+													: Effect.void
+											).pipe(
+												Effect.zipRight(
+													entry.outputs.withPermits(1)(
+														failRunnerTurn(
+															(output) => emit(output, registration.sessionId),
+															sinkId,
+															binding,
+															failure,
+															driver.driverKind,
+														).pipe(
+															Effect.ensuring(
+																Effect.sync(() => sinks.delete(sinkId)),
+															),
+														),
 													),
 												),
 											);
@@ -1352,6 +1360,7 @@ export const makeProcessSessionRunner = (
 							}
 						: undefined;
 				let child: RunnerChild | undefined;
+				let sentToRunner = false;
 				let admitted: RunnerChild | undefined;
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
@@ -1576,6 +1585,7 @@ export const makeProcessSessionRunner = (
 					} while (draining);
 					if (!entry) return;
 					child = entry;
+					sentToRunner = false;
 					if (command.type === "pre-warm" && command.input.draftPreWarm)
 						entry.draftPreWarm = true;
 					const connection = yield* Deferred.await(entry.ready);
@@ -1727,6 +1737,7 @@ export const makeProcessSessionRunner = (
 							);
 						yield* Effect.never;
 					}
+					sentToRunner = true;
 					return yield* connection
 						.commandEffect(
 							commandId,
@@ -1806,7 +1817,18 @@ export const makeProcessSessionRunner = (
 						).pipe(
 							Effect.ensuring(Effect.sync(() => sinks.delete(command.sinkId))),
 						);
-						return child ? child.outputs.withPermits(1)(cleanup) : cleanup;
+						return (
+							// Abandoned adoption preserves a runner that never received this send.
+							(
+								child?.failure && sentToRunner
+									? Deferred.await(child.stopped)
+									: Effect.void
+							).pipe(
+								Effect.zipRight(
+									child ? child.outputs.withPermits(1)(cleanup) : cleanup,
+								),
+							)
+						);
 					}),
 					Effect.ensuring(
 						Effect.suspend(() =>

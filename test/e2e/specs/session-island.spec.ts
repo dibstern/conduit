@@ -62,15 +62,21 @@ test.describe("phone session island", () => {
 		const before = await probe.evaluate(
 			(element) => element.getBoundingClientRect().top,
 		);
-		await page.locator("#messages").evaluate((scroller) => {
-			scroller.scrollTop -= 60;
-		});
+		// The bar follows the reader's gesture, not scrollTop, so a programmatic
+		// scroll would leave it collapsed. Wheel scrolling is async, hence the poll.
+		await page.locator("#messages").hover();
+		await page.mouse.wheel(0, -60);
 		await expect(bar).toHaveAttribute("data-collapsed", "false");
 		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
-		const after = await probe.evaluate(
-			(element) => element.getBoundingClientRect().top,
-		);
-		expect(Math.round(after - before)).toBe(60);
+		await expect
+			.poll(async () =>
+				Math.round(
+					(await probe.evaluate(
+						(element) => element.getBoundingClientRect().top,
+					)) - before,
+				),
+			)
+			.toBe(60);
 		await pinToBottom(page);
 		await expect(page.getByTestId("session-bar-island-overflow")).toBeVisible();
 	});

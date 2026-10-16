@@ -113,6 +113,7 @@ export interface DiscoverCommand {
 	readonly providerId: string;
 	readonly account?: Account;
 	readonly workspaceRoot?: string;
+	readonly refresh?: boolean;
 }
 
 export interface EndSessionCommand {
@@ -752,17 +753,20 @@ export class OrchestrationEngine {
 				command.providerId,
 				command.account,
 			);
-			return yield* instance
-				.discoverEffect(command.workspaceRoot, command.account)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`discover failed: provider=${command.providerId}: ${error.message}`,
-							),
+			const discovery = command.refresh
+				? instance.discoverEffect(command.workspaceRoot, command.account, {
+						refresh: true,
+					})
+				: instance.discoverEffect(command.workspaceRoot, command.account);
+			return yield* discovery.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`discover failed: provider=${command.providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 

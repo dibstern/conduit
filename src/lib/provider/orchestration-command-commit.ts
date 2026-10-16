@@ -122,10 +122,13 @@ export class DurableCommandCommitRepository {
 		// commit transaction roll back. Terminal rows (completed/failed) are
 		// preserved as history.
 		return Effect.gen(this, function* () {
-			const [running] = yield* this.sql<{ readonly n: number }>`
-				SELECT COUNT(*) AS n FROM provider_command_outbox
-				WHERE command_id = ${request.commandId} AND project_key = ${this.projectId}
-					AND status = 'running'`;
+			const [running] = yield* this.sql<{
+				readonly n: number;
+				readonly attempt_count: number;
+			}>`
+				SELECT COUNT(*) FILTER (WHERE status = 'running') AS n,
+					COALESCE(MAX(attempt_count), 0) AS attempt_count FROM provider_command_outbox
+				WHERE command_id = ${request.commandId} AND project_key = ${this.projectId}`;
 			if ((running?.n ?? 0) > 0) {
 				return yield* Effect.fail(
 					new Error(
@@ -145,7 +148,7 @@ export class DurableCommandCommitRepository {
 				) VALUES (
 					${request.requestSequence}, ${request.commandId}, ${request.projectKey},
 					${request.sessionId}, ${request.providerId}, ${request.effectType},
-					${request.payloadJson}, 'pending', 0, ${updatedAt}, ${updatedAt}
+					${request.payloadJson}, 'pending', ${running?.attempt_count ?? 0}, ${updatedAt}, ${updatedAt}
 				)`;
 		});
 	}
