@@ -16,7 +16,7 @@ test("shell feed adds and removes sidebar roots", async ({
 	relayUrl,
 }) => {
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
@@ -95,7 +95,7 @@ test("shell feed warns after a failed grace period and clears on recovery", asyn
 }) => {
 	let subscriptions = 0;
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
@@ -152,7 +152,7 @@ test("same-project reconnect keeps a visible stale warning until shell sync", as
 }) => {
 	let subscriptions = 0;
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],
@@ -205,7 +205,7 @@ test("a promptly resynchronized shell feed does not show the stale line", async 
 	relayUrl,
 }) => {
 	const rpc = await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			ListDaemonSessions: () => ({
 				sessions: [],
 				availability: [],

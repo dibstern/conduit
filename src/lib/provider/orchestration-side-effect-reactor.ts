@@ -19,7 +19,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../persistence/effect/read-query-effect.js";
-import { normalizeClaudeLaunchInput } from "./claude/claude-runner-protocol.js";
+import { normalizeClaudeLaunchInput } from "./claude/claude-runner-wire.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {

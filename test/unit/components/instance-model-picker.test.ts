@@ -42,8 +42,8 @@ const setDefaultModelRpcSpy = vi.hoisted(() =>
 		variants: [],
 	})),
 );
-const reloadProviderSessionRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: { sessionId: string }) => ({
+const reloadSessionSpy = vi.hoisted(() =>
+	vi.fn(async (_tag: string, input: { sessionId: string }) => ({
 		projectSlug: "project-a",
 		sessionId: input.sessionId,
 	})),
@@ -69,13 +69,21 @@ vi.mock(
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	getAgentsRpc: (input: unknown) => getAgentsRpcSpy(input),
-	reloadProviderSessionRpc: (input: { sessionId: string; commandId: string }) =>
-		reloadProviderSessionRpcSpy(input),
-	setDefaultModelRpc: (input: { model: string; provider: string }) =>
-		setDefaultModelRpcSpy(input),
-	switchModelRpc: (input: { modelId: string; providerId: string }) =>
-		switchModelRpcSpy(input),
+	rpc: (
+		tag:
+			| "GetAgents"
+			| "SetDefaultModel"
+			| "SwitchModel"
+			| "ReloadProviderSession",
+		input: never,
+	) =>
+		tag === "ReloadProviderSession"
+			? reloadSessionSpy(tag, input)
+			: {
+					GetAgents: getAgentsRpcSpy,
+					SetDefaultModel: setDefaultModelRpcSpy,
+					SwitchModel: switchModelRpcSpy,
+				}[tag](input),
 }));
 vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 	showToast: showToastSpy,
@@ -106,7 +114,7 @@ describe("InstanceModelPicker", () => {
 		getAgentsRpcSpy.mockClear();
 		switchModelRpcSpy.mockClear();
 		setDefaultModelRpcSpy.mockClear();
-		reloadProviderSessionRpcSpy.mockClear();
+		reloadSessionSpy.mockClear();
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
@@ -382,7 +390,7 @@ describe("InstanceModelPicker", () => {
 		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
 
 		await waitFor(() => {
-			expect(reloadProviderSessionRpcSpy).toHaveBeenCalledWith({
+			expect(reloadSessionSpy).toHaveBeenCalledWith("ReloadProviderSession", {
 				sessionId: "session-1",
 				commandId: expect.any(String),
 			});

@@ -8,9 +8,7 @@ vi.mock(
 	"../../../src/lib/frontend/transport/ws-rpc-client.js",
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
-		getAgentsRpc: () => new Promise(() => {}),
-		getCommandsRpc: () => new Promise(() => {}),
-		getModelsRpc: () => new Promise(() => {}),
+		rpc: () => new Promise(() => {}),
 	}),
 );
 

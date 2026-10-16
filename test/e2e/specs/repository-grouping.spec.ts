@@ -95,14 +95,14 @@ async function openProjectList(page: Page, baseUrl: string) {
 		accountId: null,
 		id: `grouping-${project.slug}`,
 		title: `Review ${project.title}`,
-		status: "idle",
+		status: "idle" as const,
 		projectSlug: project.slug,
 		updatedAt: 100 - index,
 		messageCount: 0,
 	}));
 	const rpc = await mockWsRpc(page, {
-		handlers: {
-			GetProjects: () => ({ projects, current: slug }),
+		stubs: {
+			FindFolders: () => ({ home: "/workspace", entries: [] }),
 			ListDaemonSessions: ({ scope }) => ({
 				sessions: sessions.filter(
 					(session) => !scope || session.projectSlug === scope,
@@ -111,9 +111,11 @@ async function openProjectList(page: Page, baseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
+		},
+		handlers: {
+			GetProjects: () => ({ projects, current: slug }),
 			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
-			FindFolders: () => ({ home: "/workspace", entries: [] }),
 			SaveProject: ({ slug: savedSlug, groupingMode }) => {
 				const stored = projects.find((project) => project.slug === savedSlug);
 				if (!stored) throw new Error(`Unknown project: ${savedSlug}`);

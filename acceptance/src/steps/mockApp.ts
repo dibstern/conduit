@@ -242,12 +242,14 @@ export const mockAppHandlers: StepHandler[] = [
 				accountId: instanceId,
 				resumes: [{ at: PINNED_CLOCK_MS, instanceId, reason: "user" }],
 			});
-			requireRpcControl(world.page).setResponse("GetAgents", {
-				projectSlug: "myapp",
-				instanceId,
-				providerScope: { id: "opencode", name: "OpenCode" },
-				agents: openCodeInstanceAgents,
-				activeAgentId: "build",
+			requireRpcControl(world.page).setStubs({
+				GetAgents: () => ({
+					projectSlug: "myapp",
+					instanceId,
+					providerScope: { id: "opencode", name: "OpenCode" },
+					agents: openCodeInstanceAgents,
+					activeAgentId: "build",
+				}),
 			});
 			await openSessionRoute(world.page, sessionId);
 			await expect(
@@ -320,23 +322,26 @@ export const mockAppHandlers: StepHandler[] = [
 			mockInstances.set(world.page, instances);
 			const rpc = requireRpcControl(world.page);
 			rpc.setDaemonList("SubscribeInstances", { instances });
-			rpc.setResponse("GetAgents", {
-				projectSlug: "myapp",
-				instanceId,
-				providerScope: { id: "codex", name: "Codex" },
-				agents: [],
+			rpc.setStubs({
+				GetAgents: () => ({
+					projectSlug: "myapp",
+					instanceId,
+					providerScope: { id: "codex", name: "Codex" },
+					agents: [],
+				}),
 			});
 			const sessionId = "sess-bound-codex";
-			const getModels =
-				rpc.getResponseHandler("GetModels") ?? rpc.catalogHandler("GetModels");
-			rpc.setHandler("GetModels", async (payload, request) => {
-				const response = await getModels?.(payload, request);
-				return {
-					...(typeof response === "object" && response !== null
-						? response
-						: {}),
-					...(payload["sessionId"] === sessionId ? { instanceId } : {}),
-				};
+			const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			rpc.setStubs({
+				GetModels: async (payload) => {
+					const response = await getModels(payload);
+					return {
+						...response,
+						...("sessionId" in payload && payload.sessionId === sessionId
+							? { instanceId }
+							: {}),
+					};
+				},
 			});
 			rpc.upsertShellRow({
 				id: sessionId,
@@ -384,25 +389,27 @@ export const mockAppHandlers: StepHandler[] = [
 			const instanceId = claude ? "claude" : "opencode";
 			const sessionId = `sess-bound-${instanceId}`;
 			const rpc = requireRpcControl(world.page);
-			const previous = rpc.getResponseHandler("GetModels");
-			rpc.setHandler("GetModels", (payload, request) =>
-				payload["sessionId"] !== sessionId
-					? previous?.(payload, request)
-					: {
-							projectSlug: "myapp",
-							instanceId,
-							providers: [],
-							active: {
-								model: claude ? "sonnet" : "nemotron-3-super-free",
-								provider: instanceId,
+			const previous = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			rpc.setStubs({
+				GetModels: (payload) =>
+					!("sessionId" in payload) || payload.sessionId !== sessionId
+						? previous(payload)
+						: {
+								defaultOpenCodeInstanceId: "opencode",
+								projectSlug: "myapp",
+								instanceId,
+								providers: [],
+								active: {
+									model: claude ? "sonnet" : "nemotron-3-super-free",
+									provider: instanceId,
+								},
+								variant: { variant: "high", variants: [] },
+								contextWindow: {
+									contextWindow: claude ? "200k" : "",
+									options: [],
+								},
 							},
-							variant: { variant: "high", variants: [] },
-							contextWindow: {
-								contextWindow: claude ? "200k" : "",
-								options: [],
-							},
-						},
-			);
+			});
 			rpc.upsertShellRow({
 				id: sessionId,
 				title: `${match[1]} offline session`,
@@ -583,12 +590,11 @@ export const mockAppHandlers: StepHandler[] = [
 			 *  GetAgents afterwards returns that harness's agents (mirrors the
 			 *  real server, where the created session is bound to the instance). */
 			let createdSessionInstance: string | undefined;
-			const sessionInstance = (payload: Record<string, unknown>) => {
+			const sessionInstance = (sessionId: string | undefined) => {
 				const row = rpcControls
 					.get(page)
 					?.shellRows?.find(
-						(candidate) =>
-							(candidate as { id?: string }).id === payload["sessionId"],
+						(candidate) => (candidate as { id?: string }).id === sessionId,
 					) as
 					| {
 							accountId?: string | null;
@@ -598,7 +604,7 @@ export const mockAppHandlers: StepHandler[] = [
 				return (
 					row?.accountId ??
 					row?.resumes?.at(-1)?.instanceId ??
-					(payload["sessionId"] === "sess-first-send"
+					(sessionId === "sess-first-send"
 						? createdSessionInstance
 						: [
 									"sess-bound-claude",
@@ -607,13 +613,13 @@ export const mockAppHandlers: StepHandler[] = [
 									"sess-side-reply",
 									"sess-side-unread",
 									"sess-side-idle",
-								].includes(String(payload["sessionId"]))
+								].includes(String(sessionId))
 							? "claude"
-							: payload["sessionId"] === "sess-bound-opencode" ||
-									payload["sessionId"] === "sess-mockup-001" ||
-									payload["sessionId"] === "sess-subagent"
+							: sessionId === "sess-bound-opencode" ||
+									sessionId === "sess-mockup-001" ||
+									sessionId === "sess-subagent"
 								? "opencode"
-								: modelExecutionMockup && payload["sessionId"]
+								: modelExecutionMockup && sessionId
 									? "claude"
 									: undefined)
 				);
@@ -625,9 +631,146 @@ export const mockAppHandlers: StepHandler[] = [
 						{ _tag: "synchronized" },
 					],
 				},
+				stubs: {
+					ResolveSession: async () => ({ projectSlug: "myapp" }),
+					ViewSession: async () => ({ ok: true }),
+					CreateSession: async (payload) => {
+						await new Promise((resolve) =>
+							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
+						);
+						createdSessionInstance =
+							typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: undefined;
+						rpcControl.upsertShellRow({
+							id: "sess-first-send",
+							accountId: createdSessionInstance ?? null,
+							title: "New session",
+							status: "idle",
+							projectSlug: "myapp",
+							updatedAt: PINNED_CLOCK_MS,
+						});
+						return { projectSlug: "myapp", sessionId: "sess-first-send" };
+					},
+					LoadMoreHistory: ({ sessionId, before }) => ({
+						projectSlug: "myapp",
+						sessionId,
+						...mockDetailPage(page, sessionId, before),
+					}),
+					"input.submit": async ({ sessionId }) => ({ ok: true, sessionId }),
+					SyncInputDraft: async () => ({ ok: true }),
+					SetDefaultPermissionMode: async (payload) => ({
+						projectSlug: "myapp",
+						mode: payload["mode"],
+					}),
+					SetDefaultModel: async (payload) => ({
+						projectSlug: "myapp",
+						model: payload["model"],
+						provider: payload["provider"],
+						variant: "",
+						variants: [],
+					}),
+					GetSessionSkills: async () => ({
+						loads: mockSessionSkills.get(page) ?? [],
+					}),
+					GetSkillContent: async (payload) => ({
+						projectSlug:
+							"projectSlug" in payload ? payload.projectSlug : "myapp",
+						name: String(payload["name"] ?? ""),
+						path: ".agents/skills/paged-skill/SKILL.md",
+						content:
+							"---\nname: paged-skill\ndescription: A navigation fixture\n---\n# Skill instructions\n\nReview the earlier runs before continuing.\n",
+					}),
+					SwitchPermissionMode: async (payload) => ({
+						projectSlug: "myapp",
+						mode: payload["mode"],
+					}),
+					SwitchVariant: async (payload) => {
+						if (rejectedEffortSwitches.delete(page)) {
+							throw new WsRpcError({
+								message: "Effort switch rejected by the provider",
+							});
+						}
+						sessionVariants.set(
+							String(payload["sessionId"]),
+							String(payload["variant"] ?? ""),
+						);
+						return {
+							projectSlug: "myapp",
+							variant: payload["variant"],
+							variants: effortOptions.get(page) ?? [],
+						};
+					},
+					GetModels: async (payload) => {
+						const sessionId =
+							"sessionId" in payload ? payload.sessionId : undefined;
+						if (sessionId) await heldModelLookups.get(page)?.promise;
+						const instanceId = sessionId
+							? sessionInstance(sessionId)
+							: typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: undefined;
+						const claude = mockInstances
+							.get(page)
+							?.some(
+								(instance) =>
+									instance["id"] === instanceId &&
+									instance["driver"] === "claude",
+							);
+						return {
+							defaultOpenCodeInstanceId: "opencode",
+							projectSlug: "myapp",
+							...(instanceId ? { instanceId } : {}),
+							providers:
+								!sessionId && payload["instanceId"] && claude
+									? []
+									: providers.filter((provider) => provider.id !== "claude"),
+							active:
+								modelRequired && !sessionId
+									? undefined
+									: modelExecutionMockup
+										? { model: "opus[1m]", provider: "claude" }
+										: claude
+											? { model: "claude-sonnet-4-5", provider: "claude" }
+											: { model: "claude-sonnet-4", provider: "anthropic" },
+							...(modelExecutionMockup
+								? { modelExecution: modelExecutionMockup.modelExecution }
+								: {}),
+							variant: {
+								variant: sessionVariants.get(String(sessionId)) ?? "",
+								variants: effortOptions.get(page) ?? [],
+							},
+							contextWindow: {
+								contextWindow: modelExecutionMockup ? "1m" : "",
+								options: [],
+							},
+						};
+					},
+					GetAgents: async (payload) => {
+						await heldAgentLookups.get(world.page)?.promise;
+						const instanceId =
+							typeof payload["instanceId"] === "string"
+								? payload["instanceId"]
+								: sessionInstance(
+										"sessionId" in payload ? payload.sessionId : undefined,
+									);
+						const claude = (mockInstances.get(page) ?? []).some(
+							(instance) =>
+								instance["id"] === instanceId &&
+								instance["driver"] === "claude",
+						);
+						return {
+							projectSlug: "myapp",
+							...(instanceId != null ? { instanceId } : {}),
+							providerScope: claude
+								? { id: "claude", name: "Claude" }
+								: { id: "opencode", name: "OpenCode" },
+							agents: claude ? claudeInstanceAgents : openCodeInstanceAgents,
+						};
+					},
+				},
 				handlers: {
 					CreatePty: async () => ({ ok: true }),
-					ResolveSession: async () => ({ projectSlug: "myapp" }),
 					// A real daemon always lists its projects; a draft prefills from them.
 					GetProjects: async () => ({
 						projects: [
@@ -638,16 +781,6 @@ export const mockAppHandlers: StepHandler[] = [
 							},
 						],
 						current: "myapp",
-					}),
-					ViewSession: async () => ({ ok: true }),
-					LoadMoreHistory: ({ projectSlug, sessionId, before }) => ({
-						projectSlug: String(projectSlug ?? "myapp"),
-						sessionId: String(sessionId ?? ""),
-						...mockDetailPage(
-							page,
-							String(sessionId ?? ""),
-							typeof before === "string" ? before : undefined,
-						),
 					}),
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
@@ -663,15 +796,6 @@ export const mockAppHandlers: StepHandler[] = [
 						rpcControl.setProjectSetting({ _tag: "claudeSettings", overrides });
 						return { projectSlug: "myapp", overrides };
 					},
-					SetDefaultPermissionMode: async (payload) => ({
-						projectSlug: "myapp",
-						mode: payload["mode"],
-					}),
-					SetDefaultModel: async (payload) => ({
-						projectSlug: "myapp",
-						model: payload["model"],
-						provider: payload["provider"],
-					}),
 					ReloadProviderSession: async (payload) => ({
 						projectSlug: "myapp",
 						sessionId: payload["sessionId"],
@@ -774,124 +898,6 @@ export const mockAppHandlers: StepHandler[] = [
 						);
 						mockInstances.set(page, next);
 						return { projectSlug: "myapp", instances: next };
-					},
-					"input.submit": async (payload) => ({
-						ok: true,
-						sessionId: payload["sessionId"],
-					}),
-					SyncInputDraft: async () => undefined,
-					GetSessionSkills: async () => ({
-						loads: mockSessionSkills.get(page) ?? [],
-					}),
-					GetSkillContent: async (payload) => ({
-						projectSlug: String(payload["projectSlug"] ?? "myapp"),
-						name: String(payload["name"] ?? ""),
-						path: ".agents/skills/paged-skill/SKILL.md",
-						content:
-							"---\nname: paged-skill\ndescription: A navigation fixture\n---\n# Skill instructions\n\nReview the earlier runs before continuing.\n",
-					}),
-					SwitchPermissionMode: async (payload) => ({
-						projectSlug: "myapp",
-						mode: payload["mode"],
-					}),
-					SwitchVariant: async (payload) => {
-						if (rejectedEffortSwitches.delete(page)) {
-							throw new WsRpcError({
-								message: "Effort switch rejected by the provider",
-							});
-						}
-						sessionVariants.set(
-							String(payload["sessionId"]),
-							String(payload["variant"] ?? ""),
-						);
-						return {
-							projectSlug: "myapp",
-							variant: payload["variant"],
-							variants: effortOptions.get(page) ?? [],
-						};
-					},
-					CreateSession: async (payload) => {
-						await new Promise((resolve) =>
-							setTimeout(resolve, createSessionDelays.get(page) ?? 0),
-						);
-						createdSessionInstance =
-							typeof payload["instanceId"] === "string"
-								? payload["instanceId"]
-								: undefined;
-						rpcControl.upsertShellRow({
-							id: "sess-first-send",
-							accountId: createdSessionInstance ?? null,
-							title: "New session",
-							status: "idle",
-							projectSlug: "myapp",
-							updatedAt: PINNED_CLOCK_MS,
-						});
-						return { projectSlug: "myapp", sessionId: "sess-first-send" };
-					},
-					// Like the server, answer for the session's own harness: opening a
-					// session fetches models, and a late reply must not rebind it.
-					GetModels: async (payload) => {
-						if (payload["sessionId"]) await heldModelLookups.get(page)?.promise;
-						const instanceId = payload["sessionId"]
-							? sessionInstance(payload)
-							: typeof payload["instanceId"] === "string"
-								? payload["instanceId"]
-								: undefined;
-						const claude = mockInstances
-							.get(page)
-							?.some(
-								(instance) =>
-									instance["id"] === instanceId &&
-									instance["driver"] === "claude",
-							);
-						return {
-							projectSlug: "myapp",
-							...(instanceId ? { instanceId } : {}),
-							providers:
-								!payload["sessionId"] && payload["instanceId"] && claude
-									? []
-									: providers.filter((provider) => provider.id !== "claude"),
-							active:
-								modelRequired && !payload["sessionId"]
-									? undefined
-									: modelExecutionMockup
-										? { model: "opus[1m]", provider: "claude" }
-										: claude
-											? { model: "claude-sonnet-4-5", provider: "claude" }
-											: { model: "claude-sonnet-4", provider: "anthropic" },
-							...(modelExecutionMockup
-								? { modelExecution: modelExecutionMockup.modelExecution }
-								: {}),
-							variant: {
-								variant:
-									sessionVariants.get(String(payload["sessionId"])) ?? "",
-								variants: effortOptions.get(page) ?? [],
-							},
-							contextWindow: {
-								contextWindow: modelExecutionMockup ? "1m" : "",
-								options: [],
-							},
-						};
-					},
-					GetAgents: async (payload) => {
-						await heldAgentLookups.get(world.page)?.promise;
-						const instanceId =
-							typeof payload["instanceId"] === "string"
-								? payload["instanceId"]
-								: sessionInstance(payload);
-						const claude = (mockInstances.get(page) ?? []).some(
-							(instance) =>
-								instance["id"] === instanceId &&
-								instance["driver"] === "claude",
-						);
-						return {
-							projectSlug: "myapp",
-							...(instanceId != null ? { instanceId } : {}),
-							providerScope: claude
-								? { id: "claude", name: "Claude" }
-								: { id: "opencode", name: "OpenCode" },
-							agents: claude ? claudeInstanceAgents : openCodeInstanceAgents,
-						};
 					},
 				},
 			});
