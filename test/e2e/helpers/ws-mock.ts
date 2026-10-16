@@ -313,7 +313,7 @@ export class WsMockControl {
 				lastTurnEndVersion:
 					(typeof row["lastTurnEndVersion"] === "number"
 						? row["lastTurnEndVersion"]
-						: -1) + 1,
+						: 0) + 1,
 			}));
 		const normalized = normalizeMockRelayMessage(msg, this.context);
 		if (projectLegacyRelayMessage(this.page, normalized)) return;
