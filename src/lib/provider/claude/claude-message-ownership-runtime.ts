@@ -31,6 +31,7 @@ import {
 import type {
 	ClaudeSessionContext,
 	ClaudeSubagentLivePoller,
+	ClaudeSubagentTranscriptSnapshot,
 	SessionMessage,
 } from "./types.js";
 
@@ -48,19 +49,53 @@ type EnsureSubagentSession = (
 	>[0],
 ) => Effect.Effect<void, ClaudeAdapterError>;
 
-function subagentTranscript(ctx: ClaudeSessionContext, childSessionId: string) {
-	const transcripts = (ctx.subagentTranscripts ??= new Map());
-	const existing = transcripts.get(childSessionId);
-	if (existing) return existing;
-	const cursor: ClaudeSubagentTranscriptCursor = {
-		messageRoles: new Map(),
-		textOffsets: new Map(),
-		thinkingOffsets: new Map(),
-		toolStarts: new Set(),
-		toolCompletions: new Set(),
-	};
-	transcripts.set(childSessionId, cursor);
-	return cursor;
+type ReadSubagentTranscript = (
+	childSessionId: string,
+) => Effect.Effect<ClaudeSubagentTranscriptSnapshot, ClaudeAdapterError>;
+
+function subagentTranscript(
+	ctx: ClaudeSessionContext,
+	childSessionId: string,
+	readTranscript: ReadSubagentTranscript | undefined,
+): Effect.Effect<ClaudeSubagentTranscriptCursor, ClaudeAdapterError> {
+	return Effect.gen(function* () {
+		const transcripts = (ctx.subagentTranscripts ??= new Map());
+		const existing = transcripts.get(childSessionId);
+		if (existing) return existing;
+		const cursor: ClaudeSubagentTranscriptCursor = {
+			messageRoles: new Map(),
+			textOffsets: new Map(),
+			thinkingOffsets: new Map(),
+			toolStarts: new Set(),
+			toolCompletions: new Set(),
+			toolMessageIds: new Map(),
+		};
+		const read =
+			yield* resolveReadClaudeSubagentTranscriptEffect(readTranscript);
+		if (read) {
+			const snapshot = yield* read(childSessionId);
+			for (const message of snapshot.messages)
+				cursor.messageRoles.set(message.id, message.role);
+			for (const part of snapshot.parts) {
+				if (part.type === "tool") {
+					cursor.toolStarts.add(part.id);
+					if (part.status === "completed" || part.status === "error")
+						cursor.toolCompletions.add(part.id);
+					cursor.toolMessageIds?.set(part.id, part.messageId);
+				} else if (part.type === "text" || part.type === "thinking") {
+					const separator = part.id.lastIndexOf("-");
+					if (separator < 0 || part.id.slice(0, separator) !== part.messageId)
+						continue;
+					const offsetKey = `${part.messageId}:${part.id.slice(separator + 1)}`;
+					const offsets =
+						part.type === "text" ? cursor.textOffsets : cursor.thinkingOffsets;
+					offsets?.set(offsetKey, part.text?.length ?? 0);
+				}
+			}
+		}
+		transcripts.set(childSessionId, cursor);
+		return cursor;
+	});
 }
 
 /** Prefer the Task's human description ("Audit auth flow") — the raw
@@ -133,7 +168,10 @@ export function applyClaudeOwnershipDecisionEffect(
 	ctx: ClaudeSessionContext,
 	decision: ClaudeOwnershipDecision,
 	parentClaudeSessionId?: string,
-	options: { readonly allowStopped?: boolean } = {},
+	options: {
+		readonly allowStopped?: boolean;
+		readonly readTranscript?: ReadSubagentTranscript;
+	} = {},
 ): Effect.Effect<Effect.Effect<void> | undefined, ClaudeAdapterError> {
 	return Effect.gen(function* () {
 		if (decision.kind === "hold" || decision.kind === "drop") {
@@ -178,7 +216,11 @@ export function applyClaudeOwnershipDecisionEffect(
 					];
 			}
 			if (messages) {
-				const cursor = subagentTranscript(ctx, childSessionId);
+				const cursor = yield* subagentTranscript(
+					ctx,
+					childSessionId,
+					options.readTranscript,
+				);
 				const stage = stageSessionMessagesToEvents({
 					childSessionId,
 					messages,
@@ -386,6 +428,27 @@ function resolveEnsureClaudeSubagentSessionEffect(
 		const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
 		return persist._tag === "Some"
 			? persist.value.ensureClaudeSubagentSession
+			: undefined;
+	});
+}
+
+function resolveReadClaudeSubagentTranscriptEffect(
+	readTranscript: ReadSubagentTranscript | undefined,
+): Effect.Effect<ReadSubagentTranscript | undefined> {
+	return Effect.gen(function* () {
+		if (readTranscript) return readTranscript;
+		const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);
+		return persist._tag === "Some"
+			? (childSessionId: string) =>
+					persist.value.readClaudeSubagentTranscript(childSessionId).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ClaudeBoundaryError({
+									operation: "readClaudeSubagentTranscript",
+									cause,
+								}),
+						),
+					)
 			: undefined;
 	});
 }

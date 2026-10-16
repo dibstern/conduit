@@ -15,6 +15,7 @@ import type { ClaudeRunnerSettingsSnapshot } from "./claude-runner-upgrade.js";
 import type {
 	ClaudePreWarmSessionInput,
 	ClaudeSendTurnInput,
+	ClaudeSubagentTranscriptSnapshot,
 } from "./types.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
@@ -137,6 +138,10 @@ export type ClaudeSessionOutput =
 					};
 			  }
 			| {
+					readonly type: "read-subagent-transcript";
+					readonly childSessionId: string;
+			  }
+			| {
 					readonly type: "ensure-subagent-session";
 					readonly input: {
 						readonly childSessionId: string;
@@ -148,7 +153,9 @@ export type ClaudeSessionOutput =
 	  ));
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
-export type ClaudeSessionOutputReply = Readonly<Record<string, never>>;
+export interface ClaudeSessionOutputReply {
+	readonly subagentTranscript?: ClaudeSubagentTranscriptSnapshot;
+}
 
 /** Failure replies preserve the SDK fields used by the side-effect reactor. */
 export interface ClaudeSessionFailure {

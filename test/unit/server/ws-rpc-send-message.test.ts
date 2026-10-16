@@ -83,6 +83,8 @@ describe("WsRpcServerLayer input.submit", () => {
 								persistEvents: () => Effect.void,
 								persistUserMessage: () => Effect.void,
 								ensureClaudeSubagentSession: () => Effect.void,
+								readClaudeSubagentTranscript: () =>
+									Effect.succeed({ messages: [], parts: [] }),
 							},
 						}),
 					),

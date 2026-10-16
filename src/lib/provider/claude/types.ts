@@ -38,6 +38,21 @@ export type ClaudeSendTurnInput = SendTurnInput & ClaudeLaunchConfig;
 export type ClaudePreWarmSessionInput = PreWarmSessionInput &
 	ClaudeLaunchConfig;
 
+/** Persisted child transcript state carried across the runner boundary as data. */
+export interface ClaudeSubagentTranscriptSnapshot {
+	readonly messages: readonly {
+		readonly id: string;
+		readonly role: "user" | "assistant";
+	}[];
+	readonly parts: readonly {
+		readonly id: string;
+		readonly messageId: string;
+		readonly type: string;
+		readonly text: string | null;
+		readonly status: string | null;
+	}[];
+}
+
 export interface ClaudeThreadReadInput {
 	readonly cursor?: string | undefined;
 	readonly textOffset?: number | undefined;

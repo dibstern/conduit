@@ -336,6 +336,7 @@ const persistentHandlerPersistence = Layer.merge(
 		persistEvents: () => Effect.void,
 		persistUserMessage: () => Effect.void,
 		ensureClaudeSubagentSession: () => Effect.void,
+		readClaudeSubagentTranscript: () => Effect.succeed({ messages: [], parts: [] }),
 	} satisfies ClaudeEventPersistEffect),
 );
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
