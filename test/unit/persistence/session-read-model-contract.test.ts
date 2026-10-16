@@ -422,6 +422,48 @@ describe("session read-model contract", () => {
 		}),
 	);
 
+	it.effect("announces a Fork whose Source is deleted to live readers", () =>
+		Effect.gen(function* () {
+			const store = yield* EventStoreEffectTag;
+			const runner = yield* ProjectionRunnerEffectTag;
+			const readQuery = yield* ReadQueryEffectTag;
+			yield* runner.recover();
+			for (const event of [source, forkOf("fork", "source")])
+				yield* runner.projectEvent(yield* store.append(event));
+			const before = yield* readQuery.readSessionList();
+			yield* runner.projectEvent(
+				yield* store.append(
+					canonicalEvent("session.deleted", "source", { sessionId: "source" }),
+				),
+			);
+			// What an open browser's sidebar and family feeds read next.
+			const forkIn = (window: {
+				rows: readonly {
+					item: { id: string; forkedFrom?: string | undefined };
+				}[];
+			}) => window.rows.find(({ item }) => item.id === "fork")?.item;
+			const lineage = (item: { forkedFrom?: string | undefined } | undefined) =>
+				item && { forkedFrom: item.forkedFrom };
+			expect(
+				lineage(
+					forkIn(yield* readQuery.readSessionList({ after: before.version })),
+				),
+			).toStrictEqual({ forkedFrom: undefined });
+			expect(
+				lineage(
+					forkIn(
+						yield* readQuery.readSessionList({
+							after: before.version,
+							familyOf: "fork",
+						}),
+					),
+				),
+			).toStrictEqual({ forkedFrom: undefined });
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	it.effect("deleting an owner removes its Side Threads and subagents", () =>
 		Effect.gen(function* () {
 			expect(
@@ -447,4 +489,124 @@ describe("session read-model contract", () => {
 			});
 		}),
 	);
+	describe("legacy events", () => {
+		// Before Forks recorded lineage, a Fork was created contained in its
+		// Source with a fork point and no Side Thread flag.
+		const legacyForkOf = (id: string, sourceId: string) =>
+			canonicalEvent("session.created", id, {
+				sessionId: id,
+				title: `${id} (fork)`,
+				provider: "claude",
+				parentId: sourceId,
+				forkPointEvent: "fork-boundary",
+				forkPointTimestamp: 1_000,
+			});
+
+		it.effect("reads a contained session with a fork point as a Fork", () =>
+			Effect.gen(function* () {
+				const busyRoot = (yield* readModelAfter([
+					makeSessionCreatedEvent("fork"),
+					makeSessionStatusEvent("fork", "busy"),
+				])).rollups["fork"];
+				expect(
+					yield* readModelAfter([
+						source,
+						legacyForkOf("fork", "source"),
+						makeSessionStatusEvent("fork", "busy"),
+					]),
+				).toStrictEqual({
+					roots: ["fork", "source"],
+					families: { fork: ["fork"], source: ["source"] },
+					rollups: { fork: busyRoot, source: idle },
+					lineage: { fork: forkLineage("source"), source: noLineage },
+				});
+			}),
+		);
+
+		it.effect(
+			"keeps a legacy Fork's Side Thread and subagent in the Fork's Family",
+			() =>
+				Effect.gen(function* () {
+					expect(
+						yield* readModelAfter([
+							source,
+							legacyForkOf("fork", "source"),
+							legacyForkOf("fork-of-fork", "fork"),
+							canonicalEvent("session.created", "fork-side-thread", {
+								sessionId: "fork-side-thread",
+								title: "fork-side-thread",
+								provider: "claude",
+								parentId: "fork",
+								forkPointEvent: "fork-boundary",
+								forkPointTimestamp: 1_000,
+								sideThread: true,
+							}),
+							canonicalEvent("session.created", "fork-subagent", {
+								sessionId: "fork-subagent",
+								title: "Fork subagent",
+								provider: "claude",
+								parentId: "fork",
+							}),
+							makeSessionStatusEvent("fork-subagent", "busy"),
+						]),
+					).toStrictEqual({
+						roots: ["fork", "fork-of-fork", "source"],
+						families: {
+							fork: ["fork", "fork-side-thread", "fork-subagent"],
+							"fork-of-fork": ["fork-of-fork"],
+							source: ["source"],
+						},
+						rollups: {
+							fork: { ...idle, processing: true, attention: "working" },
+							"fork-of-fork": idle,
+							source: idle,
+						},
+						lineage: {
+							fork: forkLineage("source"),
+							"fork-of-fork": forkLineage("fork"),
+							"fork-side-thread": sideThreadLineage("fork"),
+							"fork-subagent": { ...noLineage, parentID: "fork" },
+							source: noLineage,
+						},
+					});
+				}),
+		);
+
+		it.effect("reads session.forked without a fork point as a Fork", () =>
+			Effect.gen(function* () {
+				expect(
+					yield* readModelAfter([
+						source,
+						makeSessionCreatedEvent("fork"),
+						canonicalEvent("session.forked", "fork", {
+							sessionId: "fork",
+							parentId: "source",
+						}),
+					]),
+				).toStrictEqual({
+					roots: ["fork", "source"],
+					families: { fork: ["fork"], source: ["source"] },
+					rollups: { fork: idle, source: idle },
+					lineage: {
+						fork: { ...noLineage, forkedFrom: "source" },
+						source: noLineage,
+					},
+				});
+			}),
+		);
+
+		it.effect("keeps a legacy Side Thread contained, with lineage", () =>
+			Effect.gen(function* () {
+				expect(yield* readModelAfter([source, sideThread])).toStrictEqual({
+					roots: ["source"],
+					families: { source: ["side-thread", "source"] },
+					rollups: { source: idle },
+					lineage: {
+						source: noLineage,
+						"side-thread": sideThreadLineage("source"),
+					},
+				});
+			}),
+		);
+	});
 });

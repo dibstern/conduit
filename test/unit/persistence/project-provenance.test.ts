@@ -110,6 +110,7 @@ describe("Bound project provenance", () => {
 			"0057_session_pick_backfill",
 			"0058_compact_redundant_events",
 			"0059_sessions_lineage",
+			"0060_legacy_forks",
 		]);
 	});
 

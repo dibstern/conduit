@@ -116,9 +116,11 @@ export const refreshSidebar = (
  * both agree on a session whose chain never reaches a top-level one: an orphan
  * (its parent is missing) or a member of a parent cycle has no root, and no
  * family shows it, as the full session list does not.
+ * When supplied, `version` stamps every row whose root changes.
  */
 export const rerootSession = (
 	sessionId: string,
+	version?: number,
 ): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -139,8 +141,8 @@ export const rerootSession = (
 					SELECT child.id FROM sessions child
 					JOIN subtree ON child.parent_id = subtree.id
 				)
-				UPDATE sessions SET root_id = ${row.next}
-				WHERE id IN (SELECT id FROM subtree)`;
+				UPDATE sessions SET root_id = ${row.next}${version === undefined ? sql.literal("") : sql`, version = ${version}`}
+				WHERE id IN (SELECT id FROM subtree) AND root_id IS NOT ${row.next}`;
 		return row.root_id === null ? [sessionId] : [sessionId, row.root_id];
 	});
 

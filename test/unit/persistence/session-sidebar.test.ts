@@ -14,7 +14,7 @@
 //  4. A question or permission is answered and the pending count goes stale,
 //     because only session stamps refresh the row. The approval projector
 //     must refresh it in the same transaction.
-//  5. Unread is set or cleared on a child (a fork) through the seen writer,
+//  5. Unread is set or cleared on a Fork through the seen writer,
 //     which stamps rows without an event.
 //  6. Projections are replayed or rebuilt after a restart and the table is
 //     not rebuilt with them.
@@ -212,6 +212,7 @@ const scenario = (store: Store) => {
 	let messages = 0;
 	let approvals = 0;
 	const parents = new Map<string, string | undefined>();
+	const sideThreads = new Set<string>();
 	const lastMessage = new Map<string, string>();
 	const pending: { id: string; sessionId: string; question: boolean }[] = [];
 	const background = new Map<string, SessionBackground>();
@@ -284,10 +285,21 @@ const scenario = (store: Store) => {
 				// The parent must exist (a foreign key), but may close a cycle. A
 				// re-create without one keeps the stored parent, which the upsert
 				// checks again, so an orphan cannot be re-created (yeby).
-				const next = parent ?? parents.get(id);
-				if (next !== undefined && !parents.has(next)) return undefined;
+				const next =
+					command.fork &&
+					!command.side &&
+					parent !== undefined &&
+					!sideThreads.has(id)
+						? undefined
+						: (parent ?? parents.get(id));
+				if (
+					(parent !== undefined && !parents.has(parent)) ||
+					(next !== undefined && !parents.has(next))
+				)
+					return undefined;
 				const message = `${id}-m${messages++}`;
 				parents.set(id, next);
+				if (command.side && parent !== undefined) sideThreads.add(id);
 				return run(
 					commit([
 						event("session.created", id, {
@@ -330,6 +342,7 @@ const scenario = (store: Store) => {
 				if (!exists) return undefined;
 				for (const gone of subtree(command.id)) {
 					parents.delete(gone);
+					sideThreads.delete(gone);
 					for (let index = pending.length - 1; index >= 0; index--)
 						if (pending[index]?.sessionId === gone) pending.splice(index, 1);
 				}
@@ -919,14 +932,15 @@ describe("sidebar table against the full computation", () => {
 		expect(shown.get("a")?.item.attention).toBe("idle");
 	});
 
-	it("rolls a forked child's unread up and clears it through the seen writer", async () => {
+	it("keeps a Fork's unread on its own row and clears it through the seen writer", async () => {
 		const marked = await run([
 			root("a"),
 			child("f", "a", { fork: true }),
 			{ kind: "turn", id: "f", error: false },
 			{ kind: "unread", id: "f" },
 		]);
-		expect(marked.get("a")?.item.attention).toBe("done-unread");
+		expect(marked.get("f")?.item.attention).toBe("done-unread");
+		expect(marked.get("a")?.item.attention).toBe("idle");
 		const seen = await run([
 			root("a"),
 			child("f", "a", { fork: true }),
@@ -934,6 +948,18 @@ describe("sidebar table against the full computation", () => {
 			{ kind: "seen", id: "f" },
 		]);
 		expect(seen.get("a")?.item.attention).toBe("idle");
+		expect(seen.get("f")?.item.attention).toBe("idle");
+	});
+
+	it("refreshes a surviving Fork when its Source is deleted with an owner", async () => {
+		const shown = await run([
+			root("a"),
+			child("b", "a"),
+			child("f", "b", { fork: true }),
+			{ kind: "delete", id: "a" },
+		]);
+		expect([...shown.keys()]).toEqual(["f"]);
+		expect(shown.get("f")?.item).not.toHaveProperty("forkedFrom");
 	});
 
 	it("moves the root for a change deep in a descendant", async () => {
@@ -1033,7 +1059,7 @@ describe("sidebar table on the 10k-session fixture", () => {
 		const readQuery = yield* ReadQueryEffectTag;
 		const sidebar = yield* readQuery.readSessionList();
 		const oracle = yield* readQuery.listSessionInfos({ roots: true });
-		expect(sidebar.rows).toHaveLength(2501);
+		expect(sidebar.rows).toHaveLength(5001);
 		expect(byId(sidebar.rows.map(({ item }) => visible(item)))).toEqual(
 			byId(oracle.map(visible)),
 		);

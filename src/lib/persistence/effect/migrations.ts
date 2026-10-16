@@ -12,6 +12,7 @@ import {
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
+	LEGACY_FORKS_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
@@ -63,7 +64,7 @@ import {
 	TOOL_CALL_INDEX_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 } from "../schema.js";
-import { refreshSidebar } from "./sidebar-projection.js";
+import { refreshSidebar, rerootSession } from "./sidebar-projection.js";
 
 export const EFFECT_SQL_MIGRATIONS_TABLE = "effect_sql_migrations";
 
@@ -1185,6 +1186,26 @@ export const effectMigrationEntries = {
 		"forked_from",
 		readMigrationSql(SESSIONS_LINEAGE_MIGRATION),
 	),
+	"0060_legacy_forks": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const changed = yield* sql.unsafe<{ id: string; side_thread: number }>(
+			readMigrationSql(LEGACY_FORKS_MIGRATION),
+		);
+		if (changed.length === 0) return;
+		const [counter] = yield* sql<{ value: number }>`
+			UPDATE read_model_counter SET value = value + 1 WHERE id = 1 RETURNING value`;
+		const version = counter?.value ?? 0;
+		const affected = new Set(changed.map(({ id }) => id));
+		// All Forks are detached before walking, so a Fork of a Fork keeps its
+		// own subtree regardless of the order in which these rows are visited.
+		for (const row of changed) {
+			if (row.side_thread !== 0) continue;
+			for (const id of yield* rerootSession(row.id, version)) affected.add(id);
+		}
+		yield* sql`UPDATE sessions SET version = ${version}
+			WHERE id IN (SELECT value FROM json_each(${JSON.stringify(changed.map(({ id }) => id))}))`;
+		yield* refreshSidebar([...affected], version);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

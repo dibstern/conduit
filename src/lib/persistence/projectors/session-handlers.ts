@@ -107,10 +107,18 @@ function sessionPlacement(
 	}
 	const payload = event.data;
 	const sideThread = payload.sideThread === true;
+	const legacyFork =
+		payload.parentId !== undefined &&
+		payload.forkedFrom === undefined &&
+		payload.sideThread === undefined &&
+		(payload.forkPointEvent !== undefined ||
+			payload.forkPointTimestamp !== undefined);
 	return {
-		parentId: payload.parentId ?? null,
+		parentId: legacyFork ? null : (payload.parentId ?? null),
 		forkedFrom:
-			payload.forkedFrom ?? (sideThread ? payload.parentId : undefined) ?? null,
+			payload.forkedFrom ??
+			(sideThread || legacyFork ? payload.parentId : undefined) ??
+			null,
 		sideThread,
 	};
 }
@@ -305,7 +313,11 @@ export const sessionHandlers: {
 				       THEN excluded.title
 				       ELSE sessions.title
 				     END,
-				     parent_id = COALESCE(excluded.parent_id, sessions.parent_id),
+				     parent_id = CASE
+				       WHEN excluded.forked_from IS NOT NULL AND sessions.side_thread = 0
+				       THEN excluded.parent_id
+				       ELSE COALESCE(excluded.parent_id, sessions.parent_id)
+				     END,
 				     forked_from = COALESCE(excluded.forked_from, sessions.forked_from),
 				     fork_point_event = COALESCE(excluded.fork_point_event, sessions.fork_point_event),
 				     side_thread = MAX(sessions.side_thread, excluded.side_thread),
@@ -480,19 +492,21 @@ export const sessionHandlers: {
 		return [{ removeSession: event.data.sessionId }];
 	},
 
-	// Lineage only. The row itself is brought into being by session.created —
-	// upstream for OpenCode forks, which is why this is an UPDATE and not an
-	// upsert: this handler has no title or provider to insert with.
+	// A legacy upstream creation can contain a Fork before this lineage event
+	// identifies it. Side Threads keep their explicit containment. The row is
+	// created by session.created; this event has no title or provider to insert.
 	"session.forked": (event) => {
 		const placement = sessionPlacement(event);
 		return [
 			{
 				sql: `UPDATE sessions SET
+					parent_id = CASE WHEN side_thread = 1 THEN parent_id ELSE ? END,
 					forked_from = ?,
 					fork_point_event = COALESCE(?, fork_point_event),
 					updated_at = ?
 				 WHERE id = ?`,
 				params: [
+					placement.parentId,
 					placement.forkedFrom,
 					event.data.forkPointEvent ?? null,
 					event.createdAt,
