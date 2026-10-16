@@ -632,6 +632,7 @@ export class ClaudeProviderRuntime {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return Effect.gen(this, function* () {
 			const configDir =
@@ -646,6 +647,7 @@ export class ClaudeProviderRuntime {
 				workspaceRoot ?? this.deps.workspaceRoot,
 				this.deps.capabilitiesService,
 				configDir,
+				options,
 			);
 		}).pipe(
 			Effect.mapError(
@@ -1582,6 +1584,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
@@ -1598,6 +1601,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					workspaceRoot ?? this.deps.workspaceRoot,
 					this.deps.capabilitiesService,
 					configDir,
+					options,
 				);
 			}),
 		);
