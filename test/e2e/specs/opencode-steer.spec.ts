@@ -86,7 +86,6 @@ test.describe("OpenCode steering", () => {
 			Effect.scoped(
 				Effect.flatMap(RpcClient.make(WsRpcGroup), (client) =>
 					client.input.submit({
-						projectSlug: "e2e-replay",
 						sessionId,
 						inputId: randomUUID(),
 						text: "Bravo",

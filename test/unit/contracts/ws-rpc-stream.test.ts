@@ -316,7 +316,9 @@ describe("RpcTest subscription stream semantics", () => {
 		const subscribe = (
 			client: RpcClient.RpcClient<RpcGroup.Rpcs<typeof WsRpcGroup>>,
 		): Stream.Stream<unknown, WsRpcError> =>
-			client[member]({ projectSlug: "project", sessionId: "session-1" });
+			member === "SubscribeShell"
+				? client.SubscribeShell({ projectSlug: "project" })
+				: client.SubscribeSessionDetail({ sessionId: "session-1" });
 		it.scoped(`${member} preserves handler chunking`, () =>
 			Effect.gen(function* () {
 				const messages: Observation[] = [];
@@ -413,10 +415,15 @@ describe("RpcTest subscription stream semantics", () => {
 								Mailbox.ReadonlyMailbox<unknown, WsRpcError>,
 								never,
 								Scope.Scope
-							> = client[member](
-								{ projectSlug: "project", sessionId: "session-1" },
-								{ asMailbox: true },
-							);
+							> = member === "SubscribeShell"
+								? client.SubscribeShell(
+										{ projectSlug: "project" },
+										{ asMailbox: true },
+									)
+								: client.SubscribeSessionDetail(
+										{ sessionId: "session-1" },
+										{ asMailbox: true },
+									);
 							const mailbox = yield* subscription.pipe(
 								Effect.provideService(Scope.Scope, consumerScope),
 							);

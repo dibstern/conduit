@@ -303,7 +303,6 @@ describe("Integration: account session routing", () => {
 			const sendError = await client.rpcCall((rpc) =>
 				rpc.input
 					.submit({
-						projectSlug: "integration-test",
 						sessionId,
 						inputId: "input-after-last-account-removed",
 						text: "Cannot send without a Claude account",
@@ -410,7 +409,6 @@ describe("Integration: account session routing", () => {
 		const sendError = await client.rpcCall((rpc) =>
 			rpc.input
 				.submit({
-					projectSlug: "integration-test",
 					sessionId,
 					inputId: "input-missing-account",
 					text: "This account no longer exists",

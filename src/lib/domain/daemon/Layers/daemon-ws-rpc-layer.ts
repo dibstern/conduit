@@ -12,6 +12,7 @@ import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
 import {
 	getProviderDriver,
+	PROVIDER_DRIVERS,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
@@ -91,6 +92,7 @@ import {
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
+import type { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -111,6 +113,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
 		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
+			| SessionDirectory
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
 			| DaemonEventBusTag
@@ -189,6 +192,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				A,
 				E,
 				| ProjectRegistryTag
+				| SessionDirectory
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
@@ -271,6 +275,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| AccountDirectory
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
+				| SessionDirectory
 				| DaemonConfigRefTag
 			>,
 		) =>
@@ -295,6 +300,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 					Effect.map(getInstances, (instances) => ({
 						instances: Array.from(instances),
 						providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+						providerTraits: PROVIDER_DRIVERS,
 					})),
 				),
 			SubscribeUsage: () =>
@@ -502,6 +508,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.map((instances) => ({
 							instances: Array.from(instances),
 							providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+							providerTraits: PROVIDER_DRIVERS,
 						})),
 					),
 				),
@@ -746,8 +753,24 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				),
 			ResolveSession: (request) =>
 				run(
-					resolveDaemonSession(configDir, request.sessionId).pipe(
-						Effect.map((projectSlug) => ({ projectSlug })),
+					resolveDaemonSession(request.sessionId).pipe(
+						Effect.mapError(
+							(error) =>
+								new WsRpcError({
+									code: "ambiguous-session",
+									message: error.message,
+								}),
+						),
+						Effect.flatMap((projectSlug) =>
+							projectSlug === null
+								? Effect.fail(
+										new WsRpcError({
+											code: "unknown-session",
+											message: `Unknown session: ${request.sessionId}`,
+										}),
+									)
+								: Effect.succeed({ projectSlug }),
+						),
 					),
 				),
 			OpenCodeUseWorktree: (request) =>

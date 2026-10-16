@@ -3,7 +3,7 @@
 **Date:** 2026-05-18
 **Status:** Ready after full `ProviderRuntimeEvent` adoption and the legacy OpenCode runtime ingress deletion plan, unless duplicate browser submission/retry bugs become urgent
 **Review Inputs:** `2026-05-18-provider-orchestration-durable-receipts-decider-projector.architecture-improvements.md` and `2026-05-18-provider-orchestration-durable-receipts-decider-projector.tdd-improvements.md`
-**Latest t3code Review:** `/Users/dstern/src/personal/conduit-competitors/t3code` checked-out `main` through `4f0f24f0` and local `origin/main` through `cf07d063`, especially provider-instance options, effective dispatch identity, deterministic runtime seams, command snapshot tombstones, bounded retry/diagnostics, and command hot-path query shape.
+**Latest t3code Review:** `~/src/personal/conduit-competitors/t3code` checked-out `main` through `4f0f24f0` and local `origin/main` through `cf07d063`, especially provider-instance options, effective dispatch identity, deterministic runtime seams, command snapshot tombstones, bounded retry/diagnostics, and command hot-path query shape.
 **Execution Model:** Beads-backed issue graph, TDD vertical slices, and parallel subagent streams only where write sets are disjoint.
 
 ## Goal
@@ -327,7 +327,7 @@ After Gates C, D, E, F, and F2, run Wave 1 streams in parallel only if each stre
 Subagent prompt template:
 
 ```text
-Parent has assigned Beads issue <id> in /Users/dstern/src/personal/conduit.
+Parent has assigned Beads issue <id> in ~/src/personal/conduit.
 You are not alone in the codebase. Do not revert others' edits. Never stash.
 Owned files/modules: <list>.
 Forbidden files/modules: <list>.

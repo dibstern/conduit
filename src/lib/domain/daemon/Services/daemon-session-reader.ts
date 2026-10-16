@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { Reactivity } from "@effect/experimental";
 import { SqlClient } from "@effect/sql";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
-import { Cause, Data, Effect, Either, Exit, Layer } from "effect";
+import { Cause, Data, Effect, Either, Exit, Layer, Option } from "effect";
 import {
 	type createSessionGitCache,
 	daemonSessionGitCache,
@@ -35,6 +35,7 @@ import {
 	type ProjectRegistryTag,
 } from "./project-registry-service.js";
 import type { SessionActivityTag } from "./session-activity.js";
+import { SessionDirectory } from "./session-directory.js";
 import { makeSessionRows } from "./session-rows.js";
 
 class DaemonSessionReadError extends Data.TaggedError(
@@ -346,36 +347,12 @@ export const listDaemonSessions = (
 		};
 	}).pipe(Effect.withSpan("daemonSessions.list"));
 
-export const resolveDaemonSession = (configDir: string, sessionId: string) =>
+export const resolveDaemonSession = (sessionId: string) =>
 	Effect.gen(function* () {
-		for (const project of yield* allProjects) {
-			const databasePath = projectEventsDbPath({ configDir, ...project });
-			const result = yield* Effect.exit(
-				Effect.gen(function* () {
-					yield* Effect.try(() => statSync(databasePath));
-					return yield* Effect.gen(function* () {
-						const readQuery = yield* ReadQueryEffectTag;
-						return yield* readQuery.getSession(sessionId);
-					}).pipe(
-						Effect.provide(
-							Layer.effect(ReadQueryEffectTag, makeReadQueryEffect).pipe(
-								Layer.provide(
-									SqliteNode.layer({
-										filename: databasePath,
-										readonly: true,
-										disableWAL: true,
-									}).pipe(Layer.provide(Reactivity.layer)),
-								),
-							),
-						),
-					);
-				}),
-			);
-			if (Exit.isSuccess(result) && result.value !== undefined) {
-				return project.slug;
-			}
-		}
-		return null;
+		const directory = yield* SessionDirectory;
+		return yield* directory
+			.projectOf(sessionId)
+			.pipe(Effect.map(Option.getOrNull));
 	}).pipe(Effect.withSpan("daemonSessions.resolve"));
 
 /** Active bindings take precedence after provider switches; legacy rows use the session id. */

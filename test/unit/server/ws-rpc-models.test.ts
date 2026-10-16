@@ -158,19 +158,15 @@ describe("WsRpcServerLayer GetModels", () => {
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const drift = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "drift",
 				});
 				const match = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "match",
 				});
 				const window = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "window",
 				});
 				const unknown = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "unknown",
 				});
 
@@ -227,7 +223,6 @@ describe("WsRpcServerLayer GetModels", () => {
 			expect(getLatestTurnModelExecution).not.toHaveBeenCalled();
 
 			const noRow = yield* client.GetModels({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 			});
 			expect(noRow.modelExecution).toBeUndefined();
@@ -262,7 +257,6 @@ describe("WsRpcServerLayer GetModels", () => {
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const result = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 				});
 				expect(result.providers).toBeDefined();
@@ -421,11 +415,9 @@ describe("WsRpcServerLayer GetModels", () => {
 
 				const client = yield* rpcClient;
 				const match = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "match-session",
 				});
 				const drift = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "drift-session",
 				});
 				expect(match.modelExecution).toEqual({
@@ -511,11 +503,10 @@ describe("WsRpcServerLayer GetModels", () => {
 				const client = yield* rpcClient;
 
 				const result = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 				});
 
-				expect(result.projectSlug).toBe("project-a");
+				expect(result.projectSlug).toBe("test-project");
 				expect(result.providers).toEqual([
 					{
 						id: "anthropic",
@@ -818,7 +809,6 @@ describe("WsRpcServerLayer GetModels", () => {
 			return Effect.gen(function* () {
 				const client = yield* rpcClient;
 				const result = yield* client.GetModels({
-					projectSlug: "project-a",
 					sessionId: "session-1",
 					instanceId: "opencode",
 				});

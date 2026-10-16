@@ -21,8 +21,8 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -60,7 +60,7 @@ const seed = (filename: string) =>
 				// The reply comes half a second after its prompt, so it is newer.
 				const event =
 					(offset: number) =>
-					<T extends CanonicalEventType>(type: T, data: EventPayloadMap[T]) =>
+					<T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 						canonicalEvent(type, SESSION, data, {
 							provider: "claude",
 							createdAt: start + index * 1000 + offset,

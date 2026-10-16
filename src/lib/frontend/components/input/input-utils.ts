@@ -114,9 +114,8 @@ export function fetchFileContent(
 	if (!slug) return Promise.reject(new Error("No project selected"));
 	const sessionId = getCurrentSessionId();
 	return getFileContentRpc({
-		projectSlug: slug,
+		...(sessionId ? { sessionId } : { projectSlug: slug }),
 		path,
-		...(sessionId ? { sessionId } : {}),
 	}).then((response) => ({
 		content: response.content,
 		...(response.binary != null ? { binary: response.binary } : {}),
@@ -131,9 +130,8 @@ export function fetchDirectoryListing(
 	if (!slug) return Promise.reject(new Error("No project selected"));
 	const sessionId = getCurrentSessionId();
 	return getFileListRpc({
-		projectSlug: slug,
+		...(sessionId ? { sessionId } : { projectSlug: slug }),
 		path: requestPath,
-		...(sessionId ? { sessionId } : {}),
 	}).then((response) =>
 		response.entries
 			.map((e) =>

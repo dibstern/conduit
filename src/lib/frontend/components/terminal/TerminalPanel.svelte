@@ -159,9 +159,8 @@
 		const accountId = terminalAccountId();
 		if (!projectSlug || !beginCreateTab()) return;
 		void createPtyRpc({
-			projectSlug,
+			...(sessionId ? { sessionId } : { projectSlug }),
 			originId: getBrowserClientId(),
-			...(sessionId ? { sessionId } : {}),
 			...(accountId === undefined ? {} : { accountId }),
 			...(root === undefined ? {} : { root }),
 		}).catch(() => {

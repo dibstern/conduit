@@ -421,7 +421,7 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		rmSync(worktree, { recursive: true, force: true });
 		const recreated = await sendRpcRequest(
 			socket,
-			new RecreateSessionWorktree({ projectSlug: "process-test", sessionId }),
+			new RecreateSessionWorktree({ sessionId }),
 		);
 		expect(recreated.directory).toBe(worktree);
 		await observe(browser, "recreated", worktree);
@@ -429,7 +429,6 @@ describe("Managed real OpenCode launch workspace execution", () => {
 			sendRpcRequest(
 				socket,
 				new MoveSessionWorkspace({
-					projectSlug: "process-test",
 					sessionId,
 					path: worktree,
 				}),
@@ -449,7 +448,6 @@ describe("Managed real OpenCode launch workspace execution", () => {
 		const recovered = await sendRpcRequest(
 			socket,
 			new ContinueSessionInMainFolder({
-				projectSlug: "process-test",
 				sessionId,
 			}),
 		);

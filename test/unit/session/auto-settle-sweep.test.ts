@@ -177,12 +177,6 @@ describe("relay automatic settlement sweep", () => {
 								{ sessionId: id, messageId: `${id}-m1`, role: "assistant" },
 								{ createdAt: old },
 							),
-							canonicalEvent(
-								"session.read",
-								id,
-								{ sessionId: id },
-								{ createdAt: old + 1 },
-							),
 						])
 							yield* runner.projectEvent(yield* store.append(event));
 					});
@@ -227,12 +221,7 @@ describe("relay automatic settlement sweep", () => {
 					(yield* store.readAllBySession("woken"))
 						.filter((event) => event.type.startsWith("session."))
 						.map((event) => event.type),
-				).toEqual([
-					"session.created",
-					"session.read",
-					"session.snoozed",
-					"session.settled",
-				]);
+				).toEqual(["session.created", "session.snoozed", "session.settled"]);
 				expect(yield* settleIdleSessions(ports, 3 * DAY, now)).toBe(0);
 				yield* service.setSessionSettled("eligible", { settled: false });
 				expect(

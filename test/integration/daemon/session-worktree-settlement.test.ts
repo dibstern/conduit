@@ -334,7 +334,6 @@ describe("Worktree branch settlement through the built daemon", () => {
 			await sendRpcRequest(
 				socket,
 				new MarkSessionSeen({
-					projectSlug: "process-test",
 					sessionId,
 					upTo: Date.now(),
 					originId: "settlement-test",
@@ -407,7 +406,6 @@ describe("Worktree branch settlement through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MarkSessionSeen({
-				projectSlug: "process-test",
 				sessionId: ownedId,
 				upTo: Date.now(),
 				originId: "settlement-test",
@@ -450,7 +448,6 @@ describe("Worktree branch settlement through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new SetSessionSettled({
-				projectSlug: "process-test",
 				sessionId: otherId,
 				settled: true,
 				originId: "settlement-test",
@@ -466,7 +463,6 @@ describe("Worktree branch settlement through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MarkSessionSeen({
-				projectSlug: "process-test",
 				sessionId: otherId,
 				upTo: Date.now(),
 				originId: "settlement-test",

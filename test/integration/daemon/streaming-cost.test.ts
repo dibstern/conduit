@@ -23,7 +23,6 @@ describe("streaming cost through the fake Claude process", () => {
 			const finalText = responseChunks("streaming-cost").join("");
 			const submitted = await Effect.runPromise(
 				browser.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: browser.originId,
 					inputId: randomUUID(),

@@ -49,6 +49,7 @@ import {
 import type {
 	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 	StoredEvent,
 } from "../events.js";
 
@@ -92,46 +93,6 @@ export const SESSION_SUBTREE_SQL = `WITH RECURSIVE subtree(id) AS (
 	SELECT child.id FROM sessions child JOIN subtree ON child.parent_id = subtree.id
 )
 SELECT id FROM subtree`;
-
-type SessionHandledType =
-	| "session.created"
-	| "session.renamed"
-	| "session.rewound"
-	| "session.rewind_undone"
-	| "session.rewind_committed"
-	| "session.workspace_changed"
-	| "session.workspace_hint_changed"
-	| "session.workspace_started"
-	| "input.sent"
-	| "session.settled"
-	| "session.unsettled"
-	| "session.pinned"
-	| "session.unpinned"
-	| "session.snoozed"
-	| "session.auto_settle_set"
-	| "session.unsnoozed"
-	| "session.deleted"
-	| "session.forked"
-	| "session.status"
-	| "session.provider_changed"
-	| "session.permission_mode_changed"
-	| "session.model_changed"
-	| "session.variant_changed"
-	| "session.context_window_changed"
-	| "session.goal_changed"
-	| "session.usage_limited"
-	| "session.cut_off_dismissed"
-	| "session.resumed"
-	| "session.resume_scheduled"
-	| "session.resume_cancelled"
-	| "tool.running"
-	| "tool.completed"
-	| "turn.completed"
-	| "turn.error"
-	| "turn.interrupted"
-	| "permission.asked"
-	| "question.asked"
-	| "message.created";
 
 // An approval or question in a child rolls up into its root's attention, so it
 // must wake a snoozed ancestor too; otherwise the root sits on the shelf while
@@ -224,14 +185,9 @@ function isAutoTitleRename(event: StoredEvent): boolean {
 // last_turn_error_at answers one durable question rather than mirroring the
 // turn state machine: failures set it, while success or new work clears it.
 //
-// This mapped table replaces SessionProjector's assertHandledOrIgnored runtime
-// guard: every SessionHandledType must have an implementation at compile time.
-// Other projectors still use assertHandledOrIgnored for their imperative branches.
-export const sessionHandlers: {
-	readonly [K in SessionHandledType]: (
-		event: StoredEvent & { type: K; data: EventPayloadMap[K] },
-	) => readonly SessionStatement[];
-} = {
+// Keys declare the session projector's handled events and type each payload.
+// Cross-projector coverage is checked beside the projector factory list.
+export const sessionHandlers = {
 	"session.rewound": (event) => [
 		{
 			sql: "UPDATE sessions SET pending_rewind_message_id = ?, updated_at = ? WHERE id = ?",
@@ -739,11 +695,21 @@ export const sessionHandlers: {
 			},
 		];
 	},
+} satisfies {
+	readonly [K in LiveEventType]?: (
+		event: Extract<StoredEvent, { type: K }>,
+	) => readonly SessionStatement[];
 };
 
-export const SESSION_HANDLED_TYPES = Object.keys(
+type SessionHandledTypes = [
+	keyof typeof sessionHandlers,
+	...(keyof typeof sessionHandlers)[],
+];
+
+// The handler table is nonempty; every handled type comes from its keys.
+export const SESSION_HANDLED_TYPES: Readonly<SessionHandledTypes> = Object.keys(
 	sessionHandlers,
-) as readonly SessionHandledType[];
+) as SessionHandledTypes;
 
 export function getSessionStatements<K extends CanonicalEventType>(
 	event: StoredEvent & { type: K; data: EventPayloadMap[K] },

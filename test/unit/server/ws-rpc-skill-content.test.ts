@@ -13,8 +13,17 @@ import { RpcTest } from "@effect/rpc";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	makeSessionDirectoryLive,
+	SessionDirectory,
+} from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import {
+	makeRoutedWsRpcServerLayer,
+	WsRpcServerLayer,
+} from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
 	makeTestHandlerLayer,
@@ -184,15 +193,106 @@ describe("WsRpcServerLayer GetSkillContent", () => {
 
 	it.effect("does not use another project's cwd for a mismatched slug", () =>
 		Effect.gen(function* () {
-			writeSkill(project, "review", "Project instructions");
-			const path = writeSkill(home, "review", "Home instructions");
-			expect(yield* readSkill("review", "other-project")).toEqual({
-				projectSlug: "other-project",
+			writeSkill(project, "review", "Project A instructions");
+			const homePath = writeSkill(home, "review", "Home instructions");
+			const otherProject = join(temp, "project-b");
+			const directory = yield* SessionDirectory.pipe(
+				Effect.provide(makeSessionDirectoryLive(temp, [])),
+			);
+			const directoryLayer = Layer.succeed(SessionDirectory, directory);
+			const projectA = yield* Layer.build(
+				makeTestHandlerLayer({
+					config: makeMockConfig({ slug: "project-a", projectDir: project }),
+				}),
+			);
+			const projectB = yield* Layer.build(
+				makeTestHandlerLayer({
+					config: makeMockConfig({
+						slug: "project-b",
+						projectDir: otherProject,
+					}),
+					persistenceLayer: makePersistenceEffectLayer(
+						":memory:",
+						"project-b",
+						undefined,
+						undefined,
+						directoryLayer,
+					),
+					seedEvents: [
+						canonicalEvent("session.created", "owned-b", {
+							sessionId: "owned-b",
+							title: "Owned by B",
+							provider: "claude",
+						}),
+					],
+				}),
+			);
+			const resolve = vi.fn((slug: string) =>
+				slug === "project-a"
+					? Effect.succeed(projectA)
+					: slug === "project-b"
+						? Effect.succeed(projectB)
+						: Effect.fail(
+								new WsRpcError({ message: `Unknown project ${slug}` }),
+							),
+			);
+			const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+				Effect.provide(
+					makeRoutedWsRpcServerLayer(resolve, undefined, "project-a").pipe(
+						Layer.provide(directoryLayer),
+					),
+				),
+			);
+			const realpath = vi.spyOn(fs, "realpath");
+			const open = vi.spyOn(fs, "open");
+			expect(
+				yield* client.GetSkillContent({
+					projectSlug: "project-b",
+					name: "review",
+				}),
+			).toEqual({
+				projectSlug: "project-b",
 				name: "review",
-				path,
+				path: homePath,
 				content: "Home instructions",
 			});
-		}),
+			const path = writeSkill(otherProject, "review", "Project B instructions");
+			expect(
+				yield* client.GetSkillContent({ sessionId: "owned-b", name: "review" }),
+			).toEqual({
+				projectSlug: "project-b",
+				name: "review",
+				path,
+				content: "Project B instructions",
+			});
+			expect(resolve.mock.calls.map(([slug]) => slug)).toEqual([
+				"project-b",
+				"project-b",
+			]);
+			const projectARoot = join(project, ".claude", "skills");
+			expect(
+				realpath.mock.calls.some(([path]) =>
+					String(path).startsWith(projectARoot),
+				),
+			).toBe(false);
+			expect(
+				open.mock.calls.some(([path]) => String(path).startsWith(projectARoot)),
+			).toBe(false);
+			resolve.mockClear();
+			realpath.mockClear();
+			open.mockClear();
+			expect(
+				yield* Effect.either(
+					client.GetSkillContent({ sessionId: "missing", name: "review" }),
+				),
+			).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "WsRpcError", code: "unknown-session" },
+			});
+			expect(resolve).not.toHaveBeenCalled();
+			expect(realpath).not.toHaveBeenCalled();
+			expect(open).not.toHaveBeenCalled();
+		}).pipe(Effect.scoped),
 	);
 
 	it.effect("returns not-found when neither root contains the skill", () =>

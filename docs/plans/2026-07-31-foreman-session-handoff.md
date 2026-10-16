@@ -96,7 +96,7 @@ bug `36a7c117` fixed, arriving by the bus route instead of the relay route.
   ```
   This is how `506115bd` landed. It **bypasses the lefthook pre-commit hook**, so run
   `pnpm check`, `biome check <paths>` and the relevant tests manually and say so.
-- **Beads writes from the canonical checkout only** (`/Users/dstern/src/personal/conduit`),
+- **Beads writes from the canonical checkout only** (`~/src/personal/conduit`),
   never a worktree — worktree writes can auto-import and silently revert.
 
 **Delegating to codex (gpt-5.6-sol):** the mechanics that cost real runs are now written

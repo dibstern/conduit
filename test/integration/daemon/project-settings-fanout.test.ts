@@ -243,7 +243,6 @@ it("fans global settings out to another live project's subscribers and defaults"
 		const sessionId = await browserA.createSession("Global variant preference");
 		await Effect.runPromise(
 			browserA.rpc.SwitchVariant({
-				projectSlug: projectA,
 				sessionId,
 				variant: "",
 			}),

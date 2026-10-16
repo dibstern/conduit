@@ -326,7 +326,7 @@ test.describe("send at an account's reset", () => {
 			),
 		).toBe(false);
 		const heldHistory = await Effect.runPromise(
-			browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+			browser.rpc.LoadMoreHistory({ sessionId }),
 		);
 		expect(JSON.stringify(heldHistory.messages)).not.toContain(prompt);
 		const heldScreenshot = join(artifacts, "queued-at-reset.png");
@@ -396,7 +396,7 @@ test.describe("send at an account's reset", () => {
 				(mark) => "prompt" in mark && mark.prompt === prompt,
 			),
 			history: await Effect.runPromise(
-				browser.rpc.LoadMoreHistory({ projectSlug, sessionId }),
+				browser.rpc.LoadMoreHistory({ sessionId }),
 			),
 		};
 		writeFileSync(

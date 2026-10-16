@@ -22,7 +22,11 @@ import {
 	usageDisplay,
 } from "../utils/continuation.js";
 import { getBrowserClientId } from "./client-identity.js";
-import { getInstanceById, instanceState } from "./instance.svelte.js";
+import {
+	getDriverTraits,
+	getInstanceById,
+	instanceState,
+} from "./instance.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 import {
 	composerAccountId,
@@ -64,7 +68,7 @@ class ClaudeAccounts {
 
 	get configuredAccounts() {
 		return instanceState.instances.filter(
-			(instance) => instance.driver === "claude",
+			(instance) => getDriverTraits(instance.driver)?.usageHarness === "claude",
 		);
 	}
 
@@ -240,7 +244,6 @@ class ClaudeAccounts {
 		this.handoff = { kind: "previewing", ...context };
 		try {
 			const summary = await previewContinuationRpc({
-				projectSlug: this.projectSlug,
 				sessionId,
 				instanceId: targetId,
 				originId: getBrowserClientId(),
@@ -275,7 +278,6 @@ class ClaudeAccounts {
 		this.inFlightTarget = handoff.to;
 		try {
 			await switchSessionAccount({
-				projectSlug: this.projectSlug,
 				sessionId: handoff.sessionId,
 				instanceId: handoff.to,
 				expectedInstanceId: handoff.from,

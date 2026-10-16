@@ -280,7 +280,6 @@ describe("client-side resume at the shared client", () => {
 
 					const first = yield* links.stream.takeRequest;
 					expect(first.payload).toEqual({
-						projectSlug: "alpha",
 						sessionId: "s1",
 					});
 
@@ -301,7 +300,6 @@ describe("client-side resume at the shared client", () => {
 					// the cursor sits on 12, which 13 itself proved complete.
 					const reissued = yield* links.stream.takeRequest;
 					expect(reissued.payload).toEqual({
-						projectSlug: "alpha",
 						sessionId: "s1",
 						resumeFromSequence: 12,
 						resumeBase: { sequence: 11 },
@@ -363,7 +361,6 @@ describe("client-side resume at the shared client", () => {
 							// test is the one it really reached.
 							yield* links.stream.drop;
 							expect((yield* links.stream.takeRequest).payload).toEqual({
-								projectSlug: "alpha",
 								sessionId: "s1",
 								resumeFromSequence: point.resumeFrom,
 								resumeBase: { sequence: 11 },
@@ -413,7 +410,6 @@ describe("client-side resume at the shared client", () => {
 
 						const first = yield* links.stream.takeRequest;
 						expect(first.payload).toEqual({
-							projectSlug: "alpha",
 							sessionId: "s1",
 							resumeFromSequence: 7,
 						});
@@ -590,7 +586,6 @@ describe("client-side resume at the shared client", () => {
 
 						yield* TestClock.adjust("10 millis");
 						expect((yield* links.stream.takeRequest).payload).toEqual({
-							projectSlug: "alpha",
 							sessionId: "s1",
 						});
 					}),
