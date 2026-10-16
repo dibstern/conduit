@@ -26,6 +26,16 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: {
 		layout: "padded",
+		// Strict, because the active row once dropped below AA contrast unnoticed.
+		// The listbox is a combobox popup: focus stays in the composer textarea,
+		// which scrolls it via aria-activedescendant, so the list must not take a
+		// tab stop the way other scrollable regions do.
+		a11y: {
+			test: "error",
+			config: {
+				rules: [{ id: "scrollable-region-focusable", enabled: false }],
+			},
+		},
 	},
 	// Standalone stories render without InputArea, which owns the textarea that
 	// points `aria-controls` here. A fixed id keeps the listbox named and stable.

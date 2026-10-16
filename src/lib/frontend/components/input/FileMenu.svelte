@@ -158,7 +158,10 @@
 								class="file-path flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-base max-sm:text-xs"
 							>
 								{#if lastSlash >= 0}
-									<span class="text-text-muted"
+									<span
+										class={i === activeIndex
+											? "text-text-secondary"
+											: "text-text-muted"}
 										>{entry.slice(0, lastSlash + 1)}</span
 									><span class="text-text"
 										>{entry.slice(lastSlash + 1)}</span
