@@ -33,6 +33,7 @@ function recordServerMetrics(
 		{ reads: Record<string, number>; windows: Set<number>; ranges: Set<string> }
 	> = {};
 	const sidebarReads: { at: number; ms: number; rows: number }[] = [];
+	const readModelReads: { at: number; source: string; kind: string }[] = [];
 	subscribe("conduit:sidebar-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
@@ -47,6 +48,11 @@ function recordServerMetrics(
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
 			message as import("../../src/lib/domain/relay/Services/read-model-subscription.js").ReadModelRead;
+		readModelReads.push({
+			at: performance.timeOrigin + performance.now(),
+			source: read.source,
+			kind: read.kind,
+		});
 		const source = (sources[read.source] ??= {
 			reads: {},
 			windows: new Set(),
@@ -105,6 +111,7 @@ function recordServerMetrics(
 					]),
 				),
 				sidebarReads,
+				readModelReads,
 				gitRefreshes,
 				...(timed && { familyReads: timed.familyReads }),
 				...(timed && { streamingWrites: timed.streamingWrites }),

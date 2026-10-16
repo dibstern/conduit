@@ -18,6 +18,7 @@ export const DEFAULT_OC_PORT = 4096;
 export const DEFAULT_TRACE_MAX_BYTES = 10_485_760;
 export const DEFAULT_TRACE_MAX_FILES = 10;
 export const DEFAULT_TRACE_BATCH_WINDOW_MS = 200;
+export const DEFAULT_TRACE_SQL_MIN_MS = 5;
 
 export interface TraceEnvConfig {
 	readonly enabled: boolean;
@@ -25,6 +26,7 @@ export interface TraceEnvConfig {
 	readonly maxBytes: number;
 	readonly maxFiles: number;
 	readonly batchWindowMs: number;
+	readonly sqlMinMs?: number | undefined;
 }
 
 const parseBoundedInteger = (
@@ -73,6 +75,12 @@ export const resolveTraceConfig = (
 			10,
 			60_000,
 		),
+		sqlMinMs: parseBoundedInteger(
+			env["CONDUIT_TRACE_SQL_MIN_MS"],
+			DEFAULT_TRACE_SQL_MIN_MS,
+			0,
+			2_147_483_647,
+		),
 	};
 };
 
@@ -96,6 +104,13 @@ export const ENV = {
 		(process.env["LOG_LEVEL"] as LogLevel | undefined) ?? ("info" as const),
 	/** Log format (default: pretty). */
 	logFormat: process.env["LOG_FORMAT"] as LogFormat | undefined,
+	/** Warn on browser RPC latency; zero disables request instrumentation. */
+	slowRpcMs: parseBoundedInteger(
+		process.env["CONDUIT_SLOW_RPC_MS"],
+		100,
+		0,
+		2_147_483_647,
+	),
 	/** Per-project resume sweep; tests use a one-second interval. */
 	continuationSweepIntervalMs: parseBoundedInteger(
 		process.env["CONDUIT_CONTINUATION_SWEEP_INTERVAL_MS"],

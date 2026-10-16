@@ -67,6 +67,18 @@ describe("env module", () => {
 		expect(ENV.opencodeUsername).toBe("opencode");
 	});
 
+	it.each([
+		[undefined, 100],
+		["1", 1],
+		["0", 0],
+		["-1", 100],
+		["invalid", 100],
+	])("parses the slow RPC threshold %s as %i ms", async (value, expected) => {
+		vi.stubEnv("CONDUIT_SLOW_RPC_MS", value);
+		const { ENV } = await import("../../src/lib/env.js");
+		expect(ENV.slowRpcMs).toBe(expected);
+	});
+
 	it("resolveTraceConfig defaults to local daemon logs under configDir", async () => {
 		const { resolveTraceConfig } = await import("../../src/lib/env.js");
 		expect(resolveTraceConfig("/tmp/conduit-config", {})).toEqual({
@@ -75,7 +87,23 @@ describe("env module", () => {
 			maxBytes: 10_485_760,
 			maxFiles: 10,
 			batchWindowMs: 200,
+			sqlMinMs: 5,
 		});
+	});
+
+	it.each([
+		[undefined, 5],
+		["10", 10],
+		["0", 0],
+		["-1", 5],
+		["invalid", 5],
+	])("parses the local SQL span threshold %s as %i ms", async (value, expected) => {
+		const { resolveTraceConfig } = await import("../../src/lib/env.js");
+		expect(
+			resolveTraceConfig("/tmp/conduit-config", {
+				CONDUIT_TRACE_SQL_MIN_MS: value,
+			}).sqlMinMs,
+		).toBe(expected);
 	});
 
 	it("resolveTraceConfig resolves relative trace files against configDir", async () => {

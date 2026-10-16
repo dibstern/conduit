@@ -2,8 +2,18 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { Socket, SocketServer } from "@effect/platform";
 import { RpcSerialization, RpcServer } from "@effect/rpc";
-import type { ManagedRuntime } from "effect";
-import { Cause, Context, Effect, Layer, Option, Runtime } from "effect";
+import { Statement } from "@effect/sql";
+import type { ManagedRuntime, Schema } from "effect";
+import {
+	Cause,
+	Context,
+	Effect,
+	FiberRef,
+	Layer,
+	Option,
+	Runtime,
+	Tracer,
+} from "effect";
 import type { RuntimeFiber } from "effect/Fiber";
 import type { WebSocket } from "ws";
 import {
@@ -19,6 +29,7 @@ import {
 	type WsTransport,
 	WsTransportTag,
 } from "../domain/relay/Layers/ws-transport-layer.js";
+import { ENV } from "../env.js";
 import { isRecord } from "../utils.js";
 import { getClientIp } from "./http-utils.js";
 import {
@@ -37,6 +48,174 @@ import {
 const RPC_CONNECTION_CONCURRENCY = 32;
 // Private WebSocket code: the PIN changed; reconnect and authenticate again.
 const RPC_PIN_CHANGED_CLOSE_CODE = 4001;
+
+interface SlowRpcRequest {
+	readonly method: string;
+	readonly requestId: string;
+	readonly projectSlug?: string;
+	readonly sessionId?: string;
+	readonly receivedAt: number;
+	readonly kind: "request" | "stream-startup";
+	startedAt?: number;
+	sqlCount: number;
+	sqlMs: number;
+	finished: boolean;
+}
+
+const requestSqlStats = FiberRef.unsafeMake<SlowRpcRequest | undefined>(
+	undefined,
+);
+
+const containsInterrupt = (
+	cause: Schema.CauseEncoded<unknown, unknown>,
+): boolean =>
+	cause._tag === "Interrupt" ||
+	((cause._tag === "Sequential" || cause._tag === "Parallel") &&
+		(containsInterrupt(cause.left) || containsInterrupt(cause.right)));
+
+export const withSlowRpcLogging = (
+	protocol: RpcServer.Protocol["Type"],
+	thresholdMs = ENV.slowRpcMs,
+): RpcServer.Protocol["Type"] => {
+	if (thresholdMs === 0) return protocol;
+	const pending = new Map<string, SlowRpcRequest>();
+	const finish = (key: string, outcome: "success" | "failure" | "interrupt") =>
+		Effect.suspend(() => {
+			const request = pending.get(key);
+			if (!request) return Effect.void;
+			pending.delete(key);
+			request.finished = true;
+			const endedAt = performance.now();
+			const totalMs = endedAt - request.receivedAt;
+			if (totalMs < thresholdMs) return Effect.void;
+			return Effect.logWarning("slow rpc").pipe(
+				Effect.annotateLogs({
+					method: request.method,
+					requestId: request.requestId,
+					...(request.projectSlug !== undefined && {
+						projectSlug: request.projectSlug,
+					}),
+					...(request.sessionId !== undefined && {
+						sessionId: request.sessionId,
+					}),
+					totalMs,
+					queuedMs: (request.startedAt ?? endedAt) - request.receivedAt,
+					sqlCount: request.sqlCount,
+					sqlMs: request.sqlMs,
+					outcome,
+					kind: request.kind,
+				}),
+			);
+		});
+	return {
+		...protocol,
+		run: (handle) =>
+			protocol
+				.run((clientId, message) => {
+					if (
+						message._tag !== "Request" ||
+						typeof message.tag !== "string" ||
+						typeof message.id !== "string"
+					)
+						return handle(clientId, message);
+					const payload = isRecord(message.payload) ? message.payload : {};
+					const request: SlowRpcRequest = {
+						method: message.tag,
+						requestId: message.id,
+						...(typeof payload["projectSlug"] === "string" && {
+							projectSlug: payload["projectSlug"],
+						}),
+						...(typeof payload["sessionId"] === "string" && {
+							sessionId: payload["sessionId"],
+						}),
+						receivedAt: performance.now(),
+						kind: message.tag.startsWith("Subscribe")
+							? "stream-startup"
+							: "request",
+						sqlCount: 0,
+						sqlMs: 0,
+						finished: false,
+					};
+					pending.set(`${clientId}:${message.id}`, request);
+					return Effect.gen(function* () {
+						const previous = yield* FiberRef.get(Statement.currentTransformer);
+						return yield* Effect.tracerWith((upstream) =>
+							handle(clientId, message).pipe(
+								Effect.withTracer(
+									Tracer.make({
+										span(...args) {
+											// RpcServer creates this span after acquiring its concurrency permit.
+											if (
+												args[0] === `RpcServer.${message.tag}` &&
+												request.startedAt === undefined
+											)
+												request.startedAt = performance.now();
+											return upstream.span(...args);
+										},
+										context: (f, fiber) => upstream.context(f, fiber),
+									}),
+								),
+								// A request-local FiberRef survives stream context replacement and shares counters only with child fibers.
+								Effect.locally(requestSqlStats, request),
+								Statement.withTransformer((statement, sql, refs, span) =>
+									Effect.gen(function* () {
+										const stats = yield* FiberRef.get(requestSqlStats);
+										if (stats && !stats.finished) {
+											const end = span.end.bind(span);
+											span.end = (endTime, exit) => {
+												const status = span.status;
+												if (!stats.finished && status._tag === "Started") {
+													stats.sqlCount++;
+													stats.sqlMs +=
+														Number(endTime - status.startTime) / 1_000_000;
+												}
+												end(endTime, exit);
+											};
+										}
+										return Option.isSome(previous)
+											? yield* previous.value(statement, sql, refs, span)
+											: statement;
+									}),
+								),
+							),
+						);
+					});
+				})
+				.pipe(
+					Effect.ensuring(
+						Effect.suspend(() =>
+							Effect.forEach(
+								pending.keys(),
+								(key) => finish(key, "interrupt"),
+								{ discard: true },
+							),
+						),
+					),
+				),
+		send: (clientId, response, transferables) =>
+			protocol.send(clientId, response, transferables).pipe(
+				Effect.tap(() => {
+					if (response._tag === "Defect") {
+						return Effect.flatMap(FiberRef.get(requestSqlStats), (request) =>
+							request
+								? finish(`${clientId}:${request.requestId}`, "failure")
+								: Effect.void,
+						);
+					}
+					if (response._tag !== "Chunk" && response._tag !== "Exit")
+						return Effect.void;
+					return finish(
+						`${clientId}:${response.requestId}`,
+						response._tag === "Chunk" || response.exit._tag === "Success"
+							? "success"
+							: containsInterrupt(response.exit.cause)
+								? "interrupt"
+								: "failure",
+					);
+				}),
+			),
+	};
+};
 
 type RpcWebSocketHandlerOptions = (
 	| { readonly runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> }
@@ -175,6 +354,7 @@ const runRpcWebSocketConnection = <R>(
 						),
 					),
 			};
+			const requestProtocol = withSlowRpcLogging(pinChangeProtocol);
 
 			// RpcServer.make runs the protocol loop until interrupted, so it has
 			// to be forked. The scope then stays open only while the client is
@@ -187,10 +367,10 @@ const runRpcWebSocketConnection = <R>(
 					RpcServer.Protocol,
 					onSuccessfulShutdownResponse
 						? withRpcShutdownResponse(
-								pinChangeProtocol,
+								requestProtocol,
 								onSuccessfulShutdownResponse,
 							)
-						: pinChangeProtocol,
+						: requestProtocol,
 				),
 				Effect.provide(serverLayer),
 				Effect.interruptible,
