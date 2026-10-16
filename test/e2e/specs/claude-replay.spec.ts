@@ -1168,7 +1168,11 @@ test.describe("Claude replay lane", () => {
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: true,
+				});
 				const steering = pendingState(s.dbPath, b);
 
 				await expect.poll(s.turnEnds).toBe(1);
@@ -1307,7 +1311,11 @@ test.describe("Claude replay lane", () => {
 				// Alpha is replying (no tool, so no boundary to read the steer at).
 				await expect(s.chat.assistantMessages).toHaveCount(1);
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: true,
+				});
 				const steering = pendingState(s.dbPath, b);
 
 				await expect.poll(s.turnEnds, { timeout: 30_000 }).toBe(2);
@@ -1369,8 +1377,8 @@ test.describe("Claude replay lane", () => {
 				const charlie = await s.submit("Charlie", "steer");
 				const [b, c] = [bravo.inputId, charlie.inputId];
 				expect([bravo.response, charlie.response]).toEqual([
-					{ ok: true, sessionId: s.sessionId },
-					{ ok: true, sessionId: s.sessionId },
+					{ ok: true, sessionId: s.sessionId, handedOff: true },
+					{ ok: true, sessionId: s.sessionId, handedOff: true },
 				]);
 				const steering = [pendingState(s.dbPath, b), pendingState(s.dbPath, c)];
 
@@ -1446,7 +1454,11 @@ test.describe("Claude replay lane", () => {
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "steer");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: true,
+				});
 				const steering = pendingState(s.dbPath, b);
 				const charlie = await s.submit("Charlie", "queue");
 				const c = charlie.inputId;
@@ -1530,7 +1542,11 @@ test.describe("Claude replay lane", () => {
 				await s.app.sendMessage("Alpha");
 				await s.chat.waitForToolBlock();
 				const { inputId: b, response } = await s.submit("Bravo", "queue");
-				expect(response).toEqual({ ok: true, sessionId: s.sessionId });
+				expect(response).toEqual({
+					ok: true,
+					sessionId: s.sessionId,
+					handedOff: false,
+				});
 				const queued = pendingState(s.dbPath, b);
 				expect(await s.sendNow(b)).toEqual({ ok: true });
 				const steering = pendingState(s.dbPath, b);

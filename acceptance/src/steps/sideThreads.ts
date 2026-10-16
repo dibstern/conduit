@@ -104,7 +104,7 @@ export const sideThreadsHandlers: StepHandler[] = [
 				(candidate) => candidate.tag === "StartSideThread",
 			);
 			expect(request.payload).toMatchObject({
-				parentSessionId: requireParentId(world.page),
+				sessionId: requireParentId(world.page),
 				title: match[1],
 			});
 			await expect(world.page).toHaveURL(

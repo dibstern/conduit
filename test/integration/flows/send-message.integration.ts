@@ -1,6 +1,7 @@
 // Verifies Bug A: the relay sends the correct body format to OpenCode's
 // prompt_async endpoint. If this test passes, messages actually work.
 
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRelayHarness,
@@ -21,6 +22,73 @@ describe("Integration: Send Message", () => {
 	beforeEach(() => {
 		harness.mock.resetQueues();
 	});
+
+	it("reports handed off when sending to an idle session", async () => {
+		const client = await harness.connectWsClient();
+		await client.waitForInitialState();
+		const sessionId = client.getActiveSessionId();
+		if (!sessionId) throw new Error("Expected an active session");
+
+		const result = await client.rpcCall((rpc) =>
+			rpc.input.submit({
+				sessionId,
+				text: "Reply with just 'ok'",
+				inputId: randomUUID(),
+				delivery: "queue",
+			}),
+		);
+		try {
+			expect(result).toEqual({ ok: true, sessionId, handedOff: true });
+		} finally {
+			await client.waitForTurnEnd();
+			await client.close();
+		}
+	}, 15_000);
+
+	for (const delivery of ["queue", "steer"] as const) {
+		it(`reports ${delivery === "queue" ? "not handed off" : "a refusal without handedOff"} behind an open question`, async () => {
+			const client = await harness.connectWsClient();
+			await client.waitForInitialState();
+			const sessionId = client.getActiveSessionId();
+			if (!sessionId) throw new Error("Expected an active session");
+			const questionId = randomUUID();
+			harness.mock.emitTestEvent("question.asked", {
+				id: questionId,
+				sessionID: sessionId,
+				questions: [{ question: "Continue?", header: "Continue", options: [] }],
+			});
+			await client.waitFor("question_pending", {
+				predicate: (message) => message["toolId"] === questionId,
+			});
+
+			const inputId = randomUUID();
+			const result = await client.rpcCall((rpc) =>
+				rpc.input.submit({ sessionId, text: "Continue", inputId, delivery }),
+			);
+			try {
+				expect(result).toEqual(
+					delivery === "queue"
+						? { ok: true, sessionId, handedOff: false }
+						: { ok: false, reason: "no_steering" },
+				);
+				if (delivery === "steer")
+					expect(result).not.toHaveProperty("handedOff");
+			} finally {
+				if (delivery === "queue")
+					await client.rpcCall((rpc) =>
+						rpc.input.cancel({ sessionId, inputId }),
+					);
+				harness.mock.emitTestEvent("question.rejected", {
+					requestID: questionId,
+					sessionID: sessionId,
+				});
+				await client.waitFor("approval_removed", {
+					predicate: (message) => message["id"] === questionId,
+				});
+				await client.close();
+			}
+		}, 15_000);
+	}
 
 	it("sends a message and receives processing status", async () => {
 		const client = await harness.connectWsClient();

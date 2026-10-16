@@ -29,12 +29,19 @@ export interface RunnerLaunchCallbacks {
 	readonly sessionId: string;
 	readonly runFork: (effect: Effect.Effect<void>) => unknown;
 	readonly stateChanged: () => void;
+	/** Fence admission before a payload publishes its final turn outcome. */
+	readonly retireAfterCommand?: (inputId: string) => void;
 	readonly isCandidate: () => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
 	readonly readThread: RunnerSocket["threadReadEffect"];
 }
 
 export interface RunnerLaunch {
+	/** Retire a poisoned payload after delivering its command result. */
+	readonly shouldExitAfterCommand?: (
+		command: SessionCommand,
+		result: TurnResult | undefined,
+	) => boolean;
 	readonly wire?: RunnerWireCodec;
 	readonly capabilities?: Pick<RunnerHello, "stopsTasks" | "taggedConfigDir">;
 	readonly makeRunner: (
@@ -74,6 +81,7 @@ export const runSessionRunner = (
 		let attached = false;
 		let exiting = false;
 		let retiring = false;
+		let retirementInputId: string | undefined;
 		let role: "candidate" | "retiring" | undefined =
 			process.argv[5] === "upgrade" ? "candidate" : undefined;
 		const register = () =>
@@ -129,6 +137,7 @@ export const runSessionRunner = (
 		let reportedConfiguration: RunnerUpgradeState["liveConfiguration"];
 		const quiescent = () =>
 			!exiting &&
+			retirementInputId === undefined &&
 			!retiring &&
 			activeCommands === 0 &&
 			activeOutputs === 0 &&
@@ -173,6 +182,9 @@ export const runSessionRunner = (
 			sessionId,
 			runFork,
 			stateChanged: reportUpgradeState,
+			retireAfterCommand: (inputId) => {
+				retirementInputId = inputId;
+			},
 			isCandidate: () => role === "candidate",
 			turnStateChanged: (inFlight) => {
 				idle?.setTurnInFlight(inFlight);
@@ -374,7 +386,7 @@ export const runSessionRunner = (
 						register();
 					} else if (message.type === "command" && runner) {
 						const command = message.command;
-						if (exiting) {
+						if (exiting || retirementInputId !== undefined) {
 							peer.write({
 								type: "command-reply",
 								commandId: message.commandId,
@@ -457,6 +469,11 @@ export const runSessionRunner = (
 													Cause.squash(cause),
 												),
 											});
+											if (
+												command.type === "send-turn" &&
+												command.input.inputId === retirementInputId
+											)
+												beginExit();
 										}),
 									onSuccess: (result) =>
 										Effect.gen(function* () {
@@ -474,6 +491,12 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												...(result ? { result } : {}),
 											});
+											if (
+												(command.type === "send-turn" &&
+													command.input.inputId === retirementInputId) ||
+												launch.shouldExitAfterCommand?.(command, result)
+											)
+												beginExit();
 											if (command.type === "shutdown")
 												runFork(
 													Deferred.succeed(stopped, undefined).pipe(

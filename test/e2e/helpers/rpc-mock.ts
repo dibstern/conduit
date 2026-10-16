@@ -922,7 +922,11 @@ export async function mockWsRpc(
 	controls.set(page, control);
 	control.initialHandlers = options.handlers ?? {};
 	control.stubs = {
-		"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+		"input.submit": ({ sessionId }) => ({
+			ok: true,
+			sessionId,
+			handedOff: true,
+		}),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
 		ViewSession: () => ({ ok: true }),
 		...control.catalogStubs(),

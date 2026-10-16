@@ -20,7 +20,7 @@ import { AccountDirectory } from "../domain/daemon/Services/account-directory.js
 import {
 	cloneContextWindowOptions,
 	loadModelCatalog,
-	publishClaudeModels,
+	publishDiscoveredModels,
 } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -290,14 +290,15 @@ export const getModelsResponse = (
 						})
 						.pipe(
 							Effect.flatMap((capabilities) =>
-								publishClaudeModels(capabilities.models, claudeAccount.id),
+								publishDiscoveredModels(capabilities.models, claudeAccount),
 							),
 							Effect.catchAll((error) =>
-								Effect.sync(() =>
+								Effect.gen(function* () {
+									yield* publishDiscoveredModels([], claudeAccount);
 									log.warn(
-										`Claude provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
-									),
-								),
+										`${claudeAccount.driver} provider discovery failed during model refresh: ${formatErrorDetail(error)}`,
+									);
+								}),
 							),
 							Effect.asVoid,
 							(effect) =>

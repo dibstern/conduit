@@ -6,6 +6,7 @@ import {
 	LoadMoreHistoryResponseSchema,
 	PtyInput,
 	QuotaForAccountsResponseSchema,
+	SubmitInputResponseSchema,
 	WsRpcGroup,
 	WsRpcRequest,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -16,6 +17,14 @@ import { WsRpcGroup as ServerWsRpcGroup } from "../../../src/lib/server/ws-rpc.j
 import { makeRpcWire } from "../../helpers/rpc-wire.js";
 
 describe("browser WebSocket RPC contract", () => {
+	it("requires handedOff on accepted input replies", () => {
+		const accepts = Schema.is(SubmitInputResponseSchema);
+		expect(accepts({ ok: true, sessionId: "s1" })).toBe(false);
+		for (const handedOff of [true, false])
+			expect(accepts({ ok: true, sessionId: "s1", handedOff })).toBe(true);
+		expect(accepts({ ok: false, reason: "no_steering" })).toBe(true);
+	});
+
 	it.effect(
 		"never returns secret-bearing extra fields from a stubbed resolver child",
 		() =>
