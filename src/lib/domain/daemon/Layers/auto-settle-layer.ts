@@ -9,7 +9,7 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
-import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../../daemon/config-persistence.js";
+import { autoSettleIdleWindowMs } from "../../../daemon/config-persistence.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { hasColdAutoSettleCandidate } from "../Services/daemon-session-reader.js";
@@ -18,8 +18,6 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
-
-const MILLISECONDS_PER_DAY = 86_400_000;
 
 export const AutoSettleLive = (configDir: string) =>
 	Layer.scopedDiscard(
@@ -31,9 +29,9 @@ export const AutoSettleLive = (configDir: string) =>
 			const missingDirectories = new Set<string>();
 
 			const sweep = Effect.gen(function* () {
-				const days = (yield* Ref.get(configRef)).autoSettleAfterDays;
-				const idleWindowMs =
-					(days ?? DEFAULT_AUTO_SETTLE_AFTER_DAYS) * MILLISECONDS_PER_DAY;
+				const idleWindowMs = autoSettleIdleWindowMs(
+					(yield* Ref.get(configRef)).autoSettleAfterDays,
+				);
 				const now = yield* Clock.currentTimeMillis;
 				const projects = yield* allProjects.pipe(
 					Effect.provideService(ProjectRegistryTag, registry),
@@ -57,7 +55,7 @@ export const AutoSettleLive = (configDir: string) =>
 							return;
 						}
 						missingDirectories.delete(mainFolder);
-						if (days === null) return;
+						if (idleWindowMs === null) return;
 						const running = yield* cache.peek(project.slug);
 						const relay = Option.isSome(running)
 							? running.value

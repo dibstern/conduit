@@ -57,7 +57,13 @@
 	);
 
 	// Context menu state
-	let ctxMenuSession = $state<SessionInfo | null>(null);
+	let ctxMenuOpened = $state<SessionInfo | null>(null);
+	// Render the row as it is now, not as it was when the menu opened: a restored
+	// saved-shell row is replaced by the live one moments after a reload.
+	const ctxMenuSession = $derived.by(() => {
+		const opened = ctxMenuOpened;
+		return opened && (sessionList.rows.find((row) => row.id === opened.id) ?? opened);
+	});
 	let ctxMenuAnchor = $state<HTMLElement | null>(null);
 	let ctxMenuPresentation = $state<"menu" | "sheet">("menu");
 	let snoozePlacement = $state<"center" | "sheet">("center");
@@ -267,13 +273,13 @@
 
 	function handleContextMenu(session: SessionInfo, anchor: HTMLElement, trigger?: "touch") {
 		// Open context menu for this session
-		ctxMenuSession = session;
+		ctxMenuOpened = session;
 		ctxMenuAnchor = anchor;
 		ctxMenuPresentation = trigger === "touch" ? "sheet" : "menu";
 	}
 
 	function handleCloseContextMenu() {
-		ctxMenuSession = null;
+		ctxMenuOpened = null;
 		ctxMenuAnchor = null;
 	}
 

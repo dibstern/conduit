@@ -1,4 +1,7 @@
+import type { AutoSettleOutlook } from "../contracts/ws-rpc.js";
 import type { SessionRow } from "../persistence/read-model-types.js";
+
+export type { AutoSettleOutlook };
 
 export interface AutoSettleTurn {
 	readonly state: string;
@@ -9,6 +12,8 @@ export interface AutoSettleTurn {
 
 export interface AutoSettleFacts {
 	readonly exists: boolean;
+	/** A fork or side thread: only root sessions settle automatically. */
+	readonly isChild: boolean;
 	readonly settledAt: number | null;
 	readonly lastMessageAt: number | null;
 	readonly latestUserMessageAt: number | null;
@@ -26,23 +31,12 @@ export interface AutoSettleFacts {
 	readonly settledMergedHead?: string | undefined;
 }
 
-export type AutoSettleOutlook =
-	| { kind: "off" }
-	| { kind: "never" }
-	| { kind: "settled" }
-	| {
-			kind: "paused";
-			reason: "pinned" | "snoozed" | "unread" | "working" | "awaiting-activity";
-	  }
-	| { kind: "due" }
-	| { kind: "scheduled"; at: number };
-
 export function getAutoSettleOutlook(
 	facts: AutoSettleFacts,
 	now: number,
 	idleWindowMs: number | null,
 ): AutoSettleOutlook {
-	if (!facts.exists || facts.autoSettleDisabledAt !== null)
+	if (!facts.exists || facts.isChild || facts.autoSettleDisabledAt !== null)
 		return { kind: "off" };
 	if (idleWindowMs === null) return { kind: "never" };
 	if (facts.settledAt !== null) return { kind: "settled" };
@@ -101,6 +95,7 @@ export function sessionRowToAutoSettleFacts(
 	options: Omit<
 		AutoSettleFacts,
 		| "exists"
+		| "isChild"
 		| "settledAt"
 		| "lastMessageAt"
 		| "status"
@@ -113,6 +108,7 @@ export function sessionRowToAutoSettleFacts(
 	return {
 		...options,
 		exists: row !== undefined,
+		isChild: (row?.parent_id ?? null) !== null,
 		settledAt: row?.settled_at ?? null,
 		lastMessageAt: row?.last_message_at ?? null,
 		status: row?.status ?? "idle",

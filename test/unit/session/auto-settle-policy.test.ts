@@ -10,6 +10,7 @@ const idle = 3 * DAY;
 
 const eligible = (): AutoSettleFacts => ({
 	exists: true,
+	isChild: false,
 	settledAt: null,
 	lastMessageAt: NOW - idle - 1,
 	latestUserMessageAt: null,
