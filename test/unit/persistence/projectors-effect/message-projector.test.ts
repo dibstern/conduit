@@ -145,6 +145,7 @@ describe("MessageProjector", () => {
 			"message.part.removed",
 			"message.snapshot",
 			"text.delta",
+			"text.surfaced",
 			"thinking.start",
 			"thinking.delta",
 			"thinking.end",

@@ -972,6 +972,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	const previewParts = (source: Fragment) => sql<MessagePartRow>`
 		SELECT id, message_id, type, text, tool_name, call_id, input, metadata,
 			duration, status, sort_order, created_at, updated_at, version,
+			surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model,
 			CASE WHEN length(output) > ${PREVIEW_CODE_POINTS}
 				THEN json_quote(substr(output, 1, ${PREVIEW_CODE_POINTS}))
 				ELSE result END AS result,

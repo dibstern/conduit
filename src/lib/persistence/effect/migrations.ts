@@ -15,6 +15,7 @@ import {
 	FORK_POINT_TIMESTAMP_MIGRATION,
 	GOAL_CHECK_METADATA_MIGRATION,
 	MESSAGE_PART_METADATA_MIGRATION,
+	MESSAGE_PART_SURFACING_MIGRATION,
 	MESSAGE_PART_VERSIONS_MIGRATION,
 	MESSAGE_PARTS_COMPACTION_TYPE_MIGRATION,
 	MESSAGE_PARTS_FILE_TYPE_MIGRATION,
@@ -1204,6 +1205,25 @@ export const effectMigrationEntries = {
 			if (statement)
 				yield* runAddColumnMigrationIfMissing(
 					"session_goal_checks",
+					column,
+					statement,
+				);
+		}
+	}),
+	"0062_message_part_surfacing": Effect.gen(function* () {
+		const statements = splitSqlStatements(
+			readMigrationSql(MESSAGE_PART_SURFACING_MIGRATION),
+		);
+		for (const [index, column] of [
+			"surfacing_ordinal",
+			"surfacing_probabilities",
+			"surfacing_set_version",
+			"surfacing_model",
+		].entries()) {
+			const statement = statements[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"message_parts",
 					column,
 					statement,
 				);

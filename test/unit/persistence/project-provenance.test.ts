@@ -112,6 +112,7 @@ describe("Bound project provenance", () => {
 			"0059_session_project_scope",
 			"0060_daemon_store_imports",
 			"0061_goal_check_metadata",
+			"0062_message_part_surfacing",
 		]);
 	});
 

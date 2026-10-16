@@ -130,6 +130,10 @@ export interface MessagePartRow {
 	created_at: number;
 	updated_at: number;
 	version: PartVersion;
+	surfacing_ordinal?: number | null;
+	surfacing_probabilities?: string | null;
+	surfacing_set_version?: number | null;
+	surfacing_model?: string | null;
 	rest_payload?: string | null;
 	/** Set when a previewing read cut `result`: the whole output's UTF-8 size. */
 	result_bytes?: number | null;

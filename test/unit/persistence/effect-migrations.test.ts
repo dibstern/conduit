@@ -95,6 +95,7 @@ const expectedNames = [
 	"session_project_scope",
 	"daemon_store_imports",
 	"goal_check_metadata",
+	"message_part_surfacing",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -124,7 +125,7 @@ describe("Effect migration lineage", () => {
 						const entries = {
 							...effectMigrationEntries,
 							...(migrationPath === "gap"
-								? { "0062_test_marker": Effect.void }
+								? { "0063_test_marker": Effect.void }
 								: {}),
 						};
 						yield* makeEffectSqlMigrator(entries);
@@ -166,6 +167,7 @@ describe("Effect migration lineage", () => {
 				VALUES ('check', 'goal', 'Ship it', 1, 1, 'Still failing', 2)`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([
 				[61, "goal_check_metadata"],
+				[62, "message_part_surfacing"],
 			]);
 			expect(
 				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
@@ -176,6 +178,42 @@ describe("Effect migration lineage", () => {
 		}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
+	// Failure modes: upgrades omit columns, erase existing parts, or fail when
+	// ledger repair replays a migration whose columns already exist.
+	it.effect(
+		"upgrades part surfacing columns and retains verdicts on migration repair",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* makeEffectSqlMigrator(prefix(61));
+				yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('s', 'claude', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at) VALUES ('m', 's', 'assistant', 2, 2)`;
+				yield* sql`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at) VALUES ('p', 'm', 'text', 'Preserved', 0, 3, 4)`;
+				expect(yield* makeEffectSqlMigrator()).toEqual([
+					[62, "message_part_surfacing"],
+				]);
+				expect(
+					yield* sql`SELECT text, created_at, updated_at, surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model FROM message_parts`,
+				).toEqual([
+					{
+						text: "Preserved",
+						created_at: 3,
+						updated_at: 4,
+						surfacing_ordinal: null,
+						surfacing_probabilities: null,
+						surfacing_set_version: null,
+						surfacing_model: null,
+					},
+				]);
+				yield* sql`UPDATE message_parts SET surfacing_ordinal = 5, surfacing_set_version = 2, surfacing_model = 'jev'`;
+				yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 62`;
+				yield* makeEffectSqlMigrator();
+				expect(
+					yield* sql`SELECT surfacing_ordinal, surfacing_model FROM message_parts`,
+				).toEqual([{ surfacing_ordinal: 5, surfacing_model: "jev" }]);
+				expect(yield* makeEffectSqlMigrator()).toEqual([]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
+	);
 	it.effect(
 		"defers legacy repair until recovery and preserves the durable completion marker",
 		() =>
@@ -270,6 +308,7 @@ describe("Effect migration lineage", () => {
 					59,
 					60,
 					61,
+					62,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -434,8 +473,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 61", () => {
-		expect(migrationEntries).toHaveLength(61);
+	it("registers the contiguous production chain from 1 through 62", () => {
+		expect(migrationEntries).toHaveLength(62);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -613,6 +652,7 @@ describe("Effect migration lineage", () => {
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
 					[61, "goal_check_metadata"],
+					[62, "message_part_surfacing"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -695,6 +735,7 @@ describe("Effect migration lineage", () => {
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
 					[61, "goal_check_metadata"],
+					[62, "message_part_surfacing"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -756,6 +797,7 @@ describe("Effect migration lineage", () => {
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
 					[61, "goal_check_metadata"],
+					[62, "message_part_surfacing"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1347,6 +1389,7 @@ describe("Effect migration lineage", () => {
 				[59, "session_project_scope"],
 				[60, "daemon_store_imports"],
 				[61, "goal_check_metadata"],
+				[62, "message_part_surfacing"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -1445,6 +1488,7 @@ describe("Effect migration lineage", () => {
 					[59, "session_project_scope"],
 					[60, "daemon_store_imports"],
 					[61, "goal_check_metadata"],
+					[62, "message_part_surfacing"],
 				]);
 				const rows = yield* sql<{
 					id: string;

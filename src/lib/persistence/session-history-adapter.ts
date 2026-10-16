@@ -4,6 +4,7 @@
 
 import { Option, Schema } from "effect";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
+import { TextSurfacedPayloadSchema } from "../contracts/stored-event.js";
 import {
 	type MessageVersion,
 	type PartVersion,
@@ -35,6 +36,7 @@ function snapshotRowToHistory(
 		!Array.isArray(parsed.parts)
 	)
 		return undefined;
+	const projectedParts = new Map(row.parts.map((part) => [part.id, part]));
 	const parts: HistoryMessagePart[] = parsed.parts.map((part: unknown) => {
 		if (
 			typeof part !== "object" ||
@@ -54,10 +56,12 @@ function snapshotRowToHistory(
 			state && "metadata" in state && typeof state.metadata === "object"
 				? browserMetadata(state.metadata ?? undefined)
 				: undefined;
+		const projected = projectedParts.get(part.id);
 		return {
 			...part,
 			id: part.id,
 			type: part.type as HistoryMessagePart["type"],
+			...(projected && partSurfacing(projected)),
 			...(state === undefined
 				? {}
 				: {
@@ -185,6 +189,31 @@ export function toolOutputText(result: string): string {
 	}
 }
 
+function partSurfacing(
+	row: MessagePartRow,
+): Pick<
+	HistoryMessagePart,
+	| "surfacingOrdinal"
+	| "surfacingProbabilities"
+	| "surfacingSetVersion"
+	| "surfacingModel"
+> {
+	if (row.surfacing_ordinal == null) return {};
+	return {
+		surfacingOrdinal: row.surfacing_ordinal,
+		surfacingProbabilities:
+			row.surfacing_probabilities == null
+				? null
+				: Schema.decodeUnknownSync(
+						TextSurfacedPayloadSchema.fields.probabilities,
+					)(JSON.parse(row.surfacing_probabilities)),
+		...(row.surfacing_set_version != null && {
+			surfacingSetVersion: row.surfacing_set_version,
+		}),
+		...(row.surfacing_model != null && { surfacingModel: row.surfacing_model }),
+	};
+}
+
 function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	if (row.type === "text" && row.metadata != null) {
 		const value = parseObjectJson(row.metadata)?.["setup"];
@@ -283,6 +312,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 	return {
 		id: row.id,
 		type: row.type as HistoryMessagePart["type"],
+		...partSurfacing(row),
 		// Per-part stamps, not the message's: a whole turn's tools share one
 		// message row, so the message stamp would make every step 0ms long.
 		time: { start: row.created_at, end: row.updated_at },

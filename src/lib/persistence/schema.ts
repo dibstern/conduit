@@ -90,6 +90,8 @@ export const COMPACT_REDUNDANT_EVENTS_MIGRATION =
 export const SESSION_PROJECT_SCOPE_MIGRATION = "0058_session_project_scope.sql";
 export const DAEMON_STORE_IMPORTS_MIGRATION = "0059_daemon_store_imports.sql";
 export const GOAL_CHECK_METADATA_MIGRATION = "0060_goal_check_metadata.sql";
+export const MESSAGE_PART_SURFACING_MIGRATION =
+	"0061_message_part_surfacing.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

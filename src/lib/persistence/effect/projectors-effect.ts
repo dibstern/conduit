@@ -474,6 +474,7 @@ export const makeMessageProjector = defineProjector(() => ({
 		"message.part.removed",
 		"message.snapshot",
 		"text.delta",
+		"text.surfaced",
 		"thinking.start",
 		"thinking.delta",
 		"thinking.end",
@@ -581,6 +582,31 @@ export const makeMessageProjector = defineProjector(() => ({
 			// messageId can name the previous answer, whose usage and time stay put.
 			if (isEventType(event, "turn.completed") && event.data.userMessageId)
 				return [];
+			// Conduit facts also apply to settled OpenCode snapshots. Preserve the
+			// part's activity timestamps: judging it is not new agent activity.
+			if (isEventType(event, "text.surfaced")) {
+				const {
+					messageId,
+					partId,
+					ordinal,
+					categorySetVersion,
+					model,
+					probabilities,
+				} = event.data;
+				const encoded =
+					probabilities === null ? null : encodeJson(probabilities);
+				return ids(
+					yield* sql<{ id: string }>`
+					UPDATE message_parts SET surfacing_ordinal = ${ordinal},
+						surfacing_probabilities = ${encoded}, surfacing_set_version = ${categorySetVersion},
+						surfacing_model = ${model}, version = ${ctx.version}
+					WHERE id = ${partId} AND message_id = ${messageId} AND type = 'text'
+						AND EXISTS (SELECT 1 FROM messages WHERE id = ${messageId} AND session_id = ${event.sessionId})
+						AND (surfacing_ordinal IS NOT ${ordinal} OR surfacing_probabilities IS NOT ${encoded}
+							OR surfacing_set_version IS NOT ${categorySetVersion} OR surfacing_model IS NOT ${model})
+					RETURNING message_id AS id`,
+				);
+			}
 			if (
 				"messageId" in event.data &&
 				event.type !== "message.part.removed" &&
@@ -656,14 +682,13 @@ export const makeMessageProjector = defineProjector(() => ({
 					 rest_payload = excluded.rest_payload,
 					 finish = excluded.finish, error = excluded.error
 				RETURNING id`;
-				// A provider snapshot replaces provider parts, while Conduit's own
-				// compaction outcomes must survive reconciliation and reconnects.
+				// Replace provider data on retained parts without erasing Conduit's
+				// surfacing verdicts. Canonical compaction outcomes also survive.
 				const replaced = yield* sql<{ id: string }>`
 					DELETE FROM message_parts WHERE message_id = ${message.id}
+					AND id NOT IN ${sql.in(message.parts.map((part) => part.id))}
 					AND NOT (type = 'compaction' AND rest_payload IS NULL) RETURNING id`;
-				const kept = new Set(message.parts.map((part) => part.id));
 				for (const { id } of replaced) {
-					if (kept.has(id)) continue;
 					yield* sql`INSERT INTO message_part_tombstones (session_id, message_id, part_id, version)
 						VALUES (${event.sessionId}, ${message.id}, ${id}, ${ctx.version})
 						ON CONFLICT (part_id) DO UPDATE SET
@@ -704,7 +729,14 @@ export const makeMessageProjector = defineProjector(() => ({
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
 						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
-						 ${encodeJson(part)}, ${ctx.version})`;
+						 ${encodeJson(part)}, ${ctx.version})
+						ON CONFLICT (id) DO UPDATE SET
+							type = excluded.type, text = excluded.text, tool_name = excluded.tool_name,
+							call_id = excluded.call_id, input = excluded.input, result = excluded.result,
+							status = excluded.status, duration = NULL, sort_order = excluded.sort_order,
+							created_at = excluded.created_at, updated_at = excluded.updated_at,
+							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
+						WHERE message_parts.message_id = excluded.message_id`;
 				}
 				const previous = existing[0];
 				const moved =
