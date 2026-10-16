@@ -46,6 +46,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				id: "claude",
 				name: "Claude",
 				driver: "claude",
+				isDefault: true,
 				port: 0,
 				managed: false,
 				status: "healthy",
@@ -59,6 +60,7 @@ test("settings, commands and skill documents follow a workspace change and sessi
 	];
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: () => ({ projectSlug: "e2e-replay", providers: [] }),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
 			ListDaemonSessions: () => ({

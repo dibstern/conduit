@@ -18,7 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	type Settings,
 	query as sdkQuery,
@@ -41,6 +41,7 @@ import {
 	type Scope,
 } from "effect";
 import type { Account } from "../../contracts/account.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
@@ -297,6 +298,15 @@ export const makeClaudeProviderRuntime = (
 		const capabilitiesService =
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
+				...(deps.daemonConfigDir !== undefined
+					? {
+							cacheDir: join(
+								deps.daemonConfigDir,
+								"cache",
+								"claude-capabilities",
+							),
+						}
+					: {}),
 				launchConfig: () =>
 					resolveClaudeLaunchConfig(
 						Either.getOrElse(
@@ -388,6 +398,15 @@ export const makeClaudeSessionRunner = (
 		const capabilitiesService =
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
+				...(deps.daemonConfigDir !== undefined
+					? {
+							cacheDir: join(
+								deps.daemonConfigDir,
+								"cache",
+								"claude-capabilities",
+							),
+						}
+					: {}),
 				launchConfig: () =>
 					resolveClaudeLaunchConfig(
 						Either.getOrElse(
@@ -633,7 +652,10 @@ export class ClaudeProviderRuntime {
 		return Effect.gen(this, function* () {
 			const { eventSink, abortSignal, ...payload } = input;
 			const account = input.account;
-			if (account && account.driver !== "claude")
+			if (
+				account &&
+				PROVIDER_DRIVERS[account.driver].accountKind !== "config-directory"
+			)
 				return yield* Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: this.providerId,
@@ -641,7 +663,9 @@ export class ClaudeProviderRuntime {
 						cause: new Error("Claude turn requires a Claude account"),
 					}),
 				);
-			const folder = account?.folder ?? input.configDir;
+			const folder =
+				(account?.driver === "claude" ? account.folder : undefined) ??
+				input.configDir;
 			if (folder === undefined)
 				return yield* Effect.fail(
 					new ProviderInstanceFailure({
@@ -792,7 +816,10 @@ export class ClaudeProviderRuntime {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const preWarm = Effect.gen(this, function* () {
 			const account = input.account;
-			if (account && account.driver !== "claude")
+			if (
+				account &&
+				PROVIDER_DRIVERS[account.driver].accountKind !== "config-directory"
+			)
 				return yield* Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: this.providerId,
@@ -800,7 +827,9 @@ export class ClaudeProviderRuntime {
 						cause: new Error("Claude warm-up requires a Claude account"),
 					}),
 				);
-			const folder = account?.folder ?? input.configDir;
+			const folder =
+				(account?.driver === "claude" ? account.folder : undefined) ??
+				input.configDir;
 			if (folder === undefined)
 				return yield* Effect.fail(
 					new ProviderInstanceFailure({

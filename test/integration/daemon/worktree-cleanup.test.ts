@@ -22,6 +22,7 @@ import {
 	CleanUpWorktreesNow,
 	ClosePty,
 	CreatePty,
+	CreatePtyForSession,
 	CreateSession,
 	DeleteSession,
 	GetWorktreeCleanupSetting,
@@ -163,7 +164,6 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			sendRpcRequest(
 				socket,
 				new SetSessionSettled({
-					projectSlug: "process-test",
 					sessionId,
 					settled: true,
 				}),
@@ -498,8 +498,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const session = await create("terminal ownership");
 		await sendRpcRequest(
 			socket,
-			new CreatePty({
-				projectSlug: "process-test",
+			new CreatePtyForSession({
 				sessionId: session.id,
 				originId: "cleanup-test",
 			}),
@@ -641,7 +640,6 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new MoveSessionWorkspace({
-				projectSlug: "process-test",
 				sessionId: other.id,
 				path: owner.path,
 			}),
@@ -773,7 +771,6 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		await sendRpcRequest(
 			socket,
 			new DeleteSession({
-				projectSlug: "process-test",
 				sessionId: session.id,
 			}),
 		);
@@ -845,7 +842,6 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		const deletion = await sendRpcRequest(
 			socket,
 			new DeleteSession({
-				projectSlug: "process-test",
 				sessionId: session.id,
 				removeWorktrees: true,
 			}),

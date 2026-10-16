@@ -25,7 +25,7 @@ The current codebase has many Effect-owned domains already. The remaining work i
 Live checkout:
 
 - Branch: `main`
-- CWD: `/Users/dstern/src/personal/conduit`
+- CWD: `~/src/personal/conduit`
 - Date: 2026-05-16
 
 Docs read:

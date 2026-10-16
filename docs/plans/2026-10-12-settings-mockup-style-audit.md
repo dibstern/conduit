@@ -2,10 +2,10 @@ Read-only audit. No files changed.
 
 References below use:
 
-- **R**: [reference.html](/Users/dstern/.local/share/design-visual-ui/conduit-settings/reference.html)
+- **R**: [reference.html](~/.local/share/design-visual-ui/conduit-settings/reference.html)
 - **O**: `src/lib/frontend/components/overlays/`
 - **U**: `src/lib/frontend/components/ui/`
-- App paths are relative to `/Users/dstern/src/personal/conduit-settings-style`.
+- App paths are relative to `~/src/personal/conduit-settings-style`.
 
 Dimensions are unscaled CSS values. The app sets `html` to **12px** at `style.css:481`; Tailwind spacing is `.25rem`, so `px-3 = 9px`, `py-2 = 6px`, and `min-h-10 = 30px`. Its font overrides are `text-xs = 10px` and `text-sm = 11px`, at `style.css:172-176`.
 

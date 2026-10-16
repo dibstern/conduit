@@ -39,8 +39,6 @@ import {
 } from "./session-overrides-state.js";
 import type { SessionTitleServiceTag } from "./session-title-service.js";
 
-export { isProviderTurnInterruptProvider } from "./provider-turn-dispatch.js";
-
 export interface ProviderTurnServiceSendInput {
 	/** Continuation admission may already have resolved this immutable snapshot. */
 	readonly account?: Account;

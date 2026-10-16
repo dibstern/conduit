@@ -16,6 +16,7 @@
 
 import type { SqlError } from "@effect/sql/SqlError";
 import { Effect, Option, Schema, Stream } from "effect";
+import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	PartRemovalId,
 	type ResumeBase,
@@ -124,7 +125,7 @@ export const subscribeSessionDetail = (options: {
 				sessionRow._tag === "Right" &&
 				sessionRow.right?.history_complete === 0
 			) {
-				if (account?.driver === "opencode") {
+				if (getProviderDriver(account?.driver)?.runsOpenCodeServer) {
 					const ingress = yield* Effect.serviceOption(
 						OpenCodeHistoryReconcileTag,
 					);
@@ -333,10 +334,6 @@ export const subscribeSessionDetail = (options: {
 							return {
 								rows,
 								version: window.version,
-								// Recreating a message clears its tombstone after its old
-								// parts cascaded away. Without those part removals, bounded
-								// windows cannot prove coverage for an overflow cursor.
-								...(resuming ? {} : { removedSince: window.version }),
 								removed: [
 									...(window.removed ?? []),
 									...(window.removedParts ?? []).map(

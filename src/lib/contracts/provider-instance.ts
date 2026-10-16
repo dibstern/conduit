@@ -1,26 +1,12 @@
-import { Schema } from "effect";
+import { Record, Schema } from "effect";
 import { AccountIdSchema, MANAGED_OPENCODE_ACCOUNT_ID } from "./account.js";
 import { AgentInfoSchema, ModelInfoSchema } from "./ws-rpc.js";
 
 export type { AccountId } from "./account.js";
 export { AccountIdSchema, MANAGED_OPENCODE_ACCOUNT_ID } from "./account.js";
 
-export const KnownProviderDriverKindSchema = Schema.Literal(
-	"claude",
-	"opencode",
-);
-export type KnownProviderDriverKind = typeof KnownProviderDriverKindSchema.Type;
-
 export const ProviderDriverKindSchema = Schema.String;
 export type ProviderDriverKind = typeof ProviderDriverKindSchema.Type;
-
-const isKnownProviderDriverKind = Schema.is(KnownProviderDriverKindSchema);
-
-export function isKnownDriverKind(
-	value: unknown,
-): value is KnownProviderDriverKind {
-	return isKnownProviderDriverKind(value);
-}
 
 export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 	supportsMultiFolder: Schema.Boolean,
@@ -33,29 +19,190 @@ export const ProviderSessionCapabilitiesSchema = Schema.Struct({
 export type ProviderSessionCapabilities =
 	typeof ProviderSessionCapabilitiesSchema.Type;
 
-/** Session contracts pinned by provider captures, independent of model discovery. */
-export const PROVIDER_SESSION_CAPABILITIES = {
+export interface ProviderDriverTraits {
+	/** composer-controls-words.feature pins the compact composer's behaviour control. */
+	readonly composerModeControl: "agent" | "permission-mode";
+	/** permission-modes.test.ts pins the modes each provider can enforce. */
+	readonly permissionModes: readonly (
+		| "ask"
+		| "acceptEdits"
+		| "full"
+		| "plan"
+		| "auto"
+		| "dontAsk"
+	)[];
+	/** question-card.test.ts pins whether a provider accepts skipped questions. */
+	readonly supportsQuestionSkip: boolean;
+	/** rewind-banner.test.ts pins whether conversation rewind can also restore files. */
+	readonly supportsFileRewind: boolean;
+	/** Provider captures pin multi-folder, worktree and task-stop session contracts. */
+	readonly sessionCapabilities: ProviderSessionCapabilities;
+	/** OpenCode's SDK/API and SSE lifecycle pin server-owned operations. */
+	readonly runsOpenCodeServer: boolean;
+	/** account-usage.integration.ts pins the account sampler's usage harness. */
+	readonly usageHarness: "claude" | "cursor" | undefined;
+	/** Drivers without an installed runtime remain visible without accepting turns. */
+	readonly unavailableReason?: string;
+	/** permissions-processing-timeout-effect.test.ts pins service-owned approvals/questions. */
+	readonly interactionSink: "permission-asking" | "auto-approving";
+	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
+	readonly supportsNativeResume: boolean;
+	/** provider-turn-service.test.ts pins cumulative tokens from stored history metadata. */
+	readonly needsPriorHistoryMetadata: boolean;
+	/** AccountSchema pins config-directory logins versus server connection accounts. */
+	readonly accountKind: "config-directory" | "server";
+	/** account-directory.test.ts pins selected defaults versus the fixed managed account. */
+	readonly defaultAccountSource: "selection" | "managed";
+	/** orchestration-wiring.test.ts pins discovery versus server provider catalogs. */
+	readonly catalogSource: "discovery" | "server";
+	/** turn-settings.test.ts pins context-window suffixes versus provider-qualified ids. */
+	readonly modelIdFormat: "context-window-suffix" | "provider-qualified";
+	/** monitoring-wiring.test.ts pins provider-owned turn-end events. */
+	readonly streamsSessionLifecycle: boolean;
+	/** session-manager-service.test.ts pins local session creation before a native turn. */
+	readonly usesLocalSessions: boolean;
+	/** provider-turn-service.test.ts pins durable interrupts versus server aborts. */
+	readonly interruptViaEngine: boolean;
+	/** provider-turn-service.test.ts pins goal state passed to the native runner. */
+	readonly supportsGoalState: boolean;
+	/** enter-worktree-turn / exit-worktree-keep-turn pin tool-directed workspace moves. */
+	readonly worktreeMoves: "tool-directive" | "server-declaration";
+	/** OpenCode message snapshots pin native parentID lineage. */
+	readonly emitsMessageParentIds: boolean;
+}
+
+/** Driver contracts pinned by provider captures, independent of implementations. */
+export const PROVIDER_DRIVERS = {
 	// additionalDirectories and cwd/resume are pinned by extra-folder-read-turn
 	// and enter-worktree-turn / exit-worktree-keep-turn in claude-sdk-traces.
 	claude: {
-		supportsMultiFolder: true,
-		supportsWorktree: true,
-		supportsNewWorktree: true,
-		supportsTaskStop: true,
+		composerModeControl: "permission-mode",
+		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"],
+		supportsQuestionSkip: false,
+		supportsFileRewind: false,
+		sessionCapabilities: {
+			supportsMultiFolder: true,
+			supportsWorktree: true,
+			supportsNewWorktree: true,
+			supportsTaskStop: true,
+		},
+		runsOpenCodeServer: false,
+		usageHarness: "claude",
+		interactionSink: "permission-asking",
+		supportsNativeResume: true,
+		needsPriorHistoryMetadata: true,
+		accountKind: "config-directory",
+		defaultAccountSource: "selection",
+		catalogSource: "discovery",
+		modelIdFormat: "context-window-suffix",
+		streamsSessionLifecycle: true,
+		usesLocalSessions: true,
+		interruptViaEngine: true,
+		supportsGoalState: true,
+		worktreeMoves: "tool-directive",
+		emitsMessageParentIds: false,
 	},
 	// The multi-folder-project replay pins external_directory session rules.
 	// Managed launches/recreation are pinned by opencode-launch-worktree.test.ts.
 	// Native moves reject destinations belonging to another OpenCode project.
 	opencode: {
-		supportsMultiFolder: true,
-		supportsWorktree: false,
-		supportsNewWorktree: true,
-		supportsTaskStop: false,
+		composerModeControl: "agent",
+		permissionModes: ["ask", "acceptEdits", "full"],
+		supportsQuestionSkip: true,
+		supportsFileRewind: true,
+		sessionCapabilities: {
+			supportsMultiFolder: true,
+			supportsWorktree: false,
+			supportsNewWorktree: true,
+			supportsTaskStop: false,
+		},
+		runsOpenCodeServer: true,
+		usageHarness: undefined,
+		interactionSink: "auto-approving",
+		supportsNativeResume: false,
+		needsPriorHistoryMetadata: false,
+		accountKind: "server",
+		defaultAccountSource: "managed",
+		catalogSource: "server",
+		modelIdFormat: "provider-qualified",
+		streamsSessionLifecycle: false,
+		usesLocalSessions: false,
+		interruptViaEngine: false,
+		supportsGoalState: false,
+		worktreeMoves: "server-declaration",
+		emitsMessageParentIds: true,
 	},
-} as const satisfies Record<
-	KnownProviderDriverKind,
-	ProviderSessionCapabilities
->;
+	cursor: {
+		composerModeControl: "permission-mode", // A runner must ask before acting.
+		permissionModes: ["ask"], // No other mode is supported without a runtime trace.
+		supportsQuestionSkip: false, // Skipping questions needs a captured Cursor contract.
+		supportsFileRewind: false, // No runtime can restore files yet.
+		sessionCapabilities: {
+			supportsMultiFolder: false, // Await a Cursor multi-folder trace.
+			supportsWorktree: false, // Await a Cursor worktree trace.
+			supportsNewWorktree: false, // No runtime can launch into a worktree yet.
+			supportsTaskStop: false, // No runtime can stop individual tasks yet.
+		},
+		runsOpenCodeServer: false, // Cursor must never start or borrow OpenCode.
+		usageHarness: "cursor", // Retain the existing Cursor usage identity.
+		unavailableReason: "Cursor runtime not installed", // Discovery explains the missing runtime.
+		interactionSink: "permission-asking", // Never fall through to auto-approval.
+		supportsNativeResume: false, // Resume needs a captured Cursor thread contract.
+		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
+		accountKind: "config-directory", // Keep runner account configuration separate from servers.
+		defaultAccountSource: "selection", // Cursor owns its selected account default.
+		catalogSource: "discovery", // Models come from a registered runner, never OpenCode.
+		modelIdFormat: "provider-qualified", // Preserve ids until a trace establishes a suffix format.
+		streamsSessionLifecycle: true, // Runner lifecycle must never be polled through OpenCode.
+		usesLocalSessions: true, // Conduit owns sessions before a runner exists.
+		interruptViaEngine: true, // Interrupts must fail through runner lookup, never OpenCode abort.
+		supportsGoalState: false, // Goals need a captured Cursor runtime contract.
+		worktreeMoves: "tool-directive", // Never declare workspace moves through OpenCode.
+		emitsMessageParentIds: false, // No native message-lineage contract is established.
+	},
+} as const satisfies { readonly [driver: string]: ProviderDriverTraits };
+
+export type KnownProviderDriverKind = keyof typeof PROVIDER_DRIVERS;
+export const KnownProviderDriverKindSchema = Schema.Literal(
+	...(Object.keys(PROVIDER_DRIVERS) as KnownProviderDriverKind[]),
+);
+const isKnownProviderDriverKind = Schema.is(KnownProviderDriverKindSchema);
+
+export function isKnownDriverKind(
+	value: unknown,
+): value is KnownProviderDriverKind {
+	return isKnownProviderDriverKind(value);
+}
+
+export const BrowserDriverTraitsSchema = Schema.Struct({
+	sessionCapabilities: ProviderSessionCapabilitiesSchema,
+	runsOpenCodeServer: Schema.Boolean,
+	usageHarness: Schema.optional(Schema.Literal("claude", "cursor")),
+	unavailableReason: Schema.optional(Schema.String),
+	composerModeControl: Schema.Literal("agent", "permission-mode"),
+	accountKind: Schema.Literal("config-directory", "server"),
+	catalogSource: Schema.Literal("discovery", "server"),
+	modelIdFormat: Schema.Literal("context-window-suffix", "provider-qualified"),
+	supportsGoalState: Schema.Boolean,
+	permissionModes: Schema.Array(
+		Schema.Literal("ask", "acceptEdits", "full", "plan", "auto", "dontAsk"),
+	),
+	supportsQuestionSkip: Schema.Boolean,
+	supportsFileRewind: Schema.Boolean,
+});
+export type BrowserDriverTraits = typeof BrowserDriverTraitsSchema.Type;
+
+export function getProviderDriver(
+	driver: ProviderDriverKind | undefined,
+): ProviderDriverTraits | undefined {
+	return isKnownDriverKind(driver) ? PROVIDER_DRIVERS[driver] : undefined;
+}
+
+/** Capability-only compatibility view for callers outside the driver migration. */
+export const PROVIDER_SESSION_CAPABILITIES = Record.map(
+	PROVIDER_DRIVERS,
+	(driver) => driver.sessionCapabilities,
+);
 
 /**
  * Rewrite a pre-driver-model legacy default OpenCode instance id (`"default"`)
@@ -76,7 +223,7 @@ export function migrateLegacyDefaultOpencodeInstanceId<
 	const legacy = instances.find(
 		(instance) =>
 			instance.id === legacyId &&
-			(instance.driver ?? "opencode") === "opencode",
+			getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer,
 	);
 	if (
 		legacy === undefined ||

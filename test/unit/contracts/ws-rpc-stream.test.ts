@@ -32,6 +32,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import {
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { MessageWithParts } from "../../../src/lib/persistence/read-model-types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -48,12 +49,14 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 		? [
 				{
 					version: 1,
+					projectIds: ["test-project"],
 					sessionIds: [],
 					removedSessionIds: ["session-1"],
 					collections: ["sidebar"],
 				},
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: [],
 					removedSessionIds: ["session-2"],
 					collections: ["sidebar"],
@@ -62,12 +65,14 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 		: [
 				{
 					version: 1,
+					projectIds: ["test-project"],
 					sessionIds: ["session-1"],
 					removedSessionIds: [],
 					collections: ["messages"],
 				},
 				{
 					version: 2,
+					projectIds: ["test-project"],
 					sessionIds: ["session-1"],
 					removedSessionIds: [],
 					collections: ["messages"],
@@ -124,6 +129,7 @@ const makeLayer = (options: {
 					getAllSessionStatuses: () => Effect.succeed({}),
 					getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 					listSessions: () => Effect.succeed([]),
+					listPendingClaudeQuestionTools: () => Effect.succeed([]),
 					listSessionInfos: () => Effect.succeed([]),
 					listSessionGitRefreshTargets: () => Effect.succeed([]),
 					getSessionSkillMessages: () => Effect.succeed([]),
@@ -174,7 +180,10 @@ const makeLayer = (options: {
 					readSessionTodos: () => Effect.succeed({ rows: [], version: 0 }),
 					// The same stateless shape for the shell: each ranged read finds
 					// the one family that left at the version after its floor.
-					readSessionList: (range?: { readonly after?: number }) =>
+					readSessionList: (
+						_scope: SessionScope,
+						range?: { readonly after?: number },
+					) =>
 						options.failRead
 							? Effect.fail(readFailure)
 							: Effect.succeed(
@@ -290,9 +299,8 @@ describe("RpcTest subscription stream semantics", () => {
 				_tag: "snapshot",
 				rows: [],
 				sequence: 0,
-				...(member === "SubscribeSessionDetail"
-					? { hasMore: false, resumePoint: expect.any(String) }
-					: {}),
+				resumePoint: expect.any(String),
+				...(member === "SubscribeSessionDetail" ? { hasMore: false } : {}),
 			},
 			{ _tag: "synchronized" },
 		];
@@ -308,7 +316,9 @@ describe("RpcTest subscription stream semantics", () => {
 		const subscribe = (
 			client: RpcClient.RpcClient<RpcGroup.Rpcs<typeof WsRpcGroup>>,
 		): Stream.Stream<unknown, WsRpcError> =>
-			client[member]({ projectSlug: "project", sessionId: "session-1" });
+			member === "SubscribeShell"
+				? client.SubscribeShell({ projectSlug: "project" })
+				: client.SubscribeSessionDetail({ sessionId: "session-1" });
 		it.scoped(`${member} preserves handler chunking`, () =>
 			Effect.gen(function* () {
 				const messages: Observation[] = [];
@@ -405,10 +415,15 @@ describe("RpcTest subscription stream semantics", () => {
 								Mailbox.ReadonlyMailbox<unknown, WsRpcError>,
 								never,
 								Scope.Scope
-							> = client[member](
-								{ projectSlug: "project", sessionId: "session-1" },
-								{ asMailbox: true },
-							);
+							> = member === "SubscribeShell"
+								? client.SubscribeShell(
+										{ projectSlug: "project" },
+										{ asMailbox: true },
+									)
+								: client.SubscribeSessionDetail(
+										{ sessionId: "session-1" },
+										{ asMailbox: true },
+									);
 							const mailbox = yield* subscription.pipe(
 								Effect.provideService(Scope.Scope, consumerScope),
 							);

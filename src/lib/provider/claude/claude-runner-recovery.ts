@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import { Effect, Either } from "effect";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
+import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import {
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
@@ -89,7 +90,8 @@ export const recoverClaudeRunnerCommands = (
 			.filter((row) =>
 				Either.match(resolve(accounts, { _tag: "Id", id: row.provider_id }), {
 					onLeft: () => false,
-					onRight: (account) => account.driver === "claude",
+					onRight: (account) =>
+						PROVIDER_DRIVERS[account.driver].supportsNativeResume,
 				}),
 			)
 			.map((row) => {
@@ -116,6 +118,16 @@ export const recoverClaudeRunnerCommands = (
 						row.state !== "pending" &&
 						row.state !== "running",
 					wait: Effect.gen(function* () {
+						// Recovery can race the project's asynchronous environment capture.
+						const prepareShellEnv = deps.prepareShellEnv;
+						if (prepareShellEnv)
+							yield* Effect.tryPromise(() =>
+								prepareShellEnv(input.workspaceRoot),
+							).pipe(
+								Effect.timeoutOption("10 seconds"),
+								Effect.catchAll(() => Effect.void),
+							);
+						if (closing()) return;
 						const execution = yield* Effect.either(
 							Effect.gen(function* () {
 								const state = yield* makeProviderStateEffect.pipe(
@@ -257,7 +269,8 @@ export const settleUnclaimedClaudeRunnerCommands = <E>(
 			if (
 				!Either.match(resolve(accounts, { _tag: "Id", id: row.provider_id }), {
 					onLeft: () => false,
-					onRight: (account) => account.driver === "claude",
+					onRight: (account) =>
+						PROVIDER_DRIVERS[account.driver].supportsNativeResume,
 				})
 			)
 				continue;

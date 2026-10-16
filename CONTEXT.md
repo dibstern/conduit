@@ -10,7 +10,8 @@ the slug, never a workspace path. Opening a per-project store stamps legacy
 events and rewrites legacy command keys to its slug without changing ids, order
 or payloads. Converging command metadata keeps the highest applied sequence.
 Event sequences, command receipts and projector cursors carry that owner in
-their in-memory contracts. Reads and projections remain per-store.
+their in-memory contracts. List reads filter by Scope. Session-keyed reads,
+projections, projector cursors and the version counter stay store-wide.
 
 ## Repository Identity
 

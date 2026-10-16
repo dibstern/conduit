@@ -1,6 +1,7 @@
 import { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Effect } from "effect";
+import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 
 /** Canonical deletions survive reloads; sidebar tombstones also name cascaded children. */
 export const isSessionDeleted = (sessionId: string) =>
@@ -35,12 +36,13 @@ export class EffectSessionSeeder {
 	): Effect.Effect<
 		boolean,
 		SessionSeederEffectError | SqlError,
-		SqlClient.SqlClient
+		SqlClient.SqlClient | PersistenceProjectTag
 	> {
 		if (this.seenSessions.has(sessionId)) return Effect.succeed(false);
 
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			const { projectId } = yield* PersistenceProjectTag;
 			return yield* sql.withTransaction(
 				Effect.gen(function* () {
 					if (yield* isSessionDeleted(sessionId)) return false;
@@ -49,8 +51,8 @@ export class EffectSessionSeeder {
 					const now = Date.now();
 					yield* sql`
 					INSERT OR IGNORE INTO sessions
-					(id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-					VALUES (${sessionId}, ${provider}, ${opts?.providerSessionId ?? null}, 'Untitled', 'idle', ${opts?.parentId ?? null}, ${now}, ${now})`;
+					(id, project_id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+					VALUES (${sessionId}, ${projectId}, ${provider}, ${opts?.providerSessionId ?? null}, 'Untitled', 'idle', ${opts?.parentId ?? null}, ${now}, ${now})`;
 					return true;
 				}),
 			);

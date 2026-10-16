@@ -1,3 +1,4 @@
+import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 // src/lib/provider/orchestration-engine.ts
 // Central command processor for the provider instance layer (CQRS core loop).
@@ -9,6 +10,7 @@ import type { SqlError } from "@effect/sql/SqlError";
 import { Data, Deferred, Effect } from "effect";
 
 import type { Account } from "../contracts/account.js";
+import type { SessionScope } from "../contracts/session-scope.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
@@ -561,7 +563,7 @@ export class OrchestrationEngine {
 				try: () =>
 					JSON.stringify({
 						...payload,
-						...(driver === "claude" && pendingRewind
+						...(getProviderDriver(driver)?.supportsNativeResume && pendingRewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
 						dispatchId,
@@ -832,8 +834,10 @@ export class OrchestrationEngine {
 	}
 
 	/** List all bound sessions with their provider IDs. */
-	listBoundSessionsEffect(): Effect.Effect<SessionBinding[]> {
-		return this.sessionBindingReadModel.listBoundSessions();
+	listBoundSessionsEffect(
+		scope: SessionScope,
+	): Effect.Effect<SessionBinding[]> {
+		return this.sessionBindingReadModel.listBoundSessions(scope);
 	}
 
 	/**

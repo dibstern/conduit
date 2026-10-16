@@ -89,7 +89,6 @@
 		}
 		return run(
 			continueSessionRpc({
-				projectSlug,
 				sessionId,
 				instanceId: currentAccountId,
 				expectedInstanceId: currentAccountId,
@@ -101,7 +100,7 @@
 	}
 
 	const cancelResume = () =>
-		run(cancelContinuationRpc({ projectSlug, sessionId, originId: getBrowserClientId() }), "Couldn't cancel the resume");
+		run(cancelContinuationRpc({ sessionId, originId: getBrowserClientId() }), "Couldn't cancel the resume");
 </script>
 
 <!-- The strip's main action while limited, second to a scheduled resume. -->

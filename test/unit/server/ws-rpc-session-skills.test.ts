@@ -184,7 +184,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 				});
 				expect(
 					yield* client.GetSessionSkills({
-						projectSlug: "test-project",
 						sessionId: "session",
 					}),
 				).toEqual({
@@ -247,7 +246,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 							input: '{"name":"review"}',
 						});
 					const { loads } = yield* client.GetSessionSkills({
-						projectSlug: "test-project",
 						sessionId: "session",
 					});
 					expect(
@@ -322,7 +320,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 						sortOrder: 8,
 					});
 					const { loads } = yield* client.GetSessionSkills({
-						projectSlug: "test-project",
 						sessionId: "session",
 					});
 					expect(loads).toEqual([
@@ -397,7 +394,7 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 						at: 30,
 					});
 					const read = (sessionId: string) =>
-						client.GetSessionSkills({ projectSlug: "test-project", sessionId });
+						client.GetSessionSkills({ sessionId });
 					const parent = yield* read("session");
 					expect(parent.loads.map(({ name }) => name)).toEqual([
 						"review",
@@ -442,7 +439,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 				});
 				expect(
 					yield* client.GetSessionSkills({
-						projectSlug: "test-project",
 						sessionId: "session",
 					}),
 				).toEqual({
@@ -474,7 +470,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 					});
 					expect(
 						yield* client.GetSessionSkills({
-							projectSlug: "test-project",
 							sessionId: "session",
 						}),
 					).toEqual({ loads: [] });
@@ -494,7 +489,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 					});
 					expect(
 						yield* client.GetSessionSkills({
-							projectSlug: "test-project",
 							sessionId: "session",
 						}),
 					).toEqual({
@@ -534,7 +528,6 @@ describe("WsRpcServerLayer GetSessionSkills with SQLite", () => {
 							});
 							const result = yield* Effect.either(
 								client.GetSessionSkills({
-									projectSlug: "test-project",
 									sessionId: "session",
 								}),
 							);

@@ -13,12 +13,13 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Queue, Stream } from "effect";
 import { expect } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { subscribeApprovals } from "../../../src/lib/domain/relay/Services/approvals-subscription.js";
 import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
-import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../../../src/lib/domain/relay/Services/session-detail-subscription.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
@@ -58,7 +59,7 @@ const makeTodoTestLayer = () => {
 			SessionEventBusLive,
 		),
 		SessionEventBusLive,
-		Layer.succeed(BackgroundLivenessTag, () => undefined),
+		Layer.effect(SessionActivityTag, makeSessionActivity),
 		Layer.succeed(ConfigTag, makeMockConfig({ slug: "test-project" })),
 		cleanup,
 	);

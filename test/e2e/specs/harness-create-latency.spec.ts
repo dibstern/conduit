@@ -177,7 +177,9 @@ test("creates reach every sidebar under streaming write load", async ({
 	let stopped = false;
 	try {
 		await harness.terminate();
-		fixture = await seedSessionLoadFixture(harness.projectStorePath());
+		fixture = await seedSessionLoadFixture(harness.projectStorePath(), {
+			projectId: "process-test",
+		});
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
@@ -205,7 +207,6 @@ test("creates reach every sidebar under streaming write load", async ({
 			const sessionId = await driver.createSession(`Latency stream ${index}`);
 			await Effect.runPromise(
 				driver.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -572,7 +573,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 	let backgroundTicks = 0;
 	try {
 		await harness.terminate();
-		await seedSessionLoadFixture(harness.projectStorePath());
+		await seedSessionLoadFixture(harness.projectStorePath(), {
+			projectId: "process-test",
+		});
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
@@ -593,7 +596,6 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			const sessionId = await driver.createSession(`Overflow stream ${index}`);
 			await Effect.runPromise(
 				driver.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: driver.originId,
 					inputId: randomUUID(),
@@ -663,7 +665,6 @@ test("overflow catches up every sidebar through create and delete bursts", async
 					Effect.runPromise(
 						driver.rpc
 							.DeleteSession({
-								projectSlug: "process-test",
 								sessionId: id,
 								originId: driver.originId,
 							})

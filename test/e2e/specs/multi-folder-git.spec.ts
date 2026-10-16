@@ -95,6 +95,7 @@ for (const scenario of [
 		};
 		await mockWsRpc(page, {
 			handlers: {
+				GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 				GetProjects: () => ({ projects: [project], current: slug }),
 				GetAgents: () => ({
 					projectSlug: slug,

@@ -213,12 +213,6 @@ describe("daemon automatic settlement layer", () => {
 							{ sessionId: "cold-s1", messageId: "m1", role: "assistant" },
 							{ createdAt: old },
 						),
-						canonicalEvent(
-							"session.read",
-							"cold-s1",
-							{ sessionId: "cold-s1" },
-							{ createdAt: old + 1 },
-						),
 					])
 						yield* runner.projectEvent(yield* store.append(event));
 				}).pipe(
