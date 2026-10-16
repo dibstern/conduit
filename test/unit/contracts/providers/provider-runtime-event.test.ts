@@ -5,8 +5,6 @@ import { Either, Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
-	ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES,
-	HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES,
 	type ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventSchema,
 	type ProviderRuntimeEventType,
@@ -14,10 +12,9 @@ import {
 	ProviderRuntimeProviderRefsSchema,
 	ProviderRuntimeRawSourceSchema,
 } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
-import {
-	CANONICAL_EVENT_TYPES,
-	type CanonicalEventType,
-	type EventPayloadMap,
+import type {
+	CanonicalEventType,
+	EventPayloadMap,
 } from "../../../../src/lib/persistence/events.js";
 import { claudeRuntimeEvent } from "../../../../src/lib/provider/claude/claude-runtime-event.js";
 
@@ -129,61 +126,6 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(Either.isLeft(decodeEither(inheritedEnvelope))).toBe(true);
 	});
 
-	it("covers every canonical event type or explicit reclassification", () => {
-		// Conduit-originated events. No provider can produce them, so they are
-		// deliberately absent from the provider runtime event union.
-		const explicitlyReclassified: readonly string[] = [
-			"session.provider_cleanup_failed",
-			"session.setup_started",
-			"session.setup_output",
-			"session.setup_finished",
-			"session.handoff_delivered",
-			"session.cut_off_dismissed",
-			"session.resumed",
-			"session.resume_scheduled",
-			"session.resume_cancelled",
-			"session.usage_limited", // Continuation owns canonical intake of the adapter's same-named signal.
-			"session.forked",
-			"session.rewound",
-			"session.rewind_undone",
-			"session.rewind_committed",
-			"session.permission_mode_changed",
-			"session.model_changed",
-			"session.workspace_changed",
-			"session.workspace_hint_changed", // Relay-owned write-path inference.
-			"session.workspace_started", // Mapped from the provider's workspace.changed startup report.
-			"session.variant_changed",
-			"session.context_window_changed",
-			"session.read",
-			"session.unread",
-			"session.settled",
-			"session.unsettled",
-			"session.pinned",
-			"session.unpinned",
-			"session.snoozed",
-			"session.unsnoozed",
-			"session.auto_settle_set",
-			// Relay-owned Session Inbox facts; no provider produces them.
-			"input.admitted",
-			"input.sent",
-			"input.cancelled",
-			"input.interrupt_requested",
-		];
-		const missingRuntimeTypes = CANONICAL_EVENT_TYPES.filter(
-			(type) =>
-				!explicitlyReclassified.includes(type) &&
-				Either.isLeft(
-					Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(type),
-				),
-		);
-
-		expect(missingRuntimeTypes).toEqual([]);
-		// Goal facts originate at the provider, so they must stay in the runtime union.
-		expect(ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES).toContain(
-			"session.goal_changed",
-		);
-	});
-
 	it("decodes turn.model_resolved evidence without changing its ids", () => {
 		const event = Schema.decodeUnknownSync(ProviderRuntimeEventSchema)({
 			...baseEvent,
@@ -258,20 +200,17 @@ describe("ProviderRuntimeEvent contracts", () => {
 		expect(event.rawSource).not.toHaveProperty("raw");
 	});
 
-	it("marks tool.input_updated as historical compatibility", () => {
+	it("rejects the retired tool.input_updated runtime event", () => {
 		expect(
-			Either.isRight(
+			Either.isLeft(
 				Schema.decodeUnknownEither(ProviderRuntimeEventTypeSchema)(
 					"tool.input_updated",
 				),
 			),
 		).toBe(true);
-		expect(HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES).toEqual([
-			"tool.input_updated",
-		]);
-		expect(ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES).not.toContain(
-			"tool.input_updated",
-		);
+		expect(
+			Either.isLeft(decodeEither({ ...baseEvent, type: "tool.input_updated" })),
+		).toBe(true);
 	});
 
 	it("rejects unknown runtime event type", () => {

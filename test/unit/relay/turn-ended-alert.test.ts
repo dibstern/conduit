@@ -1,6 +1,10 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+	CanonicalEvents,
+	type LiveEventType,
+} from "../../../src/lib/contracts/stored-event.js";
+import {
 	CANONICAL_EVENT_TYPES,
 	canonicalEvent,
 	EventId,
@@ -60,7 +64,8 @@ describe("turn-ended alert", () => {
 
 	it.each(
 		CANONICAL_EVENT_TYPES.filter(
-			(type) =>
+			(type): type is LiveEventType =>
+				CanonicalEvents[type].status === "live" &&
 				type !== "turn.completed" &&
 				type !== "turn.error" &&
 				type !== "turn.interrupted",

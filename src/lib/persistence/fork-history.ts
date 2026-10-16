@@ -40,7 +40,9 @@ export interface ForkSource {
 	>;
 }
 
-const FORK_HISTORY_TYPES = new Set<CanonicalEvent["type"]>([
+const FORK_HISTORY_TYPES: ReadonlySet<StoredEvent["type"]> = new Set<
+	CanonicalEvent["type"]
+>([
 	"message.created",
 	"text.delta",
 	"thinking.start",
@@ -49,7 +51,6 @@ const FORK_HISTORY_TYPES = new Set<CanonicalEvent["type"]>([
 	"tool.started",
 	"tool.running",
 	"tool.completed",
-	"tool.input_updated",
 	"file.attached",
 	"turn.completed",
 	"turn.error",

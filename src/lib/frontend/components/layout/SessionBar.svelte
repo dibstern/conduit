@@ -73,7 +73,7 @@
 	// reads the same in the bar as it does in the list it came from.
 	const session = $derived(findSession(sessionState.currentId ?? ""));
 	const title = $derived(session?.title || "New Session");
-	const goalFacts = $derived(discoveryState.currentProviderId === "claude" ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
 	const goal = $derived(goalView(
 		goalFacts,
 		isProcessing() ? "busy" : session?.status ?? "idle",

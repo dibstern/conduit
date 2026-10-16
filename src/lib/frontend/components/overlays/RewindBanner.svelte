@@ -12,6 +12,7 @@
 	} from "../../stores/ui.svelte.js";
 	import { chatState, currentChat } from "../../stores/chat.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
+	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
@@ -33,9 +34,10 @@
 	const pendingMessageId = $derived(
 		currentChat().transcript?.pendingRewindMessageId ?? null,
 	);
-	const isClaude = $derived(
-		!pendingOnly && sessionState.currentId !== null &&
-		getAvailableInstances().find((instance) => instance.id === findSession(sessionState.currentId ?? "")?.accountId)?.driver === "claude",
+	const restoresFiles = $derived(
+		!pendingOnly && sessionState.currentId !== null
+			? getDriverTraits(getAvailableInstances().find((instance) => instance.id === findSession(sessionState.currentId ?? "")?.accountId)?.driver)?.supportsFileRewind ?? true
+			: true,
 	);
 	const showBanner = $derived(!pendingOnly && uiState.rewindActive);
 	const showModal = $derived(
@@ -55,7 +57,7 @@
 		const sessionId = sessionState.currentId;
 		const projectSlug = getCurrentSlug();
 		if (!uuid || !sessionId || !projectSlug) return;
-		const mode = isClaude ? "conversation" : "both";
+		const mode = restoresFiles ? "both" : "conversation";
 		const message = chatState.messages.find((message) => message.uuid === uuid);
 		if (!message || !("messageId" in message) || !message.messageId) {
 			exitRewindMode();
@@ -166,7 +168,7 @@
 				This message and everything after it will be removed. You can undo until you send your next message.
 			</p>
 			<p class="mb-5 text-sm text-text-secondary">
-				{isClaude ? "Files are not restored." : "Files are restored to this point."}
+				{restoresFiles ? "Files are restored to this point." : "Files are not restored."}
 			</p>
 
 			<!-- Action buttons -->

@@ -434,7 +434,7 @@
 		return dividers;
 	});
 	const goal = $derived(
-		!primary || discoveryState.currentProviderId === "claude" ? sessionGoals.get(viewedSessionId ?? "")?.goal : null,
+		!primary || discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(viewedSessionId ?? "")?.goal : null,
 	);
 	const goalNoticeTurnId = $derived.by(() => {
 		if (!goal) return null;

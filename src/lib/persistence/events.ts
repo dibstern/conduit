@@ -9,6 +9,7 @@ import {
 	EventId,
 	type EventMetadata,
 	type EventPayloadMap,
+	type LiveEventType,
 } from "../contracts/stored-event.js";
 
 export * from "../contracts/stored-event.js";
@@ -21,7 +22,7 @@ export function createCommandId(): CommandId {
 	return Schema.decodeSync(CommandId)(`cmd_${randomUUID()}`);
 }
 
-export function canonicalEvent<K extends CanonicalEventType>(
+export function canonicalEvent<K extends LiveEventType>(
 	type: K,
 	sessionId: string,
 	data: EventPayloadMap[K],

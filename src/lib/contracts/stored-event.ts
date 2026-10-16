@@ -245,7 +245,7 @@ export interface EventMetadata {
 	readonly schemaVersion?: number;
 }
 
-export type StoredEvent = CanonicalEvent & {
+export type StoredEvent = CanonicalEvent<CanonicalEventType> & {
 	readonly projectId: string;
 	readonly sequence: number;
 	readonly streamVersion: number;
@@ -988,8 +988,9 @@ function eventEnvelope<
 	});
 }
 
-export type CanonicalEvent = {
-	[K in CanonicalEventType]: {
+// Newly produced events are live; stored history can still contain retired types.
+export type CanonicalEvent<T extends CanonicalEventType = LiveEventType> = {
+	[K in T]: {
 		readonly eventId: string;
 		readonly sessionId: string;
 		readonly type: K;
@@ -998,7 +999,7 @@ export type CanonicalEvent = {
 		readonly provider: string;
 		readonly createdAt: number;
 	};
-}[CanonicalEventType];
+}[T];
 
 // Array.map loses the correlation between each key and its payload schema.
 // The mapped type above restates the discriminated union of those envelopes.
@@ -1006,7 +1007,7 @@ export const CanonicalEventSchema = Schema.Union(
 	...CANONICAL_EVENT_TYPES.map((type) =>
 		eventEnvelope(type, CanonicalEvents[type].payload),
 	),
-) as Schema.Schema<CanonicalEvent>;
+) as Schema.Schema<CanonicalEvent<CanonicalEventType>>;
 
 export const StoredEventSchema = Schema.extend(
 	CanonicalEventSchema,

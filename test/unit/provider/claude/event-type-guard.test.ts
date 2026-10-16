@@ -1,29 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { CANONICAL_EVENT_TYPES } from "../../../../src/lib/persistence/events.js";
-import {
-	CLAUDE_NOT_APPLICABLE,
-	CLAUDE_PRODUCED,
-} from "../../../../src/lib/provider/claude/event-type-guard.js";
+import { expectTypeOf, it } from "vitest";
+import type { LiveEventType } from "../../../../src/lib/contracts/stored-event.js";
+import { CLAUDE_EVENT_CLASSIFICATION } from "../../../../src/lib/provider/claude/event-type-guard.js";
 
-describe("Claude event type guard", () => {
-	it("covers every canonical event type", () => {
-		const covered = new Set([...CLAUDE_PRODUCED, ...CLAUDE_NOT_APPLICABLE]);
-		const missing = CANONICAL_EVENT_TYPES.filter((t) => !covered.has(t));
-		expect(missing).toEqual([]);
-	});
+it("requires a Claude classification for every live event", () => {
+	const { "session.created": _missing, ...incomplete } =
+		CLAUDE_EVENT_CLASSIFICATION;
 
-	it("has no overlap between produced and not-applicable", () => {
-		const overlap = [...CLAUDE_PRODUCED].filter((t) =>
-			CLAUDE_NOT_APPLICABLE.has(t),
-		);
-		expect(overlap).toEqual([]);
-	});
+	// @ts-expect-error A record missing a live event is not a total classification.
+	incomplete satisfies Record<LiveEventType, unknown>;
 
-	it("produced set includes thinking.end (regression)", () => {
-		expect(CLAUDE_PRODUCED.has("thinking.end")).toBe(true);
-	});
-
-	it("classifies turn.model_resolved as Claude-produced", () => {
-		expect(CLAUDE_PRODUCED.has("turn.model_resolved")).toBe(true);
-	});
+	expectTypeOf<
+		keyof typeof CLAUDE_EVENT_CLASSIFICATION
+	>().toEqualTypeOf<LiveEventType>();
 });

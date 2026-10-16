@@ -10,8 +10,8 @@ import type { Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -40,7 +40,7 @@ const seed = (
 			const events: CanonicalEvent[] = [];
 			for (const [index, session] of sessions.entries()) {
 				const at = Date.UTC(2026, 9, 1) + index * 10_000;
-				const event = <T extends CanonicalEventType>(
+				const event = <T extends LiveEventType>(
 					type: T,
 					data: EventPayloadMap[T],
 					offset = 0,

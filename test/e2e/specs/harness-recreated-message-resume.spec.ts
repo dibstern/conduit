@@ -14,8 +14,8 @@ import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import {
 	PartRemovalId,
@@ -40,7 +40,7 @@ const START = Date.UTC(2026, 9, 1);
 
 const event =
 	(sessionId: string, createdAt = START) =>
-	<T extends CanonicalEventType>(type: T, data: EventPayloadMap[T]) =>
+	<T extends LiveEventType>(type: T, data: EventPayloadMap[T]) =>
 		canonicalEvent(type, sessionId, data, { provider: "claude", createdAt });
 
 const seed = (filename: string, events: readonly CanonicalEvent[]) =>

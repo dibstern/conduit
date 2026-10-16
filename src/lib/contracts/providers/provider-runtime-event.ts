@@ -33,7 +33,6 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"tool.running",
 	"tool.completed",
 	"file.attached",
-	"tool.input_updated",
 	"turn.completed",
 	"turn.error",
 	"turn.interrupted",
@@ -54,30 +53,12 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"question.resolved",
 ] as const;
 
-export const HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES = [
-	"tool.input_updated",
-] as const;
-
-const historicalProviderRuntimeEventTypes = new Set<string>(
-	HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES,
-);
-
-export const ACTIVE_PROVIDER_RUNTIME_EVENT_TYPES =
-	PROVIDER_RUNTIME_EVENT_TYPES.filter(
-		(type) => !historicalProviderRuntimeEventTypes.has(type),
-	);
-
 export const ProviderRuntimeEventTypeSchema = Schema.Literal(
 	...PROVIDER_RUNTIME_EVENT_TYPES,
 );
 export type ProviderRuntimeEventType = Schema.Schema.Type<
 	typeof ProviderRuntimeEventTypeSchema
 >;
-export type ActiveProviderRuntimeEventType = Exclude<
-	ProviderRuntimeEventType,
-	(typeof HISTORICAL_PROVIDER_RUNTIME_EVENT_TYPES)[number]
->;
-
 const RAW_SOURCE_METADATA_KEYS = [
 	"kind",
 	"providerMessageType",

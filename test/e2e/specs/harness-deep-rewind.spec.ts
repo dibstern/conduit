@@ -6,8 +6,8 @@ import { writeFileSync } from "node:fs";
 import { Effect } from "effect";
 import type {
 	CanonicalEvent,
-	CanonicalEventType,
 	EventPayloadMap,
+	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -26,7 +26,7 @@ const seed = (filename: string) =>
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
 			const start = Date.UTC(2026, 9, 1);
-			const event = <T extends CanonicalEventType>(
+			const event = <T extends LiveEventType>(
 				index: number,
 				type: T,
 				data: EventPayloadMap[T],

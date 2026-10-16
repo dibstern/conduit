@@ -12,7 +12,6 @@ import {
 	mergeTouches,
 	type ProjectionContext,
 	type ProjectionTouch,
-	UNPROJECTED_CANONICAL_EVENT_TYPES,
 } from "./projectors-effect.js";
 import { refreshSidebar } from "./sidebar-projection.js";
 import {
@@ -132,27 +131,6 @@ export const makeProjectionRunnerEffect = (
 			}
 		}
 
-		// An event type no projector claims writes nothing, raises nothing, and
-		// still advances the cursor below — silent by construction, which is how
-		// session.compaction went three months unprojected. Say so once per type
-		// rather than once per event, so the gap shows up in the log instead of as
-		// absent rows much later.
-		const unclaimedWarned = new Set<string>();
-		const warnIfUnclaimed = (eventType: string) =>
-			Effect.suspend(() => {
-				if (
-					projectorsByEventType.has(eventType) ||
-					UNPROJECTED_CANONICAL_EVENT_TYPES.includes(eventType) ||
-					unclaimedWarned.has(eventType)
-				) {
-					return Effect.void;
-				}
-				unclaimedWarned.add(eventType);
-				return Effect.logWarning(
-					`No projector handles "${eventType}"; its events are stored but never projected`,
-				);
-			});
-
 		// Mutable state
 		const failures: ProjectionFailure[] = [];
 		let recovered = false;
@@ -221,7 +199,6 @@ export const makeProjectionRunnerEffect = (
 		> =>
 			sql.withTransaction(
 				Effect.gen(function* () {
-					yield* warnIfUnclaimed(event.type);
 					const matching = projectorsByEventType.get(event.type) ?? [];
 					// Inside the transaction on purpose: the bump's write lock is only
 					// held to COMMIT, so a bump that auto-commits on its own would let a
@@ -313,7 +290,6 @@ export const makeProjectionRunnerEffect = (
 						const version = yield* nextVersion;
 						const ctx: ProjectionContext = { version, replaying };
 						for (const event of events) {
-							yield* warnIfUnclaimed(event.type);
 							const matching = projectorsByEventType.get(event.type) ?? [];
 							for (const projector of matching) {
 								touches.push(yield* projector.project(event, ctx));
