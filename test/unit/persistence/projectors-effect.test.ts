@@ -3754,6 +3754,58 @@ describe("ProjectionRunnerEffect", () => {
 			}),
 		));
 
+	it("a decode failure fails the read and recovery commits only the valid prefix", () =>
+		runTest(
+			Effect.gen(function* () {
+				const store = yield* EventStoreEffectTag;
+				const runner = yield* ProjectionRunnerEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const cursors = yield* ProjectorCursorEffectTag;
+				const sessionId = "s-decode-prefix";
+				yield* seedSession(sessionId);
+				yield* store.append(makeSessionCreated(sessionId));
+				const prefix = yield* store.append(
+					canonicalEvent("session.renamed", sessionId, {
+						sessionId,
+						title: "Valid prefix",
+					}),
+				);
+				yield* insertRawEventRow({
+					sessionId,
+					streamVersion: 2,
+					data: JSON.stringify({ sessionId }),
+				});
+				yield* insertRawEventRow({
+					sessionId,
+					streamVersion: 3,
+					type: "session.renamed",
+					data: JSON.stringify({ sessionId, title: "After invalid row" }),
+				});
+
+				const read = yield* Effect.either(store.readBySession(sessionId));
+				expect(read._tag).toBe("Left");
+				if (read._tag === "Left") {
+					expect(read.left).toBeInstanceOf(EventStoreError);
+					if (read.left instanceof EventStoreError) {
+						expect(read.left.operation).toBe("decodeStoredEventRow");
+					}
+				}
+				const recovery = yield* Effect.either(runner.recover());
+				expect(recovery._tag).toBe("Left");
+				if (recovery._tag === "Left") {
+					expect(recovery.left).toBeInstanceOf(ProjectionRunnerError);
+					expect(recovery.left.operation).toBe("decodeStoredEventRow");
+				}
+				expect(yield* runner.isRecovered()).toBe(false);
+				expect(
+					yield* sql`SELECT title FROM sessions WHERE id = ${sessionId}`,
+				).toEqual([{ title: "Valid prefix" }]);
+				expect((yield* cursors.get("session"))?.lastAppliedSeq).toBe(
+					prefix.sequence,
+				);
+			}),
+		));
+
 	it("resets replaying state after typed replay decode failure", () => {
 		let observedContext: ProjectionContext | undefined;
 		const projector: EffectProjector = {
