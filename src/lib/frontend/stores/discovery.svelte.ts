@@ -442,7 +442,7 @@ const draft = $state<{
 }>({ instanceId: null, driver: null, permissionMode: "ask" });
 const draftModels = $state<Record<string, DraftPick["model"] | null>>({});
 const draftModel = $derived(draftModels[catalogScope().key] ?? null);
-let draftPermissionChosen = false;
+let draftPermissionChosen = $state(false);
 /** Like the permission mode, an untouched draft pick follows the server default. */
 let draftPickChosen = false;
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
