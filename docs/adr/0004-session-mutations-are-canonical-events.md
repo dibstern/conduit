@@ -6,6 +6,9 @@
   hardening epic conduit-test-48mo
 - Amended: 2026-09-26, scope clarified for per-viewer read state
   (conduit-test-mh7b)
+- Amended: 2026-10-16, the outcome of the conduit-test-o5vp consequence (forks
+  made children so they leave the sidebar) is superseded by ADR-0007; its
+  mechanism, lineage as a canonical event, still stands (conduit-test-extp)
 
 ## Context
 

@@ -646,7 +646,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				persisted(fixture, other).events.find(
 					({ type }) => type === "turn.error",
 				)?.data["error"],
-			).toContain("not confirmed dead");
+			).toContain("has not exited; retry after it stops");
 			expect(() => process.kill(live.pid, 0)).not.toThrow();
 			expect(persisted(fixture, id).turns).toEqual(["running"]);
 			expect(

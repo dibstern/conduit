@@ -15,9 +15,8 @@ export const cursorTurnHandlers: StepHandler[] = [
 		match: /^the Cursor turn relay is ready$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			const { GetModels: getModels, GetAgents: getAgents } = rpc.stubs;
-			if (!getModels || !getAgents)
-				throw new Error("The Cursor turn wraps the mockup's catalogue stubs");
+			const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			const getAgents = rpc.stubs.GetAgents ?? rpc.catalogStubs().GetAgents;
 			rpc.setStubs({
 				GetModels: (payload) =>
 					("sessionId" in payload && payload.sessionId === sessionId) ||
@@ -65,25 +64,22 @@ export const cursorTurnHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert Cursor approval notice",
-		match: /^the composer explains that Cursor runs without per-call approval$/,
-		run: async ({ world }) => {
+		match: /^the Cursor notice reads (.+)$/,
+		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("composer-provider-notice"),
-			).toHaveText("Cursor runs without per-call approval.");
+			).toHaveText(match[1] ?? "");
 		},
 	},
 	{
 		name: "start sent Cursor turn",
 		match: /^the Cursor relay starts the sent turn$/,
 		run: async ({ world }) => {
-			const request = requireRpcControl(world.page)
-				.getRequests()
-				.find(
-					(candidate) =>
-						candidate.tag === "input.submit" &&
-						candidate.payload["sessionId"] === sessionId,
-				);
-			if (!request) throw new Error("No Cursor message was submitted");
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) =>
+					candidate.tag === "input.submit" &&
+					candidate.payload["sessionId"] === sessionId,
+			);
 			requireRelayControl(world.page).sendMessage({
 				type: "user_message",
 				sessionId,
