@@ -13,6 +13,7 @@ Scenario Outline: choose a Cursor model and change its parameters for the next t
   And I select model <name> in the picker
   Then the shared effort picker offers Cursor choices <choices>
   And the Cursor parameter options fit inside the model picker
+  And the screen region visually matches cursor-parameters-<tier>-<shot> at <threshold> percent
   When I choose Cursor parameters <first> in the shared picker
   And I close the model picker
   Then the draft composer uses Cursor with model <model>
@@ -33,8 +34,8 @@ Scenario Outline: choose a Cursor model and change its parameters for the next t
   And no project-loading error toast is shown
 
 Examples:
-  | tier  | model        | name         | choices                                                                               | first    | next         |
-  | wide  | composer-2.5 | Composer 2.5 | Standard, Fast                                                                        | Standard | Fast         |
-  | phone | composer-2.5 | Composer 2.5 | Standard, Fast                                                                        | Standard | Fast         |
-  | wide  | grok-4.6     | Grok 4.6     | low, low · Fast, medium, medium · Fast, high, high · Fast, xhigh, xhigh · Fast            | low      | high · Fast  |
-  | phone | grok-4.6     | Grok 4.6     | low, low · Fast, medium, medium · Fast, high, high · Fast, xhigh, xhigh · Fast            | low      | high · Fast  |
+  | tier  | model        | shot     | threshold | name         | choices                                                                               | first    | next         |
+  | wide  | composer-2.5 | composer | 98        | Composer 2.5 | Standard, Fast                                                                        | Standard | Fast         |
+  | phone | composer-2.5 | composer | 98        | Composer 2.5 | Standard, Fast                                                                        | Standard | Fast         |
+  | wide  | grok-4.6     | grok     | 98        | Grok 4.6     | low, low · Fast, medium, medium · Fast, high, high · Fast, xhigh, xhigh · Fast            | low      | high · Fast  |
+  | phone | grok-4.6     | grok     | 98        | Grok 4.6     | low, low · Fast, medium, medium · Fast, high, high · Fast, xhigh, xhigh · Fast            | low      | high · Fast  |

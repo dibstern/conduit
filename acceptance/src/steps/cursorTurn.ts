@@ -75,14 +75,11 @@ export const cursorTurnHandlers: StepHandler[] = [
 		name: "start sent Cursor turn",
 		match: /^the Cursor relay starts the sent turn$/,
 		run: async ({ world }) => {
-			const request = requireRpcControl(world.page)
-				.getRequests()
-				.find(
-					(candidate) =>
-						candidate.tag === "input.submit" &&
-						candidate.payload["sessionId"] === sessionId,
-				);
-			if (!request) throw new Error("No Cursor message was submitted");
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) =>
+					candidate.tag === "input.submit" &&
+					candidate.payload["sessionId"] === sessionId,
+			);
 			requireRelayControl(world.page).sendMessage({
 				type: "user_message",
 				sessionId,
