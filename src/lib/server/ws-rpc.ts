@@ -253,7 +253,8 @@ export type DaemonRpcName =
 
 export class RpcCaller extends Context.Tag("RpcCaller")<
 	RpcCaller,
-	{ readonly kind: "browser"; readonly ip: string } | { readonly kind: "cli" }
+	| { readonly kind: "browser"; readonly ip: string; readonly secure?: boolean }
+	| { readonly kind: "cli" }
 >() {}
 
 /** Browser mutations revoke connections after their reply has been written. */
@@ -280,7 +281,7 @@ export type DaemonRpcHandlers = {
 			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
 		>,
 		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>,
-		K extends "SetPin" ? RpcCaller : never
+		K extends "SetPin" | "UpdateMessageSurfacing" ? RpcCaller : never
 	>;
 } & {
 	readonly SubscribeInstances: () => Stream.Stream<

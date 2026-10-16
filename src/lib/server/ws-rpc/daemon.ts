@@ -6,6 +6,9 @@ const daemonRequired = (operation: string) =>
 	Effect.fail(new WsRpcError({ message: `${operation} requires daemon mode` }));
 
 export const daemonOnlyHandlers = {
+	GetMessageSurfacing: (_request) => daemonRequired("GetMessageSurfacing"),
+	UpdateMessageSurfacing: (_request) =>
+		daemonRequired("UpdateMessageSurfacing"),
 	GetStatus: (_request) => daemonRequired("GetStatus"),
 	SetPin: (_request): Effect.Effect<never, WsRpcError | SetPinRejected> =>
 		daemonRequired("SetPin"),
@@ -25,6 +28,8 @@ export const daemonOnlyHandlers = {
 		daemonRequired("GetDefaultGroupingMode"),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "GetMessageSurfacing"
+	| "UpdateMessageSurfacing"
 	| "GetStatus"
 	| "SetPin"
 	| "SetKeepAwake"

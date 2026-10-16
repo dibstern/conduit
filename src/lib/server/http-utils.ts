@@ -13,16 +13,19 @@ export function readBody(req: IncomingMessage): Promise<string> {
 	});
 }
 
+export function isLoopbackAddress(address: string | undefined): boolean {
+	if (!address) return false;
+	const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
+	return address === "::1" || (isIP(ipv4) === 4 && ipv4.startsWith("127."));
+}
+
 /** Only trust a loopback proxy's last non-empty XFF entry. */
 export function getClientIp(
 	peer: string | undefined,
 	forwarded: string | readonly string[] | undefined,
 ): string {
 	const address = peer ?? "unknown";
-	const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
-	const loopback =
-		address === "::1" || (isIP(ipv4) === 4 && ipv4.startsWith("127."));
-	if (loopback && typeof forwarded === "string") {
+	if (isLoopbackAddress(peer) && typeof forwarded === "string") {
 		const entries = forwarded.split(",");
 		for (let index = entries.length - 1; index >= 0; index--) {
 			const entry = entries[index]?.trim();

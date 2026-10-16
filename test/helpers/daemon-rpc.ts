@@ -32,6 +32,11 @@ import {
 	makeInstanceManagerStateLive,
 } from "../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import {
+	MessageSurfacingSettings,
+	type MessageSurfacingSettingsOptions,
+	makeMessageSurfacingSettings,
+} from "../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
+import {
 	makeProjectRegistryLive,
 	type ProjectRegistryTag,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
@@ -65,6 +70,7 @@ export const makeDaemonRpcTestLayer = (
 	options: {
 		config?: Partial<DaemonRuntimeConfig>;
 		configDir?: string;
+		messageSurfacing?: MessageSurfacingSettingsOptions;
 		instances?: ReadonlyArray<DaemonInstanceConfig>;
 		launchLogin?: ClaudeConfigDir;
 		accountsState?: AccountsState;
@@ -81,6 +87,13 @@ export const makeDaemonRpcTestLayer = (
 	} = {},
 ) => {
 	const base = Layer.mergeAll(
+		Layer.effect(
+			MessageSurfacingSettings,
+			makeMessageSurfacingSettings(
+				options.configDir ?? "/tmp/daemon-rpc-fixture",
+				options.messageSurfacing ?? { env: {} },
+			),
+		),
 		makeSessionDirectoryLive(
 			options.configDir ?? "/tmp/daemon-rpc-fixture",
 			projects,
