@@ -15,9 +15,8 @@ export const cursorTurnHandlers: StepHandler[] = [
 		match: /^the Cursor turn relay is ready$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
-			const { GetModels: getModels, GetAgents: getAgents } = rpc.stubs;
-			if (!getModels || !getAgents)
-				throw new Error("The Cursor turn wraps the mockup's catalogue stubs");
+			const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			const getAgents = rpc.stubs.GetAgents ?? rpc.catalogStubs().GetAgents;
 			rpc.setStubs({
 				GetModels: (payload) =>
 					("sessionId" in payload && payload.sessionId === sessionId) ||

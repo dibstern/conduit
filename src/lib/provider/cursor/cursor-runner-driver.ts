@@ -5,6 +5,7 @@ import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
+import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import type { CursorModel, CursorSdkPort } from "./sdk-port.js";
 
 export const CursorModelParameters = Schema.Array(
@@ -106,6 +107,7 @@ export function invalidateCursorCatalog(accountId: string): void {
 export const discoverCursorEffect = (
 	port?: CursorSdkPort,
 	account?: Account,
+	workspaceRoot?: string,
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
 		const adapter = yield* Effect.try({
@@ -191,16 +193,19 @@ export const discoverCursorEffect = (
 			supportsAttachments: false,
 			supportsFork: false,
 			supportsRevert: false,
-			commands: [],
+			commands: workspaceRoot
+				? yield* discoverCursorSkillsEffect(workspaceRoot)
+				: [],
 		};
 	});
 
 export const makeCursorRunnerDriver = (
+	workspaceRoot: string,
 	port?: CursorSdkPort,
 ): RunnerDriverPieces => ({
 	driverKind: "cursor",
-	discoverEffect: (_workspaceRoot, account) =>
-		discoverCursorEffect(port, account),
+	discoverEffect: (directory, account) =>
+		discoverCursorEffect(port, account, directory ?? workspaceRoot),
 	prepareTurnEffect: (input) =>
 		Effect.gen(function* () {
 			const catalog = yield* discoverCursorEffect(port, input.account).pipe(

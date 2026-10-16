@@ -30,6 +30,8 @@ export const makeCursorRunnerLaunch = (
 						workspaceRoot: config.workspaceRoot,
 						daemonConfigDir,
 						environment: () => environment,
+						onAbandonedRun: (inputId) =>
+							callbacks.retireAfterCommand?.(inputId),
 					},
 					emit,
 				);

@@ -31,7 +31,7 @@ export const WithDescription: Story = {
 };
 
 export const Checked: Story = {
-	args: { checked: true },
+	args: { checked: true, onchange: meta.args.onchange },
 };
 
 export const Disabled: Story = {
@@ -39,5 +39,5 @@ export const Disabled: Story = {
 };
 
 export const DisabledChecked: Story = {
-	args: { checked: true, disabled: true },
+	args: { checked: true, disabled: true, onchange: meta.args.onchange },
 };
