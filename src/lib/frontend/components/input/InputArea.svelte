@@ -523,6 +523,11 @@
 	// the textarea's own (unhighlighted) text, exactly as during IME composition.
 	const HIGHLIGHT_MAX_CHARS = 20_000;
 	const plainText = $derived(inputText.length > HIGHLIGHT_MAX_CHARS);
+	// Set when the draft crosses into plain text; revealCaret() consumes it.
+	let enteredPlainText = false;
+	$effect(() => {
+		if (plainText) enteredPlainText = true;
+	});
 
 	const draftProject = $derived(projectState.projects.find((project) => project.slug === getDraftProject()));
 	const unsupportedDraftFolders = $derived(
@@ -635,13 +640,21 @@
 	 * text, while the scroller is still too short to reach the caret, and nothing
 	 * scrolls again once the row grows. So once the mirror has caught up, measure
 	 * the caret with a probe laid out exactly like both layers and scroll to it.
-	 * Past HIGHLIGHT_MAX_CHARS the textarea is its own scroller, and crossing the
-	 * limit swaps scrollers without the browser revealing the caret in the new one.
+	 * Past HIGHLIGHT_MAX_CHARS the textarea is its own scroller and the browser
+	 * keeps the caret in it, so only the edit that crosses the limit needs help:
+	 * it swaps scrollers, and the new one comes up at the top. A probe there lays
+	 * the whole draft out once, so a caret at the end just takes the bottom.
 	 */
 	function revealCaret() {
-		const scroller = plainText ? textareaEl : fieldScroller;
-		if (!textareaEl || !scroller || scroller.scrollHeight <= scroller.clientHeight) return;
+		if (!textareaEl || (plainText && !enteredPlainText)) return;
+		enteredPlainText = false;
 		const { value, selectionEnd, clientWidth } = textareaEl;
+		if (plainText && selectionEnd === value.length) {
+			textareaEl.scrollTop = textareaEl.scrollHeight;
+			return;
+		}
+		const scroller = plainText ? textareaEl : fieldScroller;
+		if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return;
 		const probe = document.createElement("div");
 		probe.className = "composer-text-metrics";
 		probe.style.cssText = `position: absolute; inset: 0 auto auto 0; width: ${clientWidth}px; box-sizing: border-box; visibility: hidden`;
