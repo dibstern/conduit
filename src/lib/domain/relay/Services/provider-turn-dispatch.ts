@@ -38,7 +38,6 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
-import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
 	catalogFromProviderList,
@@ -577,20 +576,6 @@ const prepareEngineTurnInput = (
 		const driver = account.driver;
 		const providerId = account.id;
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
-		const registry = yield* Effect.serviceOption(ProviderRegistryTag);
-		if (
-			traits.unavailableReason &&
-			(registry._tag === "None" || !registry.value.hasInstance(driver))
-		) {
-			yield* failUnfinishedSend(
-				resolvedInput,
-				driver,
-				false,
-				traits.unavailableReason,
-				"PROVIDER_UNAVAILABLE",
-			);
-			return undefined;
-		}
 		const readQuery = yield* ReadQueryEffectTag;
 		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
 		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
