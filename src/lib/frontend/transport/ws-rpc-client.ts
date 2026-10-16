@@ -1,7 +1,7 @@
 import { Effect, Either } from "effect";
 import type { ClaudeSettingsOverrides } from "../../contracts/claude-settings.js";
 import type { UsageLimitsSetting } from "../../contracts/limit-recovery.js";
-import type { SessionMode } from "../../contracts/project-file.js";
+import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import { AccountIdSchema } from "../../contracts/provider-instance.js";
 import type { InputDelivery } from "../../contracts/stored-event.js";
 import type { ToolCallId } from "../../contracts/tool-wire.js";
@@ -617,7 +617,7 @@ export async function resolveSessionModeRpc(projectSlug: string) {
 
 export async function setDefaultSessionModeRpc(input: {
 	readonly projectSlug: string;
-	readonly mode: SessionMode;
+	readonly mode: DefaultSessionMode;
 }) {
 	return runTransportEffect(
 		callControl(input.projectSlug, (client) =>
