@@ -31,7 +31,7 @@ vi.mock(
 				: Promise.resolve({
 						projectSlug: "current-project",
 						sessionId: "fork",
-						parentId: "other",
+						forkedFrom: "other",
 					}),
 		),
 	}),

@@ -45,6 +45,7 @@
 	import { stopBackgroundTasks } from "../session/background-tasks.svelte.js";
 	import { currentChat, draftSend, followSessionBusy, getOrCreateSessionSlot, inputSyncState, isProcessing, phaseToProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
+	import { approvals } from "../../stores/composer-settings.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -91,7 +92,7 @@
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingImage } from "../../types.js";
+	import type { PendingImage, SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
@@ -266,6 +267,8 @@
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
+	const composerNotices: Partial<Record<SessionPermissionMode, string>> | undefined = $derived(composerPresentation?.composerNotice);
+	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -1682,8 +1685,8 @@
 				{/if}
 			</div>
 		{/if}
-		{#if composerPresentation?.composerNotice}
-			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation.composerNotice}</p>
+		{#if composerNotice}
+			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
 		{/if}
 		{#if currentSession?.backgroundTasks?.length}
 			<!-- One pulse per live background task; the header row lists them. -->

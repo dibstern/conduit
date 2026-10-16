@@ -8,7 +8,7 @@ import { createLogger } from "../../logger.js";
 import { createEventId } from "../../persistence/events.js";
 import type { EventSinkError } from "../event-sink-errors.js";
 import { toRecord } from "../normalize-tool-input-helpers.js";
-import type { EventSink } from "../types.js";
+import type { EventSink, TurnTokens } from "../types.js";
 import {
 	type CursorToolCall,
 	CursorToolResults,
@@ -104,7 +104,17 @@ const decodeStream = Schema.decodeUnknownEither(
 	),
 );
 
-/** Deltas own content; stream messages add correlation, truncation and progress. */
+const decodeUsage = Schema.decodeUnknownEither(
+	Schema.Struct({
+		inputTokens: Schema.NonNegative,
+		outputTokens: Schema.NonNegative,
+		cacheReadTokens: Schema.NonNegative,
+		cacheWriteTokens: Schema.NonNegative,
+		reasoningTokens: Schema.optional(Schema.NonNegative),
+	}),
+);
+
+/** Deltas own content; stream messages add correlation, truncation, progress and per-turn usage. */
 export class CursorTurnEvents {
 	private part = 0;
 	private textPart: string | undefined;
@@ -126,6 +136,8 @@ export class CursorTurnEvents {
 	>();
 	private readonly lastShell = new Map<string, string>();
 	private readonly results: CursorToolResults;
+	tokens: TurnTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	contextTokens: number | undefined;
 	readonly refs: {
 		providerSessionId?: string | undefined;
 		providerTurnId?: string | undefined;
@@ -207,7 +219,63 @@ export class CursorTurnEvents {
 						);
 				}
 			}
+			if (
+				decoded.right.type === "usage" &&
+				typeof value === "object" &&
+				value &&
+				"usage" in value
+			) {
+				const usage = decodeUsage(value.usage);
+				if (Either.isLeft(usage)) {
+					log.warn("Skipped malformed Cursor usage update");
+					return;
+				}
+				this.contextTokens =
+					usage.right.inputTokens +
+					usage.right.cacheReadTokens +
+					usage.right.cacheWriteTokens;
+				this.tokens = {
+					input: this.tokens.input + usage.right.inputTokens,
+					output: this.tokens.output + usage.right.outputTokens,
+					cacheRead: (this.tokens.cacheRead ?? 0) + usage.right.cacheReadTokens,
+					cacheWrite:
+						(this.tokens.cacheWrite ?? 0) + usage.right.cacheWriteTokens,
+					...(usage.right.reasoningTokens !== undefined
+						? {
+								reasoning:
+									(this.tokens.reasoning ?? 0) + usage.right.reasoningTokens,
+							}
+						: {}),
+				};
+			}
 		});
+	}
+
+	reconcileUsage(value: unknown) {
+		const usage = decodeUsage(value);
+		if (Either.isLeft(usage)) return;
+		// RunResult repeats the sum of every reported turn on this run, including
+		// background follow-ups. Fill missing reports without adding the sum twice.
+		this.tokens = {
+			input: Math.max(this.tokens.input, usage.right.inputTokens),
+			output: Math.max(this.tokens.output, usage.right.outputTokens),
+			cacheRead: Math.max(
+				this.tokens.cacheRead ?? 0,
+				usage.right.cacheReadTokens,
+			),
+			cacheWrite: Math.max(
+				this.tokens.cacheWrite ?? 0,
+				usage.right.cacheWriteTokens,
+			),
+			...(usage.right.reasoningTokens !== undefined
+				? {
+						reasoning: Math.max(
+							this.tokens.reasoning ?? 0,
+							usage.right.reasoningTokens,
+						),
+					}
+				: {}),
+		};
 	}
 
 	endThinking() {

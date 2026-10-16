@@ -169,7 +169,8 @@ it.each([
 				variant: "high",
 				context_window: "200k",
 			});
-			expect(childRow?.parent_id).toBe("parent");
+			expect(childRow?.parent_id).toBeNull();
+			expect(childRow?.forked_from).toBe("parent");
 			expect(childRow?.fork_point_message_id).toBe(boundary);
 			const history = yield* read.getSessionMessagesWithParts(child.id);
 			expect(history.at(-1)?.id).toBe(`${boundary}_${child.id}`);
