@@ -84,6 +84,8 @@ Add environment overrides in `src/lib/env.ts`:
 - `CONDUIT_TRACE_MAX_FILES`: retained rotated file count, default `10`
 - `CONDUIT_TRACE_BATCH_WINDOW_MS`: flush cadence, default `200`
 - `CONDUIT_TRACE_ENABLED`: default `true`; `0` disables local file tracing for tests or constrained environments
+- `CONDUIT_TRACE_MIN_MS`: omit successful spans below this duration in milliseconds, default `5`; failures, defects, and interruptions are always recorded
+- `CONDUIT_TRACE_SESSION`: record every span with this `sessionId` on itself or a reachable ancestor, regardless of duration
 
 Resolve a relative `CONDUIT_TRACE_FILE` against `configDir`, not against the process cwd. The trace artifact belongs to daemon runtime state, and cwd changes between CLI, daemon child, tests, and foreground dev mode.
 

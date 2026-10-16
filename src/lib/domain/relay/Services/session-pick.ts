@@ -151,6 +151,7 @@ export const sessionPickEvents = (sessionId: string, pick: TurnSettings) => [
 export const backfillSessionPicks = () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const store = yield* EventStoreEffectTag;
 		const [repairState] = yield* sql<{ initialized: number }>`
 			SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
 		if (repairState?.initialized === 0) {
@@ -163,8 +164,9 @@ export const backfillSessionPicks = () =>
 					SELECT initialized FROM session_pick_backfill_state WHERE singleton = 1`;
 					if (current?.initialized === 1) return;
 					yield* sql`INSERT OR IGNORE INTO session_pick_backfill (session_id)
-					SELECT id FROM sessions WHERE model_id IS NULL OR model_provider IS NULL
-						OR variant IS NULL OR context_window IS NULL`;
+					SELECT id FROM sessions WHERE project_id = ${store.projectId}
+						AND (model_id IS NULL OR model_provider IS NULL
+						OR variant IS NULL OR context_window IS NULL)`;
 					yield* sql`UPDATE session_pick_backfill_state SET initialized = 1 WHERE singleton = 1`;
 				}),
 			);
@@ -175,10 +177,10 @@ export const backfillSessionPicks = () =>
 			retry_reason: string;
 		}>`
 			SELECT s.id, s.provider, b.retry_reason FROM session_pick_backfill b
-			JOIN sessions s ON s.id = b.session_id`;
+			JOIN sessions s ON s.id = b.session_id
+			WHERE s.project_id = ${store.projectId}`;
 		if (missing.length === 0) return 0;
 		const read = yield* ReadQueryEffectTag;
-		const store = yield* EventStoreEffectTag;
 		const commit = yield* makeCommitAndSignal;
 		const accounts = yield* AccountDirectory;
 		let filled = 0;
@@ -218,15 +220,15 @@ export const backfillSessionPicks = () =>
 			FROM turns t
 			LEFT JOIN messages u ON u.id = t.user_message_id
 			LEFT JOIN messages a ON a.id = t.assistant_message_id
-			LEFT JOIN command_receipts r ON r.command_id = COALESCE(u.input_id, t.id) AND r.command_type = 'send_turn'
+			LEFT JOIN command_receipts r ON r.command_id = COALESCE(u.input_id, t.id) AND r.command_type = 'send_turn' AND r.project_key = ${store.projectId}
 			LEFT JOIN provider_command_outbox o ON o.request_sequence = COALESCE(r.side_effect_sequence, (
 				SELECT old.request_sequence FROM provider_command_outbox old
-				WHERE u.input_id IS NULL AND old.session_id = t.session_id AND old.effect_type = 'send_turn'
+				WHERE old.project_key = ${store.projectId} AND u.input_id IS NULL AND old.session_id = t.session_id AND old.effect_type = 'send_turn'
 					AND old.status IN ('running', 'completed', 'failed', 'retryable_failed') AND old.error_code IS NOT 'orphaned'
 					AND json_extract(old.payload_json, '$.prompt') = u.text
 					AND old.requested_at <= COALESCE(t.started_at, t.requested_at)
 				ORDER BY old.request_sequence DESC LIMIT 1
-			)) AND o.effect_type = 'send_turn' AND json_valid(o.payload_json)
+			)) AND o.project_key = ${store.projectId} AND o.effect_type = 'send_turn' AND json_valid(o.payload_json)
 			WHERE t.session_id = ${id}
 				AND (t.started_at IS NOT NULL OR t.assistant_message_id IS NOT NULL OR o.status IN ('running', 'completed'))
 			ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1`;

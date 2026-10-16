@@ -12,8 +12,8 @@
 	} from "../../stores/terminal.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
-	import { ptyInputRpc, resizePtyRpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { XtermAdapter } from "../../utils/xterm-adapter.js";
 	import { XTERM_THEMES } from "../../utils/xterm-themes.js";
 	import { themeState } from "../../stores/theme.svelte.js";
@@ -36,7 +36,7 @@
 	function sendResize(size: { cols: number; rows: number }) {
 		const projectSlug = getCurrentSlug();
 		if (!projectSlug) return;
-		void resizePtyRpc({
+		void rpc("ResizePty", {
 			projectSlug,
 			ptyId,
 			originId: getBrowserClientId(),
@@ -61,9 +61,9 @@
 			unsentInput = "";
 			if (!projectSlug) break;
 			try {
-				await ptyInputRpc({ projectSlug, ptyId, data: chunk });
-			} catch {
-				showToast("Terminal input was not delivered", { variant: "warn" });
+				await rpc("PtyInput", { projectSlug, ptyId, data: chunk });
+			} catch (error) {
+				toastFailure("Terminal input was not delivered", "warn")(error);
 				unsentInput = "";
 			}
 		}

@@ -26,7 +26,11 @@ for (const viewport of [
 		const projectSlug = "e2e-replay";
 		const main = "/workspace/main";
 		const projects = [
-			{ slug: projectSlug, title: "Workspace project", folders: [main] },
+			{
+				slug: projectSlug,
+				title: "Workspace project",
+				folders: [main] as const,
+			},
 		];
 		const session = {
 			accountId: null,
@@ -55,8 +59,6 @@ for (const viewport of [
 					projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 					providers: [],
 				}),
-			},
-			handlers: {
 				GetProjects: () => ({ projects, current: projectSlug }),
 			},
 		});

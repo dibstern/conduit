@@ -128,6 +128,7 @@ type ProviderCommandExecutionError =
 	| ProviderInstanceFailure;
 
 export interface ProviderSideEffectReactorOptions {
+	readonly projectId: string;
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest">;
@@ -367,8 +368,9 @@ export class ProviderSideEffectReactor {
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
 			FROM provider_command_outbox
-			WHERE status = 'pending'
-			   OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs})
+			WHERE project_key = ${this.options.projectId}
+				AND (status = 'pending'
+					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs}))
 			ORDER BY request_sequence
 			LIMIT 1`.pipe(
 			Effect.map((rows) => rows[0]),
@@ -388,6 +390,7 @@ export class ProviderSideEffectReactor {
 			    next_attempt_at = NULL,
 			    updated_at = ${updatedAt}
 			WHERE request_sequence = ${row.request_sequence}
+			  AND project_key = ${this.options.projectId}
 			  AND status IN ('pending', 'retryable_failed')
 			RETURNING attempt_count`.pipe(
 			Effect.map((rows) => rows[0]?.attempt_count),
@@ -436,6 +439,7 @@ export class ProviderSideEffectReactor {
 						mark(turnKey, "history-ready");
 						return instance.sendTurnEffect({
 							...payload,
+							commandAttempt,
 							account:
 								payload.account ??
 								(account?.driver === "claude" && prepared
@@ -445,7 +449,6 @@ export class ProviderSideEffectReactor {
 							history: payload.history ?? [],
 							...(getProviderDriver(driver)?.supportsNativeResume
 								? {
-										commandAttempt,
 										prompt: prepared?.prompt ?? payload.prompt,
 										text: payload.prompt,
 										configDir: prepared?.configDir,
@@ -619,7 +622,8 @@ export class ProviderSideEffectReactor {
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
 			       effect_type, payload_json, attempt_count
 			FROM provider_command_outbox
-			WHERE command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
+			WHERE project_key = ${this.options.projectId}
+				AND command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
 			ORDER BY request_sequence
 			LIMIT 1`.pipe(
 			Effect.map((rows) => rows[0]),
@@ -636,7 +640,8 @@ export class ProviderSideEffectReactor {
 		return this.options.sql<{
 			readonly status: string;
 			readonly error_code: string | null;
-		}>`SELECT status, error_code FROM command_receipts WHERE command_id = ${commandId}`.pipe(
+		}>`SELECT status, error_code FROM command_receipts
+			WHERE command_id = ${commandId} AND project_key = ${this.options.projectId}`.pipe(
 			Effect.map((rows) => rows[0]),
 			Effect.mapError(storeFailure("receiptOutcome")),
 		);
@@ -704,11 +709,13 @@ export class ProviderSideEffectReactor {
 					sql`
 						UPDATE provider_command_outbox
 						SET status = 'completed', updated_at = ${updatedAt}
-						WHERE request_sequence = ${row.request_sequence}`,
+						WHERE request_sequence = ${row.request_sequence}
+							AND project_key = ${this.options.projectId}`,
 					sql`
 						UPDATE command_receipts
 						SET status = 'side_effect_completed', updated_at = ${updatedAt}
-						WHERE command_id = ${row.command_id}`,
+						WHERE command_id = ${row.command_id}
+							AND project_key = ${this.options.projectId}`,
 				]),
 			)
 			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markCompleted")));
@@ -740,7 +747,7 @@ export class ProviderSideEffectReactor {
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return this.writeFailure(
 			row,
-			turn.error?.retryable === true,
+			turn.error?.retryable === true && turn.error.retryHandled !== true,
 			turn.error?.code ?? turn.status,
 			updatedAt,
 		);
@@ -766,11 +773,13 @@ export class ProviderSideEffectReactor {
 						    error_code = ${errorCode},
 						    next_attempt_at = ${nextAttemptAt},
 						    updated_at = ${updatedAt}
-						WHERE request_sequence = ${row.request_sequence}`,
+						WHERE request_sequence = ${row.request_sequence}
+							AND project_key = ${this.options.projectId}`,
 					sql`
 						UPDATE command_receipts
 						SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
-						WHERE command_id = ${row.command_id}`,
+						WHERE command_id = ${row.command_id}
+							AND project_key = ${this.options.projectId}`,
 				]),
 			)
 			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markFailed")));

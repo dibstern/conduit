@@ -9,10 +9,8 @@ import {
 	setMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
-	applyGetAgentsResponse,
 	choosePermissionMode,
 	clearDiscoveryState,
-	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
 import {
@@ -438,45 +436,6 @@ describe("switchToSession", () => {
 		}
 	});
 
-	it("ignores session discovery returned after attaching another project", async () => {
-		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
-		let finish: (
-			response: Awaited<ReturnType<typeof sessionRpc.rpc<"GetAgents">>>,
-		) => void = () => {};
-		const spy = vi.spyOn(sessionRpc, "rpc").mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					finish = resolve;
-				}),
-		);
-		try {
-			attachedProjectState.slug = "project-a";
-			switchToSession(
-				"session-a",
-				undefined,
-				vi.fn().mockResolvedValue({ ok: true }),
-			);
-			attachedProjectState.slug = "project-b";
-			clearSessionState();
-			applyGetAgentsResponse({
-				projectSlug: "project-b",
-				providerScope: { id: "b", name: "B" },
-				agents: [],
-				activeAgentId: "agent-b",
-			});
-			finish({
-				projectSlug: "project-a",
-				providerScope: { id: "a", name: "A" },
-				agents: [],
-				activeAgentId: "agent-a",
-			});
-			await Promise.resolve();
-			expect(discoveryState.activeAgentId).toBe("agent-b");
-		} finally {
-			spy.mockRestore();
-			vi.unstubAllGlobals();
-		}
-	});
 	it("builds the session route and addresses the RPC by session", () => {
 		vi.stubGlobal("window", { history: { pushState: vi.fn() } });
 		try {

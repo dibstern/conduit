@@ -189,6 +189,9 @@ const VERBS: Record<string, [past: string, present: string]> = {
 	Task: ["Delegated", "Delegating"],
 	Skill: ["Loaded", "Loading"],
 	AskUserQuestion: ["Asked", "Asking"],
+	ComputerUse: ["Used computer", "Using computer"],
+	CreatePlan: ["Created plan", "Planning"],
+	Delete: ["Deleted", "Deleting"],
 };
 
 export function toolVerb(
@@ -202,6 +205,15 @@ export function toolVerb(
 
 /** The tool's own one-line summary (file path, command, pattern…). */
 export function toolSubject(tool: ToolMessage): string {
+	const progress = tool.metadata?.["progress"];
+	if (
+		tool.result === undefined &&
+		tool.status !== "error" &&
+		typeof tool.metadata?.["cursorToolType"] === "string" &&
+		typeof progress === "string" &&
+		progress
+	)
+		return progress;
 	return (
 		lookupSummarizer(tool.name).summarize(
 			ensureCanonical(tool.name, tool.input),
@@ -738,13 +750,14 @@ export interface TurnEconomics {
 	tokensOut?: number;
 	/** Present only when the provider reported a context window — never guessed. */
 	context?: { used: number; window: number; pct: number };
+	contextWithoutCapacity?: number;
 }
 
 /**
  * What the turn cost, and how full the context was when it finished. Context
  * used is the final call's fresh input plus everything read from and written to
- * cache; tokens sum the reported usage across segments. A provider that reports
- * no window gets no context reading at all.
+ * cache; tokens sum the reported usage across segments. An explicitly unknown
+ * capacity shows occupancy alone; legacy omitted windows retain their display.
  */
 export function economics(turn: Turn, now: number): TurnEconomics {
 	const result = lastResult(turn);
@@ -769,6 +782,9 @@ export function economics(turn: Turn, now: number): TurnEconomics {
 			tokensOut = (tokensOut ?? 0) + end.outputTokens;
 	}
 	return {
+		...(window === 0 && result?.contextTokens !== undefined
+			? { contextWithoutCapacity: result.contextTokens }
+			: {}),
 		...(duration !== undefined ? { duration } : {}),
 		...(result?.cost !== undefined ? { cost: result.cost } : {}),
 		...(tokensIn !== undefined ? { tokensIn } : {}),

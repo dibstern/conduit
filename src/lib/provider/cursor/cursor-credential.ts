@@ -1,14 +1,23 @@
 import { createHash } from "node:crypto";
 import type { CursorCredential, CursorSdkPort } from "./sdk-port.js";
 
+export function cursorEnvironmentKey(
+	port: CursorSdkPort,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): string | undefined {
+	// Replay never consumes a developer's real credential.
+	return !port.replay ||
+		(env["NODE_ENV"] === "test" &&
+			env["CURSOR_API_KEY"] === "[REDACTED:environment]")
+		? env["CURSOR_API_KEY"]?.trim()
+		: undefined;
+}
+
 export async function resolveCursorCredential(
 	port: CursorSdkPort,
 	env: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<CursorCredential | undefined> {
-	// Replay never consumes a developer's real credential.
-	const environmentKey = port.replay
-		? undefined
-		: env["CURSOR_API_KEY"]?.trim();
+	const environmentKey = cursorEnvironmentKey(port, env);
 	const stored = environmentKey ? undefined : await port.storedCredential();
 	if (
 		!environmentKey &&
@@ -22,7 +31,15 @@ export async function resolveCursorCredential(
 	if (!apiKey) return undefined;
 	const credential = {
 		source: environmentKey ? "environment" : "sdk-login",
-		fingerprint: createHash("sha256").update(apiKey).digest("hex"),
+		fingerprint: createHash("sha256")
+			.update(
+				JSON.stringify([
+					environmentKey ? "environment" : "sdk-login",
+					stored?.backendUrl ?? "",
+					apiKey,
+				]),
+			)
+			.digest("hex"),
 		...(!environmentKey && stored ? { backendUrl: stored.backendUrl } : {}),
 	} as CursorCredential;
 	// Accidental JSON/log serialization must not expose the credential.

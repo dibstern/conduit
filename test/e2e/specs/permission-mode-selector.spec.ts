@@ -142,13 +142,13 @@ async function setup(
 						String("sessionId" in params ? params.sessionId : undefined),
 					) ?? "ask",
 			}),
-		},
-		handlers: {
-			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
 			GetProjects: () => ({
 				projects: [{ slug: "myapp", title: "myapp", folders: ["/tmp/myapp"] }],
 				current: "myapp",
 			}),
+		},
+		handlers: {
+			ListSessions: () => ({ projectSlug: "myapp", sessions: [] }),
 			ListPtys: () => ({ projectSlug: "myapp", ptys: [] }),
 		},
 	});

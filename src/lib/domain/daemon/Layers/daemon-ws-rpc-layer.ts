@@ -28,6 +28,7 @@ import {
 import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
+import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -73,6 +74,7 @@ import {
 	applyAccountChange,
 	discoverInstances,
 	getInstance,
+	getInstances,
 	type InstanceManagerStateTag,
 	type PollerFibersTag,
 	persistConfig,
@@ -81,6 +83,7 @@ import {
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	broadcastProjectList,
@@ -130,7 +133,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
-		const context = Context.add(baseContext, SessionActivityTag, activity);
+		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.merge(yield* optionalPersistenceStoreContext),
+		);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -264,6 +269,22 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* discoverInstances);
 		});
+		const cursorAuth = yield* makeCursorAuth((authenticated) =>
+			run(
+				Effect.gen(function* () {
+					if (
+						authenticated &&
+						!(yield* getInstances).some(
+							(instance) => instance.driver === "cursor",
+						)
+					) {
+						yield* addInstance({ name: "Cursor", driver: "cursor" });
+						yield* persistConfig;
+					}
+					yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+				}),
+			),
+		);
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
@@ -508,6 +529,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						})),
 					),
 				),
+			GetCursorAuth: () => cursorAuth.read,
+			StartCursorLogin: () => cursorAuth.start,
+			CancelCursorLogin: () => cursorAuth.cancel,
+			LogoutCursor: () => cursorAuth.logout,
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(
@@ -753,7 +778,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.mapError(
 							(error) =>
 								new WsRpcError({
-									code: "ambiguous-session",
+									...(error._tag === "AmbiguousSession"
+										? { code: "ambiguous-session" as const }
+										: {}),
 									message: error.message,
 								}),
 						),

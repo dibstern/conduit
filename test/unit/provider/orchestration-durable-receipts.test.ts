@@ -122,6 +122,47 @@ function receiptRow(sql: SqlClient.SqlClient, commandId: string) {
 }
 
 describe("OrchestrationEngine durable receipts", () => {
+	// Caller-supplied command ids are globally unique keys, not ownership proof.
+	it.effect("rejects replay of another project's orphaned command", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const command = sendTurnCommand();
+			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
+			yield* sql`INSERT INTO command_receipts (
+				command_id, session_id, project_key, status, created_at,
+				fingerprint_hash, fingerprint_version, updated_at
+			) VALUES (${command.commandId}, 'session-b', 'project-b',
+				'side_effect_requested', 1000, ${hash}, 2, 1000)`;
+			yield* sql`INSERT INTO provider_command_outbox (
+				request_sequence, command_id, project_key, session_id, provider_id,
+				effect_type, payload_json, status, attempt_count, requested_at, updated_at
+			) VALUES (1, ${command.commandId}, 'project-b', 'session-b', 'opencode',
+				'send_turn', '{}', 'pending', 0, 1000, 1000)`;
+			const before = JSON.stringify({
+				receipts: yield* sql`SELECT * FROM command_receipts`,
+				outbox: yield* sql`SELECT * FROM provider_command_outbox`,
+			});
+			const registry = new ProviderRegistry();
+			const instance = makeStubInstance("opencode");
+			registry.registerInstance(instance);
+			const engine = new OrchestrationEngine({
+				registry,
+				durableCommands: yield* makeDurableOptions({ sql }),
+			});
+			const result = yield* Effect.either(engine.dispatchEffect(command));
+			expect(result._tag).toBe("Left");
+			expect(
+				JSON.stringify({
+					receipts: yield* sql`SELECT * FROM command_receipts`,
+					outbox: yield* sql`SELECT * FROM provider_command_outbox`,
+				}),
+			).toBe(before);
+			expect(instance.sendTurnEffect).not.toHaveBeenCalled();
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+		),
+	);
+
 	for (const providerId of ["claude", "opencode"]) {
 		it.effect(
 			`commits ${providerId} send_turn without a transcript in the outbox`,
@@ -551,7 +592,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						"side_effect_requested",
 						1000,
 						"send_turn",
-						"project-1",
+						"test-project",
 						hash,
 						2,
 						1,
@@ -597,7 +638,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						"side_effect_requested",
 						1000,
 						"send_turn",
-						"project-1",
+						"test-project",
 						hash,
 						2,
 						1,
@@ -617,7 +658,7 @@ describe("OrchestrationEngine durable receipts", () => {
 					[
 						1,
 						command.commandId,
-						"project-1",
+						"test-project",
 						"session-1",
 						"opencode",
 						"send_turn",
@@ -683,7 +724,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						"side_effect_completed",
 						1000,
 						"send_turn",
-						"project-1",
+						"test-project",
 						hash,
 						1,
 						1,
@@ -721,7 +762,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				yield* sql.unsafe(
 					`INSERT INTO provider_command_tombstones
 						(project_key, scope_kind, scope_id, event_sequence, reason_code, tombstoned_at)
-					 VALUES ('project-1', 'session', 'session-1', 1, 'session_deleted', 500)`,
+					 VALUES ('test-project', 'session', 'session-1', 1, 'session_deleted', 500)`,
 				);
 
 				const registry = new ProviderRegistry();

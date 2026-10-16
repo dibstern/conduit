@@ -263,6 +263,7 @@ export const ProjectInfoSchema = Schema.Struct({
 		Schema.Record({ key: Schema.String, value: RepositoryIdentitySchema }),
 	),
 	missing: Schema.optional(Schema.Boolean),
+	unavailableReason: Schema.optional(Schema.String),
 	git: Schema.optional(SessionGitSchema),
 	clientCount: Schema.optional(Schema.Number),
 });
@@ -284,6 +285,7 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	usageEligible: Schema.optional(Schema.Boolean),
 	available: Schema.optional(Schema.Boolean),
 	unavailableReason: Schema.optional(Schema.String),
+	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -673,7 +675,7 @@ export const ForkSessionResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	sessionId: Schema.String,
 	/** Lineage for the forking tab until the fork's family row arrives. */
-	parentId: Schema.String,
+	forkedFrom: Schema.String,
 	forkMessageId: Schema.optional(Schema.String),
 	forkPointTimestamp: Schema.optional(Schema.Number),
 });
@@ -1100,6 +1102,49 @@ export class RestartWithConfig extends Schema.TaggedRequest<RestartWithConfig>()
 		success: OkResponseSchema,
 		payload: {},
 	},
+) {}
+
+export const CursorAuthStateSchema = Schema.Struct({
+	source: Schema.Literal("environment", "sdk-login", "none"),
+	status: Schema.Literal("logged-in", "logged-out", "error"),
+	email: Schema.optional(Schema.String),
+	apiKeyExpiresAtMs: Schema.optional(Schema.Number),
+	expiresSoon: Schema.Boolean,
+	error: Schema.optional(Schema.String),
+	login: Schema.Struct({
+		state: Schema.Literal(
+			"idle",
+			"pending",
+			"complete",
+			"cancelled",
+			"timed-out",
+			"error",
+		),
+		url: Schema.optional(Schema.String),
+		deadlineAtMs: Schema.optional(Schema.Number),
+		error: Schema.optional(Schema.String),
+	}),
+});
+export type CursorAuthState = typeof CursorAuthStateSchema.Type;
+
+export class GetCursorAuth extends Schema.TaggedRequest<GetCursorAuth>()(
+	"GetCursorAuth",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class StartCursorLogin extends Schema.TaggedRequest<StartCursorLogin>()(
+	"StartCursorLogin",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class CancelCursorLogin extends Schema.TaggedRequest<CancelCursorLogin>()(
+	"CancelCursorLogin",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
+) {}
+
+export class LogoutCursor extends Schema.TaggedRequest<LogoutCursor>()(
+	"LogoutCursor",
+	{ failure: WsRpcError, success: CursorAuthStateSchema, payload: {} },
 ) {}
 
 export class GetInstances extends Schema.TaggedRequest<GetInstances>()(
@@ -2761,6 +2806,10 @@ const wsRpcRequests = [
 	SetAgent,
 	RestartWithConfig,
 	GetInstances,
+	GetCursorAuth,
+	StartCursorLogin,
+	CancelCursorLogin,
+	LogoutCursor,
 	GetInstanceStatus,
 	{
 		requests: [AttachProjectForSession, AttachProject],

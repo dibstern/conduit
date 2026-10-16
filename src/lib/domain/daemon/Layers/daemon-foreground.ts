@@ -56,6 +56,7 @@ import {
 	requestManagedOpenCodeShutdown,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeUnavailableError } from "../Services/opencode-smart-default.js";
+import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	normalizeProjectDirectory,
 	type ProjectRegistryState,
@@ -479,6 +480,7 @@ export async function startForegroundDaemon(
 			runtime,
 			Effect.gen(function* () {
 				const relayCache = yield* RelayCacheTag;
+				const storeContext = yield* optionalPersistenceStoreContext;
 				// Persist startup refreshes even when no project is saved this run.
 				yield* (yield* ConfigPersistenceTag).requestSave;
 				const registered = yield* currentHandle.getProjects();
@@ -504,7 +506,7 @@ export async function startForegroundDaemon(
 								project,
 								configDir,
 								openCodeInstanceIds,
-							))
+							).pipe(Effect.provide(storeContext)))
 						) {
 							// Recovery subscribes OpenCode directories passively, including
 							// projects no browser has opened since the restart.

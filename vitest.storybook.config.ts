@@ -7,6 +7,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	plugins: [svelte(), tailwindcss()],
+	// Pre-bundle lazily imported deps: discovering one mid-run reloads the
+	// browser and aborts the test files in flight.
+	optimizeDeps: { include: ["mermaid", "highlight.js"] },
 	test: {
 		projects: [
 			{

@@ -6,6 +6,7 @@
 		type FindFolders,
 		ProjectSaveRejected,
 		type FindFoldersResponse,
+		type SaveProject,
 		type SaveProjectResponse,
 	} from "../../transport/ws-rpc.js";
 	import { type FolderIssue, labelProjectFolders } from "../../../project-folders.js";
@@ -23,11 +24,7 @@
 	import type { OpenCodeInstance, ProjectInfo } from "../../types.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
-	import {
-		rpc,
-		saveProjectRpc,
-		type SaveProjectRpcInput,
-	} from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
@@ -50,7 +47,7 @@
 		onsaved,
 		returnFocus,
 		findFolders = (input) => rpc("FindFolders", input),
-		saveProject = saveProjectRpc,
+		saveProject = (input) => rpc("SaveProject", input),
 	}: {
 		open: boolean;
 		/** Opens the dialog in Edit mode for this project. */
@@ -61,7 +58,7 @@
 		onsaved?: (response: SaveProjectResponse) => void;
 		returnFocus?: () => HTMLElement | null;
 		findFolders?: (input: ConstructorParameters<typeof FindFolders>[0]) => Promise<FindFoldersResponse>;
-		saveProject?: (input: SaveProjectRpcInput) => Promise<SaveProjectResponse>;
+		saveProject?: (input: ConstructorParameters<typeof SaveProject>[0]) => Promise<SaveProjectResponse>;
 	} = $props();
 
 	const uid = $props.id();
@@ -256,7 +253,7 @@
 		} catch (error) {
 			if (!open || version !== saveVersion) return;
 			if (error instanceof ProjectSaveRejected) saveIssues = error.issues;
-			else saveError = error instanceof Error ? error.message : "Couldn't save the project. Try again.";
+			else saveError = failureLine(error, "Couldn't save the project. Try again.");
 		} finally {
 			if (version === saveVersion) saving = false;
 		}

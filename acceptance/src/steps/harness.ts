@@ -45,9 +45,9 @@ export const harnessHandlers: StepHandler[] = [
 	{
 		name: "register Cursor discovery",
 		match:
-			/^a Cursor account is (available with its live models|unavailable with reason (.+))$/,
+			/^a Cursor account (is available with its live models|is unavailable with reason (.+)|needs login with reason (.+))$/,
 		run: ({ world, match }) => {
-			const available = match[1] === "available with its live models";
+			const available = match[1] === "is available with its live models";
 			const instances = [
 				...(mockInstances.get(world.page) ?? []),
 				{
@@ -57,7 +57,14 @@ export const harnessHandlers: StepHandler[] = [
 					isDefault: true,
 					usageEligible: false,
 					available,
-					...(available ? {} : { unavailableReason: match[2] }),
+					...(available
+						? {}
+						: match[3]
+							? {
+									unavailableReason: match[3],
+									unavailableCode: "auth_required",
+								}
+							: { unavailableReason: match[2] }),
 					configDir: "/tmp/cursor-work",
 					port: 0,
 					managed: false,
@@ -86,23 +93,25 @@ export const harnessHandlers: StepHandler[] = [
 					},
 				],
 			});
-			const getModels = rpc.getResponseHandler("GetModels");
-			rpc.setHandler("GetModels", (payload, request) =>
-				payload["instanceId"] === "cursor-work"
-					? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
-					: getModels?.(payload, request),
-			);
-			const getAgents = rpc.getResponseHandler("GetAgents");
-			rpc.setHandler("GetAgents", (payload, request) =>
-				payload["instanceId"] === "cursor-work"
-					? {
-							projectSlug: "myapp",
-							instanceId: "cursor-work",
-							providerScope: { id: "cursor", name: "Cursor" },
-							agents: [],
-						}
-					: getAgents?.(payload, request),
-			);
+			// Other instances keep the default catalogue: an undefined reply fails
+			// the contract decode and the mock's Defect fails every pending RPC.
+			const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+			const getAgents = rpc.stubs.GetAgents ?? rpc.catalogStubs().GetAgents;
+			rpc.setStubs({
+				GetModels: (payload) =>
+					payload.instanceId === "cursor-work"
+						? { projectSlug: "myapp", instanceId: "cursor-work", providers: [] }
+						: getModels(payload),
+				GetAgents: (payload) =>
+					payload.instanceId === "cursor-work"
+						? {
+								projectSlug: "myapp",
+								instanceId: "cursor-work",
+								providerScope: { id: "cursor", name: "Cursor" },
+								agents: [],
+							}
+						: getAgents(payload),
+			});
 		},
 	},
 	{

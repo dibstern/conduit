@@ -35,13 +35,13 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 		{
 			slug: "e2e-replay",
 			title: "App",
-			folders: [main, docs],
+			folders: [main, docs] as const,
 			git: { branch: "main" },
 		},
 		{
 			slug: "other",
 			title: "Other",
-			folders: ["/workspace/other"],
+			folders: ["/workspace/other"] as const,
 			git: { branch: "dev" },
 		},
 	];
@@ -119,9 +119,9 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 				providerScope: { id: provider, name: "Draft provider" },
 				agents: [],
 			}),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetInstances: () => instances,
 		},
 	});

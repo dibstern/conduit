@@ -6,7 +6,7 @@ import {
 	InMemorySpanExporter,
 	SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { Context, Effect, Exit, Option, Tracer } from "effect";
+import { Context, Effect, Exit, FiberId, Option, Tracer } from "effect";
 import { expect, vi } from "vitest";
 
 import {
@@ -161,35 +161,39 @@ describe("Tracing Layer", () => {
 		),
 	);
 
-	it.scoped("makeDaemonTracingLive writes local file spans by default", () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-tracing-"));
-		const path = join(dir, "logs", "server.trace.ndjson");
-		return Effect.gen(function* () {
-			try {
-				yield* Effect.withSpan("daemon.local.trace")(Effect.void);
-				const record = yield* waitForTraceRecord(
-					path,
-					(candidate) => candidate["name"] === "daemon.local.trace",
-				);
-				expect(record).toMatchObject({
-					type: "effect-span",
-					name: "daemon.local.trace",
-				});
-			} finally {
-				rmSync(dir, { recursive: true, force: true });
-			}
-		}).pipe(
-			Effect.provide(
-				makeDaemonTracingLive({
-					enabled: true,
-					filePath: path,
-					maxBytes: 1024 * 1024,
-					maxFiles: 2,
-					batchWindowMs: 10,
-				}),
-			),
-		);
-	});
+	it.scoped(
+		"makeDaemonTracingLive writes local spans with the floor disabled",
+		() => {
+			const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-tracing-"));
+			const path = join(dir, "logs", "server.trace.ndjson");
+			return Effect.gen(function* () {
+				try {
+					yield* Effect.withSpan("daemon.local.trace")(Effect.void);
+					const record = yield* waitForTraceRecord(
+						path,
+						(candidate) => candidate["name"] === "daemon.local.trace",
+					);
+					expect(record).toMatchObject({
+						type: "effect-span",
+						name: "daemon.local.trace",
+					});
+				} finally {
+					rmSync(dir, { recursive: true, force: true });
+				}
+			}).pipe(
+				Effect.provide(
+					makeDaemonTracingLive({
+						enabled: true,
+						filePath: path,
+						maxBytes: 1024 * 1024,
+						maxFiles: 2,
+						batchWindowMs: 10,
+						minMs: 0,
+					}),
+				),
+			);
+		},
+	);
 
 	it.scoped(
 		"makeDaemonTracingLive fans out spans to local file tracing and OTel processors",
@@ -201,7 +205,9 @@ describe("Tracing Layer", () => {
 
 			return Effect.gen(function* () {
 				try {
-					yield* Effect.withSpan("daemon.local.and.otel")(Effect.void);
+					yield* Effect.withSpan("daemon.local.and.otel", {
+						attributes: { sessionId: "debug-session" },
+					})(Effect.void);
 					const record = yield* waitForTraceRecord(
 						path,
 						(candidate) => candidate["name"] === "daemon.local.and.otel",
@@ -228,6 +234,7 @@ describe("Tracing Layer", () => {
 						maxBytes: 1024 * 1024,
 						maxFiles: 2,
 						batchWindowMs: 10,
+						sessionId: "debug-session",
 						spanProcessors: [processor],
 					}),
 				),
@@ -236,11 +243,11 @@ describe("Tracing Layer", () => {
 	);
 
 	it.each([
-		{ sqlMinMs: undefined, retainedMs: [5, 8] },
-		{ sqlMinMs: 5, retainedMs: [5, 8] },
-		{ sqlMinMs: 0, retainedMs: [0, 4.999999, 5, 8] },
-	])("samples only local SQL spans at $sqlMinMs ms", ({
-		sqlMinMs,
+		{ minMs: undefined, retainedMs: [5, 8] },
+		{ minMs: 5, retainedMs: [5, 8] },
+		{ minMs: 0, retainedMs: [0, 4.999999, 5, 8] },
+	])("filters successful local spans at $minMs ms and keeps errors and the debugged session", ({
+		minMs,
 		retainedMs,
 	}) => {
 		const records: TraceRecord[] = [];
@@ -248,7 +255,8 @@ describe("Tracing Layer", () => {
 			filePath: "unused",
 			maxBytes: 1024,
 			maxFiles: 0,
-			...(sqlMinMs !== undefined && { sqlMinMs }),
+			...(minMs !== undefined && { minMs }),
+			sessionId: "debug-session",
 			sink: {
 				write: () => Effect.void,
 				writeSync: (record) => {
@@ -261,24 +269,87 @@ describe("Tracing Layer", () => {
 		const upstream = makeRecordingTracer("upstream");
 		const upstreamSpans = vi.spyOn(upstream, "span");
 		const tracer = makeCompositeTracer(local, upstream);
-		for (const durationNs of [0n, 4_999_999n, 5_000_000n, 8_000_000n]) {
-			tracer
-				.span("sql.execute", Option.none(), Context.empty(), [], 0n, "client")
-				.end(durationNs, Exit.void);
+		for (const name of ["sql.execute", "instance.getAll", "other"]) {
+			for (const durationNs of [0n, 4_999_999n, 5_000_000n, 8_000_000n]) {
+				tracer
+					.span(name, Option.none(), Context.empty(), [], 0n, "client")
+					.end(durationNs, Exit.void);
+			}
+			expect(
+				records
+					.filter((record) => record.name === name)
+					.map((record) => record.durationMs),
+			).toEqual(retainedMs);
 		}
-		tracer
-			.span("other", Option.none(), Context.empty(), [], 0n, "internal")
-			.end(0n, Exit.void);
-		expect(
-			records
-				.filter((record) => record.name === "sql.execute")
-				.map((record) => record.durationMs),
-		).toEqual(retainedMs);
-		expect(records.at(-1)).toMatchObject({ name: "other", durationMs: 0 });
-		expect(upstreamSpans.mock.results).toHaveLength(5);
+		for (const exit of [
+			Exit.fail("failed"),
+			Exit.die("defect"),
+			Exit.interrupt(FiberId.none),
+		]) {
+			for (const name of ["sql.execute", "other"]) {
+				tracer
+					.span(name, Option.none(), Context.empty(), [], 0n, "internal")
+					.end(0n, exit);
+				expect(records.at(-1)).toMatchObject({ name, durationMs: 0 });
+				expect(records.at(-1)?.exit._tag).not.toBe("Success");
+			}
+		}
+		expect(upstreamSpans.mock.results).toHaveLength(18);
 		for (const result of upstreamSpans.mock.results) {
 			expect(result.value.status._tag).toBe("Ended");
 		}
+
+		const external = Tracer.externalSpan({
+			spanId: "external",
+			traceId: "trace",
+		});
+		const parent = tracer.span(
+			"debug.parent",
+			Option.some(external),
+			Context.empty(),
+			[],
+			0n,
+			"internal",
+		);
+		// Pass a composite parent directly to the local tracer, and annotate it
+		// after creating the grandchild so lookup must use live attributes.
+		const child = local.span(
+			"debug.child",
+			Option.some(parent),
+			Context.empty(),
+			[],
+			0n,
+			"internal",
+		);
+		const grandchild = local.span(
+			"debug.grandchild",
+			Option.some(child),
+			Context.empty(),
+			[],
+			0n,
+			"internal",
+		);
+		parent.attribute("sessionId", "debug-session");
+		grandchild.end(0n, Exit.void);
+		child.end(0n, Exit.void);
+		parent.end(0n, Exit.void);
+		expect(records.slice(-3).map((record) => record.name)).toEqual([
+			"debug.grandchild",
+			"debug.child",
+			"debug.parent",
+		]);
+		const beforeExternal = records.length;
+		local
+			.span(
+				"external.child",
+				Option.some(external),
+				Context.empty(),
+				[],
+				0n,
+				"internal",
+			)
+			.end(0n, Exit.void);
+		expect(records).toHaveLength(beforeExternal + (minMs === 0 ? 1 : 0));
 	});
 
 	it("passes the upstream span to composite tracer context", () => {

@@ -8,7 +8,7 @@
 </script>
 
 <script lang="ts">
-	import { AccountIdSchema } from "../../../contracts/provider-instance.js";
+	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
@@ -43,6 +43,7 @@
 	import { currentChat, draftSend, followSessionBusy, inputSyncState, isProcessing, registerInputDraftPersistence, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
 	import { send, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
+	import { approvals } from "../../stores/composer-settings.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import {
@@ -88,7 +89,7 @@
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingImage } from "../../types.js";
+	import type { PendingImage, SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
@@ -212,6 +213,8 @@
 			// Projected rows report every ordinary tool as completed, so the
 			// missing result is what marks the tool still in flight.
 			if (part.type === "tool" && part.result === undefined && part.status !== "error") {
+				const progress = part.metadata?.["progress"];
+				if (typeof part.metadata?.["cursorToolType"] === "string" && typeof progress === "string" && progress) return progress;
 				const summary = lookupSummarizer(part.name).summarize(ensureCanonical(part.name, part.input), {});
 				return summary.subtitle ? `${part.name} · ${summary.subtitle}` : part.name;
 			}
@@ -219,7 +222,7 @@
 		return "";
 	});
 	$effect(() => {
-		requestSessionPreWarm(sessionState.currentId);
+		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
 		return () => requestSessionPreWarm(null);
 	});
 	function draftSessionPayload(projectSlug: string | null) {
@@ -250,18 +253,22 @@
 	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
-	// The settings row appears in one go. Until the daemon answers, models load
-	// and a session link resolves, each control would fill in on its own and
-	// guess (an empty store reads as OpenCode). "" is the undialled state, which
-	// only Storybook stays in.
+	// Wait for accounts and session placement before showing settings. Catalog
+	// loading belongs to the picker, which must stay available to switch accounts.
 	const offline = $derived(["connecting", "disconnected", "error"].includes(connectionState.status));
 	const routeSessionId = $derived(getCurrentSessionId());
 	const settingsPending = $derived(
-		offline || !discoveryState.modelsLoaded || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
+		offline || (!sessionState.currentId && !instanceState.loaded) || (routeSessionId !== null && sessionState.currentId !== routeSessionId),
 	);
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
+	const readOnlySubagent = $derived(
+		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
+		!currentSession?.sideThread,
+	);
+	const composerNotices: Partial<Record<SessionPermissionMode, string>> | undefined = $derived(composerPresentation?.composerNotice);
+	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
 	let sendMenuOpen = $state(false);
@@ -528,7 +535,7 @@
 	);
 	// A session drawn from its saved page takes sends once the server places it.
 	const unplaced = $derived(placedSessionId() !== sessionState.currentId);
-	const canSend = $derived(!unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
+	const canSend = $derived(!readOnlySubagent && !unsupportedDraftFolders && !unplaced && (sessionState.currentId !== null || getDraftPick() !== undefined || (instanceState.loaded && !getEffectiveInstanceId())) && (inputText.trim().length > 0 || pendingImages.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -778,7 +785,7 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (unsupportedDraftFolders || unplaced) return false;
+		if (readOnlySubagent || unsupportedDraftFolders || unplaced) return false;
 		if (!sessionState.currentId && getEffectiveInstanceId() && !getDraftPick()) return false;
 		let text = textOverride ?? inputText.trim();
 		if (!text) return false;
@@ -1055,10 +1062,11 @@
 			inputText = command;
 			newCursorPos = command.length;
 		}
-		// Move cursor to end of inserted command and focus the textarea
+		// Move cursor to end of inserted command and focus the textarea. tick, not a
+		// frame: keys typed before the next frame would land before the moved caret.
 		if (textareaEl) {
 			textareaEl.focus();
-			requestAnimationFrame(() => {
+			void tick().then(() => {
 				if (textareaEl) {
 					textareaEl.selectionStart = newCursorPos;
 					textareaEl.selectionEnd = newCursorPos;
@@ -1232,6 +1240,9 @@
 	<div id="input-wrapper" bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
 		<!-- Subagent context bar (above input area) -->
 		<SubagentBackBar bind:this={subagentBackBarRef} />
+		{#if readOnlySubagent}
+			<p data-testid="subagent-readonly-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation?.subagentNotice}</p>
+		{:else}
 
 		{#if !sessionState.currentId && routeSessionId === null && sessionViewState.compact}
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
@@ -1632,6 +1643,9 @@
 				{/if}
 			</div>
 		{/if}
+		{#if composerNotice}
+			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
+		{/if}
 		{#if currentSession?.backgroundTasks?.length}
 			<!-- One pulse per live background task; the header row lists them. -->
 			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">
@@ -1642,6 +1656,7 @@
 		{/if}
 		{#if !sessionState.currentId && routeSessionId === null && !sessionViewState.compact}
 			<div class="pt-2"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
+		{/if}
 		{/if}
 	</div>
 </div>

@@ -183,6 +183,15 @@ export const prepareTurnSession = (input: ProviderTurnServicePrepareInput) =>
 		});
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[account.driver];
 		if (
+			traits.readOnlySubagents &&
+			session?.parent_id &&
+			session.side_thread !== 1 &&
+			!session.fork_point_event &&
+			session.fork_point_message_id == null &&
+			session.fork_point_timestamp == null
+		)
+			return yield* Effect.fail(new Error("Subagent sessions are read-only."));
+		if (
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
 		)

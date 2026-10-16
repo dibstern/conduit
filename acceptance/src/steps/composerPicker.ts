@@ -5,6 +5,7 @@ import {
 	effortOptions,
 	openModelPicker,
 	pickerFixtureQuotaReads,
+	refetchModelCatalog,
 	requireRpcControl,
 	serveModelCatalog,
 } from "./shared.js";
@@ -90,6 +91,20 @@ export async function seedComposerPickerCatalog(
 		contextWindow: { contextWindow: "200k", options },
 		variant: { variant: "", variants: claude ? levels : [] },
 	});
+	if (new URL(page.url()).pathname.startsWith("/s/")) {
+		// Cancellation scenarios deliberately pair a bound session with another
+		// harness's model. Deliver that synthetic catalog with its session reply;
+		// discovery on a different account must not leak into this session.
+		const rpc = requireRpcControl(page);
+		const getModels = rpc.stubs.GetModels ?? rpc.catalogStubs().GetModels;
+		rpc.setStubs({
+			GetModels: async (payload) => ({
+				...(await getModels(payload)),
+				...("sessionId" in payload ? { providers } : {}),
+			}),
+		});
+		await refetchModelCatalog(page);
+	}
 	if (!new URL(page.url()).pathname.startsWith("/s/")) {
 		// A held draft survives setting updates. Seed its displayed pick through the picker.
 		await openModelPicker(page);

@@ -12,11 +12,13 @@ import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 type SwitchVariantInput = Parameters<typeof rpc<"SwitchVariant">>[1];
 
 const switchVariantRpcSpy = vi.hoisted(() =>
-	vi.fn(async (input: SwitchVariantInput) => ({
-		projectSlug: "project-a",
-		variant: input.variant,
-		variants: ["low", "medium", "high", "max"],
-	})),
+	vi.fn((input: SwitchVariantInput) =>
+		Promise.resolve({
+			projectSlug: "project-a",
+			variant: input.variant,
+			variants: ["low", "medium", "high", "max"],
+		}),
+	),
 );
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
@@ -27,8 +29,10 @@ vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => "project-a",
 }));
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	rpc: (_tag: "SwitchVariant", input: SwitchVariantInput) =>
-		switchVariantRpcSpy(input),
+	rpc: (tag: string, input: SwitchVariantInput) =>
+		tag === "SwitchVariant"
+			? switchVariantRpcSpy(input)
+			: Promise.reject(new Error("Catalog not configured in this fixture")),
 }));
 
 describe("ModelVariant", () => {

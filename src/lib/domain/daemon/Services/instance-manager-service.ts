@@ -631,16 +631,21 @@ export const getInstances = Effect.gen(function* () {
 /** External inventory probes must not delay other providers' runtime operations. */
 export const discoverInstances = Effect.gen(function* () {
 	const instances = yield* getInstances;
+	const accounts = yield* (yield* AccountDirectory).list;
 	const availability = new Map<
 		string,
-		{ available: boolean; unavailableReason?: string }
+		{
+			available: boolean;
+			unavailableReason?: string;
+			unavailableCode?: "auth_required";
+		}
 	>();
-	for (const [driver, discover] of Object.entries(instanceDiscovery)) {
-		if (!discover || !instances.some((instance) => instance.driver === driver))
-			continue;
-		const result = yield* Effect.either(discover());
+	for (const account of accounts) {
+		const discover = instanceDiscovery[account.driver];
+		if (!discover) continue;
+		const result = yield* Effect.either(discover(undefined, account));
 		availability.set(
-			driver,
+			account.id,
 			result._tag === "Right"
 				? { available: true }
 				: {
@@ -649,12 +654,13 @@ export const discoverInstances = Effect.gen(function* () {
 							result.left.cause instanceof Error
 								? result.left.cause.message
 								: "Provider discovery failed",
+						...(result.left.code ? { unavailableCode: result.left.code } : {}),
 					},
 		);
 	}
 	return instances.map((instance) => ({
 		...instance,
-		...availability.get(instance.driver ?? "opencode"),
+		...availability.get(instance.id),
 	}));
 }).pipe(Effect.withSpan("instance.discover"));
 

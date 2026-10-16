@@ -5,7 +5,7 @@
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { wsDebugState, getDebugEvents, clearDebugLog } from "../../stores/ws-debug.svelte.js";
 	import { confirm } from "../../stores/ui.svelte.js";
-	import { setLogLevelRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 
 	const COPY_FLASH_DURATION_MS = 1_200;
@@ -15,7 +15,7 @@
 	function toggleVerbose() {
 		const newValue = !wsDebugState.verboseMessages;
 		wsDebugState.verboseMessages = newValue;
-		void setLogLevelRpc({
+		void rpc("SetLogLevel", {
 			level: newValue ? "verbose" : "info",
 		}).catch(() => {});
 	}

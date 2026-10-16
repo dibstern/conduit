@@ -98,6 +98,7 @@ export const selectSessionContextWindow = (
 export const restoreSessionSettings = () =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const store = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover().pipe(
@@ -120,8 +121,9 @@ export const restoreSessionSettings = () =>
 				| "permission_mode"
 			>
 		>`SELECT id, model_id, model_provider, variant, context_window, permission_mode
-			FROM sessions WHERE model_id IS NOT NULL OR model_provider IS NOT NULL
-				OR variant IS NOT NULL OR context_window IS NOT NULL OR permission_mode IS NOT NULL`.pipe(
+			FROM sessions WHERE project_id = ${store.projectId}
+				AND (model_id IS NOT NULL OR model_provider IS NOT NULL
+				OR variant IS NOT NULL OR context_window IS NOT NULL OR permission_mode IS NOT NULL)`.pipe(
 			Effect.mapError(
 				(cause) =>
 					new SessionManagerError({

@@ -722,7 +722,7 @@ export const sessionsHandlers = {
 						: Effect.succeed({
 								projectSlug: config.slug,
 								sessionId: session.id,
-								parentId: session.parentId,
+								forkedFrom: session.forkedFrom,
 								...(session.forkMessageId && {
 									forkMessageId: session.forkMessageId,
 								}),

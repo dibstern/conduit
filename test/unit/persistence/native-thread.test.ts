@@ -16,8 +16,8 @@ const setup = Effect.gen(function* () {
 	yield* makeEffectSqlMigrator();
 	const sql = yield* SqlClient.SqlClient;
 	yield* sql`
-		INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-		VALUES ('s1', 'personal', 'Test', 'idle', 1, 1), ('s2', 'work', 'Other', 'idle', 1, 1)`;
+		INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+		VALUES ('s1', 'test-project', 'personal', 'Test', 'idle', 1, 1), ('s2', 'test-project', 'work', 'Other', 'idle', 1, 1)`;
 	const events = yield* makeEventStoreEffect.pipe(
 		Effect.provideService(PersistenceProjectTag, { projectId: "test-project" }),
 	);

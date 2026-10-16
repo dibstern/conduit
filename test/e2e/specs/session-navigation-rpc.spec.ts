@@ -55,7 +55,7 @@ async function setup(
 				draft: sessionId === seed ? "Seed draft" : `Draft for ${sessionId}`,
 			}),
 			CreateSession: () => ({ projectSlug, sessionId: created }),
-			ForkSession: () => ({ projectSlug, sessionId: forked, parentId: seed }),
+			ForkSession: () => ({ projectSlug, sessionId: forked, forkedFrom: seed }),
 			DeleteSession: () => ({ ok: true }),
 			ListDaemonSessions: () => ({
 				sessions: [],
@@ -63,13 +63,11 @@ async function setup(
 				hasMore: false,
 				nextCursor: null,
 			}),
-			...stubs,
-		},
-		handlers: {
-			AttachProject: ({ sessionId }) => ({
+			AttachProject: (payload) => ({
 				projectSlug,
-				sessionSlug: sessionId ? projectSlug : null,
+				sessionSlug: "sessionId" in payload ? projectSlug : null,
 			}),
+			...stubs,
 		},
 	});
 	const relay = await mockRelayWebSocket(page, {

@@ -21,8 +21,7 @@
 	} from "../../stores/composer-settings.svelte.js";
 	import {
 		applyDefaultModelSet,
-		followModelsRead,
-		applyGetAgentsResponse,
+		refreshCatalogs,
 		chooseAgent,
 		chooseDefaultModel,
 		discoveryState,
@@ -51,6 +50,7 @@
 	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
+	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 	import { usageResetTime } from "../../utils/continuation.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -127,10 +127,15 @@
 				locked: unavailable || (locked && driver !== selectedDriver),
 				lockedReason: unavailableReason,
 				unavailableReason,
+				authRequired: unavailable && accounts.some((account) => account.unavailableCode === "auth_required"),
 			};
 		}),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
+	$effect(() => {
+		if (pickerOpen && harnesses.some((harness) => getProviderPresentation(harness.value)?.auth && harness.authRequired))
+			void refreshCursorAuth();
+	});
 	const needsAccount = $derived(selectedTraits?.accountKind === "config-directory" && driverInstances.length === 0);
 	const accountProjectSlug = $derived(
 		sessionState.currentId
@@ -219,14 +224,7 @@
 		const sessionId = sessionState.currentId;
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
-		const applyModels = followModelsRead(sessionId);
-		void rpc("GetModels", { sessionId })
-			.then((response) => {
-				if (sessionState.currentId === sessionId) {
-					applyModels(response);
-				}
-			})
-			.catch(() => undefined);
+		untrack(() => { void refreshCatalogs(); });
 	});
 
 	/** Display name for the trigger button, with date suffix stripped.
@@ -386,17 +384,6 @@
 		view = "root";
 		if (instance.id === selectedId && discoveryState.hasInstanceChoice) return;
 		selectInstance(instance.id);
-		const projectSlug = getDraftProject();
-		const applyModels = followModelsRead();
-		if (projectSlug) void rpc("GetModels", { projectSlug, instanceId: instance.id })
-			.then(applyModels)
-			.catch(() => undefined);
-		if (projectSlug) void rpc("GetAgents", { projectSlug, instanceId: instance.id })
-			.then((response) => {
-				if (!sessionState.currentId && getDraftProject() === projectSlug && getEffectiveInstanceId() === instance.id)
-					applyGetAgentsResponse(response);
-			})
-			.catch(() => undefined);
 		searchQuery = "";
 	}
 
@@ -451,10 +438,9 @@
 
 	function handleReload(e: MouseEvent) {
 		e.stopPropagation();
-		const projectSlug = getCurrentSlug();
 		const sessionId = sessionState.currentId;
-		if (projectSlug && sessionId) {
-			void reloadProviderSession(projectSlug, sessionId).catch(() => undefined);
+		if (sessionId) {
+			void reloadProviderSession(sessionId).catch(() => undefined);
 		}
 		showToast("Reloading skills…", { duration: 1500 });
 		closePicker();
@@ -582,6 +568,10 @@
 						</OptionRow>
 						{#each harnesses.filter((harness) => harness.unavailableReason) as harness (harness.value)}
 							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] text-[11px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
+							{@const auth = getProviderPresentation(harness.value)?.auth}
+							{#if auth && harness.authRequired}
+								<Button variant="ghost-accent" size="sm" data-testid={`picker-harness-${harness.value}-login`} onclick={() => { closePicker(); openCursorLogin(); }}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
+							{/if}
 						{/each}
 					</section>
 				{/if}
@@ -690,7 +680,7 @@
 							<SegmentedControl
 								bind:value={() => effort.current ?? "", (value) => effort.select(value)}
 								options={effortSegments}
-								variant="picker"
+								variant={effortSegments.length > 5 ? "picker-context" : "picker"}
 								label="Effort"
 							/>
 						{:else}
