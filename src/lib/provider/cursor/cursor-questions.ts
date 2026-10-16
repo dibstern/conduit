@@ -35,7 +35,7 @@ export function cursorAskUserTool(
 	const calls = new Map<string, Promise<string>>();
 	return {
 		description:
-			"Ask the user clarifying questions in Conduit. Supply questions with a header, question, options (label and description), and optional multiSelect/custom flags. The user can choose options or type a custom answer.",
+			"Ask the user clarifying questions in Conduit. Use this for every clarifying question (askQuestion is unavailable) and wait for the answer before continuing. Supply questions with a header, question, options (label and description), and optional multiSelect/custom flags. The user can choose options or type a custom answer.",
 		inputSchema: {
 			type: "object",
 			properties: {

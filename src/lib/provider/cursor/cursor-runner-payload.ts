@@ -416,7 +416,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					const beforeUsage = yield* readUsage;
 					const run = yield* sdkCall("send", () =>
 						agent.send(
-							`${config.questionRule}\n\n${input.prompt}`,
+							input.prompt,
 							{
 								...config.send,
 								...(recovery ? { local: { force: true as const } } : {}),

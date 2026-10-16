@@ -327,12 +327,16 @@ describe("Cursor questions through the built daemon and detached runner", () => 
 				(data as { disallowedTools: string[] }).disallowedTools,
 			).not.toContain("mcp");
 		}
-		for (const { data } of captured.filter(
-			({ kind }) => kind === "send.options",
-		))
-			expect(data).toMatchObject({
-				prompt: expect.stringContaining("ask_user"),
-			});
+		// The rule lives in the ask_user description; prompts reach Cursor
+		// unchanged so a leading /skill still invokes the skill.
+		expect(
+			captured
+				.filter(({ kind }) => kind === "send.options")
+				.map(({ data }) => (data as { prompt: string }).prompt),
+		).toEqual([
+			"Ask me which deployment to use with ask_user.",
+			"Ask me which deployment to use with ask_user.",
+		]);
 		expect(
 			snapshot(fixture, id).events.filter(
 				({ type }) => type === "question.asked",
