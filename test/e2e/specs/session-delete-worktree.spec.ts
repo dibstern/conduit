@@ -52,9 +52,15 @@ async function setup(
 ) {
 	const projectSlug = options.foreign ? "second-project" : "e2e-replay";
 	const projects = [
-		{ slug: "e2e-replay", title: "App", folders: [folder] },
+		{ slug: "e2e-replay", title: "App", folders: [folder] as const },
 		...(options.foreign
-			? [{ slug: projectSlug, title: "Second", folders: ["/workspace/second"] }]
+			? [
+					{
+						slug: projectSlug,
+						title: "Second",
+						folders: ["/workspace/second"] as const,
+					},
+				]
 			: []),
 	];
 	let sessions = [
@@ -113,9 +119,9 @@ async function setup(
 				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
+			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
 		handlers: {
-			GetProjects: () => ({ projects, current: "e2e-replay" }),
 			GetWorktreeCleanupSetting: () => {
 				if (options.failCleanupSetting)
 					throw new WsRpcError({ message: "Could not read cleanup setting" });

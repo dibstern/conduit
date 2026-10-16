@@ -8,7 +8,6 @@ import type {
 } from "../../../../src/lib/frontend/transport/shared-client.js";
 import {
 	rpc,
-	saveProjectRpc,
 	setLogLevelRpc,
 } from "../../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { makeRpcWire } from "../../../helpers/rpc-wire.js";
@@ -100,7 +99,7 @@ it("preserves typed folder issues at the SaveProject Promise boundary", async ()
 	harness.saveFailure = failure;
 
 	await expect(
-		saveProjectRpc({
+		rpc("SaveProject", {
 			projectSlug: "alpha",
 			title: "Notes",
 			folders: [{ path: "/missing/parent/notes", create: { gitInit: true } }],

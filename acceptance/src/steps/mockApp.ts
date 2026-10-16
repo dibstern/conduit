@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
+import { Schema } from "effect";
 import type { ClaudeSettingsOverrides } from "../../../src/lib/contracts/claude-settings.js";
-import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	InstanceListResponseSchema,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import type {
 	HistoryMessage,
 	SessionGit,
@@ -166,13 +170,13 @@ export const mockAppHandlers: StepHandler[] = [
 				{
 					slug: "myapp",
 					title: project,
-					folders: [`/workspace/${project}`],
+					folders: [`/workspace/${project}`] as const,
 					...(git ? { git } : {}),
 				},
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setDaemonList("SubscribeProjects", { projects });
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			rpc.setStubs({ GetProjects: () => ({ projects, current: "myapp" }) });
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Checkout requires an open session");
 			setSessionRowStatus(world.page, sessionId, "idle", {
@@ -768,8 +772,6 @@ export const mockAppHandlers: StepHandler[] = [
 							agents: claude ? claudeInstanceAgents : openCodeInstanceAgents,
 						};
 					},
-				},
-				handlers: {
 					CreatePty: async () => ({ ok: true }),
 					// A real daemon always lists its projects; a draft prefills from them.
 					GetProjects: async () => ({
@@ -782,6 +784,87 @@ export const mockAppHandlers: StepHandler[] = [
 						],
 						current: "myapp",
 					}),
+					AddInstance: async (payload) => {
+						const list = mockInstances.get(page) ?? [];
+						const driver =
+							payload["driver"] === "claude" ? "claude" : "opencode";
+						const name =
+							typeof payload["name"] === "string"
+								? payload["name"]
+								: "instance";
+						const inst: Record<string, unknown> = {
+							id: instanceSlug(name),
+							name,
+							port: typeof payload["port"] === "number" ? payload["port"] : 0,
+							managed: payload["managed"] === true,
+							status: "healthy",
+							restartCount: 0,
+							createdAt: 1,
+							driver,
+							isDefault: !list.some(
+								(instance) => instance["driver"] === driver,
+							),
+							usageEligible: driver === "claude",
+							...(typeof payload["configDir"] === "string"
+								? { configDir: payload["configDir"] }
+								: {}),
+						};
+						const next = [...list.filter((i) => i["id"] !== inst["id"]), inst];
+						mockInstances.set(page, next);
+						return Schema.decodeUnknownSync(InstanceListResponseSchema)({
+							projectSlug: "myapp",
+							instances: next,
+						});
+					},
+					UpdateInstance: async (payload) => {
+						const list = mockInstances.get(page) ?? [];
+						const next = list.map((i) =>
+							i["id"] === payload["instanceId"]
+								? {
+										...i,
+										...(typeof payload["name"] === "string"
+											? { name: payload["name"] }
+											: {}),
+										...(i["driver"] === "claude" &&
+										typeof payload["configDir"] === "string"
+											? { configDir: payload["configDir"] }
+											: {}),
+									}
+								: i,
+						);
+						mockInstances.set(page, next);
+						return Schema.decodeUnknownSync(InstanceListResponseSchema)({
+							projectSlug: "myapp",
+							instances: next,
+						});
+					},
+					SetDefault: async (payload) => {
+						const next = (mockInstances.get(page) ?? []).map((instance) =>
+							instance["driver"] === "claude"
+								? {
+										...instance,
+										isDefault: instance["id"] === payload["instanceId"],
+									}
+								: instance,
+						);
+						mockInstances.set(page, next);
+						rpcControl.setDaemonList("SubscribeInstances", { instances: next });
+						return Schema.decodeUnknownSync(InstanceListResponseSchema)({
+							instances: next,
+						});
+					},
+					RemoveInstance: async (payload) => {
+						const next = (mockInstances.get(page) ?? []).filter(
+							(i) => i["id"] !== payload["instanceId"],
+						);
+						mockInstances.set(page, next);
+						return Schema.decodeUnknownSync(InstanceListResponseSchema)({
+							projectSlug: "myapp",
+							instances: next,
+						});
+					},
+				},
+				handlers: {
 					GetClaudeSettings: async () => ({
 						projectSlug: "myapp",
 						overrides: mockClaudeSettings.get(page) ?? {},
@@ -831,74 +914,6 @@ export const mockAppHandlers: StepHandler[] = [
 							},
 						},
 					}),
-					AddInstance: async (payload) => {
-						const list = mockInstances.get(page) ?? [];
-						const driver =
-							payload["driver"] === "claude" ? "claude" : "opencode";
-						const name =
-							typeof payload["name"] === "string"
-								? payload["name"]
-								: "instance";
-						const inst: Record<string, unknown> = {
-							id: instanceSlug(name),
-							name,
-							port: typeof payload["port"] === "number" ? payload["port"] : 0,
-							managed: payload["managed"] === true,
-							status: "healthy",
-							restartCount: 0,
-							createdAt: 1,
-							driver,
-							isDefault: !list.some(
-								(instance) => instance["driver"] === driver,
-							),
-							usageEligible: driver === "claude",
-							...(typeof payload["configDir"] === "string"
-								? { configDir: payload["configDir"] }
-								: {}),
-						};
-						const next = [...list.filter((i) => i["id"] !== inst["id"]), inst];
-						mockInstances.set(page, next);
-						return { projectSlug: "myapp", instances: next };
-					},
-					UpdateInstance: async (payload) => {
-						const list = mockInstances.get(page) ?? [];
-						const next = list.map((i) =>
-							i["id"] === payload["instanceId"]
-								? {
-										...i,
-										...(typeof payload["name"] === "string"
-											? { name: payload["name"] }
-											: {}),
-										...(i["driver"] === "claude" &&
-										typeof payload["configDir"] === "string"
-											? { configDir: payload["configDir"] }
-											: {}),
-									}
-								: i,
-						);
-						mockInstances.set(page, next);
-						return { projectSlug: "myapp", instances: next };
-					},
-					SetDefault: async (payload) => {
-						const next = (mockInstances.get(page) ?? []).map((instance) =>
-							instance["driver"] === "claude"
-								? {
-										...instance,
-										isDefault: instance["id"] === payload["instanceId"],
-									}
-								: instance,
-						);
-						mockInstances.set(page, next);
-						rpcControl.setDaemonList("SubscribeInstances", { instances: next });
-						return { instances: next };
-					},
-					RemoveInstance: async (payload) => {
-						const next = (mockInstances.get(page) ?? []).filter(
-							(i) => i["id"] !== payload["instanceId"],
-						);
-						mockInstances.set(page, next);
-						return { projectSlug: "myapp", instances: next };
-					},
 				},
 			});
 			rpcControls.set(world.page, rpcControl);

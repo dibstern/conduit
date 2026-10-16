@@ -144,7 +144,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 				},
 			];
 			const rpc = requireRpcControl(world.page);
-			rpc.setResponse("GetProjects", { projects, current: "myapp" });
+			rpc.setStubs({ GetProjects: () => ({ projects, current: "myapp" }) });
 			rpc.setDaemonList("SubscribeProjects", { projects, current: "myapp" });
 			rpc.setHandler("ListDaemonSessions", ({ scope, exclude }) => ({
 				sessions: rows.filter(

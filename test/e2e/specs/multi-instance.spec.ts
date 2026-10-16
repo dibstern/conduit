@@ -1,7 +1,11 @@
 // Instance settings, health updates and reconnect actions with a mocked daemon.
 
 import { expect, test } from "@playwright/test";
-import type { InstanceListResponse } from "../../../src/lib/contracts/ws-rpc.js";
+import { Schema } from "effect";
+import {
+	type InstanceListResponse,
+	InstanceListResponseSchema,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	instancesWith,
 	multiInstanceInitMessages,
@@ -126,8 +130,6 @@ function defaultAccountDaemon() {
 						},
 					],
 				}),
-			},
-			handlers: {
 				SetDefault: (payload) => setDefault(String(payload["instanceId"])),
 				DetectProxy: () => ({ found: false, port: 8317 }),
 			},
@@ -426,37 +428,41 @@ async function setupNoInstances(
 
 async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 	return await mockWsRpc(page, {
-		handlers: {
+		stubs: {
 			DetectProxy: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
 				found: false,
 				port: 8317,
 			}),
-			StartInstance: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: instancesWith({ personal: "unhealthy", work: "starting" }),
-			}),
-			StopInstance: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: instancesWith({ personal: "unhealthy", work: "stopped" }),
-			}),
-			RemoveInstance: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: instancesWith({ personal: "unhealthy" }).filter(
-					(instance) => instance.id === "personal",
-				),
-			}),
-			UpdateInstance: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				instances: instancesWith({
-					personal: "unhealthy",
-					work: "healthy",
-				}).map((instance) =>
-					instance.id === "work"
-						? { ...instance, name: String(params["name"] ?? "Work") }
-						: instance,
-				),
-			}),
+			StartInstance: (params) =>
+				Schema.decodeUnknownSync(InstanceListResponseSchema)({
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					instances: instancesWith({ personal: "unhealthy", work: "starting" }),
+				}),
+			StopInstance: (params) =>
+				Schema.decodeUnknownSync(InstanceListResponseSchema)({
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					instances: instancesWith({ personal: "unhealthy", work: "stopped" }),
+				}),
+			RemoveInstance: (params) =>
+				Schema.decodeUnknownSync(InstanceListResponseSchema)({
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					instances: instancesWith({ personal: "unhealthy" }).filter(
+						(instance) => instance.id === "personal",
+					),
+				}),
+			UpdateInstance: (params) =>
+				Schema.decodeUnknownSync(InstanceListResponseSchema)({
+					projectSlug: String(params["projectSlug"] ?? "myapp"),
+					instances: instancesWith({
+						personal: "unhealthy",
+						work: "healthy",
+					}).map((instance) =>
+						instance.id === "work"
+							? { ...instance, name: String(params["name"] ?? "Work") }
+							: instance,
+					),
+				}),
 			ScanNow: (params) => ({
 				projectSlug: String(params["projectSlug"] ?? "myapp"),
 				discovered: [4098],

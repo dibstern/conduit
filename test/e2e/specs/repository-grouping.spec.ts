@@ -111,11 +111,7 @@ async function openProjectList(page: Page, baseUrl: string) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
-			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
 			SaveProject: ({ slug: savedSlug, groupingMode }) => {
 				const stored = projects.find((project) => project.slug === savedSlug);
 				if (!stored) throw new Error(`Unknown project: ${savedSlug}`);
@@ -136,8 +132,12 @@ async function openProjectList(page: Page, baseUrl: string) {
 					project.slug === savedSlug ? updated : project,
 				);
 				rpc.setDaemonList("SubscribeProjects", { projects });
-				return { savedSlug, projects, warnings: [] };
+				return { savedSlug: stored.slug, projects, warnings: [] };
 			},
+		},
+		handlers: {
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
+			GetDefaultGroupingMode: () => ({ mode: defaultMode }),
 			SetDefaultGroupingMode: ({ mode }) => {
 				if (
 					mode !== "repository" &&

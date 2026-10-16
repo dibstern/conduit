@@ -38,11 +38,9 @@ async function setup(page: import("@playwright/test").Page) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-		},
-		handlers: {
-			AttachProject: ({ sessionId }) => ({
+			AttachProject: (payload) => ({
 				projectSlug,
-				sessionSlug: sessionId ? projectSlug : null,
+				sessionSlug: "sessionId" in payload ? projectSlug : null,
 			}),
 		},
 	});

@@ -9,7 +9,7 @@
 	import { disposeRuntime, runTransportEffect } from "../../transport/runtime.js";
 	import { WsRpcClients } from "../../transport/shared-client.js";
 	import { WsRpcError } from "../../transport/ws-rpc.js";
-	import { rpc, attachProjectRpc, getProjectsRpc } from "../../transport/ws-rpc-client.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import SessionBar from "./SessionBar.svelte";
 	import ViewsRail from "./ViewsRail.svelte";
@@ -520,12 +520,12 @@
 					if (generation === attachGeneration && commandSessionId === routeSessionId && commandWorkspace === workspace && (routeSessionId != null || draftInstanceId === getEffectiveInstanceId())) applyGetCommandsResponse(response);
 				})
 				.catch(() => undefined);
-			void getProjectsRpc({ projectSlug: slug })
+			void rpc("GetProjects", { projectSlug: slug })
 				.then((response) => {
 					if (generation === attachGeneration) applyProjectList(response);
 				})
-				.catch(() => {
-					if (generation === attachGeneration) showToast("Failed to load projects", { variant: "error" });
+				.catch((error) => {
+					if (generation === attachGeneration) toastFailure("Failed to load projects")(error);
 				});
 		});
 		onNavigateToSession((sessionId) => switchToSession(sessionId));
@@ -661,7 +661,7 @@
 			// else its default); afterwards only a project-only route switches it.
 			if (!attachedThisMount || (groupScope && attachedSlug === null) || (!route.sessionId && projectHint && (projectHint !== attachedSlug || requestedProject !== null))) {
 				requestedProject = projectHint ?? null;
-				void attachProjectRpc({
+				void rpc("AttachProject", {
 					originId: getBrowserClientId(),
 					...(route.sessionId ? { sessionId: route.sessionId } : projectHint ? { projectSlug: projectHint } : {}),
 				})
@@ -679,7 +679,7 @@
 						requestedProject = null;
 						if (error instanceof WsRpcError && error.code === "unknown-session" && route.sessionId)
 							placeSession(route.sessionId, null);
-						else showToast("Failed to switch projects", { variant: "error" });
+						else toastFailure("Failed to switch projects")(error);
 					});
 				if (route.sessionId) return;
 			}

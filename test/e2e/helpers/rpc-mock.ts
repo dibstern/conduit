@@ -8,6 +8,7 @@ import {
 	GetAgentsResponseSchema,
 	GetCommandsResponseSchema,
 	GetModelsResponseSchema,
+	GetProjectsResponseSchema,
 	type GetStatusResponse,
 	type ProjectSetting,
 	WsRpcError,
@@ -478,9 +479,16 @@ export class RpcMockControl {
 	}
 
 	/** GetProjects answers from the mocked list, as the daemon does. */
-	projectsHandler(): RpcHandler | undefined {
+	projectsHandler(): StubTable["GetProjects"] | undefined {
 		const list = this.daemonLists.get("SubscribeProjects");
-		return list && (() => ({ projectSlug: this.projectSlug, ...list }));
+		return (
+			list &&
+			(() =>
+				Schema.decodeUnknownSync(GetProjectsResponseSchema)({
+					projectSlug: this.projectSlug,
+					...list,
+				}))
+		);
 	}
 
 	record(tag: string, payload: Record<string, unknown>): void {
@@ -719,12 +727,8 @@ function checkedReply(
 	}
 }
 
-function defaultHandler(
-	tag: string,
-	control: RpcMockControl,
-): RpcHandler | undefined {
+function defaultHandler(tag: string): RpcHandler | undefined {
 	return (
-		(tag === "GetProjects" ? control.projectsHandler() : undefined) ??
 		(tag === "GetStatus" ? () => MOCK_SERVER_STATUS : undefined) ??
 		(tag === "GetDefaultGroupingMode"
 			? () => ({ mode: "repository" })
@@ -738,18 +742,9 @@ function defaultHandler(
 			? () => ({
 					usageLimits: { autoResume: false, autoSwitch: false, order: [] },
 				})
-			: tag === "AttachProject"
-				? ({ projectSlug, sessionId }) => ({
-						projectSlug:
-							typeof projectSlug === "string"
-								? projectSlug
-								: control.projectSlug,
-						sessionSlug:
-							typeof sessionId === "string" ? control.projectSlug : null,
-					})
-				: tag === "InspectSessionWorktrees"
-					? () => ({ worktrees: [], removeWorktrees: false })
-					: undefined)
+			: tag === "InspectSessionWorktrees"
+				? () => ({ worktrees: [], removeWorktrees: false })
+				: undefined)
 	);
 }
 
@@ -833,7 +828,7 @@ function socketTable(
 							const handler =
 								control.getResponseHandler("GetModels") ??
 								stubs["GetModels"] ??
-								defaultHandler("GetModels", control);
+								defaultHandler("GetModels");
 							if (handler) {
 								const response = yield* Effect.tryPromise({
 									try: async () =>
@@ -881,8 +876,7 @@ function socketTable(
 					),
 				);
 			}
-			const handler =
-				override ?? (typed ? stub : defaultHandler(rpc._tag, control));
+			const handler = override ?? (typed ? stub : defaultHandler(rpc._tag));
 			if (!handler) return new Promise<never>(() => {});
 			return (async () => {
 				const response = await handler(payload, request);
@@ -923,6 +917,15 @@ export async function mockWsRpc(
 	control.initialHandlers = options.handlers ?? {};
 	control.stubs = {
 		"input.submit": ({ sessionId }) => ({ ok: true, sessionId }),
+		GetProjects: (payload) =>
+			control.projectsHandler()?.(payload) ?? new Promise<never>(() => {}),
+		AttachProject: (payload) => ({
+			projectSlug:
+				"projectSlug" in payload && typeof payload.projectSlug === "string"
+					? payload.projectSlug
+					: control.projectSlug,
+			sessionSlug: "sessionId" in payload ? control.projectSlug : null,
+		}),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
 		ViewSession: () => ({ ok: true }),
 		...control.catalogStubs(),

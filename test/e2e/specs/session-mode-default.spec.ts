@@ -123,11 +123,7 @@ async function openDraft(
 				rpc.setProjectSetting({ _tag: "defaultSessionMode", mode });
 				return { mode };
 			},
-		},
-		handlers: {
 			GetProjects: () => ({ projects, current: slug }),
-			GetInstances: () => instances,
-			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 			SaveProject: ({ slug: editedSlug, sessionMode, title, folders }) => {
 				const savedSlug = typeof editedSlug === "string" ? editedSlug : "added";
 				const previous = projects.find((project) => project.slug === savedSlug);
@@ -148,6 +144,10 @@ async function openDraft(
 				projects = [...projects.filter((p) => p.slug !== savedSlug), saved];
 				return { savedSlug, projects, warnings: [] };
 			},
+		},
+		handlers: {
+			GetInstances: () => instances,
+			GetAutoSettleSetting: () => ({ autoSettleAfterDays: 3 }),
 		},
 	});
 	await mockRelayWebSocket(page, {
