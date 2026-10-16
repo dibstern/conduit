@@ -503,6 +503,36 @@ describe("probeClaudeCapabilities", () => {
 		expect(rowWarnings[0]).toContain("no [1m] suffix to infer from");
 	});
 
+	it("does not warn about a context-window row for the bare fable alias", async () => {
+		const logger = createTestLogger();
+		const warn = vi.fn();
+		logger.warn = warn;
+		const queryFactory = makeFakeQuery({
+			initResult: {
+				models: [
+					{
+						value: "fable",
+						displayName: "Fable",
+						resolvedModel: "claude-fable-5-1",
+					},
+				],
+			},
+		});
+		const result = await probeClaudeCapabilities({
+			queryFactory,
+			workspaceRoot,
+			configDir,
+			logger,
+		});
+		expect(result.models[0]?.id).toBe("fable");
+		expect(result.models[0]?.contextWindowOptions).toBeUndefined();
+		expect(
+			warn.mock.calls.filter(([message]) =>
+				String(message).includes("context-window row"),
+			),
+		).toEqual([]);
+	});
+
 	it("renders a 1M selector for an uncatalogued model the SDK advertises suffixed", async () => {
 		const logger = createTestLogger();
 		logger.warn = vi.fn();
