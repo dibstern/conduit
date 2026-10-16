@@ -696,4 +696,113 @@ test.describe("Claude Side Threads", () => {
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(before);
 		});
 	});
+
+	test.describe("before its first output", () => {
+		// Held mid auto-compaction: a long parent's inherited context makes the
+		// first turn compact before it says anything.
+		test.use({
+			claudeReplay: {
+				turns: ["pong-thinking-text-turn", "side-thread-compacting-turn"],
+				holdBefore: { turn: 2, message: 11 },
+			},
+		});
+
+		test("shows the Side Thread working, live and after a reload", async ({
+			page,
+			relayUrl,
+			harness,
+		}) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			const parentId = new URL(page.url()).pathname.split("/").at(-1);
+			await app.sendMessage(parentPrompt);
+			await expect(chat.assistantMessages).toHaveText([/pong/i]);
+			await chat.waitForStreamingComplete();
+			await expect
+				.poll(
+					async () =>
+						(await readNativeThread(harness.eventsDbPath, parentId ?? ""))
+							?.resumeSessionId,
+				)
+				.toBeTruthy();
+
+			await app.sendMessage(`$side ${question}`);
+			await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
+			await harness.claudeReplayer?.held();
+			const compacting = page.getByText("Compacting conversation…");
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+			await expect(compacting).toBeVisible();
+
+			await page.reload();
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+			await expect(compacting).toBeVisible();
+
+			harness.claudeReplayer?.release();
+			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
+			await chat.waitForStreamingComplete();
+		});
+	});
+
+	test.describe("started while its parent is answering", () => {
+		test.use({
+			claudeReplay: {
+				turns: [
+					"pong-thinking-text-turn",
+					"pong-thinking-text-turn",
+					"side-thread-compacting-turn",
+				],
+				holdBefore: [
+					{ turn: 2, message: 10 },
+					{ turn: 3, message: 11 },
+				],
+			},
+		});
+
+		test("shows the Side Thread working", async ({
+			page,
+			relayUrl,
+			harness,
+		}) => {
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			await app.goto(relayUrl);
+			const parentId = new URL(page.url()).pathname.split("/").at(-1);
+			await app.sendMessage(parentPrompt);
+			await expect(chat.assistantMessages).toHaveText([/pong/i]);
+			await chat.waitForStreamingComplete();
+			await expect
+				.poll(
+					async () =>
+						(await readNativeThread(harness.eventsDbPath, parentId ?? ""))
+							?.resumeSessionId,
+				)
+				.toBeTruthy();
+			await app.sendMessage(parentPrompt);
+			await harness.claudeReplayer?.held();
+			await expect(chat.stopBtn).toBeVisible();
+
+			await app.sendMessage(`$side ${question}`);
+			await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+			await page.reload();
+			await expect(
+				chat.userMessages.filter({ hasText: question }),
+			).toBeVisible();
+			await expect(chat.stopBtn).toBeVisible();
+
+			harness.claudeReplayer?.release();
+			harness.claudeReplayer?.release();
+			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
+		});
+	});
 });
