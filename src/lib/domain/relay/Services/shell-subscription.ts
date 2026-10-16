@@ -22,11 +22,13 @@
 import { channel } from "node:diagnostics_channel";
 import type { SqlClient } from "@effect/sql";
 import type { SqlError } from "@effect/sql/SqlError";
-import { Duration, Effect, Stream } from "effect";
-import type { ResumeBase } from "../../../contracts/ws-rpc.js";
-import type {
-	ReadQueryEffectError,
+import { Duration, Effect, Option, Schema, Stream } from "effect";
+import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
+import { type ResumeBase, ResumePoint } from "../../../contracts/ws-rpc.js";
+import {
+	type ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
@@ -46,6 +48,17 @@ export interface SidebarRead {
 
 const sidebarReads = channel("conduit:sidebar-read");
 
+const ResumePointBody = Schema.compose(
+	Schema.StringFromBase64Url,
+	Schema.parseJson(
+		Schema.Struct({
+			store: Schema.String,
+			project: Schema.String,
+			sequence: Schema.Number,
+		}),
+	),
+);
+
 /**
  * Subscribe to the shell (session-list) stream. Cold start emits the
  * recency-ordered session set and resume the families changed or removed past
@@ -60,6 +73,7 @@ export const subscribeShell = (
 	options: {
 		readonly resumeFromSequence?: number;
 		readonly resumeBase?: ResumeBase;
+		readonly resumePoint?: ResumePoint;
 	} = {},
 ): Stream.Stream<
 	Envelope<SessionInfo>,
@@ -75,6 +89,26 @@ export const subscribeShell = (
 		Effect.gen(function* () {
 			const bus = yield* SessionEventBusTag;
 			const config = yield* ConfigTag;
+			const readQuery = yield* ReadQueryEffectTag;
+			const scope: SessionScope = { projectIds: [config.slug] };
+			const store = yield* readQuery.readStoreIdentity();
+			const point = Option.getOrUndefined(
+				Option.filter(
+					Option.fromNullable(options.resumePoint).pipe(
+						Option.flatMap(Schema.decodeOption(ResumePointBody)),
+					),
+					(body) => body.store === store && body.project === config.slug,
+				),
+			);
+			const resume =
+				options.resumePoint === undefined
+					? options
+					: point === undefined
+						? {}
+						: {
+								resumeFromSequence: options.resumeFromSequence,
+								resumeBase: { sequence: point.sequence },
+							};
 			const rows = yield* makeSessionRows({
 				slug: config.slug,
 				folders: [config.projectDir, ...(config.extraFolders ?? [])],
@@ -85,6 +119,7 @@ export const subscribeShell = (
 					name: "shell",
 					collections: ["sidebar"],
 					shareReads: true,
+					shareKey: `shell/${config.slug}`,
 					// The sidebar is never paged, so a resume base is the whole list.
 					read: (range, base) =>
 						rows
@@ -103,14 +138,33 @@ export const subscribeShell = (
 									return list;
 								}),
 							),
+					route: (advance) => ({
+						moved: advanceTouchesScope(advance, scope),
+						removed: [],
+					}),
 					resume: "catchUp",
 				},
-				...(options.resumeFromSequence === undefined
+				...(resume.resumeFromSequence === undefined
 					? {}
-					: { resumeFromSequence: options.resumeFromSequence }),
-				...(options.resumeBase === undefined
+					: { resumeFromSequence: resume.resumeFromSequence }),
+				...(resume.resumeBase === undefined
 					? {}
-					: { resumeBase: options.resumeBase }),
-			});
+					: { resumeBase: resume.resumeBase }),
+			}).pipe(
+				Stream.map((envelope) =>
+					envelope._tag === "snapshot" && store !== undefined
+						? {
+								...envelope,
+								resumePoint: ResumePoint.make(
+									Schema.encodeSync(ResumePointBody)({
+										store,
+										project: config.slug,
+										sequence: envelope.sequence,
+									}),
+								),
+							}
+						: envelope,
+				),
+			);
 		}),
 	);

@@ -473,18 +473,29 @@ const scenario = (store: Store) => {
 
 	const read = Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
-		const sidebar = yield* readQuery.readSessionList({ backgroundOf });
-		const oracle = yield* readQuery.listSessionInfos({
-			roots: true,
-			backgroundOf,
-		});
+		const sidebar = yield* readQuery.readSessionList(
+			{ projectIds: ["test-project"] },
+			{ backgroundOf },
+		);
+		const oracle = yield* readQuery.listSessionInfos(
+			{ projectIds: ["test-project"] },
+			{
+				roots: true,
+				backgroundOf,
+			},
+		);
 		// The range interface: a delta from the last read names exactly the
 		// rows whose version moved past it.
-		const delta = yield* readQuery.readSessionList({
-			after: readVersion,
-			backgroundOf,
+		const delta = yield* readQuery.readSessionList(
+			{ projectIds: ["test-project"] },
+			{
+				after: readVersion,
+				backgroundOf,
+			},
+		);
+		const stored = yield* readQuery.readSessionList({
+			projectIds: ["test-project"],
 		});
-		const stored = yield* readQuery.readSessionList();
 		return { sidebar, oracle, delta, stored };
 	});
 
@@ -500,10 +511,13 @@ const scenario = (store: Store) => {
 	const resume = (from: (typeof devices)[number]) =>
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
-			const caught = yield* readQuery.readSessionList({
-				after: from.version,
-				backgroundOf,
-			});
+			const caught = yield* readQuery.readSessionList(
+				{ projectIds: ["test-project"] },
+				{
+					after: from.version,
+					backgroundOf,
+				},
+			);
 			const exists = yield* storedIds;
 			expect(caught.removedSince, "tombstones cover it").toBeLessThanOrEqual(
 				from.version,
@@ -1030,8 +1044,13 @@ describe("sidebar table on the 10k-session fixture", () => {
 
 	const compare = Effect.gen(function* () {
 		const readQuery = yield* ReadQueryEffectTag;
-		const sidebar = yield* readQuery.readSessionList();
-		const oracle = yield* readQuery.listSessionInfos({ roots: true });
+		const sidebar = yield* readQuery.readSessionList({
+			projectIds: ["test-project"],
+		});
+		const oracle = yield* readQuery.listSessionInfos(
+			{ projectIds: ["test-project"] },
+			{ roots: true },
+		);
 		expect(sidebar.rows).toHaveLength(2501);
 		expect(byId(sidebar.rows.map(({ item }) => visible(item)))).toEqual(
 			byId(oracle.map(visible)),
@@ -1044,9 +1063,12 @@ describe("sidebar table on the 10k-session fixture", () => {
 				const readQuery = yield* ReadQueryEffectTag;
 				const commitAndSignal = yield* makeCommitAndSignal;
 				const timings: number[] = [];
-				let after = (yield* readQuery.readSessionList({
-					after: Number.MAX_SAFE_INTEGER,
-				})).version;
+				let after = (yield* readQuery.readSessionList(
+					{ projectIds: ["test-project"] },
+					{
+						after: Number.MAX_SAFE_INTEGER,
+					},
+				)).version;
 				for (let index = 0; index < 21; index++) {
 					yield* commitAndSignal(
 						[
@@ -1063,7 +1085,10 @@ describe("sidebar table on the 10k-session fixture", () => {
 						{ publish: false },
 					);
 					const started = performance.now();
-					const delta = yield* readQuery.readSessionList({ after });
+					const delta = yield* readQuery.readSessionList(
+						{ projectIds: ["test-project"] },
+						{ after },
+					);
 					timings.push(performance.now() - started);
 					expect(delta.rows.map(({ item }) => item.id)).toEqual([
 						`load-f${index}`,
@@ -1187,7 +1212,7 @@ describe("sidebar upkeep in a large family", () => {
 			expect(await familyReads(markUnread("root")), "a direct stamp").toBe(1);
 			const sidebar = await store.runPromise(
 				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
-					readQuery.readSessionList(),
+					readQuery.readSessionList({ projectIds: ["test-project"] }),
 				),
 			);
 			expect(sidebar.rows.map(({ item }) => item.attention)).toEqual([

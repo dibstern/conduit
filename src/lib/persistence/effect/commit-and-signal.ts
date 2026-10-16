@@ -230,6 +230,7 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										if (sessionIds.length > 0)
 											advances.push({
 												version,
+												projectIds: [eventStore.projectId],
 												sessionIds: [...sessionIds],
 												removedSessionIds: [],
 												collections: ["sessions", "sidebar"],
@@ -282,6 +283,11 @@ export const makeCommitAndSignal = Effect.gen(function* () {
 										...advances.map((advance) => advance.version),
 									),
 									sessionIds: stamped,
+									projectIds: [
+										...new Set(
+											advances.flatMap((advance) => advance.projectIds),
+										),
+									],
 									removedSessionIds: removed,
 									collections,
 								});

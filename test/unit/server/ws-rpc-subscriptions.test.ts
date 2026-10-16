@@ -203,9 +203,9 @@ describe("subscription RPC handlers", () => {
 				);
 				const readQuery = yield* ReadQueryEffectTag;
 				expect(
-					(yield* readQuery.listSessionInfos()).find(
-						({ id }) => id === "fork-1",
-					),
+					(yield* readQuery.listSessionInfos({
+						projectIds: ["test-project"],
+					})).find(({ id }) => id === "fork-1"),
 				).not.toHaveProperty("forkPointTimestamp");
 				const client = yield* RpcTest.makeClient(WsRpcGroup);
 				const envelopes = yield* Queue.unbounded<unknown>();

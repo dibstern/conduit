@@ -177,7 +177,9 @@ test("creates reach every sidebar under streaming write load", async ({
 	let stopped = false;
 	try {
 		await harness.terminate();
-		fixture = await seedSessionLoadFixture(harness.projectStorePath());
+		fixture = await seedSessionLoadFixture(harness.projectStorePath(), {
+			projectId: "process-test",
+		});
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,
@@ -571,7 +573,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 	let backgroundTicks = 0;
 	try {
 		await harness.terminate();
-		await seedSessionLoadFixture(harness.projectStorePath());
+		await seedSessionLoadFixture(harness.projectStorePath(), {
+			projectId: "process-test",
+		});
 		await harness.restart({
 			keepPort: true,
 			skipBrowserProbe: true,

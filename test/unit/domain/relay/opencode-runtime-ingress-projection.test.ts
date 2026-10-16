@@ -210,6 +210,64 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 	}
 
+	it("settles stopped instance sessions only in this runtime's project", async () => {
+		await persistSessionCreated("local-stop", "opencode");
+		await persistSessionCreated("foreign-stop", "opencode");
+		await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE sessions SET status = 'busy' WHERE id IN ('local-stop', 'foreign-stop')`;
+				yield* sql`UPDATE sessions SET project_id = 'foreign-project' WHERE id = 'foreign-stop'`;
+			}),
+		);
+		await Effect.runPromise(
+			currentHook().onInstanceStopped("opencode", () => true),
+		);
+		const rows = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql<{
+					id: string;
+					status: string;
+				}>`SELECT id, status FROM sessions
+				WHERE id IN ('local-stop', 'foreign-stop') ORDER BY id`;
+			}),
+		);
+		expect(rows).toEqual([
+			{ id: "foreign-stop", status: "busy" },
+			{ id: "local-stop", status: "idle" },
+		]);
+	});
+
+	it("lists a content-only seeded session under the writer's project", async () => {
+		const titles = await currentRuntime().runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					decodeProviderRuntimeEvent({
+						eventId: createEventId(),
+						type: "message.created",
+						providerId: "opencode",
+						sessionId: "content-only",
+						providerRefs: { providerSessionId: "native-content-only" },
+						rawSource: { kind: "test.content-only" },
+						createdAt: 1,
+						data: {
+							messageId: "content-only-message",
+							sessionId: "content-only",
+							role: "assistant",
+						},
+					}),
+				);
+				const read = yield* ReadQueryEffectTag;
+				return (yield* read.listSessions({ projectIds: ["test-project"] })).map(
+					(row) => row.title,
+				);
+			}),
+		);
+		expect(titles).toEqual(["Untitled"]);
+	});
+
 	async function readProviderBindings(sessionId: string) {
 		return currentRuntime().runPromise(
 			Effect.gen(function* () {
@@ -258,7 +316,9 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			childId,
 		);
 		const before = await currentRuntime().runPromise(
-			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ projectIds: ["test-project"] }),
+			),
 		);
 
 		await ingestOk(
@@ -266,7 +326,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 		const after = await currentRuntime().runPromise(
 			Effect.flatMap(ReadQueryEffectTag, (query) =>
-				query.readSessionList({ after: before.version }),
+				query.readSessionList(
+					{ projectIds: ["test-project"] },
+					{ after: before.version },
+				),
 			),
 		);
 		expect(after.rows).toEqual([]);
@@ -314,7 +377,9 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			}),
 		);
 		const before = await currentRuntime().runPromise(
-			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ projectIds: ["test-project"] }),
+			),
 		);
 		await ingest(
 			makeSSEEvent("session.created", {
@@ -324,7 +389,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		);
 		const after = await currentRuntime().runPromise(
 			Effect.flatMap(ReadQueryEffectTag, (query) =>
-				query.readSessionList({ after: before.version }),
+				query.readSessionList(
+					{ projectIds: ["test-project"] },
+					{ after: before.version },
+				),
 			),
 		);
 		expect(after.removed).toEqual([
@@ -447,7 +515,9 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		expect(written).toBe(0);
 		expect(await readStored()).toEqual(before);
 		const list = await currentRuntime().runPromise(
-			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ projectIds: ["test-project"] }),
+			),
 		);
 		expect(list.rows).toEqual([]);
 	});

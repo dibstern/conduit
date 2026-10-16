@@ -79,11 +79,12 @@ const makeSubscriptions = (
 		} = {},
 	) =>
 		resumeStream(
-			(resumeFromSequence, resumeBase) =>
+			(resumeFromSequence, resumeBase, resumePoint) =>
 				sockets.control("SubscribeShell", {
 					projectSlug,
 					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 					...(resumeBase === undefined ? {} : { resumeBase }),
+					...(resumePoint === undefined ? {} : { resumePoint }),
 				}),
 			{
 				ledger: makeResumeLedger(),

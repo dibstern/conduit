@@ -79,6 +79,7 @@ const makeReadQuery = (
 	provider: "claude" | "opencode",
 	title: string,
 ): ReadQueryEffect => ({
+	listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 	readToolDetails: vi.fn(() => Effect.succeed([])),
 	getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 	getSessionFamilyRoot: () => Effect.succeed(undefined),
