@@ -33,11 +33,13 @@ import {
 	Layer,
 	Queue,
 	Schedule,
+	Schema,
 	Stream,
 	TestClock,
 } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
+import { AccountSchema } from "../../../../src/lib/contracts/account.js";
 import type { UsageReading } from "../../../../src/lib/contracts/limit-recovery.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import {
@@ -62,6 +64,7 @@ import { SessionEventBusLive } from "../../../../src/lib/domain/relay/Services/s
 import {
 	decideInbox,
 	type InboxView,
+	providerSteers,
 	SessionInboxLive,
 	SessionInboxTag,
 } from "../../../../src/lib/domain/relay/Services/session-inbox.js";
@@ -85,6 +88,25 @@ import {
 	makeMockOpenCodeAPI,
 } from "../../../helpers/mock-factories.js";
 import { usageReading } from "../../../helpers/usage.js";
+
+it.each([
+	["claude", true],
+	["opencode", false],
+	["cursor", true],
+] as const)("steering follows the %s driver for a named account without a registry", (driver, expected) => {
+	const account = Schema.decodeUnknownSync(AccountSchema)({
+		driver,
+		id: "named-account",
+		name: "Named account",
+		folder: configuredClaudeConfigDir("/tmp/claude"),
+		usageEligible: false,
+	});
+	expect(providerSteers(account)).toBe(expected);
+});
+
+it("does not steer without a resolved account", () => {
+	expect(providerSteers(undefined)).toBe(false);
+});
 
 let isolatedRoot: string;
 beforeEach(() => {
@@ -145,7 +167,6 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	const registry = new ProviderRegistry([
 		{
 			providerId: "claude",
-			steering: false,
 			discoverEffect: () => Effect.die("Continuation never discovers"),
 			sendTurnEffect: () => Effect.die("Turns use ProviderTurnService"),
 			interruptTurnEffect: () => Effect.void,

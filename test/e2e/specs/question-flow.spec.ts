@@ -111,7 +111,7 @@ test.describe("Question/Answer Flow", () => {
 				"input.submit": async ({ sessionId }) => {
 					await relay?.sendMessages(questionResponseMessages);
 					rpc.sendChunk("SubscribeApprovals", [questionAsked]);
-					return { ok: true, sessionId };
+					return { ok: true, sessionId, handedOff: true };
 				},
 				AnswerQuestion: () => ({ ok: true }),
 				RejectQuestion: () => ({ ok: true }),
