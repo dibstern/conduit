@@ -81,6 +81,7 @@ import {
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	broadcastProjectList,
@@ -130,7 +131,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| TailscaleCliTag
 		>();
 		const activity = yield* SessionActivityTag;
-		const context = Context.add(baseContext, SessionActivityTag, activity);
+		const context = Context.add(baseContext, SessionActivityTag, activity).pipe(
+			Context.merge(yield* optionalPersistenceStoreContext),
+		);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -753,7 +756,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						Effect.mapError(
 							(error) =>
 								new WsRpcError({
-									code: "ambiguous-session",
+									...(error._tag === "AmbiguousSession"
+										? { code: "ambiguous-session" as const }
+										: {}),
 									message: error.message,
 								}),
 						),

@@ -609,6 +609,7 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TRACE_MAX_BYTES"
 					| "CONDUIT_TRACE_SQL_MIN_MS"
 					| "CONDUIT_CONTENTION_METRICS"
+					| "CONDUIT_SHARED_STORE"
 					| "XPC_SERVICE_NAME"
 				>
 			>;

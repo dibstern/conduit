@@ -321,7 +321,9 @@ export const makeRoutedWsRpcServerLayer = <
 							Effect.mapError(
 								(error) =>
 									new WsRpcError({
-										code: "ambiguous-session",
+										...(error._tag === "AmbiguousSession"
+											? { code: "ambiguous-session" as const }
+											: {}),
 										message: error.message,
 									}),
 							),
