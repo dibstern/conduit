@@ -106,7 +106,7 @@ describe("todo feed", () => {
 		const request = todosRequest(wire.requests, "A");
 		if (!request) throw new Error("missing request");
 		expect(request.trafficClass).toBe("control");
-		expect(request.payload).toEqual({ projectSlug: "project", sessionId: "A" });
+		expect(request.payload).toEqual({ sessionId: "A" });
 
 		await wire.emit(request, {
 			_tag: "snapshot",

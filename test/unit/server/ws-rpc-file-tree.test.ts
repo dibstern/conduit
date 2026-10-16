@@ -5,6 +5,7 @@ import { expect, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
+	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
@@ -46,7 +47,12 @@ describe("WsRpcServerLayer GetFileTree", () => {
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							config: makeMockConfig({ slug: "project-a" }),
+						}),
+					),
 				),
 			),
 		);

@@ -69,7 +69,7 @@ it.each([
 	wire.stub({ ListWorktrees: () => value });
 	await expect(rpc("ListWorktrees", payload)).resolves.toEqual(value);
 	const request = await wire.request("ListWorktrees");
-	expect(request.payload).toEqual({ _tag: request.tag, ...payload });
+	expect(request.payload).toEqual(payload);
 });
 
 it.each([
