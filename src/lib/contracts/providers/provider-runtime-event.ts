@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import type { EventPayloadMap } from "../stored-event.js";
 
 const NonBlankString = Schema.String.pipe(
 	Schema.filter((value) => value.trim().length > 0 && value === value.trim()),
@@ -195,6 +196,13 @@ export const ProviderWorkspaceChangedDataSchema = Schema.Struct({
 export type ProviderWorkspaceChangedData = Schema.Schema.Type<
 	typeof ProviderWorkspaceChangedDataSchema
 >;
+
+export type ProviderRuntimeEventPayloadMap = Pick<
+	EventPayloadMap,
+	Exclude<ProviderRuntimeEventType, "workspace.changed">
+> & {
+	"workspace.changed": ProviderWorkspaceChangedData;
+};
 
 const ProviderRuntimeEventEnvelopeSchema = Schema.Union(
 	Schema.Struct({

@@ -169,7 +169,7 @@ export function followDaemonLists(on: boolean): void {
 											if (currentGeneration !== generation) return;
 											applyUsageReadings(readings);
 											// Reload the shared order after reconnect and each snapshot.
-											yield* control.GetUsageLimitsSetting({}).pipe(
+											yield* control("GetUsageLimitsSetting", {}).pipe(
 												Effect.tap(({ usageLimits }) =>
 													Effect.sync(() => {
 														if (currentGeneration === generation)

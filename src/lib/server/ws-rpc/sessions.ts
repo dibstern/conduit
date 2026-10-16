@@ -5,7 +5,10 @@ import {
 	type ContinuationError,
 	ContinuationErrorSchema,
 } from "../../contracts/limit-recovery.js";
-import { PROVIDER_SESSION_CAPABILITIES } from "../../contracts/provider-instance.js";
+import {
+	PROVIDER_DRIVERS,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import {
@@ -200,7 +203,7 @@ export const sessionsHandlers = {
 				_tag: "Id",
 				id: session.provider,
 			});
-			if (account.driver !== "claude") {
+			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
 				return yield* new WsRpcError({
 					message: "Goal details are available only for Claude sessions",
 				});
@@ -475,7 +478,9 @@ export const sessionsHandlers = {
 			const drafts = yield* Effect.serviceOption(DraftPreWarmTag);
 			const draftId = request.draftId;
 			const resolvedCreation =
-				draftId && !request.newWorktree && account.driver === "claude"
+				draftId &&
+				!request.newWorktree &&
+				PROVIDER_DRIVERS[account.driver].supportsNativeResume
 					? yield* resolveSessionCreation({ ...request, account }).pipe(
 							Effect.onError(() =>
 								drafts._tag === "Some"

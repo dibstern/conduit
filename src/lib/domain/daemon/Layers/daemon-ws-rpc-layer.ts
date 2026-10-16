@@ -11,6 +11,7 @@ import {
 import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
 import {
+	getProviderDriver,
 	PROVIDER_DRIVERS,
 	PROVIDER_SESSION_CAPABILITIES,
 } from "../../../contracts/provider-instance.js";
@@ -90,6 +91,7 @@ import {
 	resolveSessionMode,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
+import { SessionActivityTag } from "../Services/session-activity.js";
 import { Usage } from "../Services/usage.js";
 import { KeepAwakeTag } from "./keep-awake-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
@@ -108,7 +110,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 	DaemonWsRpcHandlersTag,
 	Effect.gen(function* () {
 		const { configDir } = yield* Ref.get(yield* DaemonStateTag);
-		const context = yield* Effect.context<
+		const baseContext = yield* Effect.context<
 			| ProjectRegistryTag
 			| ProjectSaveLockTag
 			| DaemonConfigRefTag
@@ -125,6 +127,8 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			| KeepAwakeTag
 			| TailscaleCliTag
 		>();
+		const activity = yield* SessionActivityTag;
+		const context = Context.add(baseContext, SessionActivityTag, activity);
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
 		const handle = yield* DaemonHandleTag;
@@ -189,6 +193,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| ProjectSaveLockTag
 				| DaemonConfigRefTag
 				| DaemonEventBusTag
+				| SessionActivityTag
 				| ConfigPersistenceTag
 				| RelayCacheTag
 				| AccountDirectory
@@ -223,6 +228,7 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				| PollerFibersTag
 				| ConfigPersistenceTag
 				| DaemonEventBusTag
+				| SessionActivityTag
 			>,
 		) =>
 			effect.pipe(
@@ -588,8 +594,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const instance = yield* getInstance(request.instanceId);
-						// Claude instances have no process to start.
-						if (instance.driver !== "claude")
+						if (
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+						)
 							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
 						return {
 							projectSlug: request.projectSlug,
@@ -601,7 +609,10 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 				run(
 					Effect.gen(function* () {
 						const instance = yield* getInstance(request.instanceId);
-						if (instance.driver !== "claude")
+						if (
+							getProviderDriver(instance.driver ?? "opencode")
+								?.runsOpenCodeServer
+						)
 							yield* openCodeInstances.stop(request.instanceId);
 						return {
 							projectSlug: request.projectSlug,
@@ -745,7 +756,11 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 			OpenCodeUseWorktree: (request) =>
 				Effect.gen(function* () {
 					const instance = yield* getInstance(request.instanceId);
-					if (!instance.managed || instance.driver !== "opencode")
+					if (
+						getProviderDriver(instance.driver)?.worktreeMoves !==
+							"server-declaration" ||
+						!instance.managed
+					)
 						return yield* new WsRpcError({
 							message:
 								"Declared worktree moves require a Conduit-managed OpenCode instance",

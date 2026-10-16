@@ -31,7 +31,7 @@ export interface TlsFs {
 export type ExecFn = (cmd: string) => string | Promise<string>;
 
 export interface TlsOptions {
-	/** Config directory — defaults to ~/.conduit */
+	/** Defaults to the config dir (DEFAULT_CONFIG_DIR). */
 	configDir?: string;
 	/** Injectable exec for testing (sync or async) */
 	exec?: ExecFn;
@@ -188,7 +188,7 @@ export async function getMkcertCaRoot(
 /**
  * Main TLS certificate management function.
  *
- * 1. Checks ~/.conduit/certs/ for existing key.pem + cert.pem.
+ * 1. Checks certs/ in the config dir (DEFAULT_CONFIG_DIR) for key.pem + cert.pem.
  * 2. If certs exist and all current IPs are covered, returns them.
  * 3. If certs exist but IPs changed and mkcert is available, regenerates.
  * 4. If certs exist but IPs changed and mkcert is NOT available, returns

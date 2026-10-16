@@ -2,9 +2,10 @@ import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { expect, it, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
-	BackgroundLivenessTag,
-	ConfigTag,
-} from "../../../src/lib/domain/relay/Services/services.js";
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
@@ -12,7 +13,6 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import {
 	makeMockAccountDirectory,
@@ -27,21 +27,30 @@ it("publishes task additions and removals from onChange without another event", 
 		undefined,
 		bus,
 	);
-	let now = 100;
+	const activity = await Effect.runPromise(makeSessionActivity);
 	const onChange = vi.fn((sessionId: string) => {
 		runtime.runFork(announceBackgroundWork(sessionId));
 	});
-	const liveness = makeSessionBackgroundLiveness(onChange, () => now);
+	const liveness = activity.background;
 	const runtime = ManagedRuntime.make(
 		Layer.mergeAll(
 			bus,
 			persistence,
-			Layer.succeed(BackgroundLivenessTag, liveness.backgroundOf),
+			Layer.succeed(SessionActivityTag, activity),
 			Layer.succeed(ConfigTag, makeMockConfig()),
 			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		),
 	);
 	try {
+		runtime.runFork(
+			Effect.scoped(
+				Effect.flatMap(activity.subscribe, (changes) =>
+					Stream.runForEach(changes, (sessionId) =>
+						Effect.sync(() => onChange(sessionId)),
+					),
+				),
+			),
+		);
 		await runtime.runPromise(
 			Effect.flatMap(ProjectionRunnerEffectTag, (runner) => runner.recover()),
 		);
@@ -67,15 +76,24 @@ it("publishes task additions and removals from onChange without another event", 
 		);
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(1);
 		expect(rows[0]).not.toHaveProperty("backgroundTasks");
-		const a = { id: "a", type: "local_agent", description: "Audit auth" };
-		const b = { id: "b", type: "local_agent", description: "Review tests" };
+		const a = {
+			id: "a",
+			type: "local_agent",
+			description: "Audit auth",
+			firstSeenAt: 100,
+		};
+		const b = {
+			id: "b",
+			type: "local_agent",
+			description: "Review tests",
+			firstSeenAt: 200,
+		};
 		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [a] });
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(2);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "monitoring",
 			backgroundTasks: [{ ...a, firstSeenAt: 100 }],
 		});
-		now = 200;
 		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [b, a] });
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(3);
 		expect(rows.at(-1)).toMatchObject({
@@ -125,6 +143,7 @@ it("publishes committed permission counts through the root subscription", async 
 		Layer.mergeAll(
 			bus,
 			persistence,
+			Layer.effect(SessionActivityTag, makeSessionActivity),
 			Layer.succeed(ConfigTag, makeMockConfig()),
 			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		),
@@ -146,24 +165,17 @@ it("publishes committed permission counts through the root subscription", async 
 		);
 		const counts: Array<number | undefined> = [];
 		runtime.runFork(
-			Stream.runForEach(
-				subscribeShell().pipe(
-					Stream.provideService(BackgroundLivenessTag, () => undefined),
-				),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "snapshot") {
-							counts.push(
-								envelope.rows.find((row) => row.id === "s1")
-									?.pendingPermissionCount,
-							);
-						} else if (
-							envelope._tag === "upsert" &&
-							envelope.item.id === "s1"
-						) {
-							counts.push(envelope.item.pendingPermissionCount);
-						}
-					}),
+			Stream.runForEach(subscribeShell(), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "snapshot") {
+						counts.push(
+							envelope.rows.find((row) => row.id === "s1")
+								?.pendingPermissionCount,
+						);
+					} else if (envelope._tag === "upsert" && envelope.item.id === "s1") {
+						counts.push(envelope.item.pendingPermissionCount);
+					}
+				}),
 			),
 		);
 		await expect.poll(() => counts.length, { timeout: 700 }).toBeGreaterThan(0);

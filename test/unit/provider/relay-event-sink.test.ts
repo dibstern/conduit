@@ -1,18 +1,18 @@
 import { SqlError } from "@effect/sql/SqlError";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderRuntimeEventType } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
-import { PendingInteractionCancelled } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import type {
-	CanonicalEvent,
-	EventPayloadMap,
-} from "../../../src/lib/persistence/events.js";
+	ProviderRuntimeEventPayloadMap,
+	ProviderRuntimeEventType,
+} from "../../../src/lib/contracts/providers/provider-runtime-event.js";
+import { PendingInteractionCancelled } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { MissingPendingInteractions } from "../../../src/lib/provider/errors.js";
 import { createRelayEventSink } from "../../../src/lib/provider/relay-event-sink.js";
 
 function makeEvent<T extends ProviderRuntimeEventType>(
 	type: T,
-	data: EventPayloadMap[T],
+	data: ProviderRuntimeEventPayloadMap[T],
 	metadata: Record<string, unknown> = {},
 ) {
 	return {
