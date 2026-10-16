@@ -377,7 +377,11 @@ test("deleting Claude defaults follows usage order and adding an account restore
 					},
 				};
 			},
-			GetAgents: () => ({ projectSlug: "myapp", agents: [] }),
+			GetAgents: () => ({
+				projectSlug: "myapp",
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [],
+			}),
 			GetUsageLimitsSetting: () => ({
 				usageLimits: {
 					autoResume: false,

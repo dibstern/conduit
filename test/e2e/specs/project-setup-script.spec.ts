@@ -47,6 +47,7 @@ async function openSession(
 		setupScript: storedScript,
 	};
 	const session = {
+		accountId: null,
 		id: sessionId,
 		title: "New worktree",
 		status: "idle",
@@ -55,6 +56,7 @@ async function openSession(
 	};
 	const rpc = await mockWsRpc(page, {
 		handlers: {
+			GetModels: ({ projectSlug }) => ({ projectSlug, providers: [] }),
 			GetProjects: () => ({ projects: [project], current: slug }),
 			ListDaemonSessions: () => ({
 				sessions: [session],

@@ -5,6 +5,7 @@
 	import Select from "../ui/Select.svelte";
 	import { Schema } from "effect";
 	import { GroupingModeSchema } from "../../../shared-types.js";
+	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
 	import { projectState } from "../../stores/project-state.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -127,7 +128,7 @@
 	<SettingsRow
 		label="Default session mode"
 		labelFor="settings-default-session-mode"
-		description="Applies to new drafts. Project settings and conduit.json take precedence."
+		description="Applies to new drafts. Last used repeats your previous new session. Project settings and conduit.json take precedence."
 	>
 		{#snippet control()}
 			<Select
@@ -138,7 +139,7 @@
 				onchange={(event) => {
 					const mode = event.currentTarget.value;
 					const projectSlug = getDraftProject() ?? getCurrentSlug();
-					if (!projectSlug || (mode !== "local" && mode !== "worktree")) return;
+					if (!projectSlug || !Schema.is(DefaultSessionModeSchema)(mode)) return;
 					state.sessionModeSaving = true;
 					void setDefaultSessionModeRpc({ projectSlug, mode })
 						.then((response) => applyDefaultSessionMode(response.mode))
@@ -148,6 +149,7 @@
 			>
 				<option value="local">Local</option>
 				<option value="worktree">New worktree</option>
+				<option value="last">Last used</option>
 			</Select>
 		{/snippet}
 	</SettingsRow>
@@ -193,7 +195,7 @@
 
 <SettingsGroup id="settings-worktree-cleanup" title="Worktree cleanup" collapsible bind:open={state.cleanupOpen} summary={cleanupSummary} testId="settings-worktree-cleanup">
 	<p class="px-3 py-2 text-[11px] leading-[1.35] text-text-muted">
-		Frees disk space by removing idle sessions' worktrees. Branches are never deleted, and a session's worktree is recreated from its branch on its next message.
+		Runs every hour, right after a session settles or is deleted, and when you change a rule or press Run. It skips sessions that are running, waiting on you, open in a tab or sharing a worktree, and worktrees with an open terminal. Branches are kept, so a removed worktree is rebuilt on the session's next message.
 	</p>
 	<SettingsRow label="When a session settles" labelFor="settings-cleanup-on-settle" description="Merged means its branch is in the default branch.">
 		{#snippet control()}
@@ -207,7 +209,15 @@
 			</Select>
 		{/snippet}
 	</SettingsRow>
-	<SettingsRow label="Remove idle worktrees after" labelFor="settings-cleanup-idle" description="Even if the session isn't settled.">
+	<SettingsRow label="When a session is deleted" labelFor="settings-cleanup-on-delete" description="Ask lets you choose in the delete dialog.">
+		{#snippet control()}
+			<Select id="settings-cleanup-on-delete" data-testid="settings-cleanup-on-delete" value={state.cleanup.onDelete ? "remove" : "ask"} disabled={state.cleanupSaving} onchange={(event) => saveCleanup({ onDelete: event.currentTarget.value === "remove" })}>
+				<option value="ask">Ask</option>
+				<option value="remove">Remove</option>
+			</Select>
+		{/snippet}
+	</SettingsRow>
+	<SettingsRow label="Remove idle worktrees after" labelFor="settings-cleanup-idle" description="Settled or not, counted from the session's last activity.">
 		{#snippet control()}
 			<Select id="settings-cleanup-idle" data-testid="settings-cleanup-idle" value={String(state.cleanup.afterInactiveDays ?? "never")} disabled={state.cleanupSaving} onchange={(event) => {
 				const value = event.currentTarget.value;
@@ -224,9 +234,8 @@
 			</Select>
 		{/snippet}
 	</SettingsRow>
-	<SettingsRow label="Remove once merged" description="Without waiting for the session to settle." checked={state.cleanup.whenMerged} disabled={state.cleanupSaving} onchange={() => saveCleanup({ whenMerged: !state.cleanup.whenMerged })} />
-	<SettingsRow label="Remove when there are no new commits" description="Its branch has nothing beyond the default branch." checked={state.cleanup.noCommitsBeyondDefault} disabled={state.cleanupSaving} onchange={() => saveCleanup({ noCommitsBeyondDefault: !state.cleanup.noCommitsBeyondDefault })} />
-	<SettingsRow label="Remove when a session is deleted" description="Deleting a session removes its worktree without asking." checked={state.cleanup.onDelete} disabled={state.cleanupSaving} onchange={() => saveCleanup({ onDelete: !state.cleanup.onDelete })} />
+	<SettingsRow label="Remove once merged" description="Settled or not, as soon as its branch is in the default branch." checked={state.cleanup.whenMerged} disabled={state.cleanupSaving} onchange={() => saveCleanup({ whenMerged: !state.cleanup.whenMerged })} />
+	<SettingsRow label="Remove if its branch has no new commits" description="Settled or not. Covers sessions that committed nothing, like a quick question." checked={state.cleanup.noCommitsBeyondDefault} disabled={state.cleanupSaving} onchange={() => saveCleanup({ noCommitsBeyondDefault: !state.cleanup.noCommitsBeyondDefault })} />
 	<div>
 		<SettingsRow label="Keep worktrees with" labelFor="settings-cleanup-keep-when">
 			{#snippet control()}
@@ -243,7 +252,7 @@
 		<p class="-mt-1 px-3 pb-2 text-[11px] leading-[1.35] {keepNote.warning ? 'text-warning' : 'text-text-muted'}" data-testid={keepNote.warning ? "settings-cleanup-keep-warning" : "settings-cleanup-keep-note"}>{keepNote.text}</p>
 	</div>
 	<div>
-		<SettingsRow label="Clean up now" description="Never touches running, open or shared sessions, open terminals, pending turns, or nested repos.">
+		<SettingsRow label="Clean up now">
 			{#snippet control()}
 				<Button variant="secondary" size="sm" data-testid="settings-cleanup-run" disabled={state.cleanupRun.status === "running"} onclick={cleanUpNow}>{state.cleanupRun.status === "running" ? "Running…" : "Run"}</Button>
 			{/snippet}
