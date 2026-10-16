@@ -219,7 +219,7 @@ describe("Claude project extra folders through the built daemon", () => {
 		await save(fixture, [fixture.projectDir, extra]);
 		const after = await fixture.connect(sessionId);
 		let resumeSessionId: string | undefined;
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			// Completion can arrive while SaveProject replaces the relay, before
 			// this browser reconnects. The durable turn survives that WS gap.
@@ -236,7 +236,7 @@ describe("Claude project extra folders through the built daemon", () => {
 						)
 						.all(sessionId);
 					resumeSessionId = (
-						await readNativeThread(fixture.projectStorePath(), sessionId)
+						await readNativeThread(fixture.daemonStorePath(), sessionId)
 					)?.resumeSessionId;
 					evidence["turnsBeforeNextSend"] = turns;
 					evidence["turnErrorsBeforeNextSend"] = errors;

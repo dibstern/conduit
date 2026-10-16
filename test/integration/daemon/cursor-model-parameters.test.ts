@@ -378,7 +378,7 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 				message["id"] === user?.id,
 		);
 		expect(liveUser).not.toHaveProperty("modelExecution");
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const turn = db
 				.prepare<[string], { actual_model: string }>(
@@ -449,7 +449,7 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 				TIMEOUT,
 			);
 			expect(liveUser["modelExecution"]).toEqual(execution);
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				const events = db
 					.prepare<[string], { data: string }>(

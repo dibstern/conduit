@@ -59,7 +59,7 @@ function rows(name: string): TraceRow[] {
 }
 
 function snapshot(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare<[string], { type: string; data: string }>(
@@ -272,7 +272,7 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 					for (const key of ["cursor", "stdout", "stderr", "shellOutput"])
 						expect(data["metadata"]).not.toHaveProperty(key);
 				expect(finalPart?.state?.["metadata"]).not.toHaveProperty("output");
-				const outputDb = new Database(harness.projectStorePath(), {
+				const outputDb = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
@@ -331,7 +331,7 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 				});
 			if (kind === "shell-error" || kind === "computerUse-error") {
 				expect(metadata["isError"]).toBe(true);
-				const errorDb = new Database(harness.projectStorePath(), {
+				const errorDb = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
@@ -435,7 +435,7 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 		const toolStarts = snapshot(harness, sessionId).filter(
 			({ type }) => type === "tool.started",
 		);
-		const db = new Database(harness.projectStorePath(), { readonly: true });
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
 		try {
 			const parts = db
 				.prepare<[string], { id: string; messageId: string }>(

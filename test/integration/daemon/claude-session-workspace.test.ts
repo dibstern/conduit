@@ -61,11 +61,11 @@ function initRepo(directory: string, branch = "main") {
 }
 
 function events(fixture: ProcessHarness) {
-	const db = new Database(fixture.projectStorePath(), { readonly: true });
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
 			.prepare(
-				"SELECT sequence, session_id, type, data, metadata FROM events WHERE type IN ('session.workspace_changed', 'session.workspace_started', 'tool.completed', 'session.status', 'turn.completed', 'input.admitted', 'input.sent') ORDER BY sequence",
+				"SELECT sequence, session_id, type, data, metadata FROM events WHERE project_id = 'process-test' AND type IN ('session.workspace_changed', 'session.workspace_started', 'tool.completed', 'session.status', 'turn.completed', 'input.admitted', 'input.sent') ORDER BY sequence",
 			)
 			.all()
 			.map((row) => {
@@ -177,7 +177,7 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
-			evidence["events"] = existsSync(fixture.projectStorePath())
+			evidence["events"] = existsSync(fixture.daemonStorePath())
 				? events(fixture)
 				: [];
 			evidence["errors"] =
@@ -1044,7 +1044,7 @@ exec '${realGit}' "$@"
 				).toBeDefined(),
 			{ timeout: 15_000 },
 		);
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		let nativeSessionId: unknown;
 		try {
 			nativeSessionId = db

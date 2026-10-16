@@ -152,6 +152,8 @@ This is a proposed implementation sequence, not a change made during the audit.
 
 3. **Activate the shared store and retire daemon per-file assumptions.** Make it the default, remove the temporary opt-in, retarget `projectStorePath`, update the consumer inventory and semantic tests above, and retain explicit importer/standalone fixtures. Include cold-start, restart, relay disposal and no-source-recreation evidence. Update the architecture description currently naming per-project history at [architecture.md:53](../../docs/agent-guide/architecture.md:53).
 
+   Done in conduit-test-82tn.6.4.3: the daemon always owns `<configDir>/events.db`; runtime consumers use shared storage and legacy sources remain explicit fixtures.
+
 Step 1 carries the highest risk because it combines persistent-data migration with connection lifetime and startup ordering. The later default switch should add no new storage behavior.
 
 5\. Open questions for a human

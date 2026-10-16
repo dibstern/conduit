@@ -124,7 +124,7 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude process runner E2E (real SDK)", () => {
 					readFileSync(`${runner.socketPath}.json`, "utf8"),
 				) as RunnerRegistration;
 				expect(registration).toMatchObject({ sessionId, pid: runner.pid });
-				const db = new Database(harness.projectStorePath(), {
+				const db = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});
 				try {
