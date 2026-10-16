@@ -1,11 +1,10 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Effect, Either, Fiber, Queue, Schema, Stream } from "effect";
 import { createEventId } from "../../persistence/events.js";
 import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
+import { runnerPidAlive } from "../runner/runner-registry.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import type {
 	SessionFailure,
@@ -19,6 +18,11 @@ import { cursorAskUserTool } from "./cursor-questions.js";
 import { CursorModelParameters } from "./cursor-runner-driver.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
+import {
+	cursorSessionStorePath,
+	readCursorSessionIdentity,
+	writeCursorSessionIdentity,
+} from "./cursor-session-recovery.js";
 import { CursorTurnEvents } from "./cursor-turn-events.js";
 import {
 	CursorSdkFailure,
@@ -44,6 +48,7 @@ export interface CursorRunnerDeps {
 interface CursorSession {
 	readonly cwd: string;
 	agentId?: string | undefined;
+	controllerPid?: number | undefined;
 	open?:
 		| {
 				readonly agent: CursorAgent;
@@ -147,34 +152,46 @@ export class CursorRunnerPayload implements RunnerPayload {
 		sink: EventSink,
 		signal: AbortSignal,
 	): Effect.Effect<TurnResult, SessionFailure> {
-		return Effect.suspend(() => {
+		return Effect.gen(this, function* () {
 			let state = this.sessions.get(input.sessionId);
 			if (!state) {
+				const identity = yield* Effect.try({
+					try: () =>
+						readCursorSessionIdentity(
+							this.deps.daemonConfigDir,
+							input.sessionId,
+						),
+					catch: (): SessionFailure => ({
+						operation: "session identity",
+						message: "Could not read Cursor session identity",
+					}),
+				});
 				const storedCwd = input.providerState["cursor.cwd"];
 				const storedId = input.providerState["cursor.agentId"];
 				state = {
-					cwd: typeof storedCwd === "string" ? storedCwd : input.workspaceRoot,
+					cwd:
+						identity?.cwd ??
+						(typeof storedCwd === "string" ? storedCwd : input.workspaceRoot),
 					busy: false,
 					cancelRequested: false,
-					...(typeof storedId === "string" ? { agentId: storedId } : {}),
+					...(identity
+						? {
+								agentId: identity.agentId,
+								controllerPid: identity.controllerPid,
+							}
+						: typeof storedId === "string"
+							? { agentId: storedId }
+							: {}),
 				};
 				this.sessions.set(input.sessionId, state);
 			}
 			const session = state;
-			if (session.busy)
-				return Effect.succeed(this.result(session, "steer-declined", 0));
+			if (session.busy) return this.result(session, "steer-declined", 0);
 			session.busy = true;
 			session.cancelRequested = false;
 			const questionAbort = new AbortController();
 			session.questionAbort = questionAbort;
 			const started = Date.now();
-			const storePath = join(
-				this.deps.daemonConfigDir,
-				"cursor",
-				"stores",
-				input.sessionId,
-			);
-			const recoveryPath = join(storePath, "interrupted-run.json");
 			let abandoned = false;
 			let acceptingUpdates = true;
 			let settled = false;
@@ -223,7 +240,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					cost: cost ?? 0,
 				});
 
-			return Effect.scoped(
+			return yield* Effect.scoped(
 				Effect.gen(this, function* () {
 					const queue = yield* Queue.unbounded<Update>();
 					const customTools = {
@@ -297,69 +314,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 										}),
 									),
 								);
-					const recovery = yield* sdkCall("read interrupted run", async () => {
-						let text: string;
-						try {
-							text = await readFile(recoveryPath, "utf8");
-						} catch (cause) {
-							if (
-								cause instanceof Error &&
-								"code" in cause &&
-								cause.code === "ENOENT"
-							)
-								return undefined;
-							throw cause;
-						}
-						const decoded = Schema.decodeUnknownEither(
-							Schema.Struct({
-								controllerPid: Schema.Int.pipe(Schema.positive()),
-								agentId: Schema.String,
-							}),
-						)(JSON.parse(text));
-						if (Either.isLeft(decoded))
-							throw new CursorSdkFailure({
-								operation: "read interrupted run",
-								reason: "Invalid Cursor interrupted-run recovery record",
-							});
-						return decoded.right;
-					});
-					if (recovery) {
-						// force only expires persistence. The old controller must be dead
-						// before resuming, otherwise it could still execute the abandoned run.
-						yield* Effect.gen(function* () {
-							while (true) {
-								const alive = yield* Effect.sync(() => {
-									try {
-										process.kill(recovery.controllerPid, 0);
-										return true;
-									} catch (cause) {
-										return !(
-											cause instanceof Error &&
-											"code" in cause &&
-											cause.code === "ESRCH"
-										);
-									}
-								});
-								if (!alive) break;
-								yield* Effect.sleep("50 millis");
-							}
-						}).pipe(
-							Effect.timeoutFail({
-								duration: "5 seconds",
-								onTimeout: (): SessionFailure => ({
-									operation: "recover interrupted run",
-									message:
-										"Cursor's previous controller has not exited; retry after it stops",
-									code: "timeout",
-									retryable: true,
-								}),
-							}),
-						);
-						session.agentId = recovery.agentId;
-					}
 					const config = cursorSessionConfig({
 						cwd: session.cwd,
-						storePath,
+						storePath: cursorSessionStorePath(
+							this.deps.daemonConfigDir,
+							input.sessionId,
+						),
 						workspaceRoot: input.workspaceRoot,
 						extraFolders: input.extraFolders,
 						permissionMode: input.permissionMode,
@@ -442,8 +402,60 @@ export class CursorRunnerPayload implements RunnerPayload {
 						session.agentId = agent.id;
 						session.open = { agent, store, options: config.agent };
 					}
+					const open = session.open;
 					events.refs.providerSessionId = session.agentId;
-					const agent = session.open.agent;
+					const activeRun = yield* sdkCall("active run lookup", () =>
+						this.sdk.getActiveRun(open.agent.id, open.store),
+					);
+					// Public listRuns calls a never-sent queued run "running". Only the
+					// persisted document distinguishes it from an orphaned controller.
+					const force = activeRun?.status === "running";
+					if (
+						force &&
+						(session.controllerPid === undefined ||
+							session.controllerPid === process.pid)
+					)
+						return yield* finish(
+							"error",
+							"provider_error",
+							"Cursor's previous controller is not confirmed dead; refusing to force its active run",
+						);
+					if (force && session.controllerPid !== undefined) {
+						const controllerPid = session.controllerPid;
+						yield* Effect.gen(function* () {
+							while (yield* Effect.sync(() => runnerPidAlive(controllerPid)))
+								yield* Effect.sleep("50 millis");
+						}).pipe(
+							Effect.timeoutFail({
+								duration: "5 seconds",
+								onTimeout: (): SessionFailure => ({
+									operation: "recover interrupted run",
+									message:
+										"Cursor's previous controller has not exited; retry after it stops",
+									code: "timeout",
+									retryable: true,
+								}),
+							}),
+						);
+					}
+					yield* Effect.try({
+						try: () =>
+							writeCursorSessionIdentity(
+								this.deps.daemonConfigDir,
+								input.sessionId,
+								{
+									agentId: open.agent.id,
+									cwd: session.cwd,
+									controllerPid: process.pid,
+								},
+							),
+						catch: (): SessionFailure => ({
+							operation: "session identity",
+							message: "Could not persist Cursor session identity before send",
+						}),
+					});
+					session.controllerPid = process.pid;
+					const agent = open.agent;
 					const readUsage = sdkCall("usage", () => agent.getUsage()).pipe(
 						Effect.timeout("2 seconds"),
 						Effect.map((value) => {
@@ -458,7 +470,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							input.prompt,
 							{
 								...config.send,
-								...(recovery ? { local: { force: true as const } } : {}),
+								...(force ? { local: { force: true as const } } : {}),
 							},
 							(value) => {
 								if (acceptingUpdates)
@@ -466,8 +478,6 @@ export class CursorRunnerPayload implements RunnerPayload {
 							},
 						),
 					);
-					if (recovery)
-						yield* sdkCall("clear interrupted run", () => unlink(recoveryPath));
 					session.run = run;
 					session.onCancel = () => {
 						if (acceptingUpdates)
@@ -555,16 +565,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							if (settled) continue;
 							acceptingUpdates = false;
 							abandoned = true;
-							// A durable marker precedes terminal publication, so immediate
-							// input cannot race provider-state persistence on the daemon.
-							yield* sdkCall("record interrupted run", async () => {
-								await mkdir(storePath, { recursive: true, mode: 0o700 });
-								await writeFile(
-									recoveryPath,
-									`${JSON.stringify({ controllerPid: process.pid, agentId: agent.id })}\n`,
-									{ mode: 0o600 },
-								);
-							});
+							// The identity persisted before send is the next controller's durable recovery record.
 							this.deps.onAbandonedRun?.(input.inputId);
 							return yield* finish("interrupted");
 						}

@@ -277,6 +277,14 @@ export function teeCursorSdkPort(
 			stores.set(wrapped, store);
 			return wrapped;
 		},
+		getActiveRun: (agentId, store) =>
+			call("store.active-run", { agentId }, () =>
+				port.getActiveRun(agentId, unwrapStore(store)),
+			),
+		deleteAgent: (agentId, cwd, store) =>
+			call("agent.delete", { agentId, cwd }, () =>
+				port.deleteAgent(agentId, cwd, unwrapStore(store)),
+			),
 		async primeSandbox(options, credential, store) {
 			trace.protect(credential.apiKey);
 			trace.record(

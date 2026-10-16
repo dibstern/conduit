@@ -296,6 +296,41 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 			stores.set(store, localStore);
 			return store;
 		},
+		async getActiveRun(agentId, store) {
+			const localStore = stores.get(store);
+			if (!localStore)
+				throw new CursorSdkFailure({
+					operation: "store.runs.get",
+					reason: "Cursor requires an open conduit-owned store",
+				});
+			const agent = await localStore.agents.get({ agentId });
+			if (!agent?.activeRunId) return undefined;
+			return (
+				(await localStore.runs.get({ agentId, runId: agent.activeRunId })) ??
+				undefined
+			);
+		},
+		async deleteAgent(agentId, cwd, store) {
+			const localStore = stores.get(store);
+			if (!localStore)
+				throw new CursorSdkFailure({
+					operation: "agent.delete",
+					reason: "Cursor requires an open conduit-owned store",
+				});
+			const agent = await localStore.agents.get({ agentId });
+			if (!agent) return;
+			const options = { runtime: "local" as const, cwd, store: localStore };
+			const api = (await load()).Agent;
+			if (agent.activeRunId) {
+				const run = await localStore.runs.get({
+					agentId,
+					runId: agent.activeRunId,
+				});
+				if (run?.status === "queued" || run?.status === "running")
+					await api.cancelRun(run.runId, options);
+			}
+			await api.delete(agentId, options);
+		},
 		async primeSandbox(options, credential, store) {
 			const agent = await (await load()).Agent.create(
 				agentOptions(

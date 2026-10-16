@@ -38,6 +38,15 @@ export function createCursorSdkPort(): CursorSdkPort {
 								cancelNeverSettles:
 									process.env["CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"] ===
 									"1",
+								...(process.env["CONDUIT_TEST_CURSOR_SEND_GATE"]
+									? { sendGate: process.env["CONDUIT_TEST_CURSOR_SEND_GATE"] }
+									: {}),
+								...(process.env["CONDUIT_TEST_CURSOR_STREAM_GATE"]
+									? {
+											streamGate:
+												process.env["CONDUIT_TEST_CURSOR_STREAM_GATE"],
+										}
+									: {}),
 							}
 						: {},
 				)

@@ -94,6 +94,31 @@ scheduling only, without adding or modifying SDK wire fields. The test submits
 its second input after the tee's `close.call` marker and before agent disposal,
 then verifies both turns and the remembered code word reach durable history.
 
+## Recovery replay cases (conduit-test-xqsg.6)
+
+`turn-never-sent.jsonl` derives from `basic.jsonl`. It adds the captured
+`store.runs.before_send` envelope from `never-sent.jsonl`, with only its agentId
+rebound to basic's captured agentId, and changes the scenario header. The queued
+run retains its captured null requestId/startedAt and runId. This pins the
+persisted document distinction even though public listRuns reports running.
+
+`cursor-recovery.test.ts` temporarily adds the same redacted credential-store
+and captured model-catalog rows described above. The basic, workspace-resume
+and crashed-run SDK deltas, messages and outcomes remain unchanged. Test-only file gates pause
+after local send bookkeeping or the first delta; they alter scheduling only.
+The trace player persists captured agent/run identities and turn position in
+the harness's owned store, projecting active run documents from `crashed-run`
+and terminal states from captured wait results. This lets separate runner
+processes replay the same agent without fabricating SDK messages. The
+live-controller refusal case copies that held store and identity into a second
+session, then proves no force or SDK send occurs while the first PID is alive.
+All paths are isolated under the process harness and removed at cleanup.
+
+The suite writes event sequences, restart/rebuild parity, command and turn
+states, SDK call counts and process cleanup to
+`test-results/conduit-test-xqsg.6.json`. The shared-host Claude crash-during-send
+regression writes its companion evidence separately.
+
 ## Auth replay cases (conduit-test-xqsg.11)
 
 `auth-login.jsonl` retains every catalogue and turn row from `basic.jsonl`.

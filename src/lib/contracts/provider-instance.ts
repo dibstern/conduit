@@ -162,7 +162,7 @@ export const PROVIDER_DRIVERS = {
 		runsOpenCodeServer: false, // Cursor must never start or borrow OpenCode.
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
 		interactionSink: "auto-approving", // cursor-session-config allows gated calls; sandbox is the interim boundary.
-		supportsNativeResume: false, // Same-runner resume is pinned; native-thread transfer/recovery belongs to xqsg.6.
+		supportsNativeResume: false, // cursor-recovery.test.ts pins owned-store resume; cross-account native-thread transfer is unproven.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
 		accountKind: "config-directory", // Keep runner account configuration separate from servers.
 		defaultAccountSource: "selection", // Cursor owns its selected account default.

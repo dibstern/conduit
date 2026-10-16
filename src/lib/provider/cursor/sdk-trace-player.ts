@@ -1,5 +1,12 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { Either, Schema } from "effect";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
@@ -9,8 +16,10 @@ import type {
 	CursorAuthStatus,
 	CursorCustomTool,
 	CursorModel,
+	CursorPersistedRun,
 	CursorRuntimeProbe,
 	CursorSdkPort,
+	CursorStore,
 	CursorStoredCredential,
 } from "./sdk-port.js";
 
@@ -19,8 +28,45 @@ interface TraceRow {
 	data: unknown;
 }
 
+interface TraceAgentState {
+	readonly id: string;
+	readonly cwd: string;
+	readonly sendIndex: number;
+	readonly activeRun?: CursorPersistedRun;
+}
+
 function object(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function runStatus(value: unknown): value is CursorPersistedRun["status"] {
+	return (
+		value === "queued" ||
+		value === "running" ||
+		value === "finished" ||
+		value === "error" ||
+		value === "cancelled" ||
+		value === "expired"
+	);
+}
+
+function persistedRun(value: unknown): CursorPersistedRun | undefined {
+	if (
+		!object(value) ||
+		typeof value["runId"] !== "string" ||
+		!runStatus(value["status"])
+	)
+		return undefined;
+	return {
+		runId: value["runId"],
+		status: value["status"],
+		...(typeof value["requestId"] === "string" || value["requestId"] === null
+			? { requestId: value["requestId"] }
+			: {}),
+		...(typeof value["startedAt"] === "number" || value["startedAt"] === null
+			? { startedAt: value["startedAt"] }
+			: {}),
+	};
 }
 
 const decodeModels = Schema.decodeUnknownEither(
@@ -62,6 +108,8 @@ export function createTraceCursorSdkPort(
 	playback: {
 		readonly closeDelayMs?: number;
 		readonly disposeDelayMs?: number;
+		readonly sendGate?: string;
+		readonly streamGate?: string;
 		readonly authStatePath?: string;
 		readonly loginDelayMs?: number;
 		readonly loginUrlDelayMs?: number;
@@ -73,8 +121,43 @@ export function createTraceCursorSdkPort(
 ): CursorSdkPort {
 	let contents: string | undefined;
 	let rows: TraceRow[] = [];
-	let sendIndex = 0;
-	const agentCwds = new Map<string, string>();
+	const stores = new WeakMap<CursorStore, string>();
+	const statePath = (storePath: string) => join(storePath, "trace-state.json");
+	const readState = (storePath: string): TraceAgentState | undefined => {
+		const file = statePath(storePath);
+		if (!existsSync(file)) return undefined;
+		const value: unknown = JSON.parse(readFileSync(file, "utf8"));
+		if (
+			!object(value) ||
+			typeof value["id"] !== "string" ||
+			typeof value["cwd"] !== "string" ||
+			typeof value["sendIndex"] !== "number"
+		)
+			throw new CursorSdkFailure({
+				operation: "trace.state",
+				reason: "Invalid persisted Cursor replay state",
+			});
+		const activeRun = persistedRun(value["activeRun"]);
+		return {
+			id: value["id"],
+			cwd: value["cwd"],
+			sendIndex: value["sendIndex"],
+			...(activeRun ? { activeRun } : {}),
+		};
+	};
+	const writeState = (storePath: string, state: TraceAgentState) => {
+		mkdirSync(storePath, { recursive: true, mode: 0o700 });
+		const file = statePath(storePath);
+		const temporary = `${file}.${process.pid}.tmp`;
+		writeFileSync(temporary, JSON.stringify(state), {
+			mode: 0o600,
+			flush: true,
+		});
+		renameSync(temporary, file);
+	};
+	const gate = async (file: string | undefined) => {
+		while (file && existsSync(file)) await setTimeout(20);
+	};
 	const cursors = new Map<string, number>();
 	const activeRuns = new Map<string, string>();
 	const reload = () => {
@@ -121,7 +204,6 @@ export function createTraceCursorSdkPort(
 				object(value) && typeof value["kind"] === "string",
 		);
 		cursors.clear();
-		sendIndex = 0;
 		contents = next;
 	};
 	reload();
@@ -194,14 +276,27 @@ export function createTraceCursorSdkPort(
 	): CursorAgent => {
 		let closed: Promise<void> | undefined;
 		const closeDelayMs = playback.closeDelayMs ?? 0;
-		const cwd = agentCwds.get(id);
-		if (cwd !== undefined && cwd !== options.cwd) {
+		const prior = readState(options.storePath);
+		if (prior && (prior.id !== id || prior.cwd !== options.cwd)) {
 			throw new CursorSdkFailure({
 				operation: "agent.resume",
 				reason: "Cursor agent_not_found: resume cwd changed",
 			});
 		}
-		agentCwds.set(id, options.cwd);
+		if (!prior) {
+			const queued = rows.find(
+				(row) => row.kind === "store.runs.before_send",
+			)?.data;
+			const active = Array.isArray(queued)
+				? queued.map(persistedRun).find((run) => run !== undefined)
+				: undefined;
+			writeState(options.storePath, {
+				id,
+				cwd: options.cwd,
+				sendIndex: 0,
+				...(active ? { activeRun: active } : {}),
+			});
+		}
 		return {
 			id,
 			async send(_prompt, sendOptions, onDelta) {
@@ -214,22 +309,31 @@ export function createTraceCursorSdkPort(
 					});
 				}
 				reload();
+				const state = readState(options.storePath);
+				if (!state)
+					throw new CursorSdkFailure({
+						operation: "agent.send",
+						reason: "Cursor replay agent was deleted",
+					});
+				if (state.activeRun?.status === "running" && !sendOptions.local?.force)
+					throw new CursorSdkFailure({
+						operation: "agent.send",
+						reason: "Cursor agent is busy",
+					});
 				const starts = rows.flatMap((row, index) =>
 					row.kind === "send.options" ? [index] : [],
 				);
-				if (sendOptions.local?.force && sendIndex === 0) {
-					const first = rows.slice(starts[0], starts[1]);
-					if (
-						first.some(
-							(row) =>
-								row.kind === "wait.result" &&
-								object(row.data) &&
-								row.data["status"] === "cancelled",
-						)
+				let startIndex = Math.min(state.sendIndex, starts.length - 1);
+				// A captured busy send has no handle. A forced recovery follows it.
+				if (sendOptions.local?.force) {
+					while (
+						startIndex < starts.length - 1 &&
+						!rows
+							.slice(starts[startIndex], starts[startIndex + 1])
+							.some((row) => row.kind === "run.handle")
 					)
-						sendIndex++;
+						startIndex++;
 				}
-				const startIndex = Math.min(sendIndex++, starts.length - 1);
 				const start = starts[startIndex];
 				if (start === undefined) {
 					throw new CursorSdkFailure({
@@ -260,6 +364,22 @@ export function createTraceCursorSdkPort(
 				}
 				const runId = handle["id"];
 				const terminal = turn.find((row) => row.kind === "wait.result")?.data;
+				const captured = turn.find(
+					(row) => row.kind === "store.run.after_crash",
+				)?.data;
+				const activeRun = persistedRun(captured) ?? {
+					runId,
+					status: "running" as const,
+					...(object(terminal) && typeof terminal["requestId"] === "string"
+						? { requestId: terminal["requestId"] }
+						: {}),
+				};
+				writeState(options.storePath, {
+					...state,
+					sendIndex: startIndex + 1,
+					activeRun,
+				});
+				await gate(playback.sendGate);
 				const needsCancel =
 					object(terminal) && terminal["status"] === "cancelled";
 				const delayedCancel = needsCancel && startIndex === 0;
@@ -307,6 +427,7 @@ export function createTraceCursorSdkPort(
 				return {
 					id: runId,
 					stream: (async function* () {
+						let held = false;
 						try {
 							for (const row of turn) {
 								if (
@@ -323,6 +444,10 @@ export function createTraceCursorSdkPort(
 									if (playback.deltaDelayMs)
 										await setTimeout(playback.deltaDelayMs);
 									onDelta(row.data);
+									if (!held) {
+										held = true;
+										await gate(playback.streamGate);
+									}
 								}
 								if (row.kind === "custom.start" && object(row.data)) {
 									const context = row.data["context"];
@@ -363,7 +488,19 @@ export function createTraceCursorSdkPort(
 					async wait() {
 						await streamed;
 						if (playback.waitDelayMs) await setTimeout(playback.waitDelayMs);
-						return waiting;
+						let status: CursorPersistedRun["status"] = "error";
+						try {
+							const result = await waiting;
+							if (runStatus(result["status"])) status = result["status"];
+							return result;
+						} finally {
+							const latest = readState(options.storePath);
+							if (latest)
+								writeState(options.storePath, {
+									...latest,
+									activeRun: { ...activeRun, status },
+								});
+						}
 					},
 					async cancel() {
 						cancel();
@@ -497,10 +634,10 @@ export function createTraceCursorSdkPort(
 			}
 			return decoded.right;
 		},
-		async openStore() {
+		async openStore(storePath) {
 			let disposed: Promise<void> | undefined;
 			const disposeDelayMs = playback.disposeDelayMs ?? 0;
-			return {
+			const store: CursorStore = {
 				dispose() {
 					return (disposed ??=
 						disposeDelayMs > 0
@@ -508,6 +645,25 @@ export function createTraceCursorSdkPort(
 							: Promise.resolve());
 				},
 			};
+			stores.set(store, storePath);
+			return store;
+		},
+		async getActiveRun(agentId, store) {
+			const storePath = stores.get(store);
+			const state = storePath ? readState(storePath) : undefined;
+			return state?.id === agentId ? state.activeRun : undefined;
+		},
+		async deleteAgent(agentId, _cwd, store) {
+			const storePath = stores.get(store);
+			if (!storePath)
+				throw new CursorSdkFailure({
+					operation: "agent.delete",
+					reason: "Cursor requires an open conduit-owned store",
+				});
+			const state = readState(storePath);
+			if (state?.id === agentId) {
+				unlinkSync(statePath(storePath));
+			}
 		},
 		async primeSandbox() {
 			result("sandbox.prime");
