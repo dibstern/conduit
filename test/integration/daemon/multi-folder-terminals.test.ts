@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	CreatePty,
+	CreatePtyForSession,
 	MoveSessionWorkspace,
 	SaveProject,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -105,12 +106,17 @@ describe("Multi-folder terminals through the built daemon", () => {
 			const cursor = browser.frames.length;
 			await sendRpcRequest(
 				socket,
-				new CreatePty({
-					projectSlug: scope.projectSlug,
-					originId: browser.originId,
-					...(scoped ? { sessionId } : {}),
-					...(root === undefined ? {} : { root }),
-				}),
+				scoped
+					? new CreatePtyForSession({
+							sessionId,
+							originId: browser.originId,
+							...(root === undefined ? {} : { root }),
+						})
+					: new CreatePty({
+							projectSlug: scope.projectSlug,
+							originId: browser.originId,
+							...(root === undefined ? {} : { root }),
+						}),
 			);
 			const frame = await browser.waitFor(
 				(message) => ptyEnvelope(message)?._tag === "upsert",
@@ -155,7 +161,7 @@ describe("Multi-folder terminals through the built daemon", () => {
 		await expect(
 			sendRpcRequest(
 				socket,
-				new CreatePty({
+				new CreatePtyForSession({
 					...scope,
 					originId: browser.originId,
 					root: fixture.root,
@@ -206,7 +212,7 @@ describe("Multi-folder terminals through the built daemon", () => {
 		await expect(
 			sendRpcRequest(
 				socket,
-				new CreatePty({
+				new CreatePtyForSession({
 					...scope,
 					originId: browser.originId,
 					root: mapped[1],

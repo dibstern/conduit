@@ -53,7 +53,6 @@ import {
 	getInstanceTraits,
 	instanceState,
 } from "./instance.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 import { accountSnapshotChangedListeners } from "./ws-listeners.js";
@@ -499,9 +498,9 @@ export function followSessionPickChange(
 	};
 }
 
-function refreshSessionPick(projectSlug: string, sessionId: string): void {
+function refreshSessionPick(sessionId: string): void {
 	const apply = followModelsRead(sessionId);
-	void getModelsRpc({ projectSlug, sessionId })
+	void getModelsRpc({ sessionId })
 		.then(apply)
 		.catch(() => undefined);
 }
@@ -512,7 +511,6 @@ function chooseSessionPick(
 ): UndoChoice {
 	const state = sessionPicks[sessionId];
 	if (!state?.pick) return () => {};
-	const projectSlug = getCurrentSlug();
 	const clickId = Symbol();
 	const fields = Object.keys(patch) as (keyof SessionPick)[];
 	for (const field of fields) {
@@ -527,7 +525,7 @@ function chooseSessionPick(
 				if (state.choice[field]?.clickId === clickId)
 					delete state.choice[field];
 			}
-			if (projectSlug) refreshSessionPick(projectSlug, sessionId);
+			refreshSessionPick(sessionId);
 		},
 		{ clickId },
 	);
@@ -1398,10 +1396,9 @@ export function followSessionModelSettings(
 		row.resumes?.at(-1)?.instanceId === previous.resumes?.at(-1)?.instanceId
 	)
 		return;
-	const projectSlug = getCurrentSlug();
 	const sessionId = sessionState.currentId;
-	if (!projectSlug || !sessionId) return;
-	refreshSessionPick(projectSlug, sessionId);
+	if (!sessionId) return;
+	refreshSessionPick(sessionId);
 }
 
 export function handlePermissionModeInfo(msg: {

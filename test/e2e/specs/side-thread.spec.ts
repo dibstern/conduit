@@ -14,7 +14,6 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-const projectSlug = "e2e-replay";
 const parentPrompt =
 	"Remember the word 'alpha'. Reply with only: ok, remembered.";
 const question =
@@ -98,8 +97,8 @@ function transcript(dbPath: string, sessionId: string) {
 async function parentSettings(relayUrl: string, sessionId: string) {
 	return rpc(relayUrl, (client) =>
 		Effect.gen(function* () {
-			const models = yield* client.GetModels({ projectSlug, sessionId });
-			const agents = yield* client.GetAgents({ projectSlug, sessionId });
+			const models = yield* client.GetModels({ sessionId });
+			const agents = yield* client.GetAgents({ sessionId });
 			return {
 				model: models.active,
 				permissionMode: models.permissionMode,
@@ -178,7 +177,6 @@ test.describe("OpenCode Side Threads", () => {
 			await rpc(relayUrl, (client) =>
 				Effect.gen(function* () {
 					const catalog = yield* client.GetModels({
-						projectSlug,
 						sessionId: parentId,
 					});
 					const alternate = catalog.providers
@@ -187,18 +185,15 @@ test.describe("OpenCode Side Threads", () => {
 					if (!alternate)
 						throw new Error("Recording needs a second OpenCode model");
 					yield* client.SwitchModel({
-						projectSlug,
 						sessionId: parentId,
 						providerId: "opencode",
 						modelId: alternate.id,
 					});
 					yield* client.SwitchAgent({
-						projectSlug,
 						sessionId: parentId,
 						agentId: "plan",
 					});
 					yield* client.SwitchPermissionMode({
-						projectSlug,
 						sessionId: parentId,
 						mode: "full",
 					});
@@ -240,7 +235,6 @@ test.describe("OpenCode Side Threads", () => {
 			expect(await parentSettings(relayUrl, parentId)).toEqual(settingsBefore);
 			const sideSettings = await rpc(relayUrl, (client) =>
 				client.GetModels({
-					projectSlug,
 					sessionId: sideId,
 				}),
 			);
@@ -340,8 +334,7 @@ test.describe("OpenCode Side Threads", () => {
 			const nested = await rpc(relayUrl, (client) =>
 				Effect.either(
 					client.StartSideThread({
-						projectSlug,
-						parentSessionId: sideId,
+						sessionId: sideId,
 						title: "Nested question",
 						inputId: randomUUID(),
 						text: "Nested question",
@@ -478,8 +471,7 @@ test.describe("OpenCode Side Threads", () => {
 		const result = await rpc(relayUrl, (client) =>
 			Effect.either(
 				client.StartSideThread({
-					projectSlug,
-					parentSessionId: "missing-side-thread-parent",
+					sessionId: "missing-side-thread-parent",
 					title: question,
 					inputId: randomUUID(),
 					text: question,
@@ -550,13 +542,12 @@ test.describe("Claude Side Threads", () => {
 				// A non-default mode, so a leak from the Side Thread cannot pass.
 				await rpc(relayUrl, (client) =>
 					client.SwitchPermissionMode({
-						projectSlug,
 						sessionId: parentId,
 						mode: "full",
 					}),
 				);
 				const settingsBefore = await rpc(relayUrl, (client) =>
-					client.GetModels({ projectSlug, sessionId: parentId }),
+					client.GetModels({ sessionId: parentId }),
 				).then(({ active, permissionMode }) => ({ active, permissionMode }));
 				expect(settingsBefore.permissionMode).toBe("full");
 				const parentTranscript = transcript(harness.eventsDbPath, parentId);
@@ -587,7 +578,7 @@ test.describe("Claude Side Threads", () => {
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);
 				const sideSettings = await rpc(relayUrl, (client) =>
-					client.GetModels({ projectSlug, sessionId: sideId }),
+					client.GetModels({ sessionId: sideId }),
 				);
 				expect(sideSettings.permissionMode).toBe("ask");
 				// The Side Thread asked for Ask ("default"), not the parent's "full".
@@ -661,7 +652,7 @@ test.describe("Claude Side Threads", () => {
 				);
 				expect(
 					await rpc(relayUrl, (client) =>
-						client.GetModels({ projectSlug, sessionId: parentId }),
+						client.GetModels({ sessionId: parentId }),
 					).then(({ active, permissionMode }) => ({ active, permissionMode })),
 				).toEqual(settingsBefore);
 				await expect(

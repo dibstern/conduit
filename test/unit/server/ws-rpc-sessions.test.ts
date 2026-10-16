@@ -77,8 +77,11 @@ describe("WsRpcServerLayer ResolveSession", () => {
 			expect(yield* client.ResolveSession({ sessionId: "existing" })).toEqual({
 				projectSlug: "project-a",
 			});
-			expect(yield* client.ResolveSession({ sessionId: "missing" })).toEqual({
-				projectSlug: null,
+			expect(
+				yield* Effect.either(client.ResolveSession({ sessionId: "missing" })),
+			).toMatchObject({
+				_tag: "Left",
+				left: { _tag: "WsRpcError", message: "Unknown session: missing" },
 			});
 			expect(sessionExists).toHaveBeenCalledWith("existing");
 			expect(sessionExists).toHaveBeenCalledWith("missing");
@@ -319,13 +322,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
 			yield* client.SyncInputDraft({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				text: "saved draft",
 			});
 
 			const result = yield* client.ViewSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			});
@@ -355,7 +356,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.DeleteSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			});
@@ -382,7 +382,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.DeleteSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				originId: "browser-tab-a",
 			});
@@ -441,14 +440,13 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.ForkSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				messageId: "message-1",
 				originId: "browser-tab-a",
 			});
 
 			expect(result).toEqual({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				sessionId: "session-forked",
 				parentId: "session-1",
 				forkMessageId: "message-1",
@@ -799,7 +797,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				]);
 				const client = yield* rpcClient;
 				const result = yield* client.ForkSession({
-					projectSlug: "project-a",
 					sessionId: "ses-parent",
 					messageId: "api-first",
 					originId: "browser-tab-a",
@@ -887,7 +884,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const sessionCount = () =>
 					sql<{ count: number }>`SELECT COUNT(*) AS count FROM sessions`;
 				const resultOnlyFork = yield* client.ForkSession({
-					projectSlug: "project-a",
 					sessionId: "ses-parent",
 					messageId: "result-only",
 					originId: "browser-tab-a",
@@ -907,7 +903,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				const beforeMissingPoint = (yield* sessionCount())[0]?.count;
 				const missingPoint = yield* Effect.either(
 					client.ForkSession({
-						projectSlug: "project-a",
 						sessionId: "ses-parent",
 						messageId: "not-in-history",
 						originId: "browser-tab-a",
@@ -934,7 +929,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 					);
 				const rolledBack = yield* Effect.either(
 					client.ForkSession({
-						projectSlug: "project-a",
 						sessionId: "ses-parent",
 						originId: "browser-tab-a",
 					}),
@@ -954,7 +948,6 @@ describe("WsRpcServerLayer ListSessions", () => {
 				});
 				const missing = yield* Effect.either(
 					client.ForkSession({
-						projectSlug: "project-a",
 						sessionId: "ses-no-transcript",
 						originId: "browser-tab-a",
 					}),
@@ -1107,13 +1100,12 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const client = yield* rpcClient;
 
 			const response = yield* client.LoadMoreHistory({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				before: "message-2",
 			});
 
 			expect(response).toMatchObject({
-				projectSlug: "project-a",
+				projectSlug: "test-project",
 				sessionId: "session-1",
 				messages: [
 					{

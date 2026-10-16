@@ -96,7 +96,6 @@ test("resume removes an input consumed while the browser was disconnected", asyn
 		expect(
 			await Effect.runPromise(
 				browser.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					originId: browser.originId,
 					inputId,

@@ -57,8 +57,9 @@ describe("Managed OpenCode starts on first use", () => {
 		sessionId?: string,
 	) => {
 		const scope = {
-			projectSlug: "process-test",
-			...(sessionId === undefined ? {} : { sessionId }),
+			...(sessionId === undefined
+				? { projectSlug: "process-test" }
+				: { sessionId }),
 		};
 		return Effect.runPromise(
 			Effect.all(
@@ -66,7 +67,7 @@ describe("Managed OpenCode starts on first use", () => {
 					models: browser.rpc.GetModels(scope),
 					agents: browser.rpc.GetAgents(scope),
 					commands: browser.rpc.GetCommands(scope),
-					files: browser.rpc.GetFileTree({ projectSlug: scope.projectSlug }),
+					files: browser.rpc.GetFileTree({ projectSlug: "process-test" }),
 				},
 				{ concurrency: 4 },
 			),
@@ -230,7 +231,6 @@ describe("Managed OpenCode starts on first use", () => {
 		await browser.stopInstance(instanceId);
 		await Effect.runPromise(
 			browser.rpc.ReloadProviderSession({
-				projectSlug: "process-test",
 				sessionId,
 				commandId: randomUUID(),
 			}),
@@ -435,7 +435,6 @@ describe("Managed OpenCode starts on first use", () => {
 			const cursor = browser.frames.length;
 			const accepted = await Effect.runPromise(
 				browser.rpc.input.submit({
-					projectSlug: "process-test",
 					sessionId,
 					text: "hello",
 					inputId: randomUUID(),

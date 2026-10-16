@@ -310,7 +310,7 @@ export const makeProviderRuntimeIngestionLive = (
 							};
 							yield* commitAndSignal
 								.write(
-									(project) =>
+									(project, stamp) =>
 										Effect.gen(function* () {
 											// Claim inside the append transaction, before event IDs or
 											// projections are written. Replayed and fenced frames are no-ops.
@@ -449,12 +449,27 @@ export const makeProviderRuntimeIngestionLive = (
 												)
 													needsSessionRow.set(event.sessionId, event.provider);
 											}
+											const seededSessionIds: string[] = [];
 											for (const [sessionId, provider] of needsSessionRow) {
 												const seededAt = Date.now();
-												yield* sql`INSERT OR IGNORE INTO sessions
+												const seeded = yield* sql<{
+													readonly id: string;
+												}>`INSERT OR IGNORE INTO sessions
 											(id, provider, title, status, created_at, updated_at)
-											VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt})`;
+											VALUES (${sessionId}, ${provider}, 'Untitled', 'idle', ${seededAt}, ${seededAt}) RETURNING id`;
+												seededSessionIds.push(...seeded.map(({ id }) => id));
 											}
+											// A first provider event need not project a session touch.
+											// Enroll actual inserts in the same committed advance.
+											if (seededSessionIds.length > 0)
+												yield* stamp((version) =>
+													sql<{
+														readonly id: string;
+													}>`UPDATE sessions SET version = ${version}
+												WHERE id IN (SELECT value FROM json_each(${JSON.stringify(seededSessionIds)})) RETURNING id`.pipe(
+														Effect.map((rows) => rows.map(({ id }) => id)),
+													),
+												);
 											for (const { event, record } of prepared)
 												if (!deleted.has(event.sessionId))
 													yield* record?.(project) ?? Effect.void;

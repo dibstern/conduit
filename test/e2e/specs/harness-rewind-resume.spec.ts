@@ -320,7 +320,6 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 		// Rewind to the last prompt: its turn leaves the transcript.
 		await Effect.runPromise(
 			rpc.RewindSession({
-				projectSlug: "process-test",
 				sessionId: id,
 				messageId: userId(id, last),
 			}),
@@ -338,9 +337,7 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 		});
 
 		// Undo it: the turn comes back.
-		await Effect.runPromise(
-			rpc.UndoRewind({ projectSlug: "process-test", sessionId: id }),
-		);
+		await Effect.runPromise(rpc.UndoRewind({ sessionId: id }));
 		await expect(notice).toBeHidden({ timeout: 30_000 });
 		await expect(messages).toContainText(replyEnd(id, last));
 		scenarios.push({

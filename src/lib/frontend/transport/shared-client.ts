@@ -124,7 +124,6 @@ const makeSubscriptions = (
 						sockets.stream(
 							"SubscribeSessionDetail",
 							{
-								projectSlug,
 								sessionId: options.sessionId,
 								...(resumeFromSequence === undefined
 									? {}
@@ -150,7 +149,6 @@ const makeSubscriptions = (
 	todos: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>
 			sockets.control("SubscribeSessionTodos", {
-				projectSlug,
 				sessionId: options.sessionId,
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 			}),
@@ -160,7 +158,6 @@ const makeSubscriptions = (
 	family: (options: { readonly sessionId: string }) =>
 		resumeStream((resumeFromSequence) =>
 			sockets.control("SubscribeSessionFamily", {
-				projectSlug,
 				sessionId: options.sessionId,
 				...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
 			}),
@@ -190,7 +187,6 @@ const makeSubscriptions = (
 	inputDraft: (options: { readonly sessionId: string }) =>
 		resumeStream(() =>
 			sockets.control("SubscribeInputDraft", {
-				projectSlug,
 				sessionId: options.sessionId,
 			}),
 		),

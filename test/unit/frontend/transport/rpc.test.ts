@@ -60,10 +60,8 @@ it.each([
 	undefined,
 	"session-1",
 ])("returns worktrees unchanged with optional session %s", async (sessionId) => {
-	const payload = {
-		projectSlug: "other-project",
-		...(sessionId === undefined ? {} : { sessionId }),
-	};
+	const payload =
+		sessionId === undefined ? { projectSlug: "other-project" } : { sessionId };
 	const value = {
 		worktrees: [{ path: "/work/tree", branch: "topic", main: false }],
 		directory: "/work",
@@ -71,7 +69,8 @@ it.each([
 	wire.stub({ ListWorktrees: () => value });
 	await expect(rpc("ListWorktrees", payload)).resolves.toEqual(value);
 	const request = await wire.request("ListWorktrees");
-	expect(request.payload).toEqual({ _tag: request.tag, ...payload });
+	// The wire always carries the paired form's tag so it decodes as one request.
+	expect(request.payload).toEqual({ ...payload, _tag: "ListWorktrees" });
 });
 
 it.each([
@@ -79,7 +78,6 @@ it.each([
 	"steer",
 ] as const)("sends input %s verbatim and returns the response union", async (delivery) => {
 	const payload = {
-		projectSlug: "alpha",
 		sessionId: "s1",
 		inputId: "i1",
 		text: "",
@@ -108,7 +106,6 @@ it("rejects with the declared error instance and exposes tag narrowing in Effect
 	const result = await runtime.runPromise(
 		Effect.either(
 			rpcEffect("input.submit", {
-				projectSlug: "alpha",
 				sessionId: "s1",
 				inputId: "i1",
 				text: "hello",
@@ -211,7 +208,6 @@ function contractTypes() {
 	const worktrees = rpc("ListWorktrees", { projectSlug: "alpha" });
 	expectTypeOf(worktrees).resolves.toHaveProperty("worktrees");
 	const submit = rpc("input.submit", {
-		projectSlug: "alpha",
 		sessionId: "s1",
 		inputId: "i1",
 		text: "",
@@ -223,9 +219,9 @@ function contractTypes() {
 	// @ts-expect-error Stream tags cannot be called as unary RPCs.
 	rpc("SubscribeShell", { projectSlug: "alpha" });
 	// @ts-expect-error The Effect call also accepts only unary tags.
-	rpcEffect("SubscribeInputDraft", { projectSlug: "alpha", sessionId: "s1" });
+	rpcEffect("SubscribeInputDraft", { sessionId: "s1" });
 	// @ts-expect-error Contract payload fields are required.
-	rpc("input.submit", { projectSlug: "alpha", sessionId: "s1", text: "" });
+	rpc("input.submit", { sessionId: "s1", text: "" });
 	// @ts-expect-error Unknown payload fields must not be accepted.
 	rpc("ListWorktrees", { projectSlug: "alpha", unknown: true });
 }

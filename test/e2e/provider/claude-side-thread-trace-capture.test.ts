@@ -74,8 +74,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 						() =>
 							Effect.runPromise(
 								browser.rpc.StartSideThread({
-									projectSlug: "process-test",
-									parentSessionId: parentId,
+									sessionId: parentId,
 									title: QUESTION,
 									inputId,
 									text: QUESTION,

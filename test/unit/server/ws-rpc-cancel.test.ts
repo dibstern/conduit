@@ -24,7 +24,6 @@ describe("WsRpcServerLayer CancelSession", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.CancelSession({
-				projectSlug: "project-a",
 				sessionId: "session-1",
 				commandId: "cmd-stop-opencode",
 			});
@@ -61,7 +60,6 @@ describe("WsRpcServerLayer CancelSession", () => {
 			const client = yield* rpcClient;
 
 			const result = yield* client.CancelSession({
-				projectSlug: "project-a",
 				sessionId: "session-claude",
 				commandId: "cmd-stop-1",
 			});

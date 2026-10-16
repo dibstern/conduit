@@ -244,7 +244,6 @@ class ClaudeAccounts {
 		this.handoff = { kind: "previewing", ...context };
 		try {
 			const summary = await previewContinuationRpc({
-				projectSlug: this.projectSlug,
 				sessionId,
 				instanceId: targetId,
 				originId: getBrowserClientId(),
@@ -279,7 +278,6 @@ class ClaudeAccounts {
 		this.inFlightTarget = handoff.to;
 		try {
 			await switchSessionAccount({
-				projectSlug: this.projectSlug,
 				sessionId: handoff.sessionId,
 				instanceId: handoff.to,
 				expectedInstanceId: handoff.from,

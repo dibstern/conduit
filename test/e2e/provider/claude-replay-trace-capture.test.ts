@@ -78,7 +78,6 @@ async function capture(options: {
 		const sessionId = await browser.createSession(options.fixture);
 		await Effect.runPromise(
 			browser.rpc.SwitchModel({
-				projectSlug: "process-test",
 				sessionId,
 				providerId: "claude",
 				modelId: options.modelId,

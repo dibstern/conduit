@@ -137,15 +137,14 @@
 
 	$effect(() => {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
 		const facts = goalFacts;
 		details = null;
 		detailsFailed = false;
 		detailsLoading = false;
-		if (!goalDetails.open || !sessionId || !projectSlug || !facts || (!facts.goal && !facts.endedGoal)) return;
+		if (!goalDetails.open || !sessionId || !facts || (!facts.goal && !facts.endedGoal)) return;
 		let stale = false;
 		detailsLoading = true;
-		void getGoalDetails({ projectSlug, sessionId }).then((result) => {
+		void getGoalDetails({ sessionId }).then((result) => {
 			if (!stale) details = result;
 		}).catch(() => {
 			if (!stale) detailsFailed = true;
@@ -688,7 +687,7 @@
 	{/if}
 
 	{#if tasksPanel.open && backgroundTasks.length > 0}
-		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, getCurrentSlug(), taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId, getCurrentSlug()); } : undefined} />
+		<BackgroundTasksPanel tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
 	{/if}
 
 	{#if sideThreadsPanel.open}
