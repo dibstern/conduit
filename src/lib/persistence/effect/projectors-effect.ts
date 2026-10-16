@@ -372,6 +372,10 @@ export const makeSessionProjector = defineProjector(() => ({
 						SESSION_SUBTREE_SQL,
 						[stmt.removeSession],
 					);
+					// SET NULL preserves Forks of any Source in this subtree. Their
+					// lineage and sidebar rows still change under the same delete.
+					const forks = yield* sql<{ id: string }>`SELECT id FROM sessions
+						WHERE forked_from IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))`;
 					const roots = yield* sql<{ root_id: string | null }>`
 						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
 					left.push(...roots.flatMap((row) => row.root_id ?? []));
@@ -382,7 +386,10 @@ export const makeSessionProjector = defineProjector(() => ({
 						WHERE id IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))
 						ON CONFLICT (session_id) DO UPDATE SET project_id = excluded.project_id`;
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
-					written.push(...subtree.map((row) => row.id));
+					written.push(
+						...subtree.map((row) => row.id),
+						...forks.map((row) => row.id),
+					);
 					continue;
 				}
 				const rows = yield* sql.unsafe<{ id: string }>(
@@ -393,7 +400,7 @@ export const makeSessionProjector = defineProjector(() => ({
 			}
 			// Only these two write a parent.
 			if (event.type === "session.created" || event.type === "session.forked")
-				left.push(...(yield* rerootSession(event.data.sessionId)));
+				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
 			const touch = yield* stampSessions(written, ctx.version);
 			// A removed session, child or root, leaves a deleted tombstone.
 			return {
