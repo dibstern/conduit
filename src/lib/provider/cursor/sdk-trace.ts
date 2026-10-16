@@ -4,6 +4,7 @@ import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
 	CursorAgent,
 	CursorAgentOptions,
+	CursorCustomTool,
 	CursorSdkPort,
 	CursorSendOptions,
 	CursorStore,
@@ -145,6 +146,27 @@ export function teeCursorSdkPort(
 			enableAgentRetries: true,
 		},
 	});
+	const recordedTools = (
+		tools: Readonly<Record<string, CursorCustomTool>> = {},
+	) =>
+		Object.fromEntries(
+			Object.entries(tools).map(([toolName, tool]) => [
+				toolName,
+				{
+					...tool,
+					async execute(args, context) {
+						trace.record("custom.start", { toolName, args, context });
+						try {
+							const result = await tool.execute(args, context);
+							trace.record("custom.result", { toolName, context, result });
+							return result;
+						} finally {
+							trace.record("custom.end", { toolName, context });
+						}
+					},
+				} satisfies CursorCustomTool,
+			]),
+		);
 	const wrapAgent = (agent: CursorAgent): CursorAgent => {
 		let closed: Promise<void> | undefined;
 		return {
@@ -290,7 +312,7 @@ export function teeCursorSdkPort(
 					options,
 					credential,
 					unwrapStore(store),
-					customTools,
+					recordedTools(customTools),
 				);
 				trace.record("created", { agentId: agent.id });
 				return wrapAgent(agent);
@@ -310,7 +332,7 @@ export function teeCursorSdkPort(
 					options,
 					credential,
 					unwrapStore(store),
-					customTools,
+					recordedTools(customTools),
 				);
 				trace.record("resumed", { agentId: agent.id });
 				return wrapAgent(agent);

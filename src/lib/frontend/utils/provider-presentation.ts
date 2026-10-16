@@ -14,6 +14,7 @@ export const PROVIDER_PRESENTATION = {
 		configDirPlaceholder: "~/.config/claude/work",
 		composerNotice: undefined,
 		auth: undefined,
+		subagentNotice: undefined,
 	},
 	opencode: {
 		logo: "opencode",
@@ -23,6 +24,7 @@ export const PROVIDER_PRESENTATION = {
 		configDirPlaceholder: undefined,
 		composerNotice: undefined,
 		auth: undefined,
+		subagentNotice: undefined,
 	},
 	cursor: {
 		logo: "cursor",
@@ -55,6 +57,7 @@ export const PROVIDER_PRESENTATION = {
 			expiryWarning: "Your Cursor key expires soon. Log in again to renew it.",
 			errorCode: "auth_required",
 		},
+		subagentNotice: "Subagent sessions are read-only.",
 	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
@@ -83,6 +86,7 @@ export const PROVIDER_PRESENTATION = {
 					readonly errorCode: string;
 			  }
 			| undefined;
+		readonly subagentNotice: string | undefined;
 	}
 >;
 

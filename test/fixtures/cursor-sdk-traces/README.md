@@ -137,6 +137,40 @@ variant changes only `basic.jsonl`'s `wait.result` to `status: "error"` and
 `RunResult.error` is public; SDK 1.0.37's `toRunError` preserves the
 `unauthenticated` code produced for Connect's `Code.Unauthenticated`.
 
+## Question replay cases (conduit-test-xqsg.9)
+
+These are minimal derivatives of real SDK captures. The source headers, wire
+envelopes, IDs, timestamps, results and unrelated tools remain unchanged, apart
+from the scenario name. The custom-tools option key `human` and every MCP
+`custom-user-tools` call's `toolName` become `ask_user`. Existing MCP `args`
+fields and the matching `custom.start.args` become one question: "Which deployment?",
+header "Deployment", options Blue / "Blue deployment" and Green / "Green
+deployment", `multiSelect: false`, `custom: true`.
+
+- `question-basic.jsonl` comes from `custom-auto-block-minutes.jsonl`.
+- `question-subagent.jsonl` comes from
+  `subagent-foreground-default-fixed.jsonl`. The asking tool call remains an
+  `mcp` nested under the Task's `tool-call-delta.taskUpdate`; its context's
+  `sessionId` still equals the parent ID. The Task retains `subagentType.name`
+  `spike`, so the expected question header is "spike: Deployment".
+- `question-cancel.jsonl` comes from `cancel.jsonl`. Its cancelled wait and
+  followup turns remain captured values.
+
+`cursor-question.test.ts` adds an unchanged `models.list` row from `basic.jsonl`
+and the redacted `credential.store` result to temporary replay files, as the
+text-turn process suite does. The tool callback result is the actual answer
+recorded by the tee's `custom.result`, not the source capture's old human reply.
+The suite writes assertions, SDK operations, durable question events, daemon
+generations and owned-runner cleanup to `test-results/conduit-test-xqsg.9.json`.
+
+The temporary basic replay appends its captured send segment a second time,
+changing only the custom tool call ID to `<captured-id>-second`. This keeps
+two turns' durable requests distinct while preserving the same SDK field
+shapes. The malformed/duplicate case changes the first segment's question
+arguments to `{questions: []}` and duplicates the second segment's unchanged
+`custom.start` row. It asserts an invalid call makes no pending question, then
+one answer settles both deliveries of the same valid tool call.
+
 ## Model parameter and reroute replay (conduit-test-xqsg.18)
 
 These are derived protocol fixtures, not live proof of plan entitlement or
@@ -192,8 +226,8 @@ to prevent independent replay turns from sharing a projected tool part.
   stdout/stderr's JSON `content` field. The final result remains the real
   captured shell result.
 - `tool-task` adds a declared `SDKTaskMessage` (`type`, `agent_id`, `run_id`,
-  `status`, `text`) to pin stream progress. It renders as the generic
-  `cursor.task` row; the subagent ticket (.10) owns child-session materialization.
+  `status`, `text`) to pin stream progress. Ticket .10 maps it to the canonical
+  Task card and materializes its child through the runner's existing seam.
 - `tool-nested-computerUse` wraps the declared computer-use started/completed
   deltas in the declared `tool-call-delta.taskUpdate` wrapper beneath the task,
   plus a nested text delta. Actions, error/success values and screenshot paths
@@ -231,6 +265,58 @@ edit's `diffString`, `linesAdded` and `linesRemoved`; write's canonical input
 content and `linesCreated`; delete's path and returned `fileSize`. Write and
 delete have no before-content in the SDK result, so no diff or removed-line
 count is reconstructed, cached or read from the filesystem.
+
+
+## Subagent replay cases (conduit-test-xqsg.10)
+
+`subagent-foreground-default-fixed.jsonl` is the unmodified, redacted real
+foreground capture. Its nested `taskUpdate` deltas stream child text, thinking
+and seven public tool calls. Its completion snapshot repeats that content and
+also contains three `getMcpToolsToolCall` steps absent from the public live
+updates. Those three steps stay generic; they are not claimed as public tool
+union members. Child identity uses the parent Conduit ID and Task call ID,
+never the SDK child agent ID or a custom-tool context's parent session ID.
+
+The following are replay derivatives, not new live observations. Each uses the
+foreground capture's complete rows and envelopes except for these edits:
+
+- `subagent-reconcile.jsonl` repeats the Task's completed delta once, keeping
+  all live child content and the completion snapshot unchanged. It removes
+  `args.model` from the initial partial Task, then sets the started/completed
+  Task's model to `composer-2.5-fast`, a value observed in the spike's excluded
+  `subagent-background-default.jsonl`. This pins a later SDK-reported model
+  replacing the initial inherited parent pick, plus idempotent reconciliation.
+  Foreground reconciliation reuses live text and thinking part IDs positionally
+  by kind and fills the three snapshot-only generic tools in snapshot order.
+  There is no derived callback-gap case: the spike did not observe missing
+  live text callbacks.
+- `subagent-background-follow-up.jsonl` sets the completed Task's declared
+  `isBackground` field to true, including its duplicate stream envelope, and
+  copies the capture's existing `turn-ended` delta immediately after the Task
+  completion. The subsequent, unchanged parent thinking and `done` text thus
+  arrive as a follow-up turn on that same run. After that text, three copied
+  child taskUpdates (thinking, thinking-completed, and text `Executing`) pin
+  live child continuation after the background Task returned. All original
+  live updates remain. The stale background snapshot is never reconciled.
+  This is a scheduling example derived from foreground data. The spike did not
+  observe successful background follow-up ordering, terminal status or final
+  usage ordering. The mapper keeps the child busy until authoritative
+  `Run.wait()` resolution and trusts its
+  live content, without adding snapshot-only steps.
+- `subagent-interrupt.jsonl` retains foreground rows through the first child
+  text span, then substitutes its original wait result's status with
+  `cancelled` and removes the finished response text. The captured `stream.end`
+  follows it. Playback gates that wait on the host's cancel call. This pins
+  cancelling all locally materialized children when the run is interrupted,
+  without claiming a newly observed live background cancellation timeline.
+
+The process test inserts the same inert credential-store and captured model
+catalog rows as `.5`. `CONDUIT_TEST_CURSOR_DELTA_DELAY_MS` slows replay callbacks
+and `CONDUIT_TEST_CURSOR_WAIT_DELAY_MS` delays only the replay wait result;
+these are test-only scheduling controls, never SDK wire fields. They make live
+child visibility and the gap before `Run.wait()` deterministic. The test writes
+child events, no-duplicate assertions, child/account/model identity, terminal
+states and owned process cleanup to `test-results/conduit-test-xqsg.10.json`.
 ## Usage, error and interrupt replay cases (conduit-test-xqsg.19)
 
 These derivatives keep `basic.jsonl`'s wire envelopes and change only their
