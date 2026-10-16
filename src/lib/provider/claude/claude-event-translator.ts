@@ -572,7 +572,7 @@ export class ClaudeEventTranslator {
 	): Effect.Effect<void, EventSinkError> {
 		return Effect.gen(this, function* () {
 			const tracker = ctx.goalTracker;
-			if (!tracker?.goal) return;
+			if (!tracker?.unsettledGoal) return;
 			const sdkSessionId = ctx.resumeSessionId;
 			const logger = this.deps.logger ?? defaultLog;
 			if (!sdkSessionId) {

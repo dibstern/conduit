@@ -1537,12 +1537,22 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						? yield* Effect.try(() => sessionGoalState(row))
 						: undefined;
 					const goal = facts?.goal ?? facts?.endedGoal;
-					if (!goal) return { checks: [], tokensSinceStart: null };
+					if (!goal)
+						return {
+							checks: [],
+							tokensSinceStart: null,
+							judgeModel: null,
+							setAt: null,
+							metAt: null,
+							turnCount: null,
+						};
 
 					const checks = yield* sql<GoalDetails["checks"][number]>`
-					SELECT iterations AS iteration, created_at AS at, reason
+					SELECT iterations AS iteration, created_at AS at, reason,
+						turn_index AS turnIndex, judge_model AS judgeModel
 					FROM session_goal_checks
 					WHERE session_id = ${sessionId} AND set_at = ${goal.setAt}
+						AND condition = ${goal.condition}
 					ORDER BY iterations ASC`;
 					const rows = yield* getSessionMessagesWithParts(sessionId);
 					const history = yield* Effect.try(
@@ -1552,6 +1562,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					);
 					return {
 						checks,
+						judgeModel: goal.judgeModel ?? null,
+						setAt: goal.setAt,
+						metAt: facts?.ended === "met" ? (facts.endedAt ?? null) : null,
+						turnCount: goal.turnCount ?? null,
 						tokensSinceStart:
 							history.reduce(
 								(total, message) =>

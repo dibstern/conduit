@@ -906,6 +906,7 @@ export const ClaudeSDKActiveGoalMessageSchema = Schema.Struct({
 			set_at: Schema.Number,
 			tokens_at_start: Schema.Number,
 			last_reason: Schema.optional(Schema.String),
+			judge_model: Schema.optional(Schema.String),
 		}),
 	),
 	...ClaudeUuidSessionFields,
