@@ -19,8 +19,7 @@ const scenarios = [
 	{ name: "model-list-failed", reason: "Cursor model list failed" },
 	{
 		name: "no-credential",
-		reason:
-			"Cursor has no credential; set CURSOR_API_KEY or log in with the Cursor SDK",
+		reason: "Cursor authentication required. Log in to Cursor in Settings.",
 	},
 	{ name: "sdk-load-failed", reason: "Cursor SDK could not load" },
 	{ name: "node-old", reason: "Cursor requires Node.js 22.13 or newer" },
@@ -164,6 +163,10 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 			});
 			if (scenario.reason)
 				expect(cursor?.unavailableReason).toBe(scenario.reason);
+			// Only an auth failure offers login as its remedy.
+			expect(cursor?.unavailableCode).toBe(
+				scenario.name === "no-credential" ? "auth_required" : undefined,
+			);
 
 			const catalogCursor = browser.frames.length;
 			await browser.getModels(accountId);

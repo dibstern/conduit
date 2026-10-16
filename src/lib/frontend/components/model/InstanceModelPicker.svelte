@@ -51,6 +51,7 @@
 	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
+	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 	import { usageResetTime } from "../../utils/continuation.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -127,10 +128,15 @@
 				locked: unavailable || (locked && driver !== selectedDriver),
 				lockedReason: unavailableReason,
 				unavailableReason,
+				authRequired: unavailable && accounts.some((account) => account.unavailableCode === "auth_required"),
 			};
 		}),
 	);
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
+	$effect(() => {
+		if (pickerOpen && harnesses.some((harness) => getProviderPresentation(harness.value)?.auth && harness.authRequired))
+			void refreshCursorAuth();
+	});
 	const needsAccount = $derived(selectedTraits?.accountKind === "config-directory" && driverInstances.length === 0);
 	const accountProjectSlug = $derived(
 		sessionState.currentId
@@ -582,6 +588,10 @@
 						</OptionRow>
 						{#each harnesses.filter((harness) => harness.unavailableReason) as harness (harness.value)}
 							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] text-[11px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
+							{@const auth = getProviderPresentation(harness.value)?.auth}
+							{#if auth && harness.authRequired}
+								<Button variant="ghost-accent" size="sm" data-testid={`picker-harness-${harness.value}-login`} onclick={() => { closePicker(); openCursorLogin(); }}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
+							{/if}
 						{/each}
 					</section>
 				{/if}

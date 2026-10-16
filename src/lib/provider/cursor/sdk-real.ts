@@ -13,6 +13,7 @@ import type {
 
 export function createRealCursorSdkPort(): CursorSdkPort {
 	let sdk: Promise<typeof import("@cursor/sdk")> | undefined;
+	let pendingLogin: Promise<void> | undefined;
 	const load = () => (sdk ??= import("@cursor/sdk"));
 	const call = async <A>(
 		operation: string,
@@ -204,11 +205,59 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 			}
 			return { available: true };
 		},
+		async authLogin(options) {
+			if (pendingLogin)
+				throw new CursorSdkFailure({
+					operation: "auth.login",
+					reason: "The previous Cursor login is still finishing",
+				});
+			const operation = (async () => {
+				const sdk = await load();
+				const store = new sdk.FileCredentialStore();
+				// SDK 1.0.37 aborts polling, but does not check the signal while
+				// minting/saving. Keep cancelled flows from replacing the SDK login.
+				await sdk.Cursor.auth.login({
+					...options,
+					store: {
+						load: () => store.load(),
+						clear: () => store.clear(),
+						async save(credential) {
+							const previous = await store.load();
+							options.signal.throwIfAborted();
+							await store.save(credential);
+							if (options.signal.aborted) {
+								if (previous) await store.save(previous);
+								else await store.clear();
+								options.signal.throwIfAborted();
+							}
+						},
+					},
+				});
+			})();
+			pendingLogin = operation;
+			try {
+				// The SDK persists the key. Never return it beyond this adapter.
+				await operation;
+			} catch (cause) {
+				throw cursorSdkFailure("auth.login", cause);
+			} finally {
+				pendingLogin = undefined;
+			}
+		},
 		async authStatus() {
 			try {
 				return await (await load()).Cursor.auth.status();
 			} catch (cause) {
 				throw cursorSdkFailure("auth.status", cause);
+			}
+		},
+		async authLogout() {
+			try {
+				// A cancelled mint/save must settle before logout clears the store.
+				await pendingLogin?.catch(() => {});
+				await (await load()).Cursor.auth.logout();
+			} catch (cause) {
+				throw cursorSdkFailure("auth.logout", cause);
 			}
 		},
 		async storedCredential() {
@@ -293,7 +342,9 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 					credential,
 					store,
 				),
-			);
+			).catch((cause: unknown) => {
+				throw cursorSdkFailure("sandbox.prime", cause);
+			});
 			try {
 				// 1.0.37 initializes executors lazily. Its checked internal method
 				// primes the sandbox without sending a hidden, billable prompt.
@@ -306,12 +357,8 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 						reason: "Cursor SDK sandbox initialization API changed",
 					});
 				}
-				await agent.getExecutor().catch(() => {
-					throw new CursorSdkFailure({
-						operation: "sandbox.prime",
-						reason:
-							"Cursor sandbox initialization failed. Restart the runner after checking sandbox support.",
-					});
+				await agent.getExecutor().catch((cause: unknown) => {
+					throw cursorSdkFailure("sandbox.prime", cause);
 				});
 			} finally {
 				await wrapAgent(agent).close();

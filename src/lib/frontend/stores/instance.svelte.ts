@@ -137,6 +137,9 @@ export function applyInstanceListResponse(
 		...(instance.unavailableReason !== undefined
 			? { unavailableReason: instance.unavailableReason }
 			: {}),
+		...(instance.unavailableCode !== undefined
+			? { unavailableCode: instance.unavailableCode }
+			: {}),
 		...(instance.capabilities != null
 			? { capabilities: instance.capabilities }
 			: {}),

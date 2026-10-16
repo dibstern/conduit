@@ -119,6 +119,49 @@ states, SDK call counts and process cleanup to
 `test-results/conduit-test-xqsg.6.json`. The shared-host Claude crash-during-send
 regression writes its companion evidence separately.
 
+## Auth replay cases (conduit-test-xqsg.11)
+
+`auth-login.jsonl` retains every catalogue and turn row from `basic.jsonl`.
+Its added auth rows are derived from SDK 1.0.37's declared
+`SdkLoginOptions.onLoginUrl`, `SdkAuthStatus`, `StoredSdkCredentials` and
+`SdkLogoutOptions` contracts, not a real browser login capture. The login URL
+uses inert challenge and UUID values; the email is an example.test address.
+The key is `[REDACTED]`. `auth.login` and `auth.logout` contain null because
+the port returns void and discards the SDK login result at the real boundary.
+The expiry is a fixed future epoch so ordinary playback does not age out.
+Tests replace the public expiry to exercise warning and expired states.
+
+With `NODE_ENV=test`, `CONDUIT_TEST_CURSOR_AUTH_STATE` selects a temporary
+replay-only file shared by daemon and runners. Its shape is
+`{status: {status: "logged-out"}, credential: null}` before login. Completion
+writes the fixture's public auth status and redacted credential; logout writes
+the logged-out state. Every read reloads that file. It is not the production
+credential store and never contains a usable API key.
+`CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS` delays completion while respecting the
+abort signal. `CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS` delays the callback even
+after cancellation, to prove the daemon ignores a late URL. These controls
+change scheduling without inventing SDK wire fields.
+The tee records `auth.login.call` with the browser and key-name options,
+`auth.loginUrl` with the callback value, and `auth.login.abort` with the signal's
+actual aborted state. These are port observations, not SDK message variants.
+Replay ignores `CURSOR_API_KEY` except the exact inert
+`[REDACTED:environment]` marker with `NODE_ENV=test`, used to prove environment
+precedence without consuming a developer's key.
+
+The installed SDK's bundled `getDefaultSdkAuthPath` uses
+`join(homedir(), ".cursor", "sdk", "auth.json")`; it does not read
+`CURSOR_DATA_DIR`. Real-adapter tests must set `HOME` to their temporary harness
+home before SDK import. Replay tests use only the explicit state path above.
+
+`cursor-auth.test.ts` derives rejected-credential cases in its temporary copy:
+it inserts `send.error` or `sandbox.prime.error` port error envelopes with
+`authRequired: true`, or replaces `models.list` with `models.list.error`.
+These are the tee's error observations, not new SDK message kinds. A separate
+variant changes only `basic.jsonl`'s `wait.result` to `status: "error"` and
+`error: {code: "unauthenticated", message: "Cursor credentials were rejected"}`.
+`RunResult.error` is public; SDK 1.0.37's `toRunError` preserves the
+`unauthenticated` code produced for Connect's `Code.Unauthenticated`.
+
 ## Question replay cases (conduit-test-xqsg.9)
 
 These are minimal derivatives of real SDK captures. The source headers, wire
