@@ -1,5 +1,5 @@
 // Failure modes: discovery leaks a credential, a failed probe breaks other
-// drivers, a stale catalog survives refresh, or a selectable Cursor turn runs.
+// drivers, a stale catalog survives refresh, or a selectable Cursor turn fails.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -123,6 +123,11 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 								},
 				},
 				{ kind: "auth.status", data: { status: "logged-in" } },
+				...seedRows.filter(
+					({ kind }) =>
+						kind !== undefined &&
+						!["models.list", "auth.status"].includes(kind),
+				),
 				...(scenario.name === "model-list-failed"
 					? [
 							{
@@ -184,12 +189,8 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 					"cursor",
 					{ modelId: "composer-2.5", contextWindow: "" },
 				);
-				const failed = await browser.send(
-					sessionId,
-					"not implemented yet",
-					90_000,
-				);
-				expect(failed.done["status"]).toBe("idle");
+				const reply = await browser.send(sessionId, "Say hi.", 90_000);
+				expect(reply.done["status"]).toBe("idle");
 				const db = new Database(fixture.projectStorePath(), { readonly: true });
 				try {
 					const turn = db
@@ -197,16 +198,13 @@ describe("Cursor discovery through the built daemon and SDK trace port", () => {
 							"SELECT state FROM turns WHERE session_id = ?",
 						)
 						.get(sessionId);
-					expect(turn?.state).toBe("error");
+					expect(turn?.state).toBe("completed");
 					const errors = db
 						.prepare<[string], { data: string }>(
 							"SELECT data FROM events WHERE session_id = ? AND type = 'turn.error'",
 						)
 						.all(sessionId);
-					expect(errors).toHaveLength(1);
-					expect(errors[0]?.data).toContain(
-						"Cursor turn preparation not installed",
-					);
+					expect(errors).toHaveLength(0);
 					evidence["cursorTurn"] = turn?.state;
 				} finally {
 					db.close();

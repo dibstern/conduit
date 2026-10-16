@@ -1688,6 +1688,9 @@
 				{/if}
 			</div>
 		{/if}
+		{#if composerPresentation?.composerNotice}
+			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerPresentation.composerNotice}</p>
+		{/if}
 		{#if currentSession?.backgroundTasks?.length}
 			<!-- One pulse per live background task; the header row lists them. -->
 			<div data-testid="composer-task-dots" aria-hidden="true" class="flex justify-center gap-1.5 pt-[7px]">

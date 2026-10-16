@@ -131,20 +131,20 @@ export const PROVIDER_DRIVERS = {
 		emitsMessageParentIds: true,
 	},
 	cursor: {
-		composerModeControl: "permission-mode", // A runner must ask before acting.
-		permissionModes: ["ask"], // No other mode is supported without a runtime trace.
+		composerModeControl: "permission-mode", // cursor-turn.feature pins the no-per-call-approval notice.
+		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto"], // cursor-turn.test.ts pins sandbox reopen; sandbox-anchored pins enforcement.
 		supportsQuestionSkip: false, // Skipping questions needs a captured Cursor contract.
 		supportsFileRewind: false, // No runtime can restore files yet.
 		sessionCapabilities: {
-			supportsMultiFolder: false, // Await a Cursor multi-folder trace.
+			supportsMultiFolder: true, // workspace-resume and cursor-turn.test.ts pin changed dirs with fixed cwd.
 			supportsWorktree: false, // Await a Cursor worktree trace.
 			supportsNewWorktree: false, // No runtime can launch into a worktree yet.
 			supportsTaskStop: false, // No runtime can stop individual tasks yet.
 		},
 		runsOpenCodeServer: false, // Cursor must never start or borrow OpenCode.
 		usageHarness: "cursor", // Retain the existing Cursor usage identity.
-		interactionSink: "permission-asking", // Never fall through to auto-approval.
-		supportsNativeResume: false, // Resume needs a captured Cursor thread contract.
+		interactionSink: "auto-approving", // cursor-session-config allows gated calls; sandbox is the interim boundary.
+		supportsNativeResume: false, // Same-runner resume is pinned; native-thread transfer/recovery belongs to xqsg.6.
 		needsPriorHistoryMetadata: false, // No cumulative-history contract is established.
 		accountKind: "config-directory", // Keep runner account configuration separate from servers.
 		defaultAccountSource: "selection", // Cursor owns its selected account default.
