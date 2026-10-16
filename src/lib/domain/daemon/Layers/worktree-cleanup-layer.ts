@@ -21,6 +21,7 @@ import { realWorkspacePath } from "../../../git/worktrees.js";
 import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
+import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -39,6 +40,7 @@ export const WorktreeCleanupLive = (configDir: string) =>
 			const registry = yield* ProjectRegistryTag;
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
+			const storeContext = yield* optionalPersistenceStoreContext;
 			const requests = yield* WorktreeCleanupQueueTag;
 			const getSetting = Ref.get(configRef).pipe(
 				Effect.map(
@@ -87,7 +89,7 @@ export const WorktreeCleanupLive = (configDir: string) =>
 									configDir,
 									yield* getSetting,
 									now,
-								);
+								).pipe(Effect.provide(storeContext));
 								if (paths.length === 0) return;
 								if (!existsSync(project.folders[0])) {
 									for (const item of paths)

@@ -49,6 +49,7 @@ import {
 	withCachedProjectGit,
 } from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	chooseProjectSlug,
 	projectEventsDbPath,
@@ -71,6 +72,7 @@ import {
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
+import { DaemonStoreAvailability } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
 import { indexProjectSessions, SessionDirectory } from "./session-directory.js";
 
@@ -286,6 +288,7 @@ export const allProjects = Effect.gen(function* () {
 }).pipe(Effect.withSpan("projectRegistry.allProjects"));
 
 export const projectInfos = Effect.gen(function* () {
+	const unavailable = yield* DaemonStoreAvailability;
 	const ref = yield* ProjectRegistryTag;
 	const projects = yield* allProjects;
 	// Cold projects need branches too. Share the relay cache and its refresh interval.
@@ -328,25 +331,29 @@ export const projectInfos = Effect.gen(function* () {
 				.defaultGroupingMode ?? "repository")
 		: "repository";
 	const entries = withCachedProjectGit(
-		(yield* allProjects).map((project) => ({
-			slug: project.slug,
-			folders: project.folders,
-			title: project.title,
-			...(project.setupScript !== undefined && {
-				setupScript: project.setupScript,
-			}),
-			...(project.sessionMode !== undefined && {
-				sessionMode: project.sessionMode,
-			}),
-			...(project.groupingMode !== undefined && {
-				groupingMode: project.groupingMode,
-			}),
-			effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
-			...(project.repositoryIdentities !== undefined && {
-				repositoryIdentities: project.repositoryIdentities,
-			}),
-			...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
-		})),
+		(yield* allProjects).map((project) => {
+			const unavailableReason = unavailable.get(project.slug);
+			return {
+				slug: project.slug,
+				...(unavailableReason !== undefined && { unavailableReason }),
+				folders: project.folders,
+				title: project.title,
+				...(project.setupScript !== undefined && {
+					setupScript: project.setupScript,
+				}),
+				...(project.sessionMode !== undefined && {
+					sessionMode: project.sessionMode,
+				}),
+				...(project.groupingMode !== undefined && {
+					groupingMode: project.groupingMode,
+				}),
+				effectiveGroupingMode: project.groupingMode ?? defaultGroupingMode,
+				...(project.repositoryIdentities !== undefined && {
+					repositoryIdentities: project.repositoryIdentities,
+				}),
+				...(project.lastUsed !== undefined && { lastUsed: project.lastUsed }),
+			};
+		}),
 	);
 	const groups = computeProjectGroups(
 		entries.map((project) => ({
@@ -1029,9 +1036,11 @@ export const saveProject = (input: SaveProjectInput) =>
 					existing !== undefined &&
 					normalizeProjectDirectory(existing.folders[0]) !== mainFolder;
 				if (mainChanged) {
+					const store = yield* Effect.serviceOption(PersistenceStore);
 					if (
+						Option.isNone(store) &&
 						projectEventsDbPath({ configDir, ...existing }) !==
-						resolve(projectStorageDir(configDir, existing.slug), "events.db")
+							resolve(projectStorageDir(configDir, existing.slug), "events.db")
 					) {
 						return yield* new WsRpcError({
 							message:
