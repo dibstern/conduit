@@ -450,7 +450,7 @@ export function createProjectRelayLayers({
 			const sql = yield* SqlClient.SqlClient;
 			const bindings = yield* new SqliteProviderSessionBindingReadModel(
 				sql,
-			).listBoundSessions();
+			).listBoundSessions({ projectIds: [config.slug] });
 			return relayOpenCodeInstances(
 				instances,
 				config,

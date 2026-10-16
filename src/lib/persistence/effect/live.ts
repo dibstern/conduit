@@ -128,7 +128,9 @@ export function makePersistenceEffectLayer(
 		),
 	).pipe(Layer.provideMerge(preparedSqliteLayer));
 
-	const persistenceServiceLayer = makePersistenceServiceLive.pipe(
+	// Each bound store must migrate and stamp its own connection, even when
+	// several stores are composed in the same Layer graph.
+	const persistenceServiceLayer = Layer.fresh(makePersistenceServiceLive).pipe(
 		Layer.provide(Layer.merge(sqliteLayer, projectLayer)),
 	);
 

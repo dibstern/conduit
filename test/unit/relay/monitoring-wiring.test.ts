@@ -879,12 +879,16 @@ async function createEffectHarness(
 				Effect.gen(function* () {
 					const readQuery = yield* ReadQueryEffectTag;
 					getSessionProviders.mockImplementation(() =>
-						readQuery.getAllSessionStatusesWithProviders().pipe(
-							Effect.map(
-								(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+						readQuery
+							.getAllSessionStatusesWithProviders({
+								projectIds: ["test-project"],
+							})
+							.pipe(
+								Effect.map(
+									(rows) => new Map(rows.map((row) => [row.id, row.provider])),
+								),
+								Effect.orDie,
 							),
-							Effect.orDie,
-						),
 					);
 					if (seedTurn) {
 						const sql = yield* SqlClient.SqlClient;

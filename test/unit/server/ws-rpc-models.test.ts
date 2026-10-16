@@ -70,6 +70,7 @@ const makeReadQuery = (
 		ReadQueryEffect["getLatestTurnModelExecution"]
 	>,
 ): ReadQueryEffect => ({
+	listPendingClaudeQuestionTools: () => Effect.succeed([]),
 	readToolDetails: () => Effect.succeed([]),
 	getSessionStatus: () => Effect.succeed(undefined),
 	getSession: () => Effect.succeed(undefined),

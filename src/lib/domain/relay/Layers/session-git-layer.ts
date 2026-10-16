@@ -7,6 +7,7 @@ import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js"
 import type { WorkspaceMissing } from "../../../contracts/worktree.js";
 import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import {
@@ -31,6 +32,7 @@ export const SessionGitLive = Layer.effect(
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const read = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		const commit = yield* makeCommitAndSignal;
 		const refreshes = yield* Effect.makeSemaphore(1);
@@ -138,10 +140,13 @@ export const SessionGitLive = Layer.effect(
 								// become one follow-up; the other permit waiters then have no work.
 								const request = queued;
 								queued = undefined;
-								const sessions = yield* read.listSessionGitRefreshTargets({
-									sessionIds: [...request.sessionIds],
-									all: request.all,
-								});
+								const sessions = yield* read.listSessionGitRefreshTargets(
+									{ projectIds: [eventStore.projectId] },
+									{
+										sessionIds: [...request.sessionIds],
+										all: request.all,
+									},
+								);
 								const projectFolders = [
 									config.projectDir,
 									...(config.extraFolders ?? []),

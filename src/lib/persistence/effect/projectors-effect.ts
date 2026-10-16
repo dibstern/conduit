@@ -360,6 +360,12 @@ export const makeSessionProjector = (): EffectProjector => ({
 					const roots = yield* sql<{ root_id: string | null }>`
 						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
 					left.push(...roots.flatMap((row) => row.root_id ?? []));
+					// Retain each descendant's owner before the cascade removes it.
+					yield* sql`
+						INSERT INTO session_sidebar (session_id, project_id, version, last_activity, row)
+						SELECT id, project_id, ${ctx.version}, 0, NULL FROM sessions
+						WHERE id IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))
+						ON CONFLICT (session_id) DO UPDATE SET project_id = excluded.project_id`;
 					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
 					written.push(...subtree.map((row) => row.id));
 					continue;

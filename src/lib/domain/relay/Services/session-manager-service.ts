@@ -311,18 +311,21 @@ export const deleteSession = (sessionId: string) =>
 			yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const eventStoreOption = yield* Effect.serviceOption(EventStoreEffectTag);
 		const readQueryOption = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const projectId = (yield* EventStoreEffectTag).projectId;
 
 		const sessions =
 			readQueryOption._tag === "Some"
-				? (yield* readQueryOption.value.getSessionLineage().pipe(
-						Effect.mapError(
-							(cause) =>
-								new SessionManagerError({
-									operation: "deleteSession.snapshot",
-									cause,
-								}),
-						),
-					)).rows
+				? (yield* readQueryOption.value
+						.getSessionLineage({ projectIds: [projectId] })
+						.pipe(
+							Effect.mapError(
+								(cause) =>
+									new SessionManagerError({
+										operation: "deleteSession.snapshot",
+										cause,
+									}),
+							),
+						)).rows
 				: [];
 		// The provider that owns the session is row-only state, never on the wire.
 		const row =
@@ -855,9 +858,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.gen(function* () {
 							yield* sql`
 					INSERT OR IGNORE INTO sessions (
-						id, provider, provider_sid, title, status, created_at, updated_at
+						id, project_id, provider, provider_sid, title, status, created_at, updated_at
 					) VALUES (
-						${session.id}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
+						${session.id}, ${eventStore.projectId}, ${providerInstanceId}, ${session.id}, ${normalizedTitle}, 'idle', ${now}, ${now}
 					)
 					`.pipe(
 								Effect.mapError(

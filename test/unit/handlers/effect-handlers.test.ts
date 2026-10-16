@@ -825,6 +825,7 @@ describe("switchModelForSession", () => {
 				},
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2353,6 +2354,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2457,6 +2459,7 @@ describe("handleNewSession", () => {
 				question: { list: vi.fn(async () => []) },
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("processing")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -2755,6 +2758,7 @@ describe("loadMoreHistoryForSession", () => {
 			loadPreRenderedHistory,
 		});
 		const readQuery = {
+			listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 			readToolDetails: vi.fn(() => Effect.succeed([])),
 			getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 			getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3342,6 +3346,7 @@ describe("handleMessage", () => {
 				})),
 			});
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),
@@ -3605,6 +3610,7 @@ describe("handleMessage", () => {
 			const config = mockConfig();
 			const client = makeHandlerOpenCodeAPI();
 			const readQuery = {
+				listPendingClaudeQuestionTools: vi.fn(() => Effect.succeed([])),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed("idle")),
 				getSessionFamilyRoot: () => Effect.succeed(undefined),

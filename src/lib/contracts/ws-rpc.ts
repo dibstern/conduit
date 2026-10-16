@@ -73,10 +73,10 @@ export const ResumeBase = Schema.Struct({
 export type ResumeBase = typeof ResumeBase.Type;
 
 /**
- * Where a saved snapshot can resume from, named by the store and session that
+ * Where a saved snapshot can resume from, named by its store and subscription scope
  * sent it (conduit-test-y7eo.14). Opaque to the browser, which only keeps it
  * and hands it back; it is not tamper-proof. The server validates it, refusing
- * one from another store or session with a fresh snapshot, and the resume
+ * one from another store or scope with a fresh snapshot, and the resume
  * checksum backs whatever it accepts.
  */
 export const ResumePoint = NonEmptyString.pipe(Schema.brand("ResumePoint"));
@@ -125,6 +125,8 @@ export const EnvelopeSchema = <A, I, R>(itemSchema: Schema.Schema<A, I, R>) =>
 			sequence: Schema.Number,
 			hasMore: Schema.optional(Schema.Boolean),
 			cursor: Schema.optional(NonEmptyString),
+			/** The opaque store and scope identity this snapshot resumes from. */
+			resumePoint: Schema.optional(ResumePoint),
 		}),
 		Schema.Struct({
 			_tag: Schema.Literal("synchronized"),
@@ -444,14 +446,7 @@ const TextSuffixSchema = Schema.Struct({
 });
 const DetailEnvelope = EnvelopeSchema(SessionDetailItemSchema);
 export const SessionDetailEnvelopeSchema = Schema.Union(
-	DetailEnvelope.members[0].pipe(
-		Schema.extend(
-			Schema.Struct({
-				// What a client that saves this snapshot resumes it from.
-				resumePoint: Schema.optional(ResumePoint),
-			}),
-		),
-	),
+	DetailEnvelope.members[0],
 	DetailEnvelope.members[1],
 	DetailEnvelope.members[2].pipe(
 		Schema.extend(
@@ -2750,6 +2745,7 @@ export const SubscribeShell = Rpc.make("SubscribeShell", {
 		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
+		resumePoint: Schema.optional(ResumePoint),
 	},
 	success: EnvelopeSchema(SessionInfoSchema),
 	error: WsRpcError,

@@ -94,23 +94,28 @@ describe("WsRpcServerLayer ListSessions", () => {
 			const projections = yield* ProjectionRunnerEffectTag;
 			yield* projections.recover();
 			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at, version)
-				VALUES ('root', 'claude', 'Root', 1, 1, 1)`;
+			yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at, version)
+				VALUES ('root', 'test-project', 'claude', 'Root', 1, 1, 1)`;
 			yield* sql`INSERT INTO sessions
-				(id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
-				VALUES ('child', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
+				(id, project_id, provider, title, parent_id, created_at, updated_at, version, snoozed_at)
+				VALUES ('child', 'test-project', 'claude', 'Child', 'root', 1, 1, 1, 2)`;
 			yield* sql`UPDATE read_model_counter SET value = 1 WHERE id = 1`;
 			yield* sql`UPDATE sessions SET root_id = 'root'`;
 			yield* refreshSidebar(["root"], 1);
 			const reader = yield* ReadQueryEffectTag;
-			const before = yield* reader.readSessionList();
+			const before = yield* reader.readSessionList({
+				projectIds: ["test-project"],
+			});
 			expect(before.rows.map(({ item }) => item.id)).toEqual(["root"]);
 			expect(before.rows[0]?.version).toBe(1);
 			yield* sql`UPDATE sessions SET woken_at = 3, woken_reason = 'activity', version = 2
 				WHERE id = 'child'`;
 			yield* sql`UPDATE read_model_counter SET value = 2 WHERE id = 1`;
 			yield* refreshSidebar(["child"], 2);
-			const after = yield* reader.readSessionList({ after: 1 });
+			const after = yield* reader.readSessionList(
+				{ projectIds: ["test-project"] },
+				{ after: 1 },
+			);
 			expect(after).toEqual({
 				rows: [],
 				version: 2,

@@ -596,6 +596,7 @@ describe("SessionManager Effect", () => {
 				cause: "read model unavailable",
 			});
 			const readQuery: ReadQueryEffect = {
+				listPendingClaudeQuestionTools: () => Effect.succeed([]),
 				readToolDetails: vi.fn(() => Effect.succeed([])),
 				getSessionStatus: vi.fn(() => Effect.succeed(undefined)),
 				getSession: vi.fn(() => Effect.fail(readQueryFailure)),

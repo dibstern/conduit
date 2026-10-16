@@ -58,6 +58,12 @@ export const makePersistenceServiceLive: Layer.Layer<
 				if (events.length > 0)
 					yield* sql`UPDATE events SET project_id = ${projectId}
 						WHERE project_id IS NULL OR project_id = ''`;
+				for (const table of ["sessions", "session_sidebar"]) {
+					yield* sql.unsafe(
+						`UPDATE ${table} SET project_id = ? WHERE project_id IS NULL OR project_id = ''`,
+						[projectId],
+					);
+				}
 				for (const table of PROJECT_COMMAND_TABLES) {
 					const rows = yield* sql.unsafe(
 						`SELECT 1 FROM ${table} WHERE project_key IS NOT ? LIMIT 1`,

@@ -257,9 +257,10 @@ export const sessionHandlers: {
 		// other code paths.
 		return [
 			{
-				sql: `INSERT INTO sessions (id, provider, provider_sid, title, status, parent_id, fork_point_event, side_thread, permission_mode, created_at, updated_at)
-					 VALUES (?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?)
+				sql: `INSERT INTO sessions (id, project_id, provider, provider_sid, title, status, parent_id, fork_point_event, side_thread, permission_mode, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, ?, ?, ?, ?)
 					 ON CONFLICT (id) DO UPDATE SET
+					     project_id = excluded.project_id,
 					     provider = CASE
 					       WHEN EXISTS (
 					         SELECT 1 FROM session_providers
@@ -288,6 +289,7 @@ export const sessionHandlers: {
 				     updated_at = excluded.updated_at`,
 				params: [
 					event.data.sessionId,
+					event.projectId,
 					event.data.provider,
 					event.data.providerSessionId ?? null,
 					event.data.title,

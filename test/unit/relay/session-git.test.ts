@@ -95,7 +95,9 @@ describe("Session git refresh", () => {
 			Effect.flatMap(ReadQueryEffectTag, (query) => query.getSession("one")),
 		);
 		const sidebarBefore = await runtime.runPromise(
-			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ projectIds: ["test-project"] }),
+			),
 		);
 		dirty = true;
 		read.mockClear();
@@ -122,7 +124,9 @@ describe("Session git refresh", () => {
 			Effect.flatMap(ReadQueryEffectTag, (query) => query.getSession("one")),
 		);
 		const sidebarAfter = await runtime.runPromise(
-			Effect.flatMap(ReadQueryEffectTag, (query) => query.readSessionList()),
+			Effect.flatMap(ReadQueryEffectTag, (query) =>
+				query.readSessionList({ projectIds: ["test-project"] }),
+			),
 		);
 		expect(after?.version).toBeGreaterThan(before?.version ?? 0);
 		expect(

@@ -163,8 +163,8 @@ export const makeClaudeEventPersistEffect = Effect.gen(function* () {
 		const now = Date.now();
 		return sql`
 			INSERT OR IGNORE INTO sessions
-			(id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
-			VALUES (${input.childSessionId}, 'claude', ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
+			(id, project_id, provider, provider_sid, title, status, parent_id, created_at, updated_at)
+			VALUES (${input.childSessionId}, ${eventStore.projectId}, 'claude', ${input.providerSessionId}, ${input.title}, 'idle', ${input.parentSessionId}, ${now}, ${now})`.pipe(
 			Effect.asVoid,
 		);
 	};
