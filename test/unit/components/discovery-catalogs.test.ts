@@ -1,5 +1,7 @@
+import { cleanup, render } from "@testing-library/svelte";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import VisibilitySettingsTab from "../../../src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte";
 import * as discovery from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import {
 	applyInstanceListResponse,
@@ -159,6 +161,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+	cleanup();
 	stop?.();
 	stop = undefined;
 	viewProjectSettings(null);
@@ -172,6 +175,77 @@ afterEach(async () => {
 });
 
 describe("discovery catalogs over the RPC wire", () => {
+	it.each([
+		"one",
+		"claude-work",
+	])("shows the default Claude account's model name and effort in settings while viewing %s", async (accountId) => {
+		applyInstanceListResponse({
+			instances: [
+				{ id: "one", driver: "opencode", isDefault: true },
+				{ id: "claude", driver: "claude", isDefault: true },
+				{ id: "claude-work", driver: "claude", isDefault: false },
+			].map((account) => ({
+				...account,
+				name: account.id,
+				port: 0,
+				managed: false,
+				status: "healthy" as const,
+				restartCount: 0,
+				createdAt: 0,
+			})),
+		});
+		seedSessions([{ id: "A", title: "A", accountId }]);
+		switchToSession("A", "project-a");
+		for (const [account, name] of [
+			["claude", "Claude Sonnet 4"],
+			["claude-work", "Work account model"],
+		] as const) {
+			applyProjectSetting({
+				_tag: "providerModels",
+				accountId: account,
+				providers: [
+					{
+						id: "claude",
+						name: "Claude",
+						configured: true,
+						models: [
+							{ id: "sonnet", name, provider: "claude", variants: ["high"] },
+						],
+					},
+				],
+			});
+		}
+		applyProjectSetting({
+			_tag: "harnessDefaults",
+			claude: {
+				status: "ok",
+				pick: {
+					providerId: "claude",
+					modelId: "sonnet",
+					effort: "high",
+					contextWindow: "",
+				},
+			},
+		});
+		const view = render(VisibilitySettingsTab);
+		const model = view.getByTestId(
+			"settings-harness-default-claude-model",
+		) as HTMLSelectElement;
+		expect(model.selectedOptions[0]?.textContent).toBe("Claude Sonnet 4");
+		expect(
+			(
+				view.getByTestId(
+					"settings-harness-default-claude-effort",
+				) as HTMLSelectElement
+			).value,
+		).toBe("high");
+		// Default controls must not borrow a custom account's same-id model.
+		expect(Array.from(model.options, (option) => option.text)).not.toContain(
+			"Work account model",
+		);
+		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
+	});
+
 	it.each([
 		false,
 		true,

@@ -945,6 +945,23 @@ export function getProviderGroups(): readonly Immutable<ProviderGroup>[] {
 		.map((p) => ({ provider: p, models: p.models }));
 }
 
+/** Project defaults use each driver's default account, independently of the open session. */
+export function getHarnessDefaultProviders(
+	harness: KnownProviderDriverKind,
+): readonly Immutable<ProviderInfo>[] {
+	if (getDriverTraits(harness)?.catalogSource === "discovery") {
+		const account = getAvailableInstances().find(
+			(instance) => instance.driver === harness && instance.isDefault,
+		);
+		return account
+			? (accountModelCatalogs[catalogScope().project]?.[account.id] ?? [])
+			: [];
+	}
+	return discoveryState.providers.filter(
+		(provider) => driverForProvider(provider.id) === harness,
+	);
+}
+
 /** Agents visible in the dropdown after applying the global hide-list.
  *  Never-brick: if filtering would leave zero agents, show all. */
 export function getVisibleAgents(): readonly Immutable<AgentInfo>[] {
