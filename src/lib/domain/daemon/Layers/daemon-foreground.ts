@@ -32,9 +32,9 @@ import { isDaemonRunning } from "../../../daemon/daemon-utils.js";
 import { DEFAULT_CONFIG_DIR, DEFAULT_PORT } from "../../../env.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
-import { stopRegisteredClaudeRunners } from "../../../provider/claude/claude-process-session-runner.js";
-import { discoverClaudeRunners } from "../../../provider/claude/claude-runner-registry.js";
 import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
+import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
+import { discoverRunners } from "../../../provider/runner/runner-registry.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -455,7 +455,7 @@ export async function startForegroundDaemon(
 						yield* Effect.validateAll(
 							registered,
 							({ project }) =>
-								stopRegisteredClaudeRunners(project.folders[0], configDir),
+								stopRegisteredRunners(project.folders[0], configDir),
 							{ concurrency: 4 },
 						).pipe(
 							Effect.orDie,
@@ -496,7 +496,7 @@ export async function startForegroundDaemon(
 				for (const project of registered) {
 					yield* Effect.gen(function* () {
 						const runners = yield* Effect.sync(() =>
-							discoverClaudeRunners(project.folders[0], configDir),
+							discoverRunners(project.folders[0], configDir),
 						);
 						if (
 							runners.length > 0 ||
