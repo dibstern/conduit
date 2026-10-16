@@ -32,7 +32,7 @@ async function sessionSnapshot(browser: ProcessBrowser, sessionId: string) {
 }
 
 function persisted(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			session: db
@@ -339,7 +339,7 @@ describe("Claude turn status before the model streams", () => {
 		// that used to read as idle.
 		await vi.waitFor(() => {
 			if (!harness) throw new Error("Missing harness");
-			const db = new Database(harness.projectStorePath(), { readonly: true });
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db

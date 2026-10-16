@@ -181,12 +181,12 @@ process.exit(result.status ?? 1);
 				.replace(/"hostname":"[^"]+"/g, '"hostname":"<host>"')
 				.replace(/ses_[a-z0-9]+/g, "<session>");
 		try {
-			if (existsSync(fixture.projectStorePath())) {
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+			if (existsSync(fixture.daemonStorePath())) {
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					const created = db
 						.prepare(
-							"SELECT session_id, data FROM events WHERE type = 'session.created' ORDER BY sequence",
+							"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.created' ORDER BY sequence",
 						)
 						.all() as { session_id: string; data: string }[];
 					for (const { session_id, data } of created) {
@@ -197,7 +197,7 @@ process.exit(result.status ?? 1);
 					evidence["sessions"] = (
 						db
 							.prepare(
-								"SELECT id, title, workspace FROM sessions ORDER BY title",
+								"SELECT id, title, workspace FROM sessions WHERE project_id = 'process-test' ORDER BY title",
 							)
 							.all() as {
 							id: string;
@@ -212,7 +212,7 @@ process.exit(result.status ?? 1);
 					evidence["workspaceEvents"] = (
 						db
 							.prepare(
-								"SELECT data FROM events WHERE type = 'session.workspace_changed' ORDER BY sequence",
+								"SELECT data FROM events WHERE project_id = 'process-test' AND type = 'session.workspace_changed' ORDER BY sequence",
 							)
 							.all() as { data: string }[]
 					).map(({ data }) => {
@@ -513,7 +513,7 @@ process.exit(result.status ?? 1);
 		expect(turns[1]?.resumeId).toBeTruthy();
 		expect(oldPids).not.toContain(turns[1]?.pid);
 		expect(git(fixture.projectDir, "status", "--porcelain")).toBe("");
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const events = db
 				.prepare(
@@ -594,13 +594,13 @@ process.exit(result.status ?? 1);
 	it("reports a partial Git creation failure and leaves no session, branch or worktree", async () => {
 		const { fixture, socket, sessions } = await start("creation-failure", true);
 		const before = await sessions();
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			const count = () =>
 				(
 					db
 						.prepare(
-							"SELECT count(*) AS count FROM events WHERE type = 'session.created'",
+							"SELECT count(*) AS count FROM events WHERE project_id = 'process-test' AND type = 'session.created'",
 						)
 						.get() as { count: number }
 				).count;

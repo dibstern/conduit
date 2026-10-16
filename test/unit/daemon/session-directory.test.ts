@@ -8,6 +8,8 @@ import { Effect, Layer, Option, Ref } from "effect";
 import { afterEach, expect, vi } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { ResolveSession } from "../../../src/lib/contracts/ws-rpc.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import {
@@ -127,6 +129,7 @@ it.scoped(
 			);
 			const daemon = makeDaemonRpcTestLayer(projects, undefined, {
 				configDir: root,
+				sessionDirectory: Layer.succeed(SessionDirectory, directory),
 			});
 			const handlers = yield* DaemonWsRpcHandlersTag.pipe(
 				Effect.provide(daemon),
@@ -257,7 +260,7 @@ it.scoped(
 		const { root, projects } = fixture();
 		return Effect.gen(function* () {
 			const result = yield* Effect.either(
-				resolveDaemonOpenCodeSession(root, "opencode", "shared-provider-id"),
+				resolveDaemonOpenCodeSession("opencode", "shared-provider-id"),
 			);
 			expect(result).toMatchObject({
 				_tag: "Left",
@@ -265,6 +268,9 @@ it.scoped(
 					message: expect.stringContaining("more than one Conduit project"),
 				},
 			});
-		}).pipe(Effect.provide(makeProjectRegistryLive(projects)));
+		}).pipe(
+			Effect.provide(makeProjectRegistryLive(projects)),
+			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
+		);
 	},
 );

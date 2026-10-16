@@ -175,15 +175,6 @@ async function setupWithProjectManagement(
 				};
 			},
 		},
-		handlers: {
-			ListSessions: (params) => ({
-				projectSlug: String(params["projectSlug"] ?? "myapp"),
-				sessions: sessions.filter(
-					(session) => session.projectSlug === params["projectSlug"],
-				),
-				roots: true,
-			}),
-		},
 		// Each shell subscription carries only its own project's rows, as the
 		// daemon's does; one broadcast stream would leak the next project's rows
 		// into the previous project's still-open feed.

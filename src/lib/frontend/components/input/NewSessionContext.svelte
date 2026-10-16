@@ -28,7 +28,7 @@
 		modeChosen?: boolean;
 		sessionModeDefault?: Awaited<ReturnType<typeof rpc<"ResolveSessionMode">>> | undefined;
 		focusComposer?: (() => void) | undefined;
-		loadWorktrees?: (projectSlug: string) => Promise<{ readonly worktrees: readonly WorktreeInfo[] }>;
+		loadWorktrees?: (projectSlug: string) => ReturnType<typeof rpc<"ListWorktrees">>;
 		loadBranches?: (projectSlug: string) => ReturnType<typeof rpc<"ListBranches">>;
 	} = $props();
 	let showWorktrees = $state(false);

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { SqlClient } from "@effect/sql";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import type { WorktreeCleanup } from "../../../contracts/worktree.js";
 import type { StoredProject } from "../../../types.js";
 import { projectReadDatabase } from "./project-read-database.js";
@@ -15,14 +15,12 @@ export const isWorktreeCleanupEnabled = (setting: WorktreeCleanup): boolean =>
 /** Read only: a cold relay is needed only when a persisted candidate could match. */
 export const readColdWorktreeCleanupCandidates = (
 	project: Pick<StoredProject, "slug" | "folders">,
-	configDir: string,
 	setting: WorktreeCleanup,
 	now: number,
 ) =>
 	Effect.gen(function* () {
 		if (!isWorktreeCleanupEnabled(setting)) return [];
-		const database = yield* projectReadDatabase(project, configDir);
-		if (Option.isNone(database)) return [];
+		const database = yield* projectReadDatabase(project);
 		const paths = yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			return yield* sql<{ session_id: string; path: string }>`
@@ -57,6 +55,6 @@ export const readColdWorktreeCleanupCandidates = (
 						) < ${now - (setting.afterInactiveDays ?? 0) * 86_400_000})
 					))
 				)`;
-		}).pipe(Effect.provide(database.value));
+		}).pipe(Effect.provide(database));
 		return paths.filter(({ path }) => existsSync(path));
 	});

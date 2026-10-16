@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 function ledger(harness: ProcessHarness, sessionId: string) {
-	const db = new Database(harness.projectStorePath(), { readonly: true });
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			queued: (

@@ -212,7 +212,7 @@ process.exit(result.status ?? 1);
 	}
 
 	function workspaceEvents(fixture: ProcessHarness, id: string) {
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return db
 				.prepare(
