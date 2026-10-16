@@ -10,8 +10,9 @@ import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
-// Failures must reach the action's toast without navigating, deleting a row,
+// Action failures reach the toast without navigating, deleting a row,
 // applying a failed read mark, clearing a draft, or hiding a cut-off message.
+// Failed route placement keeps the prior session cached for Back to restore.
 // A dropped socket must settle the action with its fallback, never a server reason.
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -461,11 +462,27 @@ test("warm session resolution refusal shows its server reason and keeps the curr
 		.getByTestId("toast")
 		.filter({ hasText: "Failed to open session" });
 	await expect(toast).toContainText(refused);
-	await expect(page.locator("#input")).toHaveValue(draft);
-	await expect(
-		page.getByText("Existing answer", { exact: true }),
-	).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`/s/${missing}$`));
+	await expect(page.locator("#input")).toHaveValue("");
+	await expect(page.getByText("Existing answer", { exact: true })).toBeHidden();
+	expect(
+		rpc
+			.getRequests()
+			.filter(
+				({ tag, payload }) =>
+					payload["sessionId"] === missing &&
+					[
+						"ViewSession",
+						"SubscribeSessionDetail",
+						"SubscribeSessionTodos",
+						"SubscribeInputDraft",
+						"SubscribeSessionFamily",
+					].includes(tag),
+			),
+	).toEqual([]);
 	await capture(page, testInfo, "resolve-refusal-screen");
+	await page.goBack();
+	await preserved(page, testInfo);
 });
 
 test("deep search refusal shows the server reason inline and preserves the current session", async ({

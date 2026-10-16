@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // Terminal reduction is safe when there are no thinking blocks.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

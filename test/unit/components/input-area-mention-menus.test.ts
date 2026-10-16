@@ -14,6 +14,7 @@ import {
 	clearAll,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { seedRootSessions } from "../stores/session-fixtures.js";
 
 const testSessionId = "input-area-mention-menus-test";
 
@@ -35,6 +36,9 @@ function keydown(textarea: HTMLTextAreaElement, key: string) {
 
 describe("InputArea detached listboxes", () => {
 	beforeEach(() => {
+		seedRootSessions([
+			{ id: testSessionId, title: "Session", projectSlug: "test" },
+		]);
 		sessionState.currentId = testSessionId;
 		phaseToIdle(getOrCreateSessionActivity(testSessionId));
 		clearAll();

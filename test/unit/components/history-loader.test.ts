@@ -3,15 +3,23 @@ import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadOlderTranscript = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", async () => {
-	const { sessionState } = await import(
-		"../../../src/lib/frontend/stores/session.svelte.js"
-	);
-	return {
-		loadOlderTranscript,
-		placedSessionId: () => sessionState.currentId,
-	};
-});
+vi.mock(
+	"../../../src/lib/frontend/stores/transcript.svelte.js",
+	async (importOriginal) => {
+		const actual =
+			await importOriginal<
+				typeof import("../../../src/lib/frontend/stores/transcript.svelte.js")
+			>();
+		const { sessionState } = await import(
+			"../../../src/lib/frontend/stores/session.svelte.js"
+		);
+		return {
+			...actual,
+			loadOlderTranscript,
+			placedSessionId: () => sessionState.currentId,
+		};
+	},
+);
 
 import HistoryLoader from "../../../src/lib/frontend/components/chat/HistoryLoader.svelte";
 import {

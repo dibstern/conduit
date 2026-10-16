@@ -39,6 +39,7 @@ import {
 	type SavedTranscript,
 	saveTranscript,
 } from "./saved-transcripts.js";
+import { selection } from "./selection.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
 
@@ -650,10 +651,10 @@ const drawn = new WeakMap<SessionMessages, SavedTranscript>();
 
 /** The open session, once the server has placed it: null while it is only
  *  drawn from its saved page, so nothing asks the server about it yet. */
-export const placedSessionId = (): string | null =>
-	sessionState.currentId === savedDraw.sessionId
-		? null
-		: sessionState.currentId;
+export const placedSessionId = (): string | null => {
+	const shown = selection.shown;
+	return shown.kind === "placed" ? shown.sessionId : null;
+};
 
 /** The route left the drawn session before the server placed it. Its record
  *  stays: nothing has disowned it. */
@@ -661,7 +662,6 @@ export function leaveSavedDraw(sessionId: string | undefined): void {
 	const left = savedDraw.sessionId;
 	if (left === null || left === sessionId) return;
 	savedDraw.sessionId = null;
-	if (sessionState.currentId === left) sessionState.currentId = null;
 }
 
 const emptyTranscript = (project: ProjectRef): TranscriptEntry => ({
@@ -713,7 +713,6 @@ export function drawSavedTranscript(record: SavedTranscript): void {
 	);
 	drawn.set(slot.messages, record);
 	savedDraw.sessionId = record.sessionId;
-	sessionState.currentId = record.sessionId;
 	install(record.sessionId, slot);
 }
 
@@ -725,14 +724,14 @@ export function drawSavedTranscript(record: SavedTranscript): void {
 export function placeSavedDraw(
 	sessionId: string,
 	project: ProjectRef | null,
-): void {
-	if (savedDraw.sessionId !== sessionId) return;
+): boolean {
+	if (savedDraw.sessionId !== sessionId) return false;
 	savedDraw.sessionId = null;
 	const slot = sessionMessages.get(sessionId);
-	if (slot && drawn.get(slot)?.project === project) return;
+	if (slot && drawn.get(slot)?.project === project) return false;
 	clearSessionChatState(sessionId);
 	void forgetTranscript(sessionId);
-	if (sessionState.currentId === sessionId) sessionState.currentId = null;
+	return true;
 }
 
 /** One live transcript feed: viewing a session stops the feed of the one

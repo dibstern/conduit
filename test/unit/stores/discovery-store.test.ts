@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { assert, beforeEach, describe, expect, it } from "vitest";
 import {
 	applyGetAgentsResponse,

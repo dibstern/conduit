@@ -5,6 +5,25 @@ import { seedSessions } from "./session-fixtures.js";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => {
+		const router =
+			await importOriginal<
+				typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+			>();
+		return {
+			...router,
+			navigate: (path: string) => {
+				router.routerState.path = path;
+			},
+			replaceRoute: (path: string) => {
+				router.routerState.path = path;
+			},
+		};
+	},
+);
+
 // Must mock localStorage BEFORE any store modules are loaded.
 vi.hoisted(() => {
 	let store: Record<string, string> = {};

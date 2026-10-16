@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { seedSessions } from "./session-fixtures.js";
 // The Legacy Badge Path Is Unreachable (ni8.23)
 // The badge used to be client state: a reducer fed by the retired
