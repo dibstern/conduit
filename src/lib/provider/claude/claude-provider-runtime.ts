@@ -812,6 +812,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	discoverEffect(
 		workspaceRoot?: string,
 		account?: Account,
+		options?: { readonly refresh?: boolean },
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
 		return this.mapProviderFailure(
 			"discover",
@@ -828,6 +829,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					workspaceRoot ?? this.deps.workspaceRoot,
 					this.deps.capabilitiesService,
 					configDir,
+					options,
 				);
 			}),
 		);

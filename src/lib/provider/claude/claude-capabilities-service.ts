@@ -132,8 +132,10 @@ const instrumentCapabilityProbe = <A, E, R>(
 };
 
 export interface ClaudeCapabilitiesService {
+	/** Serves cached capabilities; refresh waits for a shared probe and propagates failure. */
 	readonly get: (
 		workspaceRoot: string,
+		options?: { readonly refresh?: boolean },
 	) => Effect.Effect<ProbeResult, ClaudeBoundaryError>;
 }
 
@@ -156,11 +158,12 @@ const makeClaudeCapabilitiesServiceWithCache = (
 	const ttlMs = deps.ttlMs ?? CAPABILITY_CACHE_TTL_MS;
 	const cacheDir = deps.cacheDir;
 
-	const get = (workspaceRoot: string) =>
+	const get: ClaudeCapabilitiesService["get"] = (workspaceRoot, options) =>
 		instrumentCapabilityProbe(
 			workspaceRoot,
 			Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
+					const refresh = options?.refresh === true;
 					const launch = yield* Effect.try({
 						try: () => deps.launchConfig(),
 						catch: (cause) =>
@@ -212,15 +215,18 @@ const makeClaudeCapabilitiesServiceWithCache = (
 							const now = yield* Clock.currentTimeMillis;
 							yield* Effect.annotateCurrentSpan(
 								"cache",
-								fromDisk
-									? "disk"
-									: existing?.value
-										? existing.expiresAt > now
-											? "fresh"
-											: "stale"
-										: "miss",
+								refresh
+									? "refresh"
+									: fromDisk
+										? "disk"
+										: existing?.value
+											? existing.expiresAt > now
+												? "fresh"
+												: "stale"
+											: "miss",
 							);
 							if (
+								!refresh &&
 								existing?.value &&
 								(existing.expiresAt > now || existing.inFlight)
 							) {
@@ -342,7 +348,7 @@ const makeClaudeCapabilitiesServiceWithCache = (
 								: Effect.void,
 						),
 					);
-					if (staleValue) {
+					if (staleValue && !refresh) {
 						// The service has no Scope; the daemon refresh is bounded by the probe's own abort.
 						yield* probe.pipe(
 							Effect.withSpan("claude.capabilities.refresh", {
