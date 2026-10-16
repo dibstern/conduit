@@ -121,9 +121,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			}),
 			GetProjects: () => ({ projects, current: "e2e-replay" }),
 		},
-		handlers: {
-			GetInstances: () => instances,
-		},
 	});
 	await mockRelayWebSocket(page, {
 		initMessages: [
