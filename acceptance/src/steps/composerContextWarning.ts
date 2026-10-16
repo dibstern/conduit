@@ -164,6 +164,13 @@ export const composerContextWarningHandlers: StepHandler[] = [
 					? { preTokens: 170_000, postTokens: 164_000 }
 					: {}),
 			});
+			// The summary's completed assistant message (or error) also ends
+			// the provider turn and advances the session's turn-end metadata.
+			requireRelayControl(world.page).sendMessage({
+				type: "done",
+				sessionId,
+				code: state === "failed" ? 1 : 0,
+			});
 		},
 	},
 	{
