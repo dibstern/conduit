@@ -32,6 +32,7 @@ describe.skipIf(!RUN_EXPENSIVE)(
 	() => {
 		it(
 			"captures a Read tool turn from a project's extra folder",
+			{ timeout: 150_000 },
 			async () => {
 				const fixturePath = join(
 					import.meta.dirname,
@@ -125,7 +126,6 @@ describe.skipIf(!RUN_EXPENSIVE)(
 					}
 				}
 			},
-			{ timeout: 150_000 },
 		);
 	},
 );

@@ -83,18 +83,20 @@ describe("triggerNotifications", () => {
 		vi.stubGlobal("document", { hidden: true });
 
 		// Mock Notification constructor
-		const MockNotification = vi.fn(
-			(title: string, options?: NotificationOptions) => {
-				const instance = {
-					title,
-					options: options ?? {},
-					close: vi.fn(),
-					onclick: null as ((this: Notification, ev: Event) => unknown) | null,
-				};
-				notificationInstances.push(instance);
-				return instance;
-			},
-		);
+		// biome-ignore lint/complexity/useArrowFunction: Vitest invokes this mock as a constructor.
+		const MockNotification = vi.fn(function (
+			title: string,
+			options?: NotificationOptions,
+		) {
+			const instance = {
+				title,
+				options: options ?? {},
+				close: vi.fn(),
+				onclick: null as ((this: Notification, ev: Event) => unknown) | null,
+			};
+			notificationInstances.push(instance);
+			return instance;
+		});
 		Object.defineProperty(MockNotification, "permission", {
 			value: "granted",
 			writable: true,

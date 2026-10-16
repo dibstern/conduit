@@ -13,7 +13,15 @@ import {
 	Queue,
 	Stream,
 } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mocked,
+	vi,
+} from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
@@ -254,12 +262,7 @@ function makeRuntime(filename: string) {
 	);
 }
 
-function makeLogger(): OpenCodeRuntimeIngressLog & {
-	warn: ReturnType<typeof vi.fn>;
-	debug: ReturnType<typeof vi.fn>;
-	info: ReturnType<typeof vi.fn>;
-	verbose: ReturnType<typeof vi.fn>;
-} {
+function makeLogger(): Mocked<OpenCodeRuntimeIngressLog> {
 	return {
 		warn: vi.fn(),
 		debug: vi.fn(),

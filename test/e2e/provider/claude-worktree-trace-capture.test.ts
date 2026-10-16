@@ -76,6 +76,7 @@ function toolResult(
 describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 	it(
 		"pins cwd changes, sticky worktrees and ExitWorktree keep; captures move turns",
+		{ timeout: 1_200_000 },
 		async () => {
 			const at = new Date().toISOString();
 			const artifactDir = join(
@@ -372,6 +373,5 @@ describe.skipIf(!RUN_EXPENSIVE)("Claude worktree contract (real SDK)", () => {
 				}
 			}
 		},
-		{ timeout: 1_200_000 },
 	);
 });

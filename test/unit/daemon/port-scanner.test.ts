@@ -1,5 +1,13 @@
 // test/unit/daemon/port-scanner.test.ts
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type Mock,
+	vi,
+} from "vitest";
 import {
 	PortScanner,
 	type PortScannerConfig,
@@ -14,11 +22,13 @@ describe("PortScanner", () => {
 	};
 
 	let scanner: PortScanner;
-	let mockProbe: ReturnType<typeof vi.fn>;
+	let mockProbe: Mock<(port: number) => Promise<boolean>>;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
-		mockProbe = vi.fn().mockResolvedValue(false);
+		mockProbe = vi
+			.fn<(port: number) => Promise<boolean>>()
+			.mockResolvedValue(false);
 		scanner = new PortScanner(defaultConfig, mockProbe);
 	});
 

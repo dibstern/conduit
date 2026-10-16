@@ -5,7 +5,10 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll } from "vitest";
+import { afterAll, vi } from "vitest";
+
+// Reused SQLite forks still need fresh module state for each test file.
+vi.resetModules();
 
 // Startup capture and legacy SDK/config readers must never inherit a real
 // daemon.json, account folder or home from the reviewer's shell.

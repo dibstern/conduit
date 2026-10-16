@@ -135,8 +135,9 @@
 		"@types/pngjs": "^6.0.5",
 		"@types/ws": "^8.5.0",
 		"@typescript/native-preview": "7.0.0-dev.20260317.1",
-		"@vitest/browser": "3.2.4",
-		"@vitest/coverage-v8": "^3.2.4",
+		"@vitest/browser": "^4.1.11",
+		"@vitest/browser-playwright": "^4.1.11",
+		"@vitest/coverage-v8": "^4.1.11",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/xterm": "^6.0.0",
 		"fast-check": "^4.0.0",
@@ -154,7 +155,7 @@
 		"tsx": "^4.19.0",
 		"typescript": "^5.8.2",
 		"vite": "^6.0.0",
-		"vitest": "^3.0.0"
+		"vitest": "^4.1.11"
 	},
 	"engines": {
 		"node": ">=26.10.0 <27"

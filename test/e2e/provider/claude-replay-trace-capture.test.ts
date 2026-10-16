@@ -261,142 +261,118 @@ async function capture(options: {
 describe.skipIf(!RUN_EXPENSIVE)(
 	"Claude replay trace capture (real SDK)",
 	() => {
-		it(
-			"captures pong-thinking-text-turn",
-			() =>
-				capture({
-					fixture: "pong-thinking-text-turn",
-					modelId: "claude-fable-5",
-					prompts: ["Hello, reply with just the word pong"],
-					expectReply: "pong",
-				}),
-			{ timeout: 300_000 },
+		it("captures pong-thinking-text-turn", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "pong-thinking-text-turn",
+				modelId: "claude-fable-5",
+				prompts: ["Hello, reply with just the word pong"],
+				expectReply: "pong",
+			}),
 		);
 
 		// The inbox queues the mid-turn send until the first turn ends, so the
 		// SDK sees the second input only then: two results.
-		it(
-			"captures second-input-held-to-turn-end",
-			() =>
-				capture({
-					fixture: "second-input-held-to-turn-end",
-					modelId: "claude-fable-5",
-					prompts: [
-						"Use the Bash tool to run exactly `sleep 8; echo A-DONE`. After it finishes, reply with one short sentence that includes A-DONE.",
-						"Now reply with just the word pong",
-					],
-					expectReply: "pong",
-				}),
-			{ timeout: 300_000 },
+		it("captures second-input-held-to-turn-end", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "second-input-held-to-turn-end",
+				modelId: "claude-fable-5",
+				prompts: [
+					"Use the Bash tool to run exactly `sleep 8; echo A-DONE`. After it finishes, reply with one short sentence that includes A-DONE.",
+					"Now reply with just the word pong",
+				],
+				expectReply: "pong",
+			}),
 		);
 
 		const toolTurn = (seconds: number) =>
 			`Use the Bash tool to run exactly \`sleep ${seconds}; echo A-DONE\`. After it finishes, reply with one short sentence that includes A-DONE.`;
 
 		// The steer lands at the tool boundary: one result answers both inputs.
-		it(
-			"captures steer-during-tool-folds",
-			() =>
-				capture({
-					fixture: "steer-during-tool-folds",
-					modelId: "claude-fable-5",
-					prompts: [toolTurn(8), "Also: end your reply with the word BANANA."],
-					later: "steer",
-					results: 1,
-					expectReply: "BANANA",
-				}),
-			{ timeout: 300_000 },
+		it("captures steer-during-tool-folds", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "steer-during-tool-folds",
+				modelId: "claude-fable-5",
+				prompts: [toolTurn(8), "Also: end your reply with the word BANANA."],
+				later: "steer",
+				results: 1,
+				expectReply: "BANANA",
+			}),
 		);
 
 		// A reply with no tool has no boundary to read the steer at, so the SDK
 		// runs it as its own turn after the first: two results.
-		it(
-			"captures steer-misses-boundary",
-			() =>
-				capture({
-					fixture: "steer-misses-boundary",
-					modelId: "claude-fable-5",
-					prompts: [
-						"Without using any tools, write a 200-word story about a lighthouse keeper.",
-						"Also: end your next reply with the word BANANA.",
-					],
-					sendLaterOn: "delta",
-					later: "steer",
-					expectReply: "BANANA",
-				}),
-			{ timeout: 300_000 },
+		it("captures steer-misses-boundary", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "steer-misses-boundary",
+				modelId: "claude-fable-5",
+				prompts: [
+					"Without using any tools, write a 200-word story about a lighthouse keeper.",
+					"Also: end your next reply with the word BANANA.",
+				],
+				sendLaterOn: "delta",
+				later: "steer",
+				expectReply: "BANANA",
+			}),
 		);
 
-		it(
-			"captures two-steers-one-boundary",
-			() =>
-				capture({
-					fixture: "two-steers-one-boundary",
-					modelId: "claude-fable-5",
-					prompts: [
-						toolTurn(8),
-						"Also: include the word BANANA in your reply.",
-						"Also: include the word CHERRY in your reply.",
-					],
-					later: "steer",
-					results: 1,
-					expectReply: "CHERRY",
-				}),
-			{ timeout: 300_000 },
+		it("captures two-steers-one-boundary", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "two-steers-one-boundary",
+				modelId: "claude-fable-5",
+				prompts: [
+					toolTurn(8),
+					"Also: include the word BANANA in your reply.",
+					"Also: include the word CHERRY in your reply.",
+				],
+				later: "steer",
+				results: 1,
+				expectReply: "CHERRY",
+			}),
 		);
 
 		// Stop interrupts the running turn; the SDK reports the steer still
 		// queued and runs it as its own turn.
-		it(
-			"captures stop-with-steer-pending",
-			() =>
-				capture({
-					fixture: "stop-with-steer-pending",
-					modelId: "claude-fable-5",
-					prompts: [
-						toolTurn(15),
-						"Also: end your next reply with the word BANANA.",
-					],
-					later: "steer",
-					stopAfterMs: 1_000,
-					expectReply: "BANANA",
-				}),
-			{ timeout: 300_000 },
+		it("captures stop-with-steer-pending", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "stop-with-steer-pending",
+				modelId: "claude-fable-5",
+				prompts: [
+					toolTurn(15),
+					"Also: end your next reply with the word BANANA.",
+				],
+				later: "steer",
+				stopAfterMs: 1_000,
+				expectReply: "BANANA",
+			}),
 		);
 
-		it(
-			"captures queued-input-promoted-to-steer",
-			() =>
-				capture({
-					fixture: "queued-input-promoted-to-steer",
-					modelId: "claude-fable-5",
-					prompts: [toolTurn(8), "Also: end your reply with the word BANANA."],
-					later: "sendNow",
-					results: 1,
-					expectReply: "BANANA",
-				}),
-			{ timeout: 300_000 },
+		it("captures queued-input-promoted-to-steer", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "queued-input-promoted-to-steer",
+				modelId: "claude-fable-5",
+				prompts: [toolTurn(8), "Also: end your reply with the word BANANA."],
+				later: "sendNow",
+				results: 1,
+				expectReply: "BANANA",
+			}),
 		);
 
-		it(
-			"captures subagent-task-turn",
-			() =>
-				capture({
-					fixture: "subagent-task-turn",
-					modelId: "claude-sonnet-5",
-					prompts: [
-						"Use the Agent tool in the foreground (run_in_background false) to ask a subagent to read package.json and report its name field. Wait for its result, then reply starting with exactly 'The subagent reports' followed by what it found.",
-					],
-					expectReply: "The subagent reports",
-					setup: (projectDir) => {
-						mkdirSync(projectDir, { recursive: true });
-						writeFileSync(
-							join(projectDir, "package.json"),
-							`${JSON.stringify({ name: "conduit-replay-fixture", private: true }, null, 2)}\n`,
-						);
-					},
-				}),
-			{ timeout: 300_000 },
+		it("captures subagent-task-turn", { timeout: 300_000 }, () =>
+			capture({
+				fixture: "subagent-task-turn",
+				modelId: "claude-sonnet-5",
+				prompts: [
+					"Use the Agent tool in the foreground (run_in_background false) to ask a subagent to read package.json and report its name field. Wait for its result, then reply starting with exactly 'The subagent reports' followed by what it found.",
+				],
+				expectReply: "The subagent reports",
+				setup: (projectDir) => {
+					mkdirSync(projectDir, { recursive: true });
+					writeFileSync(
+						join(projectDir, "package.json"),
+						`${JSON.stringify({ name: "conduit-replay-fixture", private: true }, null, 2)}\n`,
+					);
+				},
+			}),
 		);
 	},
 );
