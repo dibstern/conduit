@@ -112,7 +112,7 @@ Run this when changing touch gestures, long-press, or text selection on phones. 
 pnpm test:e2e:ios
 ```
 
-Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold.
+Needs Xcode with an iOS simulator runtime. `safaridriver` boots a simulator itself. Verified on iPhone 17e, iOS 26.5, with no extra setup. An iOS 27.0 simulator refused automation sessions ("Could not find any session hosts"), so pin a working device with `IOS_SIMULATOR_UDID=<udid>` from `xcrun simctl list devices`. Evidence goes to `test-results/ios-long-press/`: `result.json` and a screenshot after each hold. The script also builds Storybook and drives `UI/HoldMenu` (Device Probe) through tap, dim-tap, hold-slide-release on and off the list, and hold-release in place; its `result.json` and twelve step screenshots go to `test-results/ios-hold-menu/`. A swipe that turns into a native scroll hangs safaridriver, so swipe cases live in the Chromium touch spec (`test/visual/hold-menu.spec.ts`). If a run hangs or reports "already paired with a different session", stop the stale `safaridriver` you started, then `xcrun simctl terminate <udid> com.apple.mobilesafari`.
 
 WebDriver lifts the finger at (0,0), which drags any live selection toward the top-left, so a screenshot can show a bigger highlight than a person would get. The assertions count only selections made while the finger is still down.
 

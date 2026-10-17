@@ -443,6 +443,15 @@ if (stories.length > 0) {
 	// story ("all"), but some are a property of the layout at one width only.
 	// See conduit-test-7jv.
 	const SKIP_STORIES = new Map<string, "all" | "desktop" | "mobile">([
+		// Hold-menu behavior is asserted by play() and hold-menu.spec.ts. These
+		// end in the same frames as Closed/Open, or expose the device event log.
+		["ui-holdmenu--pick-on-release", "all"],
+		["ui-holdmenu--release-off-list", "all"],
+		["ui-holdmenu--cancelled-pointer", "all"],
+		["ui-holdmenu--dim-dismissal", "all"],
+		["ui-holdmenu--keyboard", "all"],
+		["ui-holdmenu--scroll-cancels-press", "all"],
+		["ui-holdmenu--device-probe", "all"],
 		// Interaction-only: both selections leave a closed menu in the same modal.
 		["ui-menu-in-modal--keyboard-and-pointer-selection", "all"],
 		["fixtures-modalfocus--default", "all"],
