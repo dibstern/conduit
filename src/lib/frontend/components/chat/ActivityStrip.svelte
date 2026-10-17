@@ -32,6 +32,7 @@
 		emphasis = null,
 		onhover,
 		onjump,
+		interactive = true,
 	}: {
 		turn: Turn;
 		segment: Segment;
@@ -45,6 +46,7 @@
 		emphasis?: ReadonlySet<number> | null;
 		onhover?: (i: number | null) => void;
 		onjump?: (i: number) => void;
+		interactive?: boolean;
 	} = $props();
 
 	const positions = $derived(stripLayout(segment, turn, final, now));
@@ -66,4 +68,4 @@
 
 </script>
 
-<ActivityTimeline {segments} {active} {emphasis} {onhover} {onjump} />
+<ActivityTimeline {segments} {active} {emphasis} {onhover} {onjump} {interactive} />

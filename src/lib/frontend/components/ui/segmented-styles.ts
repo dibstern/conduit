@@ -106,6 +106,17 @@ export const SEGMENTED_VARIANTS = {
 		selected: "bg-selection text-text font-medium max-md:bg-settings-card",
 		unselected: "text-text-secondary hover:text-text max-md:text-text",
 	},
+	/**
+	 * chat/SurfacingCard's level control on the strip axis. Painted at the
+	 * axis's 21px; a transparent ::before takes the tap at 44px on phones, so
+	 * the chip track does not grow into a lozenge.
+	 */
+	level: {
+		list: "inline-flex rounded-[8px] bg-chip p-[2px]",
+		item: "relative inline-flex h-[21px] items-center gap-[4px] rounded-[6px] px-[6px] font-sans text-[11.5px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:content-[''] max-md:before:h-[44px]",
+		selected: "bg-bg text-text shadow-settings-segment",
+		unselected: "text-text-secondary hover:text-text",
+	},
 } as const satisfies Record<string, SegmentedRecipe>;
 
 export type SegmentedVariant = keyof typeof SEGMENTED_VARIANTS;
@@ -122,6 +133,10 @@ export const SEGMENTED_VARIANT_NAMES = Object.keys(
 export type SegmentedOption<T extends string = string> = {
 	value: T;
 	label: string;
+	/** Shown instead of `label` below md; the accessible name stays `label`. */
+	shortLabel?: string;
+	/** A quiet trailing figure, such as a count. Not part of the accessible name. */
+	detail?: string;
 	shortcut?: string;
 	/** Forwarded as `data-testid`; several call sites' e2e page objects need it. */
 	testId?: string;

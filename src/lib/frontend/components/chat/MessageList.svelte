@@ -502,6 +502,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	id={messagesId}
+	data-session-id={viewedSessionId}
 	role="region"
 	aria-label="Transcript"
 	tabindex="0"
@@ -571,7 +572,7 @@
 			{/if}
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
-				<TurnActivity {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} {sessionId} {providerId}
+				<TurnActivity latestTurn={turn === turns.at(-1)} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			{/if}

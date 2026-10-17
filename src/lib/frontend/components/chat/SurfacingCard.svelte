@@ -1,0 +1,210 @@
+<script module lang="ts">
+	import type { Snippet } from "svelte";
+	import type { SurfacePin, SurfaceTurn } from "../../utils/surface-turn.js";
+
+	/** Owned by the annotation, reply, recap and density tickets. */
+	export interface SurfacingRegions {
+		headChips?: Snippet<[SurfaceTurn]>;
+		stripOverlay?: Snippet<[SurfaceTurn, (pin: SurfacePin) => void]>;
+		cardHead?: Snippet<[SurfacePin]>;
+		cardFoot?: Snippet<[SurfacePin]>;
+		why?: Snippet<[SurfacePin]>;
+		belowStrip?: Snippet<[SurfaceTurn]>;
+	}
+</script>
+
+<script lang="ts">
+	import { SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel } from "../../utils/surface-turn.js";
+	import Button from "../ui/Button.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
+	import SegmentedControl from "../ui/SegmentedControl.svelte";
+
+	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover }: {
+		view: SurfaceTurn;
+		live: boolean;
+		level: SurfaceLevel;
+		overridden: boolean;
+		endTime: string;
+		startTime: string;
+		regions?: SurfacingRegions;
+		strip: Snippet;
+		onpick: (pin: SurfacePin) => void;
+		onlevel: (level: SurfaceLevel) => void;
+		ondefault: () => Promise<void>;
+		onreset: () => void;
+		onfold: () => void;
+		onfollow: () => void;
+		oncommand: (event: KeyboardEvent) => void;
+		onjump: (x: number) => void;
+		onhover: (x: number | null) => void;
+	} = $props();
+	let scrubEl: HTMLDivElement;
+	let menuOpen = $state(false);
+	let saving = $state(false);
+	let error = $state("");
+	let drag: { id: number; x: number; y: number; moved: boolean; pin?: SurfacePin } | null = null;
+	let suppressClick = false;
+	const levelOptions = $derived(SURFACE_LEVELS.map((value) => ({
+		value,
+		label: SURFACE_LABELS[value],
+		...(value === "balanced" ? { shortLabel: "Bal" } : {}),
+		...(value === "final" ? {} : { detail: String(view.counts[value]) }),
+	})));
+
+	function xAt(clientX: number): number {
+		const box = scrubEl.getBoundingClientRect();
+		return Math.max(0, Math.min(100, (clientX - box.left) / box.width * 100));
+	}
+	function pointerDown(event: PointerEvent) {
+		if (event.button !== 0 || !event.isPrimary) return;
+		const target = (event.target as HTMLElement).closest<HTMLElement>("[data-surface-part]");
+		const pin = view.pins.find(({ part }) => part.uuid === target?.dataset["surfacePart"]);
+		drag = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, ...(pin ? { pin } : {}) };
+		suppressClick = false;
+		scrubEl.setPointerCapture(event.pointerId);
+	}
+	function pointerMove(event: PointerEvent) {
+		if (!drag || drag.id !== event.pointerId) {
+			// The strip captions the head; the pin lane above it does not.
+			if (event.pointerType === "mouse") onhover((event.target as Element).closest(".surface-strip") ? xAt(event.clientX) : null);
+			return;
+		}
+		if (Math.abs(event.clientX - drag.x) >= 4 && Math.abs(event.clientX - drag.x) > Math.abs(event.clientY - drag.y)) drag.moved = true;
+		if (drag.moved) {
+			const nearest = view.nearestPin(xAt(event.clientX));
+			if (nearest) onpick(nearest);
+		}
+	}
+	function pointerUp(event: PointerEvent) {
+		if (!drag || drag.id !== event.pointerId) return;
+		if (drag.moved) {
+			const nearest = view.nearestPin(xAt(event.clientX));
+			if (nearest) onpick(nearest);
+		} else if (drag.pin) onpick(drag.pin);
+		else {
+			onjump(xAt(event.clientX));
+		}
+		suppressClick = true;
+		drag = null;
+		if (scrubEl.hasPointerCapture(event.pointerId)) scrubEl.releasePointerCapture(event.pointerId);
+	}
+	async function makeDefault() {
+		saving = true;
+		error = "";
+		try { await ondefault(); menuOpen = false; }
+		catch { error = "Couldn't save the default. Try again."; }
+		finally { saving = false; }
+	}
+</script>
+
+{#snippet stepButton(label: string, glyph: string, onclick: () => void, disabled = false)}
+	<Button variant="ghost" size="content" tone="muted" touchTarget {disabled} class="size-[26px] max-md:size-[30px] rounded-full text-[14px]" ariaLabel={label} {onclick}>{glyph}</Button>
+{/snippet}
+
+{#if view.card}
+	{@const card = view.card}
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<section class="surfacing-msg-card" style:--surface-colour={card.colour} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
+		<div class="card-head" data-surfacing-region="card-head">
+			<span class="type-label"><span>{card.glyph}</span> {card.label}</span>
+			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
+			{@render regions.cardHead?.(card)}
+			<span class="card-at">{card.number === undefined ? "Waiting for Jev" : `#${card.number}`}<span class="desktop-time">{` · ${card.time}`}</span>{` · ${view.cardIndex + 1}/${view.pins.length}`}</span>
+		</div>
+		{#if view.cardNote}<div class="card-note">{view.cardNote}</div>{/if}
+		<div class="card-body md-content">{@html card.part.html}</div>
+		{@render regions.why?.(card)}
+		<div class="card-foot" data-surfacing-region="card-foot">
+			{@render regions.cardFoot?.(card)}
+			<span class="grow"></span>
+			{#if live && !view.following}<Button variant="accent-soft" size="content" touchTarget class="h-[26px] max-md:h-[30px] rounded-full px-[9px] text-[12.5px] font-medium" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{/if}
+			{@render stepButton("Previous message", "‹", () => { if (view.previous) onpick(view.previous); }, !view.previous)}
+			{@render stepButton("Next message", "›", () => { if (view.next) onpick(view.next); }, !view.next)}
+			{@render stepButton(live ? "Fold message" : "Close message", live ? "–" : "✕", onfold)}
+		</div>
+	</section>
+{/if}
+
+<div class="surfacing-scrub select-none" data-testid="surfacing-scrub" data-surfacing-region="strip-overlay" bind:this={scrubEl} role="slider" tabindex="0" aria-label="Surfaced messages" aria-valuemin={0} aria-valuemax={Math.max(0, view.pins.length - 1)} aria-valuenow={Math.max(0, view.cardIndex)} aria-valuetext={view.sliderText} onkeydown={oncommand} onpointerdown={pointerDown} onpointermove={pointerMove} onpointerup={pointerUp} onpointercancel={() => { drag = null; suppressClick = true; }} onpointerleave={() => onhover(null)}>
+	<div class="pin-lane" class:empty={view.pins.length === 0} data-testid="surfacing-pins">
+		{#if regions.stripOverlay}
+			{@render regions.stripOverlay(view, onpick)}
+		{:else}
+		{#each view.pins as pin (pin.part.uuid)}
+			<Button variant="ghost" size="content" hoverFill="none" class="absolute bottom-0 -translate-x-1/2 h-[44px] min-w-[32px] max-md:min-w-[44px] rounded-full" style="left:{pin.x}%" data-x={pin.x} data-surface-part={pin.part.uuid} data-testid="surfacing-pin-{pin.number ?? `pending-${pin.part.uuid}`}" ariaLabel={pin.name} aria-pressed={view.card?.part.uuid === pin.part.uuid} onclick={(event) => { if (event.detail === 0 || !suppressClick) onpick(pin); }}>
+				<span class="pin-chip" class:current={view.card?.part.uuid === pin.part.uuid} class:open-ask={view.openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={view.belowLevel && view.card === pin} class:seen={pin.read === true} style:--surface-colour={pin.colour}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.read === false}<i class="unread-dot"></i>{/if}</span>
+			</Button>
+		{/each}
+		{/if}
+		{#if view.card}<i class="card-caret" style:left="clamp(14px, {view.card.x}%, calc(100% - 14px))"></i>{/if}
+	</div>
+	<div class="surface-strip">
+		{@render strip()}
+		{#if view.card || live}<i class="surface-thumb" style:left="{view.card?.x ?? 100}%"></i>{/if}
+	</div>
+</div>
+
+<div class="surface-axis">
+	<span class="axis-start">{startTime}</span>
+	<span class="axis-notes">{#if level === "final"}<span>Final only · {view.counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {SURFACE_LABELS[level]} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show All</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}</span>
+	<span class="grow"></span>
+	<div class="contents" data-testid="surfacing-level"><SegmentedControl variant="level" label="Surfacing level" options={levelOptions} bind:value={() => level, onlevel} /></div>
+	{#if overridden}<i class="override-dot" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}
+	<Menu bind:open={menuOpen} side="top" align="end" ariaLabel="Level options">
+		{#snippet trigger({ props })}<Button {...props} variant="ghost" size="content" tone="muted" iconOnly icon="ellipsis" iconSize={14} touchTarget class="size-[22px] rounded-full" ariaLabel="Level options" />{/snippet}
+		<MenuItem disabled={saving} closeOnSelect={false} onselect={makeDefault}>Make default</MenuItem>
+		<MenuItem disabled={!overridden || saving} onselect={onreset}>Back to default</MenuItem>
+		{#if error}<p role="alert" class="px-[8px] py-[6px] text-[12px] text-error">{error}</p>{/if}
+	</Menu>
+	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{:else}<span class:live-end={live}>{endTime}{live ? " now" : ""}</span>{/if}
+</div>
+<div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view)}</div>
+
+<style>
+	.surfacing-msg-card { margin-top:9px; padding:10px 12px 8px; border-radius:12px; background:var(--color-bg); outline:none; }
+	.card-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour) 16%,transparent); color:var(--surface-colour); }
+	.needs-reply { color:var(--color-status-ask); background:color-mix(in srgb,var(--color-status-ask) 16%,transparent); }
+	.card-at { margin-left:auto; font:11.5px var(--font-mono); color:var(--color-text-muted); white-space:nowrap; }
+	.card-note { margin-top:6px; font-size:12px; color:var(--color-text-muted); }
+	.card-body { margin-top:7px; font-size:14px; line-height:1.6; overflow-wrap:anywhere; }
+	.card-body :global(p:last-child) { margin-bottom:0; }
+	.card-foot { display:flex; align-items:center; gap:4px; margin-top:9px; }
+	.grow { flex:1; }
+	.surfacing-scrub { position:relative; touch-action:pan-y; outline:none; }
+	.surfacing-scrub:focus-visible { outline:1px solid var(--color-accent); border-radius:6px; }
+	.pin-lane { position:relative; height:64px; }
+	.pin-lane.empty { height:8px; }
+	.pin-chip { position:relative; display:inline-flex; align-items:center; gap:3px; height:20px; padding:0 6px; border-radius:999px; background:var(--color-chip); font:500 11px var(--font-mono); color:var(--color-text); white-space:nowrap; }
+	.pin-chip::after { content:""; position:absolute; top:100%; left:50%; width:1px; height:17px; background:var(--color-border); }
+	.glyph { color:var(--surface-colour); }
+	.current { background:var(--surface-colour); color:var(--color-bg); }
+	.current .glyph { color:inherit; }
+	.seen:not(.current) { background:color-mix(in srgb,var(--color-chip) 55%,transparent); color:var(--color-text-muted); }
+	.seen:not(.current) .glyph { opacity:.7; }
+	.open-ask:not(.current) { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1.5px var(--color-status-ask); color:var(--color-status-ask); }
+	.open-ask::before { content:""; position:absolute; inset:-4px; border-radius:999px; box-shadow:0 0 0 1.5px color-mix(in srgb,var(--color-status-ask) 45%,transparent); animation:ask-pulse 1.6s ease-in-out infinite; }
+	.pending { background:none; outline:1px dashed var(--color-accent); outline-offset:-1px; color:var(--color-accent); }
+	.below { background:var(--color-turn-bg); outline:1px dashed var(--color-text); outline-offset:-1px; color:var(--color-text); }
+	.below .glyph { color:var(--color-text-muted); }
+	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
+	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--color-bg); transform:translateX(-50%) rotate(45deg); }
+	.surface-strip { position:relative; }
+	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
+	.surface-axis { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-height:26px; margin-top:4px; color:var(--color-text-muted); font:11.5px var(--font-mono); }
+	.axis-notes { display:contents; }
+	.override-dot { width:6px; height:6px; border-radius:50%; background:var(--color-accent); }
+	.live-end { color:var(--color-accent); }
+	@keyframes ask-pulse { 50% { opacity:.45; } }
+	@media(prefers-reduced-motion:reduce) { .open-ask::before { animation:none; } }
+	@media(max-width:767px) {
+		.pin-lane:not(.empty) { height:80px; }
+		.card-body { font-size:15px; }
+		.axis-start,.desktop-time { display:none; }
+		/* Notes take their own row so the controls and end time stay on one. */
+		.axis-notes { display:flex; flex-wrap:wrap; gap:6px 8px; flex-basis:100%; }
+		.axis-notes:empty { display:none; }
+		.pin-chip { font-size:12px; height:24px; padding:0 7px; }
+	}
+</style>
