@@ -167,7 +167,10 @@ function detachedRunnerFactory(
 					)
 				: Effect.succeed(undefined);
 		}
-		return Effect.succeed({ executeEffect });
+		return Effect.succeed({
+			executeEffect,
+			hasLiveProcessEffect: () => Effect.succeed(false),
+		});
 	};
 }
 

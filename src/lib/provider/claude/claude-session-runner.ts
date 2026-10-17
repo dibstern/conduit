@@ -162,6 +162,8 @@ export interface ClaudeSessionFailure {
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface ClaudeSessionRunner {
 	readonly recoverEffect?: Effect.Effect<void, ClaudeSessionFailure>;
+	/** Process ownership in every lifecycle state, even when no session is usable. */
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

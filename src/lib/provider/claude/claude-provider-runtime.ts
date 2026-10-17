@@ -637,6 +637,10 @@ export class ClaudeProviderRuntime {
 		);
 	}
 
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId);
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {
@@ -1251,6 +1255,12 @@ class InProcessClaudeSessionRunner implements ClaudeSessionRunner {
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return Array.from(this.subagentFinalizationFibers).some(
 			([key]) => key.sessionId === sessionId,
+		);
+	}
+
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return getSession(this.stateRef, sessionId).pipe(
+			Effect.map((ctx) => ctx !== undefined),
 		);
 	}
 

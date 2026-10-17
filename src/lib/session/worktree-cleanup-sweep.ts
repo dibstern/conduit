@@ -10,6 +10,7 @@ import type {
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	ConfigTag,
 	SessionRetriesTag,
@@ -63,6 +64,7 @@ export const cleanUpProjectWorktrees = (
 		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
 		const viewers = yield* WebSocketHandlerTag;
 		const backgroundOf = yield* BackgroundLivenessTag;
+		const agentIsLive = yield* AgentLivenessTag;
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
 		const report: {
 			removed: WorktreeCleanupEntry[];
@@ -88,6 +90,7 @@ export const cleanUpProjectWorktrees = (
 						) AS found`)[0]?.found === 1,
 					hasViewer: viewers.getClientsForSession(sessionId).length > 0,
 					hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+					hasLiveAgent: yield* agentIsLive(sessionId),
 					isRetrying:
 						retries._tag === "Some" && retries.value(sessionId) !== undefined,
 				};
@@ -97,6 +100,7 @@ export const cleanUpProjectWorktrees = (
 		) => {
 			return (
 				sessionQuiescenceBlockReason(state) ??
+				(state.hasLiveAgent ? "Agent process is running" : undefined) ??
 				(state.hasViewer ? "Session has a viewer" : undefined)
 			);
 		};

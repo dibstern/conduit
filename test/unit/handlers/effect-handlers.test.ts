@@ -55,6 +55,7 @@ import type {
 } from "../../../src/lib/domain/relay/Services/services.js";
 // Batch 2 imports
 import {
+	AgentLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OpenCodeModelServiceLive,
@@ -1343,6 +1344,7 @@ function makeSessionLifecycleLayer(options?: {
 			providers: [{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4" }] }],
 		}));
 	return Layer.mergeAll(
+		Layer.succeed(AgentLivenessTag, () => Effect.succeed(false)),
 		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		openCodeModelLayer(client),
 		Layer.succeed(OrchestrationEngineTag, withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),

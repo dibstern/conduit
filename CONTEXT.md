@@ -99,6 +99,15 @@ branch only after successful checkout removal and a merged check. Detached
 checkouts are kept unless their commits are known to be merged into the default
 branch.
 
+Cleanup also keeps a checkout while its session's Claude runner owns a live
+process, including while stopping, exiting after idle, or being adopted after a
+daemon restart. Clean up now reports "Agent process is running". This guard is
+separate from quiescence and applies again at removal time, including immediate
+removal after deletion when ending the agent fails. It reads the relay's runner
+pool, never discovers runners from disk. OpenCode sessions have no Claude runner
+and are unaffected. Until settling stops agents, an otherwise eligible Claude
+checkout waits for its agent's idle exit.
+
 Worktree sessions use their own branch's merged signal to settle through the sidebar's automatic rule, keep their workspace and worktrees, and return to Active when messaged, with that merge ignored for the resumed work.
 
 Conduit's Worktree daemon service creates a checkout under

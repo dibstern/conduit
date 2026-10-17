@@ -44,6 +44,10 @@ export class ClaudeProviderInstance implements ProviderInstance {
 		return this.runtime.sendTurnEffect(input);
 	}
 
+	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
+		return this.runtime.hasLiveProcessEffect(sessionId);
+	}
+
 	getNativeSessionEffect(
 		sessionId: string,
 	): Effect.Effect<ProviderNativeSession | undefined> {

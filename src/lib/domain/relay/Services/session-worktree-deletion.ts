@@ -10,7 +10,7 @@ import { SessionWorkspaceChangedPayloadSchema } from "../../../contracts/stored-
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { DaemonSessionQueryServiceTag } from "./daemon-session-query-service.js";
-import { ConfigTag } from "./services.js";
+import { AgentLivenessTag, ConfigTag } from "./services.js";
 import { SessionCommandError } from "./session-command.js";
 
 export interface SessionWorktreeDeletionPlan {
@@ -228,6 +228,7 @@ export const cleanupSessionWorktrees = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
+		const agentIsLive = yield* AgentLivenessTag;
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		if (service._tag === "None")
 			return ["Worktrees kept because cleanup is unavailable."];
@@ -241,10 +242,11 @@ export const cleanupSessionWorktrees = (
 			)
 				continue;
 			const inUse = worktreeUsers(sessionId).pipe(
-				Effect.map(
-					(users) =>
-						users.unknown ||
-						users.paths.some((path) => containsPath(owned.path, path)),
+				Effect.flatMap((users) =>
+					users.unknown ||
+					users.paths.some((path) => containsPath(owned.path, path))
+						? Effect.succeed(true)
+						: agentIsLive(sessionId),
 				),
 				Effect.catchAllCause(() => Effect.succeed(true)),
 			);

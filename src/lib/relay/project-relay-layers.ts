@@ -92,6 +92,7 @@ import { makeProviderRuntimeIngestionLive } from "../domain/relay/Services/provi
 import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
 import { ScanServiceLive } from "../domain/relay/Services/scan-service.js";
 import {
+	AgentLivenessTag,
 	BackgroundLivenessTag,
 	type ConfigTag,
 	LiveTaskListTag,
@@ -138,6 +139,7 @@ import {
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
@@ -145,6 +147,7 @@ import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../provider/orchestration-wiring.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
@@ -641,6 +644,19 @@ export function createProjectRelayLayers({
 	const providerOrchestrationLayer = orchestrationRuntimeLayer.pipe(
 		Layer.provide(providerOrchestrationDeps),
 	);
+	const agentLivenessLayer = Layer.effect(
+		AgentLivenessTag,
+		Effect.gen(function* () {
+			const registry = yield* ProviderRegistryTag;
+			return (sessionId: string) =>
+				Effect.suspend(() => {
+					const instance = registry.getInstance("claude");
+					return instance instanceof ClaudeProviderInstance
+						? instance.hasLiveProcessEffect(sessionId)
+						: Effect.succeed(false);
+				});
+		}),
+	).pipe(Layer.provide(providerOrchestrationLayer));
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
@@ -752,6 +768,7 @@ export function createProjectRelayLayers({
 		webSocketHandlerLayer,
 		messagePollerManagerLayer,
 		activityReaders,
+		agentLivenessLayer,
 		ptyRuntimeLayer,
 		configLayer,
 		loggerLayer,

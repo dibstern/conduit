@@ -344,6 +344,51 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	if (existsSync(join(root, "claude-end-session-failure-fixture"))) {
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { ProviderInstanceFailure } = (await import(
+			pathToFileURL(join(codeRoot, "lib/provider", `errors.${extension}`)).href
+		)) as typeof import("../../src/lib/provider/errors.js");
+		const create = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				create(deps).pipe(
+					Effect.tap((instance) =>
+						Effect.sync(() => {
+							const endSession = instance.endSessionEffect.bind(instance);
+							instance.endSessionEffect = (sessionId) =>
+								Effect.suspend(() => {
+									if (!existsSync(join(root, `fail-end-session-${sessionId}`)))
+										return endSession(sessionId);
+									appendFileSync(
+										join(root, "end-session-failures.ndjson"),
+										`${JSON.stringify({ sessionId })}\n`,
+									);
+									return Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "endSession",
+											cause: new Error(
+												"Fixture end_session failure leaves the runner alive",
+											),
+										}),
+									);
+								});
+						}),
+					),
+				),
+		});
+	}
 	const metricsFile = process.env["CONDUIT_TEST_SERVER_METRICS"];
 	if (metricsFile)
 		recordServerMetrics(
