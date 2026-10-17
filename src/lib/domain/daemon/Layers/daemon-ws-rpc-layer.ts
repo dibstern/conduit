@@ -64,6 +64,7 @@ import { DaemonHandleTag } from "../Services/daemon-handle.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	findOpenCodeSession,
+	listArchivedSessions,
 	listDaemonSessions,
 	resolveDaemonOpenCodeSession,
 	resolveDaemonSession,
@@ -770,6 +771,9 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 						...(request.limit !== undefined ? { limit: request.limit } : {}),
 						...(request.roots !== undefined ? { roots: request.roots } : {}),
 						...(request.search !== undefined ? { search: request.search } : {}),
+						...(request.includeArchived !== undefined
+							? { includeArchived: request.includeArchived }
+							: {}),
 						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 						...(request.scope !== undefined ? { scope: request.scope } : {}),
 						...(request.exclude !== undefined
@@ -781,6 +785,13 @@ export const DaemonWsRpcHandlersLive = Layer.scoped(
 							...result,
 						})),
 					),
+				),
+			ListArchivedSessions: (request) =>
+				run(
+					listArchivedSessions({
+						...(request.limit !== undefined ? { limit: request.limit } : {}),
+						...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+					}),
 				),
 			ResolveSession: (request) =>
 				run(

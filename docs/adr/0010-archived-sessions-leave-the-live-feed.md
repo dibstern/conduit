@@ -31,9 +31,14 @@ They are left out of search, and sending to one is rejected.
 **Archived sessions are hidden unless asked for.**
 
 - They are not in the live feed (ADR-0009) or the default sidebar views.
-- An Archived view lists them, paged.
-- Search includes archived sessions and marks them. A search filter shows or
-  hides them in one step.
+- Settings → Archived lists them for every project, newest archived first,
+  grouped by project and paged. Each row can be unarchived or deleted. This
+  follows t3code's Settings → Archive page, except that t3code loads every
+  archived thread at once.
+- Search leaves archived sessions out. An "Include archived" switch beside
+  the search adds them, marked as archived, and resets when the search is
+  cleared. With the switch off the server does not search them at all, so
+  there is no count of hidden archived matches.
 
 ## Consequences
 

@@ -174,16 +174,21 @@ async function pin(session: SessionInfo, pinned: boolean) {
 	}
 }
 
-async function archive(session: SessionInfo, archived: boolean) {
+async function archive(
+	session: SessionInfo,
+	archived: boolean,
+): Promise<boolean> {
 	const input = rpcInput(session);
-	if (!input) return;
+	if (!input) return false;
 	try {
 		await rpc("SetSessionArchived", { ...input, archived });
 		await refreshIfForeign(session);
+		return true;
 	} catch (error) {
 		toastFailure(
 			archived ? "Couldn't archive session" : "Couldn't unarchive session",
 		)(error);
+		return false;
 	}
 }
 
@@ -258,10 +263,10 @@ async function unsnooze(session: SessionInfo) {
 async function remove(
 	session: SessionInfo,
 	returnFocus?: () => HTMLElement | null,
-) {
+): Promise<boolean> {
 	const title = session.title || "New Session";
 	const input = rpcInput(session);
-	if (!input) return;
+	if (!input) return false;
 	let targets: Awaited<ReturnType<typeof confirmSessionDeletion>>;
 	try {
 		targets = await confirmSessionDeletion(
@@ -273,16 +278,16 @@ async function remove(
 		showToast("Couldn't inspect worktrees. The session was kept.", {
 			variant: "warn",
 		});
-		return;
+		return false;
 	}
 	const target = targets?.[0];
-	if (!target) return;
+	if (!target) return false;
 	let result: Awaited<ReturnType<typeof rpc<"DeleteSession">>>;
 	try {
 		result = await rpc("DeleteSession", target);
 	} catch (error) {
 		toastFailure(`Couldn't delete "${title}"`, "warn")(error);
-		return;
+		return false;
 	}
 	void refreshIfForeign(session).catch(() =>
 		showToast("Session deleted. Couldn't refresh the session list.", {
@@ -293,6 +298,7 @@ async function remove(
 		showToast(`Session deleted. ${result.worktreeWarnings.join("; ")}`, {
 			variant: "warn",
 		});
+	return true;
 }
 
 function fork(session: SessionInfo) {

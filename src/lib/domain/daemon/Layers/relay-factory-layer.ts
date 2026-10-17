@@ -54,7 +54,10 @@ import { AccountDirectory } from "../Services/account-directory.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
-import { listDaemonSessions as listEffectDaemonSessions } from "../Services/daemon-session-reader.js";
+import {
+	listArchivedSessions,
+	listDaemonSessions as listEffectDaemonSessions,
+} from "../Services/daemon-session-reader.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
@@ -228,6 +231,13 @@ export const RelayFactoryLive = (
 			const daemonSessionQueryAdapter = Context.make(
 				DaemonSessionQueryServiceTag,
 				{
+					listArchived: (options) =>
+						listArchivedSessions(options).pipe(
+							Effect.provide(daemonContext),
+							Effect.mapError(
+								(cause) => new DaemonSessionQueryServiceError({ cause }),
+							),
+						),
 					list: (options) =>
 						listEffectDaemonSessions(configDir, options).pipe(
 							Effect.provide(daemonContext),

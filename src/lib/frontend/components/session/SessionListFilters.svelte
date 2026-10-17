@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { sessionMatchesStatus } from "../../stores/session.svelte.js";
+	import { sessionMatchesStatus, sessionState, setSearchIncludeArchived } from "../../stores/session.svelte.js";
 	import { getSessionGrouping, getSessionStatusFilter, setSessionGrouping, setSessionStatusFilter, type SessionStatusFilter } from "../../stores/session-scope.js";
 	import type { SessionInfo } from "../../types.js";
 	import Button from "../ui/Button.svelte";
+	import Checkbox from "../ui/Checkbox.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import SessionSearchField from "./SessionSearchField.svelte";
 	import SessionGroupMenu from "./SessionGroupMenu.svelte";
@@ -84,14 +85,22 @@
 			</div>
 			{#if !sessionViewState.compact}<SessionGroupMenu />{/if}
 	</div>
-	{#if searchSummary}
+	{#if sessionState.searchQuery.trim()}
 		<!-- Outside the search-input block: the count belongs to the results, and
 		     the input's visibility is local component state. -->
 		<div
 			class="flex shrink-0 items-center justify-between gap-2 px-3.5 pb-1.5 text-xs text-text-dimmer font-brand"
 			data-testid="session-search-summary"
 		>
-			<span aria-live="polite">{searchSummary}</span>
+			<span aria-live="polite">{searchSummary ?? "Searching…"}</span>
+			<label class="flex items-center gap-1.5 whitespace-nowrap">
+				<Checkbox
+					data-testid="search-include-archived"
+					checked={sessionState.searchIncludeArchived}
+					onchange={(event) => void setSearchIncludeArchived(event.currentTarget.checked)}
+				/>
+				Include archived
+			</label>
 			<TextButton onclick={onclearsearch}>Clear</TextButton>
 		</div>
 	{/if}

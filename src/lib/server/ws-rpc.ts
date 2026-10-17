@@ -249,6 +249,7 @@ export type DaemonRpcName =
 	| "DetectProxy"
 	| "FindFolders"
 	| "ListDaemonSessions"
+	| "ListArchivedSessions"
 	| "SetLogLevel"
 	| "ResolveSession";
 

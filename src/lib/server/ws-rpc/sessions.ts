@@ -233,6 +233,9 @@ export const sessionsHandlers = {
 				...(request.limit !== undefined ? { limit: request.limit } : {}),
 				...(request.roots !== undefined ? { roots: request.roots } : {}),
 				...(request.search !== undefined ? { search: request.search } : {}),
+				...(request.includeArchived !== undefined
+					? { includeArchived: request.includeArchived }
+					: {}),
 				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
 				...(request.scope !== undefined ? { scope: request.scope } : {}),
 				...(request.exclude !== undefined ? { exclude: request.exclude } : {}),
@@ -242,6 +245,14 @@ export const sessionsHandlers = {
 				...result,
 			};
 		}).pipe(Effect.catchAll(mapRpcFailure("ListDaemonSessions"))),
+	ListArchivedSessions: (request) =>
+		Effect.gen(function* () {
+			const daemonSessions = yield* DaemonSessionQueryServiceTag;
+			return yield* daemonSessions.listArchived({
+				...(request.limit !== undefined ? { limit: request.limit } : {}),
+				...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+			});
+		}).pipe(Effect.catchAll(mapRpcFailure("ListArchivedSessions"))),
 	ReloadProviderSession: (request) =>
 		Effect.flatMap(ConfigTag, (config) =>
 			reloadProviderSessionForClient({
@@ -860,6 +871,7 @@ export const sessionsHandlers = {
 	| "PreWarmDraft"
 	| "ResolveSession"
 	| "ListDaemonSessions"
+	| "ListArchivedSessions"
 	| "ReloadProviderSession"
 	| "RenameSession"
 	| "RenameSessionBranch"

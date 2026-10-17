@@ -377,6 +377,7 @@ export interface DaemonSessionQueryOptions {
 	readonly limit?: number;
 	readonly roots?: boolean;
 	readonly search?: string;
+	readonly includeArchived?: boolean;
 	readonly cursor?: DaemonSessionCursor;
 	/** Read one project slug or an encoded repository group scope. Filter projects
 	 *  before merging their pages, so scoped search and paging remain complete. */
@@ -389,6 +390,16 @@ export interface DaemonSessionQueryOptions {
 export interface DaemonSessionCursor {
 	readonly updatedAt: number;
 	readonly id: string;
+}
+
+export interface ArchivedSessionCursor {
+	readonly archivedAt: number;
+	readonly id: string;
+}
+
+export interface ArchivedSessionQueryOptions {
+	readonly limit?: number;
+	readonly cursor?: ArchivedSessionCursor;
 }
 
 export type ProjectSessionAvailability =
@@ -407,6 +418,11 @@ export interface DaemonSessionQueryResult {
 	readonly availability: ReadonlyArray<ProjectSessionAvailability>;
 	readonly hasMore: boolean;
 	readonly nextCursor: DaemonSessionCursor | null;
+}
+
+export interface ArchivedSessionQueryResult
+	extends Omit<DaemonSessionQueryResult, "nextCursor"> {
+	readonly nextCursor: ArchivedSessionCursor | null;
 }
 
 export interface AskUserQuestion {

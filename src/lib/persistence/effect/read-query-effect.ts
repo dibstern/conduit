@@ -502,7 +502,9 @@ export interface ReadQueryEffect {
 			limit?: number;
 			titleQuery?: string;
 			excludeArchived?: boolean;
-			before?: { updatedAt: number; id: string };
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
 		},
 	) => Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError>;
 
@@ -513,7 +515,9 @@ export interface ReadQueryEffect {
 			limit?: number;
 			titleQuery?: string;
 			excludeArchived?: boolean;
-			before?: { updatedAt: number; id: string };
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
 			statuses?: Readonly<Record<string, { type: string }>>;
 			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 			hintDismissals?: ReadonlyMap<string, number>;
@@ -1198,12 +1202,20 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			limit?: number;
 			titleQuery?: string;
 			excludeArchived?: boolean;
-			before?: { updatedAt: number; id: string };
+			archivedOnly?: boolean;
+			orderColumn?: "updated_at" | "archived_at";
+			before?: { at: number; id: string };
 		},
 	): Effect.Effect<readonly SessionRow[], ReadQueryEffectError | SqlError> =>
 		Effect.gen(function* () {
 			const predicates = [sql`project_id IN ${sql.in(scope.projectIds)}`];
-			if (opts?.excludeArchived) predicates.push(sql`archived_at IS NULL`);
+			// Archive state lives on the root and hides the whole family.
+			if (opts?.excludeArchived)
+				predicates.push(
+					sql`archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM sessions AS archived_root WHERE archived_root.id = sessions.root_id AND archived_root.archived_at IS NOT NULL)`,
+				);
+			if (opts?.archivedOnly) predicates.push(sql`archived_at IS NOT NULL`);
+			const orderColumn = sql(opts?.orderColumn ?? "updated_at");
 			if (opts?.roots) predicates.push(sql`parent_id IS NULL`);
 			if (opts?.titleQuery !== undefined) {
 				const escapedQuery = opts.titleQuery.replace(/[\\%_]/g, "\\$&");
@@ -1213,7 +1225,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			}
 			if (opts?.before !== undefined) {
 				predicates.push(
-					sql`(updated_at < ${opts.before.updatedAt} OR (updated_at = ${opts.before.updatedAt} AND id < ${opts.before.id}))`,
+					sql`(${orderColumn} < ${opts.before.at} OR (${orderColumn} = ${opts.before.at} AND id < ${opts.before.id}))`,
 				);
 			}
 			const limit =
@@ -1225,7 +1237,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			return yield* sql<SessionRow>`
 				SELECT * FROM sessions
 				WHERE ${sql.and(predicates)}
-				ORDER BY updated_at DESC, id DESC
+				ORDER BY ${orderColumn} DESC, id DESC
 				${limit}`;
 		}).pipe(
 			Effect.mapError((e) =>
