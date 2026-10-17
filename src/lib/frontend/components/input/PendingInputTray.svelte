@@ -50,6 +50,7 @@
 		/** The server refused to steer a row, which stays queued. */
 		onSteerRefused: (reason: SteerBlocker) => void;
 	} = $props();
+	const trayId = $props.id();
 	const currentSession = $derived(findSession(sessionId ?? sessionState.currentId ?? ""));
 	const queueSessionId = $derived(sessionId ?? sessionState.currentId);
 	const queueProjectSlug = $derived(projectSlug ?? currentSession?.projectSlug ?? "");
@@ -98,10 +99,10 @@
 			</div>
 		{/if}
 		<ol aria-label="Queued messages" class="flex flex-col gap-[2px]">
-			{#each inputs as input (input.inputId)}
+			{#each inputs as input, index (input.inputId)}
 				{@const images = input.request.images?.length ?? 0}
 				{@const command = input.request.text.trimStart().startsWith("/")}
-				<ComposerQueueRow data-testid="pending-input-row" data-input-id={input.inputId}>
+				<ComposerQueueRow id={`${trayId}-row-${index}`} data-testid="pending-input-row" data-input-id={input.inputId}>
 					{#snippet badge()}
 					<Badge variant="quiet" shape="pill" data-testid="pending-input-state">{input.state === "steering" ? "Steering" : "Queued"}</Badge>
 					{/snippet}
@@ -127,7 +128,7 @@
 						{#if sendsAt !== undefined || limited}
 							<Button variant="ghost" size="composer-chip" touchTarget data-testid="pending-input-send-now" class="shrink-0" onclick={() => act("input.sendNow", input)}>Send now</Button>
 						{:else if steer}
-							<Tooltip>
+							<Tooltip side="top" align="end" customAnchor={`#${CSS.escape(`${trayId}-row-${index}`)}`}>
 								{#snippet trigger({ props })}<Button
 									{...props}
 									variant="ghost" size="composer-chip" touchTarget

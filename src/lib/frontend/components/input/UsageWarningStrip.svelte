@@ -16,7 +16,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
-	import { usageForecastTime, usageWarning } from "../../utils/continuation.js";
+	import { quotaBlocksSwitch, usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import Button from "../ui/Button.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
@@ -31,6 +31,9 @@
 	const accountId = $derived(composerAccountId(session));
 	const reading = $derived(claudeAccounts.readingOf(accountId));
 	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
+	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) =>
+		account.id !== accountId && !quotaBlocksSwitch(claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id))));
+	const compactSwitchLabel = $derived(alternatives.length === 1 ? `Switch to ${alternatives[0]?.name}` : "Switch account");
 	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), severalAccounts, clock.now));
 	const limited = $derived(session?.limitRecovery && !session.limitRecovery.switched);
 	const resetsAt = $derived(usageForecastTime(warning?.window.resetsAt, clock.now));
@@ -75,7 +78,7 @@
 				<AccountSwitch sessionId={session.id} {projectSlug} account={accountId} limit={undefined} side="top">
 					{#snippet trigger({ props, loading })}
 						<Button {...props} variant="ask" size="composer-chip" iconSize={12} {loading} touchTarget data-testid="usage-warning-switch-account" class={sessionViewState.compact ? 'flex-1 justify-center' : ''}>
-							Switch account{#if !sessionViewState.compact}<Icon name="chevron-down" size={12} />{/if}
+							{#if sessionViewState.compact}{compactSwitchLabel}{:else}Switch account<Icon name="chevron-down" size={12} />{/if}
 						</Button>
 					{/snippet}
 				</AccountSwitch>
@@ -83,7 +86,7 @@
 			</div>
 		{:else if sessionViewState.compact}
 			<div class="mt-[2px] flex w-full justify-end"><Button variant="secondary" size="composer-chip" touchTarget ariaLabel="Dismiss usage warning" data-testid="usage-warning-dismiss" onclick={dismissWarning}>Dismiss</Button></div>
-		{:else if !severalAccounts && !sessionViewState.compact}
+		{:else if !severalAccounts}
 			<TextButton tone="inherit" data-testid="usage-warning-details" class="shrink-0 font-semibold text-status-ask" onclick={() => openSettings("usage")}>Details</TextButton>
 		{/if}
 		{#if !sessionViewState.compact}{@render dismiss()}{/if}

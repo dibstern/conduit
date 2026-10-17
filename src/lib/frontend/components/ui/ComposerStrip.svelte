@@ -56,4 +56,6 @@
 		box-shadow: inset 0 1px 0 color-mix(in srgb, var(--strip-tone) 18%, transparent);
 	}
 	@media (max-width: 767px) { .composer-strip { margin-inline: 12px; } }
+	/* Follows the composer's compact state too, so forced-phone captures get phone gutters. */
+	:global([data-compact="true"]) .composer-strip { margin-inline: 12px; }
 </style>

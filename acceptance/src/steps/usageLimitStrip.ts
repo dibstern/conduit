@@ -331,9 +331,12 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				recovery.boundingBox(),
 			]);
 			if (!buttonBox || !stripBox) throw new Error("No button or strip box");
-			// Desktop: the right slot. Phone: actions share a full-width second row.
-			const compact = (world.page.viewportSize()?.width ?? 1280) < 768;
-			if (compact) {
+			// Desktop and the queued tray: natural-width actions in the trailing slot.
+			// Phone strip: actions share a full-width second row.
+			const stretched =
+				match[1] === "usage limit strip" &&
+				(world.page.viewportSize()?.width ?? 1280) < 768;
+			if (stretched) {
 				const actions = await recovery.getByRole("button").count();
 				expect(buttonBox.width).toBeGreaterThan(
 					(stripBox.width - 30) / actions - 6,

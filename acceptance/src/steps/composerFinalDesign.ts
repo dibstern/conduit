@@ -84,6 +84,24 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert command menu spans composer",
+		match: /^the command menu spans the composer width$/,
+		run: async ({ world }) => {
+			await expect
+				.poll(async () => {
+					const menu = await box(
+						world.page.getByRole("listbox", { name: "Built-in commands" }),
+					);
+					const composer = await box(world.page.locator("#input-row"));
+					return (
+						Math.abs(menu.x - composer.x) <= 1 &&
+						Math.abs(menu.width - composer.width) <= 1
+					);
+				})
+				.toBe(true);
+		},
+	},
+	{
 		name: "assert compact context percentage",
 		match: /^the compact command reports (\d+)% context$/,
 		run: async ({ world, match }) => {

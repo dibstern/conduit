@@ -147,6 +147,12 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// on a 393px phone, just as lg always did. Desktop still differs.
 	"ui-modal--default | ui-modal--large":
 		"on a phone both md and lg clamp to the same 90vw panel width",
+
+	// Verified legitimate (conduit-test-aoqb.17). The pair proves the checkout
+	// pill sizes the same under a block parent and a grid parent; play() resizes
+	// the root through 320/180/360px in both, so one frame is the expected result.
+	"session-gitidentity--control-block-resize | session-gitidentity--control-grid-resize":
+		"the same resize assertions under block and grid parents end in one identical 360px frame",
 };
 
 const BASELINE_DIRECTORY = resolve(

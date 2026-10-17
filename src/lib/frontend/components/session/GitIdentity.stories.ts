@@ -10,17 +10,14 @@ const meta = {
 	component: GitIdentity,
 	tags: ["autodocs"],
 	args: { directory: "/src/conduit", git: undefined, presentation: "control" },
-	beforeEach: () => {
+	beforeEach: ({ canvasElement }) => {
 		sessionViewState.compact = false;
 		sessionViewState.composerWidth = 760;
-		// The checkout sizes itself as a flex item of the composer row; outside
-		// one it measures only its own content and collapses to its icon.
-		// The root outlives the story, so the cleanup takes back any width too.
-		const root = document.getElementById("storybook-root");
-		root?.style.setProperty("display", "flex");
+		// The root outlives the story; take back layout changes from fit checks.
+		const style = canvasElement.getAttribute("style");
 		return () => {
-			root?.style.removeProperty("display");
-			root?.style.removeProperty("width");
+			if (style === null) canvasElement.removeAttribute("style");
+			else canvasElement.setAttribute("style", style);
 		};
 	},
 } satisfies Meta<typeof GitIdentity>;
@@ -32,6 +29,43 @@ export const NoGit: Story = {};
 
 export const BranchOnly: Story = {
 	args: { git: { branch: "main" } },
+};
+
+export const ControlBlockResize: Story = {
+	...BranchOnly,
+	play: async ({ canvasElement }) => {
+		const identity = within(canvasElement).getByTestId("composer-checkout");
+		const slot = identity.parentElement;
+		if (!slot) throw new Error("Missing checkout slot");
+		canvasElement.style.width = "320px";
+		await waitFor(() => {
+			expect(slot.getBoundingClientRect().width).toBe(220);
+			expect(identity.querySelector('[data-part="branch"]')).toHaveTextContent(
+				"main",
+			);
+		});
+		canvasElement.style.width = "180px";
+		await waitFor(() => {
+			expect(identity.querySelector('[data-part="branch"]')).toBeNull();
+			expect(slot.getBoundingClientRect().right).toBeLessThanOrEqual(
+				canvasElement.getBoundingClientRect().right,
+			);
+		});
+		canvasElement.style.width = "360px";
+		await waitFor(() => {
+			expect(slot.getBoundingClientRect().width).toBe(220);
+			expect(identity.querySelector('[data-part="branch"]')).toHaveTextContent(
+				"main",
+			);
+		});
+	},
+};
+
+export const ControlGridResize: Story = {
+	...ControlBlockResize,
+	beforeEach: ({ canvasElement }) => {
+		canvasElement.style.display = "grid";
+	},
 };
 
 export const BranchAndWorktree: Story = {
@@ -802,8 +836,7 @@ export const LongNames: Story = {
 		);
 		// Any narrower and the checkout collapses to its icon before the model
 		// label has to truncate. Size the row: the pill rewrites its own style.
-		const root = document.getElementById("storybook-root");
-		if (root) root.style.width = "200px";
+		canvasElement.style.width = "200px";
 		await waitFor(() =>
 			expect(identity.querySelector('[data-part="branch"]')).toBeNull(),
 		);
