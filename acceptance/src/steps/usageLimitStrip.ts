@@ -334,13 +334,20 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const strip = world.page.getByTestId("usage-limit-strip");
 			await expect(strip).toHaveAttribute("data-state", match[1] ?? "");
-			// Waiting wears the theme amber (#f4b740) at 40%; limited the red at 45%.
-			await expect(strip).toHaveCSS(
-				"border-top-color",
+			// Waiting wears the theme warning at 40%; limited the error at 45%.
+			const tone =
 				match[1] === "waiting"
-					? "oklab(0.815817 0.0250889 0.14507 / 0.4)"
-					: "oklab(0.684887 0.17753 0.0399031 / 0.45)",
-			);
+					? "var(--color-warning) 40%"
+					: "var(--color-error) 45%";
+			const expected = await strip.evaluate((el, mix) => {
+				const probe = document.createElement("span");
+				probe.style.borderTopColor = `color-mix(in oklab, ${mix}, transparent)`;
+				el.append(probe);
+				const colour = getComputedStyle(probe).borderTopColor;
+				probe.remove();
+				return colour;
+			}, tone);
+			await expect(strip).toHaveCSS("border-top-color", expected);
 		},
 	},
 	{
@@ -428,7 +435,10 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const divider = world.page.getByTestId("transcript-divider");
 			await expect(divider).toHaveCount(1);
 			await expect(divider).toHaveText(match[1] ?? "");
-			await expect(divider.locator("b")).toHaveCSS("color", "rgb(0, 229, 255)");
+			await expect(divider.locator("b")).toHaveCSS(
+				"color",
+				"rgb(62, 207, 142)",
+			);
 			const reply = world.page
 				.locator("#messages .msg-assistant")
 				.filter({ hasText: match[2] ?? "" });
@@ -627,7 +637,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 				{
 					violet: "rgb(176, 140, 255)",
 					teal: "rgb(47, 211, 192)",
-					blue: "rgb(90, 169, 245)",
+					blue: "rgb(142, 155, 255)",
 				}[match[3] ?? ""] ?? "",
 			);
 		},

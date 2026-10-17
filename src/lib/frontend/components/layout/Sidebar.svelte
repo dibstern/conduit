@@ -81,7 +81,7 @@
 </script>
 
 {#snippet title(titleSize: string, countSize: string)}
-	<h1 class="m-0 flex min-w-0 items-baseline gap-[5px] {titleSize} font-semibold tracking-[-0.01em] text-text font-brand" data-testid="list-bar-title">
+	<h1 class="m-0 flex min-w-0 items-baseline gap-[5px] {titleSize} font-semibold tracking-[-0.01em] text-text font-sans" data-testid="list-bar-title">
 		Sessions
 		<span class="{countSize} font-normal tabular-nums text-text-dimmer" data-testid="list-bar-count">{openCount}</span>
 	</h1>
@@ -249,7 +249,7 @@
 				iconOnly
 				icon="plus"
 				iconSize={20}
-				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] z-[var(--z-raised)] size-[44px] justify-center rounded-full bg-fill-brand text-on-brand shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
+				class="absolute right-[11px] bottom-[calc(11px+env(safe-area-inset-bottom))] z-[var(--z-raised)] size-[44px] justify-center rounded-full bg-accent text-bg shadow-[0_4px_14px_var(--color-backdrop-subtle)]"
 				title="New session"
 				ariaLabel="New session"
 				onclick={handleNewSession}

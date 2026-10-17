@@ -122,7 +122,7 @@
 				{/each}
 			</div>
 		{:else if isEmpty}
-			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-brand" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
+			<div class="session-empty py-6 px-3.5 text-center text-xs text-text-dimmer font-sans" data-testid={statusFilter !== null && (!searching || filteredLength > 0) ? "session-filter-empty" : undefined}>
 				{emptyMessage}
 				{#if statusFilter !== null && (!searching || filteredLength > 0)}
 					<div class="mt-2"><Button variant="ghost" size="content" tone="accent" class="min-h-[44px] md:min-h-8 px-3" data-testid="session-filter-clear" onclick={() => setSessionStatusFilter(null)}>Clear filter</Button></div>
@@ -130,11 +130,11 @@
 			</div>
 		{:else}
 			{#if arrangement.pinned.length > 0}
-				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{arrangement.pinned.length}</span></div>
+				<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-sans"><span>Pinned</span>{" "}<span class="ml-auto font-medium">{arrangement.pinned.length}</span></div>
 				{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
 			{/if}
 			{#each arrangement.sections as section (section.key)}
-					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-brand">
+					<div class="session-group-label flex items-center uppercase pt-1.5 pb-0.5 px-3 text-xs font-semibold text-text-dimmer tracking-[0.3px] font-sans">
 						<span>{section.label}</span>{" "}<span class="ml-auto font-medium">{section.sessions.length}</span>
 					</div>
 					{#each section.sessions as s (s.id)}
@@ -144,7 +144,7 @@
 			{#if arrangement.snoozed.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-sans"
 					data-testid="snoozed-shelf-toggle"
 					aria-expanded={snoozedShelfOpen}
 					aria-controls="snoozed-shelf-rows"
@@ -164,7 +164,7 @@
 			{#if arrangement.settled.length > 0}
 				<TextButton
 					tone="dimmer"
-					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-brand"
+					class="session-group-label flex items-center gap-1 min-h-[44px] md:min-h-0 pt-1.5 pb-0.5 px-3 text-xs font-semibold tracking-[0.3px] font-sans"
 					data-testid="settled-shelf-toggle"
 					aria-expanded={settledShelfOpen}
 					aria-controls="settled-shelf-rows"
@@ -193,7 +193,7 @@
 
 		{#if pagerPending && (searching || scrolled)}
 			<div
-				class="px-3.5 py-2 text-center text-xs text-text-dimmer font-brand"
+				class="px-3.5 py-2 text-center text-xs text-text-dimmer font-sans"
 				data-testid="session-list-loading-more"
 			>
 				<span class="inline-flex items-center gap-2"><span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>Loading</span>
@@ -207,7 +207,7 @@
 		     the registry is a bounded set. -->
 		{#if unavailableProjectLabels.length > 0}
 			<div
-				class="session-unavailable px-3.5 py-3 text-xs leading-snug text-text-dimmer font-brand"
+				class="session-unavailable px-3.5 py-3 text-xs leading-snug text-text-dimmer font-sans"
 				data-testid="session-list-unavailable"
 			>
 				Sessions missing from {unavailableProjectLabels.join(", ")}

@@ -62,7 +62,7 @@
 	{#if showEffort}
 		<Button
 			variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-			class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+			class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text last:border-b-0 hover:bg-text/7"
 			ariaLabel={`Effort: ${levelName}. Open effort options`}
 			loading={effort.pending}
 			disabled={variants.length === 0}
@@ -85,7 +85,7 @@
 			size="content"
 			tone="muted"
 			hoverFill="none"
-			class="shrink-0 text-[11.5px] font-normal font-brand"
+			class="shrink-0 text-[11.5px] font-normal font-sans"
 			ariaLabel={`Effort: ${levelName}. Open effort options`}
 			loading={effort.pending}
 			disabled={variants.length === 0}
@@ -104,7 +104,7 @@
 		size="content"
 		tone="inherit"
 		hoverFill="none"
-		class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7"
+		class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-sans text-text-secondary whitespace-nowrap hover:bg-text/7"
 		ariaLabel={`Effort: ${levelName}. Open effort options`}
 		loading={effort.pending}
 		disabled={variants.length === 0}
@@ -182,7 +182,7 @@
 			>
 				<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
 					<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={0} /></span>
-					<span class="font-brand font-semibold">Default</span>
+					<span class="font-sans font-semibold">Default</span>
 					<span class="text-xs text-text-muted">Use the model default</span>
 				</span>
 			</MenuRadioItem>
@@ -196,7 +196,7 @@
 				>
 					<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
 						<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={index + 1} /></span>
-						<span class="font-brand font-semibold">{level?.name ?? v}</span>
+						<span class="font-sans font-semibold">{level?.name ?? v}</span>
 						<span class="text-xs text-text-muted">{level?.description ?? "Custom reasoning effort"}</span>
 					</span>
 				</MenuRadioItem>

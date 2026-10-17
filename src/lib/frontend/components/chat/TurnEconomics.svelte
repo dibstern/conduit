@@ -23,7 +23,7 @@
 		if (ctx === undefined) return "";
 		if (ctx.pct >= 80) return "bg-error";
 		if (ctx.pct >= 60) return "bg-thinking";
-		return "bg-brand-b";
+		return "bg-success";
 	});
 </script>
 

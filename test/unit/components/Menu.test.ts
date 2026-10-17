@@ -59,7 +59,7 @@ describe("Menu", () => {
 			"rounded-lg",
 			"border",
 			"border-border",
-			"bg-bg-alt",
+			"bg-popover-bg",
 			"py-1",
 			"data-[side=top]:shadow-menu",
 			"data-[side=bottom]:shadow-dropdown",

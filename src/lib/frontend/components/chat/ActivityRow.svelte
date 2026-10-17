@@ -65,7 +65,7 @@
 	});
 	const launchTone = $derived(
 		launch?.state.kind === "running"
-			? "text-brand-b"
+			? "text-success"
 			: launch?.state.kind === "finished"
 				? { completed: "text-success", failed: "text-error", stopped: "text-warning" }[launch.state.outcome]
 				: "text-text-dimmer",

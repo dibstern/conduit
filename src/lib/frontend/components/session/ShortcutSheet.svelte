@@ -47,7 +47,7 @@
 </script>
 
 {#snippet body()}
-	<div data-testid="shortcut-sheet" class="flex flex-col gap-5 font-brand">
+	<div data-testid="shortcut-sheet" class="flex flex-col gap-5 font-sans">
 		{#each sections as { title, shortcuts } (title)}
 			<section class="flex flex-col gap-2">
 				<h3 class="text-xs text-text-muted">{title}</h3>

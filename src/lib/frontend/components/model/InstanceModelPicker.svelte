@@ -518,7 +518,7 @@
 		data-phone={sheet ? "true" : undefined}
 		role={sheet ? undefined : "dialog"}
 		aria-labelledby={sheet ? undefined : titleId}
-		class="model-dropdown flex flex-col overflow-hidden font-brand {sheet
+		class="model-dropdown flex flex-col overflow-hidden font-sans {sheet
 			? 'w-full max-h-[85dvh] rounded-t-[22px] border-t border-border px-[16px] pt-2 pb-[max(30px,env(safe-area-inset-bottom))]'
 			: 'absolute bottom-[calc(100%+8px)] right-0 w-[404px] max-w-[90vw] max-h-[min(70vh,480px)] rounded-[12px] px-[12px] pt-[9px] pb-[4px] z-[var(--z-popover)]'}"
 	>
@@ -757,7 +757,7 @@
 						size="content"
 						aria-label="Search {selectedLabel} models"
 						placeholder="Search {selectedLabel} models…"
-						class="min-w-0 flex-1 text-[13px] text-text font-brand placeholder:text-text-dimmer"
+						class="min-w-0 flex-1 text-[13px] text-text font-sans placeholder:text-text-dimmer"
 					/>
 					<Button
 						variant="toolbar"
@@ -908,7 +908,7 @@
 				tone="muted"
 				hoverFill="none"
 				data-testid="composer-word-account"
-				class="shrink-0 text-[11.5px] font-normal font-brand"
+				class="shrink-0 text-[11.5px] font-normal font-sans"
 				ariaLabel={`Account: ${wordAccountName}. Open account options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
@@ -931,7 +931,7 @@
 			data-shown-context-window={selectedContext?.value ?? ""}
 			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
-			class="shrink-0 text-[11.5px] font-normal font-brand"
+			class="shrink-0 text-[11.5px] font-normal font-sans"
 			title="Switch model"
 			ariaLabel={`Model: ${displayName}. Open model options`}
 			aria-haspopup="dialog"
@@ -949,7 +949,7 @@
 				tone="muted"
 				hoverFill="none"
 				data-testid="composer-word-context"
-				class="shrink-0 text-[11.5px] font-normal font-brand"
+				class="shrink-0 text-[11.5px] font-normal font-sans"
 				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
@@ -971,7 +971,7 @@
 			hoverFill="none"
 			data-testid="composer-harness-trigger"
 			data-instance-id={selectedLogoInstanceId}
-			class="h-[26px] shrink-0 gap-[5px] rounded-[7px] bg-bg-alt px-[6px] text-[11.5px] font-normal font-brand text-text whitespace-nowrap hover:bg-text/7"
+			class="h-[26px] shrink-0 gap-[5px] rounded-[7px] bg-bg-alt px-[6px] text-[11.5px] font-normal font-sans text-text whitespace-nowrap hover:bg-text/7"
 			ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}${switchingTo ? ", switching" : ""}. Open harness options`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}
@@ -1003,7 +1003,7 @@
 			data-shown-context-window={selectedContext?.value ?? ""}
 			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
-			class="model-btn h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand text-text-secondary whitespace-nowrap hover:bg-text/7 {hasModel ? '' : 'opacity-50'}"
+			class="model-btn h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-sans text-text-secondary whitespace-nowrap hover:bg-text/7 {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Model: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}. Open model options`}
 			aria-haspopup="dialog"
@@ -1032,7 +1032,7 @@
 			data-shown-context-window={selectedContext?.value ?? ""}
 			data-shown-permission-mode={discoveryState.permissionMode}
 			disabled={sessionLoading}
-			class="model-btn min-w-0 h-[26px] text-[11.5px] font-normal text-text-secondary font-brand hover:bg-text/7 gap-[5px] px-[6px] rounded-[7px] {hasModel ? '' : 'opacity-50'}"
+			class="model-btn min-w-0 h-[26px] text-[11.5px] font-normal text-text-secondary font-sans hover:bg-text/7 gap-[5px] px-[6px] rounded-[7px] {hasModel ? '' : 'opacity-50'}"
 			title="Switch model"
 			ariaLabel={`Harness and model: ${selectedLabel}, ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}`}
 			aria-haspopup="dialog"
@@ -1052,7 +1052,7 @@
 				{#snippet rows()}
 					<Button
 						variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text hover:bg-text/7"
+						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text hover:bg-text/7"
 						data-testid="composer-harness-trigger"
 						data-instance-id={selectedLogoInstanceId}
 						ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}. Open harness options`}
@@ -1065,7 +1065,7 @@
 					</Button>
 					<Button
 						variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text hover:bg-text/7"
+						class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text hover:bg-text/7"
 						data-testid="composer-more-model"
 						ariaLabel={`Model: ${displayName}. Open model options`}
 						aria-haspopup="dialog"
@@ -1091,7 +1091,7 @@
 			tone="muted"
 			hoverFill="none"
 			data-testid="composer-word-agent"
-			class="shrink-0 text-[11.5px] font-normal font-brand"
+			class="shrink-0 text-[11.5px] font-normal font-sans"
 			ariaLabel={`Agent: ${activeAgent ? agentLabel(activeAgent) : "Default"}. Open agent options`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}

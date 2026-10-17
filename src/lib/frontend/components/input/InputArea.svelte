@@ -1246,7 +1246,7 @@
 </script>
 
 {#snippet settingsStatus()}
-	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-brand whitespace-nowrap">
+	<div data-testid="composer-settings-pending" role="status" class="flex items-center gap-2 px-1.5 text-xs text-text-dimmer font-sans whitespace-nowrap">
 		<span class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></span>
 		{offline && discoveryState.modelsLoaded ? "Reconnecting to daemon" : "Connecting"}
 	</div>
@@ -1306,7 +1306,7 @@
 			<Surface
 				variant="plain" radius="none"
 				data-testid="composer-more-sheet"
-				class="max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border px-[16px] pt-[8px] pb-[max(20px,env(safe-area-inset-bottom))] font-brand"
+				class="max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[18px] border-t border-border px-[16px] pt-[8px] pb-[max(20px,env(safe-area-inset-bottom))] font-sans"
 			>
 				<div class="mx-auto mb-[10px] h-[4px] w-[36px] rounded-[2px] bg-border-chip" aria-hidden="true"></div>
 				<h2 id={composerMoreTitleId} class="mb-[2px] text-[11.5px] font-semibold text-text">Composer</h2>
@@ -1340,8 +1340,8 @@
 				data-testid="composer-goal-hint"
 				class="composer-goal-hint flex items-center gap-[7px] mb-2 rounded-2xl border px-[10px] py-[7px] text-[11.5px] leading-[1.35] text-text-secondary"
 			>
-				<Icon name="target" size={14} class="shrink-0 text-status-violet" />
-				<span class="flex-1 min-w-0"><b class="font-semibold text-status-violet">/goal</b> sets a goal. Claude keeps working, and checks itself after each turn, until it's met.</span>
+				<Icon name="target" size={14} class="shrink-0 text-status-goal" />
+				<span class="flex-1 min-w-0"><b class="font-semibold text-status-goal">/goal</b> sets a goal. Claude keeps working, and checks itself after each turn, until it's met.</span>
 			</div>
 		{/if}
 
@@ -1661,7 +1661,7 @@
 						data-goal={isGoalCommand ? "true" : "false"}
 						data-send-mode={sendMode}
 						type="button"
-						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : (phoneIcons ? 'w-[30px] rounded-[9px] ' : 'w-[32px] rounded-[10px] ') + (isGoalCommand ? 'bg-status-violet text-bg' : 'bg-brand-a text-white')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : phoneIcons && sendMode !== 'at-reset' ? 'h-[30px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
+						class="send-btn shrink-0 touch-manipulation hover:not-disabled:opacity-90 active:not-disabled:opacity-70 {sendMode === 'at-reset' ? 'gap-[5px] rounded-full border border-status-red/50 px-[10px] font-mono text-[10.5px] text-status-red whitespace-nowrap' : (phoneIcons ? 'w-[30px] rounded-[9px] ' : 'w-[32px] rounded-[10px] ') + (isGoalCommand ? 'bg-status-goal text-bg' : 'bg-accent text-bg')} {sendMode === 'at-reset' && !sessionViewState.compact ? 'h-[26px]' : phoneIcons && sendMode !== 'at-reset' ? 'h-[30px]' : 'h-[32px]'} {sendMode === 'at-reset' ? '' : 'disabled:bg-send-off-bg disabled:text-send-off'}"
 						disabled={!canSend}
 						title={sendButtonTitle}
 						ariaLabel={isGoalCommand ? "Set goal" : sendButtonLabel}
@@ -1773,7 +1773,7 @@
 	@keyframes composer-task-pulse { 50% { opacity: 0.3; } }
 	@media (prefers-reduced-motion: reduce) { .composer-task-dot { animation: none; } }
 	:global(#send[data-goal="true"]:not([data-send-mode="at-reset"]):not([data-send-mode="switch"])) {
-		background: var(--color-status-violet);
+		background: var(--color-status-goal);
 		color: var(--color-bg);
 	}
 	:global(#send[data-send-mode="warning"]) {
@@ -1781,8 +1781,8 @@
 	}
 
 	.composer-goal-hint, .composer-goal-met, .composer-goal-cleared {
-		border-color: color-mix(in srgb, var(--goal-bar-color, var(--color-status-violet)) 38%, transparent);
-		background: color-mix(in srgb, var(--goal-bar-color, var(--color-status-violet)) 10%, transparent);
+		border-color: color-mix(in srgb, var(--goal-bar-color, var(--color-status-goal)) 38%, transparent);
+		background: color-mix(in srgb, var(--goal-bar-color, var(--color-status-goal)) 10%, transparent);
 	}
 
 	.composer-goal-met {
@@ -1799,12 +1799,12 @@
 	}
 
 	#input-row.goal {
-		border-color: var(--color-status-violet);
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-violet) 16%, transparent);
+		border-color: var(--color-status-goal);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-goal) 16%, transparent);
 	}
 
 	#input-row.paused {
-		border: 1px dashed color-mix(in srgb, var(--color-status-violet) 60%, var(--color-border));
+		border: 1px dashed color-mix(in srgb, var(--color-status-goal) 60%, var(--color-border));
 		box-shadow: none;
 	}
 </style>

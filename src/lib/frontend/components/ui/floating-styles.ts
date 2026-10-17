@@ -24,7 +24,7 @@
 // `radius` prop came off DetachedListbox: every floating surface in conduit,
 // portaled or inline, now has one corner.
 const FLOATING_SURFACE_BASE_CLASSES =
-	"border border-border bg-bg-alt rounded-lg py-1 " +
+	"border border-border bg-popover-bg rounded-lg py-1 " +
 	"focus-visible:outline-hidden " +
 	"data-[side=top]:shadow-menu data-[side=bottom]:shadow-dropdown " +
 	"data-[side=left]:shadow-panel data-[side=right]:shadow-panel";

@@ -173,7 +173,7 @@ test("desktop unread chip survives reload, has one keyboard-accessible read acti
 	const chip = page.getByTestId("session-bar-unread-chip");
 	await expect(chip).toBeVisible();
 	await expect(firstRow.getByTestId("session-unread-dot")).toBeVisible();
-	await expect(chip.locator(".bg-brand-a")).toHaveCount(1);
+	await expect(chip.locator(".bg-accent")).toHaveCount(1);
 	const titleOrder = await page
 		.locator("#session-bar-title-row")
 		.evaluate((row) =>

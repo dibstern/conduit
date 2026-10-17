@@ -157,7 +157,7 @@ export const CheckingGoal: Story = {
 		const heading = canvas.getByTestId("composer-status-checking");
 		const style = getComputedStyle(heading);
 		const expected = new Option().style;
-		expected.color = style.getPropertyValue("--color-status-violet");
+		expected.color = style.getPropertyValue("--color-status-goal");
 		await expect(style.color).toBe(expected.color);
 		await expect(Number(style.fontWeight)).toBeGreaterThanOrEqual(600);
 	},

@@ -29,7 +29,7 @@
 		"needs-approval": {
 			word: "Approve",
 			spoken: "Needs approval",
-			colour: "text-warning",
+			colour: "text-status-ask",
 			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-amber",
 			glyph: { icon: "triangle-alert" },
 			emphasis: "strong",
@@ -37,8 +37,8 @@
 		"needs-reply": {
 			word: "Reply",
 			spoken: "Needs reply",
-			colour: "text-status-indigo",
-			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-indigo",
+			colour: "text-status-ask",
+			pill: "rounded-full px-[10px] py-[5px] font-semibold text-on-fill bg-fill-amber",
 			glyph: { icon: "message-square" },
 			emphasis: "strong",
 		},
@@ -263,7 +263,7 @@
 	const wokeText = $derived(getWokenSessionText(session));
 	const wokeColour = $derived(
 		wokeReason === "approval" ? "bg-warning/10 text-warning" :
-		wokeReason === "question" ? "bg-brand-b/10 text-brand-b" :
+		wokeReason === "question" ? "bg-status-ask/10 text-status-ask" :
 		wokeReason === "error" ? "bg-error/10 text-error" :
 		wokeReason === "turn" ? "bg-success/10 text-success" : "bg-accent-bg text-accent",
 	);
@@ -304,7 +304,7 @@
 		return emphasis.row;
 	});
 	const selectionControlClass = $derived.by(() => {
-		if (active) return selected ? "text-brand-a" : "text-text-muted";
+		if (active) return selected ? "text-accent" : "text-text-muted";
 		return selected ? "text-accent" : "text-text-muted";
 	});
 
@@ -337,7 +337,7 @@
 				: "grid-cols-[20px_minmax(0,1fr)_auto]"
 		} gap-x-[9px] items-center ${densityClass} ${rowOpacityClass} mb-px rounded-panel cursor-pointer relative focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent` +
 			(picked
-				? " bg-accent-bg text-text"
+				? " bg-selection text-text"
 				: active
 				? " active bg-bg-alt text-text"
 				: " text-text-secondary hover:bg-sidebar-hover hover:text-text"),
@@ -514,8 +514,8 @@
 	}
 
 	function swipeToneClass(direction: "settle" | "snooze", stage: string): string {
-		if (stage === "commit") return direction === "settle" ? "bg-success text-bg" : "bg-fill-indigo text-on-fill";
-		return direction === "settle" ? "bg-success/15 text-success" : "bg-status-indigo/15 text-status-indigo";
+		if (stage === "commit") return direction === "settle" ? "bg-success text-bg" : "bg-status-snoozed text-bg";
+		return direction === "settle" ? "bg-success/15 text-success" : "bg-status-snoozed/15 text-status-snoozed";
 	}
 
 	function swipeIcon(verb: string): "check" | "moon" | "undo" {
@@ -533,7 +533,7 @@
 		{@const verb = swipeVerb(direction)}
 		{@const stage = heldDirection ? "reveal" : swipeStage}
 		{#if direction === "settle" && stage === "reveal" && canMarkRead}
-			<div class="absolute inset-0 flex items-stretch font-brand text-xs font-semibold">
+			<div class="absolute inset-0 flex items-stretch font-sans text-xs font-semibold">
 				{#if !actions.settleDisabledReason}
 					<Button
 						variant="ghost"
@@ -559,7 +559,7 @@
 					hoverFill="none"
 					data-testid={session.unread ? "session-swipe-mark-read" : "session-swipe-mark-unread"}
 					ariaLabel="Mark {session.unread ? 'read' : 'unread'} {displayTitle}"
-					class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-brand-a/15 text-brand-a"
+					class="flex w-[74px] shrink-0 flex-col items-center justify-center gap-1 bg-accent/15 text-accent"
 					onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) { onmarkread?.(session.id); closeHold(); } }}
 				>
 					<Icon name={session.unread ? "circle" : "circle-dot"} size={16} />
@@ -576,7 +576,7 @@
 			data-testid="session-swipe-action"
 			data-stage={stage}
 			ariaLabel="{verb} {displayTitle}"
-			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-brand text-sm font-medium {swipeToneClass(direction, stage)}"
+			class="absolute inset-0 {direction === 'settle' ? 'justify-start' : 'justify-end'} flex items-center gap-1 px-3 font-sans text-sm font-medium {swipeToneClass(direction, stage)}"
 			onclick={(event) => { event.preventDefault(); event.stopPropagation(); if (heldDirection) runSwipeAction(heldDirection, false); }}
 		>
 			<Icon name={swipeIcon(verb)} size={16} />
@@ -588,7 +588,7 @@
 	bind:this={rowEl}
 	href={href || undefined}
 	class="{itemClass} no-underline select-none {offset !== 0 && !active ? 'bg-sidebar-bg' : ''} {dragging ? 'transition-none' : 'transition-[color,background-color,transform] duration-150 motion-reduce:transition-none'}"
-	style="touch-action: pan-y; -webkit-touch-callout: none; transform: translateX({offset}px); {picked ? 'box-shadow: inset 3px 0 0 var(--color-accent);' : active ? 'box-shadow: inset 3px 0 0 var(--color-brand-a), inset 3px 0 12px rgb(from var(--color-brand-a) r g b / 0.1);' : ''}"
+	style="touch-action: pan-y; -webkit-touch-callout: none; transform: translateX({offset}px); {picked ? 'box-shadow: inset 3px 0 0 var(--color-accent);' : active ? 'box-shadow: inset 3px 0 0 var(--color-accent), inset 3px 0 12px rgb(from var(--color-accent) r g b / 0.1);' : ''}"
 	data-session-id={session.id}
 	aria-label={ariaLabel}
 	onclick={handleClick}
@@ -650,7 +650,7 @@
 	<!-- Title line -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<span
-		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-brand {titleClass}"
+		class="session-item-title col-start-2 row-start-1 flex items-center gap-1.5 overflow-hidden font-sans {titleClass}"
 		ondblclick={handleDblClick}
 	>
 		{#if shelfRow && contextText && !isRenaming}
@@ -687,11 +687,11 @@
 				>
 			{/key}
 			{#if sessionAttention(session) === "done-unread"}
-				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>
+				<span data-testid="session-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
 			{/if}
 		{/if}
 		{#if pinned}
-			<span class="shrink-0 text-text-dimmer" title="Pinned session">
+			<span class="shrink-0 text-status-pinned" title="Pinned session">
 				<Icon name="star" size={11} />
 			</span>
 		{/if}
@@ -700,7 +700,7 @@
 
 	{#if contextText && !shelfRow}
 		<span
-			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-brand"
+			class="session-item-context col-start-2 row-start-2 flex items-center gap-1.5 mt-0.5 text-sm text-text-dimmer overflow-hidden whitespace-nowrap font-sans"
 		>
 			{#if projectLabel}<ProjectSquare label={projectLabel} accent={projectAccent} />{/if}
 			<span class="overflow-hidden text-ellipsis min-w-0">{contextText}</span>
@@ -715,7 +715,7 @@
 		     content inside a row that promises 46px, and the row would silently
 		     grow past its own density contract. -->
 		<div
-			class="col-start-3 row-start-1 row-span-2 self-stretch flex items-center gap-1.5 shrink-0 text-base text-text-dimmer tabular-nums whitespace-nowrap font-brand"
+			class="col-start-3 row-start-1 row-span-2 self-stretch flex items-center gap-1.5 shrink-0 text-base text-text-dimmer tabular-nums whitespace-nowrap font-sans"
 		>
 			<!-- The pill when the tier has a word, the time otherwise, and never
 			     both: two answers in one corner is the ambiguity this row is being
@@ -725,7 +725,7 @@
 			     already leads with it; announcing it twice per row is noise. -->
 			{#if status.word && !shelfRow}
 				<span
-					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-brand {status.pill} {statusHidesOnHover && !isRenaming ? `md:group-hover:hidden md:group-focus-within:hidden ${menuOpen ? 'md:hidden' : ''}` : ''}"
+					class="session-item-status inline-flex items-center text-[11.5px] leading-none whitespace-nowrap font-sans {status.pill} {statusHidesOnHover && !isRenaming ? `md:group-hover:hidden md:group-focus-within:hidden ${menuOpen ? 'md:hidden' : ''}` : ''}"
 					aria-hidden="true"
 				>
 					{status.word}

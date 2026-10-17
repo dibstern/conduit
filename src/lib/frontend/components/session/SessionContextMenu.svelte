@@ -81,7 +81,7 @@
 
 {#snippet header(sheet: boolean)}
 	{#if sheet}
-		<div data-testid="session-sheet-header" class="flex items-start gap-3 border-b border-border px-4 pt-[8px] pb-[11px] font-brand">
+		<div data-testid="session-sheet-header" class="flex items-start gap-3 border-b border-border px-4 pt-[8px] pb-[11px] font-sans">
 			<span class="mt-0.5 grid size-[20px] shrink-0 place-items-center {status.colour}" aria-hidden="true">{#if "dither" in status.glyph}<DitherGlyph state={status.glyph.dither} />{:else}<Icon name={status.glyph.icon} size={14} />{/if}</span>
 			<div class="min-w-0 flex-1">
 				<div class="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-text">{session.title || "New Session"}</div>
@@ -93,7 +93,7 @@
 			</div>
 		</div>
 	{:else}
-		<div data-testid="session-ctx-header" class="border-b border-border px-3 py-2 font-brand">
+		<div data-testid="session-ctx-header" class="border-b border-border px-3 py-2 font-sans">
 			<div class="line-clamp-2 whitespace-normal break-words text-sm font-semibold text-text">{session.title || "New Session"}</div>
 			{#if projectLabel || branch}<div class="mt-1 flex gap-2 text-xs text-text-dimmer">{#if projectLabel}<span>{projectLabel}</span>{/if}{#if branch}<span>{branch}</span>{/if}</div>{/if}
 		</div>

@@ -43,7 +43,7 @@
 	let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 	const copyButtonClass = $derived.by(() => {
 		if (copyState === "done") return "border-success/30 bg-success/10 text-success";
-		if (copyState === "primed") return "border-brand-b/30 bg-brand-b/10 text-brand-b";
+		if (copyState === "primed") return "border-success/30 bg-success/10 text-success";
 		return "border-border-subtle/50 bg-bg-surface/80 text-text-muted hover:text-text-secondary";
 	});
 	const copyButtonLabel = $derived.by(() => {
@@ -60,19 +60,16 @@
 			styles.getPropertyValue(name).trim() || fallback;
 		const vars = {
 			darkMode: themeState.resolved === "dark",
-			background: get("--color-code-bg", "#141417"),
+			background: get("--color-code-bg", "#141416"),
 			// Under theme "base", primaryColor IS the node fill, so it must be a
-			// surface token. Pointing it at --color-accent turned every node brand
-			// pink; nodes should read as panels, with the accent reserved for
-			// emphasis elsewhere.
-			primaryColor: get("--color-bg-alt", "#1b1e24"),
-			primaryTextColor: get("--color-text", "#e4e4e7"),
-			primaryBorderColor: get("--color-border", "#3f3f46"),
-			lineColor: get("--color-text-muted", "#71717a"),
-			secondaryColor: get("--color-bg-surface", "#1f1f23"),
-			tertiaryColor: get("--color-bg", "#0d0e11"),
-			fontFamily:
-				"'Berkeley Mono', 'IBM Plex Mono', ui-monospace, monospace",
+			// surface token. Nodes read as panels; accent is reserved for emphasis.
+			primaryColor: get("--color-bg-alt", "#232327"),
+			primaryTextColor: get("--color-text", "#ededf0"),
+			primaryBorderColor: get("--color-border", "#2b2b31"),
+			lineColor: get("--color-text-muted", "#a1a1aa"),
+			secondaryColor: get("--color-bg-surface", "#1a1a1d"),
+			tertiaryColor: get("--color-bg", "#111113"),
+			fontFamily: get("--font-sans", "Geist, system-ui, sans-serif"),
 		};
 
 		mermaid.initialize({
@@ -398,7 +395,7 @@
 	onkeydown={handleKeydown}
 	role="article"
 >
-	<div class="bg-bg-surface rounded-panel py-4 px-5 relative glow-brand-b transition-colors duration-150 {containerCopyClass}">
+	<div class="bg-bg-surface rounded-panel py-4 px-5 relative glow-success transition-colors duration-150 {containerCopyClass}">
 		<!-- Action buttons (hover) — top-right icon row -->
 		{#if message.finalized}
 			<div
@@ -438,7 +435,7 @@
 		{/if}
 
 		<div class="flex items-baseline gap-2.5 mb-2">
-			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-brand-b">Assistant</span>
+			<span class="text-sm font-mono font-semibold uppercase tracking-[1.5px] text-success">Assistant</span>
 			<MessageTime createdAt={message.createdAt} />
 		</div>
 		<div class="md-content text-base leading-[1.7]">

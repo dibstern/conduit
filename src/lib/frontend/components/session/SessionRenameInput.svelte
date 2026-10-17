@@ -88,7 +88,7 @@
 		size={variant === "row" ? "content" : "sm"}
 		chrome={variant === "row" ? "bare" : "bordered"}
 		class={variant === "row"
-			? `block w-full rounded-sm border border-brand-a bg-bg px-1.5 py-0.5 font-medium text-text ring-3 ring-brand-a-glow ${className}`
+			? `block w-full rounded-sm border border-accent bg-bg px-1.5 py-0.5 font-medium text-text ring-3 ring-accent-glow ${className}`
 			: className}
 		bind:value
 		bind:element
@@ -123,7 +123,7 @@
 		<span class="flex min-w-0 items-center gap-1.5 text-sm text-text-dimmer" role="status" data-testid="session-rename-incoming">
 			<span class="min-w-0 truncate" title={incomingTitle}>Now titled <span class="text-text-secondary">“{incomingTitle}”</span></span>
 			<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget
-				class="shrink-0 text-brand-b hover:underline"
+				class="shrink-0 text-success hover:underline"
 				onmousedown={keepFocus}
 				onclick={(event) => { contain(event); value = draft.value = incomingTitle; }}
 			>Use</Button>

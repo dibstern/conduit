@@ -163,7 +163,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 						? "--color-status-amber"
 						: label.startsWith("Goal met")
 							? "--color-status-green"
-							: "--color-status-violet";
+							: "--color-status-goal";
 					expected.color = style.getPropertyValue(token);
 					const text = el.querySelector("span");
 					return {
@@ -205,8 +205,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 						const probe = document.createElement("span");
 						probe.style.color =
 							kind === "dashed violet"
-								? "color-mix(in srgb, var(--color-status-violet) 60%, var(--color-border))"
-								: "var(--color-status-violet)";
+								? "color-mix(in srgb, var(--color-status-goal) 60%, var(--color-border))"
+								: "var(--color-status-goal)";
 						el.append(probe);
 						const color = getComputedStyle(probe).color;
 						probe.remove();
@@ -265,7 +265,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 					world.page.getByTestId("composer-status-checking").evaluate((el) => {
 						const style = getComputedStyle(el);
 						const expected = new Option().style;
-						expected.color = style.getPropertyValue("--color-status-violet");
+						expected.color = style.getPropertyValue("--color-status-goal");
 						return (
 							style.color === expected.color && Number(style.fontWeight) >= 600
 						);

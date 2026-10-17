@@ -124,7 +124,7 @@
 	side="top"
 	align="end"
 	sideOffset={4}
-	class="w-[272px] font-brand"
+	class="w-[272px] font-sans"
 	data-testid="permission-mode-dropdown"
 >
 	{#snippet trigger({ props })}
@@ -135,7 +135,7 @@
 				size="content"
 				tone="inherit"
 				hoverFill="none"
-				class="shrink-0 text-[11.5px] font-normal font-brand"
+				class="shrink-0 text-[11.5px] font-normal font-sans"
 				style={`color: ${currentPresentation.tone}`}
 				ariaLabel={`Approvals: ${currentLabel}. Open options`}
 				loading={approvals.pending}
@@ -146,7 +146,7 @@
 			<Button
 				{...props}
 				variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text last:border-b-0 hover:bg-text/7"
 				ariaLabel={`Approvals: ${currentLabel}. Open options`}
 				loading={approvals.pending}
 				data-testid="composer-more-mode"
@@ -175,7 +175,7 @@
 				size="content"
 				tone="inherit"
 				hoverFill="none"
-				class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-brand whitespace-nowrap {hot ? 'text-warning bg-warning/14' : 'text-text-secondary hover:bg-text/7'}"
+				class="h-[26px] shrink-0 gap-[5px] rounded-[7px] px-[6px] text-[11.5px] font-normal font-sans whitespace-nowrap {hot ? 'text-warning bg-warning/14' : 'text-text-secondary hover:bg-text/7'}"
 				ariaLabel="Approvals {currentLabel}. Open options"
 				loading={approvals.pending}
 				data-hot={hot ? "true" : undefined}

@@ -57,8 +57,11 @@ export const TONE_CLASSES = {
 	default: "text-text",
 	secondary: "text-text-secondary hover:text-text",
 	muted: "text-text-muted hover:text-text",
-	/** Brightens only one step, not to full. `pill`'s pairing. */
-	"muted-soft": "text-text-muted hover:text-text-secondary",
+	/**
+	 * `pill`'s pairing. It used to brighten one step short of full, but the
+	 * Final palette folds secondary onto muted, so the one step up IS full.
+	 */
+	"muted-soft": "text-text-muted hover:text-text",
 	dimmer: "text-text-dimmer hover:text-text",
 	accent: "text-accent",
 	error: "text-error",
@@ -73,19 +76,9 @@ export const TONE_CLASSES = {
  * belong to their variants and stay private, because "danger, but with a
  * sidebar hover" is not a thing anyone should be able to ask for.
  *
- * Two pairs in here are very probably drift rather than design, and are
- * deliberately NOT collapsed by this ticket:
- *
- *   `overlay` 0.04 vs `overlay-soft` 0.03 -- a 1% alpha delta on a
- *   neutral scrim. Collapsing them is a real, if tiny, pixel change and
- *   so belongs in a ticket that can own the baseline churn.
- *
- *   `alt` vs `surface` -- `--color-bg-alt` and `--color-bg-surface` are
- *   defined to the SAME value in both shipped themes (style.css:29,30 and
- *   :142,143), so these render identically TODAY. Both names survive
- *   anyway: two first-party themes are in flight, and silently rewriting
- *   9 call sites onto a token they did not name would make that
- *   coincidence permanent by accident.
+ * `overlay` and `overlay-soft` keep their 0.04 and 0.03 neutral washes.
+ * `alt` is the tinted fill (the Final bubble step) and `surface` the card
+ * fill. They differ in both themes, so neither may fold onto the other.
  */
 export const HOVER_FILL_CLASSES = {
 	none: "",
@@ -273,7 +266,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	 */
 	pill: {
 		chrome:
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
+			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-sans " +
 			"border border-border bg-bg-alt duration-100",
 		tone: TONE_CLASSES["muted-soft"],
 		hoverFill: HOVER_FILL_CLASSES.base,
@@ -294,7 +287,7 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 	 */
 	"pill-warning": {
 		chrome:
-			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-brand " +
+			"gap-1 h-6 px-2 rounded-full text-xs font-medium font-sans " +
 			"border border-warning/30 bg-warning-bg duration-100",
 		tone: "text-warning",
 		hoverFill: HOVER_FILL_CLASSES.none,

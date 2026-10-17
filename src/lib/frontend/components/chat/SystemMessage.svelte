@@ -105,7 +105,7 @@
 			{#if showDetails && hasDetails}
 				<div
 					id={detailsId}
-					class="ml-5 mt-1 p-2 rounded bg-black/20 text-xs font-mono space-y-0.5 overflow-x-auto"
+					class="ml-5 mt-1 p-2 rounded bg-code-bg text-xs font-mono space-y-0.5 overflow-x-auto"
 				>
 					{#if message.statusCode}
 						<div><span class="opacity-60">status:</span> {message.statusCode}</div>

@@ -81,7 +81,7 @@
 		isProcessing() ? "busy" : session?.status ?? "idle",
 	));
 	const detailsGoal = $derived(goalFacts?.goal ?? goalFacts?.endedGoal);
-	const goalTone = $derived(goal.tone === "amber" ? "text-status-amber" : goal.tone === "success" ? "text-status-green" : "text-status-violet");
+	const goalTone = $derived(goal.tone === "amber" ? "text-status-amber" : goal.tone === "success" ? "text-status-green" : "text-status-goal");
 	const goalPhaseLabel = $derived(goal.phase ? {
 		starting: "Starting", pursuing: "Pursuing", checking: "Checking", not_yet: "Not yet", paused: "Paused", met: "Met", cleared: "Cleared",
 	}[goal.phase] : "");
@@ -389,7 +389,7 @@
 				<Button id="side-threads-control" variant="ghost" size="segment" icon="messages-square" touchTarget class="shrink-0 tabular-nums" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>
 					{sideThreads.length}
 					{#if sideThreadsWaiting}<span data-testid="side-threads-waiting" class="inline-flex {sideThreadsWaiting.colour}"><Icon name={sideThreadsWaiting.icon} size={11} /></span>{/if}
-					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>{/if}
+					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
 			{#if primaryCommand}
@@ -492,7 +492,7 @@
 			class:text-base={collapsed}
 		>
 			{#if renaming && session}
-				<SessionRenameInput {session} onend={() => { renaming = false; }} class="font-brand min-h-[44px] md:min-h-0" />
+				<SessionRenameInput {session} onend={() => { renaming = false; }} class="font-sans min-h-[44px] md:min-h-0" />
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		{#if goalShown}
@@ -530,8 +530,8 @@
 			<Menu ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
 				{#snippet trigger({ props })}
 					<Button {...props} variant="ghost" size="content" hoverFill="none" class="group -my-[13px] min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel="Unread — open options" data-testid="session-bar-unread-chip">
-						<Badge variant="quiet" shape="pill" size="sm" class="group-hover:bg-brand-a/10 group-focus-visible:bg-brand-a/10 group-active:bg-brand-a/15 group-data-[state=open]:bg-brand-a/15">
-							<span class="size-[7px] shrink-0 rounded-full bg-brand-a" aria-hidden="true"></span>Unread
+						<Badge variant="quiet" shape="pill" size="sm" class="group-hover:bg-accent/10 group-focus-visible:bg-accent/10 group-active:bg-accent/15 group-data-[state=open]:bg-accent/15">
+							<span class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>Unread
 						</Badge>
 					</Button>
 				{/snippet}
@@ -549,7 +549,7 @@
 					{#snippet trigger({ props })}
 						<Button {...props} variant="ghost" size="content" class="min-h-[44px] min-w-[44px] shrink-0 rounded-full" ariaLabel={`${stateChip.label} — open options`} data-testid="session-bar-state-chip" data-state={stateChip.kind}>
 							<Badge variant="quiet" shape="pill" size="sm">
-								<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-brand-b" : "text-success"} />
+							<Icon name={stateChip.icon} size={13} class={stateChip.kind === "snoozed" ? "text-status-snoozed" : "text-success"} />
 								<span class="desktop-state-label">{stateChip.label}</span>
 							</Badge>
 						</Button>
@@ -637,11 +637,11 @@
 
 	{#if goalDetails.open && detailsGoal && goalFacts}
 		<Surface id="goal-details" data-testid="goal-details" variant="plain" radius="none" elevation="panel" role="region" aria-label="Goal details" class="absolute inset-x-0 top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto rounded-b-[22px] border-b border-border px-[14px] pt-[12px] pb-[8px] text-[12px]">
-			<div class="flex items-center gap-[6px] font-brand text-[11px] font-semibold uppercase tracking-[0.08em] text-status-violet">
+			<div class="flex items-center gap-[6px] font-sans text-[11px] font-semibold uppercase tracking-[0.08em] text-status-goal">
 				<Icon name="target" size={13} />Goal
 				<span class="ml-auto rounded-[6px] border border-current/40 px-[6px] text-[10px] normal-case tracking-normal {goalTone}">{goalPhaseLabel}</span>
 			</div>
-			<p data-testid="goal-details-condition" class="mt-[6px] mb-[4px] font-brand text-[14px] font-semibold leading-[1.35] text-text">{detailsGoal.condition}</p>
+			<p data-testid="goal-details-condition" class="mt-[6px] mb-[4px] font-sans text-[14px] font-semibold leading-[1.35] text-text">{detailsGoal.condition}</p>
 			<div data-testid="goal-details-meta" class="text-[11px] text-text-muted">
 				Set {goalElapsed(detailsNow - detailsGoal.setAt)} ago · {detailsGoal.iterations} checks{details?.tokensSinceStart != null && !detailsLoading ? ` · ${goalTokens(details.tokensSinceStart)} tokens` : ""}
 			</div>
@@ -656,7 +656,7 @@
 				{/each}
 				{#if goal.phase === "checking"}
 					<li data-testid="goal-details-check" class="goal-details-check">
-						<Icon name="loader-circle" size={13} class="mt-px motion-safe:animate-spin text-status-violet" />
+						<Icon name="loader-circle" size={13} class="mt-px motion-safe:animate-spin text-status-goal" />
 						<span class="text-text-muted">now</span><span>Checking…</span>
 					</li>
 				{:else if goalFacts.ended === "met"}

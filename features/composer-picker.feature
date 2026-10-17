@@ -15,13 +15,13 @@ Scenario Outline: E1 desktop icons open the picker at each control's section and
   Then the icons <control> control is focused
 
 Examples:
-  | tier   | control | section | baseline                         | threshold |
-  | wide   | harness | Harness | composer-icons-picker-e1-harness | 98        |
-  | narrow | harness | Harness | composer-icons-picker-e1-harness | 98        |
-  | wide   | model   | Model   | composer-icons-picker-e1-model   | 98        |
-  | narrow | model   | Model   | composer-icons-picker-e1-model   | 98        |
-  | wide   | effort  | Effort  | composer-icons-picker-e1-effort  | 98        |
-  | narrow | effort  | Effort  | composer-icons-picker-e1-effort  | 98        |
+  | tier   | control | section | baseline                                | threshold |
+  | wide   | harness | Harness | composer-icons-picker-e1-harness        | 98        |
+  | narrow | harness | Harness | composer-icons-picker-e1-harness-narrow | 98        |
+  | wide   | model   | Model   | composer-icons-picker-e1-model          | 98        |
+  | narrow | model   | Model   | composer-icons-picker-e1-model-narrow   | 98        |
+  | wide   | effort  | Effort  | composer-icons-picker-e1-effort         | 98        |
+  | narrow | effort  | Effort  | composer-icons-picker-e1-effort-narrow  | 98        |
 
 Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   Given the conduit app is served with the connected mockup

@@ -245,7 +245,7 @@
 	{#snippet trigger({ props })}
 		{#if row}
 			<Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="inherit" hoverFill="none" layout="flow"
-				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-brand text-text last:border-b-0 hover:bg-text/7"
+				class="flex min-h-[50px] w-full items-center gap-[10px] rounded-none border-b border-border-subtle text-left text-[12.5px] font-normal font-sans text-text last:border-b-0 hover:bg-text/7"
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Checkout</span>
 				<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[5px] font-normal">{@render identity()}</span>
@@ -254,7 +254,7 @@
 		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 			<!-- The wrapper, ruler and button share a font so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control' : ''} text-[11.5px] font-brand inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} bind:clientWidth={room}>{#if control}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="muted" hoverFill="none" touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-brand" : "max-w-full gap-[5px] font-normal font-brand"}
+			<span class="git-pill {control ? 'git-control' : ''} text-[11.5px] font-sans inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} bind:clientWidth={room}>{#if control}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant="ghost" size="content" tone="muted" hoverFill="none" touchTarget align="start" class={control ? "h-[26px] max-w-full gap-[5px] rounded-[7px] px-[6px] font-normal font-sans" : "max-w-full gap-[5px] font-normal font-sans"}
 				style={`min-width: ${minimumWidth}`}
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				{@render identity()}

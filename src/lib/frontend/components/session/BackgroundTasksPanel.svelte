@@ -16,7 +16,7 @@
 </script>
 
 <Surface id="background-tasks-panel" data-testid="background-tasks-panel" variant="plain" radius="none" elevation="panel" role="region" aria-label="Background tasks" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? 'inset-x-0 rounded-b-[22px] border-b' : 'left-4 mt-1 w-[440px] max-w-[calc(100%-32px)] rounded-[14px] border'}">
-	<div class="flex items-center gap-[7px] font-brand text-[11px] font-semibold uppercase tracking-[0.08em] text-tool">
+	<div class="flex items-center gap-[7px] font-sans text-[11px] font-semibold uppercase tracking-[0.08em] text-tool">
 		<TaskGlyph />{tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
 	</div>
 	<BackgroundTaskList {tasks} {onstop} />

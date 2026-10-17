@@ -15,17 +15,8 @@
  * Every recipe below started as the as-found class list of a real call site,
  * token for token, so the migration was zero-diff by construction.
  *
- * One convergence has since landed. The three strips
- * marked their selected option in two different colours: `pill` used `accent`
- * while `underline` and `field` used `brand-a`. Those two tokens hold the same
- * value in both canonical themes (#ff2d7b dark, #c9004f light), so the split
- * was invisible on screen and the swap below is zero-diff -- but they are
- * separate names that the queued palette work may give separate values, and
- * then the split would become a real inconsistency nobody chose. `accent` wins
- * because selection is an interactive state and `accent` is the token family
- * that models one (it has `--color-accent-hover` and `--color-accent-bg`;
- * `brand-a` is a bare swatch for glows and identity marks). The token
- * duplication remains unresolved (tracked in conduit-test-57oe).
+ * All three strips use the accent family for selection, so theme changes keep
+ * their selected states consistent.
  *
  * What is NOT converged, deliberately: `pill` stays content-width with a
  * border-colour hover and `field` stays `flex-1` with none, because one is a
@@ -66,14 +57,14 @@ export const SEGMENTED_VARIANTS = {
 	 * `border-none` sets border-style to none, which kills `border-b-2` outright,
 	 * so the underline never rendered from the classes at all. Someone had
 	 * patched around it with an inline `style="border-bottom: ..."`, leaving the
-	 * conditional `border-brand-a` class as dead code that contradicted the
+	 * conditional `border-accent` class as dead code that contradicted the
 	 * element's own style attribute. Dropping `border-none` makes the classes
 	 * load-bearing again and the inline style unnecessary — Tailwind v4's
 	 * preflight already sets `border: 0 solid`, so `border-b-2` alone is a solid
 	 * 2px bottom border.
 	 */
 	underline: {
-		list: "flex border-b border-border px-5 gap-1 font-brand",
+		list: "flex border-b border-border px-5 gap-1 font-sans",
 		// A whole-pixel line box (text-sm's 1.4 gives 15.4px) keeps the strip,
 		// and the scrolling panel below it, on the pixel grid.
 		item: "px-3 py-2 text-sm leading-[15px] font-medium border-b-2 -mb-px transition-colors cursor-pointer bg-transparent",
@@ -105,7 +96,7 @@ export const SEGMENTED_VARIANTS = {
 	},
 	/**
 	 * The settings mockup's joined segment (`.seg`): one outlined capsule split
-	 * by hairlines, the selected part tinted pink. Inherits its font size from
+	 * by hairlines, the selected part tinted with the accent. Inherits its font size from
 	 * its container. Settings wears it everywhere: Server's instance Type, Composer,
 	 * and Usage's warning and forecast switches.
 	 */

@@ -268,7 +268,7 @@ export const GoalChecking: Story = {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
 			"Checking goal · check 3",
-			"--color-status-violet",
+			"--color-status-goal",
 		);
 		const spinner = subtitle.querySelector("svg");
 		if (!spinner) throw new Error("Checking spinner is missing");
@@ -293,7 +293,7 @@ export const GoalPaused: Story = {
 		const subtitle = await assertGoalSubtitle(
 			canvasElement,
 			"Goal paused · All 38 scenarios pass",
-			"--color-status-violet",
+			"--color-status-goal",
 		);
 		await expect(subtitle).toHaveAttribute(
 			"title",

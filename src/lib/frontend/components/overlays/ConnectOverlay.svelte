@@ -139,7 +139,7 @@
 		style="opacity: {fadeOut ? '0' : '1'}; transition: opacity 600ms ease; pointer-events: {fadeOut ? 'none' : 'auto'};"
 	>
 		<!-- Radial glow orb -->
-		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgb(from var(--color-brand-a) r g b / 0.08) 0%, rgb(from var(--color-brand-b) r g b / 0.05) 40%, transparent 70%);"></div>
+		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgb(from var(--color-accent) r g b / 0.08) 0%, rgb(from var(--color-success) r g b / 0.05) 40%, transparent 70%);"></div>
 
 		<div class="flex flex-col items-center gap-3 relative z-10">
 			<!-- Conduit logo with animated block grid -->
@@ -147,12 +147,12 @@
 
 		<!-- Status text — only one of these renders at a time, no empty wrapper -->
 		{#if relayStatus === "registering"}
-		<div class="text-sm font-medium text-text-muted font-brand">
+		<div class="text-sm font-medium text-text-muted font-sans">
 			Starting relay...
 		</div>
 		{:else if relayStatus === "error"}
 			<div class="flex flex-col items-center gap-2">
-			<div class="text-sm font-medium text-red-400 font-brand">
+			<div class="text-sm font-medium text-red-400 font-sans">
 				Relay failed to start
 			</div>
 				{#if relayError}
@@ -165,8 +165,8 @@
 			</div>
 		{:else}
 			<div
-				class="text-sm font-medium font-brand"
-				style="background: linear-gradient(90deg, var(--color-brand-b), var(--color-brand-a)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;"
+				class="text-sm font-medium font-sans"
+				style="background: linear-gradient(90deg, var(--color-success), var(--color-accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;"
 			>
 				{displayStatusText}
 			</div>

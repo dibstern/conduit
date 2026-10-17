@@ -89,7 +89,7 @@
 	{#each segment.activity as part, i (part.uuid)}
 		<button
 			type="button"
-			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-brand-b {segmentClass(part, running)} {partWidthClass(part, i)}"
+			class="h-full cursor-pointer touch-manipulation transition-opacity outline-none focus-visible:ring-1 focus-visible:ring-success {segmentClass(part, running)} {partWidthClass(part, i)}"
 			style={part.type === "system" ? undefined : `flex-grow: ${weights[i] ?? 1}`}
 			title={title(part, i)}
 			aria-label={title(part, i)}

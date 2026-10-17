@@ -29,8 +29,8 @@
 >
 	<div class="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
 		{#if goal?.phase === "checking"}
-			<Icon name="loader-circle" size={12} class="shrink-0 text-status-violet motion-safe:animate-spin" />
-			<b data-testid="composer-status-checking" class="shrink-0 font-semibold text-status-violet">Checking goal</b>
+			<Icon name="loader-circle" size={12} class="shrink-0 text-status-goal motion-safe:animate-spin" />
+			<b data-testid="composer-status-checking" class="shrink-0 font-semibold text-status-goal">Checking goal</b>
 			<span class="min-w-0 truncate text-text-muted">{goal.subtitle.slice("Checking goal".length).trim()}</span>
 		{:else}
 		<span

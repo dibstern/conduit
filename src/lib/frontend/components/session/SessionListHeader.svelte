@@ -16,7 +16,7 @@
 	     It is tinted and carries an exit X so the mode is unmistakable: a plain
 	     "N selected" title read like the list's normal state and was forgotten. -->
 	{#if selectMode}
-		<div class="session-list-header flex shrink-0 items-center gap-1 border-b border-accent bg-accent/20 py-1.5 pl-1.5 pr-2.5 font-brand">
+		<div class="session-list-header flex shrink-0 items-center gap-1 border-b border-accent bg-accent/20 py-1.5 pl-1.5 pr-2.5 font-sans">
 			<Button variant="ghost" size="content" iconOnly icon="x" iconSize={18} tone="default" ariaLabel="Exit selection" title="Exit selection" class="size-[44px] md:size-8 justify-center rounded-lg" onclick={ondone} />
 			<span class="flex min-w-0 flex-1 flex-col leading-tight">
 				<span class="text-[11px] font-medium uppercase tracking-wider text-accent" aria-hidden="true">Selecting</span>
