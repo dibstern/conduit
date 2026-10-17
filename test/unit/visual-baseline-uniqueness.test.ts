@@ -40,6 +40,9 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"Composer's play walks every composer preference and restores the defaults so module state cannot leak into later stories; its assertions live in play(), and phone still differs because Composer opens drilled in",
 	"overlays-settingspanel--composer-light | overlays-settingspanel--default-light":
 		"the light pair of Composer and Default, identical for the same reason",
+	// conduit-test-aoqb.8: the phone section list is a touch surface with no hover state.
+	"overlays-settingspanel--default | overlays-settingspanel--hover":
+		"on phone Default and Hover both end on the section list, whose rows have no hover style; desktop still differs on the rail's hover colour",
 
 	// Verified legitimate (conduit-test-732b). Each of these was traced to the
 	// source; the two stories genuinely produce the same frame.

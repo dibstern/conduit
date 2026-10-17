@@ -157,7 +157,67 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /** A generic open: General on desktop, the section list on phone. */
-export const Default: Story = {};
+export const Default: Story = {
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByRole("dialog", { name: "Settings" })).toBeVisible();
+		await expect(body.getByTestId("settings-close-btn")).toBeVisible();
+		if (sessionViewState.compact) {
+			const bounds = canvasElement.ownerDocument
+				.getElementById("settings-panel")
+				?.getBoundingClientRect();
+			await expect(bounds?.x).toBeCloseTo(0, 0);
+			await expect(bounds?.y).toBeCloseTo(0, 0);
+			await expect(bounds?.width).toBe(window.innerWidth);
+			await expect(bounds?.height).toBe(window.innerHeight);
+			await expect(body.getByTestId("settings-close-btn")).toHaveTextContent(
+				"Done",
+			);
+			await expect(
+				body.queryByTestId("settings-back-btn"),
+			).not.toBeInTheDocument();
+			await userEvent.click(body.getByTestId("settings-tab-general"));
+			const heading = body.getByRole("heading", {
+				level: 2,
+				name: "General",
+			});
+			await expect(heading).toBeVisible();
+			const title = heading.getBoundingClientRect();
+			await expect(title.x + title.width / 2).toBeCloseTo(
+				window.innerWidth / 2,
+				0,
+			);
+			await userEvent.click(body.getByTestId("settings-back-btn"));
+			await expect(
+				body.getByRole("heading", { level: 2, name: "Settings" }),
+			).toBeVisible();
+			await waitFor(() =>
+				expect(body.getByTestId("settings-tab-general")).toHaveFocus(),
+			);
+		} else {
+			await expect(body.getByRole("tablist")).toHaveAttribute(
+				"aria-orientation",
+				"vertical",
+			);
+			await expect(body.getByTestId("settings-tab-general")).toHaveAttribute(
+				"aria-selected",
+				"true",
+			);
+			await userEvent.click(body.getByTestId("settings-tab-models"));
+			await expect(
+				body.getByRole("heading", {
+					level: 2,
+					name: "Models & agents",
+				}),
+			).toBeVisible();
+			await userEvent.click(body.getByTestId("settings-tab-general"));
+			await expect(
+				body.getByRole("heading", { level: 2, name: "General" }),
+			).toBeVisible();
+		}
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
+	},
+};
 
 /** An explicit General open: on phone it lands drilled in, past the list. */
 export const NotificationsEnabled: Story = {
@@ -180,7 +240,7 @@ export const Composer: Story = {
 			body
 				.getAllByRole("heading", { level: 3 })
 				.map((heading) => heading.textContent),
-		).toEqual(["Notifications", "Appearance", "Composer", "Sessions"]);
+		).toEqual(["Appearance", "Composer", "Notifications", "Sessions"]);
 		await expect(
 			body.getByRole("button", { name: /^Advanced.*Debug off$/ }),
 		).toHaveAttribute("aria-expanded", "false");
@@ -416,6 +476,8 @@ export const Models: Story = {
 	},
 };
 
+export const ModelsLight: Story = { ...Models, globals: { theme: "light" } };
+
 export const ModelsInvalidDefault: Story = {
 	args: { initialTab: "models" },
 	beforeEach: () => {
@@ -507,6 +569,8 @@ export const Claude: Story = {
 	},
 };
 
+export const ClaudeLight: Story = { ...Claude, globals: { theme: "light" } };
+
 export const ClaudeAttributionExpanded: Story = {
 	args: { initialTab: "claude" },
 	play: async ({ canvasElement }) => {
@@ -544,6 +608,71 @@ export const Usage: Story = {
 };
 
 export const UsageLight: Story = { ...Usage, globals: { theme: "light" } };
+
+/** Three Claude accounts in auto-switch order: normal, warning and limited. */
+export const UsageAccounts: Story = {
+	args: { initialTab: "usage" },
+	beforeEach: () => {
+		const accounts = [
+			{ id: "claude", name: "Personal Claude", plan: "Max 20x" },
+			{ id: "work-claude", name: "Work Claude", plan: "Team" },
+			{ id: "lab-claude", name: "Lab Claude", plan: "Pro" },
+		];
+		applyInstanceListResponse({
+			instances: accounts.map(({ id, name }, index) => ({
+				id,
+				name,
+				driver: "claude",
+				isDefault: index === 0,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1_772_011_800_000 + index * 60_000,
+				usageEligible: true,
+			})),
+		});
+		// The visual suite pins Date.now(), so offsets from it render the same times.
+		const at = (minutes: number) =>
+			new Date(Date.now() + minutes * 60_000).toISOString();
+		applyUsageReadings(
+			accounts.map(({ id, plan }, index) => ({
+				accountId: id,
+				harness: "claude",
+				status: index === 2 ? "limited" : "available",
+				planLabel: plan,
+				windows: [
+					{
+						kind: "five_hour",
+						utilization: [42, 86, 100][index] ?? 0,
+						resetsAt: at([185, 62, 140][index] ?? 0),
+					},
+					{
+						kind: "seven_day",
+						utilization: [18, 64, 71][index] ?? 0,
+						resetsAt: at(2 * 24 * 60 + 47),
+					},
+					...(index === 0
+						? [
+								{
+									kind: "seven_day_model" as const,
+									model: "Opus",
+									utilization: 9,
+								},
+							]
+						: []),
+				],
+				readAt: Date.now() - 120_000,
+				stale: false,
+			})),
+		);
+	},
+};
+
+export const UsageAccountsLight: Story = {
+	...UsageAccounts,
+	globals: { theme: "light" },
+};
 export const Server: Story = {
 	args: { initialTab: "server" },
 	beforeEach: () => {
@@ -552,9 +681,17 @@ export const Server: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const logs = within(canvas.getByTestId("server-logs-group")).getByRole(
+			"button",
+			{ name: /^Logs\b/ },
+		);
+		await expect(logs).toHaveAttribute("aria-expanded", "false");
+		await userEvent.click(logs);
 		await expect(
 			canvas.getByRole("button", { name: /^Log level\b/ }),
 		).toHaveAttribute("data-value", "info");
+		await userEvent.click(logs);
+		await expect(logs).toHaveAttribute("aria-expanded", "false");
 		// The fixture has no PIN, so this frame is also the PIN-off state.
 		await expect(
 			canvas.getByTestId("server-access-settings"),
@@ -602,6 +739,8 @@ export const Server: Story = {
 			.scrollIntoView({ block: "end" });
 	},
 };
+
+export const ServerLight: Story = { ...Server, globals: { theme: "light" } };
 
 export const ServerStartupExpanded: Story = {
 	args: { initialTab: "server" },
@@ -737,9 +876,17 @@ export const QuickStartExpanded: Story = {
 	},
 };
 
+/** Instances sit below the fold on the Server page, so scroll them in. */
+const showInstances: Story["play"] = async ({ canvasElement }) => {
+	within(canvasElement)
+		.getByTestId("add-instance-btn")
+		.scrollIntoView({ block: "start" });
+};
+
 export const InstancesPopulated: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
+	play: showInstances,
 };
 
 export const InstanceExpanded: Story = {
@@ -841,6 +988,7 @@ export const InstancesEmpty: Story = {
 			"aria-expanded",
 			"false",
 		);
+		canvas.getByTestId("add-instance-btn").scrollIntoView({ block: "start" });
 	},
 };
 

@@ -216,7 +216,7 @@
 	<div>
 		<SettingsRow label="Clean up now">
 			{#snippet control()}
-				<Button variant="secondary" size="sm" data-testid="settings-cleanup-run" disabled={state.cleanupRun.status === "running"} onclick={cleanUpNow}>{state.cleanupRun.status === "running" ? "Running…" : "Run"}</Button>
+				<Button variant="secondary" size="sm" touchTarget data-testid="settings-cleanup-run" disabled={state.cleanupRun.status === "running"} onclick={cleanUpNow}>{state.cleanupRun.status === "running" ? "Running…" : "Run"}</Button>
 			{/snippet}
 		</SettingsRow>
 		<div aria-live="polite" data-testid="settings-cleanup-report">

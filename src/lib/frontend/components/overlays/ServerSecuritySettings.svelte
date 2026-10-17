@@ -71,10 +71,10 @@
 	>
 		{#snippet control()}
 			{#if status?.pinEnabled}
-				<Button variant="secondary" tone="accent" size="sm" data-testid="server-pin-change-btn" aria-expanded={openForm === "pin-change"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-change")}>Change</Button>
-				<Button variant="secondary" size="sm" data-testid="server-pin-remove-btn" aria-expanded={openForm === "pin-remove"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-remove")}>Remove</Button>
+				<Button touchTarget variant="secondary" tone="accent" size="sm" data-testid="server-pin-change-btn" aria-expanded={openForm === "pin-change"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-change")}>Change</Button>
+				<Button touchTarget variant="secondary" size="sm" data-testid="server-pin-remove-btn" aria-expanded={openForm === "pin-remove"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-remove")}>Remove</Button>
 			{:else if status}
-				<Button variant="secondary" tone="accent" size="sm" data-testid="server-pin-set-btn" aria-expanded={openForm === "pin-set"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-set")}>Set PIN</Button>
+				<Button touchTarget variant="secondary" tone="accent" size="sm" data-testid="server-pin-set-btn" aria-expanded={openForm === "pin-set"} aria-controls="server-pin-form" disabled={saving} onclick={() => onToggleForm("pin-set")}>Set PIN</Button>
 			{/if}
 		{/snippet}
 	</SettingsRow>
@@ -89,33 +89,33 @@
 			onsubmit={(event) => { event.preventDefault(); void savePin(); }}
 		>
 			{#if pinForm === "pin-remove"}
-				<p class="text-[11px] text-text-muted">Without a PIN, anyone who can reach this address can open conduit.</p>
+				<p class="text-[12px] text-text-muted">Without a PIN, anyone who can reach this address can open conduit.</p>
 			{/if}
 			<div class="grid grid-cols-1 gap-2 {pinForm === 'pin-change' ? 'md:grid-cols-3' : pinForm === 'pin-set' ? 'md:grid-cols-2' : ''}">
 				{#if pinForm !== "pin-set"}
-					<label for="server-pin-current" class="flex flex-col gap-1 text-[11px] text-text-muted">
+					<label for="server-pin-current" class="flex flex-col gap-1 text-[12px] text-text-muted">
 						Current PIN
 						<TextInput id="server-pin-current" data-testid="server-pin-current" bind:value={currentPin} bind:element={currentInput} type="password" inputmode="numeric" autocomplete="current-password" minlength={4} maxlength={8} pattern={"[0-9]{4,8}"} required disabled={saving} aria-describedby={error ? "server-pin-error" : undefined} />
 					</label>
 				{/if}
 				{#if pinForm !== "pin-remove"}
-					<label for="server-pin-new" class="flex flex-col gap-1 text-[11px] text-text-muted">
+					<label for="server-pin-new" class="flex flex-col gap-1 text-[12px] text-text-muted">
 						New PIN
 						<TextInput id="server-pin-new" data-testid="server-pin-new" bind:value={newPin} type="password" inputmode="numeric" autocomplete="new-password" placeholder="4–8 digits" minlength={4} maxlength={8} pattern={"[0-9]{4,8}"} required disabled={saving} aria-describedby={error ? "server-pin-error" : undefined} />
 					</label>
-					<label for="server-pin-confirm" class="flex flex-col gap-1 text-[11px] text-text-muted">
+					<label for="server-pin-confirm" class="flex flex-col gap-1 text-[12px] text-text-muted">
 						Confirm new PIN
 						<TextInput id="server-pin-confirm" data-testid="server-pin-confirm" bind:value={confirmation} type="password" inputmode="numeric" autocomplete="new-password" minlength={4} maxlength={8} pattern={"[0-9]{4,8}"} required disabled={saving} aria-describedby={error ? "server-pin-error" : undefined} />
 					</label>
 				{/if}
 			</div>
 			{#if pinForm !== "pin-remove"}
-				<p class="text-[11px] text-text-muted">Every browser, including this one, will ask for the new PIN.</p>
+				<p class="text-[12px] text-text-muted">Every browser, including this one, will ask for the new PIN.</p>
 			{/if}
 			<div class="flex flex-wrap items-center justify-end gap-1.5">
-				{#if error}<p id="server-pin-error" data-testid="server-pin-error" role="alert" class="mr-auto text-[11px] text-error">{error}</p>{/if}
-				<Button variant="secondary" size="sm" data-testid="server-pin-cancel" disabled={saving} onclick={() => { if (pinForm) onToggleForm(pinForm); }}>Cancel</Button>
-				<Button variant={pinForm === "pin-remove" ? "danger" : "primary"} size="sm" type="submit" data-testid="server-pin-save" disabled={saving}>{saving ? "Saving…" : pinForm === "pin-remove" ? "Remove PIN" : "Save PIN"}</Button>
+				{#if error}<p id="server-pin-error" data-testid="server-pin-error" role="alert" class="mr-auto text-[12px] text-error">{error}</p>{/if}
+				<Button touchTarget variant="secondary" size="sm" data-testid="server-pin-cancel" disabled={saving} onclick={() => { if (pinForm) onToggleForm(pinForm); }}>Cancel</Button>
+				<Button touchTarget variant={pinForm === "pin-remove" ? "danger" : "primary"} size="sm" type="submit" data-testid="server-pin-save" disabled={saving}>{saving ? "Saving…" : pinForm === "pin-remove" ? "Remove PIN" : "Save PIN"}</Button>
 			</div>
 		</form>
 	{/if}

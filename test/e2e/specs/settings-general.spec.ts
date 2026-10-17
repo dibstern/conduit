@@ -77,9 +77,9 @@ for (const [viewportName, viewport] of [
 			await expect(panel).toBeVisible();
 			await page.getByTestId("settings-tab-general").click();
 			await expect(panel.getByRole("heading", { level: 3 })).toHaveText([
-				"Notifications",
 				"Appearance",
 				"Composer",
+				"Notifications",
 				"Sessions",
 			]);
 			await expect(

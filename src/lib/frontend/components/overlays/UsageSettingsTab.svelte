@@ -34,15 +34,15 @@
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime } from "../../utils/continuation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import SortableList from "../ui/SortableList.svelte";
-	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import SettingsBanner from "../ui/SettingsBanner.svelte";
+	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import UsageForecast from "./UsageForecast.svelte";
 	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
 
-	const warnOptions = [70, 80, 90, "off"] as const;
 	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
 	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
 	const claudeAccounts = $derived(getClaudeAccounts(refreshSlug ?? ""));
@@ -57,6 +57,8 @@
 		: accounts.find((account) => account.accountId === getEffectiveInstanceId()) ?? accounts.reduce<UsageReading | undefined>((fullest, account) =>
 			!fullest || (usageDisplay(account, "off").binding?.utilization ?? -1) > (usageDisplay(fullest, "off").binding?.utilization ?? -1) ? account : fullest, undefined));
 	let expandedAccounts = $state<string[]>([]);
+	/** Phone only: whether the account order shows its drag handles. */
+	let reordering = $state(false);
 	let setting = $state<UsageLimitsSetting | null>(null);
 	let confirmed: UsageLimitsSetting | null = null;
 	let saveTicket = 0;
@@ -134,15 +136,16 @@
 			account.windows.some((window) => window.kind === "five_hour" || window.kind === "seven_day");
 	}
 
+	/** `full` reads as a sentence; otherwise it fits a 62px meter column under its heading. */
 	function resetLine(window: UsageWindow | undefined, full: boolean): string {
-		if (!window || (window.kind === "five_hour" && window.utilization === 0 && !window.resetsAt)) return "no window open";
+		if (!window || (window.kind === "five_hour" && window.utilization === 0 && !window.resetsAt)) return full ? "no window open" : "not open";
 		const time = usageResetTime(window.resetsAt, window.kind === "seven_day");
-		if (!time) return window.utilization >= 100 ? "limit reached" : "reset time unavailable";
-		if (window.kind === "seven_day") return `resets ${time}`;
-		if (window.utilization >= 100) return full ? `limit reached · resets ${time}` : `resets ${time}`;
+		if (!time) return window.utilization >= 100 ? (full ? "limit reached" : "limited") : full ? "reset time unavailable" : "—";
+		if (window.kind === "seven_day") return full ? `resets ${time}` : time;
+		if (window.utilization >= 100) return full ? `limit reached · resets ${time}` : time;
 		const minutes = Math.max(0, Math.ceil((Date.parse(window.resetsAt ?? "") - now) / 60_000));
 		const remaining = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m` : `${minutes}m`;
-		return `resets in ${remaining}${full ? ` (${time})` : ""}`;
+		return full ? `resets in ${remaining} (${time})` : `in ${remaining}`;
 	}
 
 	function limitWindow(account: UsageReading): UsageWindow | undefined {
@@ -216,61 +219,85 @@
 {#snippet meter(account: UsageReading, window: UsageWindow | undefined, label: string, prefix: string, full: boolean)}
 	<!-- usageDisplay only rates account-wide windows, so a lone window is rated as one. -->
 	{@const display = usageDisplay(window ? { ...account, status: window.utilization >= 100 ? "limited" : "available", windows: [{ ...window, kind: "seven_day" }] } : undefined, usageState.limits.warnAt)}
-	<div class="mb-[3px] flex items-baseline gap-[6px] text-[11px]">
-		<span data-testid="{prefix}-label" class="flex-1">{label}</span>
-		<span data-testid="{prefix}-value" class="font-mono text-[10.5px] {display.level === 'limited' ? 'text-error' : display.level === 'warn' ? 'text-fill-amber' : 'text-text-secondary'}">{window ? `${Math.round(window.utilization)}%` : "—"}</span>
-	</div>
+	{@const value = window ? `${Math.round(window.utilization)}%` : "—"}
+	{@const valueTone = display.level === "limited" ? "text-error" : display.level === "warn" ? "text-fill-amber" : "text-text-secondary"}
+	{#if full}
+		<div class="mb-[3px] flex items-baseline gap-[6px] text-[11px]">
+			<span data-testid="{prefix}-label" class="flex-1">{label}</span>
+			<span data-testid="{prefix}-value" class="font-mono text-[10.5px] {valueTone}">{value}</span>
+		</div>
+	{/if}
 	<div data-testid="{prefix}-bar" data-level={display.level} class="w-full overflow-hidden rounded-full bg-border-chip {full ? 'h-[6px]' : 'h-[5px]'}" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={window?.utilization} aria-valuetext={window ? `${Math.round(window.utilization)}% used` : "no window open"}>
 		<div class="h-full {display.colour}" style:width="{window?.utilization ?? 0}%"></div>
 	</div>
+	{#if !full}<div data-testid="{prefix}-value" class="mt-[4px] font-mono text-[11px] leading-[14px] {valueTone}">{value}</div>{/if}
 {/snippet}
 
 {#snippet windowRow(account: UsageReading, kind: "five_hour" | "seven_day", label: string, full: boolean)}
 	{@const window = account.windows.find((item) => item.kind === kind)}
 	{@const prefix = full ? `usage-settings-single-${kind}` : `usage-settings-card-${account.accountId}-${kind}`}
-	<div class="min-w-0">
+	<div class={full ? "min-w-0" : "w-[70px] shrink-0 self-start pt-[6px] max-md:w-[62px]"}>
 		{@render meter(account, window, label, prefix, full)}
-		<div data-testid="{prefix}-reset" class="mt-[3px] font-mono text-[10.5px] text-text-dimmer">{resetLine(window, full)}</div>
+		<div data-testid="{prefix}-reset" class="text-text-dimmer {full ? 'mt-[3px] font-mono text-[10.5px]' : 'truncate text-[10.5px] leading-[13px]'}">{resetLine(window, full)}</div>
+	</div>
+{/snippet}
+
+{#snippet subheader()}
+	<div data-testid="usage-settings-subheader" class="text-[12px] text-text-dimmer {several ? 'md:ml-auto' : 'text-right'}">
+		{#if !several && !hasPlanData(single)}Claude{:else}
+		<span>{several ? `${accounts.length} accounts` : single?.planLabel ?? claudeAccounts.nameOf(undefined)} · updated {updatedLabel} · </span>
+		<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="usage-settings-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>{several ? "Refresh all" : "Refresh"}</TextButton>
+		{/if}
 	</div>
 {/snippet}
 
 <section id="usage-settings" data-testid="usage-settings" class="min-w-0" aria-label="Claude plan usage">
-	{#if !sessionViewState.compact}<h3 class="text-[14px] font-semibold text-text">Claude plan usage</h3>{/if}
-	<div data-testid="usage-settings-subheader" class="mb-[12px] text-[11px] text-text-dimmer {sessionViewState.compact ? '' : 'mt-[2px]'}">
-		{#if !several && !hasPlanData(single)}Claude{:else}
-		{several ? `${accounts.length} accounts` : single?.planLabel ?? claudeAccounts.nameOf(undefined)} · updated {updatedLabel} ·
-		<TextButton tone="dimmer" underline="always" data-testid="usage-settings-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>{several ? "Refresh all" : "Refresh"}</TextButton>
-		{/if}
-	</div>
 	{#if several}
-		<SettingsBanner id="usage-settings-headline" data-testid="usage-settings-headline" class="mb-[12px]" tone={headline.limited ? "danger" : headline.warning ? "warning" : "neutral"}>{#if headline.bold}<b>{headline.bold}</b>{headline.text.slice(headline.bold.length)}{:else}{headline.text}{/if}</SettingsBanner>
-		<SortableList items={accounts} key={(account) => account.accountId} label={nameOf} ariaLabel="Auto-switch account order" variant="cards" disabled={setting === null} onreorder={(next) => {
+		<SettingsBanner id="usage-settings-headline" data-testid="usage-settings-headline" class="mb-[14px]" tone={headline.limited ? "danger" : headline.warning ? "warning" : "neutral"}>{#if headline.bold}<b>{headline.bold}</b>{headline.text.slice(headline.bold.length)}{:else}{headline.text}{/if}</SettingsBanner>
+	{/if}
+	<SettingsGroup title="Claude plan usage">
+		{#snippet actions()}
+			{#if several}
+				<div aria-hidden="true" class="flex gap-[10px] pr-[10px] text-[12px] font-medium text-text-muted max-md:text-[13px]">
+					<span class="w-[70px] max-md:w-[62px]">5-hour</span><span class="w-[70px] max-md:w-[62px]">Week</span>
+				</div>
+			{:else}
+				{@render subheader()}
+			{/if}
+		{/snippet}
+	{#if several}
+		<SortableList items={accounts} key={(account) => account.accountId} label={nameOf} ariaLabel="Auto-switch account order" variant="settings" disabled={setting === null} handles={!sessionViewState.compact || reordering} onreorder={(next) => {
 			if (setting) void save({ ...setting, order: next.map((account) => account.accountId) });
 		}}>
 			{#snippet row(account, index)}
-				<span data-testid="usage-settings-position-{account.accountId}" class="font-mono text-[10.5px] text-text-dimmer">{index + 1}</span>
-				<AccountDot instanceId={account.accountId} size={7} data-testid="usage-settings-dot-{account.accountId}" />
-				<span data-testid="usage-limit-account-name" class="min-w-0 truncate font-semibold text-text">{nameOf(account)}</span>
-				{#if hasPlanData(account) && account.planLabel}<span data-testid="usage-settings-plan-{account.accountId}" class="shrink-0 rounded-[5px] border border-border px-[4px] font-mono text-[9.5px] text-text-muted">{account.planLabel}</span>{/if}
-				<span data-testid="usage-settings-status-{account.accountId}" class="ml-auto shrink-0 whitespace-nowrap font-mono text-[10.5px] {usageDisplay(account, usageState.limits.warnAt).level === 'limited' ? 'text-error' : usageDisplay(account, usageState.limits.warnAt).level === 'warn' ? 'text-fill-amber' : 'text-text-dimmer'}">{statusOf(account)}</span>
+				{@const level = usageDisplay(account, usageState.limits.warnAt).level}
+				{#if !sessionViewState.compact}<span data-testid="usage-settings-position-{account.accountId}" class="w-[14px] shrink-0 text-center font-mono text-[11px] text-text-dimmer">{index + 1}</span>{/if}
+				<div class="min-w-0 flex-1">
+					<div class="flex min-w-0 items-center gap-[7px]">
+						<AccountDot instanceId={account.accountId} size={7} data-testid="usage-settings-dot-{account.accountId}" />
+						<span data-testid="usage-limit-account-name" class="min-w-0 truncate font-medium text-text">{nameOf(account)}</span>
+						{#if hasPlanData(account) && account.planLabel}<Badge variant="tag" size="xs" class="shrink-0 font-mono" data-testid="usage-settings-plan-{account.accountId}">{account.planLabel}</Badge>{/if}
+					</div>
+					<div data-testid="usage-settings-status-{account.accountId}" class="mt-[2px] truncate text-[12px] {level === 'limited' ? 'text-error' : level === 'warn' ? 'text-fill-amber' : 'text-text-dimmer'}">{statusOf(account)}</div>
+				</div>
+				{#if hasPlanData(account)}
+					{@render windowRow(account, "five_hour", "5h", false)}
+					{@render windowRow(account, "seven_day", "Week", false)}
+				{/if}
 			{/snippet}
 			{#snippet details(account)}
 				{@const models = account.windows.flatMap((window) => window.kind === "seven_day_model" && window.model
 					? [`${window.model} week ${Math.round(window.utilization)}%`] : [])}
-				<div id="usage-settings-card-{account.accountId}" data-testid="usage-settings-card-{account.accountId}">
-					{#if hasPlanData(account)}
-						<div class="mt-[8px] grid gap-[10px] md:grid-cols-2 md:gap-[14px]">
-							{@render windowRow(account, "five_hour", "5h", false)}
-							{@render windowRow(account, "seven_day", "Week", false)}
-						</div>
-					{:else}<p class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
+				<!-- Desktop details line up under the name, past the handle and position. -->
+				<div id="usage-settings-card-{account.accountId}" data-testid="usage-settings-card-{account.accountId}" class="md:pl-[48px]">
+					{#if !hasPlanData(account)}<p class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
 					{#if models.length > 0}<div data-testid="usage-settings-models-{account.accountId}" class="mt-[7px] font-mono text-[10.5px] text-text-dimmer">{models.join(" · ")}</div>{/if}
 					{#if usageForecastWindow(account)}
 						{@const pace = usagePaceLine(account, now)}
 						{#if account === forecastAccount || !pace}
 							<UsageForecast {account} {now} />
 						{:else}
-								<Button variant="ghost" size="content" layout="flow" tone="muted" hoverFill="none" data-testid="usage-settings-pace-{account.accountId}" aria-expanded={expandedAccounts.includes(account.accountId)} aria-controls="usage-settings-forecast-{account.accountId}" class="mt-[6px] flex w-full items-start gap-[8px] text-left font-mono text-[10.5px]" onclick={() => {
+								<Button touchTarget variant="ghost" size="content" layout="flow" tone="muted" hoverFill="none" data-testid="usage-settings-pace-{account.accountId}" aria-expanded={expandedAccounts.includes(account.accountId)} aria-controls="usage-settings-forecast-{account.accountId}" class="mt-[6px] flex w-full items-start gap-[8px] text-left font-mono text-[10.5px]" onclick={() => {
 									expandedAccounts = expandedAccounts.includes(account.accountId) ? expandedAccounts.filter((id) => id !== account.accountId) : [...expandedAccounts, account.accountId];
 								}}><span class="min-w-0 flex-1">{pace}</span><span aria-hidden="true" class="text-text-dimmer">›</span></Button>
 							{#if expandedAccounts.includes(account.accountId)}<UsageForecast {account} {now} />{/if}
@@ -279,10 +306,9 @@
 				</div>
 			{/snippet}
 		</SortableList>
-		<p data-testid="usage-settings-order-hint" class="mt-[6px] mb-[4px] font-mono text-[10.5px] text-text-dimmer">Drag ⠿ to set the auto-switch order.</p>
 	{:else if single && (hasPlanData(single) || single.windows.some((window) => window.kind === "seven_day_model" && window.model))}
 		<UsageForecast account={single} {now} framed />
-		<div class="flex flex-col gap-[11px]">
+		<div class="flex flex-col gap-[11px] px-[14px] py-[10px]">
 			{@render windowRow(single, "five_hour", "Current 5-hour window", true)}
 			{@render windowRow(single, "seven_day", "This week · all models", true)}
 			{#each single.windows as window, index (index)}
@@ -292,42 +318,36 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="text-[12px] leading-[1.5] text-text-dimmer">No plan limits for this login. Conduit reads them from a Claude subscription sign-in; API keys, Bedrock, Vertex and proxy routes don't report them.</p>
+		<p class="px-[14px] py-[10px] text-[12px] leading-[1.5] text-text-dimmer">No plan limits for this login. Conduit reads them from a Claude subscription sign-in; API keys, Bedrock, Vertex and proxy routes don't report them.</p>
 	{/if}
-	<div class="mt-[6px] flex min-h-[30px] items-center gap-[8px] border-t border-border pt-[10px]">
-		<label for="usage-settings-warn" class="flex-1 text-[12px] text-text">Warn me at</label>
-		<SettingsPicker
-			id="usage-settings-warn"
-			data-testid="usage-settings-warn"
-			disabled={setting === null}
-			label="Warn me at"
-			options={warnOptions.map((warnAt) => ({ value: String(warnAt), label: warnAt === "off" ? "off" : `${warnAt}%`, testId: `usage-settings-warn-${warnAt}` }))}
-			value={String(setting?.warnAt ?? 80)}
-			onvaluechange={(next) => {
-				const warnAt = warnOptions.find((option) => String(option) === next);
-				if (setting && warnAt !== undefined) void save({ ...setting, warnAt });
-			}}
-		/>
-	</div>
+	</SettingsGroup>
+	{#if several}
+		<div class="mx-[4px] mt-[8px] flex flex-wrap items-center gap-x-[12px] gap-y-[2px] text-[12px] text-text-dimmer">
+			<!-- Phones hide the handles until asked, as the Final drawing shows them without grips. -->
+			{#if !sessionViewState.compact || reordering}<p data-testid="usage-settings-order-hint" class="max-md:basis-full">Drag ⠿ to set the auto-switch order.</p>{/if}
+			{@render subheader()}
+			{#if sessionViewState.compact}
+				<TextButton class="min-h-[44px] min-w-[44px]" tone="dimmer" underline="always" data-testid="usage-settings-reorder" aria-pressed={reordering} disabled={setting === null} onclick={() => { reordering = !reordering; }}>{reordering ? "Done" : "Edit order"}</TextButton>
+			{/if}
+		</div>
+	{/if}
 	<UsageLimitsSettings {setting} {several} onsave={save} />
 </section>
 
 {#if cursorAccounts.length > 0}
-	<section id="cursor-usage-settings" data-testid="cursor-usage-settings" aria-label="Cursor plan usage" class="mt-[20px] min-w-0 border-t border-border pt-[14px]">
-		<div class="mb-[10px] flex items-baseline gap-[8px]">
-			<h3 class="flex-1 text-[14px] font-semibold text-text">Cursor plan usage</h3>
-			<TextButton tone="dimmer" underline="always" data-testid="cursor-usage-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>Refresh</TextButton>
-		</div>
-		<div class="flex flex-col gap-[8px]">
+	<SettingsGroup id="cursor-usage-settings" testId="cursor-usage-settings" title="Cursor plan usage">
+		{#snippet actions()}
+			<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="cursor-usage-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>Refresh</TextButton>
+		{/snippet}
 			{#each cursorAccounts as account (account.id)}
 				{@const reading = account.usageEligible ? usageState.readings.find((item) => item.accountId === account.id) : undefined}
 				{@const month = reading && (reading.status === "available" || reading.status === "limited") ? reading.windows.find((window) => window.kind === "month") : undefined}
-				<div data-testid="cursor-usage-card-{account.id}" class="rounded-[12px] border border-border bg-bg px-[12px] py-[10px]">
-					<div class="mb-[8px] flex items-center gap-[6px] text-[12px]">
+				<div data-testid="cursor-usage-card-{account.id}" class="px-[14px] py-[10px]">
+					<div class="mb-[8px] flex items-center gap-[6px] text-[13.5px] max-md:text-[15px]">
 						<AccountDot instanceId={account.id} size={7} />
 						<span class="min-w-0 flex-1 truncate font-semibold text-text">{account.name}</span>
 						{#if account.cursorUsageSource === "keychain"}
-							<TextButton tone="dimmer" underline="always" data-testid="cursor-usage-disable-{account.id}" disabled={keychainPending !== null} aria-busy={keychainPending === account.id} onclick={() => void setCursorKeychain(account.id, false)}>Disable</TextButton>
+							<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="cursor-usage-disable-{account.id}" disabled={keychainPending !== null} aria-busy={keychainPending === account.id} onclick={() => void setCursorKeychain(account.id, false)}>Disable</TextButton>
 						{/if}
 					</div>
 					{#if reading && month}
@@ -340,11 +360,10 @@
 					{/if}
 					{#if account.cursorUsageSource === "can_enable"}
 						<p class="mt-[7px] text-[11px] leading-[1.5] text-text-dimmer">Reads the Cursor CLI login from this Mac's Keychain. macOS asks first; "Always Allow" stops future prompts. Or set CURSOR_AUTH_TOKEN in Accounts.</p>
-						<Button variant="secondary" size="sm" data-testid="cursor-usage-enable-{account.id}" class="mt-[8px]" disabled={keychainPending !== null} onclick={() => void setCursorKeychain(account.id, true)}>{keychainPending === account.id ? "Enabling..." : "Enable"}</Button>
+						<Button touchTarget variant="secondary" size="sm" data-testid="cursor-usage-enable-{account.id}" class="mt-[8px]" disabled={keychainPending !== null} onclick={() => void setCursorKeychain(account.id, true)}>{keychainPending === account.id ? "Enabling..." : "Enable"}</Button>
 					{/if}
 					{#if keychainErrors[account.id]}<p role="status" data-testid="cursor-usage-error-{account.id}" class="mt-[7px] text-[11px] leading-[1.5] text-error">{keychainErrors[account.id]}</p>{/if}
 				</div>
 			{/each}
-		</div>
-	</section>
+	</SettingsGroup>
 {/if}

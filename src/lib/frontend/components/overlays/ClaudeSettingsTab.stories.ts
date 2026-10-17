@@ -72,6 +72,14 @@ function inheritedSettings(
 export const PrimaryFolder: Story = {
 	play: inheritedSettings("/workspace/main", false),
 };
+export const PrimaryFolderLight: Story = {
+	...PrimaryFolder,
+	globals: { theme: "light" },
+};
 export const Worktree: Story = {
 	play: inheritedSettings("/workspace/worktree", true),
+};
+export const WorktreeLight: Story = {
+	...Worktree,
+	globals: { theme: "light" },
 };

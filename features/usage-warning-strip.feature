@@ -51,7 +51,7 @@ Scenario: desktop Details opens Settings directly to Usage
   And Usage settings have one Claude account in the warn5 state
   Then the usage warning strip is visible
   When I press Details on the usage warning strip
-  Then the Usage settings title reads Claude plan usage
+  Then the Usage settings title reads Usage
   And the Usage warning choice 80 is selected
 
 Scenario Outline: a dismissal below 95 percent rearms once when that window reaches 95

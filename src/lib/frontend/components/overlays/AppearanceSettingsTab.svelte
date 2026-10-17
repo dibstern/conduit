@@ -9,7 +9,6 @@
 	<SettingsRow
 		label="Theme"
 		labelFor="theme-mode"
-		description="A fixed appearance, or follow your system"
 	>
 		{#snippet control()}
 			<SettingsPicker
