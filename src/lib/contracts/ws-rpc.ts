@@ -20,6 +20,7 @@ import {
 	CategorySetRejected,
 	CategorySetSchema,
 } from "./category-set.js";
+import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
 import {
 	WorktreeBranchRenameError,
 	WorktreeCleanupReportSchema,
@@ -1454,6 +1455,18 @@ export class CleanUpWorktreesNow extends Schema.TaggedRequest<CleanUpWorktreesNo
 		payload: { projectSlug: Schema.optional(NonEmptyString) },
 	},
 ) {}
+
+export class GetAvatar extends Schema.TaggedRequest<GetAvatar>()("GetAvatar", {
+	failure: WsRpcError,
+	success: AvatarSchema,
+	payload: {},
+}) {}
+
+export class SetAvatar extends Schema.TaggedRequest<SetAvatar>()("SetAvatar", {
+	failure: WsRpcError,
+	success: AvatarSchema,
+	payload: { choice: AvatarChoiceSchema },
+}) {}
 
 const AutoSettleSettingResponseSchema = Schema.Struct({
 	autoSettleAfterDays: Schema.NullOr(Schema.Number),
@@ -3223,6 +3236,8 @@ const wsRpcRequests = [
 	SetDefault,
 	GetAutoSettleSetting,
 	SetAutoSettleSetting,
+	GetAvatar,
+	SetAvatar,
 	GetWorktreeCleanupSetting,
 	SetWorktreeCleanupSetting,
 	CleanUpWorktreesNow,

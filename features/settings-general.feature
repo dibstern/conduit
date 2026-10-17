@@ -5,7 +5,7 @@ Scenario Outline: General orders its groups and Advanced reflects the debug togg
   And the viewport is a <viewport>
   And General auto-settle is set to 3 days
   When I open settings to the General section
-  Then the General headings are Appearance, Composer, Notifications and Sessions in order
+  Then the General headings are You, Appearance, Composer, Notifications and Sessions in order
   And General keeps Theme in Appearance and auto-settle in Sessions
   And General has no log level control
   And the General Advanced group is collapsed with Debug off

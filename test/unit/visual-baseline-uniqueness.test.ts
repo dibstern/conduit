@@ -34,6 +34,10 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"tapping the collapsed banners row opens the full header with its banners",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
+	"ui-useravatar--initial | ui-useravatar--missing-mac-picture":
+		"a Mac choice with no readable picture falls back to the initial, so matching Initial is the assertion",
+	"ui-useravatar--initial-light | ui-useravatar--missing-mac-picture-light":
+		"a Mac choice with no readable picture falls back to the initial, so matching Initial is the assertion",
 
 	// Verified legitimate (conduit-test-cju0.13). On desktop both open General.
 	"overlays-settingspanel--composer | overlays-settingspanel--default":

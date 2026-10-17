@@ -16,6 +16,8 @@
  * of it and leave the component in a state the app can never actually be in.
  */
 
+import type { Avatar, AvatarChoice } from "../../contracts/user-avatar.js";
+
 type Listener = (event?: unknown) => void;
 
 // Module scope, not per socket: the RPC client outlives a story and keeps the
@@ -23,6 +25,15 @@ type Listener = (event?: unknown) => void;
 // it did not create.
 const failingRequests = new Set<string>();
 let sessionProject: string | null = null;
+let avatar: Avatar = {
+	choice: { kind: "initial" },
+	name: "David",
+	macPicture: null,
+};
+
+export function seedStoryAvatar(value: Avatar): void {
+	avatar = value;
+}
 
 /**
  * Answers every `tag` request on the fake sockets with a WsRpcError until the
@@ -82,7 +93,11 @@ export function connectedSocket(project: string | null = null): () => void {
 				_tag?: string;
 				id?: string;
 				tag?: string;
-				payload?: { projectSlug?: string; sessionId?: string };
+				payload?: {
+					projectSlug?: string;
+					sessionId?: string;
+					choice?: AvatarChoice;
+				};
 			} = JSON.parse(data);
 			if (request._tag === "Ping") {
 				this.emit(
@@ -109,6 +124,24 @@ export function connectedSocket(project: string | null = null): () => void {
 									error: { _tag: "WsRpcError", message: "Story failure" },
 								},
 							},
+						}),
+					}),
+				);
+				return;
+			}
+			if (
+				request._tag === "Request" &&
+				(request.tag === "GetAvatar" || request.tag === "SetAvatar")
+			) {
+				if (request.tag === "SetAvatar" && request.payload?.choice)
+					avatar = { ...avatar, choice: request.payload.choice };
+				this.emit(
+					"message",
+					new MessageEvent("message", {
+						data: JSON.stringify({
+							_tag: "Exit",
+							requestId: request.id,
+							exit: { _tag: "Success", value: avatar },
 						}),
 					}),
 				);

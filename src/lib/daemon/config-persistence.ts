@@ -31,6 +31,7 @@ import {
 	migrateLegacyDefaultOpencodeInstanceId,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import { AvatarChoiceSchema } from "../contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	WorktreeCleanupSchema,
@@ -172,6 +173,7 @@ const DaemonConfigFields = {
 	}),
 	debug: Schema.Boolean,
 	keepAwake: Schema.Boolean,
+	avatar: Schema.optionalWith(AvatarChoiceSchema, { exact: true }),
 	autoSettleAfterDays: Schema.optionalWith(
 		Schema.NullOr(Schema.Number.pipe(Schema.int(), Schema.between(1, 90))),
 		{ exact: true },
