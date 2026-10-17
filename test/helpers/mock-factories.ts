@@ -325,7 +325,7 @@ function createMockConfig(): HandlerDeps["config"] {
 		projectDir: MOCK_PROJECT_DIR,
 		slug: "test-project",
 		configDir: mkdtempSync(join(mockConfigRoot, "config-")),
-		persistenceDbPath: "/test/config/projects/test-project/events.db",
+		persistenceDbPath: "/test/config/events.db",
 		publishGlobalSetting: () => Effect.void,
 	} satisfies HandlerDeps["config"];
 }
@@ -840,6 +840,7 @@ export function makeMockAccountDirectory(
 		},
 		{
 			driver: "opencode",
+			usageEligible: false,
 			id: AccountIdSchema.make("opencode"),
 			name: "OpenCode",
 		},

@@ -198,25 +198,69 @@
 		getActiveModel(activeModelId, activeProviderId),
 	);
 	const hasModel = $derived(!!activeModelId);
+	const parameters = $derived(activeModel?.parameters);
+	const defaultCombination = $derived(
+		parameters?.combinations.find((entry) => entry.isDefault) ?? parameters?.combinations[0],
+	);
+	const combination = $derived(
+		parameters?.combinations.find((entry) => entry.variant === effort.current) ?? defaultCombination,
+	);
+	function parameterCombination(id: string, value: string) {
+		if (!combination) return undefined;
+		const values = { ...combination.values, [id]: value };
+		return parameters?.combinations.find((entry) =>
+			Object.keys(entry.values).length === Object.keys(values).length &&
+			Object.entries(values).every(([key, value]) => entry.values[key] === value),
+		);
+	}
+	function selectParameter(id: string, value: string) {
+		const next = parameterCombination(id, value);
+		if (next && !effort.pending) effort.select(next.variant);
+	}
+	const parameterRows = $derived((parameters?.rows ?? []).flatMap((row) => {
+		const kind = ["effort", "reasoning", "reasoning_effort"].includes(row.id) ? "effort" : row.id;
+		if (!["effort", "context", "thinking", "fast"].includes(kind)) return [];
+		const options = row.values.map(({ value, label }) => ({
+			value,
+			label: kind === "effort" ? (value === "medium" ? "med" : value) :
+				kind === "thinking" || kind === "fast" ? (value === "true" ? "On" : "Off") : label,
+			testId: `picker-${kind}-option-${value}`,
+			disabled: effort.pending || !parameterCombination(row.id, value),
+		}));
+		const value = combination?.values[row.id] ?? "";
+		return [{ id: row.id, kind, options, value, label: options.find((option) => option.value === value)?.label ?? value }];
+	}));
+	const parameterEffort = $derived(parameterRows.find((row) => row.kind === "effort"));
+	const parameterContext = $derived(parameterRows.find((row) => row.kind === "context"));
+	const parameterToggles = $derived(parameterRows.filter((row) => row.kind === "thinking" || row.kind === "fast"));
+	const parameterEffortWord = $derived.by(() => {
+		const thinking = parameterRows.find((row) => row.kind === "thinking");
+		const fast = parameterRows.find((row) => row.kind === "fast")?.value === "true";
+		const label = parameterEffort?.label ?? (thinking ? (thinking.value === "true" ? "Thinking" : "No thinking") : "");
+		return label ? `${label}${fast ? " · Fast" : ""}` : fast ? "Fast" : "Standard";
+	});
 	const contextOptions = $derived(contextWindow.options);
 	const selectedContext = $derived(contextWindow.current);
-	const contextLabel = $derived(sessionLoading ? "" : selectedContext?.label ??
+	const contextLabel = $derived(sessionLoading ? "" : parameterContext?.label ?? selectedContext?.label ??
 		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
-	const showContextWord = $derived(!!contextLabel && (!phone || (selectedContext !== null && !selectedContext.isDefault)));
+	// Phones show the context word only when it differs from the default.
+	const showContextWord = $derived(!!contextLabel && (!phone || (parameterContext
+		? parameterContext.value !== defaultCombination?.values[parameterContext.id]
+		: selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
-	const contextSegments = $derived(contextOptions.map((option) => ({
+	const contextSegments = $derived(parameterContext?.options ?? contextOptions.map((option) => ({
 		value: option.value,
 		label: option.label,
 		testId: `picker-context-option-${option.value}`,
 		disabled: contextWindow.pending,
 	})));
-	const effortSegments = $derived(effort.options.map((variant) => ({
+	const effortSegments = $derived(parameterEffort?.options ?? (parameters ? [] : effort.options.map((variant) => ({
 		value: variant,
 		label: variant === "medium" ? "med" : variant,
 		testId: `picker-effort-option-${variant}`,
 		disabled: effort.pending,
-	})));
+	}))));
 	$effect(() => {
 		// Refetch once each turn ends.
 		const endedGeneration = currentChat().endedGeneration;
@@ -658,9 +702,9 @@
 				{#if contextLabel}
 					<div data-testid="picker-row-context" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Context</span>
-						{#if contextOptions.length > 1}
+						{#if contextSegments.length > 1}
 							<SegmentedControl
-								bind:value={() => selectedContext?.value ?? "", (value) => contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
+								bind:value={() => parameterContext?.value ?? selectedContext?.value ?? "", (value) => parameterContext ? selectParameter(parameterContext.id, value) : contextWindow.select(contextOptions.find((option) => option.value === value) ?? null)}
 								options={contextSegments}
 								variant="picker-context"
 								label="Context window"
@@ -673,21 +717,36 @@
 						{/if}
 					</div>
 				{/if}
-				{#if effortSegments.length > 0 || (sessionState.currentId && effort.current)}
+				{#if parameters ? parameterEffort : effortSegments.length > 0 || (sessionState.currentId && effort.current)}
 					<div data-testid="picker-row-effort" aria-disabled={effortSegments.length === 0 || undefined} tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Effort</span>
-						{#if effortSegments.length > 0}
+						{#if effortSegments.length > (parameters ? 1 : 0)}
 							<SegmentedControl
-								bind:value={() => effort.current ?? "", (value) => effort.select(value)}
+								bind:value={() => parameterEffort?.value ?? effort.current ?? "", (value) => parameterEffort ? selectParameter(parameterEffort.id, value) : effort.select(value)}
 								options={effortSegments}
 								variant={effortSegments.length > 5 ? "picker-context" : "picker"}
 								label="Effort"
 							/>
 						{:else}
-							<span class="min-w-0 flex-1 text-[13px] text-text">{effort.current}</span>
+							<span class="min-w-0 flex-1 text-[13px] text-text">{parameterEffort?.label ?? effort.current}</span>
 						{/if}
 					</div>
 				{/if}
+				{#each parameterToggles as row (row.id)}
+					<div data-testid="picker-row-{row.kind}" tabindex="-1" class="flex min-h-[46px] items-center gap-2.5 border-b border-border-subtle px-1 py-2.5 last:border-b-0">
+						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">{row.kind === "thinking" ? "Thinking" : "Fast"}</span>
+						{#if row.options.length > 1}
+							<SegmentedControl
+								bind:value={() => row.value, (value) => selectParameter(row.id, value)}
+								options={row.options}
+								variant="picker"
+								label={row.kind === "thinking" ? "Thinking" : "Fast"}
+							/>
+						{:else}
+							<span class="min-w-0 flex-1 text-[13px] text-text">{row.label}</span>
+						{/if}
+					</div>
+				{/each}
 				{#if planLocked}
 					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[46px] items-center gap-2.5 px-1 py-2.5">
 						<span class="w-16 shrink-0 text-[11.5px] text-text-muted">Agent</span>
@@ -1071,7 +1130,7 @@
 			{/snippet}
 		</ModelVariant>
 	{:else}
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} />
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" && !phone ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{/if}
 	{#if variant === "words" && selectedTraits?.composerModeControl === "agent"}
 		<span aria-hidden="true" class="text-border-chip">·</span>

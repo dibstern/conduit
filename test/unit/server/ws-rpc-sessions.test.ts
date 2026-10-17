@@ -277,6 +277,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				accountDirectory: makeMockAccountDirectory([
 					{
 						driver: "opencode",
+						usageEligible: false,
 						id: AccountIdSchema.make("work-oc"),
 						name: "Work OpenCode",
 					},

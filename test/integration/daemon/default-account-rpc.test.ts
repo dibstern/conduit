@@ -29,7 +29,7 @@ import {
 } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import type { DaemonInstanceConfig } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
-import { projectEventsDbPath } from "../../../src/lib/persistence/project-storage.js";
+import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { StoredProject } from "../../../src/lib/types.js";
@@ -127,8 +127,7 @@ const sessionFixture = () => {
 		folders: [join(root, "project")],
 	};
 	mkdirSync(project.folders[0]);
-	const database = projectEventsDbPath({ configDir: root, ...project });
-	mkdirSync(join(root, "projects", project.slug), { recursive: true });
+	const database = daemonStorePath(root);
 	writeEventStore(
 		database,
 		Effect.gen(function* () {
@@ -140,8 +139,8 @@ const sessionFixture = () => {
 				"opencode",
 				"unknown",
 			]) {
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
-				VALUES (${accountId}, 'opencode', ${accountId}, 'idle', 1, 1)`;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+				VALUES (${accountId}, 'opencode', ${accountId}, 'idle', 1, 1, ${project.slug})`;
 				yield* sql`INSERT INTO session_providers (id, session_id, provider, status, activated_at)
 				VALUES (${`binding-${accountId}`}, ${accountId}, ${accountId}, 'active', 1)`;
 			}

@@ -12,10 +12,11 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 
-	let { onOpen, variant = "icons", children }: {
+	let { onOpen, variant = "icons", children, wordLabel }: {
 		onOpen?: (() => void) | undefined;
 		variant?: "icons" | "words" | "control" | "row" | undefined;
 		children?: Snippet<[row: Snippet]> | undefined;
+		wordLabel?: string | undefined;
 	} = $props();
 
 	let open = $state(false);
@@ -86,7 +87,7 @@
 			tone="muted"
 			hoverFill="none"
 			class="shrink-0 text-[11.5px] font-normal font-brand"
-			ariaLabel={`Effort: ${levelName}. Open effort options`}
+			ariaLabel={`Effort: ${wordLabel ?? levelName}. Open effort options`}
 			loading={effort.pending}
 			disabled={variants.length === 0}
 			aria-haspopup="dialog"
@@ -97,7 +98,7 @@
 				openPicker("effort");
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
-		><span class="border-b border-dotted border-border-chip">{currentVariant ? microLabel.toLowerCase() : microLabel}</span></Button>
+		><span class="border-b border-dotted border-border-chip">{wordLabel ?? (currentVariant ? microLabel.toLowerCase() : microLabel)}</span></Button>
 {:else if showEffort && variant === "control"}
 	<Button
 		variant="ghost"

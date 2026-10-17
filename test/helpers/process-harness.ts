@@ -472,7 +472,12 @@ Object.assign(ClaudeDriver, { create: deps => {
 		this.rememberManagedOpenCode();
 	}
 
-	projectStorePath(slug = "process-test"): string {
+	daemonStorePath(): string {
+		return join(this.configDir, "events.db");
+	}
+
+	/** Offline source for startup-import fixtures, never a daemon runtime store. */
+	legacyProjectStorePath(slug = "process-test"): string {
 		return join(projectStorageDir(this.configDir, slug), "events.db");
 	}
 
@@ -618,6 +623,9 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"
 					| "CURSOR_API_KEY"
+					| "CURSOR_AUTH_TOKEN"
+					| "CONDUIT_TEST_CURSOR_DASHBOARD_URL"
+					| "CONDUIT_TEST_CURSOR_KEYCHAIN"
 					| "CONDUIT_TEST_CURSOR_CATALOG_TTL_MS"
 					| "CONDUIT_TEST_CURSOR_DELTA_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_WAIT_DELAY_MS"
@@ -626,7 +634,6 @@ Object.assign(ClaudeDriver, { create: deps => {
 					| "CONDUIT_TEST_CURSOR_SEND_GATE"
 					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
 					| "CONDUIT_CONTENTION_METRICS"
-					| "CONDUIT_SHARED_STORE"
 					| "XPC_SERVICE_NAME"
 				>
 			>;

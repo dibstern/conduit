@@ -10,7 +10,6 @@ import {
 	Deferred,
 	Effect,
 	Layer,
-	Option,
 	PubSub,
 	Ref,
 	Stream,
@@ -36,8 +35,6 @@ import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
-import { migrateForkLineage } from "../../../persistence/migrations/fork-lineage-import.js";
-import { migrateProjectStorage } from "../../../persistence/migrations/project-storage-migration.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
@@ -86,9 +83,8 @@ import {
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
-import { optionalPersistenceStoreContext } from "../Services/project-read-database.js";
+import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
-	allProjects,
 	broadcastProjectList,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
@@ -105,7 +101,6 @@ import {
 } from "../Services/relay-cache.js";
 import { SessionActivityDaemonLive } from "../Services/session-activity.js";
 import {
-	makeSessionDirectoryLive,
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../Services/session-directory.js";
@@ -351,6 +346,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 	| DaemonEventBusTag
 	| ConfigPersistenceTag
 	| DaemonStateTag
+	| PersistenceStore
 > =>
 	Layer.scoped(
 		RelayCacheTag,
@@ -367,7 +363,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 			>();
 			const daemonContext = Context.merge(
 				baseDaemonContext,
-				yield* optionalPersistenceStoreContext,
+				yield* persistenceStoreContext,
 			);
 			let relayCache: RelayCache | undefined;
 
@@ -382,6 +378,7 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 					| ConfigPersistenceTag
 					| RelayCacheTag
 					| DaemonStateTag
+					| PersistenceStore
 				>,
 			) => {
 				if (relayCache === undefined) {
@@ -636,9 +633,6 @@ export interface DaemonLiveOptions {
  */
 export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const { configDir, socketPath } = options;
-	// Internal, one-way opt-in for this config dir: imported per-project files
-	// are renamed to backups, so switching this off cannot restore legacy mode.
-	const sharedStore = process.env["CONDUIT_SHARED_STORE"] === "1";
 	const launchLogin =
 		options.launchLogin ?? captureClaudeLaunchLogin(process.env);
 	const accountsState = accountsStateFromConfig(
@@ -653,28 +647,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 						options.persistedConfig,
 						configDir,
 						options.persistedConfigNeedsMigration ?? false,
-					).pipe(
-						// Legacy .conduit/events.db files become import sources in shared mode.
-						Effect.andThen(
-							sharedStore
-								? Effect.void
-								: migrateProjectStorage(configDir, options.persistedConfig),
-						),
-						Effect.andThen(
-							sharedStore
-								? Effect.void
-								: migrateForkLineage(configDir, options.persistedConfig),
-						),
 					),
 				);
-	const storageStartup = (
-		sharedStore
-			? makeDaemonSharedStoreLayer(
-					configDir,
-					options.persistedConfig ?? defaultDaemonConfig(),
-				).pipe(Layer.provideMerge(configMigration))
-			: configMigration
-	).pipe(Layer.provide(PinoLoggerLive));
+	const storageStartup = makeDaemonSharedStoreLayer(
+		configDir,
+		options.persistedConfig ?? defaultDaemonConfig(),
+	).pipe(Layer.provideMerge(configMigration), Layer.provide(PinoLoggerLive));
 
 	// Tier 0: Foundation (no inter-dependencies)
 	// These Layers have zero dependencies on other Tags. They form the base
@@ -828,12 +806,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	);
 	const withSessionDirectory = Layer.unwrapEffect(
 		Effect.gen(function* () {
-			const store = yield* Effect.serviceOption(PersistenceStore);
-			return Option.isSome(store)
-				? makeSharedSessionDirectoryLive.pipe(
-						Layer.provide(Layer.succeedContext(store.value)),
-					)
-				: makeSessionDirectoryLive(configDir, yield* allProjects);
+			const store = yield* PersistenceStore;
+			return makeSharedSessionDirectoryLive.pipe(
+				Layer.provide(Layer.succeedContext(store)),
+			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
 	const registries = RelayFactoryLive(configDir).pipe(
@@ -900,8 +876,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
-		AutoSettleLive(configDir),
-		WorktreeCleanupLive(configDir),
+		AutoSettleLive(),
+		WorktreeCleanupLive(),
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		ServerBuildUpdateLive,

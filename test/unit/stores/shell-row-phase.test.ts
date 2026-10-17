@@ -21,6 +21,7 @@ import {
 	resetSessionFamily,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { usageState } from "../../../src/lib/frontend/stores/usage.svelte.js";
 import { _resetRateLimit } from "../../../src/lib/frontend/stores/ws-send.svelte.js";
 import {
@@ -223,6 +224,7 @@ describe("turn control sends over the browser RPC wire", () => {
 		permissionsState.pendingPermissions = [];
 		permissionsState.pendingQuestions = [];
 		usageState.readings = [];
+		uiState.toasts = [];
 		_resetRateLimit();
 		inputId = "";
 		snapshot("idle");
@@ -406,6 +408,91 @@ describe("turn control sends over the browser RPC wire", () => {
 			_tag: "upsert",
 			item: { ...row("idle"), id: "side", parentID: "s", sideThread: true },
 		});
+		expect(control.turn().working).toBe(false);
+	});
+
+	it("stop after the turn ended raises no error and working stays off", async () => {
+		const cancel = vi.fn(() => ({ ok: true as const }));
+		serve({ CancelSession: cancel });
+		const sent = request();
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		end();
+		expect(control.turn().working).toBe(false);
+		await control.stop("s");
+		expect(control.turn().working).toBe(false);
+		expect(cancel).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "s",
+				commandId: expect.any(String),
+			}),
+		);
+		expect(uiState.toasts).toEqual([]);
+	});
+
+	it("a slow stop reply ends an unstarted turn immediately", async () => {
+		let finishStop!: (value: { ok: true }) => void;
+		const cancel = vi.fn(
+			() =>
+				new Promise<{ ok: true }>((resolve) => {
+					finishStop = resolve;
+				}),
+		);
+		serve({ CancelSession: cancel });
+		const sent = request();
+		await received();
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		expect(control.turn().working).toBe(true);
+		const stopped = control.stop("s");
+		expect(control.turn().working).toBe(false);
+		await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+		expect(control.turn().working).toBe(false);
+		finishStop({ ok: true });
+		await stopped;
+		expect(control.turn().working).toBe(false);
+	});
+
+	it.each([
+		true,
+		false,
+	])("stop before the send reply prevents it restarting working, guessed handoff: %s", async (handoff) => {
+		serve({ CancelSession: () => ({ ok: true }) });
+		if (!handoff)
+			permissionsState.pendingQuestions = [
+				{ toolId: "q", sessionId: "s", questions: [] },
+			];
+		const sent = request();
+		await received();
+		expect(control.turn().working).toBe(handoff);
+		await control.stop("s");
+		expect(control.turn().working).toBe(false);
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await sent;
+		expect(control.turn().working).toBe(false);
+		// Stop does not prevent a later send from starting a fresh turn.
+		permissionsState.pendingQuestions = [];
+		inputId = "";
+		const next = request();
+		await received();
+		expect(control.turn().working).toBe(true);
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await next;
+		end();
+	});
+
+	it("stop leaves a server-reported busy turn working until its idle row", async () => {
+		const cancel = vi.fn(() => ({ ok: true as const }));
+		serve({ CancelSession: cancel });
+		upsert("busy");
+		expect(control.turn().working).toBe(true);
+		const stopped = control.stop("s");
+		expect(control.turn().working).toBe(true);
+		await stopped;
+		expect(cancel).toHaveBeenCalledOnce();
+		expect(control.turn().working).toBe(true);
+		upsert("idle");
 		expect(control.turn().working).toBe(false);
 	});
 

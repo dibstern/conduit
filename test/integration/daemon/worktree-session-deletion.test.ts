@@ -242,15 +242,17 @@ process.exit(result.status ?? 1);
 			return result;
 		};
 		const state = () => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				return {
 					sessions: db
-						.prepare("SELECT id, title, workspace FROM sessions ORDER BY id")
+						.prepare(
+							"SELECT id, title, workspace FROM sessions WHERE project_id = 'process-test' ORDER BY id",
+						)
 						.all(),
 					deletions: db
 						.prepare(
-							"SELECT session_id, data FROM events WHERE type = 'session.deleted' ORDER BY sequence",
+							"SELECT session_id, data FROM events WHERE project_id = 'process-test' AND type = 'session.deleted' ORDER BY sequence",
 						)
 						.all(),
 					worktrees: [...owned].map(([path, { folder, branch }]) => ({
@@ -305,7 +307,7 @@ process.exit(result.status ?? 1);
 			expect(
 				(await sessions()).some(({ id: sessionId }) => sessionId === id),
 			).toBe(false);
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db
@@ -631,7 +633,7 @@ process.exit(result.status ?? 1);
 		const { fixture, create, inspect, remove } = await start("legacy");
 		const session = await create("Legacy");
 		await fixture.kill();
-		const db = new Database(fixture.projectStorePath());
+		const db = new Database(fixture.daemonStorePath());
 		try {
 			db.prepare(
 				"UPDATE events SET data = json_remove(data, '$.ownership') WHERE type = 'session.workspace_changed' AND session_id = ?",

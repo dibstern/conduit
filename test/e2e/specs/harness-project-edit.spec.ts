@@ -23,6 +23,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Locator, Page } from "@playwright/test";
 import { Effect } from "effect";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
@@ -227,6 +228,14 @@ for (const provider of providers) {
 			// 5. History lives in conduit's config dir, never in a project folder.
 			const storage = projectStorageDir(harness.configDir, slug);
 			await expect.poll(() => existsSync(storage)).toBe(true);
+			expect(existsSync(harness.daemonStorePath())).toBe(true);
+			const assertNoProjectStore = () => {
+				for (const suffix of ["", "-wal", "-shm"])
+					expect(
+						existsSync(`${harness.legacyProjectStorePath(slug)}${suffix}`),
+					).toBe(false);
+			};
+			assertNoProjectStore();
 			for (const folder of folders)
 				expect(existsSync(join(folder, ".conduit"))).toBe(false);
 			await shot("5-storage");
@@ -262,6 +271,21 @@ for (const provider of providers) {
 			await shot("6-session");
 
 			const extras = [created, createdFromEdit];
+			const sessionId = new URL(page.url()).pathname.split("/s/")[1];
+			expect(sessionId).toBeTruthy();
+			const store = new DatabaseSync(harness.daemonStorePath(), {
+				readOnly: true,
+			});
+			try {
+				expect(
+					store
+						.prepare("SELECT project_id FROM sessions WHERE id = ?")
+						.get(sessionId ?? "")?.["project_id"],
+				).toBe(slug);
+			} finally {
+				store.close();
+			}
+			assertNoProjectStore();
 			let providerCapture: unknown;
 			if (provider.driver === "claude") {
 				const runnerPids = harness.runnerPids();

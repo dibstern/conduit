@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
-import { historicalMessageText } from "./prepare-turn.js";
+import { historicalMessageText } from "../historical-message-text.js";
 import type { ClaudeThreadReadInput, ClaudeThreadReadResult } from "./types.js";
 
 export const makeClaudeThreadRead = Effect.gen(function* () {

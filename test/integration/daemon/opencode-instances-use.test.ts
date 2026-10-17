@@ -205,7 +205,7 @@ describe("OpenCode Instances use", () => {
 			(error) => error,
 		)?.instances?.find(({ id }) => id === instanceB.id)?.pid;
 		expect(pidB).toBeTypeOf("number");
-		const db = new Database(fixture.projectStorePath(), { readonly: true });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			expect(
 				db
@@ -244,7 +244,7 @@ describe("OpenCode Instances use", () => {
 				message["type"] === "permission_pending" &&
 				message["requestId"] === "rqbc-2-live-on-b",
 		);
-		const recovered = new Database(fixture.projectStorePath(), {
+		const recovered = new Database(fixture.daemonStorePath(), {
 			readonly: true,
 		});
 		try {
@@ -304,7 +304,7 @@ describe("OpenCode Instances use", () => {
 			instanceB.id,
 		);
 		await vi.waitFor(() => {
-			const db = new Database(fixture.projectStorePath(), { readonly: true });
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				expect(
 					db.prepare("SELECT status FROM sessions WHERE id = ?").get(sessionB),
@@ -330,7 +330,7 @@ describe("OpenCode Instances use", () => {
 		});
 		await vi.waitFor(
 			() => {
-				const db = new Database(fixture.projectStorePath(), { readonly: true });
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
 				try {
 					const approval = db
 						.prepare(

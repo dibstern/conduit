@@ -36,6 +36,7 @@ import {
 	getProviderDriver,
 	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import { instanceNotFound } from "../../../instance/instance-errors.js";
 import {
@@ -58,6 +59,7 @@ import {
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
 import { discoverCursorEffect } from "../../../provider/cursor/cursor-runner-driver.js";
+import { cursorUsageSource } from "../../../provider/cursor/cursor-usage.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
 import { isRecord } from "../../../utils.js";
 import {
@@ -561,6 +563,15 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	const traits = getProviderDriver(driver);
 	return {
 		...instance,
+		...(instance.env?.["CURSOR_AUTH_TOKEN"] !== undefined
+			? {
+					env: Object.fromEntries(
+						Object.entries(instance.env).filter(
+							([key]) => key !== "CURSOR_AUTH_TOKEN",
+						),
+					),
+				}
+			: {}),
 		capabilities: traits?.sessionCapabilities ?? {
 			supportsMultiFolder: false,
 			supportsWorktree: false,
@@ -576,6 +587,10 @@ const instanceDiscovery: Partial<
 export const getInstances = Effect.gen(function* () {
 	const directory = yield* AccountDirectory;
 	const accounts = yield* directory.list;
+	const config = yield* Effect.serviceOption(DaemonConfigRefTag);
+	const binding = Option.isSome(config)
+		? (yield* Ref.get(config.value)).cursorUsageBinding
+		: undefined;
 	const state = yield* Ref.get(yield* InstanceManagerStateTag);
 	const runtimeOrder = new Map(
 		Array.from(
@@ -618,7 +633,12 @@ export const getInstances = Effect.gen(function* () {
 									: { ...account.env },
 						}),
 				isDefault: account.isDefault,
-				usageEligible: account.driver === "claude" && account.usageEligible,
+				usageEligible:
+					PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
+					account.usageEligible,
+				...(account.driver === "cursor"
+					? { cursorUsageSource: cursorUsageSource(account, binding) }
+					: {}),
 			});
 		})
 		.sort(

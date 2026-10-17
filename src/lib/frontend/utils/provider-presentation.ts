@@ -12,6 +12,7 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "claude",
 		namePlaceholder: "Work Claude",
 		configDirPlaceholder: "~/.config/claude/work",
+		environment: undefined,
 		composerNotice: undefined,
 		auth: undefined,
 		subagentNotice: undefined,
@@ -22,6 +23,7 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "server",
 		namePlaceholder: "Staging OC",
 		configDirPlaceholder: undefined,
+		environment: undefined,
 		composerNotice: undefined,
 		auth: undefined,
 		subagentNotice: undefined,
@@ -32,6 +34,10 @@ export const PROVIDER_PRESENTATION = {
 		settingsTab: "server",
 		namePlaceholder: "Work Cursor",
 		configDirPlaceholder: "~/.config/cursor/work",
+		environment: {
+			placeholder: "CURSOR_AUTH_TOKEN=...",
+			hint: "Saved usage tokens stay hidden. Enter CURSOR_AUTH_TOKEN=value to replace one, or CURSOR_AUTH_TOKEN= to remove it.",
+		},
 		// Cursor has no per-call approval hook (spike conduit-test-xqsg.3), so each
 		// mode says what cursor-session-config.ts actually enforces instead.
 		composerNotice: {
@@ -67,6 +73,9 @@ export const PROVIDER_PRESENTATION = {
 		readonly settingsTab: SettingsSection;
 		readonly namePlaceholder: string;
 		readonly configDirPlaceholder: string | undefined;
+		readonly environment:
+			| { readonly placeholder: string; readonly hint: string }
+			| undefined;
 		readonly composerNotice:
 			| Partial<Record<SessionPermissionMode, string>>
 			| undefined;

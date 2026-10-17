@@ -788,6 +788,7 @@ describe("subscribeShell", () => {
 						"parent",
 						{
 							driver: "opencode",
+							usageEligible: false,
 							id: AccountIdSchema.make("opencode"),
 							name: "OpenCode",
 						},

@@ -158,6 +158,7 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 	"cursorToolType",
 	"progress",
 	"truncated",
+	"movedToBackground",
 	"exitCode",
 	"isError",
 	"fileChange",

@@ -14,7 +14,7 @@ test("todo overlay shows the session's snapshot and follows its upserts", async 
 	page,
 }) => {
 	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
-	const rpc = await mockWsRpc(page, { handlers: {} });
+	const rpc = await mockWsRpc(page);
 	rpc.setSessionTodos(sessionId, [
 		{ id: "t1", subject: "Write the failing test", status: "completed" },
 		{ id: "t2", subject: "Make it pass", status: "in_progress" },
