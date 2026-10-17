@@ -171,12 +171,15 @@ describe("the store's own apply door", () => {
 	});
 
 	it("does not touch the selection when another session goes", () => {
-		applySessionSnapshot([session("s1"), session("s2")], "complete");
-		sessionState.currentId = "s1";
+		applySessionSnapshot(
+			[session("kept-session"), session("other-session")],
+			"complete",
+		);
+		sessionState.currentId = "kept-session";
 
-		applySessionRemoved("s2");
+		applySessionRemoved("other-session");
 
-		expect(sessionState.currentId).toBe("s1");
+		expect(sessionState.currentId).toBe("kept-session");
 	});
 
 	it("empties the map and unsettles when the project changes", () => {

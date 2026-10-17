@@ -35,11 +35,9 @@ import {
 	followSessionBusy,
 	followSessionCompaction,
 	followSessionRetry,
-	handleInputSyncReceived,
 	sessionActivity,
 	sessionMessages,
 } from "./chat.svelte.js";
-import { getBrowserClientId } from "./client-identity.js";
 import {
 	clearDraftSelection,
 	followSessionModelSettings,
@@ -49,12 +47,10 @@ import { goalDetails, sessionGoals } from "./goal.svelte.js";
 import { getProjectGroup } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
-	getCurrentRoute,
-	getCurrentSessionId,
 	getCurrentSlug,
-	navigate,
 	replaceRoute,
 } from "./router.svelte.js";
+import { markSessionDeleted, selection } from "./selection.svelte.js";
 import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope } from "./session-scope.js";
@@ -140,7 +136,6 @@ export function setAttachedProject(slug: string): void {
 // What this tab is looking at. Applying server rows never touches it.
 
 const clientSession = $state({
-	currentId: null as string | null,
 	announcedFork: null as {
 		sessionId: string;
 		forkedFrom: string;
@@ -160,18 +155,22 @@ const clientSession = $state({
 	now: Date.now(),
 });
 
-$effect.root(() => {
-	let previousId: string | null | undefined;
-	$effect(() => {
-		const id = clientSession.currentId;
-		if (previousId !== undefined && id !== previousId) goalDetails.open = false;
-		previousId = id;
-	});
+const currentSessionId = $derived.by(() => {
+	const shown = selection.shown;
+	return shown.kind === "drawn" ||
+		shown.kind === "placing" ||
+		shown.kind === "placed"
+		? shown.sessionId
+		: null;
 });
 
 /** Read view over both halves. The server half is read-only by type; the
  *  client half is a plain setting. */
 export const sessionState = {
+	/** Live placement sources exclude the provisional saved shell. */
+	get liveSessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
+		return sessionSubscription.liveRows;
+	},
 	/** Server-owned. The shell feed is its only writer. */
 	get sessions(): ReadonlyMap<string, Immutable<SessionInfo>> {
 		return serverSessions;
@@ -220,21 +219,22 @@ export const sessionState = {
 		return sessionSubscription.settled;
 	},
 	get currentId(): string | null {
-		return clientSession.currentId;
+		return currentSessionId;
 	},
 	get currentParentId(): string | null {
-		const id = clientSession.currentId;
+		const id = sessionState.currentId;
 		return id ? parentOf(id) : null;
 	},
 	get currentFork() {
-		const id = clientSession.currentId;
+		const id = sessionState.currentId;
 		// Stands in until the Fork's row arrives with its lineage.
 		return clientSession.announcedFork?.sessionId === id
 			? clientSession.announcedFork
 			: null;
 	},
 	set currentId(id: string | null) {
-		clientSession.currentId = id;
+		if (id) selection.open(id);
+		else replaceRoute("/");
 	},
 	get searchQuery(): string {
 		return clientSession.searchQuery;
@@ -244,14 +244,7 @@ export const sessionState = {
 	},
 };
 
-let selectionGeneration = 0;
-
-/**
- * A session was deleted (the shell feed marked its remove deleted). Prune the
- * cross-project and search reads the feed does not cover, and move off it if
- * it is on screen. Runs before `forgetSession` clears the selection; a row
- * that merely left a snapshot is not deleted and must not come through here.
- */
+/** A deletion owns only its id; selection follows the tombstone. */
 export function leaveDeletedSession(id: string): void {
 	clientSession.daemonSessions = clientSession.daemonSessions.filter(
 		(row) => row.id !== id,
@@ -260,38 +253,13 @@ export function leaveDeletedSession(id: string): void {
 		clientSession.searchResults = clientSession.searchResults.filter(
 			(row) => row.id !== id,
 		);
-	const route = getCurrentRoute();
-	if (
-		route.page !== "chat" ||
-		route.sessionId !== id ||
-		(clientSession.currentId !== id && clientSession.currentId !== null)
-	)
-		return;
-	const survivor = getFilteredSessions().find((row) => row.id !== id);
-	if (survivor) {
-		switchToSession(survivor.id, survivor.projectSlug, undefined, {
-			replace: true,
-		});
-		return;
-	}
-	const activity = sessionActivity.get(id);
-	if (activity) activity.replayGeneration++;
-	updateContextPercent(0);
-	clearTodoState();
-	replaceRoute("/");
-	clientSession.currentId = null;
+	markSessionDeleted(id);
 }
 
 /** Drop the state this tab keeps for a session the map no longer holds. */
 export function forgetSession(id: string): void {
 	clearSessionChatState(id);
 	sessionGoals.delete(id);
-	// A session that is gone cannot still be the one we are looking at. The
-	// selection is what makes a session routable before its row arrives, so
-	// leaving it behind lets a late event rebuild the chat state we just threw
-	// away — and deleting the last session leaves no other for the server to
-	// switch us to, so nothing else would clear it.
-	if (clientSession.currentId === id) clientSession.currentId = null;
 }
 
 /**
@@ -574,15 +542,18 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 	const previousRows = familyApplied.rows;
 	const reconnect = familyApplied.floor !== undefined;
 	// A child is not a shell row, so its settings follow the family feed.
-	const currentId = clientSession.currentId;
+	const currentId = sessionState.currentId;
 	const viewed = currentId === null ? undefined : next.rows.get(currentId);
 	const previous = viewed && previousRows.get(viewed.id);
 	if (viewed?.parentID && viewed !== previous)
 		followSessionModelSettings(viewed, previous);
 	familyApplied = next;
 	if (change._tag === "upsert") applyTurnRow(change.item);
-	if (change._tag === "remove" && change.deleted === true)
+	if (change._tag === "remove" && change.deleted === true) {
+		leaveDeletedSession(change.id);
+		forgetSession(change.id);
 		deleteTurn(change.id);
+	}
 	// The shell feed carries roots only, so a child's family row is the only
 	// status it has. Key on parentID, not shell membership: a root that gains a
 	// parent leaves the shell, and its family row is the one kept current.
@@ -834,7 +805,7 @@ export function followFork(response: ForkSessionResponse): void {
 	showToast(
 		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
-	if (clientSession.currentId !== response.sessionId)
+	if (sessionState.currentId !== response.sessionId)
 		switchToSession(response.sessionId, response.projectSlug);
 }
 
@@ -966,7 +937,7 @@ export function getFilteredSessions(): SessionInfo[] {
 
 /** Get the currently active session object (or undefined). */
 export function getActiveSession(): Immutable<SessionInfo> | undefined {
-	return findSession(clientSession.currentId ?? "");
+	return findSession(sessionState.currentId ?? "");
 }
 
 /** Group sessions into today/yesterday/older buckets. */
@@ -1001,64 +972,34 @@ export function setSearchQuery(query: string): void {
 	clientSession.searchQuery = query;
 }
 
-export function setCurrentSession(id: string | null): void {
-	clientSession.currentId = id;
-}
-
-/**
- * Switch this tab to a different session.
- * Updates local state, navigates the URL, and sends `ViewSession` to the server.
- *
- * The two-tier per-session store retains session state across switches
- * (Tier 1 is unbounded, Tier 2 is LRU-capped).
- */
+/** Expand-step shim: callers still use the old signature until i633.7. */
 export function switchToSession(
 	sessionId: string,
-	projectSlug?: string,
-	view?: typeof rpc<"ViewSession">,
+	_projectSlug?: string,
+	_view?: typeof rpc<"ViewSession">,
 	options?: { replace?: boolean },
 ): void {
-	const generation = ++selectionGeneration;
-	const previousId = clientSession.currentId;
+	if (options?.replace) replaceRoute(`/s/${sessionId}`);
+	else selection.open(sessionId);
+}
+
+/** Per-session UI state follows what selection shows, including leaving it. */
+export function followShownSession(
+	sessionId: string | null,
+	previousId: string | null,
+): void {
+	if (previousId !== sessionId) goalDetails.open = false;
 	if (previousId && previousId !== sessionId) {
 		const activity = sessionActivity.get(previousId);
 		if (activity) activity.replayGeneration++;
 	}
-
-	clientSession.currentId = sessionId;
+	if (sessionId) activateSessionChatState(sessionId);
 	clearDraftSelection();
 	if (clientSession.announcedFork?.sessionId !== sessionId)
 		clientSession.announcedFork = null;
-	activateSessionChatState(sessionId);
 	if (previousId !== sessionId) {
 		updateContextPercent(0);
 		clearTodoState();
-	}
-
-	const slug = projectSlug ?? getCurrentSlug();
-	if (getCurrentSessionId() !== sessionId) {
-		if (options?.replace) replaceRoute(`/s/${sessionId}`);
-		else navigate(`/s/${sessionId}`);
-	}
-	if (slug) {
-		const input = {
-			sessionId,
-			originId: getBrowserClientId(),
-		};
-		void (view ?? rpc)("ViewSession", input)
-			.then(({ draft }) => {
-				// Viewing another project's session attaches this tab to it.
-				if (generation === selectionGeneration && getCurrentSlug() !== slug)
-					setAttachedProject(slug);
-				if (
-					draft !== undefined &&
-					generation === selectionGeneration &&
-					clientSession.currentId === sessionId &&
-					getCurrentSlug() === slug
-				)
-					handleInputSyncReceived({ text: draft });
-			})
-			.catch(() => undefined);
 	}
 }
 
@@ -1076,7 +1017,6 @@ export async function reloadProviderSession(sessionId: string): Promise<void> {
 
 /** Clear all session state (for project switch). */
 export function clearSessionState(): void {
-	selectionGeneration++;
 	const held = [...serverSessions.keys()];
 	resetSessionSubscription();
 	for (const id of held) forgetSession(id);
@@ -1086,7 +1026,6 @@ export function clearSessionState(): void {
 	])) {
 		clearSessionChatState(id);
 	}
-	clientSession.currentId = null;
 	clientSession.announcedFork = null;
 	setSearchQuery("");
 	resetSessionFamily();

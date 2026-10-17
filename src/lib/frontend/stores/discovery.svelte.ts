@@ -55,11 +55,8 @@ import {
 	instanceState,
 } from "./instance.svelte.js";
 import { getDraftProject } from "./project-state.svelte.js";
-import {
-	attachedProjectState,
-	getCurrentSessionId,
-	getCurrentSlug,
-} from "./router.svelte.js";
+import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 import { onShellSynchronized } from "./session-list.svelte.js";
 import { showToast } from "./ui.svelte.js";
@@ -251,9 +248,9 @@ const noModels = emptyModels();
 const noAgents = emptyAgents();
 
 function catalogScope(
-	sessionId: string | null = sessionState.currentId,
+	sessionId: string | null = selection.scope?.sessionId ?? null,
 	instanceId = sessionId ? undefined : getEffectiveInstanceId(),
-	project = getCurrentSlug() ?? "",
+	project = selection.scope?.project ?? "",
 ): CatalogScope {
 	const key = JSON.stringify([
 		project,
@@ -313,7 +310,12 @@ function draftCatalog(instanceId: string, project = getCurrentSlug() ?? "") {
 /** All callers refresh the currently shown scope; replies retain their issued key. */
 export async function refreshCatalogs(): Promise<void> {
 	const scope = catalogScope();
-	if (!scope.project) return;
+	if (
+		!selection.scope ||
+		!scope.project ||
+		scope.project !== attachedProjectState.slug
+	)
+		return;
 	await readCatalogs(scope);
 }
 
@@ -347,7 +349,7 @@ function readCatalogs(
 	return Promise.allSettled(reads).then(() => undefined);
 }
 
-/** Mounted once by the shell. Selection will supply this scope in the next slice. */
+/** Mounted once by the shell; reads follow selection's placed or attached scope. */
 export function watchCatalogs(): () => void {
 	return $effect.root(() => {
 		const modelKey = $derived(catalogScope().key);
@@ -355,6 +357,7 @@ export function watchCatalogs(): () => void {
 		$effect(() => {
 			const key = modelKey;
 			const connected = getIsConnected();
+			const attached = attachedProjectState.slug;
 			untrack(() => {
 				for (const held of Object.keys(modelCatalogs))
 					if (held !== key) delete modelCatalogs[held];
@@ -363,26 +366,19 @@ export function watchCatalogs(): () => void {
 				for (const held of Object.keys(draftModels))
 					if (held !== key) delete draftModels[held];
 				const scope = catalogScope();
-				if (
-					connected &&
-					scope.project &&
-					(!getCurrentSessionId() || scope.sessionId)
-				)
+				if (connected && scope.project === attached && selection.scope !== null)
 					void readCatalogs(scope, "models-agents");
 			});
 		});
 		$effect(() => {
 			const key = commandKey;
 			const connected = getIsConnected();
+			const attached = attachedProjectState.slug;
 			untrack(() => {
 				for (const held of Object.keys(commandCatalogs))
 					if (held !== key) delete commandCatalogs[held];
 				const scope = catalogScope();
-				if (
-					connected &&
-					scope.project &&
-					(!getCurrentSessionId() || scope.sessionId)
-				)
+				if (connected && scope.project === attached && selection.scope !== null)
 					void readCatalogs(scope, "commands");
 			});
 		});
@@ -392,8 +388,7 @@ export function watchCatalogs(): () => void {
 		$effect(() => () => unsubscribe());
 		$effect(() => {
 			const project =
-				!getCurrentSessionId() &&
-				!sessionState.currentId &&
+				selection.scope?.sessionId === null &&
 				(discoveryState.defaultsLoaded || discoveryState.hasInstanceChoice)
 					? getDraftProject()
 					: null;

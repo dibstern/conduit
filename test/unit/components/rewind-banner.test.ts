@@ -17,22 +17,30 @@ import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
 const rpcSpy = vi.hoisted(() =>
-	vi.fn<typeof rpc<"RewindSession">>(async (_tag, input) => ({
-		ok: true as const,
-		sessionId: input.sessionId,
-		messageId: input.messageId,
-	})),
+	vi.fn<typeof rpc<"RewindSession">>((_tag, input) =>
+		Promise.resolve({
+			ok: true as const,
+			sessionId: input.sessionId,
+			messageId: input.messageId,
+		}),
+	),
 );
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
 
 vi.mock("../../../src/lib/frontend/components/ui/Icon.svelte", emptyComponent);
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	DRAFT_PROJECT_PARAM: "project",
-	getCurrentSlug: () => "project-a",
-	getCurrentSearchParams: () => new URLSearchParams(),
-}));
+vi.mock(
+	"../../../src/lib/frontend/stores/router.svelte.js",
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
+		>()),
+		DRAFT_PROJECT_PARAM: "project",
+		getCurrentSlug: () => "project-a",
+		getCurrentSearchParams: () => new URLSearchParams(),
+	}),
+);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: rpcSpy,
 }));

@@ -24,7 +24,7 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/transport/ws-rpc-client.js")
 		>()),
-		// Discovery never answers, so only the fork and its view settle.
+		// Keep catalog reads pending while the fork reply settles.
 		rpc: vi.fn((tag: string) =>
 			tag === "GetAgents" || tag === "GetCommands"
 				? new Promise(() => undefined)
@@ -84,11 +84,5 @@ describe("SessionList fork", () => {
 		);
 		await vi.waitFor(() => expect(sessionState.currentId).toBe("fork"));
 		expect(routerState.path).toContain("/s/fork");
-		expect(rpc).toHaveBeenCalledWith(
-			"ViewSession",
-			expect.objectContaining({
-				sessionId: "fork",
-			}),
-		);
 	});
 });

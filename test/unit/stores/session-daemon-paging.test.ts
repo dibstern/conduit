@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionList } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import {
